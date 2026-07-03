@@ -113,8 +113,9 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 | Solver | File | Feature | Description |
 |--------|------|---------|-------------|
-| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + entropy smoothing + iterative MM budget shading. **Production default.** |
-| **EgSolver** | `eg_solver.rs` | `lp` | Eisenberg-Gale / Fisher market formulation. |
+| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + single-pass SLP MM budget shading. **Production default.** |
+| **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Damped fixed-point on the EG budget multiplier; better under tight MM budgets. |
+| **EgSolver** | `eg_solver.rs` | `lp` | Eisenberg-Gale / Fisher market formulation (Frank-Wolfe). |
 | **ConicSolver** | `conic_solver.rs` | `conic` | Interior-point via Clarabel. Configurable objective (Linear, Fisher, QuasiFisher). |
 | **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |
 | **DecomposedSolver** | `decomposed.rs` | `lp` | Per-market-group decomposition with mirror descent budget coordination. |
@@ -129,9 +130,11 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 ## Architecture Knowledge Base
 
-An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~35 interlinked notes covering every major concept. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
+An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~48 interlinked notes covering every major concept. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
 
 **Entry point**: `docs/architecture/Sybil Architecture.md`
+
+**Linear walkthrough**: `docs/SPEC.md` is a single connected document covering the whole system (domain model → solvers → sequencer → verification → ZK → contracts → API → arena → ops → invariants). Read it for orientation; use the vault for per-concept depth. `design/architecture-review-2026-07.md` tracks simplification proposals and known doc drift.
 
 **When to read**: Before modifying any crate, read the notes listed in that crate's AGENTS.md under "Architecture Notes". This gives you the design context and invariants you need to preserve.
 
