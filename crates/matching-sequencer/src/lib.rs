@@ -27,6 +27,9 @@ pub mod store;
 pub mod system_event;
 pub mod validation;
 
+#[cfg(test)]
+mod crash_harness;
+
 pub use account::{Account, AccountId, AccountStore};
 pub use account_storage::{
     AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,

@@ -135,6 +135,8 @@ fn price_candle_page_from_points(
 /// Messages sent from handles to the sequencer actor.
 pub enum SequencerMsg {
     Tick,
+    #[cfg(test)]
+    TestCrashOnNextBlock(SequencerTestCrashpoint),
     SubmitOrder(OrderSubmission, RpcReplyPort<Result<(), SequencerError>>),
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
@@ -302,6 +304,19 @@ pub enum SequencerMsg {
     /// (cold start, or market with no resting orders).
     GetIndicative(MarketId, RpcReplyPort<IndicativeSnapshot>),
 }
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SequencerTestCrashpoint {
+    BeforePrepare,
+    AfterPrepareBeforePersist,
+    AfterPersistBeforeCommit,
+    AfterCommit,
+}
+
+#[cfg(not(test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SequencerTestCrashpoint {}
 
 /// Shadow-solve snapshot for one market (C2). Off-block — produced by the
 /// indicative scheduler, cached on `SequencerActorState`, served by
@@ -640,16 +655,30 @@ impl SequencerActorState {
         skip_all,
         fields(height = tracing::field::Empty, pending_bundles = tracing::field::Empty)
     )]
-    async fn on_tick(&mut self) {
+    async fn on_tick(&mut self) -> Result<(), ActorProcessingErr> {
+        self.on_tick_inner(None).await
+    }
+
+    #[tracing::instrument(
+        skip_all,
+        fields(height = tracing::field::Empty, pending_bundles = tracing::field::Empty)
+    )]
+    async fn on_tick_inner(
+        &mut self,
+        test_crashpoint: Option<SequencerTestCrashpoint>,
+    ) -> Result<(), ActorProcessingErr> {
+        #[cfg(not(test))]
+        let _ = test_crashpoint;
+
         if let Some(error) = &self.halted_error {
             tracing::error!(
                 error = %error,
                 "block production halted after invariant failure"
             );
-            return;
+            return Ok(());
         }
         if self.pause_count > 0 {
-            return;
+            return Ok(());
         }
         let timestamp_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -659,14 +688,28 @@ impl SequencerActorState {
         let pending_bundles = self.sequencer.pending_bundles_len();
         tracing::Span::current().record("pending_bundles", pending_bundles);
 
+        #[cfg(test)]
+        if test_crashpoint == Some(SequencerTestCrashpoint::BeforePrepare) {
+            return Err(ActorProcessingErr::from(
+                "injected crash before block prepare".to_string(),
+            ));
+        }
+
         let prepared = match self.sequencer.prepare_block(Vec::new(), timestamp_ms) {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.halt_after_invariant_failure(error);
-                return;
+                return Ok(());
             }
         };
         tracing::Span::current().record("height", prepared.production().block.header.height);
+
+        #[cfg(test)]
+        if test_crashpoint == Some(SequencerTestCrashpoint::AfterPrepareBeforePersist) {
+            return Err(ActorProcessingErr::from(
+                "injected crash after block prepare before persist".to_string(),
+            ));
+        }
 
         if let Err(error) = self.persist_block(&prepared).await {
             metrics::counter!("sybil_persistence_failures").increment(1);
@@ -675,21 +718,37 @@ impl SequencerActorState {
             // PENDING_BUNDLES redb table wasn't cleared because save_block's
             // transaction rolled back atomically.
             tracing::error!(error = %error, "prepared block discarded before commit; pending bundles retained for retry");
-            return;
+            return Ok(());
+        }
+
+        #[cfg(test)]
+        if test_crashpoint == Some(SequencerTestCrashpoint::AfterPersistBeforeCommit) {
+            return Err(ActorProcessingErr::from(
+                "injected crash after block persist before commit".to_string(),
+            ));
         }
 
         let bp = match self.sequencer.commit_prepared_block(prepared) {
             Ok(bp) => bp,
             Err(error) => {
                 self.halt_after_invariant_failure(error);
-                return;
+                return Ok(());
             }
         };
+
+        #[cfg(test)]
+        if test_crashpoint == Some(SequencerTestCrashpoint::AfterCommit) {
+            return Err(ActorProcessingErr::from(
+                "injected crash after block commit".to_string(),
+            ));
+        }
+
         self.record_metrics(&bp, pending_bundles);
         let sealed = bp.sealed_block();
         self.push_to_history(sealed.clone());
         let _ = self.block_broadcast.send(sealed.clone());
         self.latest_block = Some(sealed);
+        Ok(())
     }
 
     fn halt_after_invariant_failure(&mut self, error: SequencerError) {
@@ -1682,7 +1741,11 @@ impl Actor for SequencerActor {
         state.mailbox_monitor.started();
         match message {
             SequencerMsg::Tick => {
-                state.on_tick().await;
+                state.on_tick().await?;
+            }
+            #[cfg(test)]
+            SequencerMsg::TestCrashOnNextBlock(crashpoint) => {
+                state.on_tick_inner(Some(crashpoint)).await?;
             }
             SequencerMsg::IndicativeTick => {
                 state.on_indicative_tick(myself.clone());
@@ -1749,7 +1812,7 @@ impl Actor for SequencerActor {
                 let _ = reply.send(state.handle_state_proof(leaf_key).await);
             }
             SequencerMsg::ProduceBlock(reply) => {
-                state.on_tick().await;
+                state.on_tick().await?;
                 let result = match &state.halted_error {
                     Some(error) => Err(error.clone()),
                     None => state.latest_block.clone().ok_or_else(|| {
@@ -2359,6 +2422,71 @@ impl SequencerHandle {
             .send_message(SequencerSupervisorMsg::AdoptChild(child))
             .expect("failed to hand child actor to supervisor");
         Self { inner }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn spawn_with_store_arc_for_test(
+        sequencer: BlockSequencer,
+        store: Arc<crate::store::Store>,
+    ) -> Self {
+        Self::spawn_with_store_arc(sequencer, Some(store))
+    }
+
+    #[cfg(test)]
+    async fn wait_for_actor_restart_for_test(
+        &self,
+        old_id: ractor::ActorId,
+    ) -> Result<(), SequencerError> {
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let actor = self
+                .inner
+                .actor
+                .read()
+                .expect("sequencer actor ref lock poisoned")
+                .clone();
+            if let Some(actor) = actor {
+                if actor.get_id() != old_id {
+                    return Ok(());
+                }
+            }
+
+            if Instant::now() >= deadline {
+                return Err(SequencerError::ActorGone);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn crash_actor_for_test(&self) -> Result<(), SequencerError> {
+        let actor = self.actor_ref().await?;
+        let old_id = actor.get_id();
+        actor
+            .kill_and_wait(Some(std::time::Duration::from_secs(5)))
+            .await
+            .map_err(|error| {
+                SequencerError::Persistence(format!("actor test kill failed: {error}"))
+            })?;
+        self.wait_for_actor_restart_for_test(old_id).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn produce_block_and_crash_for_test(
+        &self,
+        crashpoint: SequencerTestCrashpoint,
+    ) -> Result<(), SequencerError> {
+        let actor = self.actor_ref().await?;
+        let old_id = actor.get_id();
+        self.inner.mailbox_monitor.queued();
+        if actor
+            .send_message(SequencerMsg::TestCrashOnNextBlock(crashpoint))
+            .is_err()
+        {
+            self.inner.mailbox_monitor.send_failed();
+            return Err(SequencerError::ActorGone);
+        }
+        self.wait_for_actor_restart_for_test(old_id).await
     }
 
     pub async fn submit_order(&self, submission: OrderSubmission) -> Result<(), SequencerError> {

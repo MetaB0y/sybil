@@ -2080,6 +2080,11 @@ impl BlockSequencer {
         self.pending_bundles.len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn pending_bundles_for_test(&self) -> &[OrderSubmission] {
+        &self.pending_bundles
+    }
+
     #[tracing::instrument(
         skip_all,
         fields(height = prepared.production().block.header.height)

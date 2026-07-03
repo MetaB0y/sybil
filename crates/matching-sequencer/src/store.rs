@@ -49,6 +49,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
@@ -398,6 +400,23 @@ const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks_fu
 pub struct Store {
     db: Database,
     account_state_store: Box<dyn AccountStateStore>,
+    #[cfg(test)]
+    fault_injection: Arc<Mutex<StoreFaultInjection>>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoreFaultPoint {
+    BeforeQmdbPersist,
+    AfterQmdbPersistBeforeRedbFence,
+    BeforeRedbFenceCommit,
+    AfterRedbFenceCommit,
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct StoreFaultInjection {
+    save_block_faults: VecDeque<StoreFaultPoint>,
 }
 
 /// Retention settings for durable history tables.
@@ -665,7 +684,31 @@ impl Store {
         Ok(Self {
             db,
             account_state_store,
+            #[cfg(test)]
+            fault_injection: Arc::new(Mutex::new(StoreFaultInjection::default())),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_next_save_block_fault(&self, point: StoreFaultPoint) {
+        self.fault_injection
+            .lock()
+            .expect("store fault-injection lock poisoned")
+            .save_block_faults
+            .push_back(point);
+    }
+
+    #[cfg(test)]
+    fn fail_save_block_at(&self, point: StoreFaultPoint) -> Result<(), StoreError> {
+        let mut faults = self
+            .fault_injection
+            .lock()
+            .expect("store fault-injection lock poisoned");
+        if faults.save_block_faults.front().copied() == Some(point) {
+            faults.save_block_faults.pop_front();
+            return Err(StoreError::InjectedFault(format!("{point:?}")));
+        }
+        Ok(())
     }
 
     /// Save the sequencer state after a block. Single ACID transaction.
@@ -714,6 +757,9 @@ impl Store {
             .map(|fence| fence.slot.inactive())
             .unwrap_or(AccountSnapshotSlot::A);
 
+        #[cfg(test)]
+        self.fail_save_block_at(StoreFaultPoint::BeforeQmdbPersist)?;
+
         // Persist the inactive qmdb slot first. It becomes committed only when the
         // redb transaction below flips the fence to point at it.
         let state_sidecar = state_sidecar_snapshot_from_resting_orders(
@@ -746,6 +792,9 @@ impl Store {
             }
             metrics::counter!("sybil_store_commit_root_verified_total").increment(1);
         }
+
+        #[cfg(test)]
+        self.fail_save_block_at(StoreFaultPoint::AfterQmdbPersistBeforeRedbFence)?;
 
         let txn = self.db.begin_write()?;
 
@@ -1085,7 +1134,14 @@ impl Store {
             )?;
         }
 
+        #[cfg(test)]
+        self.fail_save_block_at(StoreFaultPoint::BeforeRedbFenceCommit)?;
+
         txn.commit()?;
+
+        #[cfg(test)]
+        self.fail_save_block_at(StoreFaultPoint::AfterRedbFenceCommit)?;
+
         debug!(height = snapshot.header.height, "block persisted");
         Ok(())
     }
@@ -2196,6 +2252,9 @@ pub enum StoreError {
     UnsupportedLayout(String),
     #[error("corrupt store layout: {0}")]
     CorruptLayout(String),
+    #[cfg(test)]
+    #[error("injected store fault: {0}")]
+    InjectedFault(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
