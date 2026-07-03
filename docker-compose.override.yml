@@ -19,6 +19,8 @@ services:
 
   sybil-arena:
     build: ./arena
+    environment:
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
 
   sybil-arena-dashboard:
     build: ./arena
