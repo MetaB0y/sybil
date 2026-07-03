@@ -45,7 +45,7 @@ async def test_multi_market_article_fans_out_to_all_markets(monkeypatch):
     monkeypatch.setattr(feed, "_fetch_feed", fake_fetch_feed)
     monkeypatch.setattr("live.news_feed.fetch_article_text", fake_text)
 
-    delivered = await feed._poll_once(MagicMock())
+    delivered, _candidates = await feed._poll_once(MagicMock())
 
     a1 = await sub.drain(1)
     a2 = await sub.drain(2)
@@ -81,8 +81,8 @@ async def test_seen_url_not_reprocessed_across_polls(monkeypatch):
     monkeypatch.setattr(feed, "_fetch_feed", fake_fetch_feed)
     monkeypatch.setattr("live.news_feed.fetch_article_text", fake_text)
 
-    assert await feed._poll_once(MagicMock()) == 1
-    assert await feed._poll_once(MagicMock()) == 0  # already seen
+    assert (await feed._poll_once(MagicMock()))[0] == 1
+    assert (await feed._poll_once(MagicMock()))[0] == 0  # already seen
 
 
 def _article(url: str, title: str = "headline") -> LiveArticle:

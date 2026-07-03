@@ -19,6 +19,7 @@ from sybil_client.types import NANOS_PER_DOLLAR, TimeInForce
 
 from .db import DecisionDB
 from .market_selection import MarketProfile, select_markets
+from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed
 from .personas import PERSONAS
 from .strategy import FlatStrategy, KellyStrategy
@@ -47,6 +48,8 @@ class LiveConfig:
     noise_count: int = 5
     noise_balance: float = 50.0
     db_path: str = ""
+    metrics_host: str = "0.0.0.0"
+    metrics_port: int = 0  # <=0 disables the exporter (default: off)
     personas: list[str] = field(default_factory=lambda: list(PERSONAS.keys()))
     market_ids: list[int] | None = None  # Manual market selection (overrides auto)
     mapping_path: str | None = None  # Path to polymarket_mapping.json
@@ -221,6 +224,14 @@ async def run_live(config: LiveConfig):
     db = DecisionDB(db_path)
     log.info("Decision DB: %s", db_path)
 
+    # Arena-owned metrics exporter (off by default; sybil-api owns sybil_bot_*).
+    metrics = ArenaMetrics()
+    metrics_server = start_metrics_server(metrics, config.metrics_port, config.metrics_host)
+    if metrics_server is not None:
+        log.info(
+            "Arena metrics listening on %s:%d", config.metrics_host, config.metrics_port
+        )
+
     async with SybilClient(config.sybil_url) as client:
         # 1. Discover markets. When reference prices are required, arena may
         # start before the Polymarket mirror has published any; retry instead of
@@ -248,6 +259,10 @@ async def run_live(config: LiveConfig):
                     require_reference_price=config.require_reference_prices,
                 )
 
+            metrics.set_market_selection(
+                len(active),
+                sum(1 for m in active if (getattr(m, "reference_price_nanos", 0) or 0) > 0),
+            )
             if active:
                 break
 
@@ -313,6 +328,7 @@ async def run_live(config: LiveConfig):
                     db=db,
                     min_llm_interval_s=config.min_llm_interval,
                     name=bot_name,
+                    metrics=metrics,
                 )
                 trader.time_in_force = config.order_time_in_force
                 traders.append(trader)
@@ -334,7 +350,7 @@ async def run_live(config: LiveConfig):
 
         # 4. Create news feed (with LLM gate using cheap model)
         feed = NewsFeed(active, api_key=config.api_key, poll_interval_s=config.news_poll_interval,
-                        mapping_path=config.mapping_path)
+                        mapping_path=config.mapping_path, metrics=metrics)
 
         # Wire feed into traders. Each trader registers its own subscriber view
         # so the Kelly and Flat arms both receive every article (SYB-192).
@@ -405,6 +421,12 @@ async def run_live(config: LiveConfig):
         await asyncio.gather(*watched_tasks, return_exceptions=True)
 
         db.close()
+        if metrics_server is not None:
+            try:
+                server, _thread = metrics_server
+                server.shutdown()
+            except Exception:
+                log.debug("Metrics server shutdown failed", exc_info=True)
         log.info("Shutdown complete.")
         if failure is not None:
             raise failure
@@ -456,6 +478,17 @@ def main():
         help="Min seconds between LLM calls",
     )
     parser.add_argument("--db-path", default="", help="SQLite DB path")
+    parser.add_argument(
+        "--metrics-port",
+        type=int,
+        default=0,
+        help="Prometheus exporter port for arena metrics; <=0 (default) disables it.",
+    )
+    parser.add_argument(
+        "--metrics-host",
+        default="0.0.0.0",
+        help="Bind host for the arena metrics exporter.",
+    )
     parser.add_argument("--personas", nargs="+", default=list(PERSONAS.keys()),
                         help="Persona keys to use")
     parser.add_argument("--market-ids", nargs="+", type=int, default=None,
@@ -498,6 +531,8 @@ def main():
         news_poll_interval=args.news_interval,
         min_llm_interval=args.min_llm_interval,
         db_path=args.db_path,
+        metrics_host=args.metrics_host,
+        metrics_port=args.metrics_port,
         personas=args.personas,
         market_ids=args.market_ids,
         mapping_path=args.mapping_path,

@@ -16,6 +16,7 @@ dependencies = [
     "openai>=2.16.0",
     "trafilatura>=2.0.0",
     "feedparser>=6.0",
+    "prometheus-client>=0.20",  # Arena metrics exporter (SYB-211)
 ]
 
 [project.optional-dependencies]

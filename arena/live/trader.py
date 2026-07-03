@@ -12,6 +12,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import openai
 
@@ -21,6 +22,9 @@ from sybil_client.types import NANOS_PER_DOLLAR, Market
 
 from .db import DecisionDB
 from .news_feed import LiveArticle, NewsFeed, NewsSubscription
+
+if TYPE_CHECKING:
+    from .metrics import ArenaMetrics
 from .strategy import RESOLVED_HIGH, RESOLVED_LOW, KellyStrategy, SizingStrategy, position_orders
 
 log = logging.getLogger(__name__)
@@ -147,6 +151,7 @@ class LiveLlmTrader(BaseAgent):
         db: DecisionDB | None = None,
         min_llm_interval_s: float = 60.0,
         name: str | None = None,
+        metrics: "ArenaMetrics | None" = None,
     ):
         super().__init__(client, account_id, name or "LiveLlmTrader", market_ids)
         self.news_feed = news_feed
@@ -163,6 +168,7 @@ class LiveLlmTrader(BaseAgent):
         self.strategy = strategy or KellyStrategy()
         self.markets_info = markets_info or {}
         self.db = db
+        self.metrics = metrics
         self.min_llm_interval_s = min_llm_interval_s
 
         self._llm_client: openai.AsyncOpenAI | None = None
@@ -554,6 +560,8 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             try:
                 raw_text, llm_duration_s = await self._call_llm(prompt)
                 self._last_llm_call = time.monotonic()
+                if self.metrics is not None:
+                    self.metrics.record_llm_call(self.name)
                 log.info("[%s] LLM response (%.1fs):\n%s", self.name, llm_duration_s, raw_text)
             except Exception as e:
                 log.warning("[%s] LLM call failed: %s", self.name, e)

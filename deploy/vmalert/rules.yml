@@ -411,6 +411,52 @@ groups:
           summary: "One arena trader is stale"
           description: "{{ $labels.trader }} has not recorded a decision for more than 1h after being active during the last 6h. Historical disabled traders are intentionally ignored."
 
+      - alert: ArenaNoMarketsSelected
+        expr: max(sybil_arena_selected_markets) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Arena selected no markets to trade"
+          description: "The live arena runner has held zero selected markets for 15m. Market discovery, the mirror, or the selection profile may be broken, so no bot has anything to trade."
+
+      - alert: ArenaNoReferenceMarketsSelected
+        expr: |
+          max(sybil_arena_selected_markets) > 0
+          and
+          max(sybil_arena_selected_reference_markets) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "No selected arena market has a reference price"
+          description: "The arena selected markets, but none carry an external Polymarket reference price for 15m. Edge estimation degrades to yes_price only; the mirror may not be publishing references."
+
+      - alert: NewsFeedStale
+        expr: |
+          max(sybil_news_feed_latest_poll_success_timestamp_seconds) > 0
+          and
+          (time() - max(sybil_news_feed_latest_poll_success_timestamp_seconds)) > 900
+        for: 5m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Arena news feed has not completed a poll recently"
+          description: "The arena news feed last completed a successful poll more than 15m ago (default poll interval is 5m, so ~3 cycles have been missed). Polling may be wedged on RSS or Polymarket fetches."
+
+      - alert: NewsFeedPollErrors
+        expr: increase(sybil_news_feed_poll_errors_total[15m]) >= 3
+        for: 5m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Arena news feed polls are erroring"
+          description: "At least 3 arena news feed poll cycles have raised in the last 15m. Upstream RSS, the LLM gate, or Polymarket price fetches may be failing."
+
       - alert: ProverDown
         expr: up{job="sybil-prover"} == 0
         for: 2m

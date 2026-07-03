@@ -28,6 +28,8 @@ import trafilatura
 
 from sybil_client.types import Market
 
+from .metrics import ArenaMetrics
+
 log = logging.getLogger(__name__)
 
 GATE_MODEL = "google/gemma-4-31b-it"
@@ -332,11 +334,13 @@ class NewsFeed:
         poll_interval_s: int = 300,
         max_seen: int = 100_000,
         mapping_path: str | None = None,
+        metrics: ArenaMetrics | None = None,
     ):
         self.markets = markets
         self.api_key = api_key
         self.poll_interval = poll_interval_s
         self.max_seen = max_seen
+        self.metrics = metrics
         self.polymarket_prices = PolymarketPrices(mapping_path)
 
         # Dedup
@@ -433,8 +437,12 @@ class NewsFeed:
             return f"HTTP {error.response.status_code}"
         return type(error).__name__
 
-    async def _poll_once(self, http: httpx.AsyncClient) -> int:
-        """Poll Google News for each market, batch-gate with LLM, fetch text."""
+    async def _poll_once(self, http: httpx.AsyncClient) -> tuple[int, int]:
+        """Poll Google News for each market, batch-gate with LLM, fetch text.
+
+        Returns ``(delivered, candidates)`` — relevant articles delivered and
+        total new candidate headlines seen this poll.
+        """
         new_count = 0
         gate_yes = 0
         gate_no = 0
@@ -492,7 +500,7 @@ class NewsFeed:
         total_candidates = sum(len(v) for v in per_market.values())
         if total_candidates == 0:
             self._warmed_up = True
-            return 0
+            return 0, 0
 
         if not self._warmed_up:
             self._warmed_up = True
@@ -501,7 +509,7 @@ class NewsFeed:
                 total_candidates,
                 len(per_market),
             )
-            return 0
+            return 0, total_candidates
 
         log.info("Poll: %d new candidates across %d markets",
                  total_candidates, len(per_market))
@@ -573,7 +581,7 @@ class NewsFeed:
                 100 * gate_yes / max(gate_yes + gate_no, 1),
             )
 
-        return new_count
+        return new_count, total_candidates
 
     async def run(self):
         """Poll feeds continuously."""
@@ -584,15 +592,21 @@ class NewsFeed:
         )
         async with httpx.AsyncClient() as http:
             while True:
+                if self.metrics is not None:
+                    self.metrics.record_news_poll_start()
                 try:
                     # Fetch Polymarket reference prices each cycle
                     market_ids = [m.id for m in self.markets]
                     await self.polymarket_prices.fetch_prices(http, market_ids)
 
-                    n = await self._poll_once(http)
+                    n, candidates = await self._poll_once(http)
+                    if self.metrics is not None:
+                        self.metrics.record_news_poll_success(candidates, n)
                     if n > 0:
                         log.info("Poll complete: %d relevant articles delivered", n)
                 except Exception as e:
+                    if self.metrics is not None:
+                        self.metrics.record_news_poll_error()
                     log.error("Poll error: %s", e)
                 await asyncio.sleep(self.poll_interval)
 
