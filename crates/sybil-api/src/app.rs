@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::{MatchedPath, State};
 use axum::http::{header, Method, Request};
@@ -165,7 +165,16 @@ async fn dashboard() -> impl IntoResponse {
 }
 
 async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse {
-    record_live_market_metrics(&state).await;
+    // A slow or wedged sequencer must not stall the scrape indefinitely; bound
+    // the live-market collection and fall back to the cached gauges on timeout.
+    if tokio::time::timeout(Duration::from_secs(2), record_live_market_metrics(&state))
+        .await
+        .is_err()
+    {
+        metrics::counter!("sybil_metrics_collection_timeouts_total", "collector" => "live_market")
+            .increment(1);
+        tracing::warn!("live market metrics collection timed out; rendering cached metrics");
+    }
     record_bot_metrics(&state).await;
     state.prometheus.render()
 }

@@ -54,6 +54,10 @@ pub struct WorkerArgs {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WorkerStatusJson {
     pub version: u8,
+    /// Which producer wrote this artifact (`worker`, `mock-live`, ...). Older
+    /// status files predate the field, so decode falls back to `unknown`.
+    #[serde(default = "unknown_status_producer")]
+    pub producer: String,
     pub status: String,
     pub job_path: String,
     pub artifact_dir: String,
@@ -204,6 +208,7 @@ fn worker_status_json(
 ) -> WorkerStatusJson {
     WorkerStatusJson {
         version: 1,
+        producer: "worker".to_string(),
         status: "prepared".to_string(),
         job_path: job_path.display().to_string(),
         artifact_dir: artifact_dir.display().to_string(),
@@ -295,6 +300,12 @@ pub fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<(), Pro
 
 pub fn hex32(bytes: [u8; 32]) -> String {
     format!("0x{}", hex::encode(bytes))
+}
+
+/// serde default for [`WorkerStatusJson::producer`] on artifacts written before
+/// the field existed.
+pub fn unknown_status_producer() -> String {
+    "unknown".to_string()
 }
 
 pub fn unix_time_ms() -> u128 {

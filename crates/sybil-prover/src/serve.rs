@@ -41,6 +41,13 @@ struct ApiErrorJson {
     error: String,
 }
 
+#[derive(Serialize)]
+struct ProofStatusListJson {
+    count: usize,
+    latest: Option<WorkerStatusJson>,
+    statuses: Vec<WorkerStatusJson>,
+}
+
 pub async fn serve(args: ServeArgs) -> Result<(), ProverCliError> {
     std::fs::create_dir_all(&args.artifacts_dir).map_err(|source| ProverCliError::CreateDir {
         path: args.artifacts_dir.clone(),
@@ -75,6 +82,8 @@ fn prover_router_with_jobs_dir(artifacts_dir: PathBuf, jobs_dir: Option<PathBuf>
     Router::new()
         .route("/healthz", get(prover_healthz))
         .route("/metrics", get(prover_metrics))
+        .route("/proofs", get(list_proof_statuses))
+        .route("/proofs/latest", get(get_latest_proof_status))
         .route("/proofs/{height}", get(get_proof_status))
         .with_state(state)
 }
@@ -129,6 +138,53 @@ async fn get_proof_status(
     }
 }
 
+async fn get_latest_proof_status(AxumState(state): AxumState<ProverApiState>) -> impl IntoResponse {
+    match read_latest_worker_status(&state.artifacts_dir) {
+        Ok(Some(status)) => (StatusCode::OK, Json(status)).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiErrorJson {
+                error: "proof status store is empty".to_string(),
+            }),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiErrorJson {
+                error: error.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn list_proof_statuses(AxumState(state): AxumState<ProverApiState>) -> impl IntoResponse {
+    match read_worker_statuses(&state.artifacts_dir) {
+        Ok(mut statuses) => {
+            statuses.sort_by(|left, right| {
+                left.block_height
+                    .cmp(&right.block_height)
+                    .then_with(|| left.updated_at_ms.cmp(&right.updated_at_ms))
+                    .then_with(|| left.artifact_dir.cmp(&right.artifact_dir))
+            });
+            let latest = select_latest_status(statuses.iter().cloned());
+            let body = ProofStatusListJson {
+                count: statuses.len(),
+                latest,
+                statuses,
+            };
+            (StatusCode::OK, Json(body)).into_response()
+        }
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiErrorJson {
+                error: error.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
 fn read_worker_status_by_height(
     artifacts_dir: &Path,
     height: u64,
@@ -156,23 +212,14 @@ fn read_worker_status_by_height(
     }
     candidates.sort();
 
+    let mut statuses = Vec::new();
     for status_path in candidates {
         if !status_path.exists() {
             continue;
         }
-        let file = File::open(&status_path).map_err(|source| ProverCliError::Open {
-            path: status_path.clone(),
-            source,
-        })?;
-        let reader = BufReader::new(file);
-        let status =
-            serde_json::from_reader(reader).map_err(|source| ProverCliError::DecodeJson {
-                path: status_path,
-                source,
-            })?;
-        return Ok(Some(status));
+        statuses.push(read_worker_status(&status_path)?);
     }
-    Ok(None)
+    Ok(select_latest_status(statuses))
 }
 
 fn read_worker_statuses(artifacts_dir: &Path) -> Result<Vec<WorkerStatusJson>, ProverCliError> {
@@ -203,19 +250,41 @@ fn read_worker_statuses(artifacts_dir: &Path) -> Result<Vec<WorkerStatusJson>, P
         if !status_path.exists() {
             continue;
         }
-        let file = File::open(&status_path).map_err(|source| ProverCliError::Open {
-            path: status_path.clone(),
-            source,
-        })?;
-        let reader = BufReader::new(file);
-        let status =
-            serde_json::from_reader(reader).map_err(|source| ProverCliError::DecodeJson {
-                path: status_path,
-                source,
-            })?;
-        statuses.push(status);
+        statuses.push(read_worker_status(&status_path)?);
     }
     Ok(statuses)
+}
+
+fn read_latest_worker_status(
+    artifacts_dir: &Path,
+) -> Result<Option<WorkerStatusJson>, ProverCliError> {
+    let statuses = read_worker_statuses(artifacts_dir)?;
+    Ok(select_latest_status(statuses))
+}
+
+fn read_worker_status(status_path: &Path) -> Result<WorkerStatusJson, ProverCliError> {
+    let file = File::open(status_path).map_err(|source| ProverCliError::Open {
+        path: status_path.to_path_buf(),
+        source,
+    })?;
+    let reader = BufReader::new(file);
+    serde_json::from_reader(reader).map_err(|source| ProverCliError::DecodeJson {
+        path: status_path.to_path_buf(),
+        source,
+    })
+}
+
+/// Pick the freshest status: highest block height, then newest update, then the
+/// lexicographically-last artifact dir as a deterministic tiebreak.
+fn select_latest_status(
+    statuses: impl IntoIterator<Item = WorkerStatusJson>,
+) -> Option<WorkerStatusJson> {
+    statuses.into_iter().max_by(|left, right| {
+        left.block_height
+            .cmp(&right.block_height)
+            .then_with(|| left.updated_at_ms.cmp(&right.updated_at_ms))
+            .then_with(|| left.artifact_dir.cmp(&right.artifact_dir))
+    })
 }
 
 fn render_prover_metrics(
@@ -387,5 +456,129 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use crate::artifacts::{hex32, worker_artifact_dir, write_json_pretty, WorkerStatusJson};
+    use crate::StateTransitionProofJobId;
+
+    use super::{read_latest_worker_status, read_worker_status_by_height};
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_path(prefix: &str) -> PathBuf {
+        let unique = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "sybil-prover-{prefix}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn reads_newest_worker_status_when_height_has_multiple_artifacts() {
+        let artifacts_dir = temp_path("proof-api-artifacts-multiple");
+        let old_job_id = StateTransitionProofJobId {
+            block_height: 7,
+            block_hash: [0x11; 32],
+            state_root: [0x22; 32],
+        };
+        let new_job_id = StateTransitionProofJobId {
+            block_height: 7,
+            block_hash: [0x99; 32],
+            state_root: [0xaa; 32],
+        };
+        let old_artifact_dir = worker_artifact_dir(&artifacts_dir, &old_job_id);
+        let new_artifact_dir = worker_artifact_dir(&artifacts_dir, &new_job_id);
+        std::fs::create_dir_all(&old_artifact_dir).unwrap();
+        std::fs::create_dir_all(&new_artifact_dir).unwrap();
+        let old_status_path = old_artifact_dir.join("status.json");
+        let new_status_path = new_artifact_dir.join("status.json");
+        let old_status = WorkerStatusJson {
+            version: 1,
+            producer: "mock-live".to_string(),
+            status: "prepared".to_string(),
+            job_path: "mock://sybil/blocks/7".to_string(),
+            artifact_dir: old_artifact_dir.display().to_string(),
+            block_height: 7,
+            block_hash: hex32([0x11; 32]),
+            state_root: hex32([0x22; 32]),
+            public_input_hash: hex32([0x33; 32]),
+            da_commitment: hex32([0x44; 32]),
+            da_provider_ref: "mock://sybil/blocks/7/da".to_string(),
+            da_payload: old_artifact_dir
+                .join("mock-block.json")
+                .display()
+                .to_string(),
+            guest_input: old_artifact_dir
+                .join("guest-input.mock.json")
+                .display()
+                .to_string(),
+            da_manifest: old_artifact_dir
+                .join("da-manifest.mock.json")
+                .display()
+                .to_string(),
+            public_input_hash_path: Some(
+                old_artifact_dir
+                    .join("public-input-hash.hex")
+                    .display()
+                    .to_string(),
+            ),
+            proof_status: "mock_verified".to_string(),
+            updated_at_ms: 100,
+        };
+        let new_status = WorkerStatusJson {
+            version: 1,
+            producer: "worker".to_string(),
+            status: "prepared".to_string(),
+            job_path: "/tmp/job.msgpack".to_string(),
+            artifact_dir: new_artifact_dir.display().to_string(),
+            block_height: 7,
+            block_hash: hex32([0x99; 32]),
+            state_root: hex32([0xaa; 32]),
+            public_input_hash: hex32([0xbb; 32]),
+            da_commitment: hex32([0xcc; 32]),
+            da_provider_ref: "sybil-file://witness/example.witness.bin".to_string(),
+            da_payload: new_artifact_dir
+                .join("da/example.witness.bin")
+                .display()
+                .to_string(),
+            guest_input: new_artifact_dir
+                .join("guest-input.msgpack")
+                .display()
+                .to_string(),
+            da_manifest: new_artifact_dir
+                .join("da-manifest.json")
+                .display()
+                .to_string(),
+            public_input_hash_path: Some(
+                new_artifact_dir
+                    .join("public-input-hash.hex")
+                    .display()
+                    .to_string(),
+            ),
+            proof_status: "not_started".to_string(),
+            updated_at_ms: 200,
+        };
+        write_json_pretty(&old_status_path, &old_status).unwrap();
+        write_json_pretty(&new_status_path, &new_status).unwrap();
+
+        let loaded = read_worker_status_by_height(&artifacts_dir, 7)
+            .unwrap()
+            .unwrap();
+        let latest = read_latest_worker_status(&artifacts_dir).unwrap().unwrap();
+        let _ = std::fs::remove_file(&old_status_path);
+        let _ = std::fs::remove_file(&new_status_path);
+        let _ = std::fs::remove_dir(&old_artifact_dir);
+        let _ = std::fs::remove_dir(&new_artifact_dir);
+        let _ = std::fs::remove_dir(&artifacts_dir);
+
+        assert_eq!(loaded.producer, "worker");
+        assert_eq!(loaded.public_input_hash, hex32([0xbb; 32]));
+        assert_eq!(latest.block_hash, hex32([0x99; 32]));
     }
 }

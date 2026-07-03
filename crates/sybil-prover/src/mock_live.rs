@@ -66,6 +66,8 @@ pub enum MockLiveError {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct WorkerStatusJson {
     version: u8,
+    #[serde(default = "crate::artifacts::unknown_status_producer")]
+    producer: String,
     status: String,
     job_path: String,
     artifact_dir: String,
@@ -209,6 +211,7 @@ fn write_mock_artifact(artifacts_dir: &Path, block: &BlockResponse) -> Result<bo
 
     let status = WorkerStatusJson {
         version: 1,
+        producer: "mock-live".to_string(),
         status: "prepared".to_string(),
         job_path: format!("mock://sybil/blocks/{}", block.height),
         artifact_dir: artifact_dir.display().to_string(),
