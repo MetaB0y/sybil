@@ -86,7 +86,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 
         if has_positive && !has_negative {
             // Pure buy: check balance covers worst-case cost
-            let Some(max_cost) = checked_notional_ceil_i64(order.limit_price, order.max_fill)
+            let Some(max_cost) = checked_notional_ceil_i64(order.limit_price.0, order.max_fill.0)
             else {
                 violations.push(Violation {
                     kind: ViolationKind::InvalidOrder,
@@ -116,7 +116,8 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                 for s in 0..num_states {
                     if order.payoffs[s] < 0 {
                         let outcome = s as u8;
-                        let Some(sell_qty) = checked_sell_qty_i64(order.payoffs[s], order.max_fill)
+                        let Some(sell_qty) =
+                            checked_sell_qty_i64(order.payoffs[s], order.max_fill.0)
                         else {
                             violations.push(Violation {
                                 kind: ViolationKind::InvalidOrder,
@@ -181,7 +182,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 
                 if has_positive && !has_negative {
                     let Some(max_cost) =
-                        checked_notional_ceil_i64(order.limit_price, order.max_fill)
+                        checked_notional_ceil_i64(order.limit_price.0, order.max_fill.0)
                     else {
                         violations.push(Violation {
                             kind: ViolationKind::IncorrectRejectionReason,
@@ -278,7 +279,8 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder, WitnessRejection};
     use matching_engine::{
-        notional_nanos_ceil, outcome_buy, outcome_sell, shares_to_qty, MarketSet, NANOS_PER_DOLLAR,
+        notional_nanos_ceil, outcome_buy, outcome_sell, shares_to_qty, MarketSet, Nanos, Qty,
+        NANOS_PER_DOLLAR,
     };
     use proptest::prelude::*;
     use std::collections::HashMap;
@@ -327,7 +329,7 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10));
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10).0);
         let pre_state = vec![AccountSnapshot {
             id: 0,
             balance: 10 * NANOS_PER_DOLLAR as i64,
@@ -435,7 +437,7 @@ mod tests {
         let mut markets = MarketSet::new();
         let m0 = markets.add_binary("M0");
 
-        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10));
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10).0);
         // max_cost = 0.50 * 10 = $5, but only $3 available
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -470,8 +472,8 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         // Two buy orders from the same account, $5 each = $10 total
-        let order1 = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10));
-        let order2 = outcome_buy(&markets, 2, m0, 0, 500_000_000, shares_to_qty(10));
+        let order1 = outcome_buy(&markets, 1, m0, 0, 500_000_000, shares_to_qty(10).0);
+        let order2 = outcome_buy(&markets, 2, m0, 0, 500_000_000, shares_to_qty(10).0);
 
         // Account has $8 — enough for one but not both
         let pre_state = vec![AccountSnapshot {
@@ -756,8 +758,8 @@ mod tests {
             let order1 = outcome_buy(&markets, 1, m0, 0, limit_price_1, max_fill_1);
             let order2 = outcome_buy(&markets, 2, m0, 0, limit_price_2, max_fill_2);
 
-            let cost1 = notional_nanos_ceil(limit_price_1, max_fill_1) as i64;
-            let cost2 = notional_nanos_ceil(limit_price_2, max_fill_2) as i64;
+            let cost1 = notional_nanos_ceil(Nanos(limit_price_1), Qty(max_fill_1)).0 as i64;
+            let cost2 = notional_nanos_ceil(Nanos(limit_price_2), Qty(max_fill_2)).0 as i64;
             let state = vec![AccountSnapshot {
                 id: 0,
                 balance: cost1 + cost2 - 1,

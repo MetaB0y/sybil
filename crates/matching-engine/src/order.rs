@@ -96,8 +96,8 @@ impl Order {
             num_markets: 0,
             payoffs: [0; MAX_STATES],
             num_states: 0,
-            limit_price: 0,
-            max_fill: 0,
+            limit_price: Nanos::ZERO,
+            max_fill: Qty::ZERO,
             condition: None,
             expires_at_block: None,
         }
@@ -133,13 +133,13 @@ impl Order {
     /// Welfare = (fill_price - limit_price) * quantity for sellers
     /// (happy when fill > limit), scaled by `SHARE_SCALE`.
     pub fn welfare_contribution(&self, fill_price: Nanos, fill_qty: Qty) -> i64 {
-        if fill_qty == 0 {
+        if fill_qty == Qty::ZERO {
             return 0;
         }
         let surplus_per_unit = if self.is_seller() {
-            fill_price as i64 - self.limit_price as i64
+            fill_price.0 as i64 - self.limit_price.0 as i64
         } else {
-            self.limit_price as i64 - fill_price as i64
+            self.limit_price.0 as i64 - fill_price.0 as i64
         };
         signed_price_delta_notional(surplus_per_unit, fill_qty)
     }
@@ -150,7 +150,7 @@ impl Order {
     /// `-limit_price * qty`. Subtracting the settlement-derived minting cost
     /// from the sum of these terms gives the protocol welfare scalar.
     pub fn gross_welfare_contribution(&self, fill_qty: Qty) -> i64 {
-        let value = notional_nanos(self.limit_price, fill_qty) as i64;
+        let value = notional_nanos(self.limit_price, fill_qty).0 as i64;
         if self.is_seller() {
             -value
         } else {
@@ -194,10 +194,10 @@ impl Order {
         if self.markets[1..].iter().any(|market| !market.is_none()) {
             return Err("inactive market entries must be NONE");
         }
-        if self.limit_price > NANOS_PER_DOLLAR {
+        if self.limit_price.0 > NANOS_PER_DOLLAR {
             return Err("limit price exceeds NANOS_PER_DOLLAR");
         }
-        if self.max_fill > MAX_ORDER_QTY {
+        if self.max_fill.0 > MAX_ORDER_QTY {
             return Err("order quantity exceeds MAX_ORDER_QTY");
         }
 
@@ -264,6 +264,10 @@ impl Order {
     /// Same as `marginal_payoffs_i64` but without truncation. Needed for non-separable
     /// bundles where the marginal is fractional (e.g., `[1,0,0,0]` spanning 2 markets
     /// gives marginal 0.5 per market).
+    // Exempt from the f64 ban: this is an indicative/off-consensus helper used
+    // by the floating-point solver for fractional bundle marginals; it never
+    // feeds the state root (the integer `marginal_payoffs_i64` does that).
+    #[allow(clippy::disallowed_types)]
     pub fn marginal_payoffs_f64(&self) -> Vec<MarginalPayoff<f64>> {
         let num_markets = self.num_markets as usize;
         let num_states = self.num_states as usize;
@@ -416,10 +420,10 @@ mod tests {
     #[test]
     fn test_welfare_contribution() {
         let mut order = Order::new(1);
-        order.limit_price = 600_000_000; // 0.60 in nanos
+        order.limit_price = Nanos(600_000_000); // 0.60 in nanos
 
         // Fill at 0.50
-        let welfare = order.welfare_contribution(500_000_000, shares_to_qty(100));
+        let welfare = order.welfare_contribution(Nanos(500_000_000), shares_to_qty(100));
         // (0.60 - 0.50) * 100 = 10 in nano-equivalent
         assert_eq!(welfare, 100_000_000 * 100);
     }
@@ -502,7 +506,7 @@ mod tests {
             payoff_kind in 0u8..4,
             limit_price in 0u64..=NANOS_PER_DOLLAR,
             fill_price in 0u64..=NANOS_PER_DOLLAR,
-            fill_qty in 0u64..=shares_to_qty(1_000_000),
+            fill_qty in 0u64..=shares_to_qty(1_000_000).0,
         ) {
             let (yes_payoff, no_payoff) = match payoff_kind {
                 0 => (1, 0),
@@ -511,8 +515,8 @@ mod tests {
                 _ => (0, -1),
             };
             let mut order = binary_order(yes_payoff, no_payoff);
-            order.limit_price = limit_price;
-            order.max_fill = fill_qty;
+            order.limit_price = Nanos(limit_price);
+            order.max_fill = Qty(fill_qty);
 
             let seller = order.is_seller();
             let surplus_per_unit = if seller {
@@ -520,11 +524,14 @@ mod tests {
             } else {
                 limit_price as i64 - fill_price as i64
             };
-            let expected_welfare = signed_price_delta_notional(surplus_per_unit, fill_qty);
+            let expected_welfare = signed_price_delta_notional(surplus_per_unit, Qty(fill_qty));
 
-            prop_assert_eq!(order.welfare_contribution(fill_price, fill_qty), expected_welfare);
             prop_assert_eq!(
-                order.is_satisfied_at_price(fill_price),
+                order.welfare_contribution(Nanos(fill_price), Qty(fill_qty)),
+                expected_welfare
+            );
+            prop_assert_eq!(
+                order.is_satisfied_at_price(Nanos(fill_price)),
                 if seller {
                     fill_price >= limit_price
                 } else {
@@ -532,7 +539,7 @@ mod tests {
                 }
             );
             if fill_qty > 0 {
-                if order.is_satisfied_at_price(fill_price) {
+                if order.is_satisfied_at_price(Nanos(fill_price)) {
                     prop_assert!(expected_welfare >= 0);
                 } else {
                     prop_assert!(expected_welfare <= 0);

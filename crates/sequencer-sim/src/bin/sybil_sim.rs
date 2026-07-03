@@ -291,13 +291,15 @@ fn print_event_price_discovery(
 }
 
 fn format_market_price(
-    last_prices: Option<&std::collections::HashMap<matching_engine::MarketId, Vec<u64>>>,
+    last_prices: Option<
+        &std::collections::HashMap<matching_engine::MarketId, Vec<matching_engine::Nanos>>,
+    >,
     mid: &matching_engine::MarketId,
     true_p: f64,
 ) -> (String, String) {
     if let Some(prices) = last_prices {
         if let Some(ps) = prices.get(mid) {
-            let p = ps[0] as f64 / NANOS_PER_DOLLAR as f64;
+            let p = ps[0].0 as f64 / NANOS_PER_DOLLAR as f64;
             (format!("{:.4}", p), format!("{:.4}", (p - true_p).abs()))
         } else {
             ("N/A".to_string(), "N/A".to_string())

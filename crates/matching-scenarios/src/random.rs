@@ -15,7 +15,7 @@ pub struct RandomConfig {
     pub num_markets: usize,
     pub num_orders: usize,
     pub oversubscription: f64,
-    pub base_liquidity_depth: Qty,
+    pub base_liquidity_depth: u64,
     pub price_levels: usize,
     pub price_spread: f64,
 }
@@ -80,9 +80,9 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
     // Calculate supply per market
     let avg_order_qty = 75u64;
     let total_demand_estimate = config.num_orders as u64 * avg_order_qty;
-    let total_supply = (total_demand_estimate as f64 / config.oversubscription) as Qty;
-    let supply_per_market = total_supply / config.num_markets as Qty;
-    let supply_per_level = supply_per_market / (config.price_levels as Qty * 2);
+    let total_supply = (total_demand_estimate as f64 / config.oversubscription) as u64;
+    let supply_per_market = total_supply / config.num_markets as u64;
+    let supply_per_level = supply_per_market / (config.price_levels as u64 * 2);
 
     // Add supply/demand orders for each market (YES and NO)
     let mut liq_order_id = 5_000_000u64;
@@ -99,7 +99,7 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
                 liq_order_id,
                 market,
                 0,
-                price_to_nanos((yes_price - offset).max(0.01)),
+                price_to_nanos((yes_price - offset).max(0.01)).0,
                 supply_per_level.max(10),
             ));
             liq_order_id += 1;
@@ -109,7 +109,7 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
                 liq_order_id,
                 market,
                 0,
-                price_to_nanos((yes_price + offset).min(0.99)),
+                price_to_nanos((yes_price + offset).min(0.99)).0,
                 supply_per_level.max(10),
             ));
             liq_order_id += 1;
@@ -120,7 +120,7 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
                 liq_order_id,
                 market,
                 1,
-                price_to_nanos((no_price - offset).max(0.01)),
+                price_to_nanos((no_price - offset).max(0.01)).0,
                 supply_per_level.max(10),
             ));
             liq_order_id += 1;
@@ -130,7 +130,7 @@ pub fn generate_random_scenario(config: RandomConfig) -> Problem {
                 liq_order_id,
                 market,
                 1,
-                price_to_nanos((no_price + offset).min(0.99)),
+                price_to_nanos((no_price + offset).min(0.99)).0,
                 supply_per_level.max(10),
             ));
             liq_order_id += 1;
@@ -179,15 +179,15 @@ fn generate_simple_random_order(
     let aggressiveness = rng.random_range(0.0..0.1);
     let limit = (base_price + aggressiveness).min(0.95);
 
-    let qty: Qty = rng.random_range(30..120);
+    let qty: u64 = rng.random_range(30..120);
 
-    outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty)
+    outcome_buy(markets, id, market, outcome, price_to_nanos(limit).0, qty)
 }
 
 fn inject_conflicts(problem: &mut Problem, rng: &mut ChaCha8Rng, market_ids: &[MarketId]) {
     problem.orders.sort_by(|a, b| {
-        let a_welfare = a.limit_price as u128 * a.max_fill as u128;
-        let b_welfare = b.limit_price as u128 * b.max_fill as u128;
+        let a_welfare = a.limit_price.0 as u128 * a.max_fill.0 as u128;
+        let b_welfare = b.limit_price.0 as u128 * b.max_fill.0 as u128;
         b_welfare.cmp(&a_welfare)
     });
 
@@ -198,7 +198,7 @@ fn inject_conflicts(problem: &mut Problem, rng: &mut ChaCha8Rng, market_ids: &[M
         for order in problem.orders.iter_mut().take(conflict_count) {
             let touches_market = order.active_markets().any(|m| m == conflict_market);
             if touches_market {
-                order.max_fill = (order.max_fill as f64 * 1.5) as Qty;
+                order.max_fill = Qty((order.max_fill.0 as f64 * 1.5) as u64);
             }
         }
     }

@@ -336,14 +336,14 @@ impl PendingOrderInfo {
             market_ids,
             side,
             limit_price: order.limit_price,
-            remaining_qty: order.max_fill,
+            remaining_qty: order.max_fill.0,
             created_at_block: created_at,
             expires_at_block,
             // `original_max_fill` is `0` on pre-B5 snapshots (#[serde(default)]).
             // Fall back to the current `max_fill` so the FE progress bar
             // still renders sensibly during the rolling transition.
             original_quantity: if original_max_fill == 0 {
-                order.max_fill
+                order.max_fill.0
             } else {
                 original_max_fill
             },
@@ -376,7 +376,7 @@ fn expected_balance_delta_from_fills(
     mint_adjustments: &[matching_engine::MintAdjustment],
 ) -> i64 {
     let fill_delta = fills.iter().fold(0, |net_delta, fill| {
-        if fill.fill_qty == 0 {
+        if fill.fill_qty.0 == 0 {
             return net_delta;
         }
 
@@ -1886,7 +1886,7 @@ impl BlockSequencer {
                         order_id,
                         market_ids,
                         side,
-                        remaining_quantity: ro.order.max_fill,
+                        remaining_quantity: ro.order.max_fill.0,
                     });
                 {
                     use crate::aggregates::{HistoryEvent, HistoryKind};
@@ -1898,7 +1898,7 @@ impl BlockSequencer {
                     );
                     e.order_id = Some(order_id);
                     e.market_id = ro.order.active_markets().next();
-                    e.qty = Some(ro.order.max_fill);
+                    e.qty = Some(ro.order.max_fill.0);
                     let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
                     e.side = side;
                     e.outcome = outcome;
@@ -1964,7 +1964,7 @@ impl BlockSequencer {
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
                 self.analytics.apply_resolution(
                     market_id,
-                    payout_nanos as i64,
+                    payout_nanos.0 as i64,
                     pre_settle_positions,
                 );
                 self.record_system_event(SystemEvent::MarketResolved {
@@ -2031,7 +2031,7 @@ impl BlockSequencer {
                     settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
                 self.analytics.apply_resolution(
                     market_id,
-                    payout_nanos as i64,
+                    payout_nanos.0 as i64,
                     pre_settle_positions,
                 );
                 self.record_system_event(SystemEvent::MarketResolved {
@@ -2269,7 +2269,7 @@ impl BlockSequencer {
                 .result
                 .fills
                 .iter()
-                .filter(|f| f.fill_qty > 0)
+                .filter(|f| f.fill_qty.0 > 0)
                 .filter_map(|f| order_map.get(&f.order_id))
                 .flat_map(|o| o.active_markets())
                 .collect()
@@ -2296,7 +2296,7 @@ impl BlockSequencer {
         let total_volume = fills
             .iter()
             .map(|f| matching_engine::notional_nanos(f.fill_price, f.fill_qty))
-            .fold(0u64, |acc, v| acc.saturating_add(v));
+            .fold(0u64, |acc, v| acc.saturating_add(v.0));
         let orders_filled = pipeline_result.result.orders_filled;
 
         // Per-market welfare. Reuse the same order_map already built above
@@ -2308,7 +2308,7 @@ impl BlockSequencer {
             let order_map: HashMap<u64, &Order> =
                 problem.orders.iter().map(|o| (o.id, o)).collect();
             for fill in &fills {
-                if fill.fill_qty == 0 {
+                if fill.fill_qty.0 == 0 {
                     continue;
                 }
                 let Some(order) = order_map.get(&fill.order_id) else {
@@ -2631,9 +2631,9 @@ impl BlockSequencer {
                     payout_nanos,
                     affected_accounts,
                 } => {
-                    let payout_outcome = if *payout_nanos >= matching_engine::NANOS_PER_DOLLAR {
+                    let payout_outcome = if payout_nanos.0 >= matching_engine::NANOS_PER_DOLLAR {
                         Some("YES")
-                    } else if *payout_nanos == 0 {
+                    } else if payout_nanos.0 == 0 {
                         Some("NO")
                     } else {
                         None
@@ -2716,7 +2716,7 @@ impl BlockSequencer {
             );
             e.order_id = Some(ro.order.id);
             e.market_id = ro.order.active_markets().next();
-            e.qty = Some(ro.order.max_fill);
+            e.qty = Some(ro.order.max_fill.0);
             let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
             e.side = side;
             e.outcome = outcome;
@@ -2736,8 +2736,8 @@ impl BlockSequencer {
             );
             e.order_id = Some(ro.order.id);
             e.market_id = ro.order.active_markets().next();
-            e.qty = Some(ro.order.max_fill);
-            e.price_nanos = Some(ro.order.limit_price);
+            e.qty = Some(ro.order.max_fill.0);
+            e.price_nanos = Some(ro.order.limit_price.0);
             let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
             e.side = side;
             e.outcome = outcome;
@@ -2794,7 +2794,7 @@ impl BlockSequencer {
                 if account.balance <= 0 {
                     continue;
                 }
-                mm_c.max_capital = mm_c.max_capital.min(account.balance as u64);
+                mm_c.max_capital = mm_c.max_capital.min(Nanos(account.balance as u64));
             }
 
             let mut accepted_orders: Vec<Order> = Vec::new();
@@ -2898,7 +2898,7 @@ impl BlockSequencer {
                                 // Undo the book acceptance — release reservations
                                 // (settle with a "fully filled" phantom to release)
                                 let phantom_fill =
-                                    Fill::new(accepted.order.id, accepted.order.max_fill, 0);
+                                    Fill::new(accepted.order.id, accepted.order.max_fill, Nanos(0));
                                 let _stp_undo = self.order_book.settle(
                                     &[phantom_fill],
                                     &HashSet::new(),
@@ -2920,8 +2920,8 @@ impl BlockSequencer {
                                     );
                                     e.order_id = Some(o.id);
                                     e.market_id = o.active_markets().next();
-                                    e.qty = Some(o.max_fill);
-                                    e.price_nanos = Some(o.limit_price);
+                                    e.qty = Some(o.max_fill.0);
+                                    e.price_nanos = Some(o.limit_price.0);
                                     let (side, outcome) =
                                         crate::aggregates::side_outcome_from_order(o);
                                     e.side = side;
@@ -2956,8 +2956,8 @@ impl BlockSequencer {
                                 );
                                 e.order_id = Some(o.id);
                                 e.market_id = o.active_markets().next();
-                                e.qty = Some(o.max_fill);
-                                e.price_nanos = Some(o.limit_price);
+                                e.qty = Some(o.max_fill.0);
+                                e.price_nanos = Some(o.limit_price.0);
                                 let (side, outcome) = crate::aggregates::side_outcome_from_order(o);
                                 e.side = side;
                                 e.outcome = outcome;
@@ -2991,8 +2991,8 @@ impl BlockSequencer {
                                 );
                                 e.order_id = Some(order_id);
                                 e.market_id = order.active_markets().next();
-                                e.qty = Some(order.max_fill);
-                                e.price_nanos = Some(order.limit_price);
+                                e.qty = Some(order.max_fill.0);
+                                e.price_nanos = Some(order.limit_price.0);
                                 let (side, outcome) =
                                     crate::aggregates::side_outcome_from_order(&order);
                                 e.side = side;
@@ -3183,7 +3183,7 @@ impl BlockSequencer {
                 );
                 e.order_id = Some(ro.order.id);
                 e.market_id = ro.order.active_markets().next();
-                e.qty = Some(ro.order.max_fill);
+                e.qty = Some(ro.order.max_fill.0);
                 let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
                 e.side = side;
                 e.outcome = outcome;
@@ -3217,9 +3217,9 @@ impl BlockSequencer {
         let mm_filled_qty: HashMap<u64, u64> =
             fills
                 .iter()
-                .filter(|f| f.fill_qty > 0)
+                .filter(|f| f.fill_qty.0 > 0)
                 .fold(HashMap::new(), |mut acc, f| {
-                    *acc.entry(f.order_id).or_insert(0) += f.fill_qty;
+                    *acc.entry(f.order_id).or_insert(0) += f.fill_qty.0;
                     acc
                 });
         for o in &mm_orders {
@@ -3384,8 +3384,8 @@ mod tests {
     use crate::order_book::RestingOrder;
     use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{
-        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, MarketId, MarketSet, MmId,
-        NANOS_PER_DOLLAR,
+        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, MarketId, MarketSet, MmId, Nanos,
+        Qty, NANOS_PER_DOLLAR,
     };
     use proptest::prelude::*;
     use sybil_oracle::{
@@ -3416,7 +3416,7 @@ mod tests {
     }
 
     fn q(shares: u64) -> u64 {
-        shares_to_qty(shares)
+        shares_to_qty(shares).0
     }
 
     fn qi(shares: u64) -> i64 {
@@ -3534,8 +3534,8 @@ mod tests {
         order.num_states = 2;
         order.payoffs[0] = payoffs[0];
         order.payoffs[1] = payoffs[1];
-        order.limit_price = limit_price;
-        order.max_fill = max_fill;
+        order.limit_price = Nanos(limit_price);
+        order.max_fill = Qty(max_fill);
         order
     }
 
@@ -3721,14 +3721,15 @@ mod tests {
         let order_map = HashMap::from([(buy.id, &buy), (sell.id, &sell)]);
 
         let fills = vec![
-            Fill::new(buy.id, q(4), 300_000_000),
-            Fill::new(sell.id, q(2), 700_000_000),
+            Fill::new(buy.id, Qty(q(4)), Nanos(300_000_000)),
+            Fill::new(sell.id, Qty(q(2)), Nanos(700_000_000)),
         ];
 
         let expected_delta = expected_balance_delta_from_fills(&fills, &order_map, &[]);
         assert_eq!(
             expected_delta,
-            -(notional_nanos(300_000_000, q(4)) as i64) + notional_nanos(700_000_000, q(2)) as i64
+            -(notional_nanos(Nanos(300_000_000), Qty(q(4))).0 as i64)
+                + notional_nanos(Nanos(700_000_000), Qty(q(2))).0 as i64
         );
     }
 
@@ -3737,12 +3738,12 @@ mod tests {
         let (markets, m0) = setup();
         let buy = outcome_buy(&markets, 1, m0, 0, 300_000_000, q(4));
         let order_map = HashMap::from([(buy.id, &buy)]);
-        let fills = vec![Fill::new(buy.id, q(4), 300_000_000)];
+        let fills = vec![Fill::new(buy.id, Qty(q(4)), Nanos(300_000_000))];
         let mint_adjustments = vec![matching_engine::MintAdjustment {
             market_id: m0,
             outcome: 0,
             position_delta: -qi(4),
-            balance_delta: notional_nanos(300_000_000, q(4)) as i64,
+            balance_delta: notional_nanos(Nanos(300_000_000), Qty(q(4))).0 as i64,
         }];
 
         let expected_delta =
@@ -3868,7 +3869,10 @@ mod tests {
             SequencerConfig::default(),
         );
         *seq.analytics.price_tracker_mut() = crate::price_tracker::PriceTracker::with_state(
-            HashMap::from([(orphaned_market, vec![400_000_000, 600_000_000])]),
+            HashMap::from([(
+                orphaned_market,
+                vec![Nanos(400_000_000), Nanos(600_000_000)],
+            )]),
             HashMap::new(),
         );
 
@@ -3887,7 +3891,7 @@ mod tests {
         assert_eq!(mint.position(orphaned_market, 1), -7);
         assert_eq!(
             bp.block.clearing_prices.get(&orphaned_market),
-            Some(&vec![400_000_000, 600_000_000])
+            Some(&vec![Nanos(400_000_000), Nanos(600_000_000)])
         );
 
         let verification = sybil_verifier::verify_full(&bp.witness, false);
@@ -3955,7 +3959,7 @@ mod tests {
             SequencerConfig::default(),
         );
 
-        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
         let sub = OrderSubmission {
             account_id: mm,
@@ -4099,7 +4103,7 @@ mod tests {
 
         let order = outcome_buy(&markets, 1, m0, 0, 600_000_000, q(5));
         let cost = validate_order_with_reservation(&order, account, 0, &HashMap::new()).unwrap();
-        assert_eq!(cost, notional_nanos(600_000_000, q(5)) as i64);
+        assert_eq!(cost, notional_nanos(Nanos(600_000_000), Qty(q(5))).0 as i64);
     }
 
     #[test]
@@ -4196,7 +4200,7 @@ mod tests {
         let (mut seq, aid) = make_sequencer(0);
 
         let order = outcome_buy(&markets, 0, m0, 0, 500_000_000, 100);
-        let mut constraint = MmConstraint::new(MmId(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
 
         let sub = OrderSubmission {
@@ -4378,7 +4382,7 @@ mod tests {
         };
         let bp = seq_b.produce_block(vec![sub_b], 2_000);
 
-        let total_fill_qty: u64 = bp.block.fills.iter().map(|f| f.fill_qty).sum();
+        let total_fill_qty: u64 = bp.block.fills.iter().map(|f| f.fill_qty.0).sum();
         assert!(
             total_fill_qty > 0,
             "expected restored resting buy to match the new sell, got fills={:?}",
@@ -4805,7 +4809,7 @@ mod tests {
         let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
         let order = outcome_buy(&markets, 0, m0, 0, 100_000_000, 5);
-        let mut constraint = MmConstraint::new(MmId(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
 
         let sub = OrderSubmission {
@@ -5315,7 +5319,7 @@ mod tests {
         assert_ne!(seq.accounts.get(yes_buyer).unwrap().position(m0, 0), 0);
         assert_ne!(seq.accounts.get(no_buyer).unwrap().position(m0, 1), 0);
 
-        seq.resolve_market(m0, NANOS_PER_DOLLAR, 2_000)
+        seq.resolve_market(m0, Nanos(NANOS_PER_DOLLAR), 2_000)
             .expect("resolution should succeed");
 
         assert_eq!(seq.accounts.get(yes_buyer).unwrap().position(m0, 0), 0);
@@ -5398,7 +5402,7 @@ mod tests {
             SequencerConfig::default(),
         );
 
-        seq.resolve_market(m2, 0, 1_000).unwrap();
+        seq.resolve_market(m2, Nanos::ZERO, 1_000).unwrap();
 
         assert_eq!(seq.market_groups().len(), 1);
         assert_eq!(seq.market_groups()[0].markets, vec![m0, m1]);
@@ -5421,7 +5425,7 @@ mod tests {
         let m1_yes = bp.block.clearing_prices.get(&m1).unwrap()[0];
         assert_eq!(
             m0_yes + m1_yes,
-            NANOS_PER_DOLLAR,
+            Nanos(NANOS_PER_DOLLAR),
             "survivor YES prices must retain group coherence"
         );
         assert_eq!(bp.witness.market_groups.len(), 1);
@@ -5462,7 +5466,7 @@ mod tests {
         let signed = sign_attestation(
             ResolutionAttestation {
                 market_id: m0,
-                payout_nanos: NANOS_PER_DOLLAR,
+                payout_nanos: Nanos(NANOS_PER_DOLLAR),
                 nonce: 1,
             },
             &signing_key,
@@ -5513,7 +5517,7 @@ mod tests {
             SequencerConfig::default(),
         );
 
-        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
         constraint.add_order(1, matching_engine::MmSide::BuyYes);
         constraint.add_order(2, matching_engine::MmSide::BuyYes);
@@ -5549,7 +5553,7 @@ mod tests {
         );
 
         // Only quote 2 of 3 outcomes — not a complete set
-        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
         constraint.add_order(1, matching_engine::MmSide::BuyYes);
 
@@ -5576,7 +5580,7 @@ mod tests {
         let (markets, m0) = setup();
         let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
-        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
         constraint.add_order(1, matching_engine::MmSide::BuyNo);
 
@@ -5613,7 +5617,7 @@ mod tests {
             SequencerConfig::default(),
         );
 
-        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyNo);
         constraint.add_order(1, matching_engine::MmSide::BuyNo);
 
@@ -5659,7 +5663,7 @@ mod tests {
             .positions
             .insert((m0, 0), 1000);
 
-        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
 
         let mm_sub = OrderSubmission {
@@ -5698,7 +5702,7 @@ mod tests {
             SequencerConfig::default(),
         );
 
-        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
 
         let sub = OrderSubmission {
@@ -5818,7 +5822,7 @@ mod tests {
             .insert((m0, 0), 100_000);
 
         for block_num in 0..10 {
-            let mut constraint = MmConstraint::new(MmId::new(1), 500 * NANOS_PER_DOLLAR);
+            let mut constraint = MmConstraint::new(MmId::new(1), Nanos(500 * NANOS_PER_DOLLAR));
             constraint.add_order(0, matching_engine::MmSide::BuyYes);
 
             let mm_sub = OrderSubmission {
@@ -6111,7 +6115,7 @@ mod tests {
         ));
         seq.produce_block(vec![], 1000);
 
-        let mut constraint = MmConstraint::new(MmId::new(1), 50 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
         constraint.add_order(0, matching_engine::MmSide::BuyYes);
         let mm_sub = OrderSubmission {
             account_id: aid,
@@ -6347,7 +6351,8 @@ mod tests {
             .and_then(|v| v.first().copied())
             .expect("mark price must be set after a filled batch");
         assert_ne!(
-            mark_after_cross, 500_000_000,
+            mark_after_cross,
+            Nanos(500_000_000),
             "clearing mark must differ from 50c so the midpoint assertion is non-trivial"
         );
 
@@ -6372,7 +6377,8 @@ mod tests {
             .and_then(|v| v.first().copied())
             .expect("mark price must be set after a no-cross batch with a two-sided book");
         assert_eq!(
-            mark_after_spread, 500_000_000,
+            mark_after_spread,
+            Nanos(500_000_000),
             "mark must equal the 50c book midpoint after a non-crossing batch"
         );
 
@@ -6388,7 +6394,7 @@ mod tests {
             .expect("buyer must have a valued YES position in portfolio summary");
 
         assert_eq!(
-            pos.current_price_nanos, 500_000_000,
+            pos.current_price_nanos, Nanos(500_000_000),
             "portfolio must value the YES position at the 50c book-midpoint mark, not the old clearing price"
         );
     }

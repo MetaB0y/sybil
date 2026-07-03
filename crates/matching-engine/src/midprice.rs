@@ -37,9 +37,15 @@ pub fn book_midprices<'a>(
         }
         let (is_bid, price) = match derive_order_direction(order, market) {
             OrderDirection::BuyYes => (true, order.limit_price),
-            OrderDirection::SellNo => (true, NANOS_PER_DOLLAR.saturating_sub(order.limit_price)),
+            OrderDirection::SellNo => (
+                true,
+                Nanos(NANOS_PER_DOLLAR.saturating_sub(order.limit_price.0)),
+            ),
             OrderDirection::SellYes => (false, order.limit_price),
-            OrderDirection::BuyNo => (false, NANOS_PER_DOLLAR.saturating_sub(order.limit_price)),
+            OrderDirection::BuyNo => (
+                false,
+                Nanos(NANOS_PER_DOLLAR.saturating_sub(order.limit_price.0)),
+            ),
         };
         if is_bid {
             best_bid
@@ -66,7 +72,7 @@ pub fn book_midprices<'a>(
     for (&market, &bid) in &best_bid {
         if let Some(&ask) = best_ask.get(&market) {
             if bid < ask {
-                mids.insert(market, bid + (ask - bid) / 2);
+                mids.insert(market, bid + Nanos((ask.0 - bid.0) / 2));
             }
         }
     }
@@ -81,14 +87,14 @@ pub fn mark_yes_no(
     midpoint: Option<Nanos>,
     last_mark: Option<&[Nanos]>,
 ) -> Vec<Nanos> {
-    let half = NANOS_PER_DOLLAR / 2;
+    let half = Nanos(NANOS_PER_DOLLAR / 2);
     if had_fill {
         if let Some(c) = clearing {
             return c.to_vec();
         }
     }
     if let Some(mid) = midpoint {
-        return vec![mid, NANOS_PER_DOLLAR.saturating_sub(mid)];
+        return vec![mid, Nanos(NANOS_PER_DOLLAR.saturating_sub(mid.0))];
     }
     if let Some(prev) = last_mark {
         return prev.to_vec();
@@ -120,7 +126,7 @@ mod tests {
         let ask = outcome_sell(&ms, 2, m0, 0, 600_000_000, 5);
         let orders = [bid, ask];
         let mids = book_midprices(orders.iter());
-        assert_eq!(mids.get(&m0).copied(), Some(500_000_000));
+        assert_eq!(mids.get(&m0).copied(), Some(Nanos(500_000_000)));
     }
 
     // BuyNo @ 30c is a YES ask at 70c; SellNo @ 80c is a YES bid at 20c.
@@ -132,7 +138,7 @@ mod tests {
         let yes_bid_via_no = outcome_sell(&ms, 2, m0, 1, 800_000_000, 5); // SellNo @80c -> bid 20c
         let orders = [yes_ask_via_no, yes_bid_via_no];
         let mids = book_midprices(orders.iter());
-        assert_eq!(mids.get(&m0).copied(), Some(450_000_000));
+        assert_eq!(mids.get(&m0).copied(), Some(Nanos(450_000_000)));
     }
 
     // Only bids, no asks → no midpoint.
@@ -168,21 +174,31 @@ mod tests {
 
     #[test]
     fn mark_ladder_prefers_clearing_when_filled() {
-        let clearing = vec![620_000_000, 380_000_000];
-        let got = mark_yes_no(true, Some(clearing.as_slice()), Some(500_000_000), None);
+        let clearing = vec![Nanos(620_000_000), Nanos(380_000_000)];
+        let got = mark_yes_no(
+            true,
+            Some(clearing.as_slice()),
+            Some(Nanos(500_000_000)),
+            None,
+        );
         assert_eq!(got, clearing);
     }
 
     #[test]
     fn mark_ladder_uses_midpoint_when_not_filled() {
-        let clearing = vec![620_000_000, 380_000_000];
-        let got = mark_yes_no(false, Some(clearing.as_slice()), Some(500_000_000), None);
-        assert_eq!(got, vec![500_000_000, 500_000_000]);
+        let clearing = vec![Nanos(620_000_000), Nanos(380_000_000)];
+        let got = mark_yes_no(
+            false,
+            Some(clearing.as_slice()),
+            Some(Nanos(500_000_000)),
+            None,
+        );
+        assert_eq!(got, vec![Nanos(500_000_000), Nanos(500_000_000)]);
     }
 
     #[test]
     fn mark_ladder_carries_over_when_no_midpoint() {
-        let last_mark = vec![510_000_000, 490_000_000];
+        let last_mark = vec![Nanos(510_000_000), Nanos(490_000_000)];
         let got = mark_yes_no(false, None, None, Some(last_mark.as_slice()));
         assert_eq!(got, last_mark);
     }
@@ -190,13 +206,16 @@ mod tests {
     #[test]
     fn mark_ladder_defaults_to_half() {
         let got = mark_yes_no(false, None, None, None);
-        assert_eq!(got, vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2]);
+        assert_eq!(
+            got,
+            vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)]
+        );
     }
 
     #[test]
     fn mark_ladder_falls_through_when_filled_without_clearing() {
         // had_fill=true but no clearing supplied → falls through to midpoint.
-        let got = mark_yes_no(true, None, Some(500_000_000), None);
-        assert_eq!(got, vec![500_000_000, 500_000_000]);
+        let got = mark_yes_no(true, None, Some(Nanos(500_000_000)), None);
+        assert_eq!(got, vec![Nanos(500_000_000), Nanos(500_000_000)]);
     }
 }

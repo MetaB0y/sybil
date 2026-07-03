@@ -126,7 +126,7 @@ impl ConicSolver {
 
         // Active MMs: only those with positive budget get exp cone constraints
         let active_mms: Vec<usize> = (0..problem.mm_constraints.len())
-            .filter(|&k| problem.mm_constraints[k].max_capital > 0)
+            .filter(|&k| problem.mm_constraints[k].max_capital.0 > 0)
             .collect();
         let num_active_mm = active_mms.len();
 
@@ -154,7 +154,7 @@ impl ConicSolver {
         // MM budgets for active MMs
         let mm_budgets: Vec<f64> = active_mms
             .iter()
-            .map(|&k| problem.mm_constraints[k].max_capital as f64)
+            .map(|&k| problem.mm_constraints[k].max_capital.0 as f64)
             .collect();
 
         // ================================================================
@@ -362,7 +362,7 @@ impl ConicSolver {
             tri_row.push(bound_row);
             tri_col.push(q_offset + i);
             tri_val.push(1.0);
-            b_vec[bound_row] = order.max_fill as f64;
+            b_vec[bound_row] = order.max_fill.0 as f64;
             bound_row += 1;
         }
 
@@ -487,7 +487,8 @@ mod tests {
         single_market_problem, zero_budget_mm_problem,
     };
     use matching_engine::{
-        outcome_sell, simple_no_buy, simple_yes_buy, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR,
+        outcome_sell, simple_no_buy, simple_yes_buy, MmConstraint, MmId, MmSide, Nanos,
+        NANOS_PER_DOLLAR,
     };
 
     #[test]
@@ -641,7 +642,7 @@ mod tests {
         let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
         problem.orders.push(mm_order);
 
-        let mut mm = MmConstraint::new(MmId(1), 50 * NANOS_PER_DOLLAR);
+        let mut mm = MmConstraint::new(MmId(1), Nanos(50 * NANOS_PER_DOLLAR));
         mm.add_order(200, MmSide::BuyNo);
         problem.mm_constraints.push(mm);
 
@@ -685,7 +686,7 @@ mod tests {
         let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 2000);
         problem.orders.push(mm_order);
 
-        let mut mm = MmConstraint::new(MmId(1), 100 * NANOS_PER_DOLLAR);
+        let mut mm = MmConstraint::new(MmId(1), Nanos(100 * NANOS_PER_DOLLAR));
         mm.add_order(200, MmSide::BuyNo);
         problem.mm_constraints.push(mm);
 

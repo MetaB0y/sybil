@@ -544,7 +544,7 @@ mod tests {
             MarketStatus::Resolved {
                 record: ResolutionRecord {
                     market_id,
-                    payout_nanos: 1_000_000_000,
+                    payout_nanos: matching_engine::Nanos(1_000_000_000),
                     resolved_by: OracleSource::Admin,
                     resolved_at_ms: 1_000,
                     proposal: None,

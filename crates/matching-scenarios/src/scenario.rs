@@ -10,7 +10,7 @@ use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
     outcome_buy, outcome_sell, price_to_nanos, MarketGroup, MarketId, MmConstraint, MmId, MmSide,
-    Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
+    Nanos, Order, Problem, NANOS_PER_DOLLAR,
 };
 
 /// Unified configuration for scenario generation.
@@ -27,8 +27,8 @@ pub struct ScenarioConfig {
     /// Total number of orders to generate
     pub num_orders: usize,
     /// Order size range
-    pub order_size_min: Qty,
-    pub order_size_max: Qty,
+    pub order_size_min: u64,
+    pub order_size_max: u64,
 
     // Liquidity configuration
     /// Liquidity scarcity (0.0-1.0, lower = more scarcity, more competition)
@@ -266,8 +266,8 @@ fn add_liquidity(
 ) {
     let avg_order_qty = (config.order_size_min + config.order_size_max) / 2;
     let total_demand_estimate = config.num_orders as u64 * avg_order_qty;
-    let total_supply = (total_demand_estimate as f64 * config.liquidity_scarcity) as Qty;
-    let supply_per_market = total_supply / config.num_markets as Qty;
+    let total_supply = (total_demand_estimate as f64 * config.liquidity_scarcity) as u64;
+    let supply_per_market = total_supply / config.num_markets as u64;
 
     // Use high order IDs for supply sell orders to avoid collisions
     let mut sell_order_id = 5_000_000u64;
@@ -291,7 +291,7 @@ fn add_liquidity(
                 sell_order_id,
                 *market_id,
                 0,
-                price_to_nanos(ask_price),
+                price_to_nanos(ask_price).0,
                 level_supply.max(10),
             ));
             sell_order_id += 1;
@@ -303,7 +303,7 @@ fn add_liquidity(
                 sell_order_id,
                 *market_id,
                 0,
-                price_to_nanos(bid_price),
+                price_to_nanos(bid_price).0,
                 level_supply.max(10),
             ));
             sell_order_id += 1;
@@ -321,7 +321,7 @@ fn add_liquidity(
                 sell_order_id,
                 *market_id,
                 1,
-                price_to_nanos(ask_price),
+                price_to_nanos(ask_price).0,
                 level_supply.max(10),
             ));
             sell_order_id += 1;
@@ -333,7 +333,7 @@ fn add_liquidity(
                 sell_order_id,
                 *market_id,
                 1,
-                price_to_nanos(bid_price),
+                price_to_nanos(bid_price).0,
                 level_supply.max(10),
             ));
             sell_order_id += 1;
@@ -385,9 +385,9 @@ fn generate_simple_order(
     let qty = rng.random_range(config.order_size_min..config.order_size_max);
 
     if is_sell {
-        outcome_sell(markets, id, market, outcome, price_to_nanos(limit), qty)
+        outcome_sell(markets, id, market, outcome, price_to_nanos(limit).0, qty)
     } else {
-        outcome_buy(markets, id, market, outcome, price_to_nanos(limit), qty)
+        outcome_buy(markets, id, market, outcome, price_to_nanos(limit).0, qty)
     }
 }
 
@@ -402,7 +402,7 @@ fn generate_mm_constraints(
 
     for mm_idx in 0..config.num_mms {
         let budget_dollars = rng.random_range(config.mm_budget_min..config.mm_budget_max);
-        let budget_nanos = budget_dollars as Nanos * NANOS_PER_DOLLAR;
+        let budget_nanos = Nanos(budget_dollars * NANOS_PER_DOLLAR);
 
         let mut constraint = MmConstraint::new(MmId::new(mm_idx as u64 + 1), budget_nanos);
 
@@ -438,7 +438,7 @@ fn generate_mm_constraints(
                     *order_id,
                     market_id,
                     0,
-                    price_to_nanos(ask_price),
+                    price_to_nanos(ask_price).0,
                     level_qty.max(10),
                 );
                 constraint.add_order(*order_id, MmSide::SellYes);
@@ -451,7 +451,7 @@ fn generate_mm_constraints(
                     *order_id,
                     market_id,
                     0,
-                    price_to_nanos(bid_price),
+                    price_to_nanos(bid_price).0,
                     level_qty.max(10),
                 );
                 constraint.add_order(*order_id, MmSide::BuyYes);

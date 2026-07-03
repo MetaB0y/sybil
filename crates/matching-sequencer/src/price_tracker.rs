@@ -235,10 +235,10 @@ impl PriceTracker {
         let mut per_market_volume: HashMap<MarketId, u64> = HashMap::new();
         let mut platform_block_volume: u64 = 0;
         for fill in fills {
-            if fill.fill_qty == 0 {
+            if fill.fill_qty.0 == 0 {
                 continue;
             }
-            let vol = notional_nanos(fill.fill_price, fill.fill_qty);
+            let vol = notional_nanos(fill.fill_price, fill.fill_qty).0;
             platform_block_volume = platform_block_volume.saturating_add(vol);
             if let Some(order) = orders.get(&fill.order_id) {
                 for mid in order.active_markets() {
@@ -263,11 +263,11 @@ impl PriceTracker {
                 midpoints.get(&mid).copied(),
                 self.last_mark_prices.get(&mid).map(|v| v.as_slice()),
             );
-            let yes_price = mark.first().copied().unwrap_or(NANOS_PER_DOLLAR / 2);
+            let yes_price = mark.first().copied().unwrap_or(Nanos(NANOS_PER_DOLLAR / 2));
             let no_price = mark
                 .get(1)
                 .copied()
-                .unwrap_or_else(|| NANOS_PER_DOLLAR.saturating_sub(yes_price));
+                .unwrap_or_else(|| Nanos(NANOS_PER_DOLLAR).saturating_sub(yes_price));
 
             // Coalesce flat no-trade ticks: skip the append when the price is
             // unchanged AND nothing traded. Trades always produce a point.
@@ -440,8 +440,8 @@ impl PriceTracker {
             .rev()
             .find(|(hour_start_ms, _)| *hour_start_ms <= target_ms)
             .map(|(_, prices)| prices)?;
-        let yes = prices.first().copied()?;
-        let no = prices.get(1).copied().unwrap_or(0);
+        let yes = prices.first().copied()?.0;
+        let no = prices.get(1).copied().unwrap_or(Nanos::ZERO).0;
         Some((yes, no))
     }
 
@@ -463,8 +463,8 @@ impl PriceTracker {
                 .rev()
                 .find(|(hour_start_ms, _)| *hour_start_ms <= target_ms)
             {
-                let yes = prices.first().copied().unwrap_or(0);
-                let no = prices.get(1).copied().unwrap_or(0);
+                let yes = prices.first().copied().unwrap_or(Nanos::ZERO).0;
+                let no = prices.get(1).copied().unwrap_or(Nanos::ZERO).0;
                 out.insert(mid, (yes, no));
             }
         }
@@ -493,11 +493,11 @@ impl PriceTracker {
 mod tests {
     use super::*;
     use matching_engine::{
-        notional_nanos, outcome_buy, shares_to_qty, Fill, MarketSet, NANOS_PER_DOLLAR,
+        notional_nanos, outcome_buy, shares_to_qty, Fill, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR,
     };
 
     fn q(shares: u64) -> u64 {
-        shares_to_qty(shares)
+        shares_to_qty(shares).0
     }
 
     #[test]
@@ -508,13 +508,16 @@ mod tests {
         let mut orders = HashMap::new();
         orders.insert(order.id, &order);
         let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(market, vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2]);
+        clearing_prices.insert(
+            market,
+            vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)],
+        );
 
         let max_points = 8;
         let mut tracker = PriceTracker::with_retention(max_points);
         for height in 1..=(max_points as u64 + 5) {
             tracker.record_block(
-                &[Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2)],
+                &[Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2))],
                 &orders,
                 &clearing_prices,
                 &HashMap::new(),
@@ -534,7 +537,10 @@ mod tests {
         let market = markets.add_binary("vol");
         let order = outcome_buy(&markets, 1, market, 0, NANOS_PER_DOLLAR / 2, q(4));
         let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(market, vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2]);
+        clearing_prices.insert(
+            market,
+            vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)],
+        );
         (markets, market, order, clearing_prices)
     }
 
@@ -549,10 +555,10 @@ mod tests {
         let mut tracker = PriceTracker::new();
         let price = NANOS_PER_DOLLAR / 2;
         let qty = q(4);
-        let per_block = notional_nanos(price, qty);
+        let per_block = notional_nanos(Nanos(price), Qty(qty)).0;
 
         tracker.record_block(
-            &[Fill::new(order.id, qty, price)],
+            &[Fill::new(order.id, Qty(qty), Nanos(price))],
             &orders,
             &clearing_prices,
             &HashMap::new(),
@@ -560,7 +566,7 @@ mod tests {
             500_000, // hour 0
         );
         tracker.record_block(
-            &[Fill::new(order.id, qty, price)],
+            &[Fill::new(order.id, Qty(qty), Nanos(price))],
             &orders,
             &clearing_prices,
             &HashMap::new(),
@@ -590,12 +596,12 @@ mod tests {
         let mut tracker = PriceTracker::new();
         let price = NANOS_PER_DOLLAR / 2;
         let qty = q(4);
-        let per_block = notional_nanos(price, qty);
+        let per_block = notional_nanos(Nanos(price), Qty(qty)).0;
 
         // Three blocks, one per hour.
         for h in 0..3u64 {
             tracker.record_block(
-                &[Fill::new(order.id, qty, price)],
+                &[Fill::new(order.id, Qty(qty), Nanos(price))],
                 &orders,
                 &clearing_prices,
                 &HashMap::new(),
@@ -639,7 +645,7 @@ mod tests {
         // 30 blocks in 30 distinct hours.
         for h in 0..30u64 {
             tracker.record_block(
-                &[Fill::new(order.id, qty, price)],
+                &[Fill::new(order.id, Qty(qty), Nanos(price))],
                 &orders,
                 &clearing_prices,
                 &HashMap::new(),
@@ -656,7 +662,7 @@ mod tests {
         // Platform running total covers ALL 30 blocks (cap doesn't affect it).
         assert_eq!(
             tracker.platform_volume_total(),
-            notional_nanos(price, qty).saturating_mul(30)
+            notional_nanos(Nanos(price), Qty(qty)).0.saturating_mul(30)
         );
     }
 
@@ -670,11 +676,11 @@ mod tests {
 
         let mut tracker = PriceTracker::new();
 
-        let prices_a = vec![400_000_000, 600_000_000];
+        let prices_a = vec![Nanos(400_000_000), Nanos(600_000_000)];
         let mut cp_a = HashMap::new();
         cp_a.insert(market, prices_a.clone());
 
-        let prices_b = vec![700_000_000, 300_000_000];
+        let prices_b = vec![Nanos(700_000_000), Nanos(300_000_000)];
         let mut cp_b = HashMap::new();
         cp_b.insert(market, prices_b.clone());
 
@@ -704,10 +710,10 @@ mod tests {
             let yes = 400_000_000 + h * 1_000_000;
             let no = 1_000_000_000 - yes;
             let mut cp = HashMap::new();
-            cp.insert(market, vec![yes, no]);
+            cp.insert(market, vec![Nanos(yes), Nanos(no)]);
             // Use a fill so the clearing price flows into the mark (had_fill=true).
             tracker.record_block(
-                &[Fill::new(order.id, 1, yes)],
+                &[Fill::new(order.id, Qty(1), Nanos(yes))],
                 &orders,
                 &cp,
                 &HashMap::new(),
@@ -743,7 +749,7 @@ mod tests {
         for h in 100..105u64 {
             // hours 100..104 — far above 24h
             let mut cp = HashMap::new();
-            cp.insert(young, vec![500_000_000, 500_000_000]);
+            cp.insert(young, vec![Nanos(500_000_000), Nanos(500_000_000)]);
             young_tracker.record_block(
                 &[],
                 &young_orders,
@@ -771,7 +777,7 @@ mod tests {
         let mut tracker = PriceTracker::new();
         for h in 0..(HOURLY_CLEARING_HISTORY_CAP as u64 + 5) {
             let mut cp = HashMap::new();
-            cp.insert(market, vec![400_000_000 + h, 600_000_000 - h]);
+            cp.insert(market, vec![Nanos(400_000_000 + h), Nanos(600_000_000 - h)]);
             tracker.record_block(&[], &orders, &cp, &HashMap::new(), h + 1, h * HOUR_MS + 500);
         }
 
@@ -796,10 +802,10 @@ mod tests {
             let yes = 400_000_000 + h;
             let no = 600_000_000 - h;
             let mut cp = HashMap::new();
-            cp.insert(market, vec![yes, no]);
+            cp.insert(market, vec![Nanos(yes), Nanos(no)]);
             // Use a fill so the clearing price flows into the mark (had_fill=true).
             tracker.record_block(
-                &[Fill::new(order.id, 1, yes)],
+                &[Fill::new(order.id, Qty(1), Nanos(yes))],
                 &orders,
                 &cp,
                 &HashMap::new(),
@@ -831,11 +837,11 @@ mod tests {
         let mut tracker = PriceTracker::new();
         let price = NANOS_PER_DOLLAR / 2;
         let qty = q(4);
-        let per_block = notional_nanos(price, qty);
+        let per_block = notional_nanos(Nanos(price), Qty(qty)).0;
 
         for h in 0..3u64 {
             tracker.record_block(
-                &[Fill::new(order.id, qty, price)],
+                &[Fill::new(order.id, Qty(qty), Nanos(price))],
                 &orders,
                 &clearing_prices,
                 &HashMap::new(),
@@ -866,7 +872,7 @@ mod tests {
         let m0 = MarketId::new(0);
         let clearing: HashMap<MarketId, Vec<Nanos>> = HashMap::new(); // never traded
         let mut midpoints: HashMap<MarketId, Nanos> = HashMap::new();
-        midpoints.insert(m0, 450_000_000);
+        midpoints.insert(m0, Nanos(450_000_000));
         let orders: HashMap<u64, &Order> = HashMap::new();
 
         let (vol, mark) = pt.record_block(&[], &orders, &clearing, &midpoints, 1, 1_000);
@@ -874,12 +880,15 @@ mod tests {
         assert!(vol.is_empty(), "no fills => no volume");
         assert_eq!(
             mark.get(&m0).cloned(),
-            Some(vec![450_000_000, NANOS_PER_DOLLAR - 450_000_000])
+            Some(vec![
+                Nanos(450_000_000),
+                Nanos(NANOS_PER_DOLLAR - 450_000_000)
+            ])
         );
 
         let hist = pt.price_history(m0, None, None);
         assert_eq!(hist.len(), 1);
-        assert_eq!(hist[0].yes_price, 450_000_000);
+        assert_eq!(hist[0].yes_price, Nanos(450_000_000));
         assert_eq!(hist[0].volume_nanos, 0);
 
         // A second identical no-cross block coalesces (no new flat point).
@@ -891,7 +900,7 @@ mod tests {
         );
 
         // Midpoint moves => new point.
-        midpoints.insert(m0, 470_000_000);
+        midpoints.insert(m0, Nanos(470_000_000));
         pt.record_block(&[], &orders, &clearing, &midpoints, 3, 3_000);
         assert_eq!(pt.price_history(m0, None, None).len(), 2);
     }

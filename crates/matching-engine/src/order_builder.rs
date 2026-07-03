@@ -44,7 +44,11 @@ impl<'a> OrderBuilder<'a> {
             .map(|id| self.markets.num_outcomes(*id))
             .collect();
         self.state_space = Some(StateSpace::new(&sizes));
-        self.order.num_states = self.state_space.as_ref().unwrap().total_states() as u8;
+        self.order.num_states = self
+            .state_space
+            .as_ref()
+            .expect("state_space was just assigned Some above")
+            .total_states() as u8;
 
         self
     }
@@ -111,8 +115,8 @@ pub fn simple_yes_buy(
     markets: &MarketSet,
     id: u64,
     market: MarketId,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     // For a binary market:
     // - State 0 = outcome 0 (typically "Yes")
@@ -120,8 +124,8 @@ pub fn simple_yes_buy(
     // Buying YES means payoff of +1 when outcome 0 happens
     OrderBuilder::new(markets, id)
         .spanning(&[market])
-        .limit(limit_price)
-        .quantity(qty)
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty))
         .payoff_at(0, 1) // Win when outcome 0 (Yes) happens
         .payoff_at(1, 0) // Nothing when outcome 1 (No) happens
         .build()
@@ -132,13 +136,13 @@ pub fn simple_no_buy(
     markets: &MarketSet,
     id: u64,
     market: MarketId,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     OrderBuilder::new(markets, id)
         .spanning(&[market])
-        .limit(limit_price)
-        .quantity(qty)
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty))
         .payoff_at(0, 0) // Nothing when Yes
         .payoff_at(1, 1) // Win when No
         .build()
@@ -150,8 +154,8 @@ fn spread_order(
     id: u64,
     market_a: MarketId,
     market_b: MarketId,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
     sign: i8,
 ) -> Order {
     // For two binary markets A and B:
@@ -163,8 +167,8 @@ fn spread_order(
 
     OrderBuilder::new(markets, id)
         .spanning(&[market_a, market_b])
-        .limit(limit_price)
-        .quantity(qty)
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty))
         .payoff_when(&[0, 0], 0)
         .payoff_when(&[1, 0], -sign)
         .payoff_when(&[0, 1], sign)
@@ -179,8 +183,8 @@ pub fn spread(
     id: u64,
     market_a: MarketId,
     market_b: MarketId,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     spread_order(markets, id, market_a, market_b, limit_price, qty, 1)
 }
@@ -201,8 +205,8 @@ pub fn butterfly(
     market_a: MarketId,
     market_b: MarketId,
     market_c: MarketId,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     // With 3 binary markets, we have 8 states (2^3)
     // But only 3 are "valid" (exactly one wins): A, B, or C
@@ -213,8 +217,8 @@ pub fn butterfly(
 
     OrderBuilder::new(markets, id)
         .spanning(&[market_a, market_b, market_c])
-        .limit(limit_price)
-        .quantity(qty)
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty))
         // State encoding: [market_a, market_b, market_c]
         // 0: [0,0,0] = A=Yes, B=Yes, C=Yes -> invalid, 0
         // 1: [1,0,0] = A=No,  B=Yes, C=Yes -> invalid, 0
@@ -235,8 +239,8 @@ fn bundle_order(
     markets: &MarketSet,
     id: u64,
     market_ids: &[MarketId],
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
     payoff_sign: i8,
 ) -> Order {
     let num_markets = market_ids.len();
@@ -244,8 +248,8 @@ fn bundle_order(
 
     let mut builder = OrderBuilder::new(markets, id)
         .spanning(market_ids)
-        .limit(limit_price)
-        .quantity(qty);
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty));
 
     let sizes: Vec<u8> = market_ids
         .iter()
@@ -264,8 +268,8 @@ pub fn bundle_yes(
     markets: &MarketSet,
     id: u64,
     market_ids: &[MarketId],
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     bundle_order(markets, id, market_ids, limit_price, qty, 1)
 }
@@ -276,8 +280,8 @@ pub fn bundle_sell(
     markets: &MarketSet,
     id: u64,
     market_ids: &[MarketId],
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     bundle_order(markets, id, market_ids, limit_price, qty, -1)
 }
@@ -289,8 +293,8 @@ pub fn spread_sell(
     id: u64,
     market_a: MarketId,
     market_b: MarketId,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     spread_order(markets, id, market_a, market_b, limit_price, qty, -1)
 }
@@ -301,13 +305,13 @@ pub fn outcome_buy(
     id: u64,
     market: MarketId,
     outcome_idx: u8,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     let mut builder = OrderBuilder::new(markets, id)
         .spanning(&[market])
-        .limit(limit_price)
-        .quantity(qty);
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty));
 
     // Payoff of 1 only when the target outcome happens
     builder = builder.payoff_at(outcome_idx as usize, 1);
@@ -322,13 +326,13 @@ pub fn outcome_sell(
     id: u64,
     market: MarketId,
     outcome_idx: u8,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     let mut builder = OrderBuilder::new(markets, id)
         .spanning(&[market])
-        .limit(limit_price)
-        .quantity(qty);
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty));
 
     // Payoff of -1 when the target outcome happens (seller owes $1)
     builder = builder.payoff_at(outcome_idx as usize, -1);
@@ -345,8 +349,8 @@ pub fn ratio_spread(
     ratio_a: i8,
     market_b: MarketId,
     ratio_b: i8,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
 ) -> Order {
     // For two binary markets with ratio r_a:r_b
     // Payoff when A wins: +r_a
@@ -354,8 +358,8 @@ pub fn ratio_spread(
 
     OrderBuilder::new(markets, id)
         .spanning(&[market_a, market_b])
-        .limit(limit_price)
-        .quantity(qty)
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty))
         .payoff_when(&[0, 0], ratio_a - ratio_b) // Both Yes
         .payoff_when(&[1, 0], -ratio_b) // A=No, B=Yes
         .payoff_when(&[0, 1], ratio_a) // A=Yes, B=No
@@ -369,18 +373,18 @@ pub fn conditional_buy(
     markets: &MarketSet,
     id: u64,
     market: MarketId,
-    limit_price: Nanos,
-    qty: Qty,
+    limit_price: u64,
+    qty: u64,
     condition_market: MarketId,
-    threshold: Nanos,
+    threshold: u64,
     direction: ConditionDir,
 ) -> Order {
     OrderBuilder::new(markets, id)
         .spanning(&[market])
-        .limit(limit_price)
-        .quantity(qty)
+        .limit(Nanos(limit_price))
+        .quantity(Qty(qty))
         .payoff_at(0, 1) // Win when Yes
-        .condition(condition_market, threshold, direction)
+        .condition(condition_market, Nanos(threshold), direction)
         .build()
 }
 
@@ -402,12 +406,12 @@ mod tests {
         let markets = setup_markets();
         let m0 = MarketId::new(0);
 
-        let order = simple_yes_buy(&markets, 1, m0, price_to_nanos(0.55), 100);
+        let order = simple_yes_buy(&markets, 1, m0, price_to_nanos(0.55).0, 100);
 
         assert_eq!(order.num_states, 2);
         assert_eq!(order.payoffs[0], 1); // Win on Yes
         assert_eq!(order.payoffs[1], 0); // Nothing on No
-        assert_eq!(order.max_fill, 100);
+        assert_eq!(order.max_fill, Qty(100));
     }
 
     #[test]
@@ -416,7 +420,7 @@ mod tests {
         let m0 = MarketId::new(0);
         let m1 = MarketId::new(1);
 
-        let order = spread(&markets, 1, m0, m1, price_to_nanos(0.10), 50);
+        let order = spread(&markets, 1, m0, m1, price_to_nanos(0.10).0, 50);
 
         assert_eq!(order.num_states, 4);
         // A=Yes, B=No should be +1
@@ -432,7 +436,7 @@ mod tests {
         let m1 = MarketId::new(1); // Market B
         let m2 = MarketId::new(2); // Market C
 
-        let order = butterfly(&markets, 1, m0, m1, m2, price_to_nanos(0.05), 100);
+        let order = butterfly(&markets, 1, m0, m1, m2, price_to_nanos(0.05).0, 100);
 
         // 3 binary markets = 8 states
         assert_eq!(order.num_states, 8);
@@ -456,9 +460,9 @@ mod tests {
         let m0 = MarketId::new(0);
         let m1 = MarketId::new(1);
 
-        let order = bundle_yes(&markets, 1, &[m0, m1], price_to_nanos(0.80), 100);
+        let order = bundle_yes(&markets, 1, &[m0, m1], price_to_nanos(0.80).0, 100);
 
-        assert_eq!(order.max_fill, 100);
+        assert_eq!(order.max_fill, Qty(100));
 
         // Only state 0 (both Yes) should have payoff
         assert_eq!(order.payoffs[0], 1);
@@ -477,10 +481,10 @@ mod tests {
             &markets,
             1,
             m0,
-            price_to_nanos(0.55),
+            price_to_nanos(0.55).0,
             100,
             m1,
-            price_to_nanos(0.45),
+            price_to_nanos(0.45).0,
             ConditionDir::Above,
         );
 

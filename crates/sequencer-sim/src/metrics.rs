@@ -57,12 +57,12 @@ pub fn compute_agent_pnl(
                 if qty == 0 {
                     continue;
                 }
-                let default_prices = vec![NANOS_PER_DOLLAR / 2; 2];
+                let default_prices = vec![Nanos(NANOS_PER_DOLLAR / 2); 2];
                 let prices = last_prices.get(&market).unwrap_or(&default_prices);
                 let price = prices
                     .get(outcome as usize)
                     .copied()
-                    .unwrap_or(NANOS_PER_DOLLAR / 2);
+                    .unwrap_or(Nanos(NANOS_PER_DOLLAR / 2));
                 position_value += signed_notional_nanos(price, qty);
             }
 
@@ -95,7 +95,7 @@ pub fn price_convergence(
     for (&market_id, &true_p) in true_probs {
         if let Some(prices) = clearing_prices.get(&market_id) {
             if let Some(&yes_price) = prices.first() {
-                let market_p = yes_price as f64 / NANOS_PER_DOLLAR as f64;
+                let market_p = yes_price.0 as f64 / NANOS_PER_DOLLAR as f64;
                 total_error += (market_p - true_p).abs();
                 count += 1;
             }

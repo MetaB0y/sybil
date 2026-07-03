@@ -23,3 +23,8 @@ viz = ["matching-solver/viz"]
 lp = ["matching-solver/lp"]
 conic = ["matching-solver/conic"]
 parallel = ["matching-solver/parallel"]
+
+[lints.clippy]
+# f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);
+# this crate is legitimately floating-point (solver / sim / metrics / off-chain).
+disallowed_types = "allow"

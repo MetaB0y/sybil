@@ -115,7 +115,7 @@ impl<'a> SnapshotByteVisitor<'a> {
     fn append_resolution_proposal(&mut self, proposal: &ResolutionProposalSnapshot) {
         append_u64(self.out, proposal.id);
         append_market_id(self.out, proposal.market_id);
-        append_u64(self.out, proposal.payout_nanos);
+        append_u64(self.out, proposal.payout_nanos.0);
         self.append_oracle_source(&proposal.source);
         append_u64(self.out, proposal.proposed_at_ms);
         append_option_string(self.out, proposal.reason.as_deref());
@@ -125,15 +125,15 @@ impl<'a> SnapshotByteVisitor<'a> {
         append_u64(self.out, challenge.id);
         append_u64(self.out, challenge.challenger);
         append_u64(self.out, challenge.proposal_id);
-        append_u64(self.out, challenge.bond_amount);
-        append_u64(self.out, challenge.proposed_payout_nanos);
+        append_u64(self.out, challenge.bond_amount.0);
+        append_u64(self.out, challenge.proposed_payout_nanos.0);
         append_string(self.out, &challenge.reason);
         append_u64(self.out, challenge.challenged_at_ms);
     }
 
     fn append_resolution_record(&mut self, record: &ResolutionRecordSnapshot) {
         append_market_id(self.out, record.market_id);
-        append_u64(self.out, record.payout_nanos);
+        append_u64(self.out, record.payout_nanos.0);
         self.append_oracle_source(&record.resolved_by);
         append_u64(self.out, record.resolved_at_ms);
         append_option(self.out, record.proposal.as_ref(), |out, proposal| {

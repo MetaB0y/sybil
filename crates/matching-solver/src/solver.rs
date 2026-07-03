@@ -91,7 +91,8 @@ pub trait Solver: Send + Sync {
 #[cfg(all(test, any(feature = "lp", feature = "conic", feature = "milp")))]
 mod tests {
     use matching_engine::{
-        outcome_buy, MarketId, MmConstraint, MmId, MmSide, Order, Problem, NANOS_PER_DOLLAR,
+        outcome_buy, MarketId, MmConstraint, MmId, MmSide, Nanos, Order, Problem, Qty,
+        NANOS_PER_DOLLAR,
     };
 
     use super::filter_supported_problem;
@@ -115,11 +116,11 @@ mod tests {
         invalid.num_markets = 1;
         invalid.num_states = 2;
         invalid.payoffs[0] = 2;
-        invalid.limit_price = NANOS_PER_DOLLAR / 2;
-        invalid.max_fill = 1_000;
+        invalid.limit_price = Nanos(NANOS_PER_DOLLAR / 2);
+        invalid.max_fill = Qty(1_000);
         problem.orders.push(invalid);
 
-        let mm = MmConstraint::new(MmId(7), NANOS_PER_DOLLAR)
+        let mm = MmConstraint::new(MmId(7), Nanos(NANOS_PER_DOLLAR))
             .with_order(1, MmSide::BuyYes)
             .with_order(2, MmSide::BuyYes);
         problem.mm_constraints.push(mm);

@@ -74,7 +74,7 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
             for &market in &group.markets {
                 if let Some(prices) = witness.clearing_prices.get(&market) {
                     if let Some(&yes_price) = prices.first() {
-                        sum += yes_price;
+                        sum += yes_price.0;
                     }
                 }
             }
@@ -136,7 +136,7 @@ fn verify_fills(
         }
 
         // 4. Zero fill (diagnostic only)
-        if fill.fill_qty == 0 && diagnostics {
+        if fill.fill_qty == matching_engine::Qty::ZERO && diagnostics {
             violations.push(Violation {
                 kind: ViolationKind::ZeroQuantityFill,
                 details: format!("Order {}: zero quantity fill", fill.order_id),
@@ -222,10 +222,11 @@ fn verify_mm_constraints(
     for mm in mm_constraints {
         stats.mm_constraints_checked += 1;
 
-        let mut mm_fills: HashMap<u64, (u64, u64)> = HashMap::new();
+        let mut mm_fills: HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+            HashMap::new();
         for &order_id in &mm.order_ids {
             if let Some(fill) = fill_map.get(&order_id) {
-                if fill.fill_qty > 0 {
+                if fill.fill_qty.0 > 0 {
                     mm_fills.insert(order_id, (fill.fill_price, fill.fill_qty));
                 }
             }
@@ -267,7 +268,7 @@ fn verify_uniform_clearing_prices(
     violations: &mut Vec<Violation>,
 ) {
     for fill in &witness.fills {
-        if fill.fill_qty == 0 {
+        if fill.fill_qty == matching_engine::Qty::ZERO {
             continue;
         }
         let Some(order) = order_map.get(&fill.order_id) else {
@@ -330,7 +331,7 @@ fn verify_price_complementarity(witness: &BlockWitness, violations: &mut Vec<Vio
     for (&market, prices) in &witness.clearing_prices {
         if prices.len() == 2 {
             let sum = prices[0] + prices[1];
-            if sum != NANOS_PER_DOLLAR {
+            if sum.0 != NANOS_PER_DOLLAR {
                 violations.push(Violation {
                     kind: ViolationKind::PriceComplementarityViolation,
                     details: format!(
@@ -350,7 +351,7 @@ fn verify_market_group_constraints(witness: &BlockWitness, violations: &mut Vec<
         for &market in &group.markets {
             if let Some(prices) = witness.clearing_prices.get(&market) {
                 if let Some(&yes_price) = prices.first() {
-                    sum += yes_price;
+                    sum += yes_price.0;
                 }
             }
         }
@@ -378,7 +379,7 @@ fn verify_resolved_markets(
     let resolved: HashSet<MarketId> = witness.resolved_markets.iter().copied().collect();
 
     for fill in &witness.fills {
-        if fill.fill_qty == 0 {
+        if fill.fill_qty == matching_engine::Qty::ZERO {
             continue;
         }
         let Some(order) = order_map.get(&fill.order_id) else {
@@ -405,7 +406,7 @@ fn verify_conditional_activation(
     violations: &mut Vec<Violation>,
 ) {
     for fill in &witness.fills {
-        if fill.fill_qty == 0 {
+        if fill.fill_qty == matching_engine::Qty::ZERO {
             continue;
         }
         let Some(order) = order_map.get(&fill.order_id) else {
@@ -429,7 +430,10 @@ fn verify_conditional_activation(
             continue;
         };
 
-        let yes_price = prices.first().copied().unwrap_or(0);
+        let yes_price = prices
+            .first()
+            .copied()
+            .unwrap_or(matching_engine::Nanos::ZERO);
         let condition_met = match condition.direction {
             matching_engine::ConditionDir::Above => yes_price > condition.threshold,
             matching_engine::ConditionDir::Below => yes_price < condition.threshold,
@@ -453,7 +457,8 @@ mod tests {
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
         gross_welfare_from_fills, minting_cost_from_fills, net_welfare, outcome_sell,
-        shares_to_qty, simple_no_buy, simple_yes_buy, MarketSet, MmConstraint, MmId, MmSide,
+        shares_to_qty, simple_no_buy, simple_yes_buy, MarketSet, MmConstraint, MmId, MmSide, Nanos,
+        Qty,
     };
 
     fn empty_header() -> WitnessBlockHeader {
@@ -509,7 +514,7 @@ mod tests {
 
     fn buy_order(markets: &MarketSet, id: u64, market: MarketId) -> WitnessOrder {
         WitnessOrder {
-            order: simple_yes_buy(markets, id, market, 600_000_000, shares_to_qty(100)),
+            order: simple_yes_buy(markets, id, market, 600_000_000, shares_to_qty(100).0),
             account_id: 0,
             is_mm: false,
         }
@@ -517,7 +522,7 @@ mod tests {
 
     fn sell_order(markets: &MarketSet, id: u64, market: MarketId) -> WitnessOrder {
         WitnessOrder {
-            order: outcome_sell(markets, id, market, 0, 400_000_000, shares_to_qty(100)),
+            order: outcome_sell(markets, id, market, 0, 400_000_000, shares_to_qty(100).0),
             account_id: 1,
             is_mm: false,
         }
@@ -531,14 +536,14 @@ mod tests {
         // Balanced: buyer buys 50 YES, seller sells 50 YES at same price
         let orders = vec![buy_order(&markets, 1, m0), sell_order(&markets, 2, m0)];
         let fills = vec![
-            Fill::new(1, shares_to_qty(50), 500_000_000),
-            Fill::new(2, shares_to_qty(50), 500_000_000),
+            Fill::new(1, shares_to_qty(50), Nanos(500_000_000)),
+            Fill::new(2, shares_to_qty(50), Nanos(500_000_000)),
         ];
 
         let mut witness = make_witness(orders, fills);
         witness
             .clearing_prices
-            .insert(m0, vec![500_000_000, 500_000_000]);
+            .insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
         refresh_welfare(&mut witness);
 
         let result = verify_match(&witness, false);
@@ -547,7 +552,10 @@ mod tests {
 
     #[test]
     fn test_order_not_found() {
-        let witness = make_witness(vec![], vec![Fill::new(999, shares_to_qty(50), 500_000_000)]);
+        let witness = make_witness(
+            vec![],
+            vec![Fill::new(999, shares_to_qty(50), Nanos(500_000_000))],
+        );
         // Fix welfare since no orders exist
         let mut witness = witness;
         witness.total_welfare = 0;
@@ -566,7 +574,7 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let orders = vec![buy_order(&markets, 1, m0)];
-        let fills = vec![Fill::new(1, shares_to_qty(200), 500_000_000)]; // max_fill=100 shares
+        let fills = vec![Fill::new(1, shares_to_qty(200), Nanos(500_000_000))]; // max_fill=100 shares
 
         let mut witness = make_witness(orders, fills);
         witness.total_welfare = 0; // welfare will be wrong due to overfill
@@ -586,8 +594,8 @@ mod tests {
 
         let orders = vec![buy_order(&markets, 1, m0)];
         let fills = vec![
-            Fill::new(1, shares_to_qty(50), 500_000_000),
-            Fill::new(1, shares_to_qty(30), 500_000_000),
+            Fill::new(1, shares_to_qty(50), Nanos(500_000_000)),
+            Fill::new(1, shares_to_qty(30), Nanos(500_000_000)),
         ];
 
         let mut witness = make_witness(orders, fills);
@@ -607,7 +615,7 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let orders = vec![buy_order(&markets, 1, m0)]; // limit=600_000_000
-        let fills = vec![Fill::new(1, shares_to_qty(50), 700_000_000)]; // above limit
+        let fills = vec![Fill::new(1, shares_to_qty(50), Nanos(700_000_000))]; // above limit
 
         let mut witness = make_witness(orders, fills);
         witness.total_welfare = 0;
@@ -627,11 +635,11 @@ mod tests {
 
         let orders = vec![buy_order(&markets, 1, m0), buy_order(&markets, 2, m0)];
         let fills = vec![
-            Fill::new(1, shares_to_qty(100), 500_000_000),
-            Fill::new(2, shares_to_qty(100), 500_000_000),
+            Fill::new(1, shares_to_qty(100), Nanos(500_000_000)),
+            Fill::new(2, shares_to_qty(100), Nanos(500_000_000)),
         ];
 
-        let mm = MmConstraint::new(MmId(1), 10_000_000_000) // $10 budget
+        let mm = MmConstraint::new(MmId(1), Nanos(10_000_000_000)) // $10 budget
             .with_order(1, MmSide::SellYes)
             .with_order(2, MmSide::SellYes);
 
@@ -673,7 +681,7 @@ mod tests {
         let mut witness = make_witness(vec![], vec![]);
         witness
             .clearing_prices
-            .insert(m0, vec![600_000_000, 400_000_000]);
+            .insert(m0, vec![Nanos(600_000_000), Nanos(400_000_000)]);
 
         let result = verify_match(&witness, false);
         assert!(result.valid, "Violations: {:?}", result.violations);
@@ -687,7 +695,7 @@ mod tests {
         let mut witness = make_witness(vec![], vec![]);
         witness
             .clearing_prices
-            .insert(m0, vec![600_000_000, 500_000_000]); // sum > $1
+            .insert(m0, vec![Nanos(600_000_000), Nanos(500_000_000)]); // sum > $1
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
@@ -703,7 +711,7 @@ mod tests {
         let m0 = markets.add_binary("M0");
 
         let orders = vec![buy_order(&markets, 1, m0)];
-        let fills = vec![Fill::new(1, 0, 500_000_000)];
+        let fills = vec![Fill::new(1, Qty(0), Nanos(500_000_000))];
 
         let mut witness = make_witness(orders, fills);
         witness.total_welfare = 0;
@@ -727,14 +735,14 @@ mod tests {
         // Balanced: 50 YES bought + 50 YES sold = net 0
         let orders = vec![buy_order(&markets, 1, m0), sell_order(&markets, 2, m0)];
         let fills = vec![
-            Fill::new(1, shares_to_qty(50), 500_000_000),
-            Fill::new(2, shares_to_qty(50), 500_000_000),
+            Fill::new(1, shares_to_qty(50), Nanos(500_000_000)),
+            Fill::new(2, shares_to_qty(50), Nanos(500_000_000)),
         ];
 
         let mut witness = make_witness(orders, fills);
         witness
             .clearing_prices
-            .insert(m0, vec![500_000_000, 500_000_000]);
+            .insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
         refresh_welfare(&mut witness);
 
         let result = verify_match(&witness, false);
@@ -749,12 +757,12 @@ mod tests {
         // A one-sided buy creates position imbalance at the fill layer, but
         // this is valid when settlement derives the MINT counterparty.
         let orders = vec![buy_order(&markets, 1, m0)];
-        let fills = vec![Fill::new(1, shares_to_qty(50), 500_000_000)];
+        let fills = vec![Fill::new(1, shares_to_qty(50), Nanos(500_000_000))];
 
         let mut witness = make_witness(orders, fills);
         witness
             .clearing_prices
-            .insert(m0, vec![500_000_000, 500_000_000]);
+            .insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
 
         let result = verify_match(&witness, false);
         assert!(result.valid, "Violations: {:?}", result.violations);
@@ -767,26 +775,26 @@ mod tests {
 
         // Minting: buyer buys YES, another buyer buys NO → balanced (creates a complete set)
         let wo_yes = WitnessOrder {
-            order: simple_yes_buy(&markets, 1, m0, 600_000_000, shares_to_qty(50)),
+            order: simple_yes_buy(&markets, 1, m0, 600_000_000, shares_to_qty(50).0),
             account_id: 0,
             is_mm: false,
         };
         let wo_no = WitnessOrder {
-            order: simple_no_buy(&markets, 2, m0, 600_000_000, shares_to_qty(50)),
+            order: simple_no_buy(&markets, 2, m0, 600_000_000, shares_to_qty(50).0),
             account_id: 1,
             is_mm: false,
         };
 
         let orders = vec![wo_yes, wo_no];
         let fills = vec![
-            Fill::new(1, shares_to_qty(50), 500_000_000),
-            Fill::new(2, shares_to_qty(50), 500_000_000),
+            Fill::new(1, shares_to_qty(50), Nanos(500_000_000)),
+            Fill::new(2, shares_to_qty(50), Nanos(500_000_000)),
         ];
 
         let mut witness = make_witness(orders, fills);
         witness
             .clearing_prices
-            .insert(m0, vec![500_000_000, 500_000_000]);
+            .insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
 
         let result = verify_match(&witness, false);
         assert!(result.valid, "Violations: {:?}", result.violations);

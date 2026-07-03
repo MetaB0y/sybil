@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use matching_engine::{Fill, MarketId, Order};
+use matching_engine::{ceil_mul_ratio, Fill, MarketId, Order, Qty};
 use serde::{Deserialize, Serialize};
 
 use crate::account::{AccountId, AccountStore};
@@ -253,7 +253,7 @@ impl OrderBook {
             reserved_balance: cost,
             reserved_positions: pos_reservations,
             has_been_matched: false,
-            original_max_fill: order.max_fill,
+            original_max_fill: order.max_fill.0,
             created_at_ms,
         };
         self.orders.push(resting.clone());
@@ -484,8 +484,8 @@ impl OrderBook {
         // Build fill-qty map
         let mut filled_qty: HashMap<u64, u64> = HashMap::new();
         for f in fills {
-            if f.fill_qty > 0 {
-                *filled_qty.entry(f.order_id).or_insert(0) += f.fill_qty;
+            if f.fill_qty.0 > 0 {
+                *filled_qty.entry(f.order_id).or_insert(0) += f.fill_qty.0;
             }
         }
 
@@ -509,7 +509,7 @@ impl OrderBook {
                 ro.has_been_matched = true;
             }
 
-            if filled >= ro.order.max_fill {
+            if filled >= ro.order.max_fill.0 {
                 // Fully filled — release all reservations
                 Self::release_reservations(
                     &mut self.balance_reservations,
@@ -531,12 +531,23 @@ impl OrderBook {
             }
 
             if filled > 0 {
-                // Partially filled — reduce order and reservations proportionally
-                let remaining = ro.order.max_fill - filled;
-                let ratio = remaining as f64 / ro.order.max_fill as f64;
+                // Partially filled — reduce order and reservations proportionally.
+                //
+                // The new reservation is `ceil(old * remaining / max_fill)`. This
+                // MUST be exact integer arithmetic: the result is committed into
+                // the state root via `RestingOrderSnapshot` / reservation leaves,
+                // so any re-execution has to derive the same value. A prior f64
+                // implementation (`(old as f64 * ratio).ceil()`) diverged from
+                // exact integer ceiling both above 2^53 (float loses integer
+                // precision) and on some sane-range inputs (float rounding), which
+                // is the SEQ-2 soundness bug. `ceil_mul_ratio` is the shared
+                // consensus-canonical helper. Reservation values are non-negative
+                // by construction (see struct docs), so the `as u64` casts are safe.
+                let remaining = ro.order.max_fill.0 - filled;
+                let max_fill = ro.order.max_fill.0;
 
                 let old_cost = ro.reserved_balance;
-                let new_cost = (old_cost as f64 * ratio).ceil() as i64;
+                let new_cost = ceil_mul_ratio(old_cost as u64, remaining, max_fill) as i64;
                 let released_balance = old_cost - new_cost;
 
                 if released_balance > 0 {
@@ -550,7 +561,7 @@ impl OrderBook {
                     .reserved_positions
                     .iter()
                     .map(|&(key, qty)| {
-                        let new_qty = (qty as f64 * ratio).ceil() as i64;
+                        let new_qty = ceil_mul_ratio(qty as u64, remaining, max_fill) as i64;
                         let released = qty - new_qty;
                         if released > 0 {
                             if let Some(v) =
@@ -564,7 +575,7 @@ impl OrderBook {
                     .collect();
 
                 let mut remainder = ro.order.clone();
-                remainder.max_fill = remaining;
+                remainder.max_fill = Qty(remaining);
 
                 new_orders.push(RestingOrder {
                     order: remainder,
@@ -709,7 +720,7 @@ mod tests {
     use crate::account::AccountStore;
     use matching_engine::{
         notional_nanos, notional_nanos_ceil, outcome_buy, shares_to_qty, MarketId, MarketSet,
-        NANOS_PER_DOLLAR,
+        Nanos, Qty, NANOS_PER_DOLLAR,
     };
     use proptest::prelude::*;
 
@@ -720,11 +731,11 @@ mod tests {
         (accounts, markets, m0)
     }
 
-    fn buy_yes(markets: &MarketSet, id: u64, market: MarketId, price: u64, qty: u64) -> Order {
-        outcome_buy(markets, id, market, 0, price, qty)
+    fn buy_yes(markets: &MarketSet, id: u64, market: MarketId, price: u64, qty: Qty) -> Order {
+        outcome_buy(markets, id, market, 0, price, qty.0)
     }
 
-    fn q(shares: u64) -> u64 {
+    fn q(shares: u64) -> Qty {
         shares_to_qty(shares)
     }
 
@@ -742,7 +753,7 @@ mod tests {
         let reserved = book.reserved_balance(aid);
         assert_eq!(
             reserved,
-            notional_nanos_ceil(NANOS_PER_DOLLAR / 2, q(5)) as i64
+            notional_nanos_ceil(Nanos(NANOS_PER_DOLLAR / 2), q(5)).0 as i64
         );
     }
 
@@ -797,7 +808,7 @@ mod tests {
         let fills = vec![Fill {
             order_id,
             fill_qty: q(5),
-            fill_price: NANOS_PER_DOLLAR / 2,
+            fill_price: Nanos(NANOS_PER_DOLLAR / 2),
             account_id: 0,
         }];
         book.settle(&fills, &HashSet::new(), 1);
@@ -823,7 +834,7 @@ mod tests {
         let fills = vec![Fill {
             order_id,
             fill_qty: q(4),
-            fill_price: NANOS_PER_DOLLAR / 2,
+            fill_price: Nanos(NANOS_PER_DOLLAR / 2),
             account_id: 0,
         }];
         book.settle(&fills, &HashSet::new(), 1);
@@ -946,7 +957,7 @@ mod tests {
         assert_eq!(book.len(), 0);
         assert!(removed.iter().all(|ro| !ro.has_been_matched));
         // original_max_fill survives the removal
-        assert!(removed.iter().all(|ro| ro.original_max_fill == q(2)));
+        assert!(removed.iter().all(|ro| ro.original_max_fill == q(2).0));
     }
 
     #[test]
@@ -963,13 +974,13 @@ mod tests {
         let fills = vec![Fill {
             order_id,
             fill_qty: q(5),
-            fill_price: NANOS_PER_DOLLAR / 2,
+            fill_price: Nanos(NANOS_PER_DOLLAR / 2),
             account_id: 0,
         }];
         let removed = book.settle(&fills, &HashSet::new(), 1);
         assert_eq!(removed.len(), 1);
         assert!(removed[0].0.has_been_matched);
-        assert_eq!(removed[0].0.original_max_fill, q(5));
+        assert_eq!(removed[0].0.original_max_fill, q(5).0);
         assert_eq!(removed[0].1, RestingExit::Settled);
     }
 
@@ -1009,7 +1020,7 @@ mod tests {
 
         let ro = book.cancel(aid, accepted.order.id).unwrap();
         assert_eq!(ro.order.id, accepted.order.id);
-        assert_eq!(ro.original_max_fill, q(5));
+        assert_eq!(ro.original_max_fill, q(5).0);
         assert!(!ro.has_been_matched);
     }
 
@@ -1055,7 +1066,7 @@ mod tests {
         let fills = vec![Fill {
             order_id,
             fill_qty: q(3),
-            fill_price: NANOS_PER_DOLLAR / 2,
+            fill_price: Nanos(NANOS_PER_DOLLAR / 2),
             account_id: 0,
         }];
         let removed = book.settle(&fills, &HashSet::new(), 1);
@@ -1065,45 +1076,45 @@ mod tests {
         assert_eq!(book.len(), 1);
         let remainder = book.orders.first().unwrap();
         assert!(remainder.has_been_matched);
-        assert_eq!(remainder.original_max_fill, q(10));
+        assert_eq!(remainder.original_max_fill, q(10).0);
     }
 
     proptest! {
         #[test]
         fn accept_buy_reserves_ceiled_fractional_notional(
             price in 0u64..=NANOS_PER_DOLLAR,
-            qty in 1u64..=shares_to_qty(1_000),
+            qty in 1u64..=shares_to_qty(1_000).0,
         ) {
             let (mut accounts, markets, m0) = setup();
-            let expected = notional_nanos_ceil(price, qty);
-            let aid = accounts.create_account(expected as i64);
+            let expected = notional_nanos_ceil(Nanos(price), Qty(qty));
+            let aid = accounts.create_account(expected.0 as i64);
             let mut book = OrderBook::new(10);
             let account = accounts.get(aid).unwrap();
-            let order = buy_yes(&markets, 1, m0, price, qty);
+            let order = buy_yes(&markets, 1, m0, price, Qty(qty));
 
             let accepted = book.accept(order, aid, account, 1, 0).unwrap();
 
-            prop_assert_eq!(accepted.resting_order.reserved_balance, expected as i64);
-            prop_assert_eq!(book.reserved_balance(aid), expected as i64);
+            prop_assert_eq!(accepted.resting_order.reserved_balance, expected.0 as i64);
+            prop_assert_eq!(book.reserved_balance(aid), expected.0 as i64);
             prop_assert_eq!(book.len(), 1);
         }
 
         #[test]
         fn accept_buy_rejects_when_only_floor_notional_is_available(
             price in 1u64..=NANOS_PER_DOLLAR,
-            qty in 1u64..=shares_to_qty(1_000),
+            qty in 1u64..=shares_to_qty(1_000).0,
         ) {
-            let floor = notional_nanos(price, qty);
-            let ceil = notional_nanos_ceil(price, qty);
+            let floor = notional_nanos(Nanos(price), Qty(qty));
+            let ceil = notional_nanos_ceil(Nanos(price), Qty(qty));
             if floor == ceil {
                 return Ok(());
             }
 
             let (mut accounts, markets, m0) = setup();
-            let aid = accounts.create_account(floor as i64);
+            let aid = accounts.create_account(floor.0 as i64);
             let mut book = OrderBook::new(10);
             let account = accounts.get(aid).unwrap();
-            let order = buy_yes(&markets, 1, m0, price, qty);
+            let order = buy_yes(&markets, 1, m0, price, Qty(qty));
 
             let result = book.accept(order, aid, account, 1, 0);
             prop_assert!(
@@ -1116,8 +1127,8 @@ mod tests {
             };
             match err {
                 RejectionReason::InsufficientBalance { required, available } => {
-                    prop_assert_eq!(required, ceil as i64);
-                    prop_assert_eq!(available, floor as i64);
+                    prop_assert_eq!(required, ceil.0 as i64);
+                    prop_assert_eq!(available, floor.0 as i64);
                 }
                 other => prop_assert!(false, "unexpected rejection: {other:?}"),
             }
@@ -1128,14 +1139,14 @@ mod tests {
         #[test]
         fn accept_buy_accounts_for_existing_fractional_reservations(
             price in 1u64..=NANOS_PER_DOLLAR,
-            qty in 1u64..=shares_to_qty(1_000),
+            qty in 1u64..=shares_to_qty(1_000).0,
             accepted_count in 1usize..=20,
         ) {
-            let per_order = notional_nanos_ceil(price, qty);
-            prop_assume!(per_order > 0);
+            let per_order = notional_nanos_ceil(Nanos(price), Qty(qty));
+            prop_assume!(per_order.0 > 0);
 
             let (mut accounts, markets, m0) = setup();
-            let balance = per_order
+            let balance = per_order.0
                 .checked_mul(accepted_count as u64)
                 .expect("bounded generator keeps balance in range");
             let aid = accounts.create_account(balance as i64);
@@ -1143,15 +1154,15 @@ mod tests {
             let account = accounts.get(aid).unwrap();
 
             for order_index in 0..accepted_count {
-                let order = buy_yes(&markets, order_index as u64 + 1, m0, price, qty);
+                let order = buy_yes(&markets, order_index as u64 + 1, m0, price, Qty(qty));
                 book.accept(order, aid, account, 1, 0).unwrap();
                 prop_assert_eq!(
                     book.reserved_balance(aid),
-                    per_order as i64 * (order_index as i64 + 1)
+                    per_order.0 as i64 * (order_index as i64 + 1)
                 );
             }
 
-            let rejected = buy_yes(&markets, accepted_count as u64 + 1, m0, price, qty);
+            let rejected = buy_yes(&markets, accepted_count as u64 + 1, m0, price, Qty(qty));
             let result = book.accept(rejected, aid, account, 1, 0);
             prop_assert!(
                 result.is_err(),
@@ -1163,7 +1174,7 @@ mod tests {
             };
             match err {
                 RejectionReason::InsufficientBalance { required, available } => {
-                    prop_assert_eq!(required, per_order as i64);
+                    prop_assert_eq!(required, per_order.0 as i64);
                     prop_assert_eq!(available, 0);
                 }
                 other => prop_assert!(false, "unexpected rejection: {other:?}"),

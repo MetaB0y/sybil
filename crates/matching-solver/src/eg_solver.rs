@@ -108,7 +108,7 @@ impl EgSolver {
         let mm_budgets: Vec<f64> = problem
             .mm_constraints
             .iter()
-            .map(|mm| mm.max_capital as f64)
+            .map(|mm| mm.max_capital.0 as f64)
             .collect();
 
         let has_mm = !problem.mm_constraints.is_empty();
@@ -161,7 +161,7 @@ impl EgSolver {
             if surplus <= 0.0 {
                 for &i in group_orders {
                     if q[i] < 1.0 {
-                        q[i] = 1.0_f64.min(orders[i].max_fill as f64);
+                        q[i] = 1.0_f64.min(orders[i].max_fill.0 as f64);
                     }
                 }
             }

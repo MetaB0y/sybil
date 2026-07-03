@@ -64,7 +64,7 @@ pub fn validate_order_with_reservation(
 
     if has_positive && !has_negative {
         // Pure buy: check balance covers worst-case cost (minus already reserved)
-        let max_cost = checked_notional_ceil_i64(order.limit_price, order.max_fill)?;
+        let max_cost = checked_notional_ceil_i64(order.limit_price.0, order.max_fill.0)?;
         let available = account.balance - reserved_balance;
         if max_cost > available {
             return Err(RejectionReason::InsufficientBalance {
@@ -80,7 +80,7 @@ pub fn validate_order_with_reservation(
             for s in 0..num_states {
                 if order.payoffs[s] < 0 {
                     let outcome = s as u8;
-                    let sell_qty = checked_sell_qty_i64(order.payoffs[s], order.max_fill)
+                    let sell_qty = checked_sell_qty_i64(order.payoffs[s], order.max_fill.0)
                         .ok_or_else(|| {
                             RejectionReason::InvalidOrder("sell quantity overflow".to_string())
                         })?;
@@ -121,7 +121,7 @@ pub fn sell_reservations(order: &Order) -> Vec<(PositionKey, i64)> {
     for s in 0..num_states {
         if order.payoffs[s] < 0 {
             let outcome = s as u8;
-            if let Some(sell_qty) = checked_sell_qty_i64(order.payoffs[s], order.max_fill) {
+            if let Some(sell_qty) = checked_sell_qty_i64(order.payoffs[s], order.max_fill.0) {
                 reservations.push(((market, outcome), sell_qty));
             }
         }

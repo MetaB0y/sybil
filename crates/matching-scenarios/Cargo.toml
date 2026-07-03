@@ -8,3 +8,8 @@ description = "Scenario generators for prediction market matching"
 matching-engine = { path = "../matching-engine" }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+
+[lints.clippy]
+# f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);
+# this crate is legitimately floating-point (solver / sim / metrics / off-chain).
+disallowed_types = "allow"

@@ -88,13 +88,13 @@ impl Scenario {
             initial_balance: 5000 * NANOS_PER_DOLLAR as i64,
             noise_activity_rate: 0.6,
             noise_max_qty: 30,
-            noise_price_noise: 50_000_000,
+            noise_price_noise: Nanos(50_000_000),
             informed_min_edge: 0.05,
             informed_max_qty: 30,
             informed_max_position: 200,
-            mm_half_spread: 25_000_000,
+            mm_half_spread: Nanos(25_000_000),
             mm_qty_per_side: 100,
-            mm_budget: 50_000 * NANOS_PER_DOLLAR,
+            mm_budget: Nanos(50_000 * NANOS_PER_DOLLAR),
             mm_skew_factor: 0.1,
         }
     }
@@ -184,7 +184,7 @@ impl Scenario {
             num_mm: 1,
             num_batches: 5,
             initial_balance: 1000 * NANOS_PER_DOLLAR as i64,
-            mm_budget: 10_000 * NANOS_PER_DOLLAR,
+            mm_budget: Nanos(10_000 * NANOS_PER_DOLLAR),
             mm_qty_per_side: 50,
             noise_max_qty: 20,
             ..Self::defaults()
@@ -213,7 +213,7 @@ impl Scenario {
             num_batches: 100,
             initial_balance: 10_000 * NANOS_PER_DOLLAR as i64,
             noise_max_qty: 50,
-            mm_budget: 100_000 * NANOS_PER_DOLLAR,
+            mm_budget: Nanos(100_000 * NANOS_PER_DOLLAR),
             mm_qty_per_side: 200,
             ..Self::defaults()
         }

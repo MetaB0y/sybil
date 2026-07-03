@@ -48,3 +48,8 @@ tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+
+[lints.clippy]
+# f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);
+# this crate is legitimately floating-point (solver / sim / metrics / off-chain).
+disallowed_types = "allow"

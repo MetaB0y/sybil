@@ -46,3 +46,8 @@ lp = ["dep:highs"]      # LP solver via HiGHS
 conic = ["dep:clarabel", "lp"] # Conic EG solver via Clarabel (reuses LP utilities)
 parallel = ["dep:rayon"] # Parallel decomposed solves
 viz = []   # Enable detailed phase snapshots and orderbook data
+
+[lints.clippy]
+# f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);
+# this crate is legitimately floating-point (solver / sim / metrics / off-chain).
+disallowed_types = "allow"

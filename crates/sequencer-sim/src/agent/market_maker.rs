@@ -63,16 +63,17 @@ impl Agent for MarketMakerAgent {
             // Use public beliefs as mid price when available, fall back to last prices
             let yes_price = if let Some(ref beliefs) = view.public_beliefs {
                 if let Some(&belief) = beliefs.get(&market_id) {
-                    (belief * NANOS_PER_DOLLAR as f64) as Nanos
+                    (belief * NANOS_PER_DOLLAR as f64) as u64
                 } else {
-                    let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+                    let default_prices =
+                        vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)];
                     let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
-                    last_prices[0]
+                    last_prices[0].0
                 }
             } else {
-                let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+                let default_prices = vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)];
                 let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
-                last_prices[0]
+                last_prices[0].0
             };
 
             // Inventory skew: if we're long YES, lower our bid and raise our ask
@@ -81,14 +82,14 @@ impl Agent for MarketMakerAgent {
 
             // Compute bid and ask for YES
             let mid = yes_price as i64;
-            let bid_price = (mid - self.half_spread as i64 - skew).clamp(
+            let bid_price = (mid - self.half_spread.0 as i64 - skew).clamp(
                 NANOS_PER_DOLLAR as i64 / 100,
                 NANOS_PER_DOLLAR as i64 * 99 / 100,
-            ) as Nanos;
-            let ask_price = (mid + self.half_spread as i64 - skew).clamp(
+            ) as u64;
+            let ask_price = (mid + self.half_spread.0 as i64 - skew).clamp(
                 NANOS_PER_DOLLAR as i64 / 100,
                 NANOS_PER_DOLLAR as i64 * 99 / 100,
-            ) as Nanos;
+            ) as u64;
 
             // Bid: buy YES at bid_price
             let bid_order = outcome_buy(
@@ -120,14 +121,14 @@ impl Agent for MarketMakerAgent {
             let no_price = NANOS_PER_DOLLAR - yes_price;
             let no_mid = no_price as i64;
 
-            let no_bid_price = (no_mid - self.half_spread as i64 + skew).clamp(
+            let no_bid_price = (no_mid - self.half_spread.0 as i64 + skew).clamp(
                 NANOS_PER_DOLLAR as i64 / 100,
                 NANOS_PER_DOLLAR as i64 * 99 / 100,
-            ) as Nanos;
-            let no_ask_price = (no_mid + self.half_spread as i64 + skew).clamp(
+            ) as u64;
+            let no_ask_price = (no_mid + self.half_spread.0 as i64 + skew).clamp(
                 NANOS_PER_DOLLAR as i64 / 100,
                 NANOS_PER_DOLLAR as i64 * 99 / 100,
-            ) as Nanos;
+            ) as u64;
 
             let no_bid_order = outcome_buy(
                 &self.markets,

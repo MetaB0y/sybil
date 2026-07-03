@@ -205,7 +205,7 @@ mod tests {
 
     fn unmatched_resting(order_id: u64, market: MarketId) -> RestingOrder {
         let mut order = Order::new(order_id);
-        order.max_fill = 5;
+        order.max_fill = matching_engine::Qty(5);
         // Single-market order: outcome=0, side=buy. Only active_markets matters
         // for the tracker; concrete order shape is irrelevant.
         order.num_markets = 1;

@@ -9,3 +9,6 @@ serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 proptest = "1.6"
+
+[lints]
+workspace = true

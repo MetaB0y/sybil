@@ -33,3 +33,6 @@ metrics = "0.24"
 proptest = "1.6"
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+
+[lints]
+workspace = true

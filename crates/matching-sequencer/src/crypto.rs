@@ -80,7 +80,7 @@ fn to_canonical_order(order: &Order) -> CanonicalOrder {
         .as_ref()
         .map(|condition| CanonicalPriceCondition {
             market: CanonicalMarketId(condition.market.0),
-            threshold: condition.threshold,
+            threshold: condition.threshold.0,
             direction: match condition.direction {
                 matching_engine::ConditionDir::Above => CanonicalConditionDir::Above,
                 matching_engine::ConditionDir::Below => CanonicalConditionDir::Below,
@@ -92,8 +92,8 @@ fn to_canonical_order(order: &Order) -> CanonicalOrder {
         num_markets: order.num_markets,
         payoffs: order.payoffs,
         num_states: order.num_states,
-        limit_price: order.limit_price,
-        max_fill: order.max_fill,
+        limit_price: order.limit_price.0,
+        max_fill: order.max_fill.0,
         condition,
         expires_at_block: order.expires_at_block,
     }
@@ -182,7 +182,7 @@ pub fn sign_order(order: &Order, key: &SigningKey) -> SignedOrder {
 fn to_canonical_attestation(att: &ResolutionAttestation) -> CanonicalAttestation {
     CanonicalAttestation {
         market_id: CanonicalMarketId(att.market_id.0),
-        payout_nanos: att.payout_nanos,
+        payout_nanos: att.payout_nanos.0,
         nonce: att.nonce,
     }
 }
@@ -312,7 +312,7 @@ mod tests {
         let mut signed = sign_order(&order, &key);
 
         // Tamper with the order after signing
-        signed.order.limit_price = 999_999_999;
+        signed.order.limit_price = matching_engine::Nanos(999_999_999);
 
         assert!(matches!(
             verify_signed_order(&signed),

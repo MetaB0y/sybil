@@ -84,7 +84,7 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
         } => {
             value.push(4);
             value.extend_from_slice(&market_id.0.to_le_bytes());
-            value.extend_from_slice(&payout_nanos.to_le_bytes());
+            value.extend_from_slice(&payout_nanos.0.to_le_bytes());
             let mut affected_accounts = affected_accounts.clone();
             affected_accounts.sort_unstable();
             value.extend_from_slice(&(affected_accounts.len() as u64).to_le_bytes());
@@ -137,8 +137,8 @@ pub fn fill_leaf_value(fill: &Fill) -> Vec<u8> {
     let mut value = Vec::new();
     value.extend_from_slice(b"sybil/event/fill");
     value.extend_from_slice(&fill.order_id.to_le_bytes());
-    value.extend_from_slice(&fill.fill_qty.to_le_bytes());
-    value.extend_from_slice(&fill.fill_price.to_le_bytes());
+    value.extend_from_slice(&fill.fill_qty.0.to_le_bytes());
+    value.extend_from_slice(&fill.fill_price.0.to_le_bytes());
     value.extend_from_slice(&fill.account_id.to_le_bytes());
     value
 }

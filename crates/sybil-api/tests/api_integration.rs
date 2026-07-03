@@ -14,7 +14,7 @@ use common::{
     get, post_json, post_json_with_headers, put_json, test_app, test_app_with_config,
     test_app_with_store, test_app_with_store_config, test_app_with_store_zero_caps,
 };
-use matching_engine::MarketSet;
+use matching_engine::{MarketSet, Nanos, Qty};
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use matching_sequencer::SequencerConfig;
 use std::time::Duration;
@@ -120,8 +120,8 @@ fn signed_order_payload(
     order.markets[0] = mid;
     order.num_markets = 1;
     order.num_states = 2;
-    order.limit_price = limit_price_nanos;
-    order.max_fill = quantity;
+    order.limit_price = Nanos(limit_price_nanos);
+    order.max_fill = Qty(quantity);
     for (idx, payoff) in payoffs.iter().enumerate() {
         order.payoffs[idx] = *payoff;
     }

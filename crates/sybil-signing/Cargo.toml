@@ -11,3 +11,9 @@ serde = { version = "1.0", features = ["derive"] }
 [dev-dependencies]
 hex = "0.4"
 insta = "1.47.2"
+
+[lints.clippy]
+# f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,
+# matching-sequencer). This crate is not on the state-root arithmetic path;
+# opt out so macro-generated / off-chain f64 does not trip the workspace lint.
+disallowed_types = "allow"

@@ -21,7 +21,7 @@
 //! - Market groups: `Σ p_m ≤ NANOS_PER_DOLLAR` per group
 
 use matching_engine::{
-    minting_cost_from_fills, Fill, MarketId, MmSide, Nanos, Order, Problem, NANOS_PER_DOLLAR,
+    minting_cost_from_fills, Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
 };
 
 use crate::MatchingResult;
@@ -196,8 +196,8 @@ impl MilpSolver {
 
                 // Build clearing prices from price variables
                 for (&market, &p_yes_f64) in &solution.p_values {
-                    let p_yes = p_yes_f64.round().max(0.0) as Nanos;
-                    let p_no = NANOS_PER_DOLLAR.saturating_sub(p_yes);
+                    let p_yes = Nanos(p_yes_f64.round().max(0.0) as u64);
+                    let p_no = Nanos(NANOS_PER_DOLLAR.saturating_sub(p_yes.0));
                     clearing_prices.insert(market, vec![p_yes, p_no]);
                 }
 
@@ -217,14 +217,15 @@ impl MilpSolver {
                             .copied()
                             .unwrap_or(0.0)
                             .round()
-                            .max(0.0) as Nanos;
+                            .max(0.0) as u64;
+                        let p_yes = Nanos(p_yes);
                         let fill_price = if order.payoffs[0] != 0 {
                             p_yes
                         } else {
-                            NANOS_PER_DOLLAR.saturating_sub(p_yes)
+                            Nanos(NANOS_PER_DOLLAR.saturating_sub(p_yes.0))
                         };
 
-                        let fill = Fill::new(order.id, fill_qty, fill_price);
+                        let fill = Fill::new(order.id, Qty(fill_qty), fill_price);
                         result.add_fill(fill, order);
                     } else {
                         result.orders_unfilled_liquidity += 1;
@@ -351,8 +352,8 @@ impl MilpSolver {
             .map(|i| {
                 let order = active_orders[i];
                 let sign = order_sign(order);
-                let obj = sign * order.limit_price as f64;
-                model.add(var().cont(0.0..=(order.max_fill as f64)).obj(obj))
+                let obj = sign * order.limit_price.0 as f64;
+                model.add(var().cont(0.0..=(order.max_fill.0 as f64)).obj(obj))
             })
             .collect();
 
@@ -429,7 +430,7 @@ impl MilpSolver {
             model.add(
                 cons()
                     .coef(&q_vars[i], 1.0)
-                    .coef(&z_vars[i], -(order.max_fill as f64))
+                    .coef(&z_vars[i], -(order.max_fill.0 as f64))
                     .le(0.0),
             );
         }
@@ -449,7 +450,7 @@ impl MilpSolver {
 
         for (i, order) in active_orders.iter().enumerate() {
             let sign = order_sign(order);
-            let limit = order.limit_price as f64;
+            let limit = order.limit_price.0 as f64;
             let alpha = (order.payoffs[0] - order.payoffs[1]) as f64;
             let beta = order.payoffs[1] as f64 * nanos_f;
 
@@ -574,7 +575,7 @@ impl MilpSolver {
                                 quad_vars2,
                                 &mut quad_coefs_vec,
                                 f64::NEG_INFINITY,
-                                mm.max_capital as f64,
+                                mm.max_capital.0 as f64,
                                 &format!("mm_budget_{}", mm.mm_id.0),
                             );
                         }
@@ -620,7 +621,7 @@ impl MilpSolver {
                                 continue;
                             };
 
-                            let q_ub = order.max_fill as f64;
+                            let q_ub = order.max_fill.0 as f64;
                             let p_ub = nanos_f;
 
                             // Create auxiliary variable w_i ∈ [0, P*Q]
@@ -674,7 +675,7 @@ impl MilpSolver {
                                     budget_cons = budget_cons.coef(&q_vars[q_idx], nanos_f);
                                 }
                             }
-                            model.add(budget_cons.le(mm.max_capital as f64));
+                            model.add(budget_cons.le(mm.max_capital.0 as f64));
                         }
                     }
                     MmBudgetMode::Ignore => unreachable!(),
@@ -829,17 +830,17 @@ fn trim_mm_budget_overflows(
             let Some(&(fill_mm_idx, side)) = mm_order_info.get(&fill.order_id) else {
                 continue;
             };
-            if fill_mm_idx != mm_idx || fill.fill_qty == 0 {
+            if fill_mm_idx != mm_idx || fill.fill_qty == Qty::ZERO {
                 continue;
             }
             mm_fills.push((
                 fill_idx,
-                side.capital_needed(fill.fill_price, fill.fill_qty),
+                side.capital_needed(fill.fill_price, fill.fill_qty).0,
             ));
         }
 
         let total_capital: u128 = mm_fills.iter().map(|&(_, capital)| capital as u128).sum();
-        if total_capital <= mm.max_capital as u128 {
+        if total_capital <= mm.max_capital.0 as u128 {
             continue;
         }
 
@@ -847,27 +848,27 @@ fn trim_mm_budget_overflows(
 
         let mut remaining = total_capital;
         for &(fill_idx, _) in &mm_fills {
-            if remaining <= mm.max_capital as u128 {
+            if remaining <= mm.max_capital.0 as u128 {
                 break;
             }
             let fill = &result.fills[fill_idx];
             let Some(&(_, side)) = mm_order_info.get(&fill.order_id) else {
                 continue;
             };
-            let capital_per_unit = side.capital_needed(fill.fill_price, 1) as u128;
+            let capital_per_unit = side.capital_needed(fill.fill_price, Qty(1)).0 as u128;
             if capital_per_unit == 0 {
                 continue;
             }
-            let overflow = remaining - mm.max_capital as u128;
+            let overflow = remaining - mm.max_capital.0 as u128;
             let trim_qty = overflow
                 .div_ceil(capital_per_unit)
-                .min(result.fills[fill_idx].fill_qty as u128) as u64;
-            remaining -= side.capital_needed(fill.fill_price, trim_qty) as u128;
-            result.fills[fill_idx].fill_qty -= trim_qty;
+                .min(result.fills[fill_idx].fill_qty.0 as u128) as u64;
+            remaining -= side.capital_needed(fill.fill_price, Qty(trim_qty)).0 as u128;
+            result.fills[fill_idx].fill_qty.0 -= trim_qty;
         }
     }
 
-    result.fills.retain(|fill| fill.fill_qty > 0);
+    result.fills.retain(|fill| fill.fill_qty.0 > 0);
 }
 
 fn recompute_result_from_fills(
@@ -889,7 +890,7 @@ fn recompute_result_from_fills(
             result.gross_welfare += order.gross_welfare_contribution(fill.fill_qty);
         }
         result.orders_filled += 1;
-        result.total_quantity_filled += fill.fill_qty;
+        result.total_quantity_filled += fill.fill_qty.0;
     }
     result.minting_cost = minting_cost_from_fills(
         active_orders.iter().copied(),
@@ -1036,7 +1037,7 @@ mod tests {
             assert_eq!(prices.len(), 2);
             let sum = prices[0] + prices[1];
             assert!(
-                (sum as i64 - NANOS_PER_DOLLAR as i64).unsigned_abs() < 2,
+                (sum.0 as i64 - NANOS_PER_DOLLAR as i64).unsigned_abs() < 2,
                 "YES+NO should sum to $1, got {}",
                 sum
             );

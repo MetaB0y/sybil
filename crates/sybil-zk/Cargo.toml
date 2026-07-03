@@ -17,3 +17,9 @@ commonware-cryptography = "2026.4.0"
 commonware-runtime = "2026.4.0"
 commonware-storage = "2026.4.0"
 matching-engine = { path = "../matching-engine" }
+
+[lints.clippy]
+# f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,
+# matching-sequencer). This crate is not on the state-root arithmetic path;
+# opt out so macro-generated / off-chain f64 does not trip the workspace lint.
+disallowed_types = "allow"

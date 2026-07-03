@@ -119,7 +119,7 @@ impl VizSnapshot {
         let order_map: HashMap<u64, &matching_engine::Order> =
             problem.orders.iter().map(|o| (o.id, o)).collect();
 
-        let total_volume: u64 = result.result.fills.iter().map(|f| f.fill_qty).sum();
+        let total_volume: u64 = result.result.fills.iter().map(|f| f.fill_qty.0).sum();
 
         let filled_order_ids: HashSet<u64> =
             result.result.fills.iter().map(|f| f.order_id).collect();
@@ -183,8 +183,8 @@ impl VizSnapshot {
                     order_type,
                     side,
                     is_mm: mm_order_ids.contains(&order.id),
-                    limit_price: order.limit_price as f64 / NANOS_PER_DOLLAR as f64,
-                    max_qty: order.max_fill,
+                    limit_price: order.limit_price.0 as f64 / NANOS_PER_DOLLAR as f64,
+                    max_qty: order.max_fill.0,
                 }
             })
             .collect();
@@ -215,8 +215,8 @@ impl VizSnapshot {
 
                     FillSnapshot {
                         order_id: fill.order_id,
-                        fill_qty: fill.fill_qty,
-                        fill_price: fill.fill_price as f64 / NANOS_PER_DOLLAR as f64,
+                        fill_qty: fill.fill_qty.0,
+                        fill_price: fill.fill_price.0 as f64 / NANOS_PER_DOLLAR as f64,
                         welfare: welfare as f64 / NANOS_PER_DOLLAR as f64,
                         source,
                     }

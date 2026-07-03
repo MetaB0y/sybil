@@ -666,8 +666,8 @@ mod tests {
         order.num_markets = 1;
         order.num_states = 2;
         order.payoffs[0] = 1;
-        order.limit_price = 600_000_000;
-        order.max_fill = 12;
+        order.limit_price = matching_engine::Nanos(600_000_000);
+        order.max_fill = matching_engine::Qty(12);
         order.expires_at_block = Some(10);
 
         let state_sidecar = StateSidecarSnapshot {

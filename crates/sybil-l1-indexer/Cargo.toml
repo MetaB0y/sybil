@@ -21,3 +21,9 @@ thiserror = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.clippy]
+# f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,
+# matching-sequencer). This crate is not on the state-root arithmetic path;
+# opt out so macro-generated / off-chain f64 does not trip the workspace lint.
+disallowed_types = "allow"

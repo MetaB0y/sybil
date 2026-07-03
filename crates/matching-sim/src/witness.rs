@@ -22,7 +22,7 @@ use matching_solver::PipelineResult;
 pub fn build_witness(
     problem: &Problem,
     result: &MatchingResult,
-    clearing_prices: HashMap<MarketId, Vec<u64>>,
+    clearing_prices: HashMap<MarketId, Vec<matching_engine::Nanos>>,
 ) -> BlockWitness {
     let witness_orders: Vec<WitnessOrder> = problem
         .orders

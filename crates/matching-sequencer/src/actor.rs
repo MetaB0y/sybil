@@ -1,3 +1,9 @@
+// Exempt from the f64 ban (SYB-196): this module is off the consensus/state-root
+// path. Its floats are the token-bucket admission rate limiter and Prometheus
+// metric gauges/histograms — both explicitly exempt (admission heuristic +
+// observability). No value here is committed into a block's state root.
+#![allow(clippy::disallowed_types)]
+
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -412,7 +418,7 @@ fn build_indicative_snapshots(
     // Per-market notional volume from the shadow-solve's fills.
     let mut volume_by_market: HashMap<MarketId, u64> = HashMap::new();
     for fill in &result.result.fills {
-        if fill.fill_qty == 0 {
+        if fill.fill_qty == matching_engine::Qty::ZERO {
             continue;
         }
         let Some(order) = order_map.get(&fill.order_id) else {
@@ -421,7 +427,7 @@ fn build_indicative_snapshots(
         let notional = matching_engine::notional_nanos(fill.fill_price, fill.fill_qty);
         for m in order.active_markets() {
             let entry = volume_by_market.entry(m).or_insert(0);
-            *entry = entry.saturating_add(notional);
+            *entry = entry.saturating_add(notional.0);
         }
     }
 
@@ -447,8 +453,8 @@ fn build_indicative_snapshots(
         snapshots.insert(
             m,
             IndicativeSnapshot {
-                yes_price_nanos: yes,
-                no_price_nanos: no,
+                yes_price_nanos: yes.map(|n| n.0),
+                no_price_nanos: no.map(|n| n.0),
                 volume_nanos: volume_by_market.get(&m).copied().unwrap_or(0),
                 computed_at_ms,
             },
@@ -1004,7 +1010,7 @@ impl SequencerActorState {
 
         let mut fills_per_market: HashMap<MarketId, u64> = HashMap::new();
         for fill in &bp.block.fills {
-            if fill.fill_qty == 0 {
+            if fill.fill_qty == matching_engine::Qty::ZERO {
                 continue;
             }
             if let Some(&market_id) = order_to_market.get(&fill.order_id) {
@@ -1027,7 +1033,7 @@ impl SequencerActorState {
                     "market_id" => market_id.0.to_string(),
                     "outcome" => outcome.to_string()
                 )
-                .set(price as f64);
+                .set(price.0 as f64);
             }
             if let Some(&volume) = market_volumes.get(market_id) {
                 metrics::gauge!(
@@ -1168,12 +1174,12 @@ impl SequencerActorState {
             let volume = self.sequencer.market_volume(mid);
 
             if let Some(min_p) = query.min_yes_price {
-                if yes_price.unwrap_or(0) < min_p {
+                if yes_price.unwrap_or(Nanos::ZERO) < min_p {
                     continue;
                 }
             }
             if let Some(max_p) = query.max_yes_price {
-                if yes_price.unwrap_or(0) > max_p {
+                if yes_price.unwrap_or(Nanos::ZERO) > max_p {
                     continue;
                 }
             }
@@ -1213,8 +1219,8 @@ impl SequencerActorState {
                 crate::market_info::MarketSortField::Price => {
                     results.sort_by(|a, b| {
                         b.yes_price_nanos
-                            .unwrap_or(0)
-                            .cmp(&a.yes_price_nanos.unwrap_or(0))
+                            .unwrap_or(Nanos::ZERO)
+                            .cmp(&a.yes_price_nanos.unwrap_or(Nanos::ZERO))
                     });
                 }
             }
@@ -1287,8 +1293,8 @@ impl SequencerActorState {
                     );
                     e.order_id = Some(order_id);
                     e.market_id = o.active_markets().next();
-                    e.qty = Some(o.max_fill);
-                    e.price_nanos = Some(o.limit_price);
+                    e.qty = Some(o.max_fill.0);
+                    e.price_nanos = Some(o.limit_price.0);
                     let (side, outcome) = crate::aggregates::side_outcome_from_order(o);
                     e.side = side;
                     e.outcome = outcome;
@@ -3674,7 +3680,7 @@ mod tests {
             .await
             .unwrap();
         handle
-            .resolve_market(resolved_market, NANOS_PER_DOLLAR)
+            .resolve_market(resolved_market, Nanos(NANOS_PER_DOLLAR))
             .await
             .unwrap();
 
@@ -4132,8 +4138,11 @@ mod tests {
         let handle = SequencerHandle::spawn(seq);
 
         let m0 = MarketId::new(0);
-        let record = handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
-        assert_eq!(record.payout_nanos, NANOS_PER_DOLLAR);
+        let record = handle
+            .resolve_market(m0, Nanos(NANOS_PER_DOLLAR))
+            .await
+            .unwrap();
+        assert_eq!(record.payout_nanos, Nanos(NANOS_PER_DOLLAR));
         assert_eq!(record.market_id, m0);
     }
 
@@ -4154,7 +4163,10 @@ mod tests {
         );
         let handle = SequencerHandle::spawn(seq);
 
-        handle.resolve_market(m0, NANOS_PER_DOLLAR).await.unwrap();
+        handle
+            .resolve_market(m0, Nanos(NANOS_PER_DOLLAR))
+            .await
+            .unwrap();
         let block = handle.produce_block().await.unwrap();
 
         assert_eq!(block.canonical.system_events.len(), 1);
@@ -4165,7 +4177,7 @@ mod tests {
                 affected_accounts,
             } => {
                 assert_eq!(*market_id, m0);
-                assert_eq!(*payout_nanos, NANOS_PER_DOLLAR);
+                assert_eq!(*payout_nanos, Nanos(NANOS_PER_DOLLAR));
                 assert_eq!(affected_accounts, &vec![aid]);
             }
             other => panic!("expected MarketResolved event, got {:?}", other),
@@ -4178,7 +4190,7 @@ mod tests {
         let handle = SequencerHandle::spawn(seq);
 
         let result = handle
-            .resolve_market(MarketId::new(999), NANOS_PER_DOLLAR)
+            .resolve_market(MarketId::new(999), Nanos(NANOS_PER_DOLLAR))
             .await;
         assert!(matches!(result, Err(SequencerError::MarketNotFound)));
     }
@@ -4573,7 +4585,7 @@ mod tests {
         let problem = mk_problem(vec![order], markets);
         let result = matching_solver::PipelineResult::empty();
         let mut last_clearing = HashMap::new();
-        last_clearing.insert(m, vec![400_000_000, 600_000_000]);
+        last_clearing.insert(m, vec![Nanos(400_000_000), Nanos(600_000_000)]);
 
         let snaps = build_indicative_snapshots(&problem, &result, &last_clearing, 12_345);
 
@@ -4596,23 +4608,27 @@ mod tests {
             m,
             0,
             NANOS_PER_DOLLAR / 2,
-            matching_engine::shares_to_qty(5),
+            matching_engine::shares_to_qty(5).0,
         );
         let order_id = order.id;
         let problem = mk_problem(vec![order], markets);
 
         let mut result = matching_solver::PipelineResult::empty();
-        let mut fill =
-            matching_engine::Fill::new(order_id, matching_engine::shares_to_qty(3), 400_000_000);
+        let mut fill = matching_engine::Fill::new(
+            order_id,
+            matching_engine::shares_to_qty(3),
+            Nanos(400_000_000),
+        );
         fill.account_id = 7;
         result.result.fills.push(fill);
         let mut pd = matching_solver::PriceDiscoveryResult::empty();
-        pd.prices.insert(m, vec![450_000_000, 550_000_000]);
+        pd.prices
+            .insert(m, vec![Nanos(450_000_000), Nanos(550_000_000)]);
         result.price_discovery = Some(pd);
 
         // last_clearing has older values; PD should override.
         let mut last_clearing = HashMap::new();
-        last_clearing.insert(m, vec![100_000_000, 900_000_000]);
+        last_clearing.insert(m, vec![Nanos(100_000_000), Nanos(900_000_000)]);
 
         let snaps = build_indicative_snapshots(&problem, &result, &last_clearing, 0);
         let snap = snaps.get(&m).expect("market should be in cache");

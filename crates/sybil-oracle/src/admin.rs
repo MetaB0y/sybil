@@ -51,14 +51,14 @@ impl Oracle for AdminOracle {
 mod tests {
     use super::*;
     use crate::types::{OracleSource, ResolutionRecord};
-    use matching_engine::{MarketId, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
 
     #[test]
     fn test_admin_resolve_yes_wins() {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
         let action = oracle
-            .resolve(MarketId::new(0), NANOS_PER_DOLLAR, &status, 1000)
+            .resolve(MarketId::new(0), Nanos(NANOS_PER_DOLLAR), &status, 1000)
             .unwrap();
 
         match action {
@@ -68,7 +68,7 @@ mod tests {
                 record,
             } => {
                 assert_eq!(market_id, MarketId::new(0));
-                assert_eq!(payout_nanos, NANOS_PER_DOLLAR);
+                assert_eq!(payout_nanos, Nanos(NANOS_PER_DOLLAR));
                 assert_eq!(record.resolved_at_ms, 1000);
                 assert!(matches!(record.resolved_by, OracleSource::Admin));
             }
@@ -80,11 +80,13 @@ mod tests {
     fn test_admin_resolve_no_wins() {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
-        let action = oracle.resolve(MarketId::new(1), 0, &status, 2000).unwrap();
+        let action = oracle
+            .resolve(MarketId::new(1), Nanos(0), &status, 2000)
+            .unwrap();
 
         match action {
             ResolutionAction::SettleNow { payout_nanos, .. } => {
-                assert_eq!(payout_nanos, 0);
+                assert_eq!(payout_nanos, Nanos(0));
             }
             other => panic!("Expected SettleNow, got {:?}", other),
         }
@@ -95,7 +97,7 @@ mod tests {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
         let action = oracle
-            .resolve(MarketId::new(0), 700_000_000, &status, 3000)
+            .resolve(MarketId::new(0), Nanos(700_000_000), &status, 3000)
             .unwrap();
 
         match action {
@@ -104,8 +106,8 @@ mod tests {
                 record,
                 ..
             } => {
-                assert_eq!(payout_nanos, 700_000_000);
-                assert_eq!(record.payout_nanos, 700_000_000);
+                assert_eq!(payout_nanos, Nanos(700_000_000));
+                assert_eq!(record.payout_nanos, Nanos(700_000_000));
             }
             other => panic!("Expected SettleNow, got {:?}", other),
         }
@@ -116,7 +118,7 @@ mod tests {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
         let err = oracle
-            .resolve(MarketId::new(0), NANOS_PER_DOLLAR + 1, &status, 1000)
+            .resolve(MarketId::new(0), Nanos(NANOS_PER_DOLLAR + 1), &status, 1000)
             .unwrap_err();
         assert!(matches!(err, OracleError::InvalidPayout(_)));
     }
@@ -126,7 +128,7 @@ mod tests {
         let oracle = AdminOracle::new();
         let record = ResolutionRecord {
             market_id: MarketId::new(0),
-            payout_nanos: NANOS_PER_DOLLAR,
+            payout_nanos: Nanos(NANOS_PER_DOLLAR),
             resolved_by: OracleSource::Admin,
             resolved_at_ms: 500,
             proposal: None,
@@ -134,7 +136,7 @@ mod tests {
         };
         let status = MarketStatus::Resolved { record };
         let err = oracle
-            .resolve(MarketId::new(0), 0, &status, 1000)
+            .resolve(MarketId::new(0), Nanos(0), &status, 1000)
             .unwrap_err();
         assert!(matches!(err, OracleError::AlreadyResolved));
     }
@@ -144,7 +146,7 @@ mod tests {
         let oracle = AdminOracle::new();
         let status = MarketStatus::Active;
         let err = oracle
-            .challenge(MarketId::new(0), 0, &status, 100, 1000)
+            .challenge(MarketId::new(0), Nanos(0), &status, 100, 1000)
             .unwrap_err();
         assert!(matches!(err, OracleError::ChallengeNotSupported));
     }

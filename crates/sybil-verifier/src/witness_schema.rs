@@ -89,7 +89,7 @@ fn append_clearing_prices(out: &mut Vec<u8>, clearing_prices: &HashMap<MarketId,
         append_market_id(out, *market);
         append_u32(out, outcomes.len() as u32);
         for price in outcomes {
-            append_u64(out, *price);
+            append_u64(out, price.0);
         }
     }
 }
@@ -100,7 +100,7 @@ fn append_mm_constraints(out: &mut Vec<u8>, constraints: &[MmConstraint]) {
     append_u64(out, constraints.len() as u64);
     for constraint in constraints {
         append_u64(out, constraint.mm_id.0);
-        append_u64(out, constraint.max_capital);
+        append_u64(out, constraint.max_capital.0);
 
         let mut order_ids = constraint.order_ids.clone();
         order_ids.sort_unstable();

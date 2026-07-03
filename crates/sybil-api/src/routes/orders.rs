@@ -3,6 +3,7 @@ use axum::Json;
 
 use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
 use matching_engine::MarketId;
+use matching_engine::Nanos;
 use matching_sequencer::crypto::{PublicKey, SignedCancel, SignedOrder};
 use matching_sequencer::{AccountId, OrderSubmission, PendingOrderInfo};
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -85,7 +86,7 @@ pub async fn submit_orders(
 
     // Build MmConstraint if mm_budget_nanos is provided
     let mm_constraint = req.mm_budget_nanos.map(|budget| {
-        let mut constraint = MmConstraint::new(MmId(req.account_id), budget);
+        let mut constraint = MmConstraint::new(MmId(req.account_id), Nanos(budget));
         // Use temporary IDs (0, 1, 2...) matching order indices.
         // The sequencer will remap these to real order IDs.
         for (i, spec) in req.orders.iter().enumerate() {
@@ -173,7 +174,7 @@ fn to_pending_response(info: &PendingOrderInfo) -> PendingOrderResponse {
         account_id: info.account_id.0,
         market_id,
         side: info.side.to_string(),
-        limit_price_nanos: info.limit_price,
+        limit_price_nanos: info.limit_price.0,
         remaining_quantity: info.remaining_qty,
         created_at_block: info.created_at_block,
         expires_at_block: info.expires_at_block,

@@ -51,8 +51,8 @@ pub fn evaluate_immediate(
 
     let att = &signed.attestation;
 
-    if att.payout_nanos > NANOS_PER_DOLLAR {
-        return Err(OracleError::InvalidPayout(att.payout_nanos));
+    if att.payout_nanos.0 > NANOS_PER_DOLLAR {
+        return Err(OracleError::InvalidPayout(att.payout_nanos.0));
     }
 
     match current_status {
@@ -82,8 +82,8 @@ pub(crate) fn evaluate_admin_immediate(
     current_status: &MarketStatus,
     timestamp_ms: u64,
 ) -> Result<PolicyOutcome, OracleError> {
-    if payout_nanos > NANOS_PER_DOLLAR {
-        return Err(OracleError::InvalidPayout(payout_nanos));
+    if payout_nanos.0 > NANOS_PER_DOLLAR {
+        return Err(OracleError::InvalidPayout(payout_nanos.0));
     }
     match current_status {
         MarketStatus::Resolved { .. } => return Err(OracleError::AlreadyResolved),
@@ -106,7 +106,7 @@ pub(crate) fn evaluate_admin_immediate(
 mod tests {
     use super::*;
     use crate::feed::FeedPubkey;
-    use matching_engine::MarketId;
+    use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
 
     fn sample_feed(id: u64) -> DataFeed {
         DataFeed {
@@ -132,13 +132,13 @@ mod tests {
     #[test]
     fn immediate_happy_path_yields_settle() {
         let feed = sample_feed(7);
-        let signed = sample_signed(MarketId::new(5), NANOS_PER_DOLLAR);
+        let signed = sample_signed(MarketId::new(5), Nanos(NANOS_PER_DOLLAR));
         let outcome =
             evaluate_immediate(FeedId(7), &feed, &signed, &MarketStatus::Active, 1_000).unwrap();
         match outcome {
             PolicyOutcome::Settle { record } => {
                 assert_eq!(record.market_id, MarketId::new(5));
-                assert_eq!(record.payout_nanos, NANOS_PER_DOLLAR);
+                assert_eq!(record.payout_nanos, Nanos(NANOS_PER_DOLLAR));
                 assert_eq!(record.resolved_at_ms, 1_000);
                 assert!(matches!(record.resolved_by, OracleSource::DataFeed(_)));
             }
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn immediate_rejects_wrong_feed() {
         let feed = sample_feed(7);
-        let signed = sample_signed(MarketId::new(5), NANOS_PER_DOLLAR);
+        let signed = sample_signed(MarketId::new(5), Nanos(NANOS_PER_DOLLAR));
         let err = evaluate_immediate(FeedId(8), &feed, &signed, &MarketStatus::Active, 1_000)
             .unwrap_err();
         assert!(matches!(err, OracleError::InvalidAttestation(_)));
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn immediate_rejects_invalid_payout() {
         let feed = sample_feed(7);
-        let signed = sample_signed(MarketId::new(5), NANOS_PER_DOLLAR + 1);
+        let signed = sample_signed(MarketId::new(5), Nanos(NANOS_PER_DOLLAR + 1));
         let err = evaluate_immediate(FeedId(7), &feed, &signed, &MarketStatus::Active, 1_000)
             .unwrap_err();
         assert!(matches!(err, OracleError::InvalidPayout(_)));
@@ -167,10 +167,10 @@ mod tests {
     #[test]
     fn immediate_rejects_already_resolved() {
         let feed = sample_feed(7);
-        let signed = sample_signed(MarketId::new(5), 0);
+        let signed = sample_signed(MarketId::new(5), Nanos(0));
         let record = crate::ResolutionRecord {
             market_id: MarketId::new(5),
-            payout_nanos: NANOS_PER_DOLLAR,
+            payout_nanos: Nanos(NANOS_PER_DOLLAR),
             resolved_by: OracleSource::Admin,
             resolved_at_ms: 100,
             proposal: None,

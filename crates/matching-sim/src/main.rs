@@ -33,7 +33,7 @@ mod witness;
 use std::collections::HashMap;
 use std::time::Instant;
 
-use matching_engine::Problem;
+use matching_engine::{Nanos, Problem};
 use matching_scenarios::{generate_scenario, ScenarioConfig};
 use matching_solver::MmBudgetMode;
 #[cfg(any(feature = "lp", feature = "conic"))]
@@ -209,7 +209,7 @@ fn run_detailed_pipeline(
 
         if let Some(scale) = mm_budget_scale {
             for mm in &mut problem.mm_constraints {
-                mm.max_capital = (mm.max_capital as f64 * scale) as u64;
+                mm.max_capital = Nanos((mm.max_capital.0 as f64 * scale) as u64);
             }
         }
         let order_stats = OrderStats::compute(&problem);
@@ -315,12 +315,13 @@ fn run_detailed_pipeline(
                 );
 
                 if !problem.mm_constraints.is_empty() {
-                    let mm_fills: HashMap<u64, (u64, u64)> = result
-                        .result
-                        .fills
-                        .iter()
-                        .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
-                        .collect();
+                    let mm_fills: HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
+                        result
+                            .result
+                            .fills
+                            .iter()
+                            .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
+                            .collect();
                     let mm_filled: usize = problem
                         .mm_constraints
                         .iter()
@@ -336,16 +337,16 @@ fn run_detailed_pipeline(
                     for mm in &problem.mm_constraints {
                         let cap = mm.capital_used(&mm_fills);
                         let budget = mm.max_capital;
-                        let util = if budget > 0 {
-                            cap as f64 / budget as f64 * 100.0
+                        let util = if budget.0 > 0 {
+                            cap.0 as f64 / budget.0 as f64 * 100.0
                         } else {
                             0.0
                         };
                         println!(
                             "    MM{}: {}/{} ({:.0}% util)",
                             mm.mm_id.0,
-                            format_price(cap),
-                            format_price(budget),
+                            format_price(cap.0),
+                            format_price(budget.0),
                             util,
                         );
                     }
@@ -546,7 +547,7 @@ fn run_simulation(
 
         if let Some(scale) = mm_budget_scale {
             for mm in &mut problem.mm_constraints {
-                mm.max_capital = (mm.max_capital as f64 * scale) as u64;
+                mm.max_capital = Nanos((mm.max_capital.0 as f64 * scale) as u64);
             }
         }
 

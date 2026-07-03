@@ -145,7 +145,7 @@ impl FillRecorder {
         event_log: &mut crate::aggregates::AccountEventLog,
     ) {
         for fill in fills {
-            if fill.fill_qty == 0 {
+            if fill.fill_qty.0 == 0 {
                 continue;
             }
             let account_id = AccountId(fill.account_id);
@@ -168,7 +168,7 @@ impl FillRecorder {
                 cost_basis_tracker.apply_fill(
                     account_id,
                     &position_deltas,
-                    fill.fill_price as i64,
+                    fill.fill_price.0 as i64,
                     account,
                 );
             }
@@ -183,10 +183,10 @@ impl FillRecorder {
                 };
                 let mut e = HistoryEvent::new(account_id, kind, height, timestamp_ms);
                 e.order_id = Some(fill.order_id);
-                e.qty = Some(fill.fill_qty);
-                e.price_nanos = Some(fill.fill_price);
+                e.qty = Some(fill.fill_qty.0);
+                e.price_nanos = Some(fill.fill_price.0);
                 let (mid, side, outcome, cash) =
-                    crate::aggregates::fill_facets(&position_deltas, fill.fill_price);
+                    crate::aggregates::fill_facets(&position_deltas, fill.fill_price.0);
                 e.market_id = mid;
                 e.side = side;
                 e.outcome = outcome;
@@ -198,7 +198,7 @@ impl FillRecorder {
 
             let record = AccountFillRecord {
                 order_id: fill.order_id,
-                fill_qty: fill.fill_qty,
+                fill_qty: fill.fill_qty.0,
                 fill_price: fill.fill_price,
                 block_height: height,
                 timestamp_ms,
@@ -288,7 +288,7 @@ fn trim_account_fills(fills: &mut Vec<AccountFillRecord>, max_history_per_accoun
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{outcome_buy, Fill, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{outcome_buy, Fill, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR};
 
     #[test]
     fn fill_history_is_bounded_per_account_on_record() {
@@ -304,7 +304,7 @@ mod tests {
         let accounts = AccountStore::new();
         let mut log = crate::aggregates::AccountEventLog::new();
         for height in 1..=(max_fills as u64 + 5) {
-            let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+            let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
             fill.account_id = 42;
             recorder.record_fills(
                 &[fill],
@@ -334,7 +334,7 @@ mod tests {
                     AccountFillRecord {
                         order_id: height,
                         fill_qty: 1,
-                        fill_price: NANOS_PER_DOLLAR / 2,
+                        fill_price: Nanos(NANOS_PER_DOLLAR / 2),
                         block_height: height,
                         timestamp_ms: height * 1_000,
                         position_deltas: Vec::new(),
@@ -364,7 +364,7 @@ mod tests {
         let mut log = crate::aggregates::AccountEventLog::new();
 
         for height in 1..=2 {
-            let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+            let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
             fill.account_id = 42;
             recorder.record_fills(
                 &[fill],
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(first_page[0].block_height, 1);
         let cursor = AccountFillCursor::from_record(&first_page[0]);
 
-        let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+        let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
         fill.account_id = 42;
         recorder.record_fills(&[fill], &orders, 3, 3_000, &mut cb, &accounts, &mut log);
 
@@ -401,7 +401,7 @@ mod tests {
                     AccountFillRecord {
                         order_id: height,
                         fill_qty: 1,
-                        fill_price: NANOS_PER_DOLLAR / 2,
+                        fill_price: Nanos(NANOS_PER_DOLLAR / 2),
                         block_height: height,
                         timestamp_ms: height * 1_000,
                         position_deltas: Vec::new(),
@@ -433,7 +433,7 @@ mod tests {
         let mut cb = CostBasisTracker::new();
         let accounts = AccountStore::new();
         let mut log = crate::aggregates::AccountEventLog::new();
-        let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+        let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
         fill.account_id = 42;
         recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
 
@@ -465,7 +465,7 @@ mod tests {
         let mut recorder = FillRecorder::new();
         let mut cb = CostBasisTracker::new();
         let accounts = AccountStore::new();
-        let mut fill = Fill::new(order.id, 4, NANOS_PER_DOLLAR / 2);
+        let mut fill = Fill::new(order.id, Qty(4), Nanos(NANOS_PER_DOLLAR / 2));
         fill.account_id = 42;
         let mut log = crate::aggregates::AccountEventLog::new();
         recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
@@ -484,7 +484,7 @@ mod tests {
         let mut recorder = FillRecorder::new();
         let mut cb = CostBasisTracker::new();
         let accounts = AccountStore::new();
-        let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+        let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
         fill.account_id = AccountId::MINT.0;
         let mut log = crate::aggregates::AccountEventLog::new();
         recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
@@ -508,7 +508,7 @@ mod tests {
         let accounts = AccountStore::new();
         let mut log = crate::aggregates::AccountEventLog::new();
         for h in 1..=5 {
-            let mut fill = Fill::new(order.id, 1, NANOS_PER_DOLLAR / 2);
+            let mut fill = Fill::new(order.id, Qty(1), Nanos(NANOS_PER_DOLLAR / 2));
             fill.account_id = 42;
             recorder.record_fills(&[fill], &orders, h, h * 1_000, &mut cb, &accounts, &mut log);
         }

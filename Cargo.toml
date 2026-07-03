@@ -23,6 +23,14 @@ members = [
 [profile.release]
 overflow-checks = true
 
+# Enforced only in crates that opt in with `[lints] workspace = true`
+# (matching-engine, matching-sequencer). See clippy.toml for the f64 ban
+# rationale. `unwrap_used` keeps `.unwrap()` out of core library code (tests are
+# exempted via `allow-unwrap-in-tests`).
+[workspace.lints.clippy]
+disallowed_types = "deny"
+unwrap_used = "deny"
+
 [workspace.dependencies]
 rand = "0.10"
 rand_chacha = "0.10"

@@ -16,8 +16,8 @@ pub fn encode_fill_event(
     let mut bytes = Vec::with_capacity(1 + 8 * 4);
     bytes.push(0x01);
     bytes.extend_from_slice(&order_id.to_le_bytes());
-    bytes.extend_from_slice(&fill_qty.to_le_bytes());
-    bytes.extend_from_slice(&fill_price.to_le_bytes());
+    bytes.extend_from_slice(&fill_qty.0.to_le_bytes());
+    bytes.extend_from_slice(&fill_price.0.to_le_bytes());
     bytes.extend_from_slice(&block_height.to_le_bytes());
     bytes
 }
@@ -68,7 +68,7 @@ pub fn encode_resolution_event(
     let mut bytes = Vec::with_capacity(1 + 4 + 8 + 8);
     bytes.push(0x03);
     bytes.extend_from_slice(&market_id.0.to_le_bytes());
-    bytes.extend_from_slice(&payout_nanos.to_le_bytes());
+    bytes.extend_from_slice(&payout_nanos.0.to_le_bytes());
     bytes.extend_from_slice(&block_height.to_le_bytes());
     bytes
 }
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_digest_deterministic() {
-        let event = encode_fill_event(7, 10, 500_000_000, 12);
+        let event = encode_fill_event(7, Qty(10), Nanos(500_000_000), 12);
         assert_eq!(
             update_digest(&[0u8; 32], &event),
             update_digest(&[0u8; 32], &event)
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_digest_sensitive_to_event_bytes() {
-        let fill = encode_fill_event(7, 10, 500_000_000, 12);
+        let fill = encode_fill_event(7, Qty(10), Nanos(500_000_000), 12);
         let deposit = encode_deposit_event(500_000_000, 12);
         assert_ne!(
             update_digest(&[0u8; 32], &fill),

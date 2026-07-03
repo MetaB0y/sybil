@@ -81,16 +81,16 @@ impl LiquidityTracker {
             let Some(prices) = midprices.get(&market) else {
                 continue;
             };
-            let mid = prices.first().copied().unwrap_or(0);
-            if mid == 0 {
+            let mid = prices.first().copied().unwrap_or(Nanos::ZERO);
+            if mid == Nanos::ZERO {
                 continue;
             }
-            let band_lo = mid.saturating_sub(band_nanos);
-            let band_hi = mid.saturating_add(band_nanos);
+            let band_lo = mid.saturating_sub(Nanos(band_nanos));
+            let band_hi = mid.saturating_add(Nanos(band_nanos));
             if order.limit_price >= band_lo && order.limit_price <= band_hi {
                 let value = notional_nanos(order.limit_price, order.max_fill);
                 let entry = depth_by_market.entry(market).or_insert(0);
-                *entry = entry.saturating_add(value);
+                *entry = entry.saturating_add(value.0);
             }
         }
 
@@ -105,16 +105,16 @@ impl LiquidityTracker {
             let Some(prices) = midprices.get(&market) else {
                 continue;
             };
-            let mid = prices.first().copied().unwrap_or(0);
-            if mid == 0 {
+            let mid = prices.first().copied().unwrap_or(Nanos::ZERO);
+            if mid == Nanos::ZERO {
                 continue;
             }
-            let band_lo = mid.saturating_sub(band_nanos);
-            let band_hi = mid.saturating_add(band_nanos);
+            let band_lo = mid.saturating_sub(Nanos(band_nanos));
+            let band_hi = mid.saturating_add(Nanos(band_nanos));
             if order.limit_price >= band_lo && order.limit_price <= band_hi {
                 let value = notional_nanos(order.limit_price, order.max_fill);
                 let entry = depth_by_market.entry(market).or_insert(0);
-                *entry = entry.saturating_add(value);
+                *entry = entry.saturating_add(value.0);
             }
         }
 
@@ -229,7 +229,7 @@ mod tests {
     }
 
     fn q(shares: u64) -> u64 {
-        shares_to_qty(shares)
+        shares_to_qty(shares).0
     }
 
     /// Multi-market orders are excluded from the per-market score;
@@ -251,8 +251,8 @@ mod tests {
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
-        midprices.insert(m1, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
+        midprices.insert(m1, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
 
         tracker.record_block(&book, &mm_orders, &midprices, 50_000_000);
 
@@ -277,7 +277,7 @@ mod tests {
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
 
         for _ in 0..12 {
             tracker.record_block(&book, &[], &midprices, 50_000_000);
@@ -305,7 +305,7 @@ mod tests {
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
         tracker.record_block(&book, &[], &midprices, 50_000_000);
 
         assert_eq!(tracker.current(m0), 0);
@@ -326,7 +326,7 @@ mod tests {
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
         for _ in 0..3 {
             tracker.record_block(&book, &[], &midprices, 50_000_000);
         }
@@ -361,7 +361,7 @@ mod tests {
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
 
         tracker.record_block(&book, &mm_slice, &midprices, 50_000_000);
 
@@ -379,7 +379,7 @@ mod tests {
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
         tracker.record_block(&book, &mm_slice, &midprices, 50_000_000);
 
         assert_eq!(tracker.current(m0), 0);
@@ -400,7 +400,7 @@ mod tests {
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
 
         for _ in 0..3 {
             tracker.record_block(&book, &[], &midprices, 50_000_000);
@@ -419,7 +419,7 @@ mod tests {
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
 
         for _ in 0..5 {
             tracker.record_block(&book, &[], &midprices, 50_000_000);
@@ -448,7 +448,7 @@ mod tests {
         );
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
-        midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
+        midprices.insert(m0, vec![Nanos(mid_yes), Nanos(NANOS_PER_DOLLAR - mid_yes)]);
         for _ in 0..2 {
             tracker.record_block(&book, &[], &midprices, 50_000_000);
         }

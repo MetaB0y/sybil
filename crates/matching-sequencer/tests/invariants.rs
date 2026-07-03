@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use matching_engine::{
     compute_fill_settlement, derive_minting, net_welfare, outcome_buy, signed_notional_nanos,
-    MarketId, MarketSet, NANOS_PER_DOLLAR,
+    MarketId, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR,
 };
 use matching_sequencer::{AccountId, AccountStore, AdminOracle, BlockSequencer, OrderSubmission};
 use proptest::prelude::*;
@@ -150,8 +150,8 @@ fn expected_resolution_delta(seq: &BlockSequencer, market: MarketId, yes_payout_
     seq.accounts
         .iter()
         .map(|(_, account)| {
-            signed_notional_nanos(yes_payout_nanos, account.position(market, 0))
-                + signed_notional_nanos(no_payout_nanos, account.position(market, 1))
+            signed_notional_nanos(Nanos(yes_payout_nanos), account.position(market, 0))
+                + signed_notional_nanos(Nanos(no_payout_nanos), account.position(market, 1))
         })
         .sum()
 }
@@ -188,11 +188,11 @@ fn raw_welfare_numerator(witness: &BlockWitness) -> i128 {
         .filter_map(|fill| {
             order_map.get(&fill.order_id).map(|order| {
                 let surplus_per_unit = if order.is_seller() {
-                    fill.fill_price as i128 - order.limit_price as i128
+                    fill.fill_price.0 as i128 - order.limit_price.0 as i128
                 } else {
-                    order.limit_price as i128 - fill.fill_price as i128
+                    order.limit_price.0 as i128 - fill.fill_price.0 as i128
                 };
-                surplus_per_unit * fill.fill_qty as i128
+                surplus_per_unit * fill.fill_qty.0 as i128
             })
         })
         .sum()
@@ -293,7 +293,7 @@ proptest! {
         let (mut seq, markets) = make_sequencer();
         let bp = seq.produce_block(submissions, 1000);
 
-        let n_fills = bp.block.fills.iter().filter(|f| f.fill_qty > 0).count();
+        let n_fills = bp.block.fills.iter().filter(|f| f.fill_qty > Qty::ZERO).count();
         if n_fills > 0 {
             TRADES_SEEN.fetch_add(n_fills as u64, Ordering::Relaxed);
             CASES_WITH_TRADES.fetch_add(1, Ordering::Relaxed);
@@ -432,7 +432,7 @@ proptest! {
         let expected_delta = expected_resolution_delta(&seq, m0, payout);
 
         // Resolve
-        let _ = seq.resolve_market(m0, payout, 2000);
+        let _ = seq.resolve_market(m0, Nanos(payout), 2000);
 
         // Post-resolution checks
         let post_balance: i64 = seq.accounts.iter().map(|(_, a)| a.balance).sum();
@@ -479,7 +479,7 @@ proptest! {
                     .orders
                     .into_iter()
                     .map(|mut o| {
-                        o.max_fill = o.max_fill.saturating_mul(2);
+                        o.max_fill = Qty(o.max_fill.0.saturating_mul(2));
                         o
                     })
                     .collect(),
@@ -533,10 +533,11 @@ proptest! {
             );
             assert_eq!(
                 doubled_fill.fill_qty,
-                base_fill
+                Qty(base_fill
                     .fill_qty
+                    .0
                     .checked_mul(2)
-                    .expect("test quantities should double without overflow"),
+                    .expect("test quantities should double without overflow")),
                 "Doubled quantities did not double fill quantity for order {}",
                 doubled_fill.order_id
             );

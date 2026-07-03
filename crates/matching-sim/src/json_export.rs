@@ -19,7 +19,7 @@ fn order_to_json(order: &Order) -> serde_json::Value {
         "markets": markets,
         "payoffs": payoffs,
         "limit_price": order.limit_price,
-        "limit_price_cents": order.limit_price as f64 / 1e7,
+        "limit_price_cents": order.limit_price.0 as f64 / 1e7,
         "max_fill": order.max_fill,
         "is_seller": order.is_seller(),
         "num_markets": order.num_markets,
@@ -99,14 +99,14 @@ pub fn build_comparison_json(
                         "order_id": f.order_id,
                         "fill_qty": f.fill_qty,
                         "fill_price": f.fill_price,
-                        "fill_price_cents": f.fill_price as f64 / 1e7,
+                        "fill_price_cents": f.fill_price.0 as f64 / 1e7,
                         "welfare": welfare,
                         "welfare_dollars": welfare as f64 / 1e9,
                         "is_mm": is_mm,
                         "markets": markets,
-                        "limit_price": order.map(|o| o.limit_price).unwrap_or(0),
-                        "limit_price_cents": order.map(|o| o.limit_price as f64 / 1e7).unwrap_or(0.0),
-                        "max_fill": order.map(|o| o.max_fill).unwrap_or(0),
+                        "limit_price": order.map(|o| o.limit_price.0).unwrap_or(0),
+                        "limit_price_cents": order.map(|o| o.limit_price.0 as f64 / 1e7).unwrap_or(0.0),
+                        "max_fill": order.map(|o| o.max_fill.0).unwrap_or(0),
                         "is_seller": order.map(|o| o.is_seller()).unwrap_or(false),
                     })
                 })
@@ -117,7 +117,7 @@ pub fn build_comparison_json(
                 .clearing_prices
                 .iter()
                 .map(|(mid, prices)| {
-                    let pcts: Vec<f64> = prices.iter().map(|&p| p as f64 / 1e7).collect();
+                    let pcts: Vec<f64> = prices.iter().map(|&p| p.0 as f64 / 1e7).collect();
                     (
                         format!("M{}", mid.0),
                         serde_json::json!({ "nanos": prices, "pct": pcts }),
@@ -133,7 +133,7 @@ pub fn build_comparison_json(
                 if let Some(order) = order_map.get(&f.order_id) {
                     let w = f.welfare(order);
                     for mid in order.active_markets() {
-                        *market_vol.entry(mid).or_default() += f.fill_qty;
+                        *market_vol.entry(mid).or_default() += f.fill_qty.0;
                         *market_welfare.entry(mid).or_default() += w;
                         *market_fills.entry(mid).or_default() += 1;
                     }
@@ -166,7 +166,7 @@ pub fn build_comparison_json(
                 .map(|o| {
                     serde_json::json!({
                         "id": o.id,
-                        "limit_price_cents": o.limit_price as f64 / 1e7,
+                        "limit_price_cents": o.limit_price.0 as f64 / 1e7,
                         "max_fill": o.max_fill,
                         "is_mm": mm_order_ids.contains(&o.id),
                         "is_seller": o.is_seller(),

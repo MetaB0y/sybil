@@ -79,25 +79,26 @@ impl Agent for NoiseTrader {
                 if let Some(&belief) = beliefs.get(&market_id) {
                     // Convert belief probability to nanos price for the chosen outcome
                     let p = if outcome == 0 { belief } else { 1.0 - belief };
-                    (p * NANOS_PER_DOLLAR as f64) as Nanos
+                    (p * NANOS_PER_DOLLAR as f64) as u64
                 } else {
-                    let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+                    let default_prices =
+                        vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)];
                     let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
-                    last_prices[outcome as usize]
+                    last_prices[outcome as usize].0
                 }
             } else {
-                let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+                let default_prices = vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)];
                 let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
-                last_prices[outcome as usize]
+                last_prices[outcome as usize].0
             };
 
             // Add noise
-            let noise =
-                self.rng.random_range(0..=self.price_noise * 2) as i64 - self.price_noise as i64;
+            let noise = self.rng.random_range(0..=self.price_noise.0 * 2) as i64
+                - self.price_noise.0 as i64;
             let price = (base_price as i64 + noise).clamp(
                 NANOS_PER_DOLLAR as i64 / 100,      // min 1 cent
                 NANOS_PER_DOLLAR as i64 * 99 / 100, // max 99 cents
-            ) as Nanos;
+            ) as u64;
 
             if is_sell {
                 // Sell existing position

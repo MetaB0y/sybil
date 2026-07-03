@@ -17,8 +17,8 @@ mod conformance {
 
     const DEFAULT_CASES: u32 = 64;
     const MINT_ACCOUNT_ID: u64 = u64::MAX;
-    const BASE_BUY_LIMIT: Nanos = 600_000_000;
-    const BASE_SELL_LIMIT: Nanos = 400_000_000;
+    const BASE_BUY_LIMIT: Nanos = Nanos(600_000_000);
+    const BASE_SELL_LIMIT: Nanos = Nanos(400_000_000);
     const BLOCK_HEIGHT: u64 = 1;
 
     #[derive(Clone, Copy, Debug)]
@@ -56,14 +56,18 @@ mod conformance {
     type SettlementStates = (AccountStates, AccountStates, i64);
 
     fn arb_price() -> impl Strategy<Value = Nanos> {
-        prop_oneof![Just(0), Just(NANOS_PER_DOLLAR), 1..NANOS_PER_DOLLAR,]
+        prop_oneof![
+            Just(Nanos(0)),
+            Just(Nanos(NANOS_PER_DOLLAR)),
+            (1..NANOS_PER_DOLLAR).prop_map(Nanos),
+        ]
     }
 
     fn arb_qty() -> impl Strategy<Value = Qty> {
         prop_oneof![
-            1u64..=5_000,
+            (1u64..=5_000).prop_map(Qty),
             (1u64..=1_000).prop_map(shares_to_qty),
-            Just(MAX_ORDER_QTY),
+            Just(Qty(MAX_ORDER_QTY)),
         ]
     }
 
@@ -231,14 +235,14 @@ mod conformance {
                 .filter_map(|(order_id, _)| {
                     problem.orders.iter().find(|order| order.id == *order_id)
                 })
-                .map(|order| notional_nanos(NANOS_PER_DOLLAR, order.max_fill))
+                .map(|order| notional_nanos(Nanos(NANOS_PER_DOLLAR), order.max_fill).0)
                 .sum();
             let max_capital = match mm_mode {
                 1 => full_notional,
                 2 => full_notional / 2,
                 _ => 0,
             };
-            let mut constraint = MmConstraint::new(MmId::new(1), max_capital);
+            let mut constraint = MmConstraint::new(MmId::new(1), Nanos(max_capital));
             for (order_id, side) in mm_orders {
                 constraint.add_order(order_id, side);
             }
@@ -260,10 +264,10 @@ mod conformance {
         qty: Qty,
     ) -> Order {
         match direction {
-            Direction::BuyYes => outcome_buy(markets, id, market, 0, price, qty),
-            Direction::BuyNo => outcome_buy(markets, id, market, 1, price, qty),
-            Direction::SellYes => outcome_sell(markets, id, market, 0, price, qty),
-            Direction::SellNo => outcome_sell(markets, id, market, 1, price, qty),
+            Direction::BuyYes => outcome_buy(markets, id, market, 0, price.0, qty.0),
+            Direction::BuyNo => outcome_buy(markets, id, market, 1, price.0, qty.0),
+            Direction::SellYes => outcome_sell(markets, id, market, 0, price.0, qty.0),
+            Direction::SellNo => outcome_sell(markets, id, market, 1, price.0, qty.0),
         }
     }
 
@@ -377,7 +381,7 @@ mod conformance {
                 order.validate_binary_one_hot().err()
             );
             prop_assert!(
-                order.max_fill <= MAX_ORDER_QTY,
+                order.max_fill.0 <= MAX_ORDER_QTY,
                 "order {} max_fill {} exceeds MAX_ORDER_QTY {}",
                 order.id,
                 order.max_fill,
@@ -395,12 +399,17 @@ mod conformance {
     }
 
     fn assert_fill_totals(pipeline: &PipelineResult) -> Result<(), TestCaseError> {
-        let total_qty: u64 = pipeline.result.fills.iter().map(|fill| fill.fill_qty).sum();
+        let total_qty: u64 = pipeline
+            .result
+            .fills
+            .iter()
+            .map(|fill| fill.fill_qty.0)
+            .sum();
         let orders_filled = pipeline
             .result
             .fills
             .iter()
-            .filter(|fill| fill.fill_qty > 0)
+            .filter(|fill| fill.fill_qty.0 > 0)
             .count();
         prop_assert_eq!(
             pipeline.result.total_quantity_filled,
@@ -437,7 +446,7 @@ mod conformance {
                     fill.order_id
                 )));
             };
-            prop_assert!(fill.fill_qty > 0, "solver emitted a zero quantity fill");
+            prop_assert!(fill.fill_qty.0 > 0, "solver emitted a zero quantity fill");
             prop_assert!(
                 fill.fill_qty <= order.max_fill,
                 "order {} fill_qty {} exceeds max_fill {}",
@@ -446,14 +455,14 @@ mod conformance {
                 order.max_fill
             );
             prop_assert!(
-                fill.fill_qty <= MAX_ORDER_QTY,
+                fill.fill_qty.0 <= MAX_ORDER_QTY,
                 "order {} fill_qty {} exceeds MAX_ORDER_QTY {}",
                 fill.order_id,
                 fill.fill_qty,
                 MAX_ORDER_QTY
             );
             prop_assert!(
-                fill.fill_price <= NANOS_PER_DOLLAR,
+                fill.fill_price.0 <= NANOS_PER_DOLLAR,
                 "order {} fill_price {} exceeds NANOS_PER_DOLLAR",
                 fill.order_id,
                 fill.fill_price
@@ -492,7 +501,7 @@ mod conformance {
                 "binary market price vector must have two entries"
             );
             prop_assert_eq!(
-                prices[0] + prices[1],
+                (prices[0] + prices[1]).0,
                 NANOS_PER_DOLLAR,
                 "YES/NO clearing prices must sum to one dollar"
             );
@@ -595,8 +604,8 @@ mod conformance {
         for order in &case.problem.orders {
             let account_id = case.order_accounts[&order.id];
             let account = accounts.entry(account_id).or_default();
-            account.balance +=
-                notional_nanos(NANOS_PER_DOLLAR, order.max_fill) as i64 + NANOS_PER_DOLLAR as i64;
+            account.balance += notional_nanos(Nanos(NANOS_PER_DOLLAR), order.max_fill).0 as i64
+                + NANOS_PER_DOLLAR as i64;
 
             if order.is_seller() {
                 for (outcome, payoff) in order
@@ -610,7 +619,7 @@ mod conformance {
                         *account
                             .positions
                             .entry((order.markets[0], outcome as u8))
-                            .or_insert(0) += (-(payoff as i64)) * order.max_fill as i64;
+                            .or_insert(0) += (-(payoff as i64)) * order.max_fill.0 as i64;
                     }
                 }
             }

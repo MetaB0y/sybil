@@ -1,0 +1,21 @@
+# Floating point is banned on the consensus / state-root path. Money and
+# quantities are fixed-point integers (nanodollars, share-units) and every
+# value committed into a block's state root must be derived with exact integer
+# arithmetic — an f64 intermediate can round differently across independent
+# re-executions and break block verification (see SYB-196 / SEQ-2).
+#
+# This ban is only enforced in the crates that opt into `[lints] workspace =
+# true` (matching-engine and matching-sequencer). Legitimately floating-point
+# code — the solver crate, metrics/observability, indicative-price and
+# admission-heuristic helpers — carries a localized
+# `#[allow(clippy::disallowed_types)]` with a justification, or lives in a crate
+# that does not opt in.
+disallowed-types = [
+    { path = "f64", reason = "no floating point on the consensus/state-root path; use fixed-point nanos + integer helpers (e.g. notional_nanos, ceil_mul_ratio)" },
+    { path = "f32", reason = "no floating point on the consensus/state-root path; use fixed-point nanos + integer helpers" },
+]
+
+# `.unwrap()` is denied in the core crates' library code but is fine in tests,
+# where a panic is the failure signal.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

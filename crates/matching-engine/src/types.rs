@@ -21,34 +21,195 @@ pub const SHARE_SCALE: u64 = 1_000;
 /// current tests and devnet operation while bounding `price * quantity`.
 pub const MAX_ORDER_QTY: u64 = 1_000_000 * SHARE_SCALE;
 
-/// Amount in nanodollars (max ~18 billion dollars with u64)
-pub type Nanos = u64;
+/// Amount in nanodollars (max ~18 billion dollars with `u64`).
+///
+/// A newtype over `u64` (SYB-196). Money on the consensus / state-root path is
+/// fixed-point integer nanodollars; the newtype makes it impossible to
+/// accidentally mix a money amount with a bare count or a [`Qty`], and channels
+/// all scaling through the checked helpers below. `#[serde(transparent)]`
+/// guarantees the serialized bytes are identical to the inner `u64`, so
+/// canonical encodings and golden vectors are unaffected.
+#[derive(
+    Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct Nanos(pub u64);
 
 /// Quantity in fixed-point share units (`SHARE_SCALE` units = 1 share).
-pub type Qty = u64;
+///
+/// Newtype over `u64` (SYB-196); see [`Nanos`] for the rationale.
+#[derive(
+    Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct Qty(pub u64);
+
+impl Nanos {
+    pub const ZERO: Self = Nanos(0);
+
+    /// The inner `u64`. Use at boundaries that still speak in raw integers
+    /// (canonical byte encodings, the floating-point solver, external APIs).
+    #[inline]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn saturating_add(self, rhs: Nanos) -> Nanos {
+        Nanos(self.0.saturating_add(rhs.0))
+    }
+
+    #[inline]
+    pub const fn saturating_sub(self, rhs: Nanos) -> Nanos {
+        Nanos(self.0.saturating_sub(rhs.0))
+    }
+}
+
+impl Qty {
+    pub const ZERO: Self = Qty(0);
+
+    #[inline]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn saturating_add(self, rhs: Qty) -> Qty {
+        Qty(self.0.saturating_add(rhs.0))
+    }
+
+    #[inline]
+    pub const fn saturating_sub(self, rhs: Qty) -> Qty {
+        Qty(self.0.saturating_sub(rhs.0))
+    }
+}
+
+impl fmt::Display for Nanos {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for Qty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::ops::Add for Nanos {
+    type Output = Nanos;
+    #[inline]
+    fn add(self, rhs: Nanos) -> Nanos {
+        Nanos(self.0 + rhs.0)
+    }
+}
+
+impl std::ops::Sub for Nanos {
+    type Output = Nanos;
+    #[inline]
+    fn sub(self, rhs: Nanos) -> Nanos {
+        Nanos(self.0 - rhs.0)
+    }
+}
+
+impl std::ops::AddAssign for Nanos {
+    #[inline]
+    fn add_assign(&mut self, rhs: Nanos) {
+        self.0 += rhs.0;
+    }
+}
+
+impl std::ops::SubAssign for Nanos {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Nanos) {
+        self.0 -= rhs.0;
+    }
+}
+
+impl std::iter::Sum for Nanos {
+    fn sum<I: Iterator<Item = Nanos>>(iter: I) -> Nanos {
+        Nanos(iter.map(|n| n.0).sum())
+    }
+}
+
+impl std::ops::Add for Qty {
+    type Output = Qty;
+    #[inline]
+    fn add(self, rhs: Qty) -> Qty {
+        Qty(self.0 + rhs.0)
+    }
+}
+
+impl std::ops::Sub for Qty {
+    type Output = Qty;
+    #[inline]
+    fn sub(self, rhs: Qty) -> Qty {
+        Qty(self.0 - rhs.0)
+    }
+}
+
+impl std::iter::Sum for Qty {
+    fn sum<I: Iterator<Item = Qty>>(iter: I) -> Qty {
+        Qty(iter.map(|q| q.0).sum())
+    }
+}
 
 /// Convert whole shares into the internal fixed-point quantity unit.
 pub const fn shares_to_qty(shares: u64) -> Qty {
-    shares.saturating_mul(SHARE_SCALE)
+    Qty(shares.saturating_mul(SHARE_SCALE))
 }
 
-/// Floor of `price_nanos * qty / SHARE_SCALE`, returned as `u64`.
+/// Floor of `price_nanos * qty / SHARE_SCALE`, returned as [`Nanos`].
 pub fn notional_nanos(price: Nanos, qty: Qty) -> Nanos {
-    ((price as u128 * qty as u128) / SHARE_SCALE as u128) as Nanos
+    Nanos(((price.0 as u128 * qty.0 as u128) / SHARE_SCALE as u128) as u64)
 }
 
-/// Ceiling of `price_nanos * qty / SHARE_SCALE`, returned as `u64`.
+/// Ceiling of `price_nanos * qty / SHARE_SCALE`, returned as [`Nanos`].
 ///
 /// Use this for reservations and budget checks, where under-reserving by even
 /// one nano is worse than releasing a tiny surplus later.
 pub fn notional_nanos_ceil(price: Nanos, qty: Qty) -> Nanos {
-    let numerator = price as u128 * qty as u128;
-    numerator.div_ceil(SHARE_SCALE as u128) as Nanos
+    let numerator = price.0 as u128 * qty.0 as u128;
+    Nanos(numerator.div_ceil(SHARE_SCALE as u128) as u64)
+}
+
+/// Exact integer `ceil(value * numer / denom)` computed with `i128`
+/// intermediates.
+///
+/// This is the **consensus-canonical** way to scale a reservation down by the
+/// fraction `numer / denom` (e.g. releasing part of a resting order's balance
+/// or position reservation on a partial fill). The result is committed into the
+/// state root via `RestingOrderSnapshot` / `AccountReservationSnapshot` leaves,
+/// so every re-execution (sequencer, verifier, guest) must derive it bit for
+/// bit identically.
+///
+/// # Why this replaced an `f64` path (SEQ-2)
+///
+/// The historical code computed `(value as f64 * (numer as f64 / denom as f64))
+/// .ceil()`. Above `2^53` nanodollars an `f64` can no longer represent every
+/// integer, so an independent re-execution could round differently and derive a
+/// different root — a soundness break on the state-root path. Even *inside* the
+/// "sane" range (`< 2^53`) the `f64` path is not equal to exact integer ceiling:
+/// e.g. `value=2997, numer=17, denom=999` gives `ceil(51.000000000000007) = 52`
+/// in `f64` but the exact integer ceiling is `51`. This function returns the
+/// exact integer value; that is the intended (devnet-stage) consensus
+/// definition, and [`tests::ceil_mul_ratio_pins_f64_divergence`] pins the
+/// divergence case so it can never be "fixed" back to the float behaviour.
+///
+/// # Panics / overflow
+///
+/// `value`, `numer`, `denom` are widened to `u128`, so `value * numer` cannot
+/// overflow for any `u64` operands. Panics if `denom == 0` (callers guarantee a
+/// non-zero denominator, e.g. `max_fill > 0`).
+pub fn ceil_mul_ratio(value: u64, numer: u64, denom: u64) -> u64 {
+    assert!(denom != 0, "ceil_mul_ratio: denom must be non-zero");
+    let numerator = value as u128 * numer as u128;
+    numerator.div_ceil(denom as u128) as u64
 }
 
 /// Signed floor of `price_nanos * qty / SHARE_SCALE`.
 pub fn signed_notional_nanos(price: Nanos, qty: i64) -> i64 {
-    let abs = notional_nanos(price, qty.unsigned_abs()) as i64;
+    let abs = notional_nanos(price, Qty(qty.unsigned_abs())).0 as i64;
     if qty < 0 {
         -abs
     } else {
@@ -58,7 +219,7 @@ pub fn signed_notional_nanos(price: Nanos, qty: i64) -> i64 {
 
 /// Signed floor of `price_delta_nanos * qty / SHARE_SCALE`.
 pub fn signed_price_delta_notional(price_delta: i64, qty: Qty) -> i64 {
-    let abs = ((price_delta.unsigned_abs() as u128 * qty as u128) / SHARE_SCALE as u128) as i64;
+    let abs = ((price_delta.unsigned_abs() as u128 * qty.0 as u128) / SHARE_SCALE as u128) as i64;
     if price_delta < 0 {
         -abs
     } else {
@@ -164,28 +325,32 @@ impl fmt::Display for OrderDirection {
 }
 
 /// Helper functions for converting between Nanos and human-readable prices
+// Exempt from the f64 ban: these are display/UX conversions (human-readable
+// dollar/price formatting and parsing). They never produce a value committed
+// into the state root — money on the consensus path stays integer nanos.
+#[allow(clippy::disallowed_types)]
 pub mod conversions {
     use super::{Nanos, NANOS_PER_DOLLAR};
 
     /// Convert a decimal price (e.g., 0.53 for 53 cents) to nanos
     /// Price should be in [0, 1] for probability markets
     pub fn price_to_nanos(price: f64) -> Nanos {
-        (price * NANOS_PER_DOLLAR as f64).round() as Nanos
+        Nanos((price * NANOS_PER_DOLLAR as f64).round() as u64)
     }
 
     /// Convert nanos back to a decimal price
     pub fn nanos_to_price(nanos: Nanos) -> f64 {
-        nanos as f64 / NANOS_PER_DOLLAR as f64
+        nanos.0 as f64 / NANOS_PER_DOLLAR as f64
     }
 
     /// Convert dollars to nanos
     pub fn dollars_to_nanos(dollars: f64) -> Nanos {
-        (dollars * NANOS_PER_DOLLAR as f64).round() as Nanos
+        Nanos((dollars * NANOS_PER_DOLLAR as f64).round() as u64)
     }
 
     /// Convert nanos to dollars
     pub fn nanos_to_dollars(nanos: Nanos) -> f64 {
-        nanos as f64 / NANOS_PER_DOLLAR as f64
+        nanos.0 as f64 / NANOS_PER_DOLLAR as f64
     }
 
     /// Format nanos as a price string (e.g., "0.53")
@@ -228,6 +393,48 @@ mod tests {
         let nanos = price_to_nanos(price);
         let recovered = nanos_to_price(nanos);
         assert!((price - recovered).abs() < 1e-9);
+    }
+
+    /// Pins the exact-integer semantics of [`ceil_mul_ratio`] against the
+    /// historical `f64` reservation-scaling path (SEQ-2). The old code was
+    /// `(value as f64 * (numer as f64 / denom as f64)).ceil() as i64`, which on
+    /// this input yields `ceil(51.000000000000007) = 52`. The consensus-correct
+    /// integer answer is `51`. If anyone "restores" the float behaviour this
+    /// test fails.
+    // Deliberately exercises the old f64 path to prove the divergence.
+    #[allow(clippy::disallowed_types)]
+    #[test]
+    fn ceil_mul_ratio_pins_f64_divergence() {
+        let value = 2997u64;
+        let numer = 17u64;
+        let denom = 999u64;
+
+        // The integer path is exact: 2997*17 = 50949, 50949/999 = 51 exactly.
+        assert_eq!(ceil_mul_ratio(value, numer, denom), 51);
+
+        // Demonstrate the divergence the fix intentionally corrects.
+        let f64_result = (value as f64 * (numer as f64 / denom as f64)).ceil() as u64;
+        assert_eq!(f64_result, 52, "f64 path diverges (this is the SEQ-2 bug)");
+        assert_ne!(ceil_mul_ratio(value, numer, denom), f64_result);
+    }
+
+    #[test]
+    fn ceil_mul_ratio_basic_and_high_range() {
+        // Exact division, no rounding.
+        assert_eq!(ceil_mul_ratio(100, 3, 3), 100);
+        // Genuine ceiling.
+        assert_eq!(ceil_mul_ratio(10, 1, 3), 4); // 10/3 = 3.33 -> 4
+                                                 // remaining == max_fill -> unchanged.
+        assert_eq!(ceil_mul_ratio(u64::MAX / 2, 5, 5), u64::MAX / 2);
+        // Above 2^53, where f64 loses integer precision but i128 stays exact.
+        let value = (1u64 << 53) + 1;
+        assert_eq!(ceil_mul_ratio(value, 4, 4), value);
+    }
+
+    #[test]
+    #[should_panic(expected = "denom must be non-zero")]
+    fn ceil_mul_ratio_zero_denom_panics() {
+        ceil_mul_ratio(1, 1, 0);
     }
 
     #[test]

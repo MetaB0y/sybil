@@ -16,3 +16,8 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
 comfy-table = "7"
+
+[lints.clippy]
+# f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);
+# this crate is legitimately floating-point (solver / sim / metrics / off-chain).
+disallowed_types = "allow"

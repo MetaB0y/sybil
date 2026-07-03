@@ -14,7 +14,7 @@ use std::time::Instant;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, Order, Problem};
+use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem};
 
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
@@ -201,7 +201,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             mm_budgets
                 .entry(mm_idx)
                 .or_default()
-                .insert(comp, problem.mm_constraints[mm_idx].max_capital);
+                .insert(comp, problem.mm_constraints[mm_idx].max_capital.0);
         }
 
         self.solves_parallel(
@@ -236,7 +236,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             mm_budgets
                 .entry(mm_idx)
                 .or_default()
-                .insert(comp, problem.mm_constraints[mm_idx].max_capital);
+                .insert(comp, problem.mm_constraints[mm_idx].max_capital.0);
         }
 
         // Build order lookup for initialization
@@ -279,9 +279,9 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             let last_idx = weights.len() - 1;
             for (i, &(comp, w)) in weights.iter().enumerate() {
                 if i == last_idx {
-                    map.insert(comp, total - allocated);
+                    map.insert(comp, total.0 - allocated);
                 } else {
-                    let budget = (total as f64 * w / total_weight).round() as u64;
+                    let budget = (total.0 as f64 * w / total_weight).round() as u64;
                     map.insert(comp, budget);
                     allocated += budget;
                 }
@@ -361,7 +361,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
                     .filter(|c| !pos_comps.contains(c))
                     .map(|c| budgets.get(c).copied().unwrap_or(0))
                     .sum();
-                let pos_budget = full_budget.saturating_sub(seller_reserved);
+                let pos_budget = full_budget.0.saturating_sub(seller_reserved);
 
                 // Mirror descent: B_k^m ← B_k^m × (U_k^m)^η, then normalize.
                 // Floor at 1.0 to prevent permanent starvation (mirror descent
@@ -630,7 +630,7 @@ fn build_sub_problem(
             continue;
         }
 
-        let mut new_mm = MmConstraint::new(mm.mm_id, budget);
+        let mut new_mm = MmConstraint::new(mm.mm_id, Nanos(budget));
         for &oid in &filtered_order_ids {
             if let Some(&side) = mm.order_sides.get(&oid) {
                 new_mm.add_order(oid, side);
@@ -708,7 +708,7 @@ fn compute_mm_utilities(
                     }
                     if let Some(fills) = fill_lookup.get(&comp) {
                         if let Some(fill) = fills.get(&oid) {
-                            utility += w_i * fill.fill_qty as f64;
+                            utility += w_i * fill.fill_qty.0 as f64;
                         }
                     }
                 }
@@ -802,7 +802,7 @@ fn check_convergence(
 /// Merge results from all components into a unified PipelineResult.
 fn aggregate_results(component_results: Vec<PipelineResult>) -> PipelineResult {
     let mut merged = MatchingResult::new();
-    let mut prices: HashMap<MarketId, Vec<u64>> = HashMap::new();
+    let mut prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
     let mut total_solve_time = 0.0f64;
 
     for result in &component_results {
@@ -1018,7 +1018,7 @@ mod tests {
         problem.orders.push(mm_a);
         problem.orders.push(mm_b);
 
-        let mut mm = MmConstraint::new(MmId(1), 100 * NANOS_PER_DOLLAR);
+        let mut mm = MmConstraint::new(MmId(1), Nanos(100 * NANOS_PER_DOLLAR));
         mm.add_order(100, MmSide::BuyNo);
         mm.add_order(101, MmSide::BuyNo);
         problem.mm_constraints.push(mm);
@@ -1063,7 +1063,7 @@ mod tests {
         problem.orders.push(mm_a);
         problem.orders.push(mm_b);
 
-        let mut mm = MmConstraint::new(MmId(1), 200 * NANOS_PER_DOLLAR);
+        let mut mm = MmConstraint::new(MmId(1), Nanos(200 * NANOS_PER_DOLLAR));
         mm.add_order(100, MmSide::BuyNo);
         mm.add_order(101, MmSide::BuyNo);
         problem.mm_constraints.push(mm);

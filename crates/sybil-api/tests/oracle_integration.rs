@@ -3,7 +3,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use matching_engine::NANOS_PER_DOLLAR;
+use matching_engine::{Nanos, NANOS_PER_DOLLAR};
 use matching_sequencer::crypto::sign_attestation;
 use p256::ecdsa::SigningKey;
 use p256::elliptic_curve::rand_core::UnwrapErr;
@@ -90,7 +90,7 @@ async fn signed_resolve_via_polymarket_template_succeeds() {
     // Sign an attestation and POST.
     let attestation = ResolutionAttestation {
         market_id: matching_engine::MarketId::new(market_id),
-        payout_nanos: NANOS_PER_DOLLAR,
+        payout_nanos: Nanos(NANOS_PER_DOLLAR),
         nonce: 1_700_000_000,
     };
     let signed = sign_attestation(attestation, &key);
@@ -169,7 +169,7 @@ async fn mis_signed_attestation_rejected() {
     // attacker's pubkey (so signature verifies but pubkey != registered feed).
     let attestation = ResolutionAttestation {
         market_id: matching_engine::MarketId::new(market_id),
-        payout_nanos: 0,
+        payout_nanos: Nanos(0),
         nonce: 42,
     };
     let signed = sign_attestation(attestation, &attacker_key);

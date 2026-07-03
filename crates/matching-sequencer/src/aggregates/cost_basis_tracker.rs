@@ -51,7 +51,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{signed_price_delta_notional, MarketId, NANOS_PER_DOLLAR};
+use matching_engine::{signed_price_delta_notional, MarketId, Qty, NANOS_PER_DOLLAR};
 use serde::{Deserialize, Serialize};
 
 use crate::account::{Account, AccountId};
@@ -151,9 +151,9 @@ impl CostBasisTracker {
         // Opposite sign — reducing or flipping.
         let close_qty = delta.unsigned_abs().min(prior_qty.unsigned_abs()) as i128;
         let pnl = if prior_qty > 0 {
-            signed_price_delta_notional(entry_price - prior_basis, close_qty as u64) as i128
+            signed_price_delta_notional(entry_price - prior_basis, Qty(close_qty as u64)) as i128
         } else {
-            signed_price_delta_notional(prior_basis - entry_price, close_qty as u64) as i128
+            signed_price_delta_notional(prior_basis - entry_price, Qty(close_qty as u64)) as i128
         };
         *self.realized.entry(account_id).or_insert(0) += pnl as i64;
 
@@ -181,9 +181,9 @@ impl CostBasisTracker {
             let key = (account_id, market_id, outcome);
             let basis = self.basis.get(&key).copied().unwrap_or(0);
             let pnl = if qty > 0 {
-                signed_price_delta_notional(close_price - basis, qty.unsigned_abs()) as i128
+                signed_price_delta_notional(close_price - basis, Qty(qty.unsigned_abs())) as i128
             } else {
-                signed_price_delta_notional(basis - close_price, qty.unsigned_abs()) as i128
+                signed_price_delta_notional(basis - close_price, Qty(qty.unsigned_abs())) as i128
             };
             *self.realized.entry(account_id).or_insert(0) += pnl as i64;
             self.basis.remove(&key);
@@ -223,7 +223,7 @@ pub struct CostBasisTrackerSnapshot {
 mod tests {
     use super::*;
     use crate::account::Account;
-    use matching_engine::{shares_to_qty, signed_price_delta_notional, NANOS_PER_DOLLAR};
+    use matching_engine::{shares_to_qty, signed_price_delta_notional, Qty, NANOS_PER_DOLLAR};
 
     fn aid(n: u64) -> AccountId {
         AccountId(n)
@@ -241,7 +241,7 @@ mod tests {
     }
 
     fn q(shares: u64) -> i64 {
-        shares_to_qty(shares) as i64
+        shares_to_qty(shares).0 as i64
     }
 
     #[test]
@@ -298,7 +298,8 @@ mod tests {
         let payout = NANOS_PER_DOLLAR as i64;
         t.apply_resolution(m, payout, [(a, 0u8, q(10))]);
 
-        let expected = signed_price_delta_notional((NANOS_PER_DOLLAR as i64) - p, q(10) as u64);
+        let expected =
+            signed_price_delta_notional((NANOS_PER_DOLLAR as i64) - p, Qty(q(10) as u64));
         assert_eq!(t.realized_pnl(a), expected);
         // Basis cleared after resolution.
         assert_eq!(t.cost_basis(a, m, 0), 0);
@@ -359,7 +360,7 @@ mod tests {
         t.apply_resolution(m, 0, [(a, 0u8, q(10))]);
         assert_eq!(
             t.realized_pnl(a),
-            signed_price_delta_notional(-basis, q(10) as u64)
+            signed_price_delta_notional(-basis, Qty(q(10) as u64))
         );
     }
 
@@ -415,7 +416,7 @@ mod tests {
 
         t.apply_resolution(m, 0, [(a, 1u8, q(10))]);
         let expected =
-            signed_price_delta_notional((NANOS_PER_DOLLAR as i64) - no_price, q(10) as u64);
+            signed_price_delta_notional((NANOS_PER_DOLLAR as i64) - no_price, Qty(q(10) as u64));
         assert_eq!(t.realized_pnl(a), expected);
         assert_eq!(t.cost_basis(a, m, 1), 0); // dropped after resolution
     }
@@ -436,7 +437,7 @@ mod tests {
         t.apply_resolution(m, NANOS_PER_DOLLAR as i64, [(a, 1u8, q(10))]);
         assert_eq!(
             t.realized_pnl(a),
-            signed_price_delta_notional(-no_price, q(10) as u64)
+            signed_price_delta_notional(-no_price, Qty(q(10) as u64))
         );
     }
 
@@ -460,7 +461,7 @@ mod tests {
 
         assert_eq!(
             t.realized_pnl(a),
-            signed_price_delta_notional(sell - buy, q(4) as u64)
+            signed_price_delta_notional(sell - buy, Qty(q(4) as u64))
         );
         assert_eq!(t.cost_basis(a, m, 1), buy);
     }

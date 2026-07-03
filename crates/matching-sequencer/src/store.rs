@@ -2835,8 +2835,8 @@ mod tests {
             let point = crate::market_info::PricePoint {
                 height,
                 timestamp_ms: header.timestamp_ms,
-                yes_price: 500_000_000 + height,
-                no_price: 500_000_000 - height,
+                yes_price: Nanos(500_000_000 + height),
+                no_price: Nanos(500_000_000 - height),
                 volume_nanos: height * 10,
             };
             let block = sample_sealed_block(&header);
@@ -2918,8 +2918,8 @@ mod tests {
             let point = crate::market_info::PricePoint {
                 height,
                 timestamp_ms: header.timestamp_ms,
-                yes_price: 500_000_000,
-                no_price: 500_000_000,
+                yes_price: Nanos(500_000_000),
+                no_price: Nanos(500_000_000),
                 volume_nanos: 1,
             };
             let block = sample_sealed_block(&header);
@@ -2997,8 +2997,8 @@ mod tests {
             let point = crate::market_info::PricePoint {
                 height,
                 timestamp_ms,
-                yes_price,
-                no_price,
+                yes_price: Nanos(yes_price),
+                no_price: Nanos(no_price),
                 volume_nanos,
             };
             store
@@ -3029,14 +3029,14 @@ mod tests {
         assert_eq!(first.bucket_end_ms, 60_000);
         assert_eq!(first.first_height, 1);
         assert_eq!(first.last_height, 2);
-        assert_eq!(first.open_yes_price, 500_000_000);
-        assert_eq!(first.high_yes_price, 700_000_000);
-        assert_eq!(first.low_yes_price, 500_000_000);
-        assert_eq!(first.close_yes_price, 700_000_000);
-        assert_eq!(first.open_no_price, 500_000_000);
-        assert_eq!(first.high_no_price, 500_000_000);
-        assert_eq!(first.low_no_price, 300_000_000);
-        assert_eq!(first.close_no_price, 300_000_000);
+        assert_eq!(first.open_yes_price, Nanos(500_000_000));
+        assert_eq!(first.high_yes_price, Nanos(700_000_000));
+        assert_eq!(first.low_yes_price, Nanos(500_000_000));
+        assert_eq!(first.close_yes_price, Nanos(700_000_000));
+        assert_eq!(first.open_no_price, Nanos(500_000_000));
+        assert_eq!(first.high_no_price, Nanos(500_000_000));
+        assert_eq!(first.low_no_price, Nanos(300_000_000));
+        assert_eq!(first.close_no_price, Nanos(300_000_000));
         assert_eq!(first.volume_nanos, 30);
         assert_eq!(first.point_count, 2);
 
@@ -3044,8 +3044,8 @@ mod tests {
         assert_eq!(second.bucket_start_ms, 60_000);
         assert_eq!(second.first_height, 3);
         assert_eq!(second.last_height, 3);
-        assert_eq!(second.open_yes_price, 600_000_000);
-        assert_eq!(second.close_yes_price, 600_000_000);
+        assert_eq!(second.open_yes_price, Nanos(600_000_000));
+        assert_eq!(second.close_yes_price, Nanos(600_000_000));
         assert_eq!(second.volume_nanos, 30);
         assert_eq!(second.point_count, 1);
 
@@ -3612,7 +3612,7 @@ mod tests {
         let fill = AccountFillRecord {
             order_id: 42,
             fill_qty: 7,
-            fill_price: 600_000_000,
+            fill_price: Nanos(600_000_000),
             block_height: 1,
             timestamp_ms: 1_000,
             position_deltas: vec![(market_id, 0, 7)],
@@ -4216,7 +4216,7 @@ mod tests {
             .unwrap();
 
         let order = outcome_buy(&markets, 7, market_id, 0, NANOS_PER_DOLLAR / 2, 3);
-        let mut constraint = MmConstraint::new(MmId(1), 5 * NANOS_PER_DOLLAR);
+        let mut constraint = MmConstraint::new(MmId(1), Nanos(5 * NANOS_PER_DOLLAR));
         constraint.add_order(7, MmSide::BuyYes);
         let sub = OrderSubmission {
             account_id: AccountId(42),

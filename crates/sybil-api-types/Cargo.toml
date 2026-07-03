@@ -14,3 +14,9 @@ utoipa = { version = "5", features = ["axum_extras"], optional = true }
 
 [dev-dependencies]
 serde_json = "1"
+
+[lints.clippy]
+# f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,
+# matching-sequencer). This crate is not on the state-root arithmetic path;
+# opt out so macro-generated / off-chain f64 does not trip the workspace lint.
+disallowed_types = "allow"

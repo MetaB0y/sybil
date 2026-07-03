@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use matching_engine::{
-    outcome_buy, outcome_sell, MarketId, MarketSet, Nanos, Order, NANOS_PER_DOLLAR,
+    outcome_buy, outcome_sell, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR,
 };
 use matching_sequencer::block::SealedBlock;
 use matching_sequencer::error::Rejection;
@@ -52,7 +52,7 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
             affected_accounts,
         } => SystemEventResponse::MarketResolved {
             market_id: market_id.0,
-            payout_nanos: *payout_nanos,
+            payout_nanos: payout_nanos.0,
             affected_accounts: affected_accounts.iter().map(|id| id.0).collect(),
         },
         matching_sequencer::SystemEvent::OrderCancelled {
@@ -151,8 +151,8 @@ pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
         .iter()
         .map(|f| FillResponse {
             order_id: f.order_id,
-            fill_qty: f.fill_qty,
-            fill_price_nanos: f.fill_price,
+            fill_qty: f.fill_qty.0,
+            fill_price_nanos: f.fill_price.0,
             account_id: f.account_id,
         })
         .collect();
@@ -161,7 +161,7 @@ pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
         .canonical
         .clearing_prices
         .iter()
-        .map(|(mid, prices)| (mid.0.to_string(), prices.to_vec()))
+        .map(|(mid, prices)| (mid.0.to_string(), prices.iter().map(|n| n.0).collect()))
         .collect();
 
     let rejections = block
@@ -235,8 +235,8 @@ fn rejection_to_response(r: &Rejection) -> RejectionResponse {
 pub fn prices_to_response(prices: &HashMap<MarketId, Vec<Nanos>>) -> MarketPricesResponse {
     let mut map = HashMap::new();
     for (mid, ps) in prices {
-        let yes_price_nanos = ps.first().copied().unwrap_or(NANOS_PER_DOLLAR / 2);
-        let no_price_nanos = ps.get(1).copied().unwrap_or(NANOS_PER_DOLLAR / 2);
+        let yes_price_nanos = ps.first().map(|n| n.0).unwrap_or(NANOS_PER_DOLLAR / 2);
+        let no_price_nanos = ps.get(1).map(|n| n.0).unwrap_or(NANOS_PER_DOLLAR / 2);
         map.insert(
             mid.0.to_string(),
             MarketPriceResponse {
@@ -312,8 +312,8 @@ pub fn signed_order_data_to_order(data: &SignedOrderData) -> Result<Order, Strin
     order.num_states = 2;
     order.payoffs[0] = data.payoffs[0];
     order.payoffs[1] = data.payoffs[1];
-    order.limit_price = data.limit_price_nanos;
-    order.max_fill = data.max_fill;
+    order.limit_price = Nanos(data.limit_price_nanos);
+    order.max_fill = Qty(data.max_fill);
 
     validate_public_order_shape(&order)?;
 
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(order.markets[0], MarketId::new(0));
         assert_eq!(order.payoffs[0], 1); // YES payoff
         assert_eq!(order.payoffs[1], 0); // NO payoff
-        assert_eq!(order.max_fill, 10);
+        assert_eq!(order.max_fill, Qty(10));
     }
 
     #[test]
@@ -412,7 +412,7 @@ mod tests {
         };
         let order = order_spec_to_order(&spec, &ms).unwrap();
         assert_eq!(order.payoffs[0], -1); // Selling YES
-        assert_eq!(order.max_fill, 5);
+        assert_eq!(order.max_fill, Qty(5));
     }
 
     #[test]

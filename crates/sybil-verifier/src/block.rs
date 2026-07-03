@@ -310,7 +310,7 @@ mod tests {
         OracleSourceSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot, WithdrawalSnapshot,
         WitnessBlockHeader,
     };
-    use matching_engine::MarketId;
+    use matching_engine::{MarketId, Nanos, Qty};
     use proptest::prelude::*;
     use std::collections::HashMap;
 
@@ -507,8 +507,8 @@ mod tests {
         order.num_markets = 1;
         order.num_states = 2;
         order.payoffs[0] = 1;
-        order.limit_price = 500_000_000;
-        order.max_fill = 3;
+        order.limit_price = Nanos(500_000_000);
+        order.max_fill = Qty(3);
 
         let sidecar = StateSidecarSnapshot {
             resting_orders: vec![RestingOrderSnapshot {
@@ -537,11 +537,11 @@ mod tests {
     fn test_state_root_order_book_leaves_are_order_independent() {
         let accounts = vec![];
         let mut first_order = matching_engine::Order::new(2);
-        first_order.limit_price = 500_000_000;
-        first_order.max_fill = 2;
+        first_order.limit_price = Nanos(500_000_000);
+        first_order.max_fill = Qty(2);
         let mut second_order = matching_engine::Order::new(1);
-        second_order.limit_price = 600_000_000;
-        second_order.max_fill = 1;
+        second_order.limit_price = Nanos(600_000_000);
+        second_order.max_fill = Qty(1);
         let first = RestingOrderSnapshot {
             order: first_order,
             account_id: 7,
@@ -600,7 +600,7 @@ mod tests {
         resolved.status = MarketStatusSnapshot::Resolved {
             record: ResolutionRecordSnapshot {
                 market_id: MarketId::new(1),
-                payout_nanos: 1_000_000_000,
+                payout_nanos: Nanos(1_000_000_000),
                 resolved_by: OracleSourceSnapshot::Admin,
                 resolved_at_ms: 42,
                 proposal: None,

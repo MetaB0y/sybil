@@ -223,7 +223,7 @@ pub(crate) fn build_and_solve_lp(
     // q_i: fill quantity for order i
     let q_cols: Vec<_> = (0..n)
         .map(|i| {
-            let ub = orders[i].max_fill as f64;
+            let ub = orders[i].max_fill.0 as f64;
             pb.add_column(objective_coeffs[i], 0.0..=ub)
         })
         .collect();
@@ -374,17 +374,17 @@ pub(crate) fn normalized_yes_prices(
         let dual_y = solution.dual_yes.get(&market).copied().unwrap_or(0.0);
         let dual_n = solution.dual_no.get(&market).copied().unwrap_or(0.0);
 
-        let p_yes_raw = dual_y.abs().round().clamp(0.0, nanos_f) as Nanos;
-        let p_no_raw = dual_n.abs().round().clamp(0.0, nanos_f) as Nanos;
+        let p_yes_raw = dual_y.abs().round().clamp(0.0, nanos_f) as u64;
+        let p_no_raw = dual_n.abs().round().clamp(0.0, nanos_f) as u64;
 
         let sum = p_yes_raw + p_no_raw;
         let p_yes = if sum > 0 {
             let scale = nanos_f / sum as f64;
-            (p_yes_raw as f64 * scale).round() as Nanos
+            Nanos((p_yes_raw as f64 * scale).round() as u64)
         } else {
             // No price signal — use 50/50 as neutral default.
             // Only happens when no orders touch the market.
-            NANOS_PER_DOLLAR / 2
+            Nanos(NANOS_PER_DOLLAR / 2)
         };
 
         prices.insert(market, p_yes);
@@ -420,7 +420,12 @@ pub(crate) fn extract_result(
     let yes_prices = normalized_yes_prices(solution, markets);
     let clearing_prices: HashMap<MarketId, Vec<Nanos>> = yes_prices
         .iter()
-        .map(|(&m, &p_yes)| (m, vec![p_yes, NANOS_PER_DOLLAR.saturating_sub(p_yes)]))
+        .map(|(&m, &p_yes)| {
+            (
+                m,
+                vec![p_yes, Nanos(NANOS_PER_DOLLAR.saturating_sub(p_yes.0))],
+            )
+        })
         .collect();
 
     // Extract fills from primal solution
@@ -431,8 +436,8 @@ pub(crate) fn extract_result(
             continue;
         }
 
-        let fill_qty = q_val.round() as Qty;
-        if fill_qty == 0 {
+        let fill_qty = Qty(q_val.round() as u64);
+        if fill_qty == Qty::ZERO {
             result.orders_unfilled_liquidity += 1;
             continue;
         }
@@ -445,11 +450,11 @@ pub(crate) fn extract_result(
             .get(&market)
             .and_then(|v| v.first())
             .copied()
-            .unwrap_or(0);
+            .unwrap_or(Nanos(0));
         let fill_price = if order.payoffs[0] != 0 {
             p_yes
         } else {
-            NANOS_PER_DOLLAR.saturating_sub(p_yes)
+            Nanos(NANOS_PER_DOLLAR.saturating_sub(p_yes.0))
         };
 
         let fill = Fill::new(order.id, fill_qty, fill_price);
@@ -472,19 +477,19 @@ pub(crate) fn has_mm_budget_violations(
         let total_capital: u128 = mm_constraint_orders[mm_idx]
             .iter()
             .map(|&(i, side)| {
-                let q = solution.q_values[i].round() as Qty;
-                if q == 0 {
+                let q = Qty(solution.q_values[i].round() as u64);
+                if q == Qty::ZERO {
                     return 0;
                 }
                 let p_yes = prices
                     .get(&orders[i].markets[0])
                     .copied()
-                    .unwrap_or(NANOS_PER_DOLLAR / 2);
-                side.capital_needed(p_yes, q) as u128
+                    .unwrap_or(Nanos(NANOS_PER_DOLLAR / 2));
+                side.capital_needed(p_yes, q).0 as u128
             })
             .sum();
 
-        if total_capital > mm.max_capital as u128 {
+        if total_capital > mm.max_capital.0 as u128 {
             return true;
         }
     }
@@ -513,12 +518,12 @@ pub(crate) fn linearize_mm_budgets(
                     let p_yes = prices
                         .get(&orders[i].markets[0])
                         .copied()
-                        .unwrap_or(NANOS_PER_DOLLAR / 2);
-                    let cpu = side.capital_needed(p_yes, 1) as f64;
+                        .unwrap_or(Nanos(NANOS_PER_DOLLAR / 2));
+                    let cpu = side.capital_needed(p_yes, Qty(1)).0 as f64;
                     (cpu > 0.0).then_some((i, cpu))
                 })
                 .collect();
-            (terms, mm.max_capital as f64)
+            (terms, mm.max_capital.0 as f64)
         })
         .collect()
 }
@@ -540,14 +545,14 @@ pub(crate) fn trim_mm_budget_overflows(
             let Some(&(oi_mm_idx, side)) = mm_order_info.get(&fill.order_id) else {
                 continue;
             };
-            if oi_mm_idx != mm_idx || fill.fill_qty == 0 {
+            if oi_mm_idx != mm_idx || fill.fill_qty == Qty::ZERO {
                 continue;
             }
-            mm_fills.push((fi, side.capital_needed(fill.fill_price, fill.fill_qty)));
+            mm_fills.push((fi, side.capital_needed(fill.fill_price, fill.fill_qty).0));
         }
 
         let total_capital: u128 = mm_fills.iter().map(|&(_, c)| c as u128).sum();
-        if total_capital <= mm.max_capital as u128 {
+        if total_capital <= mm.max_capital.0 as u128 {
             continue;
         }
 
@@ -556,7 +561,7 @@ pub(crate) fn trim_mm_budget_overflows(
 
         let mut remaining = total_capital;
         for &(fi, _) in &mm_fills {
-            if remaining <= mm.max_capital as u128 {
+            if remaining <= mm.max_capital.0 as u128 {
                 break;
             }
             let fill = &result.fills[fi];
@@ -566,9 +571,9 @@ pub(crate) fn trim_mm_budget_overflows(
             let trim = trim_qty_to_fit_budget(
                 side,
                 fill.fill_price,
-                fill.fill_qty,
+                fill.fill_qty.0,
                 remaining,
-                mm.max_capital as u128,
+                mm.max_capital.0 as u128,
             );
             if trim == 0 {
                 continue;
@@ -576,28 +581,28 @@ pub(crate) fn trim_mm_budget_overflows(
 
             let fill_price = fill.fill_price;
             let old_qty = result.fills[fi].fill_qty;
-            let old_capital = side.capital_needed(fill_price, old_qty) as u128;
-            result.fills[fi].fill_qty -= trim;
-            let new_capital = side.capital_needed(fill_price, result.fills[fi].fill_qty) as u128;
+            let old_capital = side.capital_needed(fill_price, old_qty).0 as u128;
+            result.fills[fi].fill_qty.0 -= trim;
+            let new_capital = side.capital_needed(fill_price, result.fills[fi].fill_qty).0 as u128;
             remaining = remaining - old_capital + new_capital;
         }
     }
 
-    result.fills.retain(|f| f.fill_qty > 0);
+    result.fills.retain(|f| f.fill_qty.0 > 0);
 }
 
 fn trim_qty_to_fit_budget(
     side: MmSide,
     fill_price: Nanos,
-    fill_qty: Qty,
+    fill_qty: u64,
     remaining_capital: u128,
     budget: u128,
-) -> Qty {
+) -> u64 {
     if remaining_capital <= budget || fill_qty == 0 {
         return 0;
     }
 
-    let old_capital = side.capital_needed(fill_price, fill_qty) as u128;
+    let old_capital = side.capital_needed(fill_price, Qty(fill_qty)).0 as u128;
     if old_capital == 0 {
         return 0;
     }
@@ -611,7 +616,7 @@ fn trim_qty_to_fit_budget(
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
         let new_qty = fill_qty - mid;
-        let new_capital = side.capital_needed(fill_price, new_qty) as u128;
+        let new_capital = side.capital_needed(fill_price, Qty(new_qty)).0 as u128;
         let after_trim = remaining_capital - old_capital + new_capital;
         if after_trim <= budget {
             hi = mid;
@@ -638,7 +643,7 @@ pub(crate) fn trim_zero_price_minting(
             continue;
         }
         *diff_by_market.entry(order.markets[0]).or_insert(0) +=
-            diff_coeff as i128 * fill.fill_qty as i128;
+            diff_coeff as i128 * fill.fill_qty.0 as i128;
     }
 
     for (market, diff) in diff_by_market {
@@ -656,7 +661,7 @@ pub(crate) fn trim_zero_price_minting(
                 if order.markets[0] != market || outcome_diff_coeff(order) != trim_direction {
                     return None;
                 }
-                Some((fill_idx, fill.fill_qty))
+                Some((fill_idx, fill.fill_qty.0))
             })
             .collect();
         candidates.sort_by_key(|&(_, qty)| qty);
@@ -670,12 +675,12 @@ pub(crate) fn trim_zero_price_minting(
             } else {
                 remaining as u64
             };
-            result.fills[fill_idx].fill_qty -= trim;
+            result.fills[fill_idx].fill_qty.0 -= trim;
             remaining -= trim as u128;
         }
     }
 
-    result.fills.retain(|fill| fill.fill_qty > 0);
+    result.fills.retain(|fill| fill.fill_qty.0 > 0);
 }
 
 fn zero_price_mint_direction(
@@ -692,8 +697,8 @@ fn zero_price_mint_direction(
         prices
             .and_then(|market_prices| market_prices.get(outcome))
             .copied()
-            .unwrap_or(0)
-            == 0
+            .unwrap_or(Nanos(0))
+            == Nanos(0)
     };
 
     if diff > 0 && missing_or_zero(0) {
@@ -714,7 +719,7 @@ fn outcome_diff_coeff(order: &Order) -> i8 {
 /// Buyers contribute `+limit_price`, sellers `-limit_price`. This is the
 /// linear welfare coefficient shared by every LP-family objective.
 pub(crate) fn welfare_weight(order: &Order) -> f64 {
-    order_sign(order) * order.limit_price as f64
+    order_sign(order) * order.limit_price.0 as f64
 }
 
 /// Per-order welfare weights (`sign × limit price`) for all orders, in order.
@@ -841,7 +846,7 @@ pub(crate) fn project_and_finalize(
         } else {
             allocation[i].ceil() as u64
         };
-        order.max_fill = core_fill.min(orders[i].max_fill);
+        order.max_fill = Qty(core_fill.min(orders[i].max_fill.0));
     }
 
     let projection_obj = welfare_weights(orders);
@@ -872,7 +877,7 @@ pub(crate) fn recompute_welfare(
         if let Some(&order) = order_map.get(&fill.order_id) {
             result.gross_welfare += order.gross_welfare_contribution(fill.fill_qty);
         }
-        result.total_quantity_filled += fill.fill_qty;
+        result.total_quantity_filled += fill.fill_qty.0;
         result.orders_filled += 1;
     }
     result.minting_cost =

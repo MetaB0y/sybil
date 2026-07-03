@@ -65,10 +65,10 @@ impl Agent for InformedTrader {
             }
 
             // Get market price (default 0.50)
-            let default_prices = vec![NANOS_PER_DOLLAR / 2, NANOS_PER_DOLLAR / 2];
+            let default_prices = vec![Nanos(NANOS_PER_DOLLAR / 2), Nanos(NANOS_PER_DOLLAR / 2)];
             let last_prices = view.last_prices.get(&market_id).unwrap_or(&default_prices);
-            let yes_market_price = last_prices[0] as f64 / NANOS_PER_DOLLAR as f64;
-            let no_market_price = last_prices[1] as f64 / NANOS_PER_DOLLAR as f64;
+            let yes_market_price = last_prices[0].0 as f64 / NANOS_PER_DOLLAR as f64;
+            let no_market_price = last_prices[1].0 as f64 / NANOS_PER_DOLLAR as f64;
 
             // Check edge for YES buy (market underprices YES)
             let yes_edge = true_prob - yes_market_price;
@@ -77,7 +77,7 @@ impl Agent for InformedTrader {
                 if current_pos < self.max_position {
                     // Buy YES at a price between market and true value
                     let limit_price =
-                        ((yes_market_price + true_prob) / 2.0 * NANOS_PER_DOLLAR as f64) as Nanos;
+                        ((yes_market_price + true_prob) / 2.0 * NANOS_PER_DOLLAR as f64) as u64;
                     let limit_price =
                         limit_price.clamp(NANOS_PER_DOLLAR / 100, NANOS_PER_DOLLAR * 99 / 100);
 
@@ -100,7 +100,7 @@ impl Agent for InformedTrader {
                 if current_pos > 0 {
                     // Sell YES at a price between true value and market
                     let limit_price =
-                        ((true_prob + yes_market_price) / 2.0 * NANOS_PER_DOLLAR as f64) as Nanos;
+                        ((true_prob + yes_market_price) / 2.0 * NANOS_PER_DOLLAR as f64) as u64;
                     let limit_price =
                         limit_price.clamp(NANOS_PER_DOLLAR / 100, NANOS_PER_DOLLAR * 99 / 100);
 
@@ -121,7 +121,7 @@ impl Agent for InformedTrader {
                 let current_pos = account.position(market_id, 1);
                 if current_pos < self.max_position {
                     let limit_price = ((no_market_price + (1.0 - true_prob)) / 2.0
-                        * NANOS_PER_DOLLAR as f64) as Nanos;
+                        * NANOS_PER_DOLLAR as f64) as u64;
                     let limit_price =
                         limit_price.clamp(NANOS_PER_DOLLAR / 100, NANOS_PER_DOLLAR * 99 / 100);
 
@@ -143,7 +143,7 @@ impl Agent for InformedTrader {
                 let current_pos = account.position(market_id, 1);
                 if current_pos > 0 {
                     let limit_price = (((1.0 - true_prob) + no_market_price) / 2.0
-                        * NANOS_PER_DOLLAR as f64) as Nanos;
+                        * NANOS_PER_DOLLAR as f64) as u64;
                     let limit_price =
                         limit_price.clamp(NANOS_PER_DOLLAR / 100, NANOS_PER_DOLLAR * 99 / 100);
 

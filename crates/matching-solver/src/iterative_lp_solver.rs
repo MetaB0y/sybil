@@ -101,7 +101,7 @@ impl IterLpSolver {
         let mm_budgets: Vec<f64> = problem
             .mm_constraints
             .iter()
-            .map(|mm| mm.max_capital as f64)
+            .map(|mm| mm.max_capital.0 as f64)
             .collect();
 
         // Identify active MMs (positive budget AND at least one positive-welfare order)
@@ -238,7 +238,7 @@ mod tests {
     };
     use matching_engine::{
         outcome_sell, shares_to_qty, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint,
-        MmId, MmSide, NANOS_PER_DOLLAR,
+        MmId, MmSide, Nanos, NANOS_PER_DOLLAR,
     };
 
     fn dollars(nanos: i64) -> f64 {
@@ -394,7 +394,7 @@ mod tests {
                 i + 1,
                 market,
                 900_000_000 - i * 20_000_000,
-                shares_to_qty(100),
+                shares_to_qty(100).0,
             ));
         }
 
@@ -409,10 +409,10 @@ mod tests {
             200,
             market,
             600_000_000,
-            shares_to_qty(50_000),
+            shares_to_qty(50_000).0,
         );
         problem.orders.push(mm_order);
-        let mut mm = MmConstraint::new(MmId(1), 3 * NANOS_PER_DOLLAR);
+        let mut mm = MmConstraint::new(MmId(1), Nanos(3 * NANOS_PER_DOLLAR));
         mm.add_order(200, MmSide::BuyNo);
         problem.mm_constraints.push(mm);
 
@@ -424,7 +424,7 @@ mod tests {
                 market,
                 1,
                 350_000_000 + i * 15_000_000, // 35c to 48.5c
-                shares_to_qty(100),
+                shares_to_qty(100).0,
             ));
         }
 
@@ -491,21 +491,21 @@ mod tests {
         // MM1: tiny budget ($2), buys NO at 55c
         let mm1_order = simple_no_buy(&problem.markets, 200, market, 550_000_000, 50_000);
         problem.orders.push(mm1_order);
-        let mut mm1 = MmConstraint::new(MmId(1), 2 * NANOS_PER_DOLLAR);
+        let mut mm1 = MmConstraint::new(MmId(1), Nanos(2 * NANOS_PER_DOLLAR));
         mm1.add_order(200, MmSide::BuyNo);
         problem.mm_constraints.push(mm1);
 
         // MM2: medium budget ($20), buys NO at 50c
         let mm2_order = simple_no_buy(&problem.markets, 300, market, 500_000_000, 50_000);
         problem.orders.push(mm2_order);
-        let mut mm2 = MmConstraint::new(MmId(2), 20 * NANOS_PER_DOLLAR);
+        let mut mm2 = MmConstraint::new(MmId(2), Nanos(20 * NANOS_PER_DOLLAR));
         mm2.add_order(300, MmSide::BuyNo);
         problem.mm_constraints.push(mm2);
 
         // MM3: large budget ($200), buys NO at 45c
         let mm3_order = simple_no_buy(&problem.markets, 400, market, 450_000_000, 50_000);
         problem.orders.push(mm3_order);
-        let mut mm3 = MmConstraint::new(MmId(3), 200 * NANOS_PER_DOLLAR);
+        let mut mm3 = MmConstraint::new(MmId(3), Nanos(200 * NANOS_PER_DOLLAR));
         mm3.add_order(400, MmSide::BuyNo);
         problem.mm_constraints.push(mm3);
 
@@ -595,7 +595,7 @@ mod tests {
             );
             problem.orders.push(mm_order);
         }
-        let mut mm1 = MmConstraint::new(MmId(1), 5 * NANOS_PER_DOLLAR);
+        let mut mm1 = MmConstraint::new(MmId(1), Nanos(5 * NANOS_PER_DOLLAR));
         for &id in &mm1_ids {
             mm1.add_order(id, MmSide::BuyNo);
         }
@@ -613,7 +613,7 @@ mod tests {
             );
             problem.orders.push(mm_order);
         }
-        let mut mm2 = MmConstraint::new(MmId(2), 80 * NANOS_PER_DOLLAR);
+        let mut mm2 = MmConstraint::new(MmId(2), Nanos(80 * NANOS_PER_DOLLAR));
         for &id in &mm2_ids {
             mm2.add_order(id, MmSide::BuyNo);
         }
@@ -677,7 +677,7 @@ mod tests {
             // MM buying NO at 55c, huge capacity, variable budget
             let mm_order = simple_no_buy(&problem.markets, 200, market, 550_000_000, 100_000);
             problem.orders.push(mm_order);
-            let mut mm = MmConstraint::new(MmId(1), budget * NANOS_PER_DOLLAR);
+            let mut mm = MmConstraint::new(MmId(1), Nanos(budget * NANOS_PER_DOLLAR));
             mm.add_order(200, MmSide::BuyNo);
             problem.mm_constraints.push(mm);
 

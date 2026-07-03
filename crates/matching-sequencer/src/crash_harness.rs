@@ -1,3 +1,8 @@
+// Crash-injection test harness compiled into the lib for integration tests.
+// Its `.unwrap()`s assert setup invariants of a test scenario (keys, oracle
+// wiring, deterministic RNG); a panic here is the intended test-failure signal.
+#![allow(clippy::unwrap_used)]
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -610,7 +615,12 @@ impl Harness {
             1 => NANOS_PER_DOLLAR / 2,
             _ => NANOS_PER_DOLLAR,
         };
-        if self.handle.resolve_market(market_id, payout).await.is_ok() {
+        if self
+            .handle
+            .resolve_market(market_id, matching_engine::Nanos(payout))
+            .await
+            .is_ok()
+        {
             self.ledger.resolved_markets.insert(market_id);
         } else {
             self.unresolved_markets.push(market_id);

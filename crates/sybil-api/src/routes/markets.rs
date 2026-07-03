@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 
-use matching_engine::{MarketId, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
 use matching_sequencer::aggregates::OrderStats;
 use matching_sequencer::{
     MarketMetadata, ResolutionConfig, DEFAULT_PRICE_HISTORY_QUERY_POINTS,
@@ -112,7 +112,7 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         yes_price_nanos: args.yes_price_nanos,
         no_price_nanos: args.no_price_nanos,
         status: args.status.as_str().to_string(),
-        payout_nanos: args.status.payout_nanos(),
+        payout_nanos: args.status.payout_nanos().map(|n| n.0),
         challenge_deadline_ms: args.status.challenge_deadline_ms(),
         description: args
             .metadata
@@ -232,8 +232,8 @@ pub async fn list_markets(
             build_market_response(BuildMarketResponseArgs {
                 market_id: m.id.0,
                 name: m.name.clone(),
-                yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
-                no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
+                yes_price_nanos: market_prices.and_then(|p| p.first().map(|n| n.0)),
+                no_price_nanos: market_prices.and_then(|p| p.get(1).map(|n| n.0)),
                 status: &status,
                 metadata: metadata.get(&m.id),
                 volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
@@ -327,8 +327,8 @@ pub async fn list_markets_summary(
             MarketSummaryResponse {
                 market_id: m.id.0,
                 name: m.name.clone(),
-                yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
-                no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
+                yes_price_nanos: market_prices.and_then(|p| p.first().map(|n| n.0)),
+                no_price_nanos: market_prices.and_then(|p| p.get(1).map(|n| n.0)),
                 reference_price_nanos: ref_prices.get(&m.id.0).copied(),
                 volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
                 status: status.as_str().to_string(),
@@ -407,8 +407,8 @@ pub async fn get_market(
     Ok(Json(build_market_response(BuildMarketResponseArgs {
         market_id: market.id.0,
         name: market.name.clone(),
-        yes_price_nanos: market_prices.and_then(|p| p.first().copied()),
-        no_price_nanos: market_prices.and_then(|p| p.get(1).copied()),
+        yes_price_nanos: market_prices.and_then(|p| p.first().map(|n| n.0)),
+        no_price_nanos: market_prices.and_then(|p| p.get(1).map(|n| n.0)),
         status: &status,
         metadata: metadata.as_ref(),
         volume_nanos: volume,
@@ -581,7 +581,7 @@ pub async fn resolve_market(
             let signed = SignedAttestation {
                 attestation: ResolutionAttestation {
                     market_id: mid,
-                    payout_nanos: req.payout_nanos,
+                    payout_nanos: Nanos(req.payout_nanos),
                     nonce: att_dto.nonce,
                 },
                 signer: FeedPubkey(pubkey_bytes),
@@ -592,7 +592,7 @@ pub async fn resolve_market(
         None => {
             let _record = state
                 .sequencer
-                .resolve_market(mid, req.payout_nanos)
+                .resolve_market(mid, Nanos(req.payout_nanos))
                 .await?;
         }
     }
@@ -653,8 +653,8 @@ pub async fn get_price_history(
             .map(|p| PricePointResponse {
                 height: p.height,
                 timestamp_ms: p.timestamp_ms,
-                yes_price_nanos: p.yes_price,
-                no_price_nanos: p.no_price,
+                yes_price_nanos: p.yes_price.0,
+                no_price_nanos: p.no_price.0,
                 volume_nanos: p.volume_nanos,
             })
             .collect(),
@@ -715,14 +715,14 @@ pub async fn get_price_candles(
                 bucket_end_ms: c.bucket_end_ms,
                 first_height: c.first_height,
                 last_height: c.last_height,
-                open_yes_price_nanos: c.open_yes_price,
-                high_yes_price_nanos: c.high_yes_price,
-                low_yes_price_nanos: c.low_yes_price,
-                close_yes_price_nanos: c.close_yes_price,
-                open_no_price_nanos: c.open_no_price,
-                high_no_price_nanos: c.high_no_price,
-                low_no_price_nanos: c.low_no_price,
-                close_no_price_nanos: c.close_no_price,
+                open_yes_price_nanos: c.open_yes_price.0,
+                high_yes_price_nanos: c.high_yes_price.0,
+                low_yes_price_nanos: c.low_yes_price.0,
+                close_yes_price_nanos: c.close_yes_price.0,
+                open_no_price_nanos: c.open_no_price.0,
+                high_no_price_nanos: c.high_no_price.0,
+                low_no_price_nanos: c.low_no_price.0,
+                close_no_price_nanos: c.close_no_price.0,
                 volume_nanos: c.volume_nanos,
                 point_count: c.point_count,
             })
@@ -819,8 +819,8 @@ pub async fn search_markets(
         tags,
         category: params.category,
         status: params.status,
-        min_yes_price: params.min_yes_price,
-        max_yes_price: params.max_yes_price,
+        min_yes_price: params.min_yes_price.map(Nanos),
+        max_yes_price: params.max_yes_price.map(Nanos),
         min_volume: params.min_volume,
         sort_by,
         limit: params.limit,
@@ -857,8 +857,8 @@ pub async fn search_markets(
             build_market_response(BuildMarketResponseArgs {
                 market_id: mid,
                 name: r.name,
-                yes_price_nanos: r.yes_price_nanos,
-                no_price_nanos: r.no_price_nanos,
+                yes_price_nanos: r.yes_price_nanos.map(|n| n.0),
+                no_price_nanos: r.no_price_nanos.map(|n| n.0),
                 status: &r.status,
                 metadata: r.metadata.as_ref(),
                 volume_nanos: r.volume_nanos,
@@ -937,7 +937,7 @@ pub async fn get_resolution(
                 _ => None,
             };
             (
-                Some(record.payout_nanos),
+                Some(record.payout_nanos.0),
                 Some(record.resolved_at_ms),
                 feed_id,
             )

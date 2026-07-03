@@ -355,7 +355,8 @@ pub fn fill_facets(
         // `fill_price` is already this side's own price (NO orders fill at the
         // NO price), matching on-block settlement — use it directly, no flip.
         // buying (delta>0) spends cash; selling (delta<0) receives cash
-        cash -= matching_engine::signed_notional_nanos(fill_price, delta) as i128;
+        cash -= matching_engine::signed_notional_nanos(matching_engine::Nanos(fill_price), delta)
+            as i128;
         if primary.is_none_or(|(_, _, d)| delta.unsigned_abs() > d.unsigned_abs()) {
             primary = Some((m, outcome, delta));
         }
@@ -521,7 +522,7 @@ mod tests {
     fn fill_facets_no_buy_cash_is_side_price() {
         // Buy 10 NO at 0.09 → spend 0.90 (the NO price), NOT 0.91-flipped 9.10.
         let m = MarketId::new(1);
-        let qty = matching_engine::shares_to_qty(10) as i64;
+        let qty = matching_engine::shares_to_qty(10).0 as i64;
         let (mid, side, outcome, cash) = fill_facets(&[(m, 1, qty)], 90_000_000);
         assert_eq!(mid, Some(m));
         assert_eq!(side, Some("BUY"));
@@ -533,7 +534,7 @@ mod tests {
     fn fill_facets_no_sell_cash_is_side_price() {
         // Sell 10 NO at 0.30 → receive 3.00.
         let m = MarketId::new(1);
-        let qty = matching_engine::shares_to_qty(10) as i64;
+        let qty = matching_engine::shares_to_qty(10).0 as i64;
         let (_, side, outcome, cash) = fill_facets(&[(m, 1, -qty)], 300_000_000);
         assert_eq!(side, Some("SELL"));
         assert_eq!(outcome, Some("NO"));
@@ -544,7 +545,7 @@ mod tests {
     fn fill_facets_yes_unaffected() {
         let m = MarketId::new(1);
         // Buy 10 YES at 0.60 → spend 6.00.
-        let qty = matching_engine::shares_to_qty(10) as i64;
+        let qty = matching_engine::shares_to_qty(10).0 as i64;
         let (_, side, outcome, cash) = fill_facets(&[(m, 0, qty)], 600_000_000);
         assert_eq!(side, Some("BUY"));
         assert_eq!(outcome, Some("YES"));

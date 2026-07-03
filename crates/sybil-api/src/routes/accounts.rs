@@ -27,7 +27,12 @@ pub async fn create_account(
     State(state): State<AppState>,
     Json(req): Json<CreateAccountRequest>,
 ) -> Result<Json<AccountResponse>, AppError> {
-    let balance_nanos = req.initial_balance_nanos as i64;
+    let balance_nanos = i64::try_from(req.initial_balance_nanos).map_err(|_| {
+        AppError::bad_request(format!(
+            "initial_balance_nanos {} exceeds the maximum signed-balance range",
+            req.initial_balance_nanos
+        ))
+    })?;
     let account = state.sequencer.create_account(balance_nanos).await?;
     Ok(Json(account_to_response(&account)))
 }
@@ -49,7 +54,12 @@ pub async fn fund_account(
     Path(id): Path<u64>,
     Json(req): Json<FundAccountRequest>,
 ) -> Result<Json<AccountResponse>, AppError> {
-    let amount_nanos = req.amount_nanos as i64;
+    let amount_nanos = i64::try_from(req.amount_nanos).map_err(|_| {
+        AppError::bad_request(format!(
+            "amount_nanos {} exceeds the maximum signed-balance range",
+            req.amount_nanos
+        ))
+    })?;
     let account = state
         .sequencer
         .fund_account(AccountId(id), amount_nanos)
@@ -141,7 +151,7 @@ pub async fn get_portfolio(
                 "NO".to_string()
             },
             quantity: p.quantity,
-            current_price_nanos: p.current_price_nanos,
+            current_price_nanos: p.current_price_nanos.0,
             value_nanos: p.value_nanos,
             avg_entry_price_nanos: p.avg_entry_price_nanos,
         })
@@ -209,7 +219,7 @@ fn account_fill_response(f: AccountFillRecord) -> AccountFillResponse {
         cursor: AccountFillCursor::from_record(&f).to_string(),
         order_id: f.order_id,
         fill_qty: f.fill_qty,
-        fill_price_nanos: f.fill_price,
+        fill_price_nanos: f.fill_price.0,
         block_height: f.block_height,
         timestamp_ms: f.timestamp_ms,
         position_deltas: f

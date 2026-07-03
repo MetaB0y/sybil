@@ -10,8 +10,8 @@
 //! Gated on `feature = "lp"` because every LP-family solver requires it.
 
 use matching_engine::{
-    outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId, MmSide, Problem,
-    NANOS_PER_DOLLAR,
+    outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId, MmSide, Nanos,
+    Problem, Qty, NANOS_PER_DOLLAR,
 };
 
 use crate::PipelineResult;
@@ -130,7 +130,7 @@ pub(crate) fn mm_budget_problem() -> Problem {
     let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
     problem.orders.push(mm_order);
 
-    let mut mm = MmConstraint::new(MmId(1), 50 * NANOS_PER_DOLLAR);
+    let mut mm = MmConstraint::new(MmId(1), Nanos(50 * NANOS_PER_DOLLAR));
     mm.add_order(200, MmSide::BuyNo);
     problem.mm_constraints.push(mm);
     problem
@@ -160,7 +160,7 @@ pub(crate) fn zero_budget_mm_problem() -> Problem {
     let mm_order = simple_no_buy(&problem.markets, 200, market, 500_000_000, 1000);
     problem.orders.push(mm_order);
 
-    let mut mm = MmConstraint::new(MmId(1), 0);
+    let mut mm = MmConstraint::new(MmId(1), Nanos::ZERO);
     mm.add_order(200, MmSide::BuyNo);
     problem.mm_constraints.push(mm);
     problem
@@ -189,13 +189,13 @@ pub(crate) fn multiple_mms_problem() -> Problem {
 
     let mm1_order = simple_no_buy(&problem.markets, 200, market, 450_000_000, 2000);
     problem.orders.push(mm1_order);
-    let mut mm1 = MmConstraint::new(MmId(1), 100 * NANOS_PER_DOLLAR);
+    let mut mm1 = MmConstraint::new(MmId(1), Nanos(100 * NANOS_PER_DOLLAR));
     mm1.add_order(200, MmSide::BuyNo);
     problem.mm_constraints.push(mm1);
 
     let mm2_order = simple_no_buy(&problem.markets, 300, market, 500_000_000, 2000);
     problem.orders.push(mm2_order);
-    let mut mm2 = MmConstraint::new(MmId(2), 50 * NANOS_PER_DOLLAR);
+    let mut mm2 = MmConstraint::new(MmId(2), Nanos(50 * NANOS_PER_DOLLAR));
     mm2.add_order(300, MmSide::BuyNo);
     problem.mm_constraints.push(mm2);
     problem
@@ -211,9 +211,9 @@ pub(crate) fn assert_buy_no_within_budget(
 ) {
     if let Some(fill) = result.result.fills.iter().find(|f| f.order_id == order_id) {
         let capital = MmSide::BuyNo.capital_needed(fill.fill_price, fill.fill_qty);
-        let budget = budget_dollars * NANOS_PER_DOLLAR;
+        let budget = Nanos(budget_dollars * NANOS_PER_DOLLAR);
         assert!(
-            capital <= budget + NANOS_PER_DOLLAR / 100,
+            capital <= budget + Nanos(NANOS_PER_DOLLAR / 100),
             "MM capital {} should not exceed budget {}",
             capital,
             budget
@@ -225,7 +225,7 @@ pub(crate) fn assert_buy_no_within_budget(
 pub(crate) fn assert_mm_not_filled(result: &PipelineResult, order_id: u64) {
     let mm_fill = result.result.fills.iter().find(|f| f.order_id == order_id);
     assert!(
-        mm_fill.is_none() || mm_fill.unwrap().fill_qty == 0,
+        mm_fill.is_none() || mm_fill.unwrap().fill_qty == Qty::ZERO,
         "zero-budget MM should not be filled"
     );
 }

@@ -167,6 +167,9 @@ async fn run(mut db: AccountDb, mut receiver: tokio_mpsc::Receiver<Command>) {
     }
 }
 
+// `NonZero*::new(CONST).unwrap()` on compile-time non-zero page/blob/buffer
+// constants is infallible; no fallible runtime input reaches these.
+#[allow(clippy::unwrap_used)]
 async fn open_db(context: commonware_tokio::Context) -> Result<AccountDb, StoreError> {
     let page_cache = CacheRef::from_pooler(
         &context,

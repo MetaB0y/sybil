@@ -80,7 +80,7 @@ impl FillStats {
             .result
             .fills
             .iter()
-            .map(|f| (f.order_id, f.fill_qty))
+            .map(|f| (f.order_id, f.fill_qty.0))
             .collect();
 
         let mut fully_filled = 0;
@@ -100,7 +100,7 @@ impl FillStats {
 
             if fill_qty == 0 {
                 unfilled += 1;
-            } else if fill_qty >= order.max_fill {
+            } else if fill_qty >= order.max_fill.0 {
                 fully_filled += 1;
             } else {
                 partially_filled += 1;
@@ -128,7 +128,7 @@ impl FillStats {
         for fill in &result.result.fills {
             if let Some(order) = order_map.get(&fill.order_id) {
                 for market_id in order.active_markets() {
-                    *market_volumes.entry(market_id).or_default() += fill.fill_qty;
+                    *market_volumes.entry(market_id).or_default() += fill.fill_qty.0;
                 }
             }
         }
@@ -226,7 +226,7 @@ pub fn print_market_details(
         .result
         .fills
         .iter()
-        .map(|f| (f.order_id, f.fill_qty))
+        .map(|f| (f.order_id, f.fill_qty.0))
         .collect();
 
     // Find which group each market belongs to
@@ -241,8 +241,8 @@ pub fn print_market_details(
         let (yes_price, no_price) = if let Some(ref pd) = result.price_discovery {
             if let Some(prices) = pd.prices.get(&market_id) {
                 (
-                    prices.first().copied().unwrap_or(0),
-                    prices.get(1).copied().unwrap_or(0),
+                    prices.first().map(|n| n.0).unwrap_or(0),
+                    prices.get(1).map(|n| n.0).unwrap_or(0),
                 )
             } else {
                 (0, 0)
@@ -510,7 +510,7 @@ impl SolverResults {
 pub struct SolverDetail {
     pub name: String,
     pub result: matching_solver::MatchingResult,
-    pub clearing_prices: HashMap<MarketId, Vec<u64>>,
+    pub clearing_prices: HashMap<MarketId, Vec<matching_engine::Nanos>>,
     pub is_valid: bool,
 }
 
@@ -800,14 +800,14 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
     let best_price_yes = |mid: &MarketId| -> u64 {
         best.clearing_prices
             .get(mid)
-            .and_then(|p| p.first().copied())
+            .and_then(|p| p.first().map(|n| n.0))
             .unwrap_or(0)
     };
     let other_price_yes = |mid: &MarketId| -> u64 {
         other
             .clearing_prices
             .get(mid)
-            .and_then(|p| p.first().copied())
+            .and_then(|p| p.first().map(|n| n.0))
             .unwrap_or(0)
     };
 
@@ -844,13 +844,14 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
     if !problem.mm_constraints.is_empty() {
         println!("MM Budget:");
 
-        let mm_fills_map = |fills: &[Fill]| -> HashMap<u64, (u64, u64)> {
-            fills
-                .iter()
-                .filter(|f| mm_order_ids.contains(&f.order_id))
-                .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
-                .collect()
-        };
+        let mm_fills_map =
+            |fills: &[Fill]| -> HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> {
+                fills
+                    .iter()
+                    .filter(|f| mm_order_ids.contains(&f.order_id))
+                    .map(|f| (f.order_id, (f.fill_price, f.fill_qty)))
+                    .collect()
+            };
 
         let best_mm_fills = mm_fills_map(&best_result.fills);
         let other_mm_fills = mm_fills_map(&other_result.fills);
@@ -871,13 +872,13 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
                 .filter(|id| other_mm_fills.contains_key(id))
                 .count();
 
-            let best_util = if budget > 0 {
-                best_cap as f64 / budget as f64 * 100.0
+            let best_util = if budget.0 > 0 {
+                best_cap.0 as f64 / budget.0 as f64 * 100.0
             } else {
                 0.0
             };
-            let other_util = if budget > 0 {
-                other_cap as f64 / budget as f64 * 100.0
+            let other_util = if budget.0 > 0 {
+                other_cap.0 as f64 / budget.0 as f64 * 100.0
             } else {
                 0.0
             };
@@ -885,16 +886,16 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
             println!(
                 "  {}: {} of {} ({:.1}%), {} orders filled",
                 best_name,
-                format_price(best_cap),
-                format_price(budget),
+                format_price(best_cap.0),
+                format_price(budget.0),
                 best_util,
                 best_active
             );
             println!(
                 "  {}: {} of {} ({:.1}%), {} orders filled",
                 other_name,
-                format_price(other_cap),
-                format_price(budget),
+                format_price(other_cap.0),
+                format_price(budget.0),
                 other_util,
                 other_active
             );
@@ -951,8 +952,8 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
                 fill.order_id,
                 order_type,
                 market,
-                order.limit_price as f64 / 1e7,
-                fill.fill_price as f64 / 1e7,
+                order.limit_price.0 as f64 / 1e7,
+                fill.fill_price.0 as f64 / 1e7,
                 fill.fill_qty,
                 format_welfare(*welfare)
             );

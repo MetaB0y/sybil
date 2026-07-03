@@ -54,7 +54,9 @@ fn portfolio_value_nanos(
         let price = prices
             .get(&market_id)
             .and_then(|p| p.get(outcome as usize).copied())
-            .unwrap_or(matching_engine::NANOS_PER_DOLLAR / 2);
+            .unwrap_or(matching_engine::Nanos(
+                matching_engine::NANOS_PER_DOLLAR / 2,
+            ));
         total += signed_notional_nanos(price, qty) as i128;
     }
     total as i64

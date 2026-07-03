@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use matching_engine::{shares_to_qty, MarketId, Order};
+use matching_engine::{shares_to_qty, MarketId, Nanos, Order, Qty};
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use matching_sequencer::AccountId;
 use p256::ecdsa::signature::Signer;
@@ -40,8 +40,8 @@ fn signed_buy_yes_payload(
     order.markets[0] = MarketId::new(market_id);
     order.num_markets = 1;
     order.num_states = 2;
-    order.limit_price = limit_price_nanos;
-    order.max_fill = quantity;
+    order.limit_price = Nanos(limit_price_nanos);
+    order.max_fill = Qty(quantity);
     order.payoffs[0] = 1;
     order.payoffs[1] = 0;
 

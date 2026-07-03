@@ -51,7 +51,7 @@ impl MmSide {
         let price_per_share = match self {
             MmSide::SellYes | MmSide::BuyNo => {
                 // Net cost: (1 - price) per unit
-                NANOS_PER_DOLLAR.saturating_sub(price)
+                Nanos(NANOS_PER_DOLLAR.saturating_sub(price.0))
             }
             MmSide::BuyYes | MmSide::SellNo => {
                 // Net cost: price per unit
@@ -113,7 +113,7 @@ impl MmConstraint {
     ///
     /// `fills` maps order_id -> (price, quantity)
     pub fn capital_used(&self, fills: &std::collections::HashMap<u64, (Nanos, Qty)>) -> Nanos {
-        let mut total = 0;
+        let mut total = Nanos::ZERO;
         for &order_id in &self.order_ids {
             if let (Some(&(price, qty)), Some(&side)) =
                 (fills.get(&order_id), self.order_sides.get(&order_id))
@@ -143,20 +143,20 @@ mod tests {
     #[test]
     fn test_mm_side_capital_sell_yes() {
         // Selling YES at $0.60 = capital cost of $0.40 per unit
-        let capital = MmSide::SellYes.capital_needed(600_000_000, shares_to_qty(100));
-        assert_eq!(capital, 40_000_000_000); // $40
+        let capital = MmSide::SellYes.capital_needed(Nanos(600_000_000), shares_to_qty(100));
+        assert_eq!(capital, Nanos(40_000_000_000)); // $40
     }
 
     #[test]
     fn test_mm_side_capital_buy_yes() {
         // Buying YES at $0.60 = capital cost of $0.60 per unit
-        let capital = MmSide::BuyYes.capital_needed(600_000_000, shares_to_qty(100));
-        assert_eq!(capital, 60_000_000_000); // $60
+        let capital = MmSide::BuyYes.capital_needed(Nanos(600_000_000), shares_to_qty(100));
+        assert_eq!(capital, Nanos(60_000_000_000)); // $60
     }
 
     #[test]
     fn test_mm_constraint_creation() {
-        let constraint = MmConstraint::new(MmId(1), 10_000_000_000)
+        let constraint = MmConstraint::new(MmId(1), Nanos(10_000_000_000))
             .with_order(100, MmSide::SellYes)
             .with_order(101, MmSide::SellYes)
             .with_order(102, MmSide::BuyYes);
@@ -168,18 +168,18 @@ mod tests {
 
     #[test]
     fn test_mm_constraint_capital_used() {
-        let constraint = MmConstraint::new(MmId(1), 100_000_000_000) // $100
+        let constraint = MmConstraint::new(MmId(1), Nanos(100_000_000_000)) // $100
             .with_order(100, MmSide::SellYes)
             .with_order(101, MmSide::BuyYes);
 
         let mut fills = std::collections::HashMap::new();
         // Order 100: Sell YES at $0.60, qty 50 → capital = $20
-        fills.insert(100, (600_000_000, shares_to_qty(50)));
+        fills.insert(100, (Nanos(600_000_000), shares_to_qty(50)));
         // Order 101: Buy YES at $0.40, qty 100 → capital = $40
-        fills.insert(101, (400_000_000, shares_to_qty(100)));
+        fills.insert(101, (Nanos(400_000_000), shares_to_qty(100)));
 
         let capital = constraint.capital_used(&fills);
-        assert_eq!(capital, 60_000_000_000); // $60 total
+        assert_eq!(capital, Nanos(60_000_000_000)); // $60 total
 
         assert!(constraint.is_satisfied(&fills)); // $60 < $100
     }
@@ -190,22 +190,23 @@ mod tests {
         // (NANOS_PER_DOLLAR - price) * qty = (1e9 - 100_000_000) * 20_000_000_000
         // = 900_000_000 * 20_000_000_000 = 18_000_000_000_000_000_000 (~18e18)
         // u64::MAX = 18_446_744_073_709_551_615 (~18.4e18), so this just barely fits
-        let capital = MmSide::SellYes.capital_needed(100_000_000, shares_to_qty(20_000_000_000));
-        assert_eq!(capital, 18_000_000_000_000_000_000);
+        let capital =
+            MmSide::SellYes.capital_needed(Nanos(100_000_000), shares_to_qty(20_000_000_000));
+        assert_eq!(capital, Nanos(18_000_000_000_000_000_000));
     }
 
     #[test]
     fn test_mm_constraint_exceeded() {
-        let constraint = MmConstraint::new(MmId(1), 50_000_000_000) // $50
+        let constraint = MmConstraint::new(MmId(1), Nanos(50_000_000_000)) // $50
             .with_order(100, MmSide::SellYes)
             .with_order(101, MmSide::BuyYes);
 
         let mut fills = std::collections::HashMap::new();
-        fills.insert(100, (600_000_000, shares_to_qty(50))); // $20
-        fills.insert(101, (400_000_000, shares_to_qty(100))); // $40
+        fills.insert(100, (Nanos(600_000_000), shares_to_qty(50))); // $20
+        fills.insert(101, (Nanos(400_000_000), shares_to_qty(100))); // $40
 
         let capital = constraint.capital_used(&fills);
-        assert_eq!(capital, 60_000_000_000); // $60 total
+        assert_eq!(capital, Nanos(60_000_000_000)); // $60 total
 
         assert!(!constraint.is_satisfied(&fills)); // $60 > $50
     }

@@ -103,8 +103,8 @@ impl MatchingResult {
 
     pub fn add_fill(&mut self, fill: Fill, order: &Order) {
         self.gross_welfare += order.gross_welfare_contribution(fill.fill_qty);
-        self.total_quantity_filled += fill.fill_qty;
-        if fill.fill_qty > 0 {
+        self.total_quantity_filled += fill.fill_qty.0;
+        if fill.fill_qty.0 > 0 {
             self.orders_filled += 1;
         }
         self.fills.push(fill);

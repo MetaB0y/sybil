@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use matching_engine::{
-    ConditionDir, Fill, MarketGroup, MarketId, MmConstraint, MmId, MmSide, Order, OrderDirection,
-    PriceCondition,
+    ConditionDir, Fill, MarketGroup, MarketId, MmConstraint, MmId, MmSide, Nanos, Order,
+    OrderDirection, PriceCondition, Qty,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -77,8 +77,8 @@ fn byte_identity_witness() -> BlockWitness {
     };
 
     let mut clearing_prices = HashMap::new();
-    clearing_prices.insert(market_b, vec![410_000_000, 590_000_000]);
-    clearing_prices.insert(market_a, vec![610_000_000, 390_000_000]);
+    clearing_prices.insert(market_b, vec![Nanos(410_000_000), Nanos(590_000_000)]);
+    clearing_prices.insert(market_a, vec![Nanos(610_000_000), Nanos(390_000_000)]);
 
     BlockWitness {
         header,
@@ -105,14 +105,14 @@ fn byte_identity_witness() -> BlockWitness {
         }],
         fills: vec![Fill {
             order_id: 42,
-            fill_qty: 250,
-            fill_price: 600_000_000,
+            fill_qty: Qty(250),
+            fill_price: Nanos(600_000_000),
             account_id: 1001,
         }],
         clearing_prices,
         total_welfare: 12_345,
         minting_cost: -222,
-        mm_constraints: vec![MmConstraint::new(MmId::new(12), 3_000_000_000)
+        mm_constraints: vec![MmConstraint::new(MmId::new(12), Nanos(3_000_000_000))
             .with_order(42, MmSide::BuyYes)
             .with_order(7, MmSide::SellNo)],
         market_groups: vec![MarketGroup {
@@ -143,11 +143,11 @@ fn fixture_order(
     order.payoffs[1] = -1;
     order.payoffs[2] = 1;
     order.payoffs[3] = 0;
-    order.limit_price = limit_price;
-    order.max_fill = 500;
+    order.limit_price = Nanos(limit_price);
+    order.max_fill = Qty(500);
     order.condition = Some(PriceCondition {
         market: secondary,
-        threshold: 500_000_000,
+        threshold: Nanos(500_000_000),
         direction: ConditionDir::Above,
     });
     order.expires_at_block = expires_at_block;
@@ -172,7 +172,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
     let proposal = ResolutionProposalSnapshot {
         id: 88,
         market_id: MarketId::new(3),
-        payout_nanos: 700_000_000,
+        payout_nanos: Nanos(700_000_000),
         source: OracleSourceSnapshot::DataFeed(55),
         proposed_at_ms: 1_700_000_000_100,
         reason: Some("feed quorum".to_string()),
@@ -181,8 +181,8 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
         id: 99,
         challenger: 1002,
         proposal_id: 88,
-        bond_amount: 50_000,
-        proposed_payout_nanos: 300_000_000,
+        bond_amount: Nanos(50_000),
+        proposed_payout_nanos: Nanos(300_000_000),
         reason: "disputed source".to_string(),
         challenged_at_ms: 1_700_000_000_200,
     };
@@ -211,7 +211,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 status: MarketStatusSnapshot::Resolved {
                     record: ResolutionRecordSnapshot {
                         market_id: MarketId::new(9),
-                        payout_nanos: 1_000_000_000,
+                        payout_nanos: Nanos(1_000_000_000),
                         resolved_by: OracleSourceSnapshot::Admin,
                         resolved_at_ms: 1_700_000_000_300,
                         proposal: Some(proposal.clone()),

@@ -38,3 +38,8 @@ thiserror = { workspace = true }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 
 [dev-dependencies]
+
+[lints.clippy]
+# f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);
+# this crate is legitimately floating-point (solver / sim / metrics / off-chain).
+disallowed_types = "allow"

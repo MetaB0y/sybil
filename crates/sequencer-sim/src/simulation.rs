@@ -240,7 +240,7 @@ impl SimulationRunner {
                         0
                     }
                 };
-                settlement::resolve_market(&mut self.sequencer.accounts, mid, payout);
+                settlement::resolve_market(&mut self.sequencer.accounts, mid, Nanos(payout));
                 self.resolved_markets.insert(mid);
             }
 
@@ -307,7 +307,7 @@ impl SimulationRunner {
                 } else {
                     0
                 };
-                settlement::resolve_market(&mut self.sequencer.accounts, mid, payout);
+                settlement::resolve_market(&mut self.sequencer.accounts, mid, Nanos(payout));
             }
         }
 

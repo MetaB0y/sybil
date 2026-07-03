@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{signed_notional_nanos, signed_price_delta_notional, MarketId, Nanos};
+use matching_engine::{signed_notional_nanos, signed_price_delta_notional, MarketId, Nanos, Qty};
 
 use crate::account::{Account, AccountId};
 use crate::aggregates::CostBasisTracker;
@@ -63,15 +63,18 @@ pub fn compute_portfolio(
         let price = last_prices
             .get(&market_id)
             .and_then(|p| p.get(outcome as usize).copied())
-            .unwrap_or(matching_engine::NANOS_PER_DOLLAR / 2);
+            .unwrap_or(matching_engine::Nanos(
+                matching_engine::NANOS_PER_DOLLAR / 2,
+            ));
 
         let value_nanos = signed_notional_nanos(price, quantity);
         total_position_value += value_nanos;
 
         let basis = cost_basis_tracker.cost_basis(account.id, market_id, outcome);
-        unrealized += signed_price_delta_notional(price as i64 - basis, quantity.unsigned_abs())
-            as i128
-            * quantity.signum() as i128;
+        unrealized +=
+            signed_price_delta_notional(price.0 as i64 - basis, Qty(quantity.unsigned_abs()))
+                as i128
+                * quantity.signum() as i128;
 
         positions.push(PositionValue {
             market_id,

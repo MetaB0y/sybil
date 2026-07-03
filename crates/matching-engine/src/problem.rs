@@ -86,7 +86,7 @@ impl Problem {
     }
 
     pub fn total_demand(&self) -> u64 {
-        self.orders.iter().map(|o| o.max_fill).sum()
+        self.orders.iter().map(|o| o.max_fill.0).sum()
     }
 
     /// Validate problem invariants.

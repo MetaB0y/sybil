@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use matching_engine::{
     compute_fill_settlement, derive_minting, minting_cost_from_incremental_adjustments, Fill,
-    MarketId, Order,
+    MarketId, Nanos, Order,
 };
 
 use crate::types::{AccountSnapshot, BlockWitness, WitnessOrder};
@@ -32,7 +32,7 @@ fn derive_post_state(
     post_system_state: &[AccountSnapshot],
     orders: &[WitnessOrder],
     fills: &[Fill],
-    clearing_prices: &HashMap<MarketId, Vec<u64>>,
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> DerivedSettlement {
     let mut result = DerivedSettlement::default();
 
@@ -67,7 +67,7 @@ fn derive_post_state(
 
     // Apply each fill using the shared settlement function
     for fill in fills {
-        if fill.fill_qty == 0 {
+        if fill.fill_qty == matching_engine::Qty::ZERO {
             continue;
         }
 
@@ -342,7 +342,8 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
-        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, Fill, MarketSet, NANOS_PER_DOLLAR,
+        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, Fill, MarketSet, Nanos, Qty,
+        NANOS_PER_DOLLAR,
     };
     use proptest::prelude::*;
 
@@ -380,7 +381,7 @@ mod tests {
     }
 
     fn q(shares: u64) -> u64 {
-        shares_to_qty(shares)
+        shares_to_qty(shares).0
     }
 
     #[test]
@@ -390,13 +391,13 @@ mod tests {
 
         let qty = q(10);
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let expected_cost = notional_nanos(500_000_000, qty) as i64;
+        let expected_cost = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
         let mint_id = u64::MAX;
         let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+        clearing_prices.insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
 
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -458,11 +459,11 @@ mod tests {
 
         let qty = q(10);
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let mint_id = u64::MAX;
         let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+        clearing_prices.insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
 
         let post_system_state = vec![AccountSnapshot {
             id: 0,
@@ -524,13 +525,13 @@ mod tests {
 
         let qty = q(5);
         let order = outcome_sell(&markets, 2, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(2, qty, 500_000_000);
+        let fill = Fill::new(2, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let expected_revenue = notional_nanos(500_000_000, qty) as i64;
+        let expected_revenue = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
         let mint_id = u64::MAX;
         let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+        clearing_prices.insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
 
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -592,7 +593,7 @@ mod tests {
 
         let qty = q(10);
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
 
@@ -688,10 +689,11 @@ mod tests {
         // Account starts with $1, buys 10 YES @ $0.50 → cost = $5 → balance = -$4
         let qty = q(10);
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 1_000_000_000; // $1
-        let expected_balance = initial_balance - notional_nanos(500_000_000, qty) as i64; // -$4
+        let expected_balance =
+            initial_balance - notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64; // -$4
 
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -749,10 +751,10 @@ mod tests {
         // Account sells 5 YES without holding any → position = -5
         let qty = q(5);
         let order = outcome_sell(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let expected_revenue = notional_nanos(500_000_000, qty) as i64;
+        let expected_revenue = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
 
         let pre_state = vec![AccountSnapshot {
             id: 0,
@@ -810,14 +812,14 @@ mod tests {
 
         let qty = q(10);
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let fill_cost = notional_nanos(500_000_000, qty) as i64; // $5
+        let fill_cost = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64; // $5
         let mint_revenue = fill_cost; // MINT receives yes_price * diff
 
         let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+        clearing_prices.insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
 
         let mint_id = u64::MAX;
         let pre_state = vec![
@@ -889,14 +891,14 @@ mod tests {
 
         let qty = q(10);
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let fill_cost = notional_nanos(500_000_000, qty) as i64;
+        let fill_cost = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
         let mint_id = u64::MAX;
 
         let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+        clearing_prices.insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
 
         let post_system_state = vec![AccountSnapshot {
             id: 0,
@@ -959,13 +961,13 @@ mod tests {
 
         let qty = q(10);
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let fill_cost = notional_nanos(500_000_000, qty) as i64;
+        let fill_cost = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
 
         let mut clearing_prices = HashMap::new();
-        clearing_prices.insert(m0, vec![500_000_000, 500_000_000]);
+        clearing_prices.insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
 
         let mint_id = u64::MAX;
         let pre_state = vec![
@@ -1042,10 +1044,10 @@ mod tests {
 
         let qty = q(10);
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
-        let fill = Fill::new(1, qty, 500_000_000);
+        let fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
 
         let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
-        let fill_cost = notional_nanos(500_000_000, qty) as i64;
+        let fill_cost = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
         let mint_id = u64::MAX;
 
         let pre_state = vec![
@@ -1152,7 +1154,7 @@ mod tests {
                 account_id: 0,
                 is_mm: false,
             };
-            let mut fill = Fill::new(order.id, 0, limit_price);
+            let mut fill = Fill::new(order.id, Qty(0), Nanos(limit_price));
             fill.account_id = 0;
 
             let post_system_state = vec![AccountSnapshot {
@@ -1210,13 +1212,13 @@ mod tests {
                 },
             ];
 
-            let mut fill_a = Fill::new(order_a.id, qty_a, price_a);
+            let mut fill_a = Fill::new(order_a.id, Qty(qty_a), Nanos(price_a));
             fill_a.account_id = 0;
-            let mut fill_b = Fill::new(order_b.id, qty_b, price_b);
+            let mut fill_b = Fill::new(order_b.id, Qty(qty_b), Nanos(price_b));
             fill_b.account_id = 1;
             let mut clearing_prices = HashMap::new();
-            clearing_prices.insert(m0, vec![price_a, NANOS_PER_DOLLAR - price_a]);
-            clearing_prices.insert(m1, vec![price_b, NANOS_PER_DOLLAR - price_b]);
+            clearing_prices.insert(m0, vec![Nanos(price_a), Nanos(NANOS_PER_DOLLAR - price_a)]);
+            clearing_prices.insert(m1, vec![Nanos(price_b), Nanos(NANOS_PER_DOLLAR - price_b)]);
 
             let derived_ab = derive_post_state(
                 &post_system_state,

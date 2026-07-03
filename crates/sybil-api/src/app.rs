@@ -231,7 +231,7 @@ async fn record_live_market_metrics(state: &AppState) {
             .set(reference_price as f64);
 
         if let Some(yes_price) = yes_price {
-            let diff = yes_price.abs_diff(reference_price);
+            let diff = yes_price.0.abs_diff(reference_price);
             metrics::gauge!("sybil_price_reference_diff_nanos", "market_id" => market.id.0.to_string())
                 .set(diff as f64);
             diff_count += 1;
