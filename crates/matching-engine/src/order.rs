@@ -6,7 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty};
+use crate::types::{
+    signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty, MAX_ORDER_QTY,
+    NANOS_PER_DOLLAR,
+};
 
 /// A (MarketId, value) pair from marginal payoff computation.
 pub type MarginalPayoff<T> = (MarketId, T);
@@ -157,6 +160,46 @@ impl Order {
         self.payoffs[..self.num_states as usize]
             .iter()
             .any(|&p| p < 0)
+    }
+
+    /// Validate the production-supported public order shape.
+    ///
+    /// The core payoff-vector representation intentionally remains more general
+    /// for research and tests, but current public admission and solvers only
+    /// support one binary market with exactly one ±1 payoff entry.
+    pub fn validate_binary_one_hot(&self) -> Result<(), &'static str> {
+        if self.num_markets != 1 {
+            return Err("orders must span exactly one market");
+        }
+        if self.num_states != 2 {
+            return Err("orders must have exactly two binary states");
+        }
+        if self.markets[0].is_none() {
+            return Err("orders must reference a concrete market");
+        }
+        if self.markets[1..].iter().any(|market| !market.is_none()) {
+            return Err("inactive market entries must be NONE");
+        }
+        if self.limit_price > NANOS_PER_DOLLAR {
+            return Err("limit price exceeds NANOS_PER_DOLLAR");
+        }
+        if self.max_fill > MAX_ORDER_QTY {
+            return Err("order quantity exceeds MAX_ORDER_QTY");
+        }
+
+        let active = &self.payoffs[..2];
+        let non_zero = active.iter().filter(|&&payoff| payoff != 0).count();
+        if non_zero != 1 {
+            return Err("orders must have exactly one non-zero payoff");
+        }
+        if !active.iter().any(|&payoff| payoff == 1 || payoff == -1) {
+            return Err("non-zero payoff must be +1 or -1");
+        }
+        if self.payoffs[2..].iter().any(|&payoff| payoff != 0) {
+            return Err("inactive payoff entries must be zero");
+        }
+
+        Ok(())
     }
 
     /// Per-market marginal payoff using stride-based decomposition (integer version).

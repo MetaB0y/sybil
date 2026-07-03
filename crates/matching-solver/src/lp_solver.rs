@@ -75,10 +75,12 @@ impl LpSolver {
             return PipelineResult::empty();
         }
 
-        debug_assert!(
-            problem.orders.iter().all(|o| o.num_markets == 1),
-            "LP solver only supports single-market orders"
-        );
+        let supported = crate::solver::filter_supported_problem(problem, "LP");
+        let _rejected_orders = supported.rejected_orders;
+        let problem = supported.problem.as_ref();
+        if problem.orders.is_empty() {
+            return PipelineResult::empty();
+        }
 
         let ctx = build_solver_context(problem);
 

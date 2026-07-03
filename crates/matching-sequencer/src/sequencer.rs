@@ -32,6 +32,7 @@ use crate::order_book::OrderBook;
 use crate::settlement;
 use crate::store::{ControlPlaneCommand, RestoredState, SequencerSnapshot};
 use crate::system_event::SystemEvent;
+use crate::validation::validate_order_shape;
 
 fn current_timestamp_ms() -> u64 {
     std::time::SystemTime::now()
@@ -431,6 +432,9 @@ fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionRea
         RejectionReason::AccountNotFound => sybil_verifier::RejectionReason::AccountNotFound,
         RejectionReason::CompleteSetFormation => {
             sybil_verifier::RejectionReason::CompleteSetFormation
+        }
+        RejectionReason::InvalidOrder(reason) => {
+            sybil_verifier::RejectionReason::InvalidOrder(reason.clone())
         }
         RejectionReason::Expired {
             current_block,
@@ -1531,6 +1535,13 @@ impl BlockSequencer {
     /// book doesn't model.
     pub fn try_admit_direct(&mut self, submission: OrderSubmission, now_ms: u64) -> AdmitOutcome {
         for order in &submission.orders {
+            if let Err(reason) = validate_order_shape(order) {
+                return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                    order_id: 0,
+                    account_id: submission.account_id,
+                    reason,
+                }));
+            }
             for market_id in order.active_markets() {
                 if self.markets.get(market_id).is_none() {
                     return AdmitOutcome::Rejected(SequencerError::MarketNotFound);
@@ -2540,6 +2551,21 @@ impl BlockSequencer {
                 let order_id = self.next_order_id;
                 self.next_order_id += 1;
                 order.id = order_id;
+
+                if let Err(reason) = validate_order_shape(&order) {
+                    witness_rejections.push(WitnessRejection {
+                        order: order.clone(),
+                        account_id: account_id.0,
+                        reason: convert_rejection_reason(&reason),
+                    });
+                    rejections.push(Rejection {
+                        order_id,
+                        account_id,
+                        reason,
+                    });
+                    continue;
+                }
+
                 let expires_at_block =
                     order.effective_expires_at_block(self.height, self.order_book.ttl());
                 if self.height > expires_at_block {
@@ -3112,6 +3138,30 @@ mod tests {
         q(shares) as i64
     }
 
+    fn total_balance(seq: &BlockSequencer) -> i64 {
+        seq.accounts
+            .iter()
+            .map(|(_, account)| account.balance)
+            .sum()
+    }
+
+    fn raw_single_market_order(
+        market: MarketId,
+        payoffs: [i8; 2],
+        limit_price: u64,
+        max_fill: u64,
+    ) -> Order {
+        let mut order = Order::new(0);
+        order.markets[0] = market;
+        order.num_markets = 1;
+        order.num_states = 2;
+        order.payoffs[0] = payoffs[0];
+        order.payoffs[1] = payoffs[1];
+        order.limit_price = limit_price;
+        order.max_fill = max_fill;
+        order
+    }
+
     fn eth_address(byte: u8) -> [u8; 20] {
         [byte; 20]
     }
@@ -3233,6 +3283,88 @@ mod tests {
         let expected_delta =
             expected_balance_delta_from_fills(&fills, &order_map, &mint_adjustments);
         assert_eq!(expected_delta, 0);
+    }
+
+    #[test]
+    fn non_one_hot_payoff_submission_does_not_clear_or_break_conservation() {
+        let (markets, m0) = setup();
+        let mut accounts = AccountStore::new();
+        let custom_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let no_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+        let initial_balance = total_balance(&seq);
+
+        let custom = raw_single_market_order(m0, [2, 0], 900_000_000, q(1));
+        let no_leg = outcome_buy(&markets, 0, m0, 1, 700_000_000, q(2));
+
+        let bp = seq.produce_block(
+            vec![
+                single_order_sub(custom_buyer, custom),
+                single_order_sub(no_buyer, no_leg),
+            ],
+            1_000,
+        );
+
+        assert!(
+            bp.block.fills.is_empty(),
+            "non-one-hot payoff order must be rejected before solve; fills={:?} rejections={:?}",
+            bp.block.fills,
+            bp.block.rejections
+        );
+        assert_eq!(
+            total_balance(&seq),
+            initial_balance,
+            "malformed payoff submission must not change total account balance"
+        );
+    }
+
+    #[test]
+    fn multi_market_bundle_submission_does_not_clear_or_break_conservation() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let mut accounts = AccountStore::new();
+        let bundle_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let no_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+        let initial_balance = total_balance(&seq);
+
+        let bundle = matching_engine::bundle_yes(&markets, 0, &[m0, m1], 400_000_000, q(1));
+        let no_leg = outcome_buy(&markets, 0, m0, 1, 600_000_000, q(1));
+
+        let bp = seq.produce_block(
+            vec![
+                single_order_sub(bundle_buyer, bundle),
+                single_order_sub(no_buyer, no_leg),
+            ],
+            1_000,
+        );
+
+        assert!(
+            bp.block.fills.is_empty(),
+            "multi-market bundle must be rejected before solve; fills={:?} rejections={:?}",
+            bp.block.fills,
+            bp.block.rejections
+        );
+        assert_eq!(
+            total_balance(&seq),
+            initial_balance,
+            "multi-market bundle submission must not change total account balance"
+        );
     }
 
     #[test]
@@ -5026,6 +5158,40 @@ mod tests {
             account_id,
             orders: vec![order],
             mm_constraint: None,
+        }
+    }
+
+    #[test]
+    fn direct_admission_rejects_non_one_hot_order() {
+        let (mut seq, aid, _markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        let order = raw_single_market_order(m0, [2, 0], 500_000_000, q(1));
+
+        match seq.try_admit_direct(single_order_sub(aid, order), 0) {
+            AdmitOutcome::Rejected(_) => {}
+            other => panic!("expected non-one-hot rejection, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn direct_admission_rejects_multi_market_order() {
+        let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        let order = matching_engine::bundle_yes(&markets, 0, &[m0, m1], 400_000_000, q(1));
+
+        match seq.try_admit_direct(single_order_sub(aid, order), 0) {
+            AdmitOutcome::Rejected(_) => {}
+            other => panic!("expected multi-market rejection, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn direct_admission_rejects_oversized_quantity() {
+        let (mut seq, aid, _markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        let order =
+            raw_single_market_order(m0, [1, 0], 500_000_000, matching_engine::MAX_ORDER_QTY + 1);
+
+        match seq.try_admit_direct(single_order_sub(aid, order), 0) {
+            AdmitOutcome::Rejected(_) => {}
+            other => panic!("expected oversized quantity rejection, got {:?}", other),
         }
     }
 

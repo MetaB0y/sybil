@@ -459,14 +459,15 @@ mod tests {
     fn test_mm_budget_exceeded() {
         let mut problem = create_test_problem();
 
-        // Add MM constraint with small budget
-        let mm = MmConstraint::new(MmId(1), 10_000_000_000) // $10 budget
+        // Add MM constraint with a small budget. Each 100-unit fill is 0.1
+        // share, so a $0.50 fill price consumes $0.05 of capital.
+        let mm = MmConstraint::new(MmId(1), 10_000_000) // $0.01 budget
             .with_order(1, MmSide::SellYes)
             .with_order(2, MmSide::SellYes);
         problem.mm_constraints.push(mm);
 
         let mut result = MatchingResult::new();
-        // Fill both orders - each costs ~$50 capital (100 shares * $0.50)
+        // Fill both orders - each costs ~$0.05 capital (0.1 shares * $0.50)
         result.fills.push(Fill::new(1, 100, 500_000_000));
         result.fills.push(Fill::new(2, 100, 500_000_000));
 

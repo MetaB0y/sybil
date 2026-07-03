@@ -21,6 +21,11 @@ pub fn event_leaf_values(
     events
 }
 
+fn push_str(value: &mut Vec<u8>, text: &str) {
+    value.extend_from_slice(&(text.len() as u32).to_le_bytes());
+    value.extend_from_slice(text.as_bytes());
+}
+
 pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
     let mut value = Vec::new();
     value.extend_from_slice(b"sybil/event/system");
@@ -162,6 +167,10 @@ fn append_rejection_reason(value: &mut Vec<u8>, reason: &RejectionReason) {
         }
         RejectionReason::AccountNotFound => value.push(2),
         RejectionReason::CompleteSetFormation => value.push(3),
+        RejectionReason::InvalidOrder(reason) => {
+            value.push(5);
+            push_str(value, reason);
+        }
         RejectionReason::Expired {
             current_block,
             expires_at_block,

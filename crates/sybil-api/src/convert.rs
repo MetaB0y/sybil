@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
-use matching_engine::order::{MAX_MARKETS_PER_ORDER, MAX_STATES};
 use matching_engine::{
-    bundle_sell, bundle_yes, outcome_buy, outcome_sell, spread, MarketId, MarketSet, Nanos, Order,
-    NANOS_PER_DOLLAR,
+    outcome_buy, outcome_sell, MarketId, MarketSet, Nanos, Order, NANOS_PER_DOLLAR,
 };
 use matching_sequencer::block::SealedBlock;
 use matching_sequencer::error::Rejection;
@@ -252,7 +250,7 @@ pub fn prices_to_response(prices: &HashMap<MarketId, Vec<Nanos>>) -> MarketPrice
 
 /// Convert an OrderSpec from the API into an internal Order.
 pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Order, String> {
-    match spec {
+    let order = match spec {
         OrderSpec::BuyYes {
             market_id,
             limit_price_nanos,
@@ -261,14 +259,7 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
             let mid = MarketId::new(*market_id);
             validate_market(mid, markets)?;
             validate_price_nanos(*limit_price_nanos)?;
-            Ok(outcome_buy(
-                markets,
-                0,
-                mid,
-                0,
-                *limit_price_nanos,
-                *quantity,
-            ))
+            outcome_buy(markets, 0, mid, 0, *limit_price_nanos, *quantity)
         }
         OrderSpec::BuyNo {
             market_id,
@@ -278,14 +269,7 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
             let mid = MarketId::new(*market_id);
             validate_market(mid, markets)?;
             validate_price_nanos(*limit_price_nanos)?;
-            Ok(outcome_buy(
-                markets,
-                0,
-                mid,
-                1,
-                *limit_price_nanos,
-                *quantity,
-            ))
+            outcome_buy(markets, 0, mid, 1, *limit_price_nanos, *quantity)
         }
         OrderSpec::SellYes {
             market_id,
@@ -295,14 +279,7 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
             let mid = MarketId::new(*market_id);
             validate_market(mid, markets)?;
             validate_price_nanos(*limit_price_nanos)?;
-            Ok(outcome_sell(
-                markets,
-                0,
-                mid,
-                0,
-                *limit_price_nanos,
-                *quantity,
-            ))
+            outcome_sell(markets, 0, mid, 0, *limit_price_nanos, *quantity)
         }
         OrderSpec::SellNo {
             market_id,
@@ -312,142 +289,33 @@ pub fn order_spec_to_order(spec: &OrderSpec, markets: &MarketSet) -> Result<Orde
             let mid = MarketId::new(*market_id);
             validate_market(mid, markets)?;
             validate_price_nanos(*limit_price_nanos)?;
-            Ok(outcome_sell(
-                markets,
-                0,
-                mid,
-                1,
-                *limit_price_nanos,
-                *quantity,
-            ))
+            outcome_sell(markets, 0, mid, 1, *limit_price_nanos, *quantity)
         }
-        OrderSpec::Spread {
-            market_a,
-            market_b,
-            limit_price_nanos,
-            quantity,
-        } => {
-            let ma = MarketId::new(*market_a);
-            let mb = MarketId::new(*market_b);
-            validate_market(ma, markets)?;
-            validate_market(mb, markets)?;
-            validate_price_nanos(*limit_price_nanos)?;
-            Ok(spread(markets, 0, ma, mb, *limit_price_nanos, *quantity))
-        }
-        OrderSpec::BundleYes {
-            market_ids,
-            limit_price_nanos,
-            quantity,
-        } => {
-            let mids: Vec<MarketId> = market_ids.iter().map(|&id| MarketId::new(id)).collect();
-            for &mid in &mids {
-                validate_market(mid, markets)?;
-            }
-            validate_price_nanos(*limit_price_nanos)?;
-            if mids.len() > MAX_MARKETS_PER_ORDER {
-                return Err(format!(
-                    "Bundle cannot span more than {} markets",
-                    MAX_MARKETS_PER_ORDER
-                ));
-            }
-            Ok(bundle_yes(markets, 0, &mids, *limit_price_nanos, *quantity))
-        }
-        OrderSpec::BundleSell {
-            market_ids,
-            limit_price_nanos,
-            quantity,
-        } => {
-            let mids: Vec<MarketId> = market_ids.iter().map(|&id| MarketId::new(id)).collect();
-            for &mid in &mids {
-                validate_market(mid, markets)?;
-            }
-            validate_price_nanos(*limit_price_nanos)?;
-            if mids.len() > MAX_MARKETS_PER_ORDER {
-                return Err(format!(
-                    "Bundle cannot span more than {} markets",
-                    MAX_MARKETS_PER_ORDER
-                ));
-            }
-            Ok(bundle_sell(
-                markets,
-                0,
-                &mids,
-                *limit_price_nanos,
-                *quantity,
-            ))
-        }
-        OrderSpec::Custom {
-            market_ids,
-            payoffs,
-            limit_price_nanos,
-            max_fill,
-        } => {
-            let mids: Vec<MarketId> = market_ids.iter().map(|&id| MarketId::new(id)).collect();
-            for &mid in &mids {
-                validate_market(mid, markets)?;
-            }
-            validate_price_nanos(*limit_price_nanos)?;
-            if mids.len() > MAX_MARKETS_PER_ORDER {
-                return Err(format!(
-                    "Custom order cannot span more than {} markets",
-                    MAX_MARKETS_PER_ORDER
-                ));
-            }
-            if payoffs.len() > MAX_STATES {
-                return Err(format!("Payoff vector cannot exceed {} states", MAX_STATES));
-            }
-
-            let mut order = Order::new(0);
-            for (i, &mid) in mids.iter().enumerate() {
-                order.markets[i] = mid;
-            }
-            order.num_markets = mids.len() as u8;
-            let num_states = 1usize << mids.len();
-            order.num_states = num_states as u8;
-
-            for (i, &p) in payoffs.iter().enumerate() {
-                if i < MAX_STATES {
-                    order.payoffs[i] = p;
-                }
-            }
-
-            order.limit_price = *limit_price_nanos;
-            order.max_fill = *max_fill;
-
-            Ok(order)
-        }
-    }
+    };
+    validate_public_order_shape(&order)?;
+    Ok(order)
 }
 
 /// Convert a SignedOrderData to an internal Order.
 pub fn signed_order_data_to_order(data: &SignedOrderData) -> Result<Order, String> {
-    if data.market_ids.len() > MAX_MARKETS_PER_ORDER {
-        return Err(format!(
-            "Order cannot span more than {} markets",
-            MAX_MARKETS_PER_ORDER
-        ));
+    if data.market_ids.len() != 1 {
+        return Err("Signed orders must span exactly one market".to_string());
     }
-    if data.payoffs.len() > MAX_STATES {
-        return Err(format!("Payoff vector cannot exceed {} states", MAX_STATES));
+    if data.payoffs.len() != 2 {
+        return Err("Signed orders must provide exactly two binary payoff entries".to_string());
     }
     validate_price_nanos(data.limit_price_nanos)?;
 
     let mut order = Order::new(0);
-    for (i, &mid) in data.market_ids.iter().enumerate() {
-        order.markets[i] = MarketId::new(mid);
-    }
-    order.num_markets = data.market_ids.len() as u8;
-    let num_states = 1usize << data.market_ids.len();
-    order.num_states = num_states as u8;
-
-    for (i, &p) in data.payoffs.iter().enumerate() {
-        if i < MAX_STATES {
-            order.payoffs[i] = p;
-        }
-    }
-
+    order.markets[0] = MarketId::new(data.market_ids[0]);
+    order.num_markets = 1;
+    order.num_states = 2;
+    order.payoffs[0] = data.payoffs[0];
+    order.payoffs[1] = data.payoffs[1];
     order.limit_price = data.limit_price_nanos;
     order.max_fill = data.max_fill;
+
+    validate_public_order_shape(&order)?;
 
     Ok(order)
 }
@@ -499,6 +367,12 @@ fn validate_price_nanos(price_nanos: u64) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_public_order_shape(order: &Order) -> Result<(), String> {
+    order
+        .validate_binary_one_hot()
+        .map_err(|reason| format!("unsupported order shape: {reason}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,20 +416,6 @@ mod tests {
     }
 
     #[test]
-    fn test_spread_conversion() {
-        let ms = make_markets();
-        let spec = OrderSpec::Spread {
-            market_a: 0,
-            market_b: 1,
-            limit_price_nanos: 100_000_000,
-            quantity: 10,
-        };
-        let order = order_spec_to_order(&spec, &ms).unwrap();
-        assert_eq!(order.num_markets, 2);
-        assert_eq!(order.num_states, 4);
-    }
-
-    #[test]
     fn test_invalid_market_rejected() {
         let ms = make_markets();
         let spec = OrderSpec::BuyYes {
@@ -563,6 +423,18 @@ mod tests {
             limit_price_nanos: 550_000_000,
             quantity: 10,
         };
+        assert!(order_spec_to_order(&spec, &ms).is_err());
+    }
+
+    #[test]
+    fn test_oversized_quantity_rejected() {
+        let ms = make_markets();
+        let spec = OrderSpec::BuyYes {
+            market_id: 0,
+            limit_price_nanos: 500_000_000,
+            quantity: matching_engine::MAX_ORDER_QTY + 1,
+        };
+
         assert!(order_spec_to_order(&spec, &ms).is_err());
     }
 
@@ -578,6 +450,42 @@ mod tests {
     }
 
     #[test]
+    fn test_signed_non_one_hot_payoff_rejected() {
+        let data = SignedOrderData {
+            market_ids: vec![0],
+            payoffs: vec![2, 0],
+            limit_price_nanos: 500_000_000,
+            max_fill: 10,
+        };
+
+        assert!(signed_order_data_to_order(&data).is_err());
+    }
+
+    #[test]
+    fn test_signed_multi_market_payoff_rejected() {
+        let data = SignedOrderData {
+            market_ids: vec![0, 1],
+            payoffs: vec![1, 0, 0, 0],
+            limit_price_nanos: 500_000_000,
+            max_fill: 10,
+        };
+
+        assert!(signed_order_data_to_order(&data).is_err());
+    }
+
+    #[test]
+    fn test_signed_oversized_quantity_rejected() {
+        let data = SignedOrderData {
+            market_ids: vec![0],
+            payoffs: vec![1, 0],
+            limit_price_nanos: 500_000_000,
+            max_fill: matching_engine::MAX_ORDER_QTY + 1,
+        };
+
+        assert!(signed_order_data_to_order(&data).is_err());
+    }
+
+    #[test]
     fn test_account_to_response() {
         let mut account = Account::new(AccountId(42), 100 * NANOS_PER_DOLLAR as i64);
         account.positions.insert((MarketId::new(0), 0), 10);
@@ -586,22 +494,5 @@ mod tests {
         assert_eq!(resp.account_id, 42);
         assert_eq!(resp.balance_nanos, 100 * NANOS_PER_DOLLAR as i64);
         assert_eq!(resp.positions.len(), 1);
-    }
-
-    #[test]
-    fn test_custom_order_conversion() {
-        let ms = make_markets();
-        let spec = OrderSpec::Custom {
-            market_ids: vec![0, 1],
-            payoffs: vec![1, 0, 0, 0],
-            limit_price_nanos: 200_000_000,
-            max_fill: 10,
-        };
-        let order = order_spec_to_order(&spec, &ms).unwrap();
-        assert_eq!(order.num_markets, 2);
-        assert_eq!(order.num_states, 4);
-        assert_eq!(order.payoffs[0], 1);
-        assert_eq!(order.payoffs[1], 0);
-        assert_eq!(order.max_fill, 10);
     }
 }

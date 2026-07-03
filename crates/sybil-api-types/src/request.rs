@@ -174,7 +174,11 @@ pub enum TimeInForce {
     Gtd,
 }
 
-/// Tagged enum representing different order types.
+/// Tagged enum representing public order types.
+///
+/// Public submission is intentionally limited to single-market binary orders.
+/// Compound payoff-vector orders remain available inside `matching-engine` for
+/// research and tests, but are not accepted at the HTTP API edge.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "type")]
@@ -207,36 +211,6 @@ pub enum OrderSpec {
         limit_price_nanos: u64,
         /// Quantity in fixed-point share-units.
         quantity: u64,
-    },
-    /// Spread: buy A YES, sell B YES.
-    Spread {
-        market_a: u32,
-        market_b: u32,
-        limit_price_nanos: u64,
-        /// Quantity in fixed-point share-units.
-        quantity: u64,
-    },
-    /// Bundle YES: all markets must be YES to win.
-    BundleYes {
-        market_ids: Vec<u32>,
-        limit_price_nanos: u64,
-        /// Quantity in fixed-point share-units.
-        quantity: u64,
-    },
-    /// Bundle Sell: sell the all-YES bundle.
-    BundleSell {
-        market_ids: Vec<u32>,
-        limit_price_nanos: u64,
-        /// Quantity in fixed-point share-units.
-        quantity: u64,
-    },
-    /// Custom payoff vector.
-    Custom {
-        market_ids: Vec<u32>,
-        payoffs: Vec<i8>,
-        limit_price_nanos: u64,
-        /// Maximum fill in fixed-point share-units.
-        max_fill: u64,
     },
 }
 
@@ -387,4 +361,56 @@ pub struct SetMarketMetadataRequest {
     /// markets from the listing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn custom_order_spec_is_not_part_of_public_submit_api() {
+        let payload = json!({
+            "account_id": 1,
+            "orders": [{
+                "type": "Custom",
+                "market_ids": [0],
+                "payoffs": [2, 0],
+                "limit_price_nanos": 500_000_000u64,
+                "max_fill": 1000u64
+            }]
+        });
+
+        assert!(serde_json::from_value::<SubmitOrderRequest>(payload).is_err());
+    }
+
+    #[test]
+    fn bundle_order_specs_are_not_part_of_public_submit_api() {
+        for order_type in ["Spread", "BundleYes", "BundleSell"] {
+            let order = match order_type {
+                "Spread" => json!({
+                    "type": order_type,
+                    "market_a": 0,
+                    "market_b": 1,
+                    "limit_price_nanos": 500_000_000u64,
+                    "quantity": 1000u64
+                }),
+                _ => json!({
+                    "type": order_type,
+                    "market_ids": [0, 1],
+                    "limit_price_nanos": 500_000_000u64,
+                    "quantity": 1000u64
+                }),
+            };
+            let payload = json!({
+                "account_id": 1,
+                "orders": [order]
+            });
+
+            assert!(
+                serde_json::from_value::<SubmitOrderRequest>(payload).is_err(),
+                "{order_type} must not deserialize as a public OrderSpec"
+            );
+        }
+    }
 }

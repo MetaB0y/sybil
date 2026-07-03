@@ -105,13 +105,15 @@ impl ConicSolver {
             return PipelineResult::empty();
         }
 
+        let supported = crate::solver::filter_supported_problem(problem, "Conic");
+        let _rejected_orders = supported.rejected_orders;
+        let problem = supported.problem.as_ref();
+        if problem.orders.is_empty() {
+            return PipelineResult::empty();
+        }
+
         let orders = &problem.orders;
         let n = orders.len();
-
-        debug_assert!(
-            orders.iter().all(|o| o.num_markets == 1),
-            "Conic solver only supports single-market orders"
-        );
 
         let ctx = build_solver_context(problem);
         let num_markets = ctx.markets.len();

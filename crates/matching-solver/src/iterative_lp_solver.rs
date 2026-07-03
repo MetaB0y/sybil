@@ -62,13 +62,15 @@ impl IterLpSolver {
             return PipelineResult::empty();
         }
 
+        let supported = crate::solver::filter_supported_problem(problem, "IterLP");
+        let _rejected_orders = supported.rejected_orders;
+        let problem = supported.problem.as_ref();
+        if problem.orders.is_empty() {
+            return PipelineResult::empty();
+        }
+
         let orders = &problem.orders;
         let n = orders.len();
-
-        debug_assert!(
-            orders.iter().all(|o| o.num_markets == 1),
-            "IterLp solver only supports single-market orders"
-        );
 
         // No MMs → delegate to plain LP (fast path)
         if problem.mm_constraints.is_empty() {
@@ -255,8 +257,8 @@ impl crate::Solver for IterLpSolver {
 mod tests {
     use super::*;
     use matching_engine::{
-        outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId,
-        NANOS_PER_DOLLAR,
+        outcome_sell, shares_to_qty, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint,
+        MmId, NANOS_PER_DOLLAR,
     };
 
     #[test]
@@ -586,7 +588,7 @@ mod tests {
                 i + 1,
                 market,
                 900_000_000 - i * 20_000_000,
-                100,
+                shares_to_qty(100),
             ));
         }
 
@@ -596,7 +598,13 @@ mod tests {
         //   At p_yes=55c: capital/unit = 45c → budget $3 = 6 fills
         // LP linearizes at high p_yes, thinks 20 fills are fine.
         // Actual equilibrium is at lower p_yes where only ~6 fills fit.
-        let mm_order = simple_no_buy(&problem.markets, 200, market, 600_000_000, 50_000);
+        let mm_order = simple_no_buy(
+            &problem.markets,
+            200,
+            market,
+            600_000_000,
+            shares_to_qty(50_000),
+        );
         problem.orders.push(mm_order);
         let mut mm = MmConstraint::new(MmId(1), 3 * NANOS_PER_DOLLAR);
         mm.add_order(200, MmSide::BuyNo);
@@ -610,7 +618,7 @@ mod tests {
                 market,
                 1,
                 350_000_000 + i * 15_000_000, // 35c to 48.5c
-                100,
+                shares_to_qty(100),
             ));
         }
 

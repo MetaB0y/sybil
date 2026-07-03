@@ -93,6 +93,8 @@ pub enum ViolationKind {
     AcceptedOrderMissingAccount,
     /// Accepted order was not eligible at this block height.
     OrderExpiryViolation,
+    /// Accepted order shape or quantity is not supported by production admission.
+    InvalidOrder,
     /// A rejection is incorrect — order would have been valid.
     FalseRejection,
     /// A rejection reason does not match the actual validation failure.

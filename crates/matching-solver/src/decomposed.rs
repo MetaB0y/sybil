@@ -54,6 +54,13 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             return PipelineResult::empty();
         }
 
+        let supported = crate::solver::filter_supported_problem(problem, "Decomposed");
+        let _rejected_orders = supported.rejected_orders;
+        let problem = supported.problem.as_ref();
+        if problem.orders.is_empty() {
+            return PipelineResult::empty();
+        }
+
         // Step 1: Partition markets into components
         let (market_to_component, num_components) = partition_markets(problem);
 

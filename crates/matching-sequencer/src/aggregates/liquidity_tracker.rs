@@ -232,8 +232,8 @@ mod tests {
         shares_to_qty(shares)
     }
 
-    /// Multi-market resting orders (spreads/bundles) are excluded from the
-    /// per-market score; single-market orders inside the band contribute.
+    /// Multi-market orders are excluded from the per-market score;
+    /// single-market orders inside the band contribute.
     #[test]
     fn record_block_excludes_multi_market() {
         let (markets, accounts, trader, m0, m1) = two_market_setup();
@@ -246,19 +246,15 @@ mod tests {
             outcome_buy(&markets, 1, m0, 0, mid_yes, q(4)),
             trader,
         );
-        admit(
-            &mut book,
-            &accounts,
-            spread(&markets, 2, m0, m1, mid_yes, q(4)),
-            trader,
-        );
+        let multi_market = spread(&markets, 2, m0, m1, mid_yes, q(4));
+        let mm_orders = [&multi_market];
 
         let mut tracker = LiquidityTracker::new();
         let mut midprices = HashMap::new();
         midprices.insert(m0, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
         midprices.insert(m1, vec![mid_yes, NANOS_PER_DOLLAR - mid_yes]);
 
-        tracker.record_block(&book, &[], &midprices, 50_000_000);
+        tracker.record_block(&book, &mm_orders, &midprices, 50_000_000);
 
         assert_eq!(tracker.current(m0), mid_yes.saturating_mul(4));
         assert_eq!(tracker.avg_last_n(m0, 10), mid_yes.saturating_mul(4));

@@ -224,12 +224,21 @@ impl MilpSolver {
         let start = std::time::Instant::now();
         let mut result = MatchingResult::new();
 
+        let supported = crate::solver::filter_supported_problem(problem, "MILP");
+        let rejected_orders = supported.rejected_orders;
+        let problem = supported.problem.as_ref();
+
         let active_orders: Vec<_> = problem.orders.iter().collect();
 
         if active_orders.is_empty() {
+            let status = if rejected_orders > 0 {
+                SolveStatus::Error("unsupported order shape".to_string())
+            } else {
+                SolveStatus::Optimal
+            };
             return MilpResult {
                 result,
-                status: SolveStatus::Optimal,
+                status,
                 solve_time_secs: start.elapsed().as_secs_f64(),
                 clearing_prices: HashMap::new(),
                 objective_welfare: 0,
@@ -331,10 +340,12 @@ impl MilpSolver {
         let n = active_orders.len();
         let nanos_f = NANOS_PER_DOLLAR as f64;
 
-        debug_assert!(
-            active_orders.iter().all(|o| o.num_markets == 1),
-            "MILP solver only supports single-market binary orders"
-        );
+        if let Some(order) = active_orders
+            .iter()
+            .find(|order| order.validate_binary_one_hot().is_err())
+        {
+            return Err(format!("unsupported order shape for order {}", order.id));
+        }
 
         // Build order_id -> index map for MM constraint lookups
         let order_id_to_idx: HashMap<u64, usize> = active_orders
@@ -359,18 +370,15 @@ impl MilpSolver {
 
         let num_markets = markets.len();
         let num_states = 1usize << num_markets;
-        debug_assert!(
-            active_orders
-                .iter()
-                .all(|o| o.num_states as usize <= num_states),
-            "MILP assumes binary markets: expected max {} states, found order with {} states",
-            num_states,
-            active_orders
-                .iter()
-                .map(|o| o.num_states)
-                .max()
-                .unwrap_or(0)
-        );
+        if let Some(order) = active_orders
+            .iter()
+            .find(|order| order.num_states as usize > num_states)
+        {
+            return Err(format!(
+                "unsupported binary state shape for order {}",
+                order.id
+            ));
+        }
 
         // ================================================================
         // Create SCIP model

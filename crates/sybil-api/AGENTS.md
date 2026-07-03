@@ -51,12 +51,13 @@ enum OrderSpec {
     BuyNo { market_id, limit_price_nanos, qty },
     SellYes { market_id, limit_price_nanos, qty },
     SellNo { market_id, limit_price_nanos, qty },
-    Spread { buy_market, sell_market, limit_price_nanos, qty },
-    BundleYes { market_ids, limit_price_nanos, qty },
-    BundleSell { market_ids, limit_price_nanos, qty },
-    Custom { market_ids, payoffs, limit_price_nanos, max_fill },
 }
 ```
+
+Public API admission only accepts single-market binary one-hot orders. The core
+`matching-engine` payoff-vector helpers for spreads, bundles, and custom payoff
+vectors remain available for research and tests, but are not exposed through
+`OrderSpec`.
 
 ## Dev Mode
 

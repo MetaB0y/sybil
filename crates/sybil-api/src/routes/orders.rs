@@ -23,9 +23,6 @@ fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
         OrderSpec::BuyNo { .. } => MmSide::BuyNo,
         OrderSpec::SellYes { .. } => MmSide::SellYes,
         OrderSpec::SellNo { .. } => MmSide::SellNo,
-        // For complex order types, use BuyYes as a conservative default.
-        // Capital = price * qty / SHARE_SCALE, which is the max possible cost.
-        _ => MmSide::BuyYes,
     }
 }
 

@@ -14,6 +14,13 @@ pub const NANOS_PER_DOLLAR: u64 = 1_000_000_000;
 /// share, represented as `Qty = 1`.
 pub const SHARE_SCALE: u64 = 1_000;
 
+/// Maximum publicly admissible order quantity in share-units.
+///
+/// This is 1,000,000 full shares at `SHARE_SCALE = 1000`. At a $1 limit
+/// price, one order's notional is capped at $1,000,000, which is ample for
+/// current tests and devnet operation while bounding `price * quantity`.
+pub const MAX_ORDER_QTY: u64 = 1_000_000 * SHARE_SCALE;
+
 /// Amount in nanodollars (max ~18 billion dollars with u64)
 pub type Nanos = u64;
 

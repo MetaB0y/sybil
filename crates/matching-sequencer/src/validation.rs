@@ -1,12 +1,38 @@
 use std::collections::HashMap;
 
-use matching_engine::{notional_nanos_ceil, MarketId, Order};
+use matching_engine::{MarketId, Order, SHARE_SCALE};
 
 use crate::account::Account;
 use crate::error::RejectionReason;
 
 /// Position reservation key: (account_id-scoped market, outcome).
 pub type PositionKey = (MarketId, u8);
+
+pub fn validate_order_shape(order: &Order) -> Result<(), RejectionReason> {
+    order
+        .validate_binary_one_hot()
+        .map_err(|reason| RejectionReason::InvalidOrder(reason.to_string()))
+}
+
+fn checked_notional_ceil_i64(price: u64, qty: u64) -> Result<i64, RejectionReason> {
+    let numerator = (price as i128)
+        .checked_mul(qty as i128)
+        .ok_or_else(|| RejectionReason::InvalidOrder("price*quantity overflow".to_string()))?;
+    let rounded = numerator
+        .checked_add(SHARE_SCALE as i128 - 1)
+        .ok_or_else(|| RejectionReason::InvalidOrder("price*quantity overflow".to_string()))?
+        / SHARE_SCALE as i128;
+    i64::try_from(rounded)
+        .map_err(|_| RejectionReason::InvalidOrder("order notional exceeds i64".to_string()))
+}
+
+fn checked_sell_qty_i64(payoff: i8, max_fill: u64) -> Option<i64> {
+    if payoff >= 0 {
+        return None;
+    }
+    let qty = (-(payoff as i128)).checked_mul(max_fill as i128)?;
+    i64::try_from(qty).ok()
+}
 
 /// Validate an order against account state (used for pending order re-validation).
 pub fn validate_order(
@@ -28,6 +54,8 @@ pub fn validate_order_with_reservation(
     reserved_balance: i64,
     reserved_positions: &HashMap<PositionKey, i64>,
 ) -> Result<i64, RejectionReason> {
+    validate_order_shape(order)?;
+
     let num_states = order.num_states as usize;
 
     // Check if this is a buy (positive payoffs somewhere) or sell (negative payoffs)
@@ -36,7 +64,7 @@ pub fn validate_order_with_reservation(
 
     if has_positive && !has_negative {
         // Pure buy: check balance covers worst-case cost (minus already reserved)
-        let max_cost = notional_nanos_ceil(order.limit_price, order.max_fill) as i64;
+        let max_cost = checked_notional_ceil_i64(order.limit_price, order.max_fill)?;
         let available = account.balance - reserved_balance;
         if max_cost > available {
             return Err(RejectionReason::InsufficientBalance {
@@ -52,7 +80,10 @@ pub fn validate_order_with_reservation(
             for s in 0..num_states {
                 if order.payoffs[s] < 0 {
                     let outcome = s as u8;
-                    let sell_qty = (-order.payoffs[s] as i64) * order.max_fill as i64;
+                    let sell_qty = checked_sell_qty_i64(order.payoffs[s], order.max_fill)
+                        .ok_or_else(|| {
+                            RejectionReason::InvalidOrder("sell quantity overflow".to_string())
+                        })?;
                     let reserved = reserved_positions
                         .get(&(market, outcome))
                         .copied()
@@ -90,8 +121,9 @@ pub fn sell_reservations(order: &Order) -> Vec<(PositionKey, i64)> {
     for s in 0..num_states {
         if order.payoffs[s] < 0 {
             let outcome = s as u8;
-            let sell_qty = (-order.payoffs[s] as i64) * order.max_fill as i64;
-            reservations.push(((market, outcome), sell_qty));
+            if let Some(sell_qty) = checked_sell_qty_i64(order.payoffs[s], order.max_fill) {
+                reservations.push(((market, outcome), sell_qty));
+            }
         }
     }
     reservations

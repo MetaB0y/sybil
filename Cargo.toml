@@ -18,6 +18,9 @@ members = [
     "crates/sybil-polymarket",
 ]
 
+[profile.release]
+overflow-checks = true
+
 [workspace.dependencies]
 rand = "0.10"
 rand_chacha = "0.10"
