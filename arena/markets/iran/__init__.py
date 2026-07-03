@@ -1,6 +1,5 @@
 """Iran strike market configuration."""
 
-from pathlib import Path
 
 from markets import MarketConfig
 

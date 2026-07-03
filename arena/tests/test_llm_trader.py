@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
-import pytest
 
 from sim.clock import SimulatedClock
 from sim.llm_trader import (

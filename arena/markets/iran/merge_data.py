@@ -65,7 +65,7 @@ def main():
     for art in unique:
         ts = art.get("timestamp", "")
         if len(ts) >= 11:
-            hour_key = ts[:11] + "0000Z"  # e.g., 20260102T080000Z -> 20260102T08:00
+            ts[:11] + "0000Z"  # e.g., 20260102T080000Z -> 20260102T08:00
             hour_label = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:00"
         else:
             hour_label = "unknown"

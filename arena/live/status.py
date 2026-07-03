@@ -101,19 +101,19 @@ def run(db_path: str | None = None, hours: int = 24):
     if cost_df is not None and not cost_df.empty:
         total_tokens = cost_df["prompt_tokens"].sum() + cost_df["completion_tokens"].sum()
         cost = total_tokens * 0.70 / 1_000_000
-        print(f"--- LLM Cost ---")
+        print("--- LLM Cost ---")
         print(f"  Total calls: {int(cost_df['calls'].sum())}  tokens: {int(total_tokens):,}  est. cost: ${cost:.4f}\n")
 
     # --- Market Maker ---
     mm = queries.get_mm_mtm()
     if mm:
-        print(f"--- Market Maker (MtM) ---")
+        print("--- Market Maker (MtM) ---")
         print(f"  Cash: ${mm['cash']:,.2f}  Positions: ${mm['position_value']:,.2f}  ({mm['positions']} markets)")
         print(f"  Total: ${mm['total']:,.2f}  PnL: ${mm['pnl']:+,.2f} ({mm['return_pct']:+.4f}%)\n")
 
     # --- Stats ---
     stats = queries.get_stats(conn)
-    print(f"--- Stats ---")
+    print("--- Stats ---")
     print(f"  Decisions: {stats['decisions']}  Articles: {stats['articles']}  Snapshots: {stats['snapshots']}")
 
     conn.close()

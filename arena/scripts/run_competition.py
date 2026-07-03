@@ -8,7 +8,7 @@ AI agent trading competitions on Sybil prediction markets.
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from rich.console import Console
 from rich.live import Live

@@ -45,6 +45,15 @@ packages = ["sybil_client", "bots", "feeds", "sim", "markets", "live"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+ignore = ["E501"]
+extend-exclude = [
+    "mm_backtest.py",
+    "mm_param_sweep.py",
+    "mm_pnl_analysis.py",
+    "viz",
+]
+# These entrypoints extend sys.path before importing local packages.
+per-file-ignores = { "examples/full_competition.py" = ["E402"], "sim/runner.py" = ["E402"] }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -52,4 +61,6 @@ asyncio_mode = "auto"
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
 ]

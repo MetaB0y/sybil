@@ -197,7 +197,7 @@ async def main():
     pct = (total_low / total_yes * 100) if total_yes > 0 else 0
     print(f"Total: {total_low}/{total_yes} LOW ({pct:.0f}%)")
     if not args.apply and total_low > 0:
-        print(f"\nRe-run with --apply to demote LOW articles to NO in phase1 files.")
+        print("\nRe-run with --apply to demote LOW articles to NO in phase1 files.")
 
 
 if __name__ == "__main__":

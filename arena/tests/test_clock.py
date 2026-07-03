@@ -3,7 +3,6 @@
 import asyncio
 from datetime import datetime, timedelta
 
-import pytest
 
 from sim.clock import SimulatedClock
 

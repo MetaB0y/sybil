@@ -41,6 +41,26 @@ jobs:
       - name: Validate architecture vault
         run: ./scripts/check-vault.sh
 
+  arena:
+    name: Arena
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install Arena dependencies
+        working-directory: arena
+        run: uv sync
+
+      - name: Ruff
+        working-directory: arena
+        run: uv run ruff check .
+
+      - name: Pytest
+        working-directory: arena
+        run: uv run pytest -q
+
   feature-lattice:
     name: Feature Lattice
     runs-on: ubuntu-latest

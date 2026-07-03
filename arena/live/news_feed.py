@@ -16,7 +16,6 @@ Usage (standalone test):
 import asyncio
 import logging
 import os
-import re
 import urllib.parse
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field

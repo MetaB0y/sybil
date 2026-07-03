@@ -1,6 +1,5 @@
 """China visit market configuration."""
 
-from pathlib import Path
 
 from markets import MarketConfig
 

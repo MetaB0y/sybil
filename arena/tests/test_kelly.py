@@ -1,6 +1,5 @@
 """Tests for sizing strategies (live/strategy.py)."""
 
-import pytest
 from live.strategy import KellyStrategy, FlatStrategy, position_orders
 from sybil_client import BuyYes, BuyNo, SellYes, SellNo
 

@@ -214,8 +214,13 @@ doc:
 doc-open:
     cargo doc --workspace --no-deps --open
 
+# Run Arena Python lint and tests
+arena-check:
+    cd arena && uv run ruff check .
+    cd arena && uv run pytest -q
+
 # Check all (compile, test, lint, fmt, docs)
-check-all: fmt-check lint test docs-check contracts-fmt-check contracts-build contracts-test
+check-all: fmt-check lint test docs-check arena-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any

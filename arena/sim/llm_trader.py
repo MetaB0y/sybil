@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -595,7 +595,7 @@ MOTIVATION: [1-2 sentence thesis]"""
         recent_trades_lines = []
         for rec in self.trade_log[-5:]:
             if rec.motivation:
-                prefix = "[REBALANCE] " if rec.motivation.startswith("[REBALANCE]") else ""
+                "[REBALANCE] " if rec.motivation.startswith("[REBALANCE]") else ""
                 order_desc = ", ".join(_describe_order(o) for o in rec.orders) or "HOLD"
                 recent_trades_lines.append(
                     f"- [{rec.sim_time:%H:%M}] {order_desc} | {rec.motivation}"
@@ -796,7 +796,7 @@ MOTIVATION: [1 sentence thesis]"""
 
         parsed = self._parse_orders(raw_text)
         if parsed is None:
-            print(f" FAILED (parse error)", flush=True)
+            print(" FAILED (parse error)", flush=True)
             self.trade_log.append(TradeRecord(
                 articles=arrived,
                 analysis="",
