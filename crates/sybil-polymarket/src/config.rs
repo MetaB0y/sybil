@@ -104,6 +104,14 @@ pub struct Config {
     #[arg(long, default_value = "5", env = "MM_SYNC_INTERVAL_BLOCKS")]
     pub mm_sync_interval_blocks: u64,
 
+    /// Per-token price staleness threshold in milliseconds (PM-4/PM-6). A token
+    /// whose midpoint has not refreshed within this window stops being quoted
+    /// and its reference price is evicted (pushed as the 0 sentinel) so
+    /// downstream consumers do not trade on a frozen value. Default preserves
+    /// the previous global 30s behaviour, now applied per token.
+    #[arg(long, default_value = "30000", env = "MM_STALENESS_MS")]
+    pub mm_staleness_ms: u64,
+
     /// REST price poll interval in seconds (WebSocket fallback).
     #[arg(long, default_value = "5", env = "REST_POLL_INTERVAL_SECS")]
     pub rest_poll_interval_secs: u64,

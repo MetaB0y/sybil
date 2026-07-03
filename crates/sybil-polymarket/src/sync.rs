@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -24,6 +25,10 @@ pub struct SyncActor {
     mapping: Arc<RwLock<MappingStore>>,
     feed_tx: mpsc::Sender<FeedMessage>,
     mm_tx: mpsc::Sender<MmMessage>,
+    /// Live count of markets the MM is actively quoting (PM-8). Admission to MM
+    /// is gated on this, not the monotonic mapped-market count, so slots freed
+    /// by resolved/untracked markets are recycled for fresh events.
+    mm_live_rx: watch::Receiver<usize>,
     /// Re-push off-block metadata for all mapped markets on the first cycle
     /// after start, so schema additions backfill onto existing markets
     /// without wiping `market_ref_data.json`.
@@ -31,6 +36,7 @@ pub struct SyncActor {
 }
 
 impl SyncActor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Config,
         gamma_client: GammaClient,
@@ -38,6 +44,7 @@ impl SyncActor {
         mapping: Arc<RwLock<MappingStore>>,
         feed_tx: mpsc::Sender<FeedMessage>,
         mm_tx: mpsc::Sender<MmMessage>,
+        mm_live_rx: watch::Receiver<usize>,
     ) -> Self {
         Self {
             config,
@@ -46,6 +53,7 @@ impl SyncActor {
             mapping,
             feed_tx,
             mm_tx,
+            mm_live_rx,
             first_sync: true,
         }
     }
@@ -84,6 +92,12 @@ impl SyncActor {
                 self.config.min_volume_usd,
             )
             .await?;
+
+        // Baseline live-set size for MM admission this cycle (PM-8). Copied out
+        // of the watch so we never hold the borrow across an await, and bumped
+        // locally as we admit so a single cycle cannot overshoot the cap before
+        // the MM has processed our messages.
+        let mut mm_live = *self.mm_live_rx.borrow();
 
         let synced_before = self.mapping.read().await.event_count();
         info!(
@@ -281,10 +295,7 @@ impl SyncActor {
                             );
                         }
 
-                        if self.config.mm_max_markets == 0
-                            || self.mapping.read().await.market_count()
-                                <= self.config.mm_max_markets
-                        {
+                        if self.config.mm_max_markets == 0 || mm_live < self.config.mm_max_markets {
                             // Notify MM about the new market
                             let initial_mid = poly_market.yes_price().unwrap_or(0.5);
                             let _ = self
@@ -301,6 +312,7 @@ impl SyncActor {
                                     },
                                 })
                                 .await;
+                            mm_live += 1;
 
                             // Collect token IDs for Feed subscription
                             new_token_ids.extend(token_ids);
@@ -308,7 +320,8 @@ impl SyncActor {
                             info!(
                                 sybil_id,
                                 limit = self.config.mm_max_markets,
-                                "created market but skipped live MM tracking"
+                                live = mm_live,
+                                "created market but skipped live MM tracking (cap reached)"
                             );
                         }
                     }

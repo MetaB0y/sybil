@@ -5,6 +5,7 @@ use tokio::sync::{mpsc, watch};
 use tracing::{debug, info, warn};
 
 use crate::config::Config;
+use crate::error::Error;
 use crate::feed::PriceSnapshot;
 use crate::sybil::client::SybilClient;
 use sybil_api_types::*;
@@ -13,6 +14,12 @@ use sybil_api_types::*;
 const DEFAULT_VARIANCE: f64 = 0.0005;
 const SHARE_SCALE: f64 = 1_000.0;
 const SHARE_SCALE_I64: i64 = 1_000;
+
+/// Reference price pushed for a market whose token has gone stale (PM-6). A 0
+/// midpoint is not a legal in-band price (the MM only quotes `0.01 < p < 0.99`),
+/// so downstream `reference_price_nanos > 0` guards read it as "no reference"
+/// and stop trading rather than trading on a frozen value.
+const REFERENCE_PRICE_EVICTION_SENTINEL: u64 = 0;
 
 fn shares_to_qty_units(shares: f64) -> u64 {
     if !shares.is_finite() || shares <= 0.0 {
@@ -385,6 +392,9 @@ pub struct MmActor {
     account_id: u64,
     price_rx: watch::Receiver<PriceSnapshot>,
     mm_rx: mpsc::Receiver<MmMessage>,
+    /// Publishes the count of markets the MM is actively quoting so SyncActor
+    /// can recycle `mm_max_markets` slots as markets are untracked (PM-8).
+    live_tx: watch::Sender<usize>,
     state: MmState,
 }
 
@@ -395,6 +405,7 @@ impl MmActor {
         account_id: u64,
         price_rx: watch::Receiver<PriceSnapshot>,
         mm_rx: mpsc::Receiver<MmMessage>,
+        live_tx: watch::Sender<usize>,
     ) -> Self {
         Self {
             config,
@@ -402,7 +413,26 @@ impl MmActor {
             account_id,
             price_rx,
             mm_rx,
+            live_tx,
             state: MmState::new(),
+        }
+    }
+
+    /// Publish the current live-market count to SyncActor's watch channel.
+    fn publish_live_count(&self) {
+        let _ = self.live_tx.send(self.state.markets.len());
+    }
+
+    /// Stop quoting a market and free its live-set slot. Returns `true` if the
+    /// market was tracked. Used by resolution untracking (PM-1 root fix) and by
+    /// the batch-rejection defence below.
+    fn untrack_market(&mut self, market_id: u32, reason: &str) -> bool {
+        if self.state.markets.remove(&market_id).is_some() {
+            info!(market_id, reason, "MM untracking market");
+            self.publish_live_count();
+            true
+        } else {
+            false
         }
     }
 
@@ -500,6 +530,7 @@ impl MmActor {
                         self.config.mm_vol_window,
                     ),
                 );
+                self.publish_live_count();
             }
         }
     }
@@ -566,11 +597,27 @@ impl MmActor {
         (budget * NANOS_PER_DOLLAR as f64) as u64
     }
 
+    /// Untrack every market the block reports resolved. Pure state mutation
+    /// (no IO) so it is unit-testable in isolation.
+    fn untrack_resolved(&mut self, block: &BlockResponse) {
+        for event in &block.system_events {
+            if let SystemEventResponse::MarketResolved { market_id, .. } = event {
+                self.untrack_market(*market_id, "market_resolved");
+            }
+        }
+    }
+
     // ----- Per-block quote generation ------------------------------------- //
 
     async fn on_block(&mut self, block: &BlockResponse) {
         let snapshot = self.price_rx.borrow().clone();
         let now = now_ms();
+
+        // 0. Lifecycle: untrack markets the chain resolved this block (PM-1 root
+        //    fix). The mirror already receives `MarketResolved` on the block
+        //    stream it consumes; acting on it here stops a resolved market from
+        //    poisoning the whole IOC batch and frees its live-set slot (PM-8).
+        self.untrack_resolved(block);
 
         // 1. Periodic position sync
         self.maybe_sync_positions(block.height).await;
@@ -582,20 +629,38 @@ impl MmActor {
             return;
         }
 
-        // 3. Update state (mutation pass): push prices, collect reference prices
-        let stale = now.saturating_sub(snapshot.last_updated_ms) > 30_000;
+        // 3. Update state (mutation pass): push prices, collect reference prices.
+        //    Staleness is now evaluated per token (PM-4): a single frozen token
+        //    stops being quoted even while its neighbours keep updating.
+        let staleness_ms = self.config.mm_staleness_ms;
         let mut ref_prices = HashMap::new();
         let mut quote_inputs = Vec::new();
 
         for ms in self.state.markets.values_mut() {
-            let mid = match snapshot.midpoints.get(&ms.yes_token_id) {
-                Some(&p) if p > 0.01 && p < 0.99 => p,
-                _ => continue,
+            let Some(&mid) = snapshot.midpoints.get(&ms.yes_token_id) else {
+                // Never seen a price for this token; nothing to publish or quote.
+                continue;
             };
 
-            ref_prices.insert(ms.sybil_market_id, (mid * NANOS_PER_DOLLAR as f64) as u64);
+            if snapshot.token_is_stale(&ms.yes_token_id, now, staleness_ms) {
+                // PM-6: a frozen token's reference price is evicted so downstream
+                // `--require-reference-prices` consumers stop trading on it
+                // rather than being picked off on the stale value.
+                ref_prices.insert(ms.sybil_market_id, REFERENCE_PRICE_EVICTION_SENTINEL);
+                continue;
+            }
 
-            if stale {
+            // Publish the *current* reference price even when it has drifted out
+            // of the tradeable band (PM-6): the reference must track reality
+            // instead of freezing at the last in-band value. Quoting is still
+            // suppressed outside the band below.
+            ref_prices.insert(
+                ms.sybil_market_id,
+                (mid.clamp(0.0, 1.0) * NANOS_PER_DOLLAR as f64) as u64,
+            );
+
+            if !(mid > 0.01 && mid < 0.99) {
+                // Out of band: near-resolved, don't quote.
                 continue;
             }
 
@@ -631,9 +696,16 @@ impl MmActor {
         );
         self.state.next_quote_index = next_quote_index;
 
-        // 5. Submit (IO)
-        self.submit_orders(&orders, budget_nanos, block.height)
-            .await;
+        // 5. Submit (IO). A whole-batch rejection that names a non-tradeable
+        //    market lets us drop the poison defensively (PM-1 defence in depth)
+        //    even if we never saw its `MarketResolved` (e.g. missed block, or a
+        //    market that became untradeable for another reason).
+        if let Some(poisoned) = self
+            .submit_orders(&orders, budget_nanos, block.height)
+            .await
+        {
+            self.untrack_market(poisoned, "batch_rejected_untradeable");
+        }
 
         // 6. Push reference prices (IO)
         if !ref_prices.is_empty() {
@@ -651,9 +723,17 @@ impl MmActor {
         }
     }
 
-    async fn submit_orders(&self, orders: &[OrderSpec], budget_nanos: u64, block_height: u64) {
+    /// Submit the IOC batch. Returns `Some(market_id)` when the whole batch was
+    /// rejected because that market is non-tradeable, so the caller can untrack
+    /// it (defence in depth for PM-1).
+    async fn submit_orders(
+        &self,
+        orders: &[OrderSpec],
+        budget_nanos: u64,
+        block_height: u64,
+    ) -> Option<u32> {
         if orders.is_empty() {
-            return;
+            return None;
         }
         let req = SubmitOrderRequest {
             account_id: self.account_id,
@@ -671,12 +751,42 @@ impl MmActor {
                     budget_dollars = budget_nanos as f64 / NANOS_PER_DOLLAR as f64,
                     "submitted MM orders"
                 );
+                None
             }
             Err(e) => {
-                warn!(block = block_height, error = %e, "order submission failed");
+                let poisoned = poisoned_market_from_error(&e);
+                warn!(block = block_height, error = %e, poisoned, "order submission failed");
+                poisoned
             }
         }
     }
+}
+
+/// Extract the non-tradeable market id from a whole-batch rejection.
+///
+/// sybil-api validates every order against the live market set and fails the
+/// entire submission with `{"error":"Market <id> not found", ...}` (HTTP 400)
+/// as soon as one order targets a market that is gone/untradeable. Parsing that
+/// id out is the cleanest mechanism the current API surfaces — no probing or
+/// per-market bisection needed — so we drop exactly that market and let the
+/// next block re-form the batch without it.
+fn poisoned_market_from_error(err: &Error) -> Option<u32> {
+    let Error::SybilApi { status: 400, body } = err else {
+        return None;
+    };
+    // The body is JSON (`{"error": "...", "code": "..."}`); fall back to the
+    // raw text if it is not the shape we expect.
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .unwrap_or_else(|| body.clone());
+
+    if !message.contains("not found") {
+        return None;
+    }
+    let rest = message.strip_prefix("Market ")?;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
 }
 
 fn now_ms() -> u64 {
@@ -689,6 +799,130 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser as _;
+
+    fn sybil_api_error(body: &str) -> Error {
+        Error::SybilApi {
+            status: 400,
+            body: body.to_string(),
+        }
+    }
+
+    #[test]
+    fn poisoned_market_parsed_from_json_rejection() {
+        let err = sybil_api_error(r#"{"error":"Market 42 not found","code":"BAD_REQUEST"}"#);
+        assert_eq!(poisoned_market_from_error(&err), Some(42));
+    }
+
+    #[test]
+    fn poisoned_market_parsed_from_raw_message() {
+        // Defensive: also handles a non-JSON body carrying the same message.
+        let err = sybil_api_error("Market 7 not found");
+        assert_eq!(poisoned_market_from_error(&err), Some(7));
+    }
+
+    #[test]
+    fn poisoned_market_ignores_unrelated_rejections() {
+        assert_eq!(
+            poisoned_market_from_error(&sybil_api_error(
+                r#"{"error":"Invalid price","code":"BAD_REQUEST"}"#
+            )),
+            None
+        );
+        // Non-400 statuses are never treated as poison.
+        assert_eq!(
+            poisoned_market_from_error(&Error::SybilApi {
+                status: 500,
+                body: "Market 3 not found".to_string(),
+            }),
+            None
+        );
+    }
+
+    fn test_actor(live_tx: watch::Sender<usize>) -> (MmActor, watch::Sender<PriceSnapshot>) {
+        let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
+        let (_mm_tx, mm_rx) = mpsc::channel(16);
+        let client = SybilClient::new(reqwest::Client::new(), "http://localhost".into(), None);
+        let actor = MmActor::new(
+            Config::parse_from(["sybil-polymarket"]),
+            client,
+            1,
+            price_rx,
+            mm_rx,
+            live_tx,
+        );
+        (actor, price_tx)
+    }
+
+    fn track(actor: &mut MmActor, market_id: u32) {
+        actor.handle_message(MmMessage::MarketMirrored {
+            sybil_market_id: market_id,
+            yes_token_id: format!("token-{market_id}"),
+            initial_mid: 0.5,
+            group_key: None,
+            group_size: 0,
+        });
+    }
+
+    fn block_resolving(market_ids: &[u32]) -> BlockResponse {
+        BlockResponse {
+            height: 1,
+            parent_hash: String::new(),
+            state_root: String::new(),
+            events_root: String::new(),
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: 0,
+            system_events: market_ids
+                .iter()
+                .map(|&market_id| SystemEventResponse::MarketResolved {
+                    market_id,
+                    payout_nanos: 0,
+                    affected_accounts: Vec::new(),
+                })
+                .collect(),
+            fills: Vec::new(),
+            clearing_prices_nanos: Default::default(),
+            rejections: Vec::new(),
+            bridge: Default::default(),
+            total_welfare_nanos: 0,
+            total_volume_nanos: 0,
+            orders_filled: 0,
+            unique_placers: 0,
+            by_market: Default::default(),
+        }
+    }
+
+    #[test]
+    fn resolved_market_is_untracked_and_frees_live_slot() {
+        let (live_tx, live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+
+        track(&mut actor, 10);
+        track(&mut actor, 11);
+        assert_eq!(*live_rx.borrow(), 2);
+        assert!(actor.state.markets.contains_key(&10));
+
+        actor.untrack_resolved(&block_resolving(&[10]));
+
+        assert!(!actor.state.markets.contains_key(&10));
+        assert!(actor.state.markets.contains_key(&11));
+        // PM-8: the freed slot is published back to Sync.
+        assert_eq!(*live_rx.borrow(), 1);
+    }
+
+    #[test]
+    fn untrack_market_defensive_drop_publishes_live_count() {
+        let (live_tx, live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        track(&mut actor, 5);
+        assert_eq!(*live_rx.borrow(), 1);
+
+        assert!(actor.untrack_market(5, "batch_rejected_untradeable"));
+        assert_eq!(*live_rx.borrow(), 0);
+        // Dropping an already-gone market is a no-op.
+        assert!(!actor.untrack_market(5, "batch_rejected_untradeable"));
+    }
 
     fn default_config() -> QuoteConfig {
         QuoteConfig {

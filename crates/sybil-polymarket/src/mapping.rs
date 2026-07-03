@@ -19,6 +19,13 @@ pub struct MappingStore {
     /// Set of polymarket event IDs already synced
     synced_events: HashSet<String>,
 
+    /// Persisted MM account id (PM-7). The mirror runs a single MM identity, so
+    /// this is keyed implicitly by "the mirror's MM". Reattached on restart when
+    /// the Sybil server still knows the account; otherwise a fresh account is
+    /// minted and stored here. `None` means "never minted / no durable account".
+    #[serde(default)]
+    mm_account_id: Option<u64>,
+
     /// Persistence path (not serialized).
     #[serde(skip)]
     persist_path: Option<PathBuf>,
@@ -131,12 +138,29 @@ impl MappingStore {
     }
 
     /// Clear all persisted Sybil mappings while preserving the persistence path.
+    ///
+    /// The MM account id is cleared too: `clear()` is only invoked when the
+    /// Sybil chain has been rebuilt from scratch (mapped markets no longer
+    /// exist server-side), which means the old MM account is gone as well.
+    /// Reattachment would fail its `get_account` probe anyway; dropping it here
+    /// keeps the persisted state internally consistent.
     pub fn clear(&mut self) {
         self.condition_to_sybil.clear();
         self.sybil_to_condition.clear();
         self.token_to_sybil.clear();
         self.event_to_group.clear();
         self.synced_events.clear();
+        self.mm_account_id = None;
+    }
+
+    /// Persisted MM account id, if one has been minted and stored.
+    pub fn mm_account_id(&self) -> Option<u64> {
+        self.mm_account_id
+    }
+
+    /// Persist the MM account id so the next restart reattaches to it.
+    pub fn set_mm_account_id(&mut self, account_id: u64) {
+        self.mm_account_id = Some(account_id);
     }
 
     /// All (condition_id, sybil_market_id) pairs — used by the resolution
@@ -245,5 +269,37 @@ mod tests {
 
         assert_eq!(loaded.sybil_market_id("cond1"), Some(0));
         assert!(loaded.is_event_synced("ev1"));
+    }
+
+    #[test]
+    fn mm_account_id_roundtrips_and_clears() {
+        let mut store = MappingStore::new(None);
+        assert_eq!(store.mm_account_id(), None);
+
+        store.set_mm_account_id(777);
+        assert_eq!(store.mm_account_id(), Some(777));
+
+        let json = serde_json::to_string(&store).unwrap();
+        let loaded: MappingStore = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.mm_account_id(), Some(777));
+
+        // A fresh-chain clear drops the account so reattach mints a new one.
+        let mut loaded = loaded;
+        loaded.clear();
+        assert_eq!(loaded.mm_account_id(), None);
+    }
+
+    #[test]
+    fn mm_account_id_defaults_when_absent_from_json() {
+        // Older on-disk stores predate the field; they must load cleanly.
+        let json = r#"{
+            "condition_to_sybil": {},
+            "sybil_to_condition": {},
+            "token_to_sybil": {},
+            "event_to_group": {},
+            "synced_events": []
+        }"#;
+        let store: MappingStore = serde_json::from_str(json).unwrap();
+        assert_eq!(store.mm_account_id(), None);
     }
 }

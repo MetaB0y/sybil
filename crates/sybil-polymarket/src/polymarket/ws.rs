@@ -72,19 +72,21 @@ pub async fn run_ws_feed(
                         // Try parsing as array (some messages come batched)
                         if let Ok(messages) = serde_json::from_str::<Vec<ClobWsMessage>>(&text) {
                             let mut snapshot = price_tx.borrow().clone();
+                            let now = now_ms();
                             for ws_msg in messages {
                                 if let Some((token_id, price)) = ws_msg.midpoint() {
-                                    snapshot.midpoints.insert(token_id, price);
+                                    snapshot.record_midpoint(token_id, price, now);
                                 }
                             }
-                            snapshot.last_updated_ms = now_ms();
+                            snapshot.last_updated_ms = now;
                             snapshot.source = crate::feed::PriceSource::WebSocket;
                             let _ = price_tx.send(snapshot);
                         } else if let Ok(ws_msg) = serde_json::from_str::<ClobWsMessage>(&text) {
                             if let Some((token_id, price)) = ws_msg.midpoint() {
                                 let mut snapshot = price_tx.borrow().clone();
-                                snapshot.midpoints.insert(token_id, price);
-                                snapshot.last_updated_ms = now_ms();
+                                let now = now_ms();
+                                snapshot.record_midpoint(token_id, price, now);
+                                snapshot.last_updated_ms = now;
                                 snapshot.source = crate::feed::PriceSource::WebSocket;
                                 let _ = price_tx.send(snapshot);
                             }

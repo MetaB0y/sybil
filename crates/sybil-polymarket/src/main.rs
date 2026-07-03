@@ -18,6 +18,45 @@ use sybil_polymarket::signer::ResolutionSigner;
 use sybil_polymarket::sybil::client::SybilClient;
 use sybil_polymarket::sync::SyncActor;
 
+/// Reattach to the persisted MM account, or mint and persist a fresh one (PM-7).
+///
+/// A fresh account minted on every process start orphans prior inventory while
+/// the real exposure persists on-chain. We look up the account id stored in the
+/// mapping store and reuse it when the server still recognises it; otherwise we
+/// create a new account and persist the id so the next restart reattaches. This
+/// mirrors the arena's bot-account reattach (AR-3).
+async fn resolve_mm_account(
+    client: &SybilClient,
+    mapping: &Arc<RwLock<MappingStore>>,
+    balance_nanos: u64,
+) -> Result<u64, Box<dyn std::error::Error>> {
+    if let Some(account_id) = mapping.read().await.mm_account_id() {
+        match client.get_account(account_id).await {
+            Ok(_) => {
+                info!(account_id, "reattached to persisted MM account");
+                return Ok(account_id);
+            }
+            Err(e) => {
+                warn!(
+                    account_id,
+                    error = %e,
+                    "persisted MM account unusable; minting a new one"
+                );
+            }
+        }
+    }
+
+    let account = client.create_account(balance_nanos).await?;
+    {
+        let mut map = mapping.write().await;
+        map.set_mm_account_id(account.account_id);
+        if let Err(e) = map.save() {
+            warn!(error = %e, "failed to persist MM account id (will re-mint next restart)");
+        }
+    }
+    Ok(account.account_id)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install rustls crypto provider (needed for WebSocket TLS)
@@ -132,13 +171,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Create MM account
+    // Resolve the MM account: reattach to the persisted one when the server
+    // still knows it, otherwise mint and persist a fresh account (PM-7).
     let balance_nanos = (config.mm_initial_balance_dollars * NANOS_PER_DOLLAR as f64) as u64;
-    let mm_account = sybil_client_sync.create_account(balance_nanos).await?;
+    let mm_account_id = resolve_mm_account(&sybil_client_sync, &mapping, balance_nanos).await?;
     info!(
-        account_id = mm_account.account_id,
+        account_id = mm_account_id,
         balance_dollars = config.mm_initial_balance_dollars,
-        "created MM account"
+        "MM account ready"
     );
 
     // Channels — size MM channel to fit all existing markets for bootstrap.
@@ -206,6 +246,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (feed_tx, feed_rx) = mpsc::channel(64);
     let (mm_tx, mm_rx) = mpsc::channel(mm_channel_size);
     let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
+    // Live-set channel: MM publishes how many markets it is actively quoting so
+    // Sync recycles `mm_max_markets` slots as markets resolve/untrack (PM-8).
+    let (mm_live_tx, mm_live_rx) = watch::channel(0usize);
 
     // Bootstrap MM with existing markets from mapping
     if !existing.is_empty() {
@@ -259,6 +302,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             mapping_for_sync,
             feed_tx,
             mm_tx,
+            mm_live_rx,
         );
         actor.run(cancel_sync).await;
     });
@@ -272,9 +316,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let actor = MmActor::new(
             config_mm,
             sybil_client_mm,
-            mm_account.account_id,
+            mm_account_id,
             price_rx,
             mm_rx,
+            mm_live_tx,
         );
         actor.run(cancel_mm).await;
     });

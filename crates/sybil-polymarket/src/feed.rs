@@ -29,10 +29,34 @@ pub enum PriceSource {
 pub struct PriceSnapshot {
     /// token_id -> midpoint price (0.0 to 1.0)
     pub midpoints: HashMap<String, f64>,
-    /// Timestamp of last update (ms since epoch).
+    /// token_id -> timestamp of that token's last update (ms since epoch).
+    /// Parallel to `midpoints`. Enables per-token staleness (PM-4) instead of
+    /// a single global clock that a busy neighbour token keeps alive.
+    pub token_updated_ms: HashMap<String, u64>,
+    /// Timestamp of last update to ANY token (ms since epoch). Retained for
+    /// coarse "feed is alive" diagnostics; per-token freshness lives in
+    /// `token_updated_ms`.
     pub last_updated_ms: u64,
     /// Source of the most recent update.
     pub source: PriceSource,
+}
+
+impl PriceSnapshot {
+    /// Record a fresh midpoint for `token_id`, stamping its per-token clock.
+    pub fn record_midpoint(&mut self, token_id: String, price: f64, now_ms: u64) {
+        self.token_updated_ms.insert(token_id.clone(), now_ms);
+        self.midpoints.insert(token_id, price);
+    }
+
+    /// True when `token_id` has not updated within `max_age_ms` of `now_ms`
+    /// (or was never seen). A stale token is neither quoted nor pushed as a
+    /// live reference price.
+    pub fn token_is_stale(&self, token_id: &str, now_ms: u64, max_age_ms: u64) -> bool {
+        match self.token_updated_ms.get(token_id) {
+            Some(&ts) => now_ms.saturating_sub(ts) > max_age_ms,
+            None => true,
+        }
+    }
 }
 
 /// Price feed actor. Maintains a WebSocket connection to Polymarket CLOB,
@@ -152,10 +176,11 @@ impl FeedActor {
         match self.gamma_client.fetch_midpoints(&self.token_ids).await {
             Ok(prices) => {
                 let mut snapshot = self.price_tx.borrow().clone();
+                let now = now_ms();
                 for (token_id, price) in prices {
-                    snapshot.midpoints.insert(token_id, price);
+                    snapshot.record_midpoint(token_id, price, now);
                 }
-                snapshot.last_updated_ms = now_ms();
+                snapshot.last_updated_ms = now;
                 snapshot.source = PriceSource::RestFallback;
                 let _ = self.price_tx.send(snapshot);
             }
@@ -171,4 +196,35 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_token_staleness_is_independent() {
+        let mut snap = PriceSnapshot::default();
+        // "hot" updated at t=10_000, "frozen" updated long ago at t=0.
+        snap.record_midpoint("hot".into(), 0.6, 10_000);
+        snap.record_midpoint("frozen".into(), 0.4, 0);
+
+        let now = 20_000;
+        let threshold = 30_000;
+        // Even though a neighbour ("hot") is fresh, "frozen" is judged on its
+        // own clock: 20s old, still inside the 30s window here.
+        assert!(!snap.token_is_stale("frozen", now, threshold));
+
+        // Push time forward: "frozen" crosses the threshold while "hot" would
+        // not — the global-clock bug (PM-4) cannot mask it.
+        let now = 35_000;
+        assert!(snap.token_is_stale("frozen", now, threshold));
+        assert!(!snap.token_is_stale("hot", now, threshold));
+    }
+
+    #[test]
+    fn unknown_token_is_stale() {
+        let snap = PriceSnapshot::default();
+        assert!(snap.token_is_stale("never-seen", 1_000, 30_000));
+    }
 }
