@@ -20,7 +20,7 @@ from sybil_client import Block, OrderSpec
 from sybil_client.types import NANOS_PER_DOLLAR, Market
 
 from .db import DecisionDB
-from .news_feed import LiveArticle, NewsFeed
+from .news_feed import LiveArticle, NewsFeed, NewsSubscription
 from .strategy import RESOLVED_HIGH, RESOLVED_LOW, KellyStrategy, SizingStrategy, position_orders
 
 log = logging.getLogger(__name__)
@@ -150,6 +150,13 @@ class LiveLlmTrader(BaseAgent):
     ):
         super().__init__(client, account_id, name or "LiveLlmTrader", market_ids)
         self.news_feed = news_feed
+        # SYB-192: each trader drains its OWN subscriber view so the Kelly and
+        # Flat arms both see every article. When the feed is wired after
+        # construction (the runner passes news_feed=None), attach_news_feed
+        # registers the subscription then.
+        self.news_sub: NewsSubscription | None = (
+            news_feed.subscribe(name=name) if news_feed is not None else None
+        )
         self.api_key = api_key
         self.model_name = model_name
         self.persona = persona
@@ -168,6 +175,14 @@ class LiveLlmTrader(BaseAgent):
         self.trade_log: dict[int, list[TradeRecord]] = {}
         self.fair_values: dict[int, float] = {}
         self._pending_order_logs: list[dict] = []
+
+    def attach_news_feed(self, feed: NewsFeed) -> None:
+        """Wire in the shared feed and register this trader's own subscription.
+
+        Used by the runner, which constructs traders before the feed exists.
+        """
+        self.news_feed = feed
+        self.news_sub = feed.subscribe(name=self.name)
 
     def _record_trade(
         self,
@@ -508,7 +523,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             if self._last_llm_call != 0 and elapsed_llm < self.min_llm_interval_s:
                 break
 
-            articles = await self.news_feed.drain(market_id)
+            articles = await self.news_sub.drain(market_id) if self.news_sub else []
             if not articles:
                 continue
 

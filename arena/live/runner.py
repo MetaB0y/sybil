@@ -305,9 +305,10 @@ async def run_live(config: LiveConfig):
         feed = NewsFeed(active, api_key=config.api_key, poll_interval_s=config.news_poll_interval,
                         mapping_path=config.mapping_path)
 
-        # Wire feed into traders
+        # Wire feed into traders. Each trader registers its own subscriber view
+        # so the Kelly and Flat arms both receive every article (SYB-192).
         for trader in traders:
-            trader.news_feed = feed
+            trader.attach_news_feed(feed)
 
         # 5. Run everything
         log.info("Starting live trading with %d LLM traders + %d noise traders on %d markets",

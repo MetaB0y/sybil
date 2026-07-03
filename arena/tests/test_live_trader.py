@@ -167,7 +167,8 @@ def _make_multi_market_trader(market_ids):
         published=datetime(2026, 1, 1, tzinfo=timezone.utc),
         full_text="Body text.",
     )
-    news_feed.drain = AsyncMock(return_value=[article])
+    # The trader drains its own subscription, not the feed directly (SYB-192).
+    news_feed.subscribe.return_value.drain = AsyncMock(return_value=[article])
 
     markets_info = {}
     for mid in market_ids:

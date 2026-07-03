@@ -1,9 +1,10 @@
 """Tests for the live NewsFeed ingestion pipeline."""
 
+import logging
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
-from live.news_feed import NewsFeed
+from live.news_feed import LiveArticle, NewsFeed
 from sybil_client.types import Market
 
 
@@ -25,6 +26,7 @@ async def test_multi_market_article_fans_out_to_all_markets(monkeypatch):
     m2 = _market(2, "Iran nuclear agreement reached")
     feed = NewsFeed([m1, m2], api_key=None, poll_interval_s=1)
     feed._warmed_up = True  # skip warm-start suppression
+    sub = feed.subscribe()
 
     shared = {
         "url": "http://example.com/shared",
@@ -45,8 +47,8 @@ async def test_multi_market_article_fans_out_to_all_markets(monkeypatch):
 
     delivered = await feed._poll_once(MagicMock())
 
-    a1 = await feed.drain(1)
-    a2 = await feed.drain(2)
+    a1 = await sub.drain(1)
+    a2 = await sub.drain(2)
 
     assert len(a1) == 1
     assert len(a2) == 1
@@ -81,3 +83,106 @@ async def test_seen_url_not_reprocessed_across_polls(monkeypatch):
 
     assert await feed._poll_once(MagicMock()) == 1
     assert await feed._poll_once(MagicMock()) == 0  # already seen
+
+
+def _article(url: str, title: str = "headline") -> LiveArticle:
+    return LiveArticle(
+        url=url,
+        title=title,
+        source="wire",
+        published=datetime(2026, 7, 1, tzinfo=UTC),
+        full_text="body",
+    )
+
+
+async def _poll_delivering_one_article(feed, url, title):
+    """Drive a single poll that delivers one article across every market feed."""
+    feed._warmed_up = True
+    entry = {
+        "url": url,
+        "title": title,
+        "source": "wire",
+        "published": datetime(2026, 7, 1, tzinfo=UTC),
+    }
+
+    async def fake_fetch_feed(http, _url):
+        return [dict(entry)]
+
+    async def fake_text(http, _url):
+        return "text"
+
+    import pytest
+
+    _mp = pytest.MonkeyPatch()
+    _mp.setattr(feed, "_fetch_feed", fake_fetch_feed)
+    _mp.setattr("live.news_feed.fetch_article_text", fake_text)
+    try:
+        return await feed._poll_once(MagicMock())
+    finally:
+        _mp.undo()
+
+
+async def test_two_subscribers_both_receive_same_article():
+    # SYB-192 core regression: with the old shared-pending drain each article
+    # reached exactly one trader, invalidating the Kelly-vs-Flat A/B. Now two
+    # subscribers draining the same feed must BOTH see the same article.
+    m1 = _market(1, "US and Iran sign a peace deal")
+    feed = NewsFeed([m1], api_key=None, poll_interval_s=1)
+    kelly = feed.subscribe(name="kelly")
+    flat = feed.subscribe(name="flat")
+
+    await _poll_delivering_one_article(feed, "http://ex/a", "Peace talks advance")
+
+    a_kelly = await kelly.drain(1)
+    a_flat = await flat.drain(1)
+
+    assert len(a_kelly) == 1
+    assert len(a_flat) == 1
+    assert a_kelly[0].url == a_flat[0].url == "http://ex/a"
+    # Draining one subscriber must NOT consume the other's copy.
+    assert await kelly.drain(1) == []  # kelly already drained
+    assert len(a_flat) == 1  # flat still had its own copy
+
+
+async def test_unsubscribe_then_resubscribe_is_sane():
+    # An unsubscribed view stops receiving; a fresh subscription only sees
+    # articles delivered after it registered.
+    m1 = _market(1, "Election market")
+    feed = NewsFeed([m1], api_key=None, poll_interval_s=1)
+
+    sub1 = feed.subscribe(name="s1")
+    await _poll_delivering_one_article(feed, "http://ex/1", "first")
+    assert len(await sub1.drain(1)) == 1
+
+    feed.unsubscribe(sub1)
+    # Unsubscribe is idempotent.
+    feed.unsubscribe(sub1)
+
+    await _poll_delivering_one_article(feed, "http://ex/2", "second")
+    # sub1 no longer receives deliveries.
+    assert await sub1.drain(1) == []
+
+    # A fresh subscription only sees articles delivered after it joined.
+    sub2 = feed.subscribe(name="s2")
+    await _poll_delivering_one_article(feed, "http://ex/3", "third")
+    got = await sub2.drain(1)
+    assert len(got) == 1
+    assert got[0].url == "http://ex/3"
+
+
+async def test_subscriber_queue_bounds_drop_oldest(caplog):
+    # A stalled subscriber's queue is bounded drop-oldest, with a warning.
+    m1 = _market(1, "Bounded market")
+    feed = NewsFeed([m1], api_key=None, poll_interval_s=1)
+    sub = feed.subscribe(max_queue=2, name="stalled")
+
+    async with feed._lock:
+        sub._deliver(1, _article("http://ex/1", "first"))
+        sub._deliver(1, _article("http://ex/2", "second"))
+        with caplog.at_level(logging.WARNING, logger="live.news_feed"):
+            sub._deliver(1, _article("http://ex/3", "third"))
+
+    drained = await sub.drain(1)
+    # Oldest dropped; only the two most-recent survive, in order.
+    assert [a.url for a in drained] == ["http://ex/2", "http://ex/3"]
+    assert "dropping oldest" in caplog.text

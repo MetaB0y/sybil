@@ -34,6 +34,12 @@ GATE_MODEL = "google/gemma-4-31b-it"
 MAX_FEED_FETCH_CONCURRENCY = 32
 MAX_GATE_HEADLINES_PER_MARKET = 8
 
+# Per-subscriber, per-market queue bound. A stalled subscriber (e.g. a trader
+# that has exhausted its LLM budget for many blocks) must not grow memory
+# without limit, so its oldest queued articles are dropped once this many pile
+# up for a single market.
+MAX_SUBSCRIBER_QUEUE = 500
+
 # Default path where sybil-polymarket writes the mapping
 DEFAULT_MAPPING_PATH = "/data/polymarket_mapping.json"
 CLOB_URL = "https://clob.polymarket.com"
@@ -254,6 +260,66 @@ async def llm_gate_batch(
 
 
 # --------------------------------------------------------------------------- #
+# Per-subscriber delivery
+# --------------------------------------------------------------------------- #
+class NewsSubscription:
+    """A single subscriber's private, destructive view of a shared NewsFeed.
+
+    SYB-192: the feed used to keep ONE pending dict shared across every trader,
+    and ``drain`` popped that shared state — so each article reached exactly one
+    trader and the Kelly-vs-Flat A/B comparison saw different inputs. Instead,
+    every subscriber now gets its own copy of every delivered article. Draining
+    one subscriber's queue does not consume another subscriber's copy, so all
+    sizing arms observe identical news.
+
+    Each per-market queue is bounded (drop-oldest, with a warning) so a stalled
+    subscriber cannot grow memory without limit. The article objects themselves
+    are shared by reference across subscribers — they are treated as read-only.
+    """
+
+    def __init__(
+        self,
+        feed: "NewsFeed",
+        max_queue: int = MAX_SUBSCRIBER_QUEUE,
+        name: str | None = None,
+    ):
+        self._feed = feed
+        self._max_queue = max_queue
+        self.name = name
+        self._pending: dict[int, deque[LiveArticle]] = defaultdict(deque)
+
+    def _deliver(self, market_id: int, article: LiveArticle) -> None:
+        """Enqueue an article for one market. Caller must hold the feed lock."""
+        queue = self._pending[market_id]
+        queue.append(article)
+        while len(queue) > self._max_queue:
+            dropped = queue.popleft()
+            log.warning(
+                "Subscriber %s queue for market %d full (max=%d); dropping oldest "
+                "article %r",
+                self.name or id(self),
+                market_id,
+                self._max_queue,
+                dropped.title[:60],
+            )
+
+    async def drain(self, market_id: int) -> list[LiveArticle]:
+        """Destructively pop this subscriber's pending articles for a market.
+
+        Only this subscriber's queue is drained; other subscribers keep their
+        own copies. AR-6: a trader that leaves articles undrained (spent LLM
+        budget) keeps them queued for a later block without affecting others.
+        """
+        async with self._feed._lock:
+            queue = self._pending.get(market_id)
+            if not queue:
+                return []
+            articles = list(queue)
+            queue.clear()
+        return articles
+
+
+# --------------------------------------------------------------------------- #
 # NewsFeed
 # --------------------------------------------------------------------------- #
 class NewsFeed:
@@ -279,8 +345,11 @@ class NewsFeed:
         # url -> set of market ids that matched it in the latest poll (AR-7)
         self._url_market_ids: dict[str, set[int]] = {}
 
-        # Pending articles per market
-        self._pending: dict[int, list[LiveArticle]] = defaultdict(list)
+        # Broadcast delivery: every trader registers as a subscriber and gets
+        # its own per-market queue. Polling/fetching stays single (one poll
+        # loop, one fetch per url); only delivery fans out. The lock guards both
+        # delivery into subscriber queues and each subscriber's drain.
+        self._subscribers: list[NewsSubscription] = []
         self._lock = asyncio.Lock()
 
         # All articles (for DB logging)
@@ -479,9 +548,14 @@ class NewsFeed:
                 )
 
                 async with self._lock:
-                    self._pending[market_id].append(article)
+                    # Broadcast: hand every subscriber its own copy for this
+                    # market. AR-7 fan-out is unchanged — this runs once per
+                    # (article, matched market) so a multi-market article still
+                    # lands in each matching market's queue for every trader.
+                    for sub in self._subscribers:
+                        sub._deliver(market_id, article)
                     # De-dup the all-articles log (one row per url), while still
-                    # fanning the article out to every market's pending queue.
+                    # fanning the article out to every subscriber's queue.
                     if url not in logged_urls:
                         self._all_articles.append(article)
                         logged_urls.add(url)
@@ -522,11 +596,26 @@ class NewsFeed:
                     log.error("Poll error: %s", e)
                 await asyncio.sleep(self.poll_interval)
 
-    async def drain(self, market_id: int) -> list[LiveArticle]:
-        """Pop all pending articles for a market."""
-        async with self._lock:
-            articles = self._pending.pop(market_id, [])
-        return articles
+    def subscribe(
+        self,
+        max_queue: int = MAX_SUBSCRIBER_QUEUE,
+        name: str | None = None,
+    ) -> NewsSubscription:
+        """Register a subscriber and return its private, drainable view.
+
+        Each subscriber receives every future delivered article. Call once per
+        trader so both sizing arms observe identical news (SYB-192).
+        """
+        sub = NewsSubscription(self, max_queue=max_queue, name=name)
+        self._subscribers.append(sub)
+        return sub
+
+    def unsubscribe(self, sub: NewsSubscription) -> None:
+        """Stop delivering to a subscriber. Idempotent."""
+        try:
+            self._subscribers.remove(sub)
+        except ValueError:
+            pass
 
     def drain_all_new(self) -> list[LiveArticle]:
         """Pop all new articles (for DB logging). Non-async for simplicity."""
