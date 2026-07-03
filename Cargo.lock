@@ -4200,6 +4200,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sybil-api-types",
+ "sybil-client",
  "sybil-oracle",
  "tokio",
  "tokio-stream",
@@ -4232,6 +4233,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-client"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sybil-api-types",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "sybil-oracle"
 version = "0.1.0"
 dependencies = [
@@ -4255,6 +4269,7 @@ dependencies = [
  "serde_json",
  "sybil-api-types",
  "sybil-canonical",
+ "sybil-client",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.29.0",

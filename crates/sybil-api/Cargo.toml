@@ -16,6 +16,7 @@ path = "src/bin/sybil_admin.rs"
 matching-engine = { path = "../matching-engine" }
 matching-sequencer = { path = "../matching-sequencer" }
 sybil-api-types = { path = "../sybil-api-types", features = ["openapi"] }
+sybil-client = { path = "../sybil-client" }
 sybil-oracle = { path = "../sybil-oracle" }
 axum = { version = "0.8", features = ["json", "ws"] }
 tokio = { version = "1", features = ["full"] }

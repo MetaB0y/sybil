@@ -30,6 +30,17 @@ pub enum Error {
     Channel(String),
 }
 
+impl From<sybil_client::Error> for Error {
+    fn from(err: sybil_client::Error) -> Self {
+        match err {
+            // Preserve the raw status + body so downstream parsing (e.g. the MM's
+            // poisoned-market-from-400-body detection) keeps working unchanged.
+            sybil_client::Error::Api { status, body } => Self::SybilApi { status, body },
+            sybil_client::Error::Http(err) => Self::Http(err),
+        }
+    }
+}
+
 impl Error {
     pub fn is_expected_websocket_disconnect(&self) -> bool {
         match self {

@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use sybil_api_types::NANOS_PER_DOLLAR;
+use sybil_client::SybilClient;
 use sybil_polymarket::config::Config;
 use sybil_polymarket::feed::{FeedActor, PriceSnapshot};
 use sybil_polymarket::mapping::MappingStore;
@@ -15,7 +16,6 @@ use sybil_polymarket::mm::MmActor;
 use sybil_polymarket::polymarket::gamma::GammaClient;
 use sybil_polymarket::resolution::ResolutionActor;
 use sybil_polymarket::signer::ResolutionSigner;
-use sybil_polymarket::sybil::client::SybilClient;
 use sybil_polymarket::sync::SyncActor;
 
 /// Reattach to the persisted MM account, or mint and persist a fresh one (PM-7).

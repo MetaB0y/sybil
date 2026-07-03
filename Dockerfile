@@ -22,6 +22,7 @@ COPY crates/matching-sim/Cargo.toml crates/matching-sim/
 COPY crates/matching-sequencer/Cargo.toml crates/matching-sequencer/
 COPY crates/sybil-api/Cargo.toml crates/sybil-api/
 COPY crates/sybil-api-types/Cargo.toml crates/sybil-api-types/
+COPY crates/sybil-client/Cargo.toml crates/sybil-client/
 COPY crates/sybil-oracle/Cargo.toml crates/sybil-oracle/
 COPY crates/sybil-verifier/Cargo.toml crates/sybil-verifier/
 COPY crates/sybil-zk/Cargo.toml crates/sybil-zk/
@@ -31,7 +32,7 @@ COPY crates/sybil-polymarket/Cargo.toml crates/sybil-polymarket/
 COPY crates/sequencer-sim/Cargo.toml crates/sequencer-sim/
 
 # Create dummy source files to cache dependency compilation
-RUN for crate in matching-engine matching-solver matching-scenarios matching-sim matching-sequencer sybil-api sybil-api-types sybil-oracle sybil-verifier sybil-zk sybil-canonical sybil-polymarket sequencer-sim; do \
+RUN for crate in matching-engine matching-solver matching-scenarios matching-sim matching-sequencer sybil-api sybil-api-types sybil-client sybil-oracle sybil-verifier sybil-zk sybil-canonical sybil-polymarket sequencer-sim; do \
         mkdir -p crates/$crate/src && echo "" > crates/$crate/src/lib.rs; \
     done && \
     mkdir -p crates/sybil-api/src && echo "fn main() {}" > crates/sybil-api/src/main.rs && \

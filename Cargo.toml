@@ -11,6 +11,7 @@ members = [
     "crates/sybil-oracle",
     "crates/sybil-api",
     "crates/sybil-api-types",
+    "crates/sybil-client",
     "crates/sybil-verifier",
     "crates/sybil-zk",
     "crates/sybil-prover",

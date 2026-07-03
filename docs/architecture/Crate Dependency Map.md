@@ -20,6 +20,8 @@ block/proof material from the sequencer store. The sequencer does not depend on
 `sybil-zk`; it produces and persists blocks, witnesses, and qMDB proof
 material.
 
+The client tier sits below the DTO crate. `sybil-api-types` is the shared source of truth for request/response shapes; `sybil-client` is THE Rust HTTP client for `sybil-api` (SYB-171), typed against those DTOs. Both in-tree Rust consumers use it: `sybil-polymarket` (the mirror + market maker) and the `sybil-admin` CLI (a binary inside `sybil-api`). It replaced two hand-written clients that had drifted independently — there is now exactly one, so no third should be added. It owns base-url + optional service-token (`SYBIL_SERVICE_TOKEN`) auth, response decoding, and the SSE block-stream consumption; each consumer keeps its own concerns (the mirror's reconnect loop and poisoned-market parsing, the admin's audit log) around it.
+
 The Python `arena/` sits outside the Rust workspace entirely, connected only via HTTP to `sybil-api`. This clean boundary means the Python bots can be developed, tested, and deployed independently of the Rust code — they only need a running server. The separation also means the arena doesn't need to compile any Rust code, which is important for Python-first developers who want to build bots without a Rust toolchain.
 
 ```mermaid
@@ -45,6 +47,11 @@ graph TB
     ZK --> PROVER
     SEQ -.->|"sequencer-store feature"| PROVER
     ZK --> OPENVM["zk/openvm-guest"]
+
+    TYPES["sybil-api-types<br/>shared request/response DTOs"] --> CLIENT["sybil-client<br/>THE Rust API client · SYB-171"]
+    CLIENT --> POLY["sybil-polymarket<br/>mirror + market maker"]
+    CLIENT --> API
+    POLY -.->|"HTTP"| API
 ```
 
 *Note: `matching-sim` also depends on `matching-solver` and `sybil-verifier` — omitted to keep arrows clean. It's a dev tool for benchmarking.*
@@ -57,6 +64,7 @@ graph TB
 - `sybil-prover witgen ...` is sequencer-side tooling for exporting latest-block proof jobs from the store, gated behind `sequencer-store`
 - Default `sybil-prover` builds are the proof-job CLI/service boundary and settlement calldata encoder; they do not depend on the sequencer
 - Sequencer owns block production and persistence, not prover input assembly
+- `sybil-client` is THE Rust HTTP client (SYB-171): `sybil-polymarket` and the `sybil-admin` CLI both depend on it; no hand-written duplicate should be reintroduced
 - Arena connects via HTTP only — no Rust compilation required
 - `matching-sim` is a dev tool that cross-cuts multiple crates for benchmarking
 - `sequencer-sim` is a dev-only crate: it depends on `matching-sequencer` so the sequencer library stays free of simulation/agent code (nothing `sybil-api` links pulls it in)

@@ -7,8 +7,8 @@ use tracing::{debug, info, warn};
 use crate::config::Config;
 use crate::error::Error;
 use crate::feed::PriceSnapshot;
-use crate::sybil::client::SybilClient;
 use sybil_api_types::*;
+use sybil_client::SybilClient;
 
 /// Default variance prior for markets with insufficient price history.
 const DEFAULT_VARIANCE: f64 = 0.0005;
@@ -754,6 +754,7 @@ impl MmActor {
                 None
             }
             Err(e) => {
+                let e = Error::from(e);
                 let poisoned = poisoned_market_from_error(&e);
                 warn!(block = block_height, error = %e, poisoned, "order submission failed");
                 poisoned

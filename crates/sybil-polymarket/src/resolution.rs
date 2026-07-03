@@ -25,8 +25,8 @@ use crate::mapping::MappingStore;
 use crate::polymarket::gamma::GammaClient;
 use crate::polymarket::types::{GammaEvent, GammaMarket};
 use crate::signer::ResolutionSigner;
-use crate::sybil::client::SybilClient;
 use sybil_api_types::SetMarketMetadataRequest;
+use sybil_client::SybilClient;
 
 /// Periodic resolver. Polls closed Polymarket events, attests to clean
 /// binary resolutions, and sends them to sybil-api.

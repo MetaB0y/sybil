@@ -7,11 +7,11 @@ use sybil_api::util::now_ms;
 use clap::{Args, Parser, Subcommand};
 use matching_engine::NANOS_PER_DOLLAR;
 use reqwest::StatusCode;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sybil_api_types::request::{CreateMarketRequest, ResolveMarketRequest};
 use sybil_api_types::response::{CreateMarketResponse, ResolveMarketResponse};
+use sybil_client::SybilClient;
 
 #[derive(Parser, Debug)]
 #[command(name = "sybil-admin", about = "Admin CLI for Sybil market curation")]
@@ -151,24 +151,23 @@ struct AuditEntry {
     error: Option<String>,
 }
 
+/// Thin admin wrapper over the shared [`SybilClient`] (SYB-171). The client
+/// owns all HTTP/auth/decoding; this wrapper adds the admin-only append-only
+/// audit log around each call.
 struct ApiClient {
-    base_url: String,
+    client: SybilClient,
     audit_log: PathBuf,
-    http: reqwest::Client,
-    service_token: Option<String>,
 }
 
 impl ApiClient {
     fn new(base_url: String, audit_log: PathBuf) -> Self {
-        // TODO(SYBIL): extract this client into a shared crate if we build a user/trading CLI.
+        // Service bearer token (SYB-173): present in production, absent in dev.
         let service_token = std::env::var("SYBIL_SERVICE_TOKEN")
             .ok()
             .and_then(|value| (!value.trim().is_empty()).then_some(value));
         Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
+            client: SybilClient::new(reqwest::Client::new(), base_url, service_token),
             audit_log,
-            http: reqwest::Client::new(),
-            service_token,
         }
     }
 
@@ -176,8 +175,12 @@ impl ApiClient {
         &self,
         request: &CreateMarketRequest,
     ) -> Result<CreateMarketResponse, CliError> {
-        self.post_json("/v1/markets", "market.create", Some(request), request)
-            .await
+        self.record(
+            "/v1/markets",
+            "market.create",
+            request,
+            self.client.create_market(request).await,
+        )
     }
 
     async fn resolve_market(
@@ -185,85 +188,66 @@ impl ApiClient {
         market_id: u32,
         request: &ResolveMarketRequest,
     ) -> Result<ResolveMarketResponse, CliError> {
-        self.post_json(
+        self.record(
             &format!("/v1/markets/{market_id}/resolve"),
             "market.resolve",
-            Some(request),
             request,
+            self.client.resolve_market_request(market_id, request).await,
         )
-        .await
     }
 
-    async fn post_json<TReq, TResp>(
+    /// Wrap a shared-client call with the admin audit log, mapping the client's
+    /// error surface back onto [`CliError`] so caller-visible behavior is
+    /// unchanged. Every audited endpoint returns 200 on success.
+    fn record<TReq, TResp>(
         &self,
         path: &str,
         action: &str,
-        audit_request: Option<&impl Serialize>,
         request: &TReq,
+        result: Result<TResp, sybil_client::Error>,
     ) -> Result<TResp, CliError>
     where
         TReq: Serialize + ?Sized,
-        TResp: DeserializeOwned + Serialize,
+        TResp: Serialize,
     {
-        let url = format!("{}{}", self.base_url, path);
-        let mut request_builder = self.http.post(&url).json(request);
-        if let Some(token) = self.service_token.as_deref() {
-            request_builder = request_builder.bearer_auth(token);
-        }
-        let response = request_builder.send().await?;
-        self.decode_response(path, action, response, audit_request)
-            .await
-    }
-
-    async fn decode_response<TResp>(
-        &self,
-        path: &str,
-        action: &str,
-        response: reqwest::Response,
-        audit_request: Option<&impl Serialize>,
-    ) -> Result<TResp, CliError>
-    where
-        TResp: DeserializeOwned + Serialize,
-    {
-        let status = response.status();
-        let text = response.text().await?;
-        let request_json = audit_request
-            .map(serde_json::to_value)
-            .transpose()
-            .unwrap_or(None);
-
-        if status.is_success() {
-            let parsed: TResp = serde_json::from_str(&text)?;
-            self.append_audit_log(AuditEntry {
-                timestamp_ms: now_ms(),
-                action: action.to_string(),
-                endpoint: path.to_string(),
-                success: true,
-                http_status: Some(status.as_u16()),
-                request: request_json,
-                response: Some(serde_json::to_value(&parsed)?),
-                error: None,
-            })?;
-            Ok(parsed)
-        } else {
-            let message = match serde_json::from_str::<ApiErrorBody>(&text) {
-                Ok(body) => match body.details {
-                    Some(details) => format!("{} ({details})", body.error),
-                    None => body.error,
-                },
-                Err(_) => text.clone(),
-            };
-            self.append_audit_log(AuditEntry {
-                timestamp_ms: now_ms(),
-                action: action.to_string(),
-                endpoint: path.to_string(),
-                success: false,
-                http_status: Some(status.as_u16()),
-                request: request_json,
-                response: serde_json::from_str(&text).ok(),
-                error: Some(message.clone()),
-            })?;
-            Err(CliError::Api { status, message })
+        let request_json = serde_json::to_value(request).ok();
+        match result {
+            Ok(parsed) => {
+                self.append_audit_log(AuditEntry {
+                    timestamp_ms: now_ms(),
+                    action: action.to_string(),
+                    endpoint: path.to_string(),
+                    success: true,
+                    http_status: Some(200),
+                    request: request_json,
+                    response: Some(serde_json::to_value(&parsed)?),
+                    error: None,
+                })?;
+                Ok(parsed)
+            }
+            Err(sybil_client::Error::Api { status, body }) => {
+                let message = match serde_json::from_str::<ApiErrorBody>(&body) {
+                    Ok(parsed) => match parsed.details {
+                        Some(details) => format!("{} ({details})", parsed.error),
+                        None => parsed.error,
+                    },
+                    Err(_) => body.clone(),
+                };
+                self.append_audit_log(AuditEntry {
+                    timestamp_ms: now_ms(),
+                    action: action.to_string(),
+                    endpoint: path.to_string(),
+                    success: false,
+                    http_status: Some(status),
+                    request: request_json,
+                    response: serde_json::from_str(&body).ok(),
+                    error: Some(message.clone()),
+                })?;
+                let status =
+                    StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+                Err(CliError::Api { status, message })
+            }
+            Err(sybil_client::Error::Http(err)) => Err(CliError::Http(err)),
         }
     }
 

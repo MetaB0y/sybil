@@ -1,10 +1,15 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
 use reqwest::Client;
+use serde::de::DeserializeOwned;
 use tracing::debug;
 
 use crate::error::Error;
 use sybil_api_types::*;
 
-/// HTTP client for the Sybil API. Mirrors the Python `SybilClient`.
+/// HTTP client for the Sybil API. This is THE shared client (SYB-171); it is
+/// typed against [`sybil_api_types`] and mirrors the Python `SybilClient`.
 pub struct SybilClient {
     http: Client,
     base_url: String,
@@ -12,12 +17,27 @@ pub struct SybilClient {
 }
 
 impl SybilClient {
+    /// Construct a client over a caller-provided `reqwest::Client`. Use this
+    /// when you want to control the transport (TLS backend, connection pool,
+    /// per-request timeouts such as the long-lived SSE stream).
     pub fn new(http: Client, base_url: String, service_token: Option<String>) -> Self {
         Self {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
             service_token,
         }
+    }
+
+    /// Convenience constructor that builds a `reqwest::Client` with sane default
+    /// timeouts. Callers with their own transport requirements (e.g. the
+    /// long-poll SSE stream) should use [`SybilClient::new`] with a client they
+    /// configure themselves.
+    pub fn with_defaults(base_url: String, service_token: Option<String>) -> Self {
+        let http = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("failed to build default reqwest client");
+        Self::new(http, base_url, service_token)
     }
 
     fn url(&self, path: &str) -> String {
@@ -37,8 +57,13 @@ impl SybilClient {
         } else {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
-            Err(Error::SybilApi { status, body })
+            Err(Error::Api { status, body })
         }
+    }
+
+    async fn decode<T: DeserializeOwned>(&self, resp: reqwest::Response) -> Result<T, Error> {
+        let resp = self.check_response(resp).await?;
+        Ok(resp.json().await?)
     }
 
     // === Health ===
@@ -48,8 +73,7 @@ impl SybilClient {
             .with_service_auth(self.http.get(self.url("/v1/health")))
             .send()
             .await?;
-        let resp = self.check_response(resp).await?;
-        Ok(resp.json().await?)
+        self.decode(resp).await
     }
 
     // === Accounts ===
@@ -66,8 +90,7 @@ impl SybilClient {
             .json(&req)
             .send()
             .await?;
-        let resp = self.check_response(resp).await?;
-        Ok(resp.json().await?)
+        self.decode(resp).await
     }
 
     pub async fn get_account(&self, account_id: u64) -> Result<AccountResponse, Error> {
@@ -78,8 +101,7 @@ impl SybilClient {
             )
             .send()
             .await?;
-        let resp = self.check_response(resp).await?;
-        Ok(resp.json().await?)
+        self.decode(resp).await
     }
 
     pub async fn fund_account(
@@ -96,8 +118,7 @@ impl SybilClient {
             .json(&req)
             .send()
             .await?;
-        let resp = self.check_response(resp).await?;
-        Ok(resp.json().await?)
+        self.decode(resp).await
     }
 
     // === Markets ===
@@ -111,8 +132,7 @@ impl SybilClient {
             .json(req)
             .send()
             .await?;
-        let resp = self.check_response(resp).await?;
-        Ok(resp.json().await?)
+        self.decode(resp).await
     }
 
     pub async fn list_market_summaries(&self) -> Result<Vec<MarketSummaryResponse>, Error> {
@@ -120,8 +140,7 @@ impl SybilClient {
             .with_service_auth(self.http.get(self.url("/v1/markets/summary")))
             .send()
             .await?;
-        let resp = self.check_response(resp).await?;
-        Ok(resp.json().await?)
+        self.decode(resp).await
     }
 
     pub async fn create_market_group(
@@ -133,8 +152,27 @@ impl SybilClient {
             .json(req)
             .send()
             .await?;
-        let resp = self.check_response(resp).await?;
-        Ok(resp.json().await?)
+        self.decode(resp).await
+    }
+
+    /// Resolve a market, returning the typed server response. Prefer the
+    /// [`SybilClient::resolve_market`] / [`SybilClient::resolve_market_attested`]
+    /// helpers for the common cases; this is the raw form used by callers that
+    /// need the [`ResolveMarketResponse`] (e.g. `sybil-admin`).
+    pub async fn resolve_market_request(
+        &self,
+        market_id: u32,
+        req: &ResolveMarketRequest,
+    ) -> Result<ResolveMarketResponse, Error> {
+        let resp = self
+            .with_service_auth(
+                self.http
+                    .post(self.url(&format!("/v1/markets/{}/resolve", market_id))),
+            )
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
     }
 
     pub async fn resolve_market(&self, market_id: u32, payout_nanos: u64) -> Result<(), Error> {
@@ -193,8 +231,7 @@ impl SybilClient {
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
-        let resp = self.check_response(resp).await?;
-        Ok(Some(resp.json().await?))
+        Ok(Some(self.decode(resp).await?))
     }
 
     // === Orders ===
@@ -205,8 +242,7 @@ impl SybilClient {
             .json(req)
             .send()
             .await?;
-        let resp = self.check_response(resp).await?;
-        let result: OrderAcceptedResponse = resp.json().await?;
+        let result: OrderAcceptedResponse = self.decode(resp).await?;
         Ok(result.accepted)
     }
 
@@ -251,10 +287,7 @@ impl SybilClient {
     }
 
     /// Push reference prices to sybil-api (display only, not matching logic).
-    pub async fn set_reference_prices(
-        &self,
-        prices: &std::collections::HashMap<u32, u64>,
-    ) -> Result<(), Error> {
+    pub async fn set_reference_prices(&self, prices: &HashMap<u32, u64>) -> Result<(), Error> {
         let body = serde_json::json!({ "prices": prices });
         let resp = self
             .with_service_auth(self.http.post(self.url("/v1/markets/prices/reference")))
