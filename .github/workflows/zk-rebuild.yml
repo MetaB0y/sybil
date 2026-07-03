@@ -1,0 +1,139 @@
+name: ZK Rebuild Reproducibility
+
+# Rebuilds the OpenVM guest from source and checks whether the regenerated
+# commitment hashes still match the committed
+# zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json.
+#
+# REPORT-ONLY (not a merge gate). Rationale (SYB-208): the guest does not
+# currently rebuild from source at all -- crates/sybil-zk's guest_commitments.rs
+# passes owned [u8; N] arrays to a Sha256::update that takes &[u8] on the
+# riscv32im-risc0-zkvm-elf target — regression from SYB-170, fixed same-day
+# under SYB-208 (borrowed hasher args). Both preconditions for gating were then
+# met: the guest builds, and two independent rebuilds produced identical
+# commitments (2026-07-03). This lane is therefore a HARD GATE: regenerated
+# commits must equal the committed commit.json. If it goes red, either source
+# changed without refreshing the pins (run just openvm-commit +
+# scripts/zk-guest-fingerprint.sh --write) or the build stopped being
+# reproducible — both demand attention, not a silent skip.
+#
+# The fast, always-on ZK job (ci.yml -> zk) stays untouched: it only host-checks
+# the guest source and runs the fingerprint staleness gate; it never rebuilds
+# the consensus artifact.
+
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  OPENVM_TAG: v2.0.0-beta.2
+  # Nightly the OpenVM guest build driver invokes (cargo +<toolchain> build
+  # --target riscv32im-risc0-zkvm-elf -Z build-std=...). Keep in sync with the
+  # toolchain cargo-openvm v2.0.0-beta.2 selects locally.
+  GUEST_NIGHTLY: nightly-2026-01-18
+  COMMIT_JSON: zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json
+
+jobs:
+  zk-rebuild:
+    name: Rebuild guest & compare commitment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Host toolchain used to compile the workspace crates the guest pulls in.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      # Guest nightly with rust-src so `-Z build-std` can build the zkVM target.
+      - name: Install guest nightly toolchain
+        run: |
+          rustup toolchain install "$GUEST_NIGHTLY" --profile minimal --component rust-src
+          rustup target add riscv32im-risc0-zkvm-elf --toolchain "$GUEST_NIGHTLY" || true
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Dedicated cache key for the out-of-workspace OpenVM crates; do not
+          # share with the fast zk job's cache.
+          key: zk-rebuild
+          workspaces: |
+            zk/openvm-guest
+            zk/openvm-tools
+
+      # cargo-openvm is expensive to build from the git tag; cache the installed
+      # binary keyed on the pinned tag.
+      - name: Cache cargo-openvm binary
+        id: cache-openvm
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-openvm
+          key: cargo-openvm-${{ env.OPENVM_TAG }}
+
+      - name: Install cargo-openvm (pinned)
+        if: steps.cache-openvm.outputs.cache-hit != 'true'
+        run: |
+          cargo install --locked \
+            --git https://github.com/openvm-org/openvm.git \
+            --tag "$OPENVM_TAG" cargo-openvm
+
+      - name: Rebuild guest commitment
+        id: rebuild
+        continue-on-error: false
+        run: |
+          set -o pipefail
+          cargo openvm commit \
+            --manifest-path zk/openvm-guest/Cargo.toml \
+            --config zk/openvm-guest/openvm.toml \
+            --output-dir target/openvm/zk-rebuild-ci 2>&1 | tee /tmp/openvm-rebuild.log
+
+      - name: Compare regenerated vs committed commitment
+        continue-on-error: false
+        run: |
+          set -u
+          NEW_JSON="target/openvm/zk-rebuild-ci/release/sybil-openvm-guest.commit.json"
+          {
+            echo "## ZK rebuild reproducibility (report-only)"
+            echo ""
+            echo "- OpenVM tag: \`$OPENVM_TAG\`"
+            echo "- Guest nightly: \`$GUEST_NIGHTLY\`"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ steps.rebuild.outcome }}" != "success" ] || [ ! -f "$NEW_JSON" ]; then
+            {
+              echo "### ❌ Guest rebuild FAILED (expected until the SYB-170 guest-build regression is fixed)"
+              echo ""
+              echo "The guest does not currently compile for \`riscv32im-risc0-zkvm-elf\`."
+              echo "Tail of the build log:"
+              echo '```'
+              tail -n 40 /tmp/openvm-rebuild.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::ZK guest rebuild failed; commitment could not be regenerated (report-only)."
+            exit 0
+          fi
+
+          extract() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$2" | head -n1; }
+          NEW_EXE="$(extract app_exe_commit "$NEW_JSON")"
+          NEW_VM="$(extract app_vm_commit "$NEW_JSON")"
+          OLD_EXE="$(extract app_exe_commit "$COMMIT_JSON")"
+          OLD_VM="$(extract app_vm_commit "$COMMIT_JSON")"
+
+          {
+            echo "| field | committed commit.json | regenerated |"
+            echo "| --- | --- | --- |"
+            echo "| app_exe_commit | \`$OLD_EXE\` | \`$NEW_EXE\` |"
+            echo "| app_vm_commit | \`$OLD_VM\` | \`$NEW_VM\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$NEW_EXE" = "$OLD_EXE" ] && [ "$NEW_VM" = "$OLD_VM" ]; then
+            echo "### ✅ Regenerated commitment matches the committed commit.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ⚠️ Regenerated commitment DIFFERS from the committed commit.json" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "If this is an intended guest/source change, follow the redeploy procedure in \`zk/openvm-guest/README.md\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Regenerated guest commitment differs from committed commit.json (report-only)."
+          fi

@@ -8,7 +8,14 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/
 contracts/lib/
-zk/openvm-guest/openvm/
+# OpenVM guest build artifacts are gitignored (large binaries: vmexe, pk, vk),
+# EXCEPT the two small reviewable commitment JSONs, which are committed as the
+# source of truth for the on-chain appExeCommit/appVmCommit pin (SYB-208).
+zk/openvm-guest/openvm/*
+!zk/openvm-guest/openvm/release/
+zk/openvm-guest/openvm/release/*
+!zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json
+!zk/openvm-guest/openvm/release/sybil-openvm-guest.baseline.json
 zk/openvm-guest/target/
 zk/openvm-guest/openvm_init.rs
 *.tsbuildinfo

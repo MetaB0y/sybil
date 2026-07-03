@@ -63,6 +63,61 @@ read_lock_field() {
     sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$LOCK_FILE" | head -n1
 }
 
+read_commit_json_field() {
+    # $1 = field name; prints value from the committed commit.json, or empty.
+    local field="$1"
+    [ -f "$COMMIT_JSON" ] || return 0
+    sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$COMMIT_JSON" | head -n1
+}
+
+# Cross-check: the lock file's commitment hashes MUST equal the committed
+# commit.json (the reviewable source of truth for the on-chain pin, committed
+# via SYB-208). The lock file keeps the SOURCE-fingerprint role; commit.json
+# is authoritative for the commitment hashes. If they drift, someone edited
+# one without the other -- fail loudly.
+cross_check_commit_json() {
+    if [ ! -f "$COMMIT_JSON" ]; then
+        cat >&2 <<EOF
+ERROR: committed guest commitment artifact missing: $COMMIT_JSON
+
+This JSON is committed (SYB-208) as the source of truth for the on-chain
+appExeCommit/appVmCommit pin. A clean checkout always contains it; if it is
+missing you likely deleted it locally -- restore it:
+  git checkout -- zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json
+EOF
+        exit 1
+    fi
+    local lock_exe lock_vm json_exe json_vm
+    lock_exe="$(read_lock_field app_exe_commit)"
+    lock_vm="$(read_lock_field app_vm_commit)"
+    json_exe="$(read_commit_json_field app_exe_commit)"
+    json_vm="$(read_commit_json_field app_vm_commit)"
+    if [ -z "$json_exe" ] || [ -z "$json_vm" ]; then
+        echo "ERROR: committed commit.json missing app_exe_commit/app_vm_commit: $COMMIT_JSON" >&2
+        exit 1
+    fi
+    if [ "$lock_exe" != "$json_exe" ] || [ "$lock_vm" != "$json_vm" ]; then
+        cat >&2 <<EOF
+ERROR: guest commitment records disagree.
+
+  lock file (guest.commitment.lock.json):
+    app_exe_commit: $lock_exe
+    app_vm_commit:  $lock_vm
+  committed commit.json (source of truth):
+    app_exe_commit: $json_exe
+    app_vm_commit:  $json_vm
+
+commit.json is authoritative for the commitment hashes; the lock carries a
+copy for the staleness workflow. Reconcile them:
+  1. If commit.json is correct, refresh the lock: scripts/zk-guest-fingerprint.sh --write
+  2. Refresh the deployed OpenVmVerifierAdapter pin if the commitment truly changed.
+See zk/openvm-guest/README.md for the three-record model and redeploy procedure.
+EOF
+        exit 1
+    fi
+    echo "OK: lock commitment hashes match committed commit.json (exe=$json_exe)."
+}
+
 write_lock() {
     local source_hash exe_commit vm_commit
     source_hash="$(compute_source_hash)"
@@ -121,6 +176,7 @@ EOF
         exit 1
     fi
     echo "OK: guest source matches pinned commitment fingerprint ($actual)."
+    cross_check_commit_json
 }
 
 case "${1:---check}" in

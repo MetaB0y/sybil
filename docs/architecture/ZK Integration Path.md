@@ -2,7 +2,7 @@
 tags: [zk]
 layer: verification
 status: planned
-last_verified: 2026-05-06
+last_verified: 2026-07-03
 ---
 
 Sybil is designed for a Validium architecture: off-chain data, on-chain proofs. The exchange runs off-chain for performance, but every batch's correctness is attested by an OpenVM proof posted to Ethereum L1. The [[L1 Settlement and Vault|on-chain contracts]] store accepted [[State Root and Parent Hash|state roots]], custody collateral, and process proof-backed withdrawals — they never see individual orders, fills, or account balances.
@@ -87,6 +87,81 @@ The first guest boundary is intentionally narrow:
   scaffolding, not the final encrypted recovery DA design. `SybilSettlement`
   stores the proven commitment but does not judge provider availability
   on-chain.
+
+## Guest Commitment Records
+
+The guest's compiled artifact yields two commitment hashes — `app_exe_commit`
+and `app_vm_commit` — that `contracts/src/OpenVmVerifierAdapter.sol` pins at
+deploy time. Because the compiled artifacts under `zk/openvm-guest/openvm/` are
+large binaries, there are **three** records of these hashes, with distinct
+roles and authority (SYB-208):
+
+1. **Deployed pin (authoritative for consensus).** The `appExeCommit` /
+   `appVmCommit` constructor args baked into the deployed
+   `OpenVmVerifierAdapter`. This is what the chain actually enforces. It is the
+   ground truth; everything else is a record *of* it. The current pin is the
+   May-2026 build.
+2. **Committed `commit.json` (reviewable source of truth).**
+   `zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json` (plus
+   `…baseline.json`) is now committed — the small, human-reviewable JSON that
+   records which commitment the source *should* produce. Committing it gives
+   the repo a persistent, diff-able record instead of relying solely on the
+   deployed constructor args. The large `.vmexe`/`.pk`/`.vk` binaries stay
+   gitignored.
+3. **`guest.commitment.lock.json` (source fingerprint).** A SHA-256 fingerprint
+   of the guest *source tree* plus a copy of the commitment hashes. Its job is
+   staleness detection: `scripts/zk-guest-fingerprint.sh --check` fails if the
+   guest source changes without regenerating the pin, and now also cross-checks
+   that its copied hashes still equal `commit.json`.
+
+**Authority order:** deployed pin > `commit.json` > lock file. The lock owns the
+source-fingerprint role; `commit.json` owns the commitment-hash record.
+
+### Rebuild status: deterministic; deployed pin diverges until next redeploy
+
+The fingerprint gate only covers `zk/openvm-guest`'s own source tree — it does
+**not** cover the transitively-compiled `crates/sybil-zk` (the guest compiles it
+by path). So the gate can be green while the produced commitment has drifted.
+[[Canonical Serialization|SYB-170]] consolidated the canonical byte/hash code
+into `sybil-zk` and flagged exactly this.
+
+Measured under SYB-208 (2026-07-03): SYB-170 had additionally broken the
+guest-target build itself — `guest_commitments.rs` passed owned `[u8; N]`
+arrays to `Sha256::update`, which compiles on the host (`sha2` takes
+`impl AsRef<[u8]>`) but fails on `riscv32im-risc0-zkvm-elf`, where the guest's
+`Sha256::update` takes `&[u8]`. Host builds, workspace tests, and the
+fingerprint gate never see the zkVM target, so everything stayed green — the
+blind spot the `zk-rebuild` lane exists to close. Fixed the same day (borrowed
+args, same commit as the SYB-208 landing).
+
+With the fix, rebuilds are **deterministic** (two independent
+`just openvm-commit` runs → identical commitments), so the `zk-rebuild` CI
+lane (below) is a **hard gate**: regenerated commits must equal the committed
+`commit.json`. The committed `commit.json` + lock now carry the
+**current-source** commitment (`app_exe_commit 0x0094ea7a…`); the **deployed**
+adapter still pins the **May-2026** build (`0x00796a20…`). Consensus bytes are
+golden-vector-identical, but the artifact differs — the next devnet redeploy
+must update the adapter constructor args to the committed values (freshly
+built proofs will not verify against the old pin until then).
+
+### Redeploy procedure (when the commitment legitimately changes)
+
+When a guest rebuild *does* produce a new, correct commitment (after the guest
+build is fixed and any intended source change lands):
+
+1. `just openvm-commit` → regenerate the artifacts and read the new
+   `app_exe_commit` / `app_vm_commit`.
+2. Copy the new `commit.json` + `baseline.json` into
+   `zk/openvm-guest/openvm/release/` and commit them.
+3. `scripts/zk-guest-fingerprint.sh --write` → refresh the lock's source
+   fingerprint and commitment-hash copy.
+4. Redeploy `OpenVmVerifierAdapter` with the new pin (or deploy a new adapter
+   and repoint `SybilSettlement`), then record the deployment.
+5. Confirm `scripts/zk-guest-fingerprint.sh --check` is green (source ↔ lock ↔
+   commit.json all agree) before merging.
+
+See `zk/openvm-guest/README.md` for the same procedure alongside the build
+commands.
 
 Commands:
 

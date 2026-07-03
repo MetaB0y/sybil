@@ -217,6 +217,12 @@ fn verify_qmdb_operation_proof(
     )
 }
 
+// The borrowed hasher args below are REQUIRED on the guest target
+// (riscv32im-risc0-zkvm-elf), whose minimal Sha256::update takes &[u8]; host
+// sha2's update takes impl AsRef<[u8]>, so host clippy calls the borrows
+// needless. Removing them breaks the zkVM guest build (SYB-208, fixed after
+// SYB-170 introduced owned args that only compiled on host).
+#[allow(clippy::needless_borrows_for_generic_args)]
 fn verify_qmdb_range_proof(
     root: &[u8; 32],
     proof: &QmdbStateRangeProof,
@@ -259,11 +265,11 @@ fn verify_qmdb_range_proof(
     };
 
     let mut hasher = Sha256::new();
-    hasher.update(proof.ops_root);
-    hasher.update(merkle_root);
+    hasher.update(&proof.ops_root);
+    hasher.update(&merkle_root);
     if has_partial_chunk {
-        hasher.update(next_bit.to_be_bytes());
-        hasher.update(proof.partial_chunk_digest.expect("checked above"));
+        hasher.update(&next_bit.to_be_bytes());
+        hasher.update(&proof.partial_chunk_digest.expect("checked above"));
     }
     hasher.finalize().as_slice() == root
 }
