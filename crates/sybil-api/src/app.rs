@@ -23,6 +23,8 @@ use crate::util::now_ms;
     paths(
         routes::system::health,
         routes::system::state_root,
+        routes::system::pause,
+        routes::system::resume,
         routes::proofs::get_state_proof,
         routes::accounts::create_account,
         routes::accounts::fund_account,
@@ -47,6 +49,7 @@ use crate::util::now_ms;
         routes::markets::resolve_market,
         routes::markets::get_resolution,
         routes::markets::get_price_history,
+        routes::markets::get_price_candles,
         routes::markets::search_markets,
         routes::markets::set_reference_prices,
         routes::markets::set_market_metadata,
@@ -66,6 +69,9 @@ use crate::util::now_ms;
         routes::aggregates::get_activity_overview,
         routes::aggregates::get_open_batch,
         routes::aggregates::get_event_traders,
+        routes::events::get_event_raw,
+        routes::events::put_event_raw,
+        routes::bots::get_bot_decisions,
     ),
     components(schemas(
         CreateAccountRequest,
@@ -133,6 +139,11 @@ use crate::util::now_ms;
         OpenBatchResponse,
         EventTradersResponse,
         HistoryEventResponse,
+        routes::bots::BotDecisionFeedResponse,
+        routes::bots::BotStatsResponse,
+        routes::bots::BotSummaryResponse,
+        routes::bots::BotDecisionResponse,
+        routes::bots::TokenUsageResponse,
     )),
     info(
         title = "Sybil API",

@@ -60,6 +60,16 @@ pub async fn state_root(
 }
 
 /// POST /v1/simulation/pause
+///
+/// Dev-mode only: pauses block production. Returns 403 outside dev mode.
+#[utoipa::path(
+    post,
+    path = "/v1/simulation/pause",
+    responses(
+        (status = 200, description = "Block production paused", body = serde_json::Value),
+        (status = 403, description = "Dev mode required"),
+    )
+)]
 pub async fn pause(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
     if !state.dev_mode {
         return Err(AppError::dev_mode_required());
@@ -69,6 +79,16 @@ pub async fn pause(State(state): State<AppState>) -> Result<Json<serde_json::Val
 }
 
 /// POST /v1/simulation/resume
+///
+/// Dev-mode only: resumes block production. Returns 403 outside dev mode.
+#[utoipa::path(
+    post,
+    path = "/v1/simulation/resume",
+    responses(
+        (status = 200, description = "Block production resumed", body = serde_json::Value),
+        (status = 403, description = "Dev mode required"),
+    )
+)]
 pub async fn resume(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
     if !state.dev_mode {
         return Err(AppError::dev_mode_required());

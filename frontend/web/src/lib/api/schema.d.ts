@@ -286,6 +286,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bots/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /v1/bots/decisions
+         * @description Native arena / bot analytics feed. Public (unauthenticated) read route.
+         */
+        get: operations["get_bot_decisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bridge/deposits": {
         parameters: {
             query?: never;
@@ -347,6 +367,31 @@ export interface paths {
         /** GET /v1/bridge/withdrawals/{id} */
         get: operations["get_withdrawal"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events/{event_id}/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /v1/events/{event_id}/raw — return the stored event JSON, or 404.
+         *     Readable in any mode (only the PUT is dev-mode gated) so the frontend can
+         *     fetch snapshots without dev mode. Public read route.
+         */
+        get: operations["get_event_raw"];
+        /**
+         * PUT /v1/events/{event_id}/raw — store the full Polymarket event JSON.
+         *     Service/operator route. Body must be valid JSON.
+         */
+        put: operations["put_event_raw"];
         post?: never;
         delete?: never;
         options?: never;
@@ -588,6 +633,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/markets/{id}/prices/candles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/markets/{id}/prices/candles */
+        get: operations["get_price_candles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/markets/{id}/prices/history": {
         parameters: {
             query?: never;
@@ -718,6 +780,46 @@ export interface paths {
         get: operations["get_state_proof"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST /v1/simulation/pause
+         * @description Dev-mode only: pauses block production. Returns 403 outside dev mode.
+         */
+        post: operations["pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/simulation/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST /v1/simulation/resume
+         * @description Dev-mode only: resumes block production. Returns 403 outside dev mode.
+         */
+        post: operations["resume"];
         delete?: never;
         options?: never;
         head?: never;
@@ -859,6 +961,82 @@ export interface components {
              *     scalar — `by_market[m].placers` is the per-market split.
              */
             unique_placers?: number;
+        };
+        BotDecisionFeedResponse: {
+            db_available: boolean;
+            db_path?: string | null;
+            decisions: components["schemas"]["BotDecisionResponse"][];
+            error?: string | null;
+            stats: components["schemas"]["BotStatsResponse"];
+            summaries: components["schemas"]["BotSummaryResponse"][];
+            token_usage: components["schemas"]["TokenUsageResponse"][];
+        };
+        BotDecisionResponse: {
+            analysis?: string | null;
+            article_urls: unknown;
+            /** Format: double */
+            balance?: number | null;
+            /** Format: double */
+            edge?: number | null;
+            /** Format: double */
+            fair_value?: number | null;
+            /** Format: int64 */
+            id: number;
+            /** Format: double */
+            llm_duration_s?: number | null;
+            /** Format: int64 */
+            market_id?: number | null;
+            market_name?: string | null;
+            /** Format: double */
+            market_price?: number | null;
+            motivation?: string | null;
+            /** Format: int64 */
+            no_pos?: number | null;
+            orders: unknown;
+            timestamp?: string | null;
+            trader_name: string;
+            /** Format: int64 */
+            yes_pos?: number | null;
+        };
+        BotStatsResponse: {
+            /** Format: int64 */
+            articles: number;
+            /** Format: int64 */
+            decisions: number;
+            latest_decision_timestamp?: string | null;
+            /** Format: int64 */
+            snapshots: number;
+            /** Format: int64 */
+            token_usage: number;
+            traders: number;
+        };
+        BotSummaryResponse: {
+            /** Format: double */
+            avg_edge?: number | null;
+            /** Format: int64 */
+            decision_count: number;
+            /** Format: double */
+            latest_balance?: number | null;
+            /** Format: double */
+            latest_edge?: number | null;
+            /** Format: double */
+            latest_fair_value?: number | null;
+            /** Format: int64 */
+            latest_market_id?: number | null;
+            latest_market_name?: string | null;
+            /** Format: double */
+            latest_market_price?: number | null;
+            latest_timestamp?: string | null;
+            /** Format: double */
+            pnl?: number | null;
+            /** Format: double */
+            portfolio_value?: number | null;
+            snapshot_timestamp?: string | null;
+            /** Format: int64 */
+            total_fills?: number | null;
+            /** Format: int64 */
+            total_orders?: number | null;
+            trader_name: string;
         };
         BridgeAccountKeyResponse: {
             /** Format: int64 */
@@ -1963,6 +2141,18 @@ export interface components {
         };
         /** @enum {string} */
         TimeInForce: "GTC" | "IOC" | "GTD";
+        TokenUsageResponse: {
+            /** Format: double */
+            avg_latency_s?: number | null;
+            /** Format: int64 */
+            calls: number;
+            /** Format: int64 */
+            completion_tokens: number;
+            latest_model?: string | null;
+            /** Format: int64 */
+            prompt_tokens: number;
+            trader_name: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -2421,6 +2611,31 @@ export interface operations {
             };
         };
     };
+    get_bot_decisions: {
+        parameters: {
+            query?: {
+                /** @description Maximum returned decisions, clamped to 1..=200 (default 50) */
+                limit?: number;
+                /** @description Filter decisions to a single trader name */
+                trader?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bot decision feed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotDecisionFeedResponse"];
+                };
+            };
+        };
+    };
     submit_l1_deposit: {
         parameters: {
             query?: never;
@@ -2525,6 +2740,99 @@ export interface operations {
                 };
             };
             /** @description Withdrawal not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_event_raw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Event identifier (alphanumeric, '_' or '-') */
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stored raw event JSON */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Invalid event_id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Snapshot not found or snapshots disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    put_event_raw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Event identifier (alphanumeric, '_' or '-') */
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        /** @description Raw event JSON snapshot */
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description Snapshot stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Invalid event_id or non-JSON body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing service bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid service bearer token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Event snapshots disabled */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -2938,6 +3246,40 @@ export interface operations {
             };
         };
     };
+    get_price_candles: {
+        parameters: {
+            query: {
+                /** @description Candle resolution: seconds or one of 1m, 5m, 1h */
+                resolution: string;
+                /** @description Start bucket timestamp filter */
+                from_ms?: number;
+                /** @description End bucket timestamp filter */
+                to_ms?: number;
+                /** @description Return candles with bucket_start_ms strictly below this cursor */
+                before_ms?: number;
+                /** @description Maximum returned candles, clamped server-side */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Market ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Price candles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceCandlesResponse"];
+                };
+            };
+        };
+    };
     get_price_history: {
         parameters: {
             query?: {
@@ -3219,6 +3561,60 @@ export interface operations {
             };
             /** @description Proof store unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Block production paused */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Dev mode required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Block production resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Dev mode required */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

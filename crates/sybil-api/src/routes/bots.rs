@@ -23,6 +23,19 @@ type SnapshotRow = (
 );
 
 /// GET /v1/bots/decisions
+///
+/// Native arena / bot analytics feed. Public (unauthenticated) read route.
+#[utoipa::path(
+    get,
+    path = "/v1/bots/decisions",
+    params(
+        ("limit" = Option<usize>, Query, description = "Maximum returned decisions, clamped to 1..=200 (default 50)"),
+        ("trader" = Option<String>, Query, description = "Filter decisions to a single trader name"),
+    ),
+    responses(
+        (status = 200, description = "Bot decision feed", body = BotDecisionFeedResponse)
+    )
+)]
 pub async fn get_bot_decisions(
     State(state): State<AppState>,
     Query(params): Query<BotDecisionParams>,
@@ -51,7 +64,7 @@ pub struct BotDecisionParams {
     pub trader: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct BotDecisionFeedResponse {
     pub db_available: bool,
     pub db_path: Option<String>,
@@ -62,7 +75,7 @@ pub struct BotDecisionFeedResponse {
     pub token_usage: Vec<TokenUsageResponse>,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, utoipa::ToSchema)]
 pub struct BotStatsResponse {
     pub decisions: i64,
     pub articles: i64,
@@ -72,7 +85,7 @@ pub struct BotStatsResponse {
     pub latest_decision_timestamp: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, utoipa::ToSchema)]
 pub struct BotSummaryResponse {
     pub trader_name: String,
     pub decision_count: i64,
@@ -91,7 +104,7 @@ pub struct BotSummaryResponse {
     pub snapshot_timestamp: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct BotDecisionResponse {
     pub id: i64,
     pub trader_name: String,
@@ -111,7 +124,7 @@ pub struct BotDecisionResponse {
     pub no_pos: Option<i64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TokenUsageResponse {
     pub trader_name: String,
     pub calls: i64,
