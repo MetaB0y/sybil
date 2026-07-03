@@ -28,9 +28,10 @@ COPY crates/sybil-zk/Cargo.toml crates/sybil-zk/
 COPY crates/sybil-prover/Cargo.toml crates/sybil-prover/
 COPY crates/sybil-canonical/Cargo.toml crates/sybil-canonical/
 COPY crates/sybil-polymarket/Cargo.toml crates/sybil-polymarket/
+COPY crates/sequencer-sim/Cargo.toml crates/sequencer-sim/
 
 # Create dummy source files to cache dependency compilation
-RUN for crate in matching-engine matching-solver matching-scenarios matching-sim matching-sequencer sybil-api sybil-api-types sybil-oracle sybil-verifier sybil-zk sybil-canonical sybil-polymarket; do \
+RUN for crate in matching-engine matching-solver matching-scenarios matching-sim matching-sequencer sybil-api sybil-api-types sybil-oracle sybil-verifier sybil-zk sybil-canonical sybil-polymarket sequencer-sim; do \
         mkdir -p crates/$crate/src && echo "" > crates/$crate/src/lib.rs; \
     done && \
     mkdir -p crates/sybil-api/src && echo "fn main() {}" > crates/sybil-api/src/main.rs && \
@@ -38,7 +39,7 @@ RUN for crate in matching-engine matching-solver matching-scenarios matching-sim
     mkdir -p crates/sybil-prover/src && echo "" > crates/sybil-prover/src/lib.rs && echo "fn main() {}" > crates/sybil-prover/src/main.rs && \
     mkdir -p crates/sybil-prover/src/bin && echo "fn main() {}" > crates/sybil-prover/src/bin/sybil_prover_mock.rs && \
     mkdir -p crates/matching-sim/src && echo "fn main() {}" > crates/matching-sim/src/main.rs && \
-    mkdir -p crates/matching-sequencer/src/bin && echo "fn main() {}" > crates/matching-sequencer/src/bin/sybil_sim.rs && \
+    mkdir -p crates/sequencer-sim/src/bin && echo "fn main() {}" > crates/sequencer-sim/src/bin/sybil_sim.rs && \
     mkdir -p crates/matching-solver/benches && echo "fn main() {}" > crates/matching-solver/benches/solver_bench.rs && \
     mkdir -p crates/sybil-polymarket/src && echo "fn main() {}" > crates/sybil-polymarket/src/main.rs
 
