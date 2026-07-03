@@ -13,6 +13,11 @@ pub const DEPOSIT_DOMAIN: &[u8] = b"sybil/l1-deposit/v1";
 pub const WITHDRAWAL_NULLIFIER_DOMAIN: &[u8] = b"sybil/withdrawal-nullifier/v1";
 pub const DEPOSIT_RECEIVED_SIGNATURE: &str =
     "DepositReceived(uint64,address,bytes32,address,uint256,bytes32)";
+/// Solidity signature of the auto-generated getter for
+/// `mapping(uint64 count => bytes32 root) public depositRootByCount` on
+/// `SybilVault`. Used by the indexer to reconcile a log's cumulative deposit
+/// root against the canonical on-chain root before crediting (reorg safety).
+pub const DEPOSIT_ROOT_BY_COUNT_SIGNATURE: &str = "depositRootByCount(uint64)";
 pub const DEPOSIT_TREE_DEPTH: usize = 32;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -71,6 +76,21 @@ impl DepositReceived {
 
 pub fn deposit_received_topic0() -> Bytes32 {
     keccak256(DEPOSIT_RECEIVED_SIGNATURE.as_bytes())
+}
+
+/// ABI-encoded `eth_call` calldata for `depositRootByCount(count)`.
+///
+/// The selector is `keccak256("depositRootByCount(uint64)")[..4]` followed by
+/// the `uint64` count padded to a 32-byte word. The call returns the cumulative
+/// `bytes32` deposit root recorded on-chain at that deposit count, which the
+/// indexer compares against the root carried by a `DepositReceived` log to
+/// detect reorgs/replacements before crediting.
+pub fn deposit_root_by_count_calldata(count: u64) -> Vec<u8> {
+    let selector = keccak256(DEPOSIT_ROOT_BY_COUNT_SIGNATURE.as_bytes());
+    let mut out = Vec::with_capacity(4 + 32);
+    out.extend_from_slice(&selector[..4]);
+    out.extend_from_slice(&abi_u64_word(count));
+    out
 }
 
 pub fn parse_deposit_received_log(log: &L1Log) -> Result<DepositReceived, L1ProtocolError> {
@@ -329,6 +349,18 @@ mod tests {
             parse_deposit_received(&topics, &data),
             Err(L1ProtocolError::NonZeroHighBytes { field: "amount" })
         );
+    }
+
+    #[test]
+    fn deposit_root_by_count_calldata_is_selector_plus_word() {
+        let calldata = deposit_root_by_count_calldata(7);
+        assert_eq!(calldata.len(), 4 + 32);
+        // Selector = keccak256("depositRootByCount(uint64)")[..4].
+        assert_eq!(
+            hex::encode(&calldata[..4]),
+            hex::encode(&keccak256(DEPOSIT_ROOT_BY_COUNT_SIGNATURE.as_bytes())[..4])
+        );
+        assert_eq!(calldata[4..], abi_u64_word(7));
     }
 
     #[test]
