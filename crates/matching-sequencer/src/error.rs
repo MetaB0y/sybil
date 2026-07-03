@@ -163,6 +163,9 @@ pub enum SequencerError {
     /// Requested proof cannot be served by this sequencer configuration.
     #[error("proof unavailable: {0}")]
     ProofUnavailable(String),
+    /// Block production is intentionally paused.
+    #[error("block production paused")]
+    BlockProductionPaused,
     /// Block persistence failed before the prepared block could be committed.
     #[error("block persistence failed: {0}")]
     Persistence(String),

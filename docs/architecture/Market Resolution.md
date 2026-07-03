@@ -3,7 +3,7 @@ tags: [concept]
 layer: oracle
 crate: sybil-oracle
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-07-03
 ---
 
 Market resolution is the moment a prediction market's question gets answered: YES shares pay out, NO shares pay the complement, and positions are converted to balance. The payout is specified in [[Nanos and Integer Arithmetic|nanos]]: YES shares receive `payout_nanos` per share, and NO shares receive `NANOS_PER_DOLLAR - payout_nanos` per share. For a standard binary resolution, `payout_nanos` is either `NANOS_PER_DOLLAR` (YES won) or 0 (NO won).
@@ -12,6 +12,10 @@ Fractional resolution is supported — `payout_nanos` can be any value between 0
 
 Resolution flows through the [[Block Lifecycle]]: when the oracle resolves a market, the sequencer includes the resolution in the next block, converting all holders' positions to balance credits. The [[Four-Layer Verification|verifier]] independently confirms that resolution payouts were applied correctly. The `ResolutionRecord` captures the immutable record: which market, what payout, which oracle source, and when.
 
+For a member of a mutually-exclusive [[Binary Markets and Market Groups|market group]], resolution removes only that market from the group. If at least two unresolved members remain, the group persists and the next solver problem and block witness still carry the survivor group, preserving the joint price and group-minting constraint over the remaining outcomes. If fewer than two members remain, the group dissolves because a singleton has no mutual-exclusion constraint left to enforce.
+
+Resolved-market positions are zeroed during payout settlement before the next block is produced. Minting inputs are derived from account position totals, so the resolved market naturally drops out of future minting derivation while survivor markets remain governed by the shrunken group in the solver problem, state sidecar, and witness.
+
 ## Key Properties
 - YES payout: `payout_nanos` per share
 - NO payout: `NANOS_PER_DOLLAR - payout_nanos` per share
@@ -19,6 +23,7 @@ Resolution flows through the [[Block Lifecycle]]: when the oracle resolves a mar
 - Resolution is irreversible — no trading after resolution
 - `ResolutionRecord` captures immutable audit trail
 - Payout validated within `[0, NANOS_PER_DOLLAR]`
+- Multi-outcome groups shrink by the resolved member and dissolve only below two unresolved members
 
 ## Where This Lives
 > `crates/sybil-oracle/src/types.rs` — `ResolutionRecord`, payout model

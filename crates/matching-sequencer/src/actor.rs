@@ -7,7 +7,6 @@ use tokio::sync::broadcast;
 use tokio::time::{interval_at, Instant};
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos, Order, Problem};
-use matching_solver::LpSolver;
 use sybil_oracle::{
     DataFeed, FeedId, FeedPubkey, MarketStatus, Oracle, ResolutionRecord, SignedAttestation,
 };
@@ -303,6 +302,11 @@ pub enum SequencerMsg {
     /// Result of one shadow-solve: a per-market cache of indicative prices
     /// + per-market notional volume + computed_at_ms.
     IndicativeUpdate(HashMap<MarketId, IndicativeSnapshot>),
+    /// Shadow-solve failed before producing a cache update.
+    IndicativeSolveFailed {
+        solver: String,
+        error: String,
+    },
     /// Read the cached indicative snapshot for one market. Returns a
     /// default (None/None/0/0) snapshot if the market hasn't been seen yet
     /// (cold start, or market with no resting orders).
@@ -358,6 +362,23 @@ impl IndicativeSolveGate {
 
     fn finish(&mut self) {
         self.in_flight = false;
+    }
+}
+
+enum BlockTickOutcome {
+    Produced(Box<SealedBlock>),
+    Paused,
+    Halted(SequencerError),
+    PersistFailed(SequencerError),
+}
+
+fn panic_payload_to_string(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
     }
 }
 
@@ -659,7 +680,7 @@ impl SequencerActorState {
         skip_all,
         fields(height = tracing::field::Empty, pending_bundles = tracing::field::Empty)
     )]
-    async fn on_tick(&mut self) -> Result<(), ActorProcessingErr> {
+    async fn on_tick(&mut self) -> Result<BlockTickOutcome, ActorProcessingErr> {
         self.on_tick_inner(None).await
     }
 
@@ -670,7 +691,7 @@ impl SequencerActorState {
     async fn on_tick_inner(
         &mut self,
         test_crashpoint: Option<SequencerTestCrashpoint>,
-    ) -> Result<(), ActorProcessingErr> {
+    ) -> Result<BlockTickOutcome, ActorProcessingErr> {
         #[cfg(not(test))]
         let _ = test_crashpoint;
 
@@ -679,10 +700,10 @@ impl SequencerActorState {
                 error = %error,
                 "block production halted after invariant failure"
             );
-            return Ok(());
+            return Ok(BlockTickOutcome::Halted(error.clone()));
         }
         if self.pause_count > 0 {
-            return Ok(());
+            return Ok(BlockTickOutcome::Paused);
         }
         let timestamp_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -702,8 +723,9 @@ impl SequencerActorState {
         let prepared = match self.sequencer.prepare_block(Vec::new(), timestamp_ms) {
             Ok(prepared) => prepared,
             Err(error) => {
+                let outcome_error = error.clone();
                 self.halt_after_invariant_failure(error);
-                return Ok(());
+                return Ok(BlockTickOutcome::Halted(outcome_error));
             }
         };
         tracing::Span::current().record("height", prepared.production().block.header.height);
@@ -722,7 +744,7 @@ impl SequencerActorState {
             // PENDING_BUNDLES redb table wasn't cleared because save_block's
             // transaction rolled back atomically.
             tracing::error!(error = %error, "prepared block discarded before commit; pending bundles retained for retry");
-            return Ok(());
+            return Ok(BlockTickOutcome::PersistFailed(error));
         }
 
         #[cfg(test)]
@@ -735,8 +757,9 @@ impl SequencerActorState {
         let bp = match self.sequencer.commit_prepared_block(prepared) {
             Ok(bp) => bp,
             Err(error) => {
+                let outcome_error = error.clone();
                 self.halt_after_invariant_failure(error);
-                return Ok(());
+                return Ok(BlockTickOutcome::Halted(outcome_error));
             }
         };
 
@@ -751,8 +774,8 @@ impl SequencerActorState {
         let sealed = bp.sealed_block();
         self.push_to_history(sealed.clone());
         let _ = self.block_broadcast.send(sealed.clone());
-        self.latest_block = Some(sealed);
-        Ok(())
+        self.latest_block = Some(sealed.clone());
+        Ok(BlockTickOutcome::Produced(Box::new(sealed)))
     }
 
     fn halt_after_invariant_failure(&mut self, error: SequencerError) {
@@ -815,15 +838,29 @@ impl SequencerActorState {
         let target = myself.clone();
         let mailbox = self.mailbox_monitor.clone();
 
+        let solver = self.sequencer.solver();
+        let solver_name = solver.name().to_string();
+
         tokio::task::spawn_blocking(move || {
-            let result = LpSolver::new().solve(&problem);
-            let snapshots =
-                build_indicative_snapshots(&problem, &result, &last_clearing, computed_at_ms);
+            let message = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                solver.solve(&problem)
+            })) {
+                Ok(result) => {
+                    let snapshots = build_indicative_snapshots(
+                        &problem,
+                        &result,
+                        &last_clearing,
+                        computed_at_ms,
+                    );
+                    SequencerMsg::IndicativeUpdate(snapshots)
+                }
+                Err(payload) => SequencerMsg::IndicativeSolveFailed {
+                    solver: solver_name,
+                    error: panic_payload_to_string(payload.as_ref()),
+                },
+            };
             mailbox.queued();
-            if target
-                .send_message(SequencerMsg::IndicativeUpdate(snapshots))
-                .is_err()
-            {
+            if target.send_message(message).is_err() {
                 mailbox.send_failed();
             }
         });
@@ -1745,17 +1782,31 @@ impl Actor for SequencerActor {
         state.mailbox_monitor.started();
         match message {
             SequencerMsg::Tick => {
-                state.on_tick().await?;
+                let _ = state.on_tick().await?;
             }
             #[cfg(test)]
             SequencerMsg::TestCrashOnNextBlock(crashpoint) => {
-                state.on_tick_inner(Some(crashpoint)).await?;
+                let _ = state.on_tick_inner(Some(crashpoint)).await?;
             }
             SequencerMsg::IndicativeTick => {
                 state.on_indicative_tick(myself.clone());
             }
             SequencerMsg::IndicativeUpdate(snapshots) => {
                 state.indicative_cache = snapshots;
+                state.indicative_solve_gate.finish();
+            }
+            SequencerMsg::IndicativeSolveFailed { solver, error } => {
+                metrics::counter!(
+                    "sybil_indicative_solve_failures_total",
+                    "solver" => solver.clone(),
+                    "reason" => "panic"
+                )
+                .increment(1);
+                tracing::error!(
+                    solver = %solver,
+                    error = %error,
+                    "indicative shadow solve failed; releasing gate"
+                );
                 state.indicative_solve_gate.finish();
             }
             SequencerMsg::GetIndicative(market_id, reply) => {
@@ -1816,12 +1867,12 @@ impl Actor for SequencerActor {
                 let _ = reply.send(state.handle_state_proof(leaf_key).await);
             }
             SequencerMsg::ProduceBlock(reply) => {
-                state.on_tick().await?;
-                let result = match &state.halted_error {
-                    Some(error) => Err(error.clone()),
-                    None => state.latest_block.clone().ok_or_else(|| {
-                        SequencerError::Persistence("no block committed".to_string())
-                    }),
+                let result = match state.on_tick().await? {
+                    BlockTickOutcome::Produced(block) => Ok(*block),
+                    BlockTickOutcome::Paused => Err(SequencerError::BlockProductionPaused),
+                    BlockTickOutcome::Halted(error) | BlockTickOutcome::PersistFailed(error) => {
+                        Err(error)
+                    }
                 };
                 let _ = reply.send(result);
             }
@@ -2996,7 +3047,7 @@ mod tests {
     use crate::system_event::SystemEvent;
     use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
     use sybil_oracle::{AdminOracle, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
@@ -3055,6 +3106,71 @@ mod tests {
 
         let block = handle.produce_block().await.unwrap();
         assert_eq!(block.canonical.header.height, 1);
+    }
+
+    #[tokio::test]
+    async fn produce_block_rpc_returns_error_when_paused() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config);
+        let handle = SequencerHandle::spawn(seq);
+
+        let first = handle.produce_block().await.unwrap();
+        assert_eq!(first.canonical.header.height, 1);
+
+        handle.pause_block_production().await.unwrap();
+        let error = match handle.produce_block().await {
+            Ok(block) => panic!(
+                "expected paused error, got block height {}",
+                block.canonical.header.height
+            ),
+            Err(error) => error,
+        };
+        assert!(matches!(error, SequencerError::BlockProductionPaused));
+
+        let latest = handle
+            .get_latest_block()
+            .await
+            .unwrap()
+            .expect("first block remains latest");
+        assert_eq!(latest.canonical.header.height, 1);
+    }
+
+    #[tokio::test]
+    async fn produce_block_rpc_returns_error_when_persistence_fails() {
+        let path = temp_store_path("produce-persist-failure");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        store.inject_next_save_block_fault(crate::store::StoreFaultPoint::BeforeQmdbPersist);
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config);
+        let handle = SequencerHandle::spawn_with_store_arc_for_test(seq, store);
+
+        let error = match handle.produce_block().await {
+            Ok(block) => panic!(
+                "expected persistence error, got block height {}",
+                block.canonical.header.height
+            ),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(error, SequencerError::Persistence(ref message) if message.contains("BeforeQmdbPersist")),
+            "expected persistence error from injected fault, got {error:?}"
+        );
+        assert!(
+            handle.get_latest_block().await.unwrap().is_none(),
+            "failed persistence attempt must not publish a stale or prepared block"
+        );
+
+        let block = handle.produce_block().await.unwrap();
+        assert_eq!(
+            block.canonical.header.height, 1,
+            "retry after failed persistence should commit the same next height"
+        );
     }
 
     #[tokio::test]
@@ -4441,6 +4557,23 @@ mod tests {
         assert!(gate.try_start(), "next tick may start after update arrives");
     }
 
+    struct PanicOnceSolver {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl matching_solver::Solver for PanicOnceSolver {
+        fn solve(&self, _problem: &Problem) -> matching_solver::PipelineResult {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                panic!("injected indicative solver panic");
+            }
+            matching_solver::PipelineResult::empty()
+        }
+
+        fn name(&self) -> &str {
+            "panic-once"
+        }
+    }
+
     #[tokio::test]
     async fn get_indicative_returns_default_when_uncached() {
         let (seq, _) = make_test_sequencer();
@@ -4450,6 +4583,58 @@ mod tests {
         assert!(snap.yes_price_nanos.is_none());
         assert!(snap.no_price_nanos.is_none());
         assert_eq!(snap.volume_nanos, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn indicative_solver_panic_releases_gate_for_next_tick() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("Test");
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let seq = BlockSequencer::new(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+            Arc::new(PanicOnceSolver {
+                calls: Arc::clone(&calls),
+            }),
+            config,
+        );
+        let handle = SequencerHandle::spawn(seq);
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&markets, 0, m0, 0, 500_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let mut released_and_reran = false;
+        while Instant::now() < deadline {
+            if calls.load(Ordering::SeqCst) >= 2 {
+                let snap = handle.get_indicative(m0).await.unwrap();
+                if snap.computed_at_ms > 0 {
+                    released_and_reran = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        assert!(
+            released_and_reran,
+            "indicative solve gate did not release after panic; calls={}",
+            calls.load(Ordering::SeqCst)
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

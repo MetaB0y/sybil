@@ -1042,8 +1042,8 @@ impl BlockSequencer {
     /// Excludes MM-constrained bundles and `AccountId::MINT`.
     pub fn open_batch_unique_placers(&self, market_id: MarketId) -> u32 {
         let mut placers: HashSet<AccountId> = HashSet::new();
-        for (_order, account_id) in self.order_book.resting_orders() {
-            if account_id != AccountId::MINT {
+        for (order, account_id) in self.order_book.resting_orders() {
+            if account_id != AccountId::MINT && order.active_markets().any(|m| m == market_id) {
                 placers.insert(account_id);
             }
         }
@@ -1896,7 +1896,7 @@ impl BlockSequencer {
     ///
     /// `payout_nanos`: YES payout per share in nanos (0 to NANOS_PER_DOLLAR).
     ///
-    /// On `SettleNow`: calls settlement, removes from market groups, updates status.
+    /// On `SettleNow`: calls settlement, removes the resolved market from market groups, updates status.
     /// On `Propose`: stores the pending proposal (future L0 path).
     pub fn resolve_market(
         &mut self,
@@ -1951,8 +1951,7 @@ impl BlockSequencer {
                     payout_nanos,
                     affected_accounts,
                 });
-                self.market_groups
-                    .retain(|g| !g.markets.contains(&market_id));
+                self.shrink_market_groups_after_resolution(market_id);
                 Ok(record)
             }
             sybil_oracle::ResolutionAction::Propose { .. } => Err(SequencerError::OracleError(
@@ -2019,8 +2018,7 @@ impl BlockSequencer {
                     payout_nanos,
                     affected_accounts,
                 });
-                self.market_groups
-                    .retain(|g| !g.markets.contains(&market_id));
+                self.shrink_market_groups_after_resolution(market_id);
                 Ok(record)
             }
             sybil_oracle::ResolutionAction::Propose { .. } => Err(SequencerError::OracleError(
@@ -2056,6 +2054,28 @@ impl BlockSequencer {
 
     pub fn install_template(&mut self, template: sybil_oracle::ResolutionTemplate) {
         self.lifecycle.install_template(template);
+    }
+
+    /// Remove a resolved member from any mutually-exclusive group. A group with
+    /// two or more unresolved members still constrains survivor prices and group
+    /// minting; a singleton has no remaining mutual-exclusion surface.
+    fn shrink_market_groups_after_resolution(&mut self, market_id: MarketId) {
+        let mut groups = Vec::with_capacity(self.market_groups.len());
+        for mut group in std::mem::take(&mut self.market_groups) {
+            if group.markets.contains(&market_id) {
+                group.markets.retain(|&member| member != market_id);
+                if group.markets.len() >= 2 {
+                    groups.push(group);
+                }
+            } else {
+                groups.push(group);
+            }
+        }
+        self.market_groups = groups;
+    }
+
+    pub(crate) fn solver(&self) -> Arc<dyn Solver> {
+        Arc::clone(&self.solver)
     }
 
     /// Whether a template with this id has been installed. Used by the API
@@ -3337,7 +3357,9 @@ pub type BatchSequencer = BlockSequencer;
 mod tests {
     use super::*;
     use crate::account::AccountStore;
+    use crate::crypto::sign_attestation;
     use crate::error::RejectionReason;
+    use crate::market_info::ResolutionConfig;
     use crate::order_book::RestingOrder;
     use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{
@@ -3345,7 +3367,9 @@ mod tests {
         NANOS_PER_DOLLAR,
     };
     use proptest::prelude::*;
-    use sybil_oracle::AdminOracle;
+    use sybil_oracle::{
+        AdminOracle, ResolutionAttestation, ResolutionPolicy, ResolutionTemplate, TemplateId,
+    };
 
     fn setup() -> (MarketSet, MarketId) {
         let mut markets = MarketSet::new();
@@ -5339,6 +5363,122 @@ mod tests {
     }
 
     #[test]
+    fn admin_resolution_shrinks_three_market_group_and_survivors_stay_coherent() {
+        let (markets, m0, m1, m2, group) = setup_group();
+        let mut accounts = AccountStore::new();
+        let buyer0 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let buyer1 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        seq.resolve_market(m2, 0, 1_000).unwrap();
+
+        assert_eq!(seq.market_groups().len(), 1);
+        assert_eq!(seq.market_groups()[0].markets, vec![m0, m1]);
+
+        let bp = seq.produce_block(
+            vec![
+                single_order_sub(buyer0, outcome_buy(&markets, 0, m0, 0, 600_000_000, q(1))),
+                single_order_sub(buyer1, outcome_buy(&markets, 0, m1, 0, 500_000_000, q(1))),
+            ],
+            2_000,
+        );
+
+        assert_eq!(bp.block.rejections.len(), 0);
+        assert_eq!(
+            bp.block.fills.len(),
+            2,
+            "survivor YES buyers should fill through the remaining group mint"
+        );
+        let m0_yes = bp.block.clearing_prices.get(&m0).unwrap()[0];
+        let m1_yes = bp.block.clearing_prices.get(&m1).unwrap()[0];
+        assert_eq!(
+            m0_yes + m1_yes,
+            NANOS_PER_DOLLAR,
+            "survivor YES prices must retain group coherence"
+        );
+        assert_eq!(bp.witness.market_groups.len(), 1);
+        assert_eq!(bp.witness.market_groups[0].markets, vec![m0, m1]);
+
+        let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "violations: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
+    fn attested_resolution_dissolves_two_market_group() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let mut group = MarketGroup::new("Binary event");
+        group.add_market(m0);
+        group.add_market(m1);
+
+        let mut accounts = AccountStore::new();
+        accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let signed = sign_attestation(
+            ResolutionAttestation {
+                market_id: m0,
+                payout_nanos: NANOS_PER_DOLLAR,
+                nonce: 1,
+            },
+            &signing_key,
+        );
+        let template = "attested_test";
+        let feed_id = seq.register_feed(signed.signer.clone(), "attested feed".to_string(), 0);
+        seq.install_template(ResolutionTemplate {
+            id: TemplateId(template.to_string()),
+            policy: ResolutionPolicy::Immediate { feed_id },
+        });
+        seq.set_market_metadata(
+            m0,
+            MarketMetadata {
+                resolution_config: Some(ResolutionConfig {
+                    template: template.to_string(),
+                }),
+                ..MarketMetadata::default()
+            },
+        );
+
+        seq.resolve_market_attested(m0, &signed, 1_000).unwrap();
+
+        assert!(
+            seq.market_groups().is_empty(),
+            "two-market group should dissolve after one member resolves"
+        );
+        let bp = seq.produce_block(Vec::new(), 2_000);
+        assert!(bp.witness.market_groups.is_empty());
+        let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "violations: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
     fn test_mm_complete_set_buyyes_rejected() {
         let (markets, m0, m1, m2, group) = setup_group();
         let mut accounts = AccountStore::new();
@@ -5713,6 +5853,36 @@ mod tests {
             orders: vec![order],
             mm_constraint: None,
         }
+    }
+
+    #[test]
+    fn open_batch_unique_placers_filters_resting_orders_by_market() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let mut accounts = AccountStore::new();
+        let a0 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let a1 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let a2 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        for (account_id, market_id) in [(a0, m0), (a1, m0), (a2, m1)] {
+            let order = outcome_buy(&markets, 0, market_id, 0, 400_000_000, q(1));
+            assert!(matches!(
+                seq.try_admit_direct(single_order_sub(account_id, order), 0),
+                AdmitOutcome::Admitted { .. }
+            ));
+        }
+
+        assert_eq!(seq.open_batch_unique_placers(m0), 2);
+        assert_eq!(seq.open_batch_unique_placers(m1), 1);
     }
 
     #[test]

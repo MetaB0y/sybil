@@ -823,9 +823,11 @@ impl Store {
             }
         }
 
-        // Market groups (groups can be added but not removed; overwrite by index)
+        // Market groups. Resolution can shrink or dissolve groups, so clear
+        // stale rows before writing the current indexed snapshot.
         {
             let mut table = txn.open_table(MARKET_GROUPS)?;
+            table.retain(|_, _| false)?;
             for (i, group) in snapshot.market_groups.iter().enumerate() {
                 let bytes = rmp_serde::to_vec(group)?;
                 table.insert(i as u32, bytes.as_slice())?;
@@ -1534,15 +1536,16 @@ impl Store {
         };
 
         // Market groups
-        let market_groups = {
+        let market_groups: Vec<MarketGroup> = {
             let table = txn.open_table(MARKET_GROUPS)?;
             let mut groups = Vec::new();
             for entry in table.iter()? {
-                let (_, value) = entry?;
+                let (key, value) = entry?;
                 let group: MarketGroup = rmp_serde::from_slice(value.value())?;
-                groups.push(group);
+                groups.push((key.value(), group));
             }
-            groups
+            groups.sort_by_key(|(index, _)| *index);
+            groups.into_iter().map(|(_, group)| group).collect()
         };
 
         // Market statuses

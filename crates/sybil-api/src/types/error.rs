@@ -216,6 +216,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::ProofUnavailable(ref msg) => {
                 AppError::service_unavailable(format!("Proof unavailable: {msg}"))
             }
+            matching_sequencer::SequencerError::BlockProductionPaused => {
+                AppError::conflict("Block production paused")
+            }
             matching_sequencer::SequencerError::BlockInvariantFailure { height, failures } => {
                 tracing::error!(
                     height = *height,

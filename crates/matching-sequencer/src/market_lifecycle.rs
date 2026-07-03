@@ -124,7 +124,7 @@ impl MarketLifecycle {
     /// Consult the oracle and update status. Returns the action for the caller to execute.
     ///
     /// The caller (BlockSequencer) is responsible for acting on the result:
-    /// - `SettleNow` → settle positions, remove from market groups
+    /// - `SettleNow` → settle positions, shrink affected market groups
     /// - `Propose` → no action needed (status already updated here)
     /// - `Reject` → returned as error
     pub fn resolve_market(
