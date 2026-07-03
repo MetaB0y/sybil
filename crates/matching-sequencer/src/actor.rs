@@ -4155,7 +4155,9 @@ mod tests {
             "the regression targets empty non-system blocks"
         );
 
-        let events = store.account_events(aid, 10, None, Some("trades".into())).unwrap();
+        let events = store
+            .account_events(aid, 10, None, Some("trades".into()))
+            .unwrap();
         let placed_count = events
             .iter()
             .filter(|event| matches!(event.kind, crate::aggregates::HistoryKind::Placed))
@@ -4167,13 +4169,16 @@ mod tests {
 
         let equity = store.equity_series(aid).unwrap();
         assert!(
-            equity.iter().any(|point| point.height == block.canonical.header.height),
+            equity
+                .iter()
+                .any(|point| point.height == block.canonical.header.height),
             "equity point from the empty-fill block must be durable"
         );
 
         handle.produce_block().await.unwrap();
-        let events_after_next_block =
-            store.account_events(aid, 10, None, Some("trades".into())).unwrap();
+        let events_after_next_block = store
+            .account_events(aid, 10, None, Some("trades".into()))
+            .unwrap();
         let placed_count_after_next_block = events_after_next_block
             .iter()
             .filter(|event| matches!(event.kind, crate::aggregates::HistoryKind::Placed))
