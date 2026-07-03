@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use axum::http::HeaderValue;
 use matching_sequencer::SequencerHandle;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde::{Deserialize, Serialize};
@@ -188,6 +189,11 @@ impl HttpOrderRateLimiter {
 pub struct AppState {
     pub sequencer: SequencerHandle,
     pub dev_mode: bool,
+    /// Bearer token for service/operator routes. `None` fails closed when
+    /// `dev_mode` is false.
+    pub service_token: Option<String>,
+    /// CORS origins allowed in production. Empty means no cross-origin CORS.
+    pub cors_origins: Vec<HeaderValue>,
     pub prometheus: PrometheusHandle,
     /// Reference prices from external systems (e.g., Polymarket).
     /// Keyed by market_id (u32). Display-only — not part of matching logic.
@@ -238,9 +244,30 @@ impl AppState {
             Some(p) => load_market_ref_data(p),
             None => HashMap::new(),
         };
+        let service_token =
+            (!config.service_token.trim().is_empty()).then(|| config.service_token.clone());
+        let cors_origins = config
+            .cors_origins
+            .iter()
+            .filter_map(|origin| {
+                let trimmed = origin.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                match HeaderValue::from_str(trimmed) {
+                    Ok(value) => Some(value),
+                    Err(e) => {
+                        tracing::warn!(origin = %trimmed, error = %e, "ignoring invalid CORS origin");
+                        None
+                    }
+                }
+            })
+            .collect();
         Self {
             sequencer,
             dev_mode: config.dev_mode,
+            service_token,
+            cors_origins,
             prometheus,
             reference_prices: Arc::new(RwLock::new(HashMap::new())),
             reference_prices_updated_at_ms: Arc::new(RwLock::new(0)),

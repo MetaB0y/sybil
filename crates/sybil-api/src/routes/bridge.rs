@@ -87,10 +87,6 @@ pub async fn submit_l1_deposit(
     State(state): State<AppState>,
     Json(req): Json<SubmitL1DepositRequest>,
 ) -> Result<Json<BridgeDepositResponse>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
-
     let account_id = AccountId(req.account_id);
     let sybil_account_key = match req.sybil_account_key_hex {
         Some(value) => parse_hex_array::<32>(&value, "sybil_account_key_hex")?,
@@ -135,10 +131,6 @@ pub async fn create_withdrawal(
     State(state): State<AppState>,
     Json(req): Json<CreateBridgeWithdrawalRequest>,
 ) -> Result<Json<BridgeWithdrawalResponse>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
-
     let expiry_height = match req.expiry_height {
         Some(height) => height,
         None => {

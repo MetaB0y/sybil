@@ -159,21 +159,21 @@ fn signed_cancel_payload(account_id: u64, order_id: u64, key: &SigningKey) -> Va
 async fn create_account_forbidden_without_dev_mode() {
     let (app, _) = test_app(false).await;
     let (status, _) = post_json(app, "/v1/accounts", json!({ "initial_balance_nanos": 100 })).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
 async fn create_market_forbidden_without_dev_mode() {
     let (app, _) = test_app(false).await;
     let (status, _) = post_json(app, "/v1/markets", json!({ "name": "Test" })).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
 async fn fund_account_forbidden_without_dev_mode() {
     let (app, _) = test_app(false).await;
     let (status, _) = post_json(app, "/v1/accounts/0/fund", json!({ "amount_nanos": 100 })).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -185,7 +185,7 @@ async fn resolve_market_forbidden_without_dev_mode() {
         json!({ "payout_nanos": 1_000_000_000u64 }),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

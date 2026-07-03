@@ -1,6 +1,7 @@
 """Sybil API client."""
 
 import json
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -42,8 +43,9 @@ class SybilClientError(Exception):
 class SybilClient:
     """Async client for Sybil API."""
 
-    def __init__(self, base_url: str = "http://localhost:3000"):
+    def __init__(self, base_url: str = "http://localhost:3000", service_token: str | None = None):
         self.base_url = base_url.rstrip("/")
+        self.service_token = service_token or os.environ.get("SYBIL_SERVICE_TOKEN", "")
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "SybilClient":
@@ -61,6 +63,10 @@ class SybilClient:
         return self._client
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        if self.service_token:
+            headers = dict(kwargs.pop("headers", {}) or {})
+            headers.setdefault("authorization", f"Bearer {self.service_token}")
+            kwargs["headers"] = headers
         response = await self.client.request(method, path, **kwargs)
         if response.status_code >= 400:
             raise SybilClientError(response.status_code, response.text)

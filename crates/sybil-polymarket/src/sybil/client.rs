@@ -8,18 +8,27 @@ use sybil_api_types::*;
 pub struct SybilClient {
     http: Client,
     base_url: String,
+    service_token: Option<String>,
 }
 
 impl SybilClient {
-    pub fn new(http: Client, base_url: String) -> Self {
+    pub fn new(http: Client, base_url: String, service_token: Option<String>) -> Self {
         Self {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
+            service_token,
         }
     }
 
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
+    }
+
+    fn with_service_auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self.service_token.as_deref() {
+            Some(token) => request.bearer_auth(token),
+            None => request,
+        }
     }
 
     async fn check_response(&self, resp: reqwest::Response) -> Result<reqwest::Response, Error> {
@@ -35,7 +44,10 @@ impl SybilClient {
     // === Health ===
 
     pub async fn health(&self) -> Result<HealthResponse, Error> {
-        let resp = self.http.get(self.url("/v1/health")).send().await?;
+        let resp = self
+            .with_service_auth(self.http.get(self.url("/v1/health")))
+            .send()
+            .await?;
         let resp = self.check_response(resp).await?;
         Ok(resp.json().await?)
     }
@@ -50,8 +62,7 @@ impl SybilClient {
             initial_balance_nanos,
         };
         let resp = self
-            .http
-            .post(self.url("/v1/accounts"))
+            .with_service_auth(self.http.post(self.url("/v1/accounts")))
             .json(&req)
             .send()
             .await?;
@@ -61,8 +72,10 @@ impl SybilClient {
 
     pub async fn get_account(&self, account_id: u64) -> Result<AccountResponse, Error> {
         let resp = self
-            .http
-            .get(self.url(&format!("/v1/accounts/{}", account_id)))
+            .with_service_auth(
+                self.http
+                    .get(self.url(&format!("/v1/accounts/{}", account_id))),
+            )
             .send()
             .await?;
         let resp = self.check_response(resp).await?;
@@ -76,8 +89,10 @@ impl SybilClient {
     ) -> Result<AccountResponse, Error> {
         let req = FundAccountRequest { amount_nanos };
         let resp = self
-            .http
-            .post(self.url(&format!("/v1/accounts/{}/fund", account_id)))
+            .with_service_auth(
+                self.http
+                    .post(self.url(&format!("/v1/accounts/{}/fund", account_id))),
+            )
             .json(&req)
             .send()
             .await?;
@@ -92,8 +107,7 @@ impl SybilClient {
         req: &CreateMarketRequest,
     ) -> Result<CreateMarketResponse, Error> {
         let resp = self
-            .http
-            .post(self.url("/v1/markets"))
+            .with_service_auth(self.http.post(self.url("/v1/markets")))
             .json(req)
             .send()
             .await?;
@@ -103,8 +117,7 @@ impl SybilClient {
 
     pub async fn list_market_summaries(&self) -> Result<Vec<MarketSummaryResponse>, Error> {
         let resp = self
-            .http
-            .get(self.url("/v1/markets/summary"))
+            .with_service_auth(self.http.get(self.url("/v1/markets/summary")))
             .send()
             .await?;
         let resp = self.check_response(resp).await?;
@@ -116,8 +129,7 @@ impl SybilClient {
         req: &CreateMarketGroupRequest,
     ) -> Result<MarketGroupResponse, Error> {
         let resp = self
-            .http
-            .post(self.url("/v1/markets/groups"))
+            .with_service_auth(self.http.post(self.url("/v1/markets/groups")))
             .json(req)
             .send()
             .await?;
@@ -131,8 +143,10 @@ impl SybilClient {
             attestation: None,
         };
         let resp = self
-            .http
-            .post(self.url(&format!("/v1/markets/{}/resolve", market_id)))
+            .with_service_auth(
+                self.http
+                    .post(self.url(&format!("/v1/markets/{}/resolve", market_id))),
+            )
             .json(&req)
             .send()
             .await?;
@@ -152,8 +166,10 @@ impl SybilClient {
             attestation: Some(attestation),
         };
         let resp = self
-            .http
-            .post(self.url(&format!("/v1/markets/{}/resolve", market_id)))
+            .with_service_auth(
+                self.http
+                    .post(self.url(&format!("/v1/markets/{}/resolve", market_id))),
+            )
             .json(&req)
             .send()
             .await?;
@@ -168,8 +184,10 @@ impl SybilClient {
         market_id: u32,
     ) -> Result<Option<ResolutionResponse>, Error> {
         let resp = self
-            .http
-            .get(self.url(&format!("/v1/markets/{}/resolution", market_id)))
+            .with_service_auth(
+                self.http
+                    .get(self.url(&format!("/v1/markets/{}/resolution", market_id))),
+            )
             .send()
             .await?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -183,8 +201,7 @@ impl SybilClient {
 
     pub async fn submit_orders(&self, req: &SubmitOrderRequest) -> Result<bool, Error> {
         let resp = self
-            .http
-            .post(self.url("/v1/orders"))
+            .with_service_auth(self.http.post(self.url("/v1/orders")))
             .json(req)
             .send()
             .await?;
@@ -195,17 +212,18 @@ impl SybilClient {
 
     /// Push mirror-derived metadata (event id/title, images, end dates,
     /// category) to sybil-api. Off-block — never enters `MarketMetadata` or
-    /// the block digest. The endpoint is dev-mode-only on the server; in prod
-    /// `SYBIL_DEV_MODE=true` is already set on the mirror's neighbour
-    /// container, so this just works.
+    /// the block digest. In production this is a service route protected by
+    /// `SYBIL_SERVICE_TOKEN`; dev mode skips that check for local workflows.
     pub async fn set_market_metadata(
         &self,
         market_id: u32,
         req: &SetMarketMetadataRequest,
     ) -> Result<(), Error> {
         let resp = self
-            .http
-            .post(self.url(&format!("/v1/markets/{}/metadata", market_id)))
+            .with_service_auth(
+                self.http
+                    .post(self.url(&format!("/v1/markets/{}/metadata", market_id))),
+            )
             .json(req)
             .send()
             .await?;
@@ -214,15 +232,17 @@ impl SybilClient {
     }
 
     /// Push the full Polymarket event JSON to sybil-api's snapshot store.
-    /// Idempotent upsert; dev-mode-only on the server (same as metadata).
+    /// Idempotent upsert; service-authenticated in production.
     pub async fn put_event_raw(
         &self,
         event_id: &str,
         value: &serde_json::Value,
     ) -> Result<(), Error> {
         let resp = self
-            .http
-            .put(self.url(&format!("/v1/events/{}/raw", event_id)))
+            .with_service_auth(
+                self.http
+                    .put(self.url(&format!("/v1/events/{}/raw", event_id))),
+            )
             .json(value)
             .send()
             .await?;
@@ -237,8 +257,7 @@ impl SybilClient {
     ) -> Result<(), Error> {
         let body = serde_json::json!({ "prices": prices });
         let resp = self
-            .http
-            .post(self.url("/v1/markets/prices/reference"))
+            .with_service_auth(self.http.post(self.url("/v1/markets/prices/reference")))
             .json(&body)
             .send()
             .await?;
@@ -254,8 +273,7 @@ impl SybilClient {
         &self,
     ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>>, Error> {
         let resp = self
-            .http
-            .get(self.url("/v1/blocks/stream"))
+            .with_service_auth(self.http.get(self.url("/v1/blocks/stream")))
             .timeout(std::time::Duration::from_secs(86400)) // SSE stream: effectively no timeout
             .send()
             .await?;

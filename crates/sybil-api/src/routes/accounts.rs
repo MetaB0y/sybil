@@ -26,10 +26,6 @@ pub async fn create_account(
     State(state): State<AppState>,
     Json(req): Json<CreateAccountRequest>,
 ) -> Result<Json<AccountResponse>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
-
     let balance_nanos = req.initial_balance_nanos as i64;
     let account = state.sequencer.create_account(balance_nanos).await?;
     Ok(Json(account_to_response(&account)))
@@ -52,10 +48,6 @@ pub async fn fund_account(
     Path(id): Path<u64>,
     Json(req): Json<FundAccountRequest>,
 ) -> Result<Json<AccountResponse>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
-
     let amount_nanos = req.amount_nanos as i64;
     let account = state
         .sequencer

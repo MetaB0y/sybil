@@ -7,9 +7,20 @@ pub struct ApiConfig {
     #[arg(long, default_value = "3000", env = "SYBIL_PORT")]
     pub port: u16,
 
-    /// Enable dev mode (account creation, funding, market creation).
+    /// Enable local dev conveniences (free account funding, simulation
+    /// controls, diagnostic orderbook listings, permissive CORS).
     #[arg(long, default_value = "false", env = "SYBIL_DEV_MODE")]
     pub dev_mode: bool,
+
+    /// Bearer token required for service/operator routes when dev mode is off.
+    /// Empty/unset means service routes fail closed in production.
+    #[arg(long, default_value = "", env = "SYBIL_SERVICE_TOKEN")]
+    pub service_token: String,
+
+    /// Comma-separated browser origins allowed by CORS in production. Empty =
+    /// no cross-origin CORS headers; same-origin browser requests still work.
+    #[arg(long, env = "SYBIL_CORS_ORIGINS", value_delimiter = ',')]
+    pub cors_origins: Vec<String>,
 
     /// Block production interval in milliseconds.
     #[arg(long, default_value = "500", env = "SYBIL_BLOCK_INTERVAL_MS")]
@@ -217,6 +228,8 @@ impl Default for ApiConfig {
         Self {
             port: 3000,
             dev_mode: false,
+            service_token: String::new(),
+            cors_origins: Vec::new(),
             block_interval_ms: 500,
             seed_markets: Vec::new(),
             order_ttl_blocks: 63_072_000,

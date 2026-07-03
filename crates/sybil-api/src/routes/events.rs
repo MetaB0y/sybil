@@ -18,15 +18,12 @@ fn snapshot_path(dir: &FsPath, event_id: &str) -> Option<PathBuf> {
 }
 
 /// PUT /v1/events/{event_id}/raw — store the full Polymarket event JSON.
-/// Dev-mode only (mirrors the metadata push). Body must be valid JSON.
+/// Service/operator route. Body must be valid JSON.
 pub async fn put_event_raw(
     State(state): State<AppState>,
     Path(event_id): Path<String>,
     body: Bytes,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
     let dir = state
         .event_snapshot_dir
         .as_ref()

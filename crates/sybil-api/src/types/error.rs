@@ -66,6 +66,18 @@ impl AppError {
         }
     }
 
+    pub fn unauthorized(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            body: ErrorBody {
+                error: error.into(),
+                code: "UNAUTHORIZED".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
     pub fn internal(error: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,

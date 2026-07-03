@@ -3,12 +3,12 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-01
+last_verified: 2026-07-03
 ---
 
 The REST API is the external interface to the exchange. Built with Axum (a Rust async web framework), it exposes endpoints for account management, market operations, order submission, and block retrieval. An OpenAPI schema is auto-generated for client code generation. The API communicates with the sequencer via message passing through a `SequencerHandle` — no shared mutable state.
 
-The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), and **Blocks** (latest, by height, [[SSE Block Stream|SSE stream]]). Many endpoints are dev-mode only: account creation/funding, market creation/resolution, and group creation. In production, these administrative operations would be restricted to governance or oracle processes.
+The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), and **Blocks** (latest, by height, [[SSE Block Stream|SSE stream]]). Operator/service writes (account creation/funding, market creation/grouping/resolution, mirror metadata and reference prices, raw event snapshots, feed registration, bridge sidecar writes) are mounted in production but require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts only simulation pause/resume plus diagnostic all-pending/orderbook listings.
 
 Order quantity fields (`quantity`, `max_fill`, `fill_qty`,
 `remaining_quantity`, `original_quantity`, and position `quantity`) are protocol
@@ -52,12 +52,12 @@ requires a persistent store-backed sequencer; in-memory dev sequencers return
 - Axum-based, async, with OpenAPI auto-generation
 - Actor model: API → message channel → `SequencerActor`
 - All values in [[Nanos and Integer Arithmetic|nanos]] (u64)
-- Dev mode gates administrative endpoints
+- Service bearer auth gates operator writes in production; dev mode is limited to local conveniences and diagnostics
 - Order-write endpoints return `429 Too Many Requests` with `Retry-After` under abnormal load
 - State proof endpoint returns inclusion or exclusion proofs for the latest committed qMDB root
 - Order submissions support GTC, IOC, and GTD time-in-force
 - Stateless API layer — all state in sequencer
-- CORS enabled for browser-based clients
+- CORS is permissive only in dev mode; production uses `SYBIL_CORS_ORIGINS` and defaults to same-origin only
 
 ## Where This Lives
 > `crates/sybil-api/src/app.rs` — router creation, OpenAPI schema

@@ -6,6 +6,9 @@ services:
       - sybil-data:/data
       - arena-data:/arena-data
     environment:
+      SYBIL_DEV_MODE: "false"
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
+      SYBIL_CORS_ORIGINS: "${SYBIL_CORS_ORIGINS:-}"
       # Public devnet runs persistent by default. To intentionally reset,
       # stop sybil-api and remove or replace the sybil-data volume.
       SYBIL_DATA_DIR: "/data"
@@ -20,6 +23,8 @@ services:
       SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT: "0"
 
   sybil-polymarket:
+    environment:
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--max-events=50"
@@ -37,6 +42,8 @@ services:
       - polymarket-data:/polymarket-data:ro
     env_file:
       - ./arena.env
+    environment:
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--max-markets=0"

@@ -17,7 +17,7 @@ fn feed_to_response(feed: &sybil_oracle::DataFeed) -> RegisteredFeedResponse {
     }
 }
 
-/// POST /v1/feeds — register a data feed (dev mode only).
+/// POST /v1/feeds — register a data feed.
 #[utoipa::path(
     post,
     path = "/v1/feeds",
@@ -31,9 +31,6 @@ pub async fn register_feed(
     State(state): State<AppState>,
     Json(req): Json<RegisterFeedRequest>,
 ) -> Result<Json<RegisteredFeedResponse>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
     let pubkey_bytes =
         hex::decode(&req.pubkey_hex).map_err(|_| AppError::bad_request("Invalid pubkey_hex"))?;
     if pubkey_bytes.len() != 33 {

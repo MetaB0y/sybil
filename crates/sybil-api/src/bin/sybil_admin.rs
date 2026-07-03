@@ -155,15 +155,20 @@ struct ApiClient {
     base_url: String,
     audit_log: PathBuf,
     http: reqwest::Client,
+    service_token: Option<String>,
 }
 
 impl ApiClient {
     fn new(base_url: String, audit_log: PathBuf) -> Self {
         // TODO(SYBIL): extract this client into a shared crate if we build a user/trading CLI.
+        let service_token = std::env::var("SYBIL_SERVICE_TOKEN")
+            .ok()
+            .and_then(|value| (!value.trim().is_empty()).then_some(value));
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             audit_log,
             http: reqwest::Client::new(),
+            service_token,
         }
     }
 
@@ -201,7 +206,11 @@ impl ApiClient {
         TResp: DeserializeOwned + Serialize,
     {
         let url = format!("{}{}", self.base_url, path);
-        let response = self.http.post(&url).json(request).send().await?;
+        let mut request_builder = self.http.post(&url).json(request);
+        if let Some(token) = self.service_token.as_deref() {
+            request_builder = request_builder.bearer_auth(token);
+        }
+        let response = request_builder.send().await?;
         self.decode_response(path, action, response, audit_request)
             .await
     }

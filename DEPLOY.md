@@ -31,10 +31,16 @@ and is not copied to the server.
 Create `/opt/sybil/.env` on the deploy host before running prod compose commands:
 
 ```bash
+SYBIL_SERVICE_TOKEN=<strong random bearer token for service/operator routes>
 GF_SECURITY_ADMIN_PASSWORD=<strong grafana admin password>
 CADDY_OPS_AUTH_USER=ops
 CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 ```
+
+`SYBIL_SERVICE_TOKEN` is injected into `sybil-api`, `sybil-polymarket`, and
+`sybil-arena`. In prod, service routes fail closed when it is missing. Optional
+`SYBIL_CORS_ORIGINS` may be set to a comma-separated browser-origin allowlist;
+empty/unset keeps CORS same-origin only.
 
 Generate the Caddy hash with:
 

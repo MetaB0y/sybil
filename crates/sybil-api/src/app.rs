@@ -2,12 +2,12 @@ use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
-use axum::http::{header, Request};
+use axum::http::{header, Method, Request};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use rusqlite::{Connection, OpenFlags};
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 use utoipa::OpenApi;
@@ -548,7 +548,238 @@ async fn order_rate_limit(
     next.run(req).await
 }
 
-pub fn create_router(state: AppState) -> Router {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RouteMount {
+    pub method: &'static str,
+    pub path: &'static str,
+}
+
+pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
+    RouteMount {
+        method: "GET",
+        path: "/",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/openapi.json",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/metrics",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/bots/decisions",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/health",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/state-root",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/proofs/state/{leaf_key_hex}",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/accounts/{id}/keys",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/portfolio",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/fills",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/equity",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/events",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/bridge-key",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/orders",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/bridge/status",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/bridge/withdrawals/{id}",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/search",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/summary",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/groups",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/prices",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/{id}",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/{id}/resolution",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/{id}/prices/history",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/{id}/prices/candles",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/{id}/open-batch",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/activity/overview",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/events/{event_id}/traders",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/events/{event_id}/raw",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/feeds",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/orders",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/orders/signed",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/orders/cancel/signed",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/blocks",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/blocks/latest",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/blocks/stream",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/blocks/ws",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/blocks/{height}",
+    },
+];
+
+pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
+    RouteMount {
+        method: "POST",
+        path: "/v1/accounts",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/accounts/{id}/fund",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/bridge/deposits",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/bridge/withdrawals",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/markets",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/markets/groups",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/markets/{id}/resolve",
+    },
+    RouteMount {
+        method: "PUT",
+        path: "/v1/events/{event_id}/raw",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/feeds",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/markets/prices/reference",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/markets/{id}/metadata",
+    },
+];
+
+pub const DEV_ROUTE_TABLE: &[RouteMount] = &[
+    RouteMount {
+        method: "POST",
+        path: "/v1/simulation/pause",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/simulation/resume",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/orders/pending",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/markets/{id}/orderbook",
+    },
+];
+
+fn public_routes() -> Router<AppState> {
     Router::new()
         // Dashboard
         .route("/", axum::routing::get(dashboard))
@@ -571,27 +802,10 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/proofs/state/{leaf_key_hex}",
             axum::routing::get(routes::proofs::get_state_proof),
         )
-        // Simulation control
-        .route(
-            "/v1/simulation/pause",
-            axum::routing::post(routes::system::pause),
-        )
-        .route(
-            "/v1/simulation/resume",
-            axum::routing::post(routes::system::resume),
-        )
         // Accounts
-        .route(
-            "/v1/accounts",
-            axum::routing::post(routes::accounts::create_account),
-        )
         .route(
             "/v1/accounts/{id}",
             axum::routing::get(routes::accounts::get_account),
-        )
-        .route(
-            "/v1/accounts/{id}/fund",
-            axum::routing::post(routes::accounts::fund_account),
         )
         .route(
             "/v1/accounts/{id}/keys",
@@ -627,14 +841,6 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(routes::bridge::status),
         )
         .route(
-            "/v1/bridge/deposits",
-            axum::routing::post(routes::bridge::submit_l1_deposit),
-        )
-        .route(
-            "/v1/bridge/withdrawals",
-            axum::routing::post(routes::bridge::create_withdrawal),
-        )
-        .route(
             "/v1/bridge/withdrawals/{id}",
             axum::routing::get(routes::bridge::get_withdrawal),
         )
@@ -649,12 +855,11 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/v1/markets",
-            axum::routing::get(routes::markets::list_markets).post(routes::markets::create_market),
+            axum::routing::get(routes::markets::list_markets),
         )
         .route(
             "/v1/markets/groups",
-            axum::routing::get(routes::markets::list_market_groups)
-                .post(routes::markets::create_market_group),
+            axum::routing::get(routes::markets::list_market_groups),
         )
         .route(
             "/v1/markets/prices",
@@ -663,10 +868,6 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/markets/{id}",
             axum::routing::get(routes::markets::get_market),
-        )
-        .route(
-            "/v1/markets/{id}/resolve",
-            axum::routing::post(routes::markets::resolve_market),
         )
         .route(
             "/v1/markets/{id}/resolution",
@@ -694,13 +895,10 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/v1/events/{event_id}/raw",
-            axum::routing::get(routes::events::get_event_raw).put(routes::events::put_event_raw),
+            axum::routing::get(routes::events::get_event_raw),
         )
         // Feeds
-        .route(
-            "/v1/feeds",
-            axum::routing::get(routes::feeds::list_feeds).post(routes::feeds::register_feed),
-        )
+        .route("/v1/feeds", axum::routing::get(routes::feeds::list_feeds))
         // Orders
         .route(
             "/v1/orders",
@@ -713,22 +911,6 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/v1/orders/cancel/signed",
             axum::routing::post(routes::orders::cancel_signed_order),
-        )
-        .route(
-            "/v1/orders/pending",
-            axum::routing::get(routes::orders::get_all_pending_orders),
-        )
-        .route(
-            "/v1/markets/{id}/orderbook",
-            axum::routing::get(routes::orders::get_market_orderbook),
-        )
-        .route(
-            "/v1/markets/prices/reference",
-            axum::routing::post(routes::markets::set_reference_prices),
-        )
-        .route(
-            "/v1/markets/{id}/metadata",
-            axum::routing::post(routes::markets::set_market_metadata),
         )
         // Blocks
         .route(
@@ -751,24 +933,157 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/blocks/{height}",
             axum::routing::get(routes::blocks::get_block_by_height),
         )
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            order_rate_limit,
-        ))
-        .layer(middleware::from_fn(http_metrics))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|req: &Request<axum::body::Body>| {
-                    tracing::info_span!(
-                        "http.request",
-                        method = %req.method(),
-                        path = %req.uri().path(),
-                    )
-                })
-                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+}
+
+fn service_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/v1/accounts",
+            axum::routing::post(routes::accounts::create_account),
         )
-        .layer(CorsLayer::permissive())
-        .with_state(state)
+        .route(
+            "/v1/accounts/{id}/fund",
+            axum::routing::post(routes::accounts::fund_account),
+        )
+        .route(
+            "/v1/bridge/deposits",
+            axum::routing::post(routes::bridge::submit_l1_deposit),
+        )
+        .route(
+            "/v1/bridge/withdrawals",
+            axum::routing::post(routes::bridge::create_withdrawal),
+        )
+        .route(
+            "/v1/markets",
+            axum::routing::post(routes::markets::create_market),
+        )
+        .route(
+            "/v1/markets/groups",
+            axum::routing::post(routes::markets::create_market_group),
+        )
+        .route(
+            "/v1/markets/{id}/resolve",
+            axum::routing::post(routes::markets::resolve_market),
+        )
+        .route(
+            "/v1/events/{event_id}/raw",
+            axum::routing::put(routes::events::put_event_raw),
+        )
+        .route(
+            "/v1/feeds",
+            axum::routing::post(routes::feeds::register_feed),
+        )
+        .route(
+            "/v1/markets/prices/reference",
+            axum::routing::post(routes::markets::set_reference_prices),
+        )
+        .route(
+            "/v1/markets/{id}/metadata",
+            axum::routing::post(routes::markets::set_market_metadata),
+        )
+}
+
+fn dev_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/v1/simulation/pause",
+            axum::routing::post(routes::system::pause),
+        )
+        .route(
+            "/v1/simulation/resume",
+            axum::routing::post(routes::system::resume),
+        )
+        .route(
+            "/v1/orders/pending",
+            axum::routing::get(routes::orders::get_all_pending_orders),
+        )
+        .route(
+            "/v1/markets/{id}/orderbook",
+            axum::routing::get(routes::orders::get_market_orderbook),
+        )
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&left, &right) in a.iter().zip(b) {
+        diff |= left ^ right;
+    }
+    diff == 0
+}
+
+fn bearer_token(req: &Request<axum::body::Body>) -> Option<&str> {
+    req.headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|token| !token.is_empty())
+}
+
+async fn service_auth(
+    State(state): State<AppState>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    if state.dev_mode {
+        return next.run(req).await;
+    }
+
+    let Some(expected) = state.service_token.as_deref() else {
+        return AppError::unauthorized("Service token is not configured").into_response();
+    };
+    let Some(actual) = bearer_token(&req) else {
+        return AppError::unauthorized("Missing service bearer token").into_response();
+    };
+    if !constant_time_eq(actual.as_bytes(), expected.as_bytes()) {
+        return AppError::forbidden("Invalid service bearer token").into_response();
+    }
+
+    next.run(req).await
+}
+
+fn cors_layer(state: &AppState) -> CorsLayer {
+    if state.dev_mode {
+        return CorsLayer::permissive();
+    }
+    if state.cors_origins.is_empty() {
+        return CorsLayer::new();
+    }
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(state.cors_origins.clone()))
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::OPTIONS])
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+}
+
+pub fn create_router(state: AppState) -> Router {
+    let mut app = public_routes().merge(
+        service_routes().route_layer(middleware::from_fn_with_state(state.clone(), service_auth)),
+    );
+    if state.dev_mode {
+        app = app.merge(dev_routes());
+    }
+    let cors = cors_layer(&state);
+
+    app.layer(middleware::from_fn_with_state(
+        state.clone(),
+        order_rate_limit,
+    ))
+    .layer(middleware::from_fn(http_metrics))
+    .layer(
+        TraceLayer::new_for_http()
+            .make_span_with(|req: &Request<axum::body::Body>| {
+                tracing::info_span!(
+                    "http.request",
+                    method = %req.method(),
+                    path = %req.uri().path(),
+                )
+            })
+            .on_response(DefaultOnResponse::new().level(Level::INFO)),
+    )
+    .layer(cors)
+    .with_state(state)
 }
 
 #[cfg(test)]

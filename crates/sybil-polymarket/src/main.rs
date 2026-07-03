@@ -35,6 +35,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::parse();
     info!(?config, "starting sybil-polymarket");
+    let sybil_service_token = std::env::var("SYBIL_SERVICE_TOKEN")
+        .ok()
+        .and_then(|value| (!value.trim().is_empty()).then_some(value));
 
     // Shared HTTP client
     let http = reqwest::Client::builder()
@@ -61,8 +64,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.gamma_url.clone(),
         config.clob_url.clone(),
     );
-    let sybil_client_sync = SybilClient::new(http.clone(), config.sybil_url.clone());
-    let sybil_client_mm = SybilClient::new(http.clone(), config.sybil_url.clone());
+    let sybil_client_sync = SybilClient::new(
+        http.clone(),
+        config.sybil_url.clone(),
+        sybil_service_token.clone(),
+    );
+    let sybil_client_mm = SybilClient::new(
+        http.clone(),
+        config.sybil_url.clone(),
+        sybil_service_token.clone(),
+    );
     let gamma_client_feed = GammaClient::new(
         http.clone(),
         config.gamma_url.clone(),
@@ -73,7 +84,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.gamma_url.clone(),
         config.clob_url.clone(),
     );
-    let sybil_client_resolution = SybilClient::new(http.clone(), config.sybil_url.clone());
+    let sybil_client_resolution =
+        SybilClient::new(http.clone(), config.sybil_url.clone(), sybil_service_token);
 
     // Wait for Sybil to be healthy
     info!(url = &config.sybil_url, "waiting for Sybil API...");

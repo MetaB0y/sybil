@@ -401,10 +401,6 @@ pub async fn create_market(
     State(state): State<AppState>,
     Json(req): Json<CreateMarketRequest>,
 ) -> Result<Json<CreateMarketResponse>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
-
     if let Some(template) = req.resolution_template.as_ref() {
         if !state.sequencer.template_exists(template.clone()).await? {
             return Err(AppError::bad_request(format!(
@@ -488,10 +484,6 @@ pub async fn create_market_group(
     State(state): State<AppState>,
     Json(req): Json<CreateMarketGroupRequest>,
 ) -> Result<Json<MarketGroupResponse>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
-
     let market_ids: Vec<MarketId> = req.market_ids.iter().map(|&id| MarketId::new(id)).collect();
     let group = state
         .sequencer
@@ -563,9 +555,6 @@ pub async fn resolve_market(
             let _record = state.sequencer.resolve_market_attested(mid, signed).await?;
         }
         None => {
-            if !state.dev_mode {
-                return Err(AppError::dev_mode_required());
-            }
             let _record = state
                 .sequencer
                 .resolve_market(mid, req.payout_nanos)
@@ -859,7 +848,7 @@ pub async fn search_markets(
     Ok(Json(response))
 }
 
-/// POST /v1/markets/prices/reference — set reference prices from external system (dev mode)
+/// POST /v1/markets/prices/reference — set reference prices from external system.
 #[utoipa::path(
     post,
     path = "/v1/markets/prices/reference",
@@ -872,9 +861,6 @@ pub async fn set_reference_prices(
     State(state): State<AppState>,
     Json(req): Json<SetReferencePricesRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
     let mut prices = state.reference_prices.write().await;
     for (market_id, price) in req.prices {
         prices.insert(market_id, price);
@@ -954,7 +940,7 @@ pub async fn get_resolution(
     }))
 }
 
-/// POST /v1/markets/{id}/metadata — set external metadata for a market (dev mode)
+/// POST /v1/markets/{id}/metadata — set external metadata for a market.
 #[utoipa::path(
     post,
     path = "/v1/markets/{id}/metadata",
@@ -969,9 +955,6 @@ pub async fn set_market_metadata(
     Path(id): Path<u32>,
     Json(req): Json<SetMarketMetadataRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if !state.dev_mode {
-        return Err(AppError::dev_mode_required());
-    }
     let mut ref_data = state.market_ref_data.write().await;
     let entry = ref_data.entry(id).or_insert_with(MarketRefData::default);
     if let Some(v) = req.external_url {
