@@ -275,6 +275,39 @@ for name in "${NOTE_NAMES[@]}"; do
 done
 
 echo ""
+# ── Runbooks: repo-path validation only ─────────────────────────────────────
+# docs/runbooks/ notes are operational documents, not vault notes: no
+# frontmatter/wiki-link/layer conventions apply, but their backticked repo
+# paths must resolve just like the vault's (same token filter as check 7).
+RUNBOOKS_PATH="$REPO_ROOT/docs/runbooks"
+if [ -d "$RUNBOOKS_PATH" ]; then
+    echo ""
+    echo "=== Runbook Path Validation: docs/runbooks ==="
+    for f in "$RUNBOOKS_PATH"/*.md; do
+        [ -f "$f" ] || continue
+        echo "[$(basename "$f" .md)]"
+        while IFS= read -r tok; do
+            [ -z "$tok" ] && continue
+            case "$tok" in
+                *[[:space:]]*) continue ;;
+                *"*"*)         continue ;;
+                *"<"*)         continue ;;
+                *"{"*)         continue ;;
+                *"://"*)       continue ;;
+                */*) ;;
+                *)             continue ;;
+            esac
+            p="${tok%%:*}"
+            [ -z "$p" ] && continue
+            first="${p%%/*}"
+            if is_top_dir "$first" && [ ! -e "$REPO_ROOT/$p" ]; then
+                error "Dead repo path \`$tok\` → '$p' not found"
+            fi
+        done < <(grep -oE '`[^`]+`' "$f" | sed 's/`//g')
+    done
+fi
+
+echo ""
 echo "=== Summary ==="
 echo "  Notes:    ${#NOTE_NAMES[@]}"
 echo "  Errors:   $ERRORS"
