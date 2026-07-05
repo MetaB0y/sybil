@@ -148,6 +148,12 @@ pub enum SequencerError {
     /// The requested market was not found.
     #[error("market not found")]
     MarketNotFound,
+    /// The requested market group was not found.
+    #[error("market group not found")]
+    MarketGroupNotFound,
+    /// The requested market already belongs to another market group.
+    #[error("market already belongs to group {group_id}")]
+    MarketAlreadyGrouped { group_id: u64 },
     /// The requested block was not found.
     #[error("block not found")]
     BlockNotFound,

@@ -564,6 +564,10 @@ pub enum ControlPlaneCommand {
     InstallTemplate {
         template: ResolutionTemplate,
     },
+    ExtendMarketGroup {
+        group_id: u64,
+        market_id: MarketId,
+    },
 }
 
 /// Store-restored analytics projections. These are grouped separately from

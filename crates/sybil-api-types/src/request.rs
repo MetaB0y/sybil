@@ -123,6 +123,13 @@ pub struct CreateMarketGroupRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ExtendMarketGroupRequest {
+    /// Market ID to add to the existing group.
+    pub market_id: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResolveMarketRequest {
     /// Payout per YES share in nanos (0 to 1_000_000_000).
     /// 1_000_000_000 = YES wins ($1), 0 = NO wins, 700_000_000 = $0.70 fractional.

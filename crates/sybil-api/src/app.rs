@@ -47,6 +47,7 @@ use crate::util::now_ms;
         routes::markets::create_market,
         routes::markets::list_market_groups,
         routes::markets::create_market_group,
+        routes::markets::extend_market_group,
         routes::markets::get_prices,
         routes::markets::resolve_market,
         routes::markets::get_resolution,
@@ -84,6 +85,7 @@ use crate::util::now_ms;
         RegisterKeyRequest,
         CreateMarketRequest,
         CreateMarketGroupRequest,
+        ExtendMarketGroupRequest,
         ResolveMarketRequest,
         SignedAttestationDto,
         RegisterFeedRequest,
@@ -575,6 +577,10 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "POST",
+        path: "/v1/markets/groups/{group_id}/members",
+    },
+    RouteMount {
+        method: "POST",
         path: "/v1/markets/{id}/resolve",
     },
     RouteMount {
@@ -803,6 +809,10 @@ fn service_routes() -> Router<AppState> {
         .route(
             "/v1/markets/groups",
             axum::routing::post(routes::markets::create_market_group),
+        )
+        .route(
+            "/v1/markets/groups/{group_id}/members",
+            axum::routing::post(routes::markets::extend_market_group),
         )
         .route(
             "/v1/markets/{id}/resolve",

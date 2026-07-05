@@ -15,8 +15,8 @@ use crate::convert::prices_to_response;
 use crate::state::{save_market_ref_data, AppState, MarketRefData};
 use crate::types::error::AppError;
 use crate::types::request::{
-    CreateMarketGroupRequest, CreateMarketRequest, MarketSearchParams, ResolveMarketRequest,
-    SetMarketMetadataRequest, SetReferencePricesRequest,
+    CreateMarketGroupRequest, CreateMarketRequest, ExtendMarketGroupRequest, MarketSearchParams,
+    ResolveMarketRequest, SetMarketMetadataRequest, SetReferencePricesRequest,
 };
 use crate::types::response::*;
 use crate::util::now_ms;
@@ -497,7 +497,9 @@ pub async fn list_market_groups(
     let groups = state.sequencer.list_market_groups().await?;
     let response: Vec<MarketGroupResponse> = groups
         .iter()
-        .map(|g| MarketGroupResponse {
+        .enumerate()
+        .map(|(group_id, g)| MarketGroupResponse {
+            group_id: group_id as u64,
             name: g.name.clone(),
             market_ids: g.markets.iter().map(|m| m.0).collect(),
         })
@@ -520,12 +522,44 @@ pub async fn create_market_group(
     Json(req): Json<CreateMarketGroupRequest>,
 ) -> Result<Json<MarketGroupResponse>, AppError> {
     let market_ids: Vec<MarketId> = req.market_ids.iter().map(|&id| MarketId::new(id)).collect();
-    let group = state
+    let (group_id, group) = state
         .sequencer
         .create_market_group(req.name, market_ids)
         .await?;
 
     Ok(Json(MarketGroupResponse {
+        group_id,
+        name: group.name,
+        market_ids: group.markets.iter().map(|m| m.0).collect(),
+    }))
+}
+
+/// POST /v1/markets/groups/{group_id}/members
+#[utoipa::path(
+    post,
+    path = "/v1/markets/groups/{group_id}/members",
+    params(
+        ("group_id" = u64, Path, description = "Current market group index")
+    ),
+    request_body = ExtendMarketGroupRequest,
+    responses(
+        (status = 200, description = "Market group extended or already contained the member", body = MarketGroupResponse),
+        (status = 404, description = "Market group or market not found"),
+        (status = 409, description = "Market is resolved or already belongs to another group")
+    )
+)]
+pub async fn extend_market_group(
+    State(state): State<AppState>,
+    Path(group_id): Path<u64>,
+    Json(req): Json<ExtendMarketGroupRequest>,
+) -> Result<Json<MarketGroupResponse>, AppError> {
+    let (group, _) = state
+        .sequencer
+        .extend_market_group(group_id, MarketId::new(req.market_id))
+        .await?;
+
+    Ok(Json(MarketGroupResponse {
+        group_id,
         name: group.name,
         market_ids: group.markets.iter().map(|m| m.0).collect(),
     }))

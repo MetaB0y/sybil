@@ -204,6 +204,12 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::MarketNotFound => {
                 AppError::not_found("Market not found")
             }
+            matching_sequencer::SequencerError::MarketGroupNotFound => {
+                AppError::not_found("Market group not found")
+            }
+            matching_sequencer::SequencerError::MarketAlreadyGrouped { group_id } => {
+                AppError::conflict(format!("Market already belongs to group {group_id}"))
+            }
             matching_sequencer::SequencerError::BlockNotFound => {
                 AppError::not_found("Block not found")
             }

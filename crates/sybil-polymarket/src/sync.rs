@@ -45,7 +45,7 @@ struct PendingMmNotification {
 #[derive(Debug, PartialEq, Eq)]
 enum NegRiskGroupAction {
     Create(Vec<u32>),
-    ExistingCannotExtend {
+    Extend {
         missing_market_ids: Vec<u32>,
         existing_group_market_ids: Vec<u32>,
     },
@@ -70,7 +70,7 @@ fn plan_negrisk_group_action(
         if missing_market_ids.is_empty() {
             NegRiskGroupAction::None
         } else {
-            NegRiskGroupAction::ExistingCannotExtend {
+            NegRiskGroupAction::Extend {
                 missing_market_ids,
                 existing_group_market_ids: group.sybil_market_ids.clone(),
             }
@@ -78,6 +78,38 @@ fn plan_negrisk_group_action(
     } else {
         NegRiskGroupAction::Create(active_mapped_ids.to_vec())
     }
+}
+
+fn matching_sybil_group_id(
+    groups: &[MarketGroupResponse],
+    existing_group: &GroupInfo,
+) -> Option<u64> {
+    groups
+        .iter()
+        .filter(|group| group.name == existing_group.group_name)
+        .filter_map(|group| {
+            let overlap = group
+                .market_ids
+                .iter()
+                .filter(|id| existing_group.sybil_market_ids.contains(id))
+                .count();
+            if overlap == 0 {
+                return None;
+            }
+
+            let stored_subset_of_server = existing_group
+                .sybil_market_ids
+                .iter()
+                .all(|id| group.market_ids.contains(id));
+            let server_subset_of_stored = group
+                .market_ids
+                .iter()
+                .all(|id| existing_group.sybil_market_ids.contains(id));
+            (stored_subset_of_server || server_subset_of_stored)
+                .then_some((group.group_id, overlap))
+        })
+        .max_by_key(|(_, overlap)| *overlap)
+        .map(|(group_id, _)| group_id)
 }
 
 fn mm_group_membership(
@@ -458,16 +490,73 @@ impl SyncActor {
                         }
                     }
                 }
-                NegRiskGroupAction::ExistingCannotExtend {
+                NegRiskGroupAction::Extend {
                     missing_market_ids,
                     existing_group_market_ids,
                 } => {
-                    warn!(
-                        event_id = &event.id,
-                        missing_market_ids = ?missing_market_ids,
-                        existing_group_market_ids = ?existing_group_market_ids,
-                        "NegRisk event has active child markets outside an existing Sybil MarketGroup; Sybil exposes create/list only, no group-extension endpoint, so the mirror will not submit a duplicate overlapping group"
-                    );
+                    let groups = match self.sybil_client.list_market_groups().await {
+                        Ok(groups) => groups,
+                        Err(e) => {
+                            warn!(
+                                event_id = &event.id,
+                                missing_market_ids = ?missing_market_ids,
+                                error = %e,
+                                "failed to list Sybil market groups before extension"
+                            );
+                            Vec::new()
+                        }
+                    };
+                    let Some(existing_group) = existing_group.as_ref() else {
+                        warn!(
+                            event_id = &event.id,
+                            missing_market_ids = ?missing_market_ids,
+                            "planned NegRisk group extension without a local group mapping"
+                        );
+                        continue;
+                    };
+                    let Some(group_id) = matching_sybil_group_id(&groups, existing_group) else {
+                        warn!(
+                            event_id = &event.id,
+                            missing_market_ids = ?missing_market_ids,
+                            existing_group_market_ids = ?existing_group_market_ids,
+                            "could not locate current Sybil MarketGroup for NegRisk extension"
+                        );
+                        continue;
+                    };
+
+                    let mut extended = Vec::new();
+                    for market_id in &missing_market_ids {
+                        let req = ExtendMarketGroupRequest {
+                            market_id: *market_id,
+                        };
+                        match self.sybil_client.extend_market_group(group_id, &req).await {
+                            Ok(group) => {
+                                info!(
+                                    event_id = &event.id,
+                                    group_id,
+                                    market_id,
+                                    members = group.market_ids.len(),
+                                    "extended NegRisk market group"
+                                );
+                                extended.push(*market_id);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    event_id = &event.id,
+                                    group_id,
+                                    market_id,
+                                    error = %e,
+                                    "failed to extend NegRisk market group"
+                                );
+                            }
+                        }
+                    }
+                    if !extended.is_empty() {
+                        self.mapping
+                            .write()
+                            .await
+                            .extend_event_group(&event.id, &extended);
+                    }
                 }
                 NegRiskGroupAction::None => {}
             }
@@ -497,8 +586,9 @@ impl SyncActor {
                         event_id = &event.id,
                         sybil_id = pending.sybil_market_id,
                         condition_id = &pending.condition_id,
-                        "tracking late NegRisk child as standalone because existing Sybil MarketGroup cannot be extended"
+                        "skipping NegRisk MM notification until group extension is reflected in local mapping"
                     );
+                    continue;
                 }
 
                 if self.config.mm_max_markets == 0 || mm_live < self.config.mm_max_markets {
@@ -680,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn resync_synced_negrisk_child_does_not_plan_duplicate_group() {
+    fn synced_negrisk_event_with_late_child_plans_group_extension() {
         let event = negrisk_event(vec![
             market("cond-1", "yes-1", "no-1", "A"),
             market("cond-2", "yes-2", "no-2", "B"),
@@ -695,7 +785,7 @@ mod tests {
         let action = plan_negrisk_group_action(&event, &[0, 1, 2], Some(&existing_group));
         assert_eq!(
             action,
-            NegRiskGroupAction::ExistingCannotExtend {
+            NegRiskGroupAction::Extend {
                 missing_market_ids: vec![2],
                 existing_group_market_ids: vec![0, 1],
             }
@@ -703,21 +793,51 @@ mod tests {
     }
 
     #[test]
-    fn late_negrisk_child_uses_standalone_mm_membership_when_group_cannot_extend() {
-        let existing_group = GroupInfo {
+    fn late_negrisk_child_uses_group_membership_after_extension() {
+        let mut existing_group = GroupInfo {
             group_name: "Election".to_string(),
             sybil_market_ids: vec![0, 1],
             neg_risk: true,
         };
+        existing_group.sybil_market_ids.push(2);
 
         assert_eq!(
             mm_group_membership("event-1", 0, Some(&existing_group)),
-            (Some("event-1".to_string()), 2)
+            (Some("event-1".to_string()), 3)
         );
         assert_eq!(
             mm_group_membership("event-1", 2, Some(&existing_group)),
-            (None, 0)
+            (Some("event-1".to_string()), 3)
         );
+    }
+
+    #[test]
+    fn sybil_group_lookup_handles_h13_shrink_and_prior_extension() {
+        let existing_group = GroupInfo {
+            group_name: "Election".to_string(),
+            sybil_market_ids: vec![0, 1, 2],
+            neg_risk: true,
+        };
+        let groups = vec![
+            MarketGroupResponse {
+                group_id: 7,
+                name: "Other".to_string(),
+                market_ids: vec![0, 1],
+            },
+            MarketGroupResponse {
+                group_id: 8,
+                name: "Election".to_string(),
+                market_ids: vec![0, 1],
+            },
+        ];
+        assert_eq!(matching_sybil_group_id(&groups, &existing_group), Some(8));
+
+        let groups = vec![MarketGroupResponse {
+            group_id: 9,
+            name: "Election".to_string(),
+            market_ids: vec![0, 1, 2, 3],
+        }];
+        assert_eq!(matching_sybil_group_id(&groups, &existing_group), Some(9));
     }
 
     #[test]

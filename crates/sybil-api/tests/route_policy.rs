@@ -218,6 +218,10 @@ fn exact_service_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "POST",
+            path: "/v1/markets/groups/{group_id}/members",
+        },
+        RouteMount {
+            method: "POST",
             path: "/v1/markets/{id}/resolve",
         },
         RouteMount {
@@ -381,6 +385,11 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             Method::POST,
             "/v1/markets/groups",
             json!({"name": "service group", "market_ids": [0]}),
+        ),
+        (
+            Method::POST,
+            "/v1/markets/groups/0/members",
+            json!({"market_id": 1}),
         ),
         (
             Method::POST,
@@ -619,9 +628,31 @@ async fn service_routes_succeed_with_token_in_prod() {
     let (status, body) = request_json(
         app.clone(),
         Method::POST,
+        "/v1/markets",
+        Some(TOKEN),
+        json!({"name": "service market late child"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let late_market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
         "/v1/markets/groups",
         Some(TOKEN),
         json!({"name": "service group", "market_ids": [market_id]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let group_id = parse_json(&body)["group_id"].as_u64().unwrap();
+
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        &format!("/v1/markets/groups/{group_id}/members"),
+        Some(TOKEN),
+        json!({"market_id": late_market_id}),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));

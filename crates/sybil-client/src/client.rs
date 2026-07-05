@@ -215,6 +215,30 @@ impl SybilClient {
         self.decode(resp).await
     }
 
+    pub async fn list_market_groups(&self) -> Result<Vec<MarketGroupResponse>, Error> {
+        let resp = self
+            .with_service_auth(self.http.get(self.url("/v1/markets/groups")))
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    pub async fn extend_market_group(
+        &self,
+        group_id: u64,
+        req: &ExtendMarketGroupRequest,
+    ) -> Result<MarketGroupResponse, Error> {
+        let resp = self
+            .with_service_auth(
+                self.http
+                    .post(self.url(&format!("/v1/markets/groups/{group_id}/members"))),
+            )
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
     /// Resolve a market, returning the typed server response. Prefer the
     /// [`SybilClient::resolve_market`] / [`SybilClient::resolve_market_attested`]
     /// helpers for the common cases; this is the raw form used by callers that

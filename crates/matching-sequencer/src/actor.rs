@@ -175,7 +175,12 @@ pub enum SequencerMsg {
     CreateMarketGroup(
         String,
         Vec<MarketId>,
-        RpcReplyPort<Result<MarketGroup, SequencerError>>,
+        RpcReplyPort<Result<(u64, MarketGroup), SequencerError>>,
+    ),
+    ExtendMarketGroup(
+        u64,
+        MarketId,
+        RpcReplyPort<Result<(MarketGroup, bool), SequencerError>>,
     ),
     ResolveMarket(
         MarketId,
@@ -1500,13 +1505,28 @@ impl SequencerActorState {
         &mut self,
         name: String,
         market_ids: Vec<MarketId>,
-    ) -> Result<MarketGroup, SequencerError> {
+    ) -> Result<(u64, MarketGroup), SequencerError> {
         self.persist_control_plane(&ControlPlaneCommand::CreateMarketGroup {
             name: name.clone(),
             market_ids: market_ids.clone(),
         })
         .await?;
         Ok(self.sequencer.create_market_group(name, market_ids))
+    }
+
+    async fn handle_extend_market_group(
+        &mut self,
+        group_id: u64,
+        market_id: MarketId,
+    ) -> Result<(MarketGroup, bool), SequencerError> {
+        let mut validation = self.sequencer.clone();
+        validation.extend_market_group(group_id, market_id)?;
+        self.persist_control_plane(&ControlPlaneCommand::ExtendMarketGroup {
+            group_id,
+            market_id,
+        })
+        .await?;
+        self.sequencer.extend_market_group(group_id, market_id)
     }
 
     async fn handle_resolve_market(
@@ -1876,6 +1896,9 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::CreateMarketGroup(name, market_ids, reply) => {
                 let _ = reply.send(state.handle_create_market_group(name, market_ids).await);
+            }
+            SequencerMsg::ExtendMarketGroup(group_id, market_id, reply) => {
+                let _ = reply.send(state.handle_extend_market_group(group_id, market_id).await);
             }
             SequencerMsg::ResolveMarket(market_id, payout_nanos, reply) => {
                 let _ = reply.send(state.handle_resolve_market(market_id, payout_nanos).await);
@@ -2612,8 +2635,17 @@ impl SequencerHandle {
         &self,
         name: String,
         market_ids: Vec<MarketId>,
-    ) -> Result<MarketGroup, SequencerError> {
+    ) -> Result<(u64, MarketGroup), SequencerError> {
         self.rpc(|reply| SequencerMsg::CreateMarketGroup(name, market_ids, reply))
+            .await?
+    }
+
+    pub async fn extend_market_group(
+        &self,
+        group_id: u64,
+        market_id: MarketId,
+    ) -> Result<(MarketGroup, bool), SequencerError> {
+        self.rpc(|reply| SequencerMsg::ExtendMarketGroup(group_id, market_id, reply))
             .await?
     }
 
@@ -3045,10 +3077,12 @@ mod tests {
 
     fn temp_store_path(prefix: &str) -> PathBuf {
         let unique = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
+        let path = std::env::temp_dir().join(format!(
             "sybil-actor-{prefix}-{}-{unique}.redb",
             std::process::id()
-        ))
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
     }
 
     fn make_test_sequencer() -> (BlockSequencer, AccountId) {
@@ -3562,11 +3596,18 @@ mod tests {
             .create_market("group wal market".to_string())
             .await
             .unwrap();
-        let group = handle
+        let (group_id, group) = handle
             .create_market_group("wal group".to_string(), vec![group_market])
             .await
             .unwrap();
+        assert_eq!(group_id, 0);
         assert_eq!(group.markets, vec![group_market]);
+        let (extended_group, inserted) = handle
+            .extend_market_group(group_id, metadata_market)
+            .await
+            .unwrap();
+        assert!(inserted);
+        assert_eq!(extended_group.markets, vec![group_market, metadata_market]);
 
         let feed_pubkey = FeedPubkey(vec![2u8; 33]);
         let feed_id = handle
@@ -3579,10 +3620,7 @@ mod tests {
         };
         handle.install_template(template.clone()).await.unwrap();
 
-        let resolved_market = handle
-            .create_market("resolved wal market".to_string())
-            .await
-            .unwrap();
+        let resolved_market = plain_market;
         handle
             .resolve_market(resolved_market, Nanos(NANOS_PER_DOLLAR))
             .await
@@ -3635,8 +3673,9 @@ mod tests {
                 restored_seq
                     .market_groups()
                     .iter()
-                    .any(|group| group.name == "wal group" && group.markets == vec![group_market]),
-                "market group was acknowledged but not replayed after restore"
+                    .any(|group| group.name == "wal group"
+                        && group.markets == vec![group_market, metadata_market]),
+                "market group extension was acknowledged but not replayed after restore"
             );
             assert!(
                 matches!(
@@ -3669,6 +3708,16 @@ mod tests {
                 restored.control_plane_log.len(),
                 EXPECTED_CONTROL_PLANE_COMMANDS,
                 "restart round {restart_round} should see every acknowledged control-plane command before commit"
+            );
+            assert!(
+                restored.control_plane_log.iter().any(|command| matches!(
+                    command,
+                    ControlPlaneCommand::ExtendMarketGroup {
+                        group_id,
+                        market_id
+                    } if *group_id == 0 && *market_id == metadata_market
+                )),
+                "restart round {restart_round} should replay the market group extension"
             );
             assert!(
                 restored.control_plane_log.iter().any(|command| matches!(
@@ -4131,10 +4180,11 @@ mod tests {
         let m1 = handle.create_market("A wins".to_string()).await.unwrap();
         let m2 = handle.create_market("B wins".to_string()).await.unwrap();
 
-        let group = handle
+        let (group_id, group) = handle
             .create_market_group("Election".to_string(), vec![m1, m2])
             .await
             .unwrap();
+        assert_eq!(group_id, 0);
         assert_eq!(group.name, "Election");
         assert_eq!(group.markets.len(), 2);
 

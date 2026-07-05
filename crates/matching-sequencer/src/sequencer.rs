@@ -1047,6 +1047,10 @@ impl BlockSequencer {
                 self.create_market_group(name, market_ids);
                 Ok(())
             }
+            ControlPlaneCommand::ExtendMarketGroup {
+                group_id,
+                market_id,
+            } => self.extend_market_group(group_id, market_id).map(|_| ()),
             ControlPlaneCommand::CancelPendingOrder {
                 account_id,
                 order_id,
@@ -1173,13 +1177,68 @@ impl BlockSequencer {
         market_id
     }
 
-    pub fn create_market_group(&mut self, name: String, market_ids: Vec<MarketId>) -> MarketGroup {
+    pub fn create_market_group(
+        &mut self,
+        name: String,
+        market_ids: Vec<MarketId>,
+    ) -> (u64, MarketGroup) {
+        let group_id = self.market_groups.len() as u64;
         let mut group = MarketGroup::new(&name);
         for market_id in market_ids {
             group.add_market(market_id);
         }
         self.market_groups.push(group.clone());
-        group
+        (group_id, group)
+    }
+
+    /// Add a market to an existing mutually-exclusive group.
+    ///
+    /// Group membership is a forward-only solver constraint. Existing positions
+    /// and MINT inventory are per-market, not per-group-versioned, so extending
+    /// a group never rewrites previously settled positions or tries to
+    /// reinterpret old complete sets. The next block commits the updated
+    /// `market_group/{group_id}` state leaf; future batches solve one joint
+    /// simplex over the extended unresolved membership. Duplicate extension of
+    /// the same group/member pair is idempotent.
+    pub fn extend_market_group(
+        &mut self,
+        group_id: u64,
+        market_id: MarketId,
+    ) -> Result<(MarketGroup, bool), SequencerError> {
+        if self.markets.get(market_id).is_none() {
+            return Err(SequencerError::MarketNotFound);
+        }
+        let status = self.lifecycle.market_status(market_id);
+        if !status.is_tradeable() {
+            return Err(SequencerError::InvalidMarketState(format!(
+                "market {market_id:?} is not tradeable ({})",
+                status.as_str()
+            )));
+        }
+
+        let group_index =
+            usize::try_from(group_id).map_err(|_| SequencerError::MarketGroupNotFound)?;
+        let Some(group) = self.market_groups.get(group_index) else {
+            return Err(SequencerError::MarketGroupNotFound);
+        };
+        if group.markets.contains(&market_id) {
+            return Ok((group.clone(), false));
+        }
+
+        for (existing_group_id, group) in self.market_groups.iter().enumerate() {
+            if existing_group_id != group_index && group.markets.contains(&market_id) {
+                return Err(SequencerError::MarketAlreadyGrouped {
+                    group_id: existing_group_id as u64,
+                });
+            }
+        }
+
+        let group = self
+            .market_groups
+            .get_mut(group_index)
+            .expect("group exists: checked above");
+        group.add_market(market_id);
+        Ok((group.clone(), true))
     }
 
     pub fn last_header(&self) -> Option<&BlockHeader> {
@@ -5403,6 +5462,140 @@ mod tests {
         let bp = seq.produce_block(Vec::new(), 2_000);
         assert!(bp.witness.market_groups.is_empty());
         let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "violations: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
+    fn extending_market_group_is_idempotent_and_rejects_cross_group_member() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let m2 = markets.add_binary("C");
+        let mut group0 = MarketGroup::new("Event 0");
+        group0.add_market(m0);
+        group0.add_market(m1);
+        let mut group1 = MarketGroup::new("Event 1");
+        group1.add_market(m2);
+
+        let accounts = AccountStore::new();
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            vec![group0, group1],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let (group, inserted) = seq.extend_market_group(0, m1).unwrap();
+        assert!(!inserted);
+        assert_eq!(group.markets, vec![m0, m1]);
+
+        let err = seq.extend_market_group(0, m2).unwrap_err();
+        assert!(matches!(
+            err,
+            SequencerError::MarketAlreadyGrouped { group_id: 1 }
+        ));
+    }
+
+    #[test]
+    fn market_group_extension_composes_with_h13_resolved_member_shrink() {
+        let (markets, m0, m1, m2, group) = setup_group();
+        let mut accounts = AccountStore::new();
+        accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets,
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        seq.resolve_market(m2, Nanos::ZERO, 1_000).unwrap();
+        assert_eq!(seq.market_groups()[0].markets, vec![m0, m1]);
+
+        let m3 = seq.create_market("D".to_string());
+        let (extended, inserted) = seq.extend_market_group(0, m3).unwrap();
+        assert!(inserted);
+        assert_eq!(extended.markets, vec![m0, m1, m3]);
+
+        let bp = seq.produce_block(Vec::new(), 2_000);
+        assert_eq!(bp.witness.market_groups.len(), 1);
+        assert_eq!(bp.witness.market_groups[0].markets, vec![m0, m1, m3]);
+        let verification = sybil_verifier::verify_full(&bp.witness, false);
+        assert!(
+            verification.valid,
+            "violations: {:?}",
+            verification.violations
+        );
+    }
+
+    #[test]
+    fn group_extension_after_preexisting_group_minting_conserves_cash() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("A");
+        let m1 = markets.add_binary("B");
+        let m2 = markets.add_binary("Late C");
+        let mut group = MarketGroup::new("Expandable event");
+        group.add_market(m0);
+        group.add_market(m1);
+
+        let mut accounts = AccountStore::new();
+        let buyer0 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let buyer1 = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let initial_total_balance = accounts.total_balance();
+        let oracle = Arc::new(AdminOracle::new());
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle,
+            SequencerConfig::default(),
+        );
+
+        let minted = seq.produce_block(
+            vec![
+                single_order_sub(buyer0, outcome_buy(&markets, 0, m0, 0, 600_000_000, q(1))),
+                single_order_sub(buyer1, outcome_buy(&markets, 0, m1, 0, 500_000_000, q(1))),
+            ],
+            1_000,
+        );
+        assert_eq!(
+            minted.block.fills.len(),
+            2,
+            "old group complete set should mint before extension"
+        );
+        assert_eq!(seq.accounts.total_balance(), initial_total_balance);
+
+        let (extended, inserted) = seq.extend_market_group(0, m2).unwrap();
+        assert!(inserted);
+        assert_eq!(extended.markets, vec![m0, m1, m2]);
+
+        seq.resolve_market(m2, Nanos(NANOS_PER_DOLLAR), 2_000)
+            .unwrap();
+        seq.resolve_market(m0, Nanos::ZERO, 2_001).unwrap();
+        seq.resolve_market(m1, Nanos::ZERO, 2_002).unwrap();
+
+        let settled = seq.produce_block(Vec::new(), 3_000);
+        assert!(seq.market_groups().is_empty());
+        assert_eq!(
+            seq.accounts.total_balance(),
+            initial_total_balance,
+            "extension must not create or destroy cash; old claims settle per-market and MINT absorbs the result"
+        );
+        for buyer in [buyer0, buyer1] {
+            let buyer_account = seq.accounts.get(buyer).unwrap();
+            assert_eq!(buyer_account.position(m0, 0), 0);
+            assert_eq!(buyer_account.position(m1, 0), 0);
+            assert_eq!(buyer_account.position(m2, 0), 0);
+        }
+
+        let verification = sybil_verifier::verify_full(&settled.witness, false);
         assert!(
             verification.valid,
             "violations: {:?}",

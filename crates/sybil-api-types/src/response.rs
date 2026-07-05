@@ -187,6 +187,7 @@ pub struct MarketSummaryResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MarketGroupResponse {
+    pub group_id: u64,
     pub name: String,
     pub market_ids: Vec<u32>,
 }

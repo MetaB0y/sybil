@@ -93,6 +93,21 @@ impl MappingStore {
         self.event_to_group.insert(event_id, group_info);
     }
 
+    /// Add newly observed Sybil markets to an existing NegRisk event mapping.
+    ///
+    /// The server-side group extension is idempotent; this local mapping is too,
+    /// so re-observing the same Polymarket event does not inflate group size.
+    pub fn extend_event_group(&mut self, event_id: &str, market_ids: &[u32]) {
+        if let Some(group) = self.event_to_group.get_mut(event_id) {
+            for &market_id in market_ids {
+                if !group.sybil_market_ids.contains(&market_id) {
+                    group.sybil_market_ids.push(market_id);
+                }
+            }
+            self.synced_events.insert(event_id.to_string());
+        }
+    }
+
     /// Look up the Sybil market group registered for a Polymarket event.
     pub fn event_group(&self, event_id: &str) -> Option<GroupInfo> {
         self.event_to_group.get(event_id).cloned()
@@ -253,6 +268,24 @@ mod tests {
         assert!(!store.is_event_synced("event1"));
 
         store.mark_event_synced("event1");
+        assert!(store.is_event_synced("event1"));
+    }
+
+    #[test]
+    fn extend_event_group_is_idempotent() {
+        let mut store = MappingStore::new(None);
+        store.register_event(
+            "event1".into(),
+            GroupInfo {
+                group_name: "Event".into(),
+                sybil_market_ids: vec![1, 2],
+                neg_risk: true,
+            },
+        );
+
+        store.extend_event_group("event1", &[2, 3, 3]);
+        let group = store.event_group("event1").unwrap();
+        assert_eq!(group.sybil_market_ids, vec![1, 2, 3]);
         assert!(store.is_event_synced("event1"));
     }
 
