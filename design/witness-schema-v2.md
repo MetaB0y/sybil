@@ -5,6 +5,20 @@ witness-schema bump that closes the H4 sidecar-transition gap, unblocks the SYB-
 view extraction, folds in SYB-212 group-membership derivation, and fixes the SYB-214
 O(total-deposits) witness growth — arranged so **exactly one guest-commitment move** happens.*
 
+**Status (2026-07-05): RATIFIED** — all four headline decisions approved (unproven view
+sidecar; full pre-sidecar at devnet scale; vault-tree frontier, no MMR; fresh-genesis
+migration), with two riders now binding on the implementation tickets:
+
+1. *Provenance visibility*: the API/OpenAPI surface must let an external consumer (most
+   likely an AI agent) distinguish consensus-proven data from analytics-derived data —
+   provenance is schema metadata on the ONE existing API surface.
+2. *No two-API split*: consumers never need a "proven API" plus an "analytics API" for the
+   same data across timeframes. One surface; provenance is metadata, not topology.
+
+Accepted rationale: the unproven set is historical/derived (candles, PnL curves, liquidity
+scores) — non-essential, and a sequencer has no incentive to lie about data it cannot
+monetize; every balance, position, reservation, and fill remains proven.
+
 Companion reads: `docs/review/02-cross-cutting-themes.md` (Theme 2, "verify don't log"),
 `docs/review/15-verification-zk.md` (H4, ZK-9), `design/architecture-review-2026-07.md`
 (§P1 kernel/views split). Ground truth for the current encoding:
