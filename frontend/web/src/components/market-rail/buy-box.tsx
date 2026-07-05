@@ -8,10 +8,12 @@
  *   - sell + YES → SellYes
  *   - sell + NO  → SellNo
  *
- * TTL → expires_at_block (relative to latestHeight from the store):
- *   - "1 batch"     → +1   (effectively IOC)
- *   - "5 batches"   → +5   (short GTD, replay-safe)
- *   - "until cancel" → undefined (GTC; backend default)
+ * TTL → time_in_force + expires_at_block (relative to latestHeight from the store):
+ *   - "GTC" → time_in_force GTC, no expiry (backend default; rests until cancel)
+ *   - "IOC" → time_in_force IOC, expires_at_block = latestHeight + 1 (next batch only)
+ *   - "GTD" → time_in_force GTD, expires_at_block = latestHeight + N batches (picker)
+ * IOC/GTD both sign `expires_at_block`; the server verifies it against the P256
+ * signature. IOC is confirmed server-supported (TimeInForce enum GTC|IOC|GTD).
  */
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -19,8 +21,10 @@ import { useEffect, useState } from "react";
 import {
   submitSignedOrder,
   type OrderSide,
+  type SubmitTimeInForce,
 } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
+import type { AccountOrder } from "@/lib/account/use-account-orders";
 import {
   formatShareUnits,
   notionalNanosCeil,
@@ -43,9 +47,14 @@ import { useBatchCountdown } from "./use-batch-countdown";
 type Direction = "buy" | "sell";
 type OutcomeSide = "YES" | "NO";
 type Unit = "usd" | "shares";
-type Ttl = "1 batch" | "5 batches" | "until cancel";
+type Tif = SubmitTimeInForce;
 
-const TTL_OPTS: Ttl[] = ["1 batch", "5 batches", "until cancel"];
+const TIF_OPTS: Tif[] = ["GTC", "IOC", "GTD"];
+const TIF_HELP: Record<Tif, string> = {
+  GTC: "rests until you cancel",
+  IOC: "next batch only, then expires",
+  GTD: "rests for a chosen number of batches",
+};
 
 function orderSideFor(dir: Direction, side: OutcomeSide): OrderSide {
   if (dir === "buy") return side === "YES" ? "BuyYes" : "BuyNo";
@@ -69,7 +78,9 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const [unit, setUnit] = useState<Unit>("usd");
   const [amount, setAmount] = useState("25");
   const [shares, setShares] = useState("100");
-  const [ttl, setTtl] = useState<Ttl>("until cancel");
+  const [tif, setTif] = useState<Tif>("GTC");
+  // GTD block-height picker: how many batches ahead the order stays eligible.
+  const [gtdBatches, setGtdBatches] = useState(5);
 
   const indicativeCents = outcomeSide === "YES" ? yesCents : noCents;
   const [limit, setLimit] = useState<number>(indicativeCents);
@@ -89,16 +100,23 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitOk, setSubmitOk] = useState<string | null>(null);
+  // Accepted receipt: the order-id (best-effort, looked up from the refreshed
+  // pending list — the signed endpoint returns only `{ accepted }`) plus the
+  // block it will clear in and a one-line summary.
+  const [accepted, setAccepted] = useState<{
+    orderId: number | null;
+    block: number | null;
+    summary: string;
+  } | null>(null);
 
   // Any edit in the trader section makes the last submit's receipt stale — drop
-  // the "queued …" confirmation (and any prior error) so it doesn't linger while
-  // the user lines up a different order (e.g. flips to Sell NO).
+  // the confirmation (and any prior error) so it doesn't linger while the user
+  // lines up a different order (e.g. flips to Sell NO).
   /* eslint-disable react-hooks/set-state-in-effect -- clear stale receipt on edit */
   useEffect(() => {
-    setSubmitOk(null);
+    setAccepted(null);
     setSubmitError(null);
-  }, [dir, outcomeSide, unit, amount, shares, ttl, limit]);
+  }, [dir, outcomeSide, unit, amount, shares, tif, gtdBatches, limit]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const limitDec = Math.max(1, Math.min(99, limit)) / 100;
@@ -115,6 +133,12 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const grossAtLimit =
     Number(notionalNanosCeil(limitPriceNanosPreview, qtyUnits)) / 1e9;
   const payoutIfWin = qtyShares; // qty × $1
+
+  // Live clearing ESTIMATE from the side's indicative price. A batch auction
+  // gives no firm quote, so this is only "what the next batch would fill near
+  // if it clears at today's indicative" — surfaced as an estimate, never a quote.
+  const estClearingCents = Math.max(1, Math.min(99, Math.round(indicativeCents)));
+  const estFillDollars = qtyShares * (estClearingCents / 100);
 
   // Cash available to BUY = balance − cash reserved by resting buy orders.
   // (Sells are gated by held shares below, not cash.) Matches the engine so a
@@ -220,7 +244,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
     }
     if (!session) return;
     setSubmitError(null);
-    setSubmitOk(null);
+    setAccepted(null);
 
     // Resolve qty (max_fill) and basic validation.
     const maxFill = sharesToUnits(unit === "usd" ? sharesIfUsd : sh);
@@ -232,12 +256,13 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
     const limitPriceNanos = BigInt(limitCents) * 10_000_000n; // cents × 1e7
 
     let expiresAtBlock: bigint | undefined;
-    if (ttl !== "until cancel") {
+    if (tif !== "GTC") {
       if (latestHeight == null) {
         setSubmitError("waiting for latest block — try again in a moment");
         return;
       }
-      const horizon = ttl === "1 batch" ? 1 : 5;
+      // IOC commits to the very next block; GTD rests for the picked horizon.
+      const horizon = tif === "IOC" ? 1 : Math.max(1, Math.round(gtdBatches));
       expiresAtBlock = BigInt(latestHeight + horizon);
     }
 
@@ -250,23 +275,39 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         side: orderSideFor(dir, outcomeSide),
         limitPriceNanos,
         maxFill,
+        timeInForce: tif,
         ...(expiresAtBlock !== undefined ? { expiresAtBlock } : {}),
       });
       if (!res.accepted) {
         setSubmitError("server returned accepted=false");
       } else {
-        setSubmitOk(
-          `queued · ${formatShareUnits(maxFill)} sh @ ${limitCents}¢ (${ttl})`,
-        );
-        // Refresh both per-account caches and the chain-wide pending list
-        // (consumed by market-rail's pending feed).
-        qc.invalidateQueries({
+        // Refresh per-account caches and the chain-wide pending list (consumed
+        // by market-rail's pending feed). Await the orders refetch so we can
+        // recover the new order-id from it below.
+        await qc.invalidateQueries({
           queryKey: ["account", session.accountId, "orders"],
         });
         qc.invalidateQueries({
           queryKey: ["account", session.accountId, "portfolio"],
         });
         qc.invalidateQueries({ queryKey: ["orders", "pending"] });
+
+        // The signed endpoint returns only `{ accepted }`, so recover the
+        // order-id best-effort from the refreshed pending list (newest open
+        // order for this market). A filled IOC leaves nothing pending → null.
+        const orderId = latestOrderIdFor(
+          qc.getQueryData<AccountOrder[]>([
+            "account",
+            session.accountId,
+            "orders",
+          ]),
+          outcome.marketId,
+        );
+        setAccepted({
+          orderId,
+          block: batchNumber,
+          summary: `${formatShareUnits(maxFill)} sh @ ${limitCents}¢ · ${tif}`,
+        });
       }
     } catch (e) {
       // warn (not error): the rejection is handled and shown humanized below;
@@ -658,17 +699,34 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         </div>
       </div>
 
-      {/* TTL */}
+      {/* Time-in-force: GTC / IOC / GTD (with a batch-height picker for GTD) */}
       <div>
-        <Eyebrow>good for</Eyebrow>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+          }}
+        >
+          <Eyebrow>time in force</Eyebrow>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 9.5,
+              color: "var(--fg-4)",
+            }}
+          >
+            {TIF_HELP[tif]}
+          </span>
+        </div>
         <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
-          {TTL_OPTS.map((t) => {
-            const active = ttl === t;
+          {TIF_OPTS.map((t) => {
+            const active = tif === t;
             return (
               <button
                 key={t}
                 type="button"
-                onClick={() => setTtl(t)}
+                onClick={() => setTif(t)}
                 disabled={disabledInputs}
                 style={{
                   flex: 1,
@@ -679,7 +737,8 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
                   border: `1px solid ${active ? "var(--border-3)" : "var(--border-1)"}`,
                   color: active ? "var(--fg-1)" : "var(--fg-3)",
                   fontFamily: "var(--font-mono)",
-                  fontSize: 10,
+                  fontSize: 11,
+                  fontWeight: active ? 600 : 500,
                   opacity: disabledInputs ? 0.7 : 1,
                 }}
               >
@@ -688,6 +747,69 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             );
           })}
         </div>
+        {tif === "GTD" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 6,
+              marginTop: 6,
+              padding: "6px 8px",
+              background: "var(--bg-2)",
+              border: "1px solid var(--border-1)",
+              borderRadius: 4,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: "var(--fg-3)",
+              }}
+            >
+              expires in
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <StepButton
+                label="−"
+                disabled={disabledInputs || gtdBatches <= 1}
+                onClick={() => setGtdBatches((n) => Math.max(1, n - 1))}
+              />
+              <span
+                className="tabular"
+                style={{
+                  minWidth: 60,
+                  textAlign: "center",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
+                  color: "var(--fg-1)",
+                }}
+              >
+                {gtdBatches} {gtdBatches === 1 ? "batch" : "batches"}
+              </span>
+              <StepButton
+                label="+"
+                disabled={disabledInputs || gtdBatches >= 60}
+                onClick={() => setGtdBatches((n) => Math.min(60, n + 1))}
+              />
+            </div>
+          </div>
+        )}
+        {tif !== "GTC" && latestHeight != null && (
+          <div
+            style={{
+              marginTop: 5,
+              fontFamily: "var(--font-mono)",
+              fontSize: 9.5,
+              color: "var(--fg-4)",
+              textAlign: "right",
+            }}
+          >
+            expires block #
+            {(latestHeight + (tif === "IOC" ? 1 : Math.max(1, gtdBatches))).toLocaleString()}
+          </div>
+        )}
       </div>
 
       {/* Receipt */}
@@ -704,6 +826,16 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           fontSize: 11,
         }}
       >
+        {/* Live clearing estimate — labelled an estimate; a batch auction gives
+            no firm quote until the next batch clears. */}
+        <ReceiptRow
+          label={dir === "buy" ? "est. fill · next batch" : "est. proceeds · next batch"}
+          value={
+            <span style={{ color: "var(--fg-2)" }}>
+              ~${estFillDollars.toFixed(2)} at ~{estClearingCents}%
+            </span>
+          }
+        />
         {dir === "buy" ? (
           <>
             {/* Buy: pay AT MOST limit×qty (uniform clearing may be cheaper),
@@ -785,10 +917,14 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           {submitError}
         </div>
       )}
-      {submitOk && !submitError && (
+      {accepted && !submitError && (
         <div
+          role="status"
           style={{
-            padding: "6px 10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            padding: "8px 10px",
             background: "color-mix(in srgb, var(--yes) 12%, transparent)",
             border:
               "1px solid color-mix(in srgb, var(--yes) 32%, transparent)",
@@ -798,7 +934,17 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             fontSize: 11,
           }}
         >
-          {submitOk}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <span>order accepted</span>
+            <span>
+              {accepted.orderId != null ? `#${accepted.orderId}` : "queued"}
+            </span>
+          </div>
+          <div style={{ color: "var(--fg-2)" }}>{accepted.summary}</div>
+          <div style={{ color: "var(--fg-3)" }}>
+            clears in block{" "}
+            {accepted.block == null ? "—" : `#${accepted.block.toLocaleString()}`}
+          </div>
         </div>
       )}
 
@@ -813,6 +959,58 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         clears at the uniform price · could fill better than your limit
       </span>
     </div>
+  );
+}
+
+/** Newest (highest order_id) open order for a market — best-effort id recovery
+ * from the refreshed pending list, since the signed endpoint returns no id. */
+function latestOrderIdFor(
+  orders: AccountOrder[] | undefined,
+  marketId: number,
+): number | null {
+  if (!orders || orders.length === 0) return null;
+  let best: number | null = null;
+  for (const o of orders) {
+    if (o.market_id !== marketId) continue;
+    if (best === null || o.order_id > best) best = o.order_id;
+  }
+  return best;
+}
+
+function StepButton({
+  label,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label === "+" ? "increase batches" : "decrease batches"}
+      style={{
+        width: 22,
+        height: 22,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 3,
+        border: "1px solid var(--border-1)",
+        background: "var(--surface-2)",
+        color: "var(--fg-2)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 13,
+        lineHeight: 1,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.4 : 1,
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

@@ -36,6 +36,16 @@ describe("humanizeOrderError", () => {
     expect(humanizeOrderError(new Error("mempool full"))).toMatch(/network is busy/i);
   });
 
+  it("maps a 409 replay-nonce rejection to a retry nudge", () => {
+    const raw = new Error(
+      "submit_signed failed (HTTP 409): replay nonce is stale or duplicate",
+    );
+    expect(humanizeOrderError(raw, "order")).toBe(
+      "This order was already submitted — try again.",
+    );
+    expect(humanizeOrderError(raw, "order")).not.toMatch(/HTTP|nonce|replay/);
+  });
+
   it("falls back to a generic line and never echoes the raw string", () => {
     const raw = new Error("submit_signed failed (HTTP 500): kaboom internal panic");
     const out = humanizeOrderError(raw, "bet");

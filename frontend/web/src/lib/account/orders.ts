@@ -17,6 +17,17 @@ import { recordCancel } from "./use-cancelled-orders";
 
 export type OrderSide = "BuyYes" | "BuyNo" | "SellYes" | "SellNo";
 
+/**
+ * Time-in-force policies the signed endpoint accepts (see `TimeInForce` in the
+ * OpenAPI schema and `apply_time_in_force` in `crates/sybil-api/src/convert.rs`):
+ *   - GTC — rests until cancelled; `expires_at_block` must be absent.
+ *   - GTD — rests until an explicit `expires_at_block` (covered by the signature).
+ *   - IOC — same wire shape as GTD, but the client commits to the *next* block
+ *     as the last-eligible height, so it only takes the very next batch.
+ * IOC/GTD both sign `expires_at_block`; GTC signs `None`.
+ */
+export type SubmitTimeInForce = "GTC" | "IOC" | "GTD";
+
 const PAYOFFS: Record<OrderSide, [number, number]> = {
   BuyYes: [1, 0],
   BuyNo: [0, 1],
@@ -33,8 +44,17 @@ export interface SubmitSignedOrderArgs {
   maxFill: bigint;
   /** Strictly increasing per-account replay nonce. Defaults to a browser-local monotonic nonce. */
   nonce?: bigint;
-  /** GTD horizon. Omit for GTC. Demo flows should set ~+5 blocks (≈10s). */
+  /**
+   * Last-eligible block height, covered by the P256 signature. Required for
+   * IOC and GTD; must be absent for GTC. For IOC the caller passes the next
+   * block height.
+   */
   expiresAtBlock?: bigint;
+  /**
+   * Explicit time-in-force. When omitted it's inferred for backwards
+   * compatibility: GTD if `expiresAtBlock` is set, otherwise GTC.
+   */
+  timeInForce?: SubmitTimeInForce;
 }
 
 export async function submitSignedOrder(
@@ -47,6 +67,14 @@ export async function submitSignedOrder(
     );
   }
 
+  // Resolve the effective TIF. IOC/GTD sign `expires_at_block`; GTC signs None.
+  const tif: SubmitTimeInForce =
+    args.timeInForce ?? (args.expiresAtBlock !== undefined ? "GTD" : "GTC");
+  if (tif !== "GTC" && args.expiresAtBlock === undefined) {
+    throw new Error(`${tif} orders require expires_at_block`);
+  }
+  const expiresAtBlock = tif === "GTC" ? undefined : args.expiresAtBlock;
+
   const payoffs = PAYOFFS[args.side];
   const nonce = args.nonce ?? nextReplayNonce(args.accountId);
   const canonical = canonicalOrderBytes({
@@ -55,9 +83,7 @@ export async function submitSignedOrder(
     limitPriceNanos: args.limitPriceNanos,
     maxFill: args.maxFill,
     nonce,
-    ...(args.expiresAtBlock !== undefined
-      ? { expiresAtBlock: args.expiresAtBlock }
-      : {}),
+    ...(expiresAtBlock !== undefined ? { expiresAtBlock } : {}),
   });
   const signature_hex = await signBytes(key, canonical);
 
@@ -73,10 +99,10 @@ export async function submitSignedOrder(
       },
       nonce: u64JsonNumber(nonce),
       signature_hex,
-      ...(args.expiresAtBlock !== undefined
+      ...(expiresAtBlock !== undefined
         ? {
-            expires_at_block: Number(args.expiresAtBlock),
-            time_in_force: "GTD" as const,
+            expires_at_block: Number(expiresAtBlock),
+            time_in_force: tif,
           }
         : {}),
     },

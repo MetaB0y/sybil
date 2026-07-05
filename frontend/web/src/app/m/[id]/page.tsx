@@ -10,6 +10,7 @@ import {
 } from "@/components/chart-range-bar";
 import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
+import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart } from "@/components/price-chart";
@@ -78,6 +79,10 @@ export default function MarketDetailPage({
   const marketQ = useMarket(marketId);
   const market = marketQ.data;
 
+  // Place-order modal (SYB-54) — launched from the header CTA, renders the
+  // shared BuyBox for the currently-selected outcome.
+  const [orderOpen, setOrderOpen] = useState(false);
+
   return (
     <SelectOutcomeProvider value={selectOutcome}>
       <main
@@ -108,7 +113,13 @@ export default function MarketDetailPage({
                 padding: "var(--space-6) var(--space-5) 0",
               }}
             >
-              <Header marketId={marketId} market={market} />
+              <Header
+                marketId={marketId}
+                market={market}
+                {...(market.closed === true
+                  ? {}
+                  : { onPlaceOrder: () => setOrderOpen(true) })}
+              />
             </div>
 
             <div
@@ -142,6 +153,12 @@ export default function MarketDetailPage({
 
               <MarketRail marketId={marketId} />
             </div>
+
+            <PlaceOrderModal
+              marketId={marketId}
+              open={orderOpen}
+              onClose={() => setOrderOpen(false)}
+            />
           </>
         )}
       </main>
@@ -159,6 +176,7 @@ export default function MarketDetailPage({
 function Header({
   marketId,
   market,
+  onPlaceOrder,
 }: {
   marketId: number;
   market: {
@@ -176,6 +194,8 @@ function Header({
     event_image_url?: string | null;
     event_icon_url?: string | null;
   };
+  /** Opens the place-order modal. Omitted (no button) when the market is closed. */
+  onPlaceOrder?: () => void;
 }) {
   const { stats } = useMarketStats(marketId);
   const { primary } = pickDisplayCategory(market.categories, market.category);
@@ -275,6 +295,28 @@ function Header({
             {market.name}
           </h1>
           <StatusPill status={market.status} closed={market.closed === true} />
+          {onPlaceOrder && (
+            <button
+              type="button"
+              onClick={onPlaceOrder}
+              style={{
+                marginLeft: "auto",
+                flexShrink: 0,
+                padding: "8px 16px",
+                borderRadius: "var(--radius-md)",
+                border: 0,
+                background: "var(--accent)",
+                color: "var(--fg-on-accent)",
+                fontFamily: "var(--font-sans)",
+                fontSize: "var(--fs-13)",
+                fontWeight: 600,
+                letterSpacing: "0.01em",
+                cursor: "pointer",
+              }}
+            >
+              Place order
+            </button>
+          )}
         </div>
 
         {/* 5-stat meta row, all scoped to this market. Only `batches` is an

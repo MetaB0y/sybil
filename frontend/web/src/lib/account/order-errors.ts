@@ -20,6 +20,11 @@ export function humanizeOrderError(err: unknown, noun: OrderNoun = "bet"): strin
 
   if (/InsufficientBalance/i.test(m)) return `Not enough balance for this ${noun}.`;
   if (/InsufficientPosition/i.test(m)) return "You don't have enough shares to sell.";
+  // HTTP 409 from the signed endpoints — the replay nonce was stale or already
+  // used (see `submit_signed_order` in crates/sybil-api). Retrying mints a fresh
+  // nonce, so a plain "try again" is the right nudge.
+  if (/HTTP 409|replay|nonce|stale or duplicate/i.test(m))
+    return `This ${noun} was already submitted — try again.`;
   if (/\bExpired\b/i.test(m))
     return `Your ${noun} didn't make it into a batch in time. Try again.`;
   if (/rate limited/i.test(m))
