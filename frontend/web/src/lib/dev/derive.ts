@@ -1,9 +1,10 @@
 /**
  * Dev Zone derived selectors — pure, side-effect-free ports of the Sybil
- * console's Alpine getters/methods (crates/sybil-api/static/index.html).
+ * console's Alpine getters/methods (formerly crates/sybil-api/static/index.html,
+ * deleted in SYB-174; this Dev Zone is now the sole dev console).
  * The React views call these so they stay thin and the logic is testable.
  *
- * `*_nanos` arithmetic mirrors the console: raw `Number()` coercion, float
+ * `*_nanos` arithmetic mirrors the old console: raw `Number()` coercion, float
  * math. Fields that may arrive as strings on the wire are coerced via `n()`.
  */
 

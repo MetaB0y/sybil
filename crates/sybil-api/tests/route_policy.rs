@@ -25,10 +25,6 @@ fn exact_public_routes() -> &'static [RouteMount] {
     &[
         RouteMount {
             method: "GET",
-            path: "/",
-        },
-        RouteMount {
-            method: "GET",
             path: "/openapi.json",
         },
         RouteMount {

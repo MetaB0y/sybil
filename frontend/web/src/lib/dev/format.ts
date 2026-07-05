@@ -1,6 +1,6 @@
 /**
  * Dev Zone formatters — ported verbatim from the Sybil console
- * (crates/sybil-api/static/index.html). Kept separate from
+ * (formerly crates/sybil-api/static/index.html, deleted in SYB-174). Kept separate from
  * lib/format/nanos.ts per the Dev Zone isolation rule. Inputs accept
  * string | number because the wire sends JSON numbers but the generated
  * schema types *_nanos as string.

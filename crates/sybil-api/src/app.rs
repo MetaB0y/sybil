@@ -162,13 +162,6 @@ async fn openapi_json() -> impl IntoResponse {
     Json(ApiDoc::openapi())
 }
 
-async fn dashboard() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../static/index.html"),
-    )
-}
-
 async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse {
     // A slow or wedged sequencer must not stall the scrape indefinitely; bound
     // the live-market collection and fall back to the cached gauges on timeout.
@@ -384,10 +377,6 @@ pub struct RouteMount {
 }
 
 pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
-    RouteMount {
-        method: "GET",
-        path: "/",
-    },
     RouteMount {
         method: "GET",
         path: "/openapi.json",
@@ -622,8 +611,6 @@ pub const DEV_ROUTE_TABLE: &[RouteMount] = &[
 
 fn public_routes() -> Router<AppState> {
     Router::new()
-        // Dashboard
-        .route("/", axum::routing::get(dashboard))
         // OpenAPI spec
         .route("/openapi.json", axum::routing::get(openapi_json))
         // Metrics (outside http_metrics middleware to avoid self-scraping noise)

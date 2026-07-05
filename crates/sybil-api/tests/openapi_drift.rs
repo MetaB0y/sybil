@@ -17,8 +17,6 @@ use utoipa::OpenApi;
 /// Each entry is a non-API surface: it does not speak the JSON request/response
 /// contract that OpenAPI describes, so documenting it would be misleading.
 const OPENAPI_EXEMPT_PATHS: &[&str] = &[
-    // HTML dashboard (`static/index.html`), not a JSON API endpoint.
-    "/",
     // The OpenAPI document itself; describing it inside itself is circular.
     "/openapi.json",
     // Prometheus text-exposition scrape target, not JSON — served outside the

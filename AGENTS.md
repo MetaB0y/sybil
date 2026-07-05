@@ -186,7 +186,7 @@ just deploy-shell                  # SSH into server
 
 ### Dashboards
 
-- `http://172.104.31.54:3000/` — Alpine.js: markets, MM state, live blocks
+- `https://172-104-31-54.nip.io/dev` — web UI dev console (Next.js): markets, MM state, live blocks, aggregates, bot decisions. (Replaced the old Alpine.js static console served by `sybil-api` at `/`, deleted in SYB-174.)
 - `http://172.104.31.54:8501/` — Streamlit: arena bot decisions, PnL, news feed
 
 ## Development Notes
