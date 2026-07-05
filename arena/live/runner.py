@@ -13,7 +13,6 @@ import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bots.random_trader import RandomTrader
 from sybil_client import SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR, TimeInForce
 
@@ -25,6 +24,7 @@ from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed
 from .personas import PERSONAS
 from .strategy import FlatStrategy, KellyStrategy
+from .synthetic import FastReferenceTrader, NativeNoiseTrader, SyntheticStrategyConfig
 from .trader import LiveLlmTrader
 
 log = logging.getLogger(__name__)
@@ -52,8 +52,12 @@ class LiveConfig:
     # sizers' trading bankroll. Exhausting it pauses the persona's analyst.
     # None (or <=0 on the CLI) disables the budget (unlimited).
     llm_budget_usd: float | None = 5.0
+    fast_count: int = 5
     noise_count: int = 5
     noise_balance: float = 50.0
+    synthetic_strategy: SyntheticStrategyConfig = field(
+        default_factory=SyntheticStrategyConfig
+    )
     db_path: str = ""
     metrics_host: str = "0.0.0.0"
     metrics_port: int = 0  # <=0 disables the exporter (default: off)
@@ -67,6 +71,13 @@ def _env_int(name: str, default: int) -> int:
     if not raw:
         return default
     return int(raw)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    return float(raw)
 
 
 def _env_market_profile(name: str, default: MarketProfile = "all") -> MarketProfile:
@@ -300,6 +311,16 @@ async def run_live(config: LiveConfig):
 
         markets_info = {m.id: m for m in active}
         market_ids = [m.id for m in active]
+        synthetic_markets = [
+            m
+            for m in all_markets
+            if str(getattr(m, "status", "")).lower() == "active"
+        ]
+        if config.market_ids:
+            allowed = set(config.market_ids)
+            synthetic_markets = [m for m in synthetic_markets if m.id in allowed]
+        synthetic_markets_info = {m.id: m for m in synthetic_markets}
+        synthetic_market_ids = [m.id for m in synthetic_markets]
 
         # 2. Create accounts — each persona gets two bots (Kelly + Flat)
         strategies = [
@@ -361,20 +382,47 @@ async def run_live(config: LiveConfig):
                 trader.time_in_force = config.order_time_in_force
                 traders.append(trader)
 
-        # 3. Create noise traders
+        # 3. Create synthetic fast/noise traders. Fast traders only act on
+        # reference-backed mirror markets; noise traders only act on native
+        # no-reference markets. Both consume the same config shape with per-bot
+        # seed offsets for deterministic but non-identical streams.
+        fast_traders = []
+        for i in range(config.fast_count):
+            account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
+            fast = FastReferenceTrader(
+                client=client,
+                account_id=account.id,
+                name=f"Fast-{i}",
+                market_ids=synthetic_market_ids,
+                markets_info=synthetic_markets_info,
+                config=config.synthetic_strategy.with_seed(
+                    config.synthetic_strategy.random_seed + i
+                ),
+            )
+            fast.time_in_force = config.order_time_in_force
+            fast_traders.append(fast)
+
         noise_traders = []
         for i in range(config.noise_count):
             account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
-            noise = RandomTrader(
+            noise = NativeNoiseTrader(
                 client=client,
                 account_id=account.id,
                 name=f"Noise-{i}",
-                market_ids=market_ids,
-                seed=i + 42,
+                market_ids=synthetic_market_ids,
+                markets_info=synthetic_markets_info,
+                config=config.synthetic_strategy.with_seed(
+                    config.synthetic_strategy.random_seed + 10_000 + i
+                ),
             )
             noise.time_in_force = config.order_time_in_force
             noise_traders.append(noise)
-        log.info("Created %d noise traders", len(noise_traders))
+        log.info(
+            "Created %d fast traders and %d native noise traders over %d active markets",
+            len(fast_traders),
+            len(noise_traders),
+            len(synthetic_markets_info),
+        )
 
         # 4. Create news feed (with LLM gate using cheap model)
         feed = NewsFeed(active, api_key=config.api_key, poll_interval_s=config.news_poll_interval,
@@ -392,20 +440,29 @@ async def run_live(config: LiveConfig):
 
         # 5. Run everything
         log.info(
-            "Starting live trading with %d analysts + %d sizers + %d noise traders on %d markets",
-            len(analysts), len(traders), len(noise_traders), len(active),
+            "Starting live trading with %d analysts + %d sizers + %d fast + %d noise traders on %d selected markets",
+            len(analysts),
+            len(traders),
+            len(fast_traders),
+            len(noise_traders),
+            len(active),
         )
 
         stop_event = asyncio.Event()
         tasks = [
             asyncio.create_task(feed.run(), name="news_feed"),
-            asyncio.create_task(snapshot_portfolios(traders, db), name="snapshots"),
+            asyncio.create_task(
+                snapshot_portfolios([*traders, *fast_traders, *noise_traders], db),
+                name="snapshots",
+            ),
             asyncio.create_task(log_articles_loop(feed, db), name="article_logger"),
         ]
         for a in analysts:
             tasks.append(asyncio.create_task(supervise_bot(a, stop_event), name=f"analyst:{a.name}"))
         for t in traders:
             tasks.append(asyncio.create_task(supervise_bot(t, stop_event), name=f"trader:{t.name}"))
+        for f in fast_traders:
+            tasks.append(asyncio.create_task(supervise_bot(f, stop_event), name=f"fast:{f.name}"))
         for n in noise_traders:
             tasks.append(asyncio.create_task(supervise_bot(n, stop_event), name=f"noise:{n.name}"))
 
@@ -417,6 +474,8 @@ async def run_live(config: LiveConfig):
                 a.stop()
             for t in traders:
                 t.stop()
+            for f in fast_traders:
+                f.stop()
             for n in noise_traders:
                 n.stop()
 
@@ -450,6 +509,8 @@ async def run_live(config: LiveConfig):
                 a.stop()
             for t in traders:
                 t.stop()
+            for f in fast_traders:
+                f.stop()
             for n in noise_traders:
                 n.stop()
 
@@ -508,7 +569,45 @@ def main():
         help="Time-in-force for live bot/noise orders. IOC avoids stale resting orders.",
     )
     parser.add_argument("--balance", type=float, default=500.0, help="Initial balance per trader")
+    parser.add_argument("--fast-count", type=int, default=None)
     parser.add_argument("--noise-count", type=int, default=5)
+    parser.add_argument(
+        "--synthetic-max-inventory",
+        type=int,
+        default=None,
+        help="Max synthetic trader inventory per market side, in shares.",
+    )
+    parser.add_argument(
+        "--synthetic-quote-width",
+        type=float,
+        default=None,
+        help="Minimum price edge before a synthetic trader acts.",
+    )
+    parser.add_argument(
+        "--synthetic-notional-budget",
+        type=float,
+        default=None,
+        help="Per-order synthetic trader notional budget in dollars.",
+    )
+    parser.add_argument(
+        "--synthetic-seed",
+        type=int,
+        default=None,
+        help="Base RNG seed for deterministic synthetic traders.",
+    )
+    parser.add_argument(
+        "--synthetic-randomization-range",
+        type=float,
+        default=None,
+        help="Synthetic price jitter range; capped internally below 2%.",
+    )
+    parser.add_argument(
+        "--synthetic-market-ids",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Optional per-market enablement for synthetic traders.",
+    )
     parser.add_argument(
         "--news-interval", type=int, default=300, help="RSS poll interval (seconds)"
     )
@@ -553,6 +652,34 @@ def main():
             "ARENA_MAX_MARKETS", 0
         )
         market_profile = args.market_profile or _env_market_profile("ARENA_MARKET_PROFILE")
+        fast_count = args.fast_count if args.fast_count is not None else _env_int(
+            "ARENA_FAST_COUNT", 5
+        )
+        synthetic_max_inventory = (
+            args.synthetic_max_inventory
+            if args.synthetic_max_inventory is not None
+            else _env_int("ARENA_SYNTHETIC_MAX_INVENTORY", 50)
+        )
+        synthetic_quote_width = (
+            args.synthetic_quote_width
+            if args.synthetic_quote_width is not None
+            else _env_float("ARENA_SYNTHETIC_QUOTE_WIDTH", 0.005)
+        )
+        synthetic_notional_budget = (
+            args.synthetic_notional_budget
+            if args.synthetic_notional_budget is not None
+            else _env_float("ARENA_SYNTHETIC_NOTIONAL_BUDGET", 5.0)
+        )
+        synthetic_seed = (
+            args.synthetic_seed
+            if args.synthetic_seed is not None
+            else _env_int("ARENA_SYNTHETIC_SEED", 42)
+        )
+        synthetic_randomization_range = (
+            args.synthetic_randomization_range
+            if args.synthetic_randomization_range is not None
+            else _env_float("ARENA_SYNTHETIC_RANDOMIZATION_RANGE", 0.02)
+        )
     except ValueError as e:
         parser.error(str(e))
 
@@ -578,7 +705,20 @@ def main():
         market_profile=market_profile,
         require_reference_prices=args.require_reference_prices,
         order_time_in_force=args.order_time_in_force,
+        fast_count=fast_count,
         noise_count=args.noise_count,
+        synthetic_strategy=SyntheticStrategyConfig(
+            max_inventory=synthetic_max_inventory,
+            quote_width=synthetic_quote_width,
+            notional_budget=synthetic_notional_budget,
+            random_seed=synthetic_seed,
+            randomization_range=synthetic_randomization_range,
+            enabled_market_ids=(
+                frozenset(args.synthetic_market_ids)
+                if args.synthetic_market_ids is not None
+                else None
+            ),
+        ),
         news_poll_interval=args.news_interval,
         min_llm_interval=args.min_llm_interval,
         llm_budget_usd=args.llm_budget_usd if args.llm_budget_usd > 0 else None,

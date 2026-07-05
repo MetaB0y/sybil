@@ -59,6 +59,7 @@ class Market:
     no_price_nanos: int
     status: str
     reference_price_nanos: int | None = None
+    polymarket_condition_id: str | None = None
     description: str = ""
     category: str = ""
     tags: list[str] = field(default_factory=list)

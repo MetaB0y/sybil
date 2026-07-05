@@ -1028,6 +1028,71 @@ mod tests {
     }
 
     #[test]
+    fn inventory_skews_quotes_against_inventory_on_both_buy_sides() {
+        let config = default_config();
+        let neutral_orders = generate_quotes(&default_input(0.5), &config);
+        let mut long_yes = default_input(0.5);
+        long_yes.net_inventory = 1000.0;
+        long_yes.yes_position = q(1000);
+        let long_yes_orders = generate_quotes(&long_yes, &config);
+
+        let neutral_yes_bid = neutral_orders
+            .iter()
+            .find_map(|order| match order {
+                OrderSpec::BuyYes {
+                    limit_price_nanos, ..
+                } => Some(*limit_price_nanos),
+                _ => None,
+            })
+            .unwrap();
+        let long_yes_bid = long_yes_orders
+            .iter()
+            .find_map(|order| match order {
+                OrderSpec::BuyYes {
+                    limit_price_nanos, ..
+                } => Some(*limit_price_nanos),
+                _ => None,
+            })
+            .unwrap();
+        let neutral_no_bid = neutral_orders
+            .iter()
+            .find_map(|order| match order {
+                OrderSpec::BuyNo {
+                    limit_price_nanos, ..
+                } => Some(*limit_price_nanos),
+                _ => None,
+            })
+            .unwrap();
+        let long_yes_no_bid = long_yes_orders
+            .iter()
+            .find_map(|order| match order {
+                OrderSpec::BuyNo {
+                    limit_price_nanos, ..
+                } => Some(*limit_price_nanos),
+                _ => None,
+            })
+            .unwrap();
+
+        assert!(long_yes_bid < neutral_yes_bid);
+        assert!(long_yes_no_bid > neutral_no_bid);
+    }
+
+    #[test]
+    fn budget_decays_to_zero_at_max_exposure() {
+        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        actor.config.mm_max_exposure_dollars = 100.0;
+        actor.config.mm_budget_dollars = 1000.0;
+        track(&mut actor, 1);
+        actor.state.markets.get_mut(&1).unwrap().yes_position = q(200);
+
+        let mut snapshot = PriceSnapshot::default();
+        snapshot.midpoints.insert("token-1".to_string(), 0.5);
+
+        assert_eq!(actor.compute_budget(&snapshot), 0);
+    }
+
+    #[test]
     fn at_position_limit_no_buy() {
         let config = default_config();
         let mut input = default_input(0.5);

@@ -56,6 +56,17 @@ class TestTypes:
         )
         assert market.reference_price == 0.125
 
+    def test_market_polymarket_condition_id(self):
+        market = Market(
+            id=0,
+            name="Test",
+            yes_price_nanos=0,
+            no_price_nanos=0,
+            status="active",
+            polymarket_condition_id="0xabc",
+        )
+        assert market.polymarket_condition_id == "0xabc"
+
     def test_fill_price(self):
         fill = Fill(order_id=1, fill_qty=10, fill_price_nanos=550_000_000)
         assert fill.fill_price == 0.55
@@ -228,3 +239,22 @@ async def test_stream_blocks_reconnects_after_drop():
 
     assert heights == [5, 6]
     assert client._client.calls == 2  # reconnected once after the drop
+
+
+def test_parse_market_preserves_polymarket_condition_id():
+    from sybil_client import SybilClient
+
+    client = SybilClient("http://example.invalid")
+
+    market = client._parse_market(
+        {
+            "market_id": 9,
+            "name": "Mirror",
+            "status": "active",
+            "reference_price_nanos": 610_000_000,
+            "polymarket_condition_id": "0xcondition",
+        }
+    )
+
+    assert market.reference_price == 0.61
+    assert market.polymarket_condition_id == "0xcondition"
