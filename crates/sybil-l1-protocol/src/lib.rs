@@ -411,7 +411,9 @@ mod tests {
 
     #[test]
     fn deposit_leaf_and_prefix_roots_golden_vector() {
-        let deposits = vec![
+        // Twin: contracts/test/SybilGoldenVectors.t.sol. Keep these constants
+        // byte-for-byte aligned with the Solidity suite.
+        let deposits = [
             DepositLeaf {
                 chain_id: 31_337,
                 vault_address: address(0x11),
@@ -430,7 +432,66 @@ mod tests {
                 sybil_account_key: bytes32(0x66),
                 amount_token_units: 2_500_000,
             },
+            DepositLeaf {
+                chain_id: 31_337,
+                vault_address: address(0x11),
+                deposit_id: 3,
+                token_address: address(0x22),
+                sender: address(0x77),
+                sybil_account_key: bytes32(0x88),
+                amount_token_units: 42_000_001,
+            },
         ];
+        let high_id_max_amount = DepositLeaf {
+            chain_id: 31_337,
+            vault_address: address(0x11),
+            deposit_id: 0xfedc_ba98_7654_3210,
+            token_address: address(0x22),
+            sender: address(0x99),
+            sybil_account_key: bytes32(0xaa),
+            amount_token_units: u64::MAX,
+        };
+
+        println!(
+            "deposit_1_leaf=0x{}",
+            hex::encode(deposit_leaf(&deposits[0]))
+        );
+        println!(
+            "deposit_1_tree_leaf=0x{}",
+            hex::encode(deposit_tree_leaf(&deposits[0]))
+        );
+        println!(
+            "deposit_2_leaf=0x{}",
+            hex::encode(deposit_leaf(&deposits[1]))
+        );
+        println!(
+            "deposit_2_tree_leaf=0x{}",
+            hex::encode(deposit_tree_leaf(&deposits[1]))
+        );
+        println!(
+            "deposit_3_leaf=0x{}",
+            hex::encode(deposit_leaf(&deposits[2]))
+        );
+        println!(
+            "deposit_3_tree_leaf=0x{}",
+            hex::encode(deposit_tree_leaf(&deposits[2]))
+        );
+        println!(
+            "deposit_high_leaf=0x{}",
+            hex::encode(deposit_leaf(&high_id_max_amount))
+        );
+        println!(
+            "deposit_high_tree_leaf=0x{}",
+            hex::encode(deposit_tree_leaf(&high_id_max_amount))
+        );
+        println!("empty_deposit_root=0x{}", hex::encode(empty_deposit_root()));
+        println!(
+            "deposit_prefix_roots={:?}",
+            deposit_prefix_roots(&deposits)
+                .into_iter()
+                .map(hex::encode)
+                .collect::<Vec<_>>()
+        );
 
         assert_eq!(
             hex::encode(deposit_leaf(&deposits[0])),
@@ -452,11 +513,20 @@ mod tests {
             vec![
                 "2e7fc1c1f7494f98b453f8be88ee3b99b47321b95425faf6853c3e59618de440",
                 "bf00beb7a033f95b583dfb040f9f962db5f538c56e11cb9b3fa303b69d820b1f",
+                "5d9b49419ded14b47faf0f943198c33647c016bd37f998b1d9196b103acfecda",
             ]
         );
         assert_eq!(
             hex::encode(deposit_root_from_prefix(&deposits)),
-            "bf00beb7a033f95b583dfb040f9f962db5f538c56e11cb9b3fa303b69d820b1f"
+            "5d9b49419ded14b47faf0f943198c33647c016bd37f998b1d9196b103acfecda"
+        );
+        assert_eq!(
+            hex::encode(deposit_leaf(&high_id_max_amount)),
+            "0e0fe498f14aa8310467572c634bc13d6617573ca1fe7587c1fd642fbad168a1"
+        );
+        assert_eq!(
+            hex::encode(deposit_tree_leaf(&high_id_max_amount)),
+            "f7f3a6aeef19f4464f11bdfe4358124d745de1295dd03a116cccb1ab7ff2e90f"
         );
     }
 }

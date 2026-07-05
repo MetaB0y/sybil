@@ -1333,6 +1333,35 @@ mod tests {
     }
 
     #[test]
+    fn state_transition_public_input_hash_solidity_golden_vector() {
+        // Twin: contracts/test/SybilGoldenVectors.t.sol. Keep these constants
+        // byte-for-byte aligned with the Solidity suite.
+        let inputs = StateTransitionPublicInputs {
+            previous_height: 41,
+            new_height: 42,
+            previous_state_root: [0x10; 32],
+            new_state_root: [0x20; 32],
+            block_hash: [0x30; 32],
+            events_root: [0x40; 32],
+            witness_root: [0x50; 32],
+            da_commitment: [0x60; 32],
+            deposit_root: [
+                93, 155, 73, 65, 157, 237, 20, 180, 127, 175, 15, 148, 49, 152, 195, 54, 71, 192,
+                22, 189, 55, 249, 152, 177, 217, 25, 107, 16, 58, 207, 236, 218,
+            ],
+            deposit_count: 3,
+        };
+
+        assert_eq!(
+            state_transition_public_input_hash(&inputs),
+            [
+                66, 25, 125, 13, 255, 123, 194, 248, 106, 110, 53, 159, 24, 122, 221, 161, 99, 252,
+                155, 79, 250, 160, 231, 207, 185, 132, 85, 97, 187, 116, 72, 48,
+            ]
+        );
+    }
+
+    #[test]
     fn guest_events_root_matches_native_golden_deposit() {
         let system_events = vec![sybil_verifier::SystemEventWitness::Deposit {
             account_id: 7,
