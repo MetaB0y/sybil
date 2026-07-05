@@ -24,6 +24,15 @@ export function isClosed(m: Market): boolean {
   return m.closed === true;
 }
 
+/**
+ * A market mirrored from Polymarket. Provenance marker per SYB-150:
+ * a non-null `polymarket_condition_id` IS the mirror linkage (set by the
+ * mirror via market metadata; native Sybil markets never carry one).
+ */
+export function isMirror(m: Market): boolean {
+  return m.polymarket_condition_id != null;
+}
+
 /** An event is shown on the index if at least one of its markets is still open. */
 export function eventVisibleOnIndex(markets: Market[]): boolean {
   return markets.some((m) => !isClosed(m));
