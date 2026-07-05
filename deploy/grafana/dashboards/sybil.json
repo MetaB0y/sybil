@@ -101,8 +101,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
-        { "expr": "rate(sybil_solve_time_seconds_sum[1m]) / rate(sybil_solve_time_seconds_count[1m])", "legendFormat": "avg solve time", "refId": "A" },
-        { "expr": "histogram_quantile(0.99, rate(sybil_solve_time_seconds_bucket[5m]))", "legendFormat": "p99", "refId": "B" }
+        { "expr": "sequencer:solve_time_seconds:avg5m", "legendFormat": "avg solve time", "refId": "A" },
+        { "expr": "sequencer:solve_time_seconds:p99", "legendFormat": "p99", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
     },
@@ -122,7 +122,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
-        { "expr": "histogram_quantile(0.95, sum(rate(sybil_http_request_duration_seconds_bucket[5m])) by (le, path))", "legendFormat": "p95 {{path}}", "refId": "A" }
+        { "expr": "sybil_http_request_duration_seconds{quantile=\"0.95\"}", "legendFormat": "p95 {{method}} {{path}}", "refId": "A" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line" } }, "overrides": [] }
     },
@@ -214,9 +214,9 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum(rate(sybil_solve_time_seconds_bucket[5m])) by (le))", "legendFormat": "p50", "refId": "A" },
-        { "expr": "histogram_quantile(0.95, sum(rate(sybil_solve_time_seconds_bucket[5m])) by (le))", "legendFormat": "p95", "refId": "B" },
-        { "expr": "histogram_quantile(0.99, sum(rate(sybil_solve_time_seconds_bucket[5m])) by (le))", "legendFormat": "p99", "refId": "C" }
+        { "expr": "max(sybil_solve_time_seconds{quantile=\"0.5\"})", "legendFormat": "p50", "refId": "A" },
+        { "expr": "max(sybil_solve_time_seconds{quantile=\"0.95\"})", "legendFormat": "p95", "refId": "B" },
+        { "expr": "sequencer:solve_time_seconds:p99", "legendFormat": "p99", "refId": "C" }
       ],
       "fieldConfig": {
         "defaults": {
