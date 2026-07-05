@@ -109,21 +109,27 @@ roles and authority (SYB-208):
    deployed constructor args. The large `.vmexe`/`.pk`/`.vk` binaries stay
    gitignored.
 3. **`guest.commitment.lock.json` (source fingerprint).** A SHA-256 fingerprint
-   of the guest *source tree* plus a copy of the commitment hashes. Its job is
-   staleness detection: `scripts/zk-guest-fingerprint.sh --check` fails if the
-   guest source changes without regenerating the pin, and now also cross-checks
-   that its copied hashes still equal `commit.json`.
+   of the guest *source tree and its full path-dependency closure*
+   (`zk/openvm-guest/`, `crates/sybil-zk`, `crates/sybil-verifier`,
+   `crates/matching-engine`) plus a copy of the commitment hashes. Its job is
+   staleness detection: `scripts/zk-guest-fingerprint.sh --check` fails if any
+   of that source changes without regenerating the pin, and now also
+   cross-checks that its copied hashes still equal `commit.json`.
 
 **Authority order:** deployed pin > `commit.json` > lock file. The lock owns the
 source-fingerprint role; `commit.json` owns the commitment-hash record.
 
 ### Rebuild status: deterministic; deployed pin diverges until next redeploy
 
-The fingerprint gate only covers `zk/openvm-guest`'s own source tree — it does
-**not** cover the transitively-compiled `crates/sybil-zk` (the guest compiles it
-by path). So the gate can be green while the produced commitment has drifted.
+Until SYB-213 the fingerprint gate covered only `zk/openvm-guest`'s own source
+tree — **not** the transitively-compiled `crates/sybil-zk` (and, through it,
+`crates/sybil-verifier` → `crates/matching-engine`) that the guest compiles by
+path. So the gate could stay green while the produced commitment drifted, which
+is exactly what the SYB-196 newtype migration did (it moved `app_exe_commit`
+`0x0094ea7a → 0x0036273c` under a green gate). SYB-213 extended the fingerprint
+to the guest's full path-dep closure, closing the gap.
 [[Canonical Serialization|SYB-170]] consolidated the canonical byte/hash code
-into `sybil-zk` and flagged exactly this.
+into `sybil-zk` and originally flagged this class of blind spot.
 
 Measured under SYB-208 (2026-07-03): SYB-170 had additionally broken the
 guest-target build itself — `guest_commitments.rs` passed owned `[u8; N]`

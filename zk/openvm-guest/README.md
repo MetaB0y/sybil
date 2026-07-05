@@ -8,9 +8,10 @@ for how the guest fits the validium proof pipeline.
 
 The compiled guest yields two commitment hashes — `app_exe_commit` and
 `app_vm_commit` — that `contracts/src/OpenVmVerifierAdapter.sol` pins at deploy
-time. This directory is **consensus surface**: changing the guest source (or the
-`crates/sybil-zk` it compiles by path) changes those hashes and requires an
-on-chain redeploy.
+time. This directory is **consensus surface**: changing the guest source — or
+any crate in its path-dependency closure (`crates/sybil-zk` →
+`crates/sybil-verifier` → `crates/matching-engine`, all compiled by path) —
+changes those hashes and requires an on-chain redeploy.
 
 ## Three commitment records
 
@@ -18,7 +19,7 @@ on-chain redeploy.
 | --- | --- | --- | --- |
 | Deployed pin | `OpenVmVerifierAdapter` constructor args (on-chain) | What the chain enforces | **Authoritative for consensus** |
 | `commit.json` | `openvm/release/sybil-openvm-guest.commit.json` (committed) | Reviewable, diff-able record of the commitment | Source of truth for the hashes in-repo |
-| Lock file | `guest.commitment.lock.json` (committed) | SHA-256 fingerprint of the guest **source tree** + a copy of the hashes | Staleness detector for the source |
+| Lock file | `guest.commitment.lock.json` (committed) | SHA-256 fingerprint of the guest **source tree + its path-dependency closure** (`crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`) + a copy of the hashes | Staleness detector for the source |
 
 Authority order: **deployed pin > `commit.json` > lock file.** The lock owns the
 source-fingerprint role; `commit.json` owns the commitment-hash record.
@@ -28,8 +29,16 @@ are committed. The large `.vmexe`, `app.pk`, `app.vk`, and `agg_prefix.pk`
 binaries stay gitignored (see the repo `.gitignore`).
 
 `scripts/zk-guest-fingerprint.sh --check` (run in CI) enforces two things:
-1. the guest **source** still matches the lock's `source_sha256`, and
+1. the guest **source and its full path-dep closure** (`zk/openvm-guest/`,
+   `crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`) still
+   match the lock's `source_sha256`, and
 2. the lock's commitment hashes still equal the committed `commit.json`.
+
+Hashing the whole closure (not just `zk/openvm-guest/`) closes the SYB-213 blind
+spot: the SYB-196 newtype migration moved the commitment while a guest-only
+fingerprint stayed green. The gate deliberately over-hashes — `#[cfg(test)]`
+code in those crates affects the hash but not the built guest — because a false
+"stale" (re-run `--write`) is far safer than a false "fresh".
 
 ## Rebuild status and the 2026-07-03 divergence
 

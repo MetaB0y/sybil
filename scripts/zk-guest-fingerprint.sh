@@ -16,6 +16,15 @@
 # without regenerating the commitment. This script only COMPARES; it never
 # rebuilds the guest or regenerates the on-chain commitment.
 #
+# SCOPE (SYB-213): the fingerprint covers the guest's full path-dependency
+# closure, NOT just zk/openvm-guest/. The guest compiles `crates/sybil-zk` by
+# path, which pulls in `crates/sybil-verifier`, which pulls in
+# `crates/matching-engine` -- all by path, all consensus surface. Editing any of
+# them changes the built guest and its app_exe_commit/app_vm_commit. Hashing
+# only zk/openvm-guest/ was a real blind spot: the SYB-196 newtype migration
+# moved the commitment (app_exe_commit 0x0094ea7a -> 0x0036273c) while this gate
+# stayed green. See collect_source_files() for the enumerated closure.
+#
 # Usage:
 #   scripts/zk-guest-fingerprint.sh            # --check (default, used by CI)
 #   scripts/zk-guest-fingerprint.sh --check
@@ -33,13 +42,53 @@ GUEST_DIR="$REPO_ROOT/zk/openvm-guest"
 LOCK_FILE="$GUEST_DIR/guest.commitment.lock.json"
 COMMIT_JSON="$GUEST_DIR/openvm/release/sybil-openvm-guest.commit.json"
 
-# Consensus-relevant guest source inputs, relative to $GUEST_DIR.
-# Explicit, sorted list -> deterministic, and never includes the lock file
-# itself or the gitignored build artifacts under openvm/ and target/.
+# Consensus-relevant guest source inputs, as paths relative to $REPO_ROOT.
+#
+# This MUST cover the guest's full path-dependency closure, because the compiled
+# guest -- and therefore its commitment -- is built from all of it. The closure
+# is (each arrow is a Cargo `path = ` dependency):
+#
+#   zk/openvm-guest       -> crates/sybil-zk
+#   crates/sybil-zk       -> crates/sybil-verifier
+#   crates/sybil-verifier -> crates/matching-engine
+#   crates/matching-engine   (leaf; no path deps)
+#
+# We hardcode these roots rather than parse `cargo metadata`: the guest lives
+# outside the workspace and needs the OpenVM prerelease toolchain to resolve, so
+# metadata isn't cheaply available, and shell-parsing it is fragile. Keep this
+# list in sync with the guest's transitive path deps if any crate gains a new
+# `path = ` dependency.
+#
+# Enumeration is `find`-based (no reliance on git tracking) and LC_ALL=C-sorted,
+# so the hash is deterministic and identical across machines. For each closure
+# crate we take every `*.rs` plus its `Cargo.toml`; `target/` build artifacts
+# are excluded. The guest crate is listed explicitly (its dir also contains the
+# lock file itself and the gitignored openvm/ artifacts, which must NOT be
+# hashed).
+#
+# Over-hashing tradeoff (SAFE direction): `#[cfg(test)] mod tests` code and any
+# test-only source in the closure crates get hashed here but do NOT affect the
+# built guest (the guest never compiles dev-deps or tests). So a pure test edit
+# can trip `--check` and demand a `--write`. That false "stale" is strictly
+# preferable to a false "fresh" -- the failure mode SYB-196 exposed, where a
+# real consensus drift slipped past a green gate.
+CLOSURE_CRATES=(crates/sybil-zk crates/sybil-verifier crates/matching-engine)
+
 collect_source_files() {
     {
-        printf '%s\n' "Cargo.toml" "Cargo.lock" "openvm.toml"
-        (cd "$GUEST_DIR" && find src -type f -name '*.rs')
+        # Guest crate: manifest, lock, openvm config, and Rust sources. Listed
+        # explicitly so we never sweep in openvm/ artifacts or the lock file.
+        printf '%s\n' \
+            "zk/openvm-guest/Cargo.toml" \
+            "zk/openvm-guest/Cargo.lock" \
+            "zk/openvm-guest/openvm.toml"
+        (cd "$REPO_ROOT" && find zk/openvm-guest/src -type f -name '*.rs')
+        # Path-dep closure crates: every Rust source + the manifest.
+        local crate
+        for crate in "${CLOSURE_CRATES[@]}"; do
+            printf '%s\n' "$crate/Cargo.toml"
+            (cd "$REPO_ROOT" && find "$crate" -type f -name '*.rs' -not -path '*/target/*')
+        done
     } | LC_ALL=C sort -u
 }
 
@@ -47,12 +96,12 @@ collect_source_files() {
 compute_source_hash() {
     local rel
     while IFS= read -r rel; do
-        if [ ! -f "$GUEST_DIR/$rel" ]; then
-            echo "ERROR: expected guest source file missing: zk/openvm-guest/$rel" >&2
+        if [ ! -f "$REPO_ROOT/$rel" ]; then
+            echo "ERROR: expected guest source file missing: $rel" >&2
             exit 3
         fi
         printf '%s\n' "$rel"
-        sha256sum "$GUEST_DIR/$rel" | awk '{print $1}'
+        sha256sum "$REPO_ROOT/$rel" | awk '{print $1}'
     done < <(collect_source_files) | sha256sum | awk '{print $1}'
 }
 
