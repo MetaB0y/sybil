@@ -913,6 +913,144 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
     );
 }
 
+#[tokio::test]
+async fn candle_retention_floor_distinguishes_pruned_range_from_no_data() {
+    let (app, handle) = test_app_with_store_config(
+        true,
+        SequencerConfig {
+            price_candle_resolutions_secs: vec![1],
+            price_candle_retention_secs: vec![1],
+            history_prune_interval_blocks: 1,
+            history_prune_max_rows: 100,
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        },
+    )
+    .await;
+
+    let balance = 100_000_000_000u64;
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": balance }),
+    )
+    .await;
+    let acct_a = parse_json(&body)["account_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": balance }),
+    )
+    .await;
+    let acct_b = parse_json(&body)["account_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/markets",
+        json!({ "name": "Candle retention" }),
+    )
+    .await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    for (index, (yes_price, no_price)) in [
+        (600_000_000u64, 500_000_000u64),
+        (700_000_000u64, 400_000_000u64),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (status, _) = post_json(
+            app.clone(),
+            "/v1/orders",
+            json!({
+                "account_id": acct_a,
+                "orders": [{
+                    "type": "BuyYes",
+                    "market_id": market_id,
+                    "limit_price_nanos": yes_price,
+                    "quantity": 10
+                }]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = post_json(
+            app.clone(),
+            "/v1/orders",
+            json!({
+                "account_id": acct_b,
+                "orders": [{
+                    "type": "BuyNo",
+                    "market_id": market_id,
+                    "limit_price_nanos": no_price,
+                    "quantity": 10
+                }]
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let block = handle.produce_block().await.unwrap();
+        assert!(!block.canonical.fills.is_empty());
+
+        if index == 0 {
+            tokio::time::sleep(Duration::from_millis(1_200)).await;
+        }
+    }
+
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/markets/{market_id}/prices/candles?resolution=1&limit=10"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let retained = parse_json(&body);
+    let retained_candles = retained["candles"].as_array().unwrap();
+    assert_eq!(retained_candles.len(), 1, "retained candles: {retained}");
+    let floor = retained["retention_min_bucket_ms"].as_u64().unwrap();
+    let retained_bucket = retained_candles[0]["bucket_start_ms"].as_u64().unwrap();
+    assert_eq!(floor, retained_bucket);
+
+    let old_bucket = floor.saturating_sub(1_000);
+    let (status, body) = get(
+        app.clone(),
+        &format!(
+            "/v1/markets/{market_id}/prices/candles?resolution=1&from_ms={old_bucket}&to_ms={old_bucket}&limit=10"
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pruned_range = parse_json(&body);
+    assert!(pruned_range["candles"].as_array().unwrap().is_empty());
+    assert_eq!(
+        pruned_range["retention_min_bucket_ms"].as_u64(),
+        Some(floor)
+    );
+    assert!(
+        floor > old_bucket,
+        "floor should tell clients this empty range is older than retained history: {pruned_range}"
+    );
+
+    let future_ms = floor + 2_000;
+    let (status, body) = get(
+        app,
+        &format!(
+            "/v1/markets/{market_id}/prices/candles?resolution=1&from_ms={future_ms}&to_ms={future_ms}&limit=10"
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let no_data_range = parse_json(&body);
+    assert!(no_data_range["candles"].as_array().unwrap().is_empty());
+    assert_eq!(
+        no_data_range["retention_min_bucket_ms"].as_u64(),
+        Some(floor)
+    );
+    assert!(
+        floor < future_ms,
+        "floor should also show this empty range is in retained history but has no data: {no_data_range}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // D. Order validation
 // ---------------------------------------------------------------------------

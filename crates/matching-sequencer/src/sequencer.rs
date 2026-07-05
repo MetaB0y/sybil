@@ -111,6 +111,9 @@ pub struct SequencerConfig {
     pub history_prune_max_rows: usize,
     /// Candle resolutions maintained from committed raw price points.
     pub price_candle_resolutions_secs: Vec<u32>,
+    /// Per-resolution durable candle retention, aligned by index with
+    /// `price_candle_resolutions_secs`. 0 means unbounded for that resolution.
+    pub price_candle_retention_secs: Vec<u64>,
     /// Maximum in-memory fill records retained per account for API queries.
     /// Persistent storage may retain more rows.
     pub max_fill_history_per_account: usize,
@@ -157,6 +160,7 @@ impl Default for SequencerConfig {
             history_prune_interval_blocks: 1_000,
             history_prune_max_rows: 10_000,
             price_candle_resolutions_secs: vec![60, 300, 3_600],
+            price_candle_retention_secs: vec![2_592_000, 15_552_000, 0],
             max_fill_history_per_account:
                 crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
             max_equity_points_per_account: crate::aggregates::MAX_EQUITY_POINTS,

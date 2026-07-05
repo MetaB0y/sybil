@@ -432,6 +432,7 @@ async fn history_retention_and_candles_survive_process_restart() {
         ("SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS", "1"),
         ("SYBIL_HISTORY_PRUNE_MAX_ROWS", "100"),
         ("SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS", "60"),
+        ("SYBIL_PRICE_CANDLE_RETENTION_SECS", "2592000"),
     ];
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -534,6 +535,10 @@ async fn history_retention_and_candles_survive_process_restart() {
         &format!("/v1/markets/{market_id}/prices/candles?resolution=1m&limit=10"),
     )
     .await;
+    assert!(
+        candles["retention_min_bucket_ms"].as_u64().is_some(),
+        "candle retention floor after restart: {candles}"
+    );
     let point_count: u64 = candles["candles"]
         .as_array()
         .unwrap()

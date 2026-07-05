@@ -164,6 +164,17 @@ pub struct ApiConfig {
     )]
     pub price_candle_resolutions_secs: Vec<u32>,
 
+    /// Comma-separated durable candle retention windows, in seconds, aligned
+    /// by index with `SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS`. 0 disables pruning
+    /// for that resolution.
+    #[arg(
+        long,
+        env = "SYBIL_PRICE_CANDLE_RETENTION_SECS",
+        value_delimiter = ',',
+        default_value = "2592000,15552000,0"
+    )]
+    pub price_candle_retention_secs: Vec<u64>,
+
     /// In-memory fill-history records retained per account for API queries.
     #[arg(
         long,
@@ -268,6 +279,7 @@ impl Default for ApiConfig {
             history_prune_interval_blocks: 1_000,
             history_prune_max_rows: 10_000,
             price_candle_resolutions_secs: vec![60, 300, 3_600],
+            price_candle_retention_secs: vec![2_592_000, 15_552_000, 0],
             max_fill_history_per_account: 5_000,
             max_equity_points_per_account: 0,
             max_history_events_per_account: 0,

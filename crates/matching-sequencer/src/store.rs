@@ -46,14 +46,14 @@
 //! - Price history: implemented for raw mark points (see `PRICE_POINTS` table).
 //! - Block ring buffer: exact-height fallback implemented, list/replay policy TODO.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use sybil_oracle::{
     AdminOracle, DataFeed, FeedPubkey, MarketStatus, ResolutionTemplate, SignedAttestation,
 };
@@ -214,9 +214,20 @@ const KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT: &str = "snapshot";
 /// market_id(4B BE) ++ block_height(8B BE).
 const PRICE_POINTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("price_points");
 
+/// Ordered retention index for raw mark-price points. Key =
+/// block_height(8B BE) ++ market_id(4B BE). Value is unused.
+const PRICE_POINTS_BY_HEIGHT: TableDefinition<&[u8], u64> =
+    TableDefinition::new("price_points_by_height");
+
 /// Downsampled committed-batch price candles. Key =
 /// market_id(4B BE) ++ resolution_secs(4B BE) ++ bucket_start_ms(8B BE).
 const PRICE_CANDLES: TableDefinition<&[u8], &[u8]> = TableDefinition::new("price_candles");
+
+/// Ordered retention index for price candles. Key =
+/// resolution_secs(4B BE) ++ bucket_start_ms(8B BE) ++ market_id(4B BE).
+/// Value is unused.
+const PRICE_CANDLES_BY_RESOLUTION: TableDefinition<&[u8], u64> =
+    TableDefinition::new("price_candles_by_resolution");
 
 /// Off-block liquidity tracker: per-market ±band depth rings used by the
 /// `liquidity_avg10` surface. Same single-blob shape as `TRADER_TRACKER`.
@@ -265,6 +276,7 @@ const KEY_HISTORY_EVENT_NEXT_SEQ: &str = "history_event_next_seq";
 const KEY_BLOCKS_FULL_MIN_HEIGHT: &str = "blocks_full_min_height";
 const KEY_PRICE_POINTS_MIN_HEIGHT: &str = "price_points_min_height";
 const KEY_LAST_HISTORY_PRUNE_HEIGHT: &str = "last_history_prune_height";
+const KEY_PRICE_CANDLES_MIN_BUCKET_MS_PREFIX: &str = "price_candles_min_bucket_ms:";
 
 const STORE_LAYOUT_VERSION: u64 = 1;
 
@@ -309,9 +321,29 @@ fn price_point_key(market_id: MarketId, height: u64) -> [u8; 12] {
     key
 }
 
-fn price_point_height_from_key(key: &[u8]) -> Option<u64> {
+fn price_point_parts_from_key(key: &[u8]) -> Option<(MarketId, u64)> {
+    let market_bytes: [u8; 4] = key.get(..4)?.try_into().ok()?;
     let height_bytes: [u8; 8] = key.get(4..12)?.try_into().ok()?;
-    Some(u64::from_be_bytes(height_bytes))
+    Some((
+        MarketId(u32::from_be_bytes(market_bytes)),
+        u64::from_be_bytes(height_bytes),
+    ))
+}
+
+fn price_point_by_height_key(height: u64, market_id: MarketId) -> [u8; 12] {
+    let mut key = [0u8; 12];
+    key[..8].copy_from_slice(&height.to_be_bytes());
+    key[8..].copy_from_slice(&market_id.0.to_be_bytes());
+    key
+}
+
+fn price_point_by_height_parts_from_key(key: &[u8]) -> Option<(u64, MarketId)> {
+    let height_bytes: [u8; 8] = key.get(..8)?.try_into().ok()?;
+    let market_bytes: [u8; 4] = key.get(8..12)?.try_into().ok()?;
+    Some((
+        u64::from_be_bytes(height_bytes),
+        MarketId(u32::from_be_bytes(market_bytes)),
+    ))
 }
 
 fn price_point_market_bounds(market_id: MarketId) -> ([u8; 12], [u8; 12]) {
@@ -329,6 +361,17 @@ fn price_candle_key(market_id: MarketId, resolution_secs: u32, bucket_start_ms: 
     key
 }
 
+fn price_candle_parts_from_key(key: &[u8]) -> Option<(MarketId, u32, u64)> {
+    let market_bytes: [u8; 4] = key.get(..4)?.try_into().ok()?;
+    let resolution_bytes: [u8; 4] = key.get(4..8)?.try_into().ok()?;
+    let bucket_bytes: [u8; 8] = key.get(8..16)?.try_into().ok()?;
+    Some((
+        MarketId(u32::from_be_bytes(market_bytes)),
+        u32::from_be_bytes(resolution_bytes),
+        u64::from_be_bytes(bucket_bytes),
+    ))
+}
+
 fn price_candle_market_resolution_bounds(
     market_id: MarketId,
     resolution_secs: u32,
@@ -337,6 +380,46 @@ fn price_candle_market_resolution_bounds(
         price_candle_key(market_id, resolution_secs, 0),
         price_candle_key(market_id, resolution_secs, u64::MAX),
     )
+}
+
+fn price_candle_by_resolution_key(
+    resolution_secs: u32,
+    bucket_start_ms: u64,
+    market_id: MarketId,
+) -> [u8; 16] {
+    let mut key = [0u8; 16];
+    key[..4].copy_from_slice(&resolution_secs.to_be_bytes());
+    key[4..12].copy_from_slice(&bucket_start_ms.to_be_bytes());
+    key[12..].copy_from_slice(&market_id.0.to_be_bytes());
+    key
+}
+
+fn price_candle_by_resolution_parts_from_key(key: &[u8]) -> Option<(u32, u64, MarketId)> {
+    let resolution_bytes: [u8; 4] = key.get(..4)?.try_into().ok()?;
+    let bucket_bytes: [u8; 8] = key.get(4..12)?.try_into().ok()?;
+    let market_bytes: [u8; 4] = key.get(12..16)?.try_into().ok()?;
+    Some((
+        u32::from_be_bytes(resolution_bytes),
+        u64::from_be_bytes(bucket_bytes),
+        MarketId(u32::from_be_bytes(market_bytes)),
+    ))
+}
+
+fn price_candle_resolution_bounds(resolution_secs: u32) -> ([u8; 16], [u8; 16]) {
+    (
+        price_candle_by_resolution_key(resolution_secs, 0, MarketId(0)),
+        price_candle_by_resolution_key(resolution_secs, u64::MAX, MarketId(u32::MAX)),
+    )
+}
+
+fn price_candles_min_bucket_key(resolution_secs: u32) -> String {
+    format!("{KEY_PRICE_CANDLES_MIN_BUCKET_MS_PREFIX}{resolution_secs}")
+}
+
+fn parse_price_candles_min_bucket_key(key: &str) -> Option<u32> {
+    key.strip_prefix(KEY_PRICE_CANDLES_MIN_BUCKET_MS_PREFIX)?
+        .parse()
+        .ok()
 }
 
 fn seq_from_history_event_key(key: &[u8]) -> Option<u64> {
@@ -441,20 +524,29 @@ fn pop_save_block_fault(
 /// A value of 0 disables pruning for that stream. `prune_max_rows` bounds the
 /// memory and write work of one maintenance pass; when it is exhausted,
 /// metadata remains at the oldest row still present.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HistoryRetentionPolicy {
     pub block_history_retention_blocks: u64,
     pub raw_price_retention_blocks: u64,
+    pub price_candle_resolutions_secs: Vec<u32>,
+    pub price_candle_retention_secs: Vec<u64>,
     pub prune_interval_blocks: u64,
     pub prune_max_rows: usize,
 }
 
 impl HistoryRetentionPolicy {
     pub fn should_prune_at(&self, height: u64) -> bool {
+        let prunes_price_candles = self
+            .price_candle_resolutions_secs
+            .iter()
+            .zip(&self.price_candle_retention_secs)
+            .any(|(&resolution_secs, &retention_secs)| resolution_secs > 0 && retention_secs > 0);
         height > 0
             && self.prune_interval_blocks > 0
             && self.prune_max_rows > 0
-            && (self.block_history_retention_blocks > 0 || self.raw_price_retention_blocks > 0)
+            && (self.block_history_retention_blocks > 0
+                || self.raw_price_retention_blocks > 0
+                || prunes_price_candles)
             && height.is_multiple_of(self.prune_interval_blocks)
     }
 
@@ -464,6 +556,23 @@ impl HistoryRetentionPolicy {
 
     fn price_points_floor(&self, head_height: u64) -> Option<u64> {
         retention_floor(head_height, self.raw_price_retention_blocks)
+    }
+
+    fn price_candle_cutoffs(&self, head_timestamp_ms: u64) -> BTreeMap<u32, u64> {
+        self.price_candle_resolutions_secs
+            .iter()
+            .zip(&self.price_candle_retention_secs)
+            .filter_map(|(&resolution_secs, &retention_secs)| {
+                if resolution_secs == 0 || retention_secs == 0 {
+                    return None;
+                }
+                let retention_ms = retention_secs.saturating_mul(1000);
+                Some((
+                    resolution_secs,
+                    head_timestamp_ms.saturating_sub(retention_ms),
+                ))
+            })
+            .collect()
     }
 }
 
@@ -478,23 +587,32 @@ fn retention_floor(head_height: u64, retention_blocks: u64) -> Option<u64> {
     )
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HistoryRetentionMeta {
     pub blocks_full_min_height: Option<u64>,
     pub price_points_min_height: Option<u64>,
+    pub price_candles_min_bucket_ms: BTreeMap<u32, u64>,
     pub last_history_prune_height: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HistoryPruneReport {
     pub blocks_full_pruned: usize,
     pub price_points_pruned: usize,
+    pub price_candles_pruned: usize,
     pub meta: HistoryRetentionMeta,
 }
 
 fn read_history_retention_meta(db: &Database) -> Result<HistoryRetentionMeta, StoreError> {
     let txn = db.begin_read()?;
     let table = txn.open_table(HISTORY_META)?;
+    let mut price_candles_min_bucket_ms = BTreeMap::new();
+    for entry in table.iter()? {
+        let (key, value) = entry?;
+        if let Some(resolution_secs) = parse_price_candles_min_bucket_key(key.value()) {
+            price_candles_min_bucket_ms.insert(resolution_secs, value.value());
+        }
+    }
     Ok(HistoryRetentionMeta {
         blocks_full_min_height: table
             .get(KEY_BLOCKS_FULL_MIN_HEIGHT)?
@@ -502,6 +620,7 @@ fn read_history_retention_meta(db: &Database) -> Result<HistoryRetentionMeta, St
         price_points_min_height: table
             .get(KEY_PRICE_POINTS_MIN_HEIGHT)?
             .map(|value| value.value()),
+        price_candles_min_bucket_ms,
         last_history_prune_height: table
             .get(KEY_LAST_HISTORY_PRUNE_HEIGHT)?
             .map(|value| value.value()),
@@ -992,13 +1111,19 @@ where
 
     {
         let mut table = txn.open_table(PRICE_POINTS)?;
+        let mut by_height = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
         for row in &commit.price_point_rows {
             table.insert(row.key.as_slice(), row.bytes.as_slice())?;
+            by_height.insert(
+                price_point_by_height_key(row.point.height, row.market_id).as_slice(),
+                0,
+            )?;
         }
     }
 
     if !commit.price_point_rows.is_empty() && !commit.price_candle_resolutions_secs.is_empty() {
         let mut candles = txn.open_table(PRICE_CANDLES)?;
+        let mut candles_by_resolution = txn.open_table(PRICE_CANDLES_BY_RESOLUTION)?;
         for row in &commit.price_point_rows {
             for &resolution_secs in &commit.price_candle_resolutions_secs {
                 if resolution_secs == 0 {
@@ -1006,6 +1131,11 @@ where
                 }
                 let mut candle = PriceCandle::from_point(resolution_secs, &row.point);
                 let key = price_candle_key(row.market_id, resolution_secs, candle.bucket_start_ms);
+                let index_key = price_candle_by_resolution_key(
+                    resolution_secs,
+                    candle.bucket_start_ms,
+                    row.market_id,
+                );
                 if let Some(existing) = {
                     candles
                         .get(key.as_slice())?
@@ -1017,6 +1147,7 @@ where
                 }
                 let bytes = rmp_serde::to_vec(&candle)?;
                 candles.insert(key.as_slice(), bytes.as_slice())?;
+                candles_by_resolution.insert(index_key.as_slice(), 0)?;
             }
         }
     }
@@ -1142,64 +1273,89 @@ fn prune_history_redb(
     policy: HistoryRetentionPolicy,
     block_floor: Option<u64>,
     price_floor: Option<u64>,
+    price_candle_cutoffs: BTreeMap<u32, u64>,
 ) -> Result<HistoryPruneReport, StoreError> {
     let txn = db.begin_write()?;
     let mut remaining = policy.prune_max_rows;
     let mut blocks_full_pruned = 0usize;
     let mut price_points_pruned = 0usize;
+    let mut price_candles_pruned = 0usize;
 
     if let Some(floor) = block_floor {
-        let keys: Vec<u64> = {
-            let table = txn.open_table(BLOCKS_FULL)?;
-            let mut keys = Vec::new();
-            for entry in table.range(0..floor)? {
-                let (key, _) = entry?;
-                keys.push(key.value());
-                if keys.len() >= remaining {
-                    break;
-                }
-            }
-            keys
-        };
-
-        if !keys.is_empty() {
+        if remaining > 0 {
             let mut table = txn.open_table(BLOCKS_FULL)?;
-            for key in keys {
-                if table.remove(key)?.is_some() {
-                    blocks_full_pruned += 1;
-                }
+            let mut iter = table.extract_from_if(0..floor, |_, _| true)?;
+            while remaining > 0 {
+                let Some(_) = iter.next().transpose()? else {
+                    break;
+                };
+                blocks_full_pruned += 1;
+                remaining -= 1;
             }
-            remaining = remaining.saturating_sub(blocks_full_pruned);
         }
     }
 
     if remaining > 0 {
         if let Some(floor) = price_floor {
-            let keys: Vec<[u8; 12]> = {
-                let table = txn.open_table(PRICE_POINTS)?;
-                let mut keys = Vec::new();
-                for entry in table.iter()? {
-                    let (key, _) = entry?;
-                    let key_bytes = key.value();
-                    if price_point_height_from_key(key_bytes).is_some_and(|h| h < floor) {
-                        let mut owned = [0u8; 12];
-                        owned.copy_from_slice(key_bytes);
-                        keys.push(owned);
-                        if keys.len() >= remaining {
-                            break;
-                        }
-                    }
-                }
-                keys
-            };
-
-            if !keys.is_empty() {
-                let mut table = txn.open_table(PRICE_POINTS)?;
-                for key in keys {
-                    if table.remove(key.as_slice())?.is_some() {
+            let lo = price_point_by_height_key(0, MarketId(0));
+            let hi = price_point_by_height_key(floor, MarketId(0));
+            let mut points = txn.open_table(PRICE_POINTS)?;
+            let mut by_height = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
+            let mut iter = by_height.extract_from_if(lo.as_slice()..hi.as_slice(), |_, _| true)?;
+            while remaining > 0 {
+                let Some((key, _)) = iter.next().transpose()? else {
+                    break;
+                };
+                if let Some((height, market_id)) = price_point_by_height_parts_from_key(key.value())
+                {
+                    if points
+                        .remove(price_point_key(market_id, height).as_slice())?
+                        .is_some()
+                    {
                         price_points_pruned += 1;
                     }
+                } else {
+                    warn!("invalid price point retention index key in store");
                 }
+                remaining -= 1;
+            }
+        }
+    }
+
+    if remaining > 0 {
+        for (&resolution_secs, &cutoff_ms) in &price_candle_cutoffs {
+            if remaining == 0 {
+                break;
+            }
+            if cutoff_ms == 0 {
+                continue;
+            }
+            let lo = price_candle_by_resolution_key(resolution_secs, 0, MarketId(0));
+            let hi = price_candle_by_resolution_key(resolution_secs, cutoff_ms, MarketId(0));
+            let mut candles = txn.open_table(PRICE_CANDLES)?;
+            let mut by_resolution = txn.open_table(PRICE_CANDLES_BY_RESOLUTION)?;
+            let mut iter =
+                by_resolution.extract_from_if(lo.as_slice()..hi.as_slice(), |_, _| true)?;
+            while remaining > 0 {
+                let Some((key, _)) = iter.next().transpose()? else {
+                    break;
+                };
+                if let Some((indexed_resolution, bucket_start_ms, market_id)) =
+                    price_candle_by_resolution_parts_from_key(key.value())
+                {
+                    if candles
+                        .remove(
+                            price_candle_key(market_id, indexed_resolution, bucket_start_ms)
+                                .as_slice(),
+                        )?
+                        .is_some()
+                    {
+                        price_candles_pruned += 1;
+                    }
+                } else {
+                    warn!("invalid price candle retention index key in store");
+                }
+                remaining -= 1;
             }
         }
     }
@@ -1216,18 +1372,33 @@ fn prune_history_redb(
         None
     };
     let price_points_min_height = if price_floor.is_some() {
-        let table = txn.open_table(PRICE_POINTS)?;
-        let mut min_height: Option<u64> = None;
-        for entry in table.iter()? {
-            let (key, _) = entry?;
-            if let Some(height) = price_point_height_from_key(key.value()) {
-                min_height = Some(min_height.map_or(height, |min| min.min(height)));
-            }
-        }
+        let table = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
+        let min_height =
+            table.iter()?.next().transpose()?.and_then(|(key, _)| {
+                price_point_by_height_parts_from_key(key.value()).map(|(h, _)| h)
+            });
         min_height
     } else {
         None
     };
+    let mut price_candles_min_bucket_ms = BTreeMap::new();
+    if !price_candle_cutoffs.is_empty() {
+        let table = txn.open_table(PRICE_CANDLES_BY_RESOLUTION)?;
+        for &resolution_secs in price_candle_cutoffs.keys() {
+            let (lo, hi) = price_candle_resolution_bounds(resolution_secs);
+            if let Some((key, _)) = table
+                .range(lo.as_slice()..=hi.as_slice())?
+                .next()
+                .transpose()?
+            {
+                if let Some((_, bucket_start_ms, _)) =
+                    price_candle_by_resolution_parts_from_key(key.value())
+                {
+                    price_candles_min_bucket_ms.insert(resolution_secs, bucket_start_ms);
+                }
+            }
+        }
+    }
 
     {
         let mut meta = txn.open_table(HISTORY_META)?;
@@ -1251,6 +1422,17 @@ fn prune_history_redb(
                 }
             }
         }
+        for &resolution_secs in price_candle_cutoffs.keys() {
+            let key = price_candles_min_bucket_key(resolution_secs);
+            match price_candles_min_bucket_ms.get(&resolution_secs) {
+                Some(bucket_start_ms) => {
+                    meta.insert(key.as_str(), *bucket_start_ms)?;
+                }
+                None => {
+                    meta.remove(key.as_str())?;
+                }
+            }
+        }
         meta.insert(KEY_LAST_HISTORY_PRUNE_HEIGHT, head_height)?;
     }
 
@@ -1258,8 +1440,94 @@ fn prune_history_redb(
     Ok(HistoryPruneReport {
         blocks_full_pruned,
         price_points_pruned,
+        price_candles_pruned,
         meta: read_history_retention_meta(db)?,
     })
+}
+
+fn backfill_price_history_indexes(db: &Database) -> Result<(), StoreError> {
+    let (price_points_len, price_points_index_len, price_candles_len, price_candles_index_len) = {
+        let txn = db.begin_read()?;
+        let price_points_len = txn.open_table(PRICE_POINTS)?.len()?;
+        let price_points_index_len = txn.open_table(PRICE_POINTS_BY_HEIGHT)?.len()?;
+        let price_candles_len = txn.open_table(PRICE_CANDLES)?.len()?;
+        let price_candles_index_len = txn.open_table(PRICE_CANDLES_BY_RESOLUTION)?.len()?;
+        (
+            price_points_len,
+            price_points_index_len,
+            price_candles_len,
+            price_candles_index_len,
+        )
+    };
+
+    if price_points_index_len >= price_points_len && price_candles_index_len >= price_candles_len {
+        return Ok(());
+    }
+
+    let txn = db.begin_write()?;
+    let mut price_points_backfilled = 0u64;
+    let mut price_candles_backfilled = 0u64;
+
+    if price_points_index_len < price_points_len {
+        let mut rows = Vec::new();
+        {
+            let table = txn.open_table(PRICE_POINTS)?;
+            for entry in table.iter()? {
+                let (key, _) = entry?;
+                let Some((market_id, height)) = price_point_parts_from_key(key.value()) else {
+                    warn!("invalid price point key in store; skipping index backfill");
+                    continue;
+                };
+                rows.push(price_point_by_height_key(height, market_id));
+            }
+        }
+        {
+            let mut index = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
+            for key in rows {
+                if index.insert(key.as_slice(), 0)?.is_none() {
+                    price_points_backfilled += 1;
+                }
+            }
+        }
+    }
+
+    if price_candles_index_len < price_candles_len {
+        let mut rows = Vec::new();
+        {
+            let table = txn.open_table(PRICE_CANDLES)?;
+            for entry in table.iter()? {
+                let (key, _) = entry?;
+                let Some((market_id, resolution_secs, bucket_start_ms)) =
+                    price_candle_parts_from_key(key.value())
+                else {
+                    warn!("invalid price candle key in store; skipping index backfill");
+                    continue;
+                };
+                rows.push(price_candle_by_resolution_key(
+                    resolution_secs,
+                    bucket_start_ms,
+                    market_id,
+                ));
+            }
+        }
+        {
+            let mut index = txn.open_table(PRICE_CANDLES_BY_RESOLUTION)?;
+            for key in rows {
+                if index.insert(key.as_slice(), 0)?.is_none() {
+                    price_candles_backfilled += 1;
+                }
+            }
+        }
+    }
+
+    txn.commit()?;
+    if price_points_backfilled > 0 || price_candles_backfilled > 0 {
+        info!(
+            price_points_backfilled,
+            price_candles_backfilled, "backfilled price history retention indexes"
+        );
+    }
+    Ok(())
 }
 
 impl Store {
@@ -1302,7 +1570,9 @@ impl Store {
         txn.open_table(PRICE_TRACKER_VOLUME)?;
         txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
         txn.open_table(PRICE_POINTS)?;
+        txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
         txn.open_table(PRICE_CANDLES)?;
+        txn.open_table(PRICE_CANDLES_BY_RESOLUTION)?;
         txn.open_table(LIQUIDITY_TRACKER)?;
         txn.open_table(ORDER_STATS_TRACKER)?;
         txn.open_table(WELFARE_TRACKER)?;
@@ -1312,6 +1582,7 @@ impl Store {
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
+        backfill_price_history_indexes(&db)?;
         if prune_historical_block_rows(&db)? {
             match db.compact() {
                 Ok(true) => info!(?path, "compacted store after pruning historical block rows"),
@@ -1568,11 +1839,15 @@ impl Store {
     pub async fn prune_history(
         &self,
         head_height: u64,
+        head_timestamp_ms: u64,
         policy: HistoryRetentionPolicy,
     ) -> Result<HistoryPruneReport, StoreError> {
         let block_floor = policy.blocks_full_floor(head_height);
         let price_floor = policy.price_points_floor(head_height);
-        if policy.prune_max_rows == 0 || (block_floor.is_none() && price_floor.is_none()) {
+        let price_candle_cutoffs = policy.price_candle_cutoffs(head_timestamp_ms);
+        if policy.prune_max_rows == 0
+            || (block_floor.is_none() && price_floor.is_none() && price_candle_cutoffs.is_empty())
+        {
             return Ok(HistoryPruneReport {
                 meta: self.history_retention_meta()?,
                 ..HistoryPruneReport::default()
@@ -1580,7 +1855,14 @@ impl Store {
         }
 
         self.redb_write(move |db| {
-            prune_history_redb(&db, head_height, policy, block_floor, price_floor)
+            prune_history_redb(
+                &db,
+                head_height,
+                policy,
+                block_floor,
+                price_floor,
+                price_candle_cutoffs,
+            )
         })
         .await
     }
@@ -1653,7 +1935,7 @@ impl Store {
         before_ms: Option<u64>,
         limit: usize,
     ) -> Result<PriceCandlePage, StoreError> {
-        if resolution_secs == 0 || limit == 0 {
+        if resolution_secs == 0 {
             return Ok(PriceCandlePage {
                 resolution_secs,
                 candles: Vec::new(),
@@ -1662,6 +1944,19 @@ impl Store {
             });
         }
         let txn = self.db.begin_read()?;
+        let retention_min_bucket_ms = {
+            let meta = txn.open_table(HISTORY_META)?;
+            let key = price_candles_min_bucket_key(resolution_secs);
+            meta.get(key.as_str())?.map(|value| value.value())
+        };
+        if limit == 0 {
+            return Ok(PriceCandlePage {
+                resolution_secs,
+                candles: Vec::new(),
+                next_before_ms: None,
+                retention_min_bucket_ms,
+            });
+        }
         let table = txn.open_table(PRICE_CANDLES)?;
         let (lo, hi) = price_candle_market_resolution_bounds(market_id, resolution_secs);
         let mut candles = VecDeque::new();
@@ -1690,7 +1985,7 @@ impl Store {
             resolution_secs,
             candles,
             next_before_ms,
-            retention_min_bucket_ms: None,
+            retention_min_bucket_ms,
         })
     }
 
@@ -3028,9 +3323,12 @@ mod tests {
         let report = store
             .prune_history(
                 5,
+                sample_header(5).timestamp_ms,
                 HistoryRetentionPolicy {
                     block_history_retention_blocks: 3,
                     raw_price_retention_blocks: 3,
+                    price_candle_resolutions_secs: Vec::new(),
+                    price_candle_retention_secs: Vec::new(),
                     prune_interval_blocks: 1,
                     prune_max_rows: 10,
                 },
@@ -3112,9 +3410,12 @@ mod tests {
         let report = store
             .prune_history(
                 5,
+                sample_header(5).timestamp_ms,
                 HistoryRetentionPolicy {
                     block_history_retention_blocks: 2,
                     raw_price_retention_blocks: 2,
+                    price_candle_resolutions_secs: Vec::new(),
+                    price_candle_retention_secs: Vec::new(),
                     prune_interval_blocks: 1,
                     prune_max_rows: 2,
                 },
@@ -3144,6 +3445,163 @@ mod tests {
         let heights: Vec<_> = page.points.iter().map(|point| point.height).collect();
         assert_eq!(heights, vec![1, 2, 3, 4, 5]);
         assert_eq!(page.retention_min_height, Some(1));
+    }
+
+    #[tokio::test]
+    async fn price_candle_pruning_deletes_by_resolution_with_metadata() {
+        let path = temp_db_path("store-price-candle-retention");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("candle retention");
+        let accounts = AccountStore::new();
+        let env = TestEnv::new();
+
+        for (height, timestamp_ms) in [(1, 0), (2, 60_000), (3, 300_000), (4, 600_000)] {
+            let mut header = sample_header(height);
+            header.timestamp_ms = timestamp_ms;
+            let point = crate::market_info::PricePoint {
+                height,
+                timestamp_ms,
+                yes_price: Nanos(500_000_000 + height),
+                no_price: Nanos(500_000_000 - height),
+                volume_nanos: height,
+            };
+            store
+                .save_block(env.snapshot_with_price_points(
+                    &accounts,
+                    &markets,
+                    &lifecycle,
+                    &header,
+                    vec![(market_id, point)],
+                ))
+                .await
+                .unwrap();
+        }
+
+        let report = store
+            .prune_history(
+                4,
+                600_000,
+                HistoryRetentionPolicy {
+                    block_history_retention_blocks: 0,
+                    raw_price_retention_blocks: 0,
+                    price_candle_resolutions_secs: vec![60, 300],
+                    price_candle_retention_secs: vec![300, 600],
+                    prune_interval_blocks: 1,
+                    prune_max_rows: 100,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(report.blocks_full_pruned, 0);
+        assert_eq!(report.price_points_pruned, 0);
+        assert_eq!(report.price_candles_pruned, 2);
+        assert_eq!(
+            report.meta.price_candles_min_bucket_ms.get(&60),
+            Some(&300_000)
+        );
+        assert_eq!(report.meta.price_candles_min_bucket_ms.get(&300), Some(&0));
+
+        let one_minute = store
+            .load_price_candles(market_id, 60, None, None, None, 10)
+            .await
+            .unwrap();
+        assert_eq!(one_minute.retention_min_bucket_ms, Some(300_000));
+        assert_eq!(
+            one_minute
+                .candles
+                .iter()
+                .map(|candle| candle.bucket_start_ms)
+                .collect::<Vec<_>>(),
+            vec![300_000, 600_000]
+        );
+
+        let five_minute = store
+            .load_price_candles(market_id, 300, None, None, None, 10)
+            .await
+            .unwrap();
+        assert_eq!(five_minute.retention_min_bucket_ms, Some(0));
+        assert_eq!(
+            five_minute
+                .candles
+                .iter()
+                .map(|candle| candle.bucket_start_ms)
+                .collect::<Vec<_>>(),
+            vec![0, 300_000, 600_000]
+        );
+    }
+
+    #[tokio::test]
+    async fn price_candle_pruning_obeys_batch_limit_and_keeps_floor_actual() {
+        let path = temp_db_path("store-price-candle-retention-budget");
+        let store = Store::open(&path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("candle retention budget");
+        let accounts = AccountStore::new();
+        let env = TestEnv::new();
+
+        for (height, timestamp_ms) in [(1, 0), (2, 60_000), (3, 120_000)] {
+            let mut header = sample_header(height);
+            header.timestamp_ms = timestamp_ms;
+            let point = crate::market_info::PricePoint {
+                height,
+                timestamp_ms,
+                yes_price: Nanos(500_000_000),
+                no_price: Nanos(500_000_000),
+                volume_nanos: 1,
+            };
+            store
+                .save_block(env.snapshot_with_price_points(
+                    &accounts,
+                    &markets,
+                    &lifecycle,
+                    &header,
+                    vec![(market_id, point)],
+                ))
+                .await
+                .unwrap();
+        }
+
+        let report = store
+            .prune_history(
+                3,
+                180_000,
+                HistoryRetentionPolicy {
+                    block_history_retention_blocks: 0,
+                    raw_price_retention_blocks: 0,
+                    price_candle_resolutions_secs: vec![60],
+                    price_candle_retention_secs: vec![60],
+                    prune_interval_blocks: 1,
+                    prune_max_rows: 1,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(report.price_candles_pruned, 1);
+        assert_eq!(
+            report.meta.price_candles_min_bucket_ms.get(&60),
+            Some(&60_000),
+            "floor must remain at the oldest actual retained candle while the prune budget is exhausted"
+        );
+
+        let page = store
+            .load_price_candles(market_id, 60, None, None, None, 10)
+            .await
+            .unwrap();
+        assert_eq!(page.retention_min_bucket_ms, Some(60_000));
+        assert_eq!(
+            page.candles
+                .iter()
+                .map(|candle| candle.bucket_start_ms)
+                .collect::<Vec<_>>(),
+            vec![60_000, 120_000]
+        );
     }
 
     #[tokio::test]

@@ -870,6 +870,7 @@ impl SequencerActorState {
         if let Some(ref store) = self.store {
             let sealed = prepared.production().sealed_block();
             let height = sealed.canonical.header.height;
+            let timestamp_ms = sealed.canonical.header.timestamp_ms;
             // Commit clears pending off-block read-model rows after this returns.
             // Persist every prepared block so empty-fill batches can still durably
             // carry direct-admit history and equity deltas.
@@ -888,11 +889,21 @@ impl SequencerActorState {
                     .config
                     .block_history_retention_blocks,
                 raw_price_retention_blocks: self.sequencer.config.raw_price_retention_blocks,
+                price_candle_resolutions_secs: self
+                    .sequencer
+                    .config
+                    .price_candle_resolutions_secs
+                    .clone(),
+                price_candle_retention_secs: self
+                    .sequencer
+                    .config
+                    .price_candle_retention_secs
+                    .clone(),
                 prune_interval_blocks: self.sequencer.config.history_prune_interval_blocks,
                 prune_max_rows: self.sequencer.config.history_prune_max_rows,
             };
             if policy.should_prune_at(height) {
-                match store.prune_history(height, policy).await {
+                match store.prune_history(height, timestamp_ms, policy).await {
                     Ok(report) => {
                         metrics::counter!(
                             "sybil_history_pruned_rows_total",
@@ -904,6 +915,11 @@ impl SequencerActorState {
                             "stream" => "price_points"
                         )
                         .increment(report.price_points_pruned as u64);
+                        metrics::counter!(
+                            "sybil_history_pruned_rows_total",
+                            "stream" => "price_candles"
+                        )
+                        .increment(report.price_candles_pruned as u64);
                         if let Some(min_height) = report.meta.blocks_full_min_height {
                             metrics::gauge!(
                                 "sybil_history_retention_min_height",
@@ -917,6 +933,16 @@ impl SequencerActorState {
                                 "stream" => "price_points"
                             )
                             .set(min_height as f64);
+                        }
+                        for (resolution_secs, min_bucket_ms) in
+                            &report.meta.price_candles_min_bucket_ms
+                        {
+                            metrics::gauge!(
+                                "sybil_history_retention_min_bucket_ms",
+                                "stream" => "price_candles",
+                                "resolution_secs" => resolution_secs.to_string()
+                            )
+                            .set(*min_bucket_ms as f64);
                         }
                     }
                     Err(error) => {
