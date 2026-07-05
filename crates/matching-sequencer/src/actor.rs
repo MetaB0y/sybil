@@ -849,7 +849,7 @@ impl SequencerActorState {
         problem.market_groups = self.sequencer.market_groups().to_vec();
         // mm_constraints intentionally empty (Tier 1 — no MM flash liquidity).
 
-        let last_clearing = self.sequencer.last_clearing_prices().clone();
+        let last_clearing = self.sequencer.analytics().last_clearing_prices().clone();
         let computed_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -972,7 +972,7 @@ impl SequencerActorState {
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
         metrics::gauge!("sybil_recent_block_history_len").set(self.block_history.len() as f64);
 
-        let analytics = self.sequencer.analytics_memory_stats();
+        let analytics = self.sequencer.analytics().memory_stats();
         metrics::gauge!("sybil_analytics_equity_known_accounts")
             .set(analytics.equity_known_accounts as f64);
         metrics::gauge!("sybil_analytics_equity_cached_accounts")
@@ -1025,7 +1025,7 @@ impl SequencerActorState {
             .increment(count);
         }
 
-        let market_volumes = self.sequencer.market_volumes();
+        let market_volumes = self.sequencer.analytics().market_volumes();
         for (market_id, prices) in &bp.block.clearing_prices {
             for (outcome, &price) in prices.iter().enumerate() {
                 metrics::gauge!(
@@ -1170,10 +1170,10 @@ impl SequencerActorState {
                 }
             }
 
-            let market_prices = self.sequencer.last_clearing_prices().get(&mid);
+            let market_prices = self.sequencer.analytics().last_clearing_prices().get(&mid);
             let yes_price = market_prices.and_then(|p| p.first().copied());
             let no_price = market_prices.and_then(|p| p.get(1).copied());
-            let volume = self.sequencer.market_volume(mid);
+            let volume = self.sequencer.analytics().market_volume(mid);
 
             if let Some(min_p) = query.min_yes_price {
                 if yes_price.unwrap_or(Nanos::ZERO) < min_p {
@@ -2056,13 +2056,13 @@ impl Actor for SequencerActor {
                 let _ = reply.send(blocks);
             }
             SequencerMsg::GetMarketPrices(reply) => {
-                let _ = reply.send(state.sequencer.last_clearing_prices().clone());
+                let _ = reply.send(state.sequencer.analytics().last_clearing_prices().clone());
             }
             SequencerMsg::GetMarketVolume(market_id, reply) => {
-                let _ = reply.send(state.sequencer.market_volume(market_id));
+                let _ = reply.send(state.sequencer.analytics().market_volume(market_id));
             }
             SequencerMsg::GetAllMarketVolumes(reply) => {
-                let _ = reply.send(state.sequencer.market_volumes().clone());
+                let _ = reply.send(state.sequencer.analytics().market_volumes().clone());
             }
             SequencerMsg::GetAllMarketMetadata(reply) => {
                 let _ = reply.send(state.sequencer.market_metadata_all().clone());
@@ -2096,7 +2096,10 @@ impl Actor for SequencerActor {
                         .await
                         .map_err(|error| SequencerError::Persistence(error.to_string())),
                     None => Ok(limit_price_point_page(
-                        state.sequencer.price_history(market_id, from_ms, to_ms),
+                        state
+                            .sequencer
+                            .analytics()
+                            .price_history(market_id, from_ms, to_ms),
                         before_height,
                         limit,
                     )),
@@ -2126,7 +2129,10 @@ impl Actor for SequencerActor {
                         .await
                         .map_err(|error| SequencerError::Persistence(error.to_string())),
                     None => Ok(price_candle_page_from_points(
-                        state.sequencer.price_history(market_id, from_ms, to_ms),
+                        state
+                            .sequencer
+                            .analytics()
+                            .price_history(market_id, from_ms, to_ms),
                         resolution_secs,
                         from_ms,
                         to_ms,
@@ -2148,10 +2154,12 @@ impl Actor for SequencerActor {
                             tracing::warn!(error = %e, account_id = account_id.0, "account_fills read failed; falling back to memory");
                             state
                                 .sequencer
+                                .analytics()
                                 .account_fills(account_id, market_id, limit, offset)
                         }),
                     None => state
                         .sequencer
+                        .analytics()
                         .account_fills(account_id, market_id, limit, offset),
                 };
                 let _ = reply.send(result);
@@ -2164,10 +2172,12 @@ impl Actor for SequencerActor {
                             tracing::warn!(error = %e, account_id = account_id.0, "account_fills_after read failed; falling back to memory");
                             state
                                 .sequencer
+                                .analytics()
                                 .account_fills_after(account_id, market_id, after, limit)
                         }),
                     None => state
                         .sequencer
+                        .analytics()
                         .account_fills_after(account_id, market_id, after, limit),
                 };
                 let _ = reply.send(result);
@@ -2183,6 +2193,7 @@ impl Actor for SequencerActor {
                         tracing::warn!(error = %e, account_id = account_id.0, "equity_series read failed; falling back to memory");
                         state
                             .sequencer
+                            .analytics()
                             .equity_series(account_id)
                             .into_iter()
                             .filter(|point| point.timestamp_ms >= since_ms)
@@ -2190,6 +2201,7 @@ impl Actor for SequencerActor {
                     }),
                     None => state
                         .sequencer
+                        .analytics()
                         .equity_series(account_id)
                         .into_iter()
                         .filter(|point| point.timestamp_ms >= since_ms)
@@ -2202,7 +2214,7 @@ impl Actor for SequencerActor {
                     Some(store) => {
                         match store.account_events(account_id, limit, before, category.clone()) {
                             Ok(mut events) => {
-                                events.extend(state.sequencer.pending_account_history(
+                                events.extend(state.sequencer.analytics().pending_account_history(
                                     account_id,
                                     before,
                                     category.as_deref(),
@@ -2216,7 +2228,7 @@ impl Actor for SequencerActor {
                             }
                             Err(e) => {
                                 tracing::warn!(error = %e, account_id = account_id.0, "account_events read failed; falling back to memory");
-                                state.sequencer.account_history(
+                                state.sequencer.analytics().account_history(
                                     account_id,
                                     limit,
                                     before,
@@ -2225,7 +2237,7 @@ impl Actor for SequencerActor {
                             }
                         }
                     }
-                    None => state.sequencer.account_history(
+                    None => state.sequencer.analytics().account_history(
                         account_id,
                         limit,
                         before,
@@ -2252,41 +2264,49 @@ impl Actor for SequencerActor {
                 let _ = reply.send(());
             }
             SequencerMsg::GetAllTraderCounts(reply) => {
-                let _ = reply.send(state.sequencer.all_trader_counts());
+                let _ = reply.send(state.sequencer.analytics().all_trader_counts());
             }
             SequencerMsg::GetPlatformTraderCounts(now_ms, reply) => {
-                let all_time = state.sequencer.platform_trader_count();
-                let last_24h = state.sequencer.platform_trader_24h_count(now_ms);
+                let all_time = state.sequencer.analytics().platform_trader_count();
+                let last_24h = state
+                    .sequencer
+                    .analytics()
+                    .platform_trader_24h_count(now_ms);
                 let _ = reply.send((all_time, last_24h));
             }
             SequencerMsg::GetEventTraderCount(market_ids, reply) => {
-                let _ = reply.send(state.sequencer.event_trader_count(&market_ids));
+                let _ = reply.send(state.sequencer.analytics().event_trader_count(&market_ids));
             }
             SequencerMsg::GetOpenBatchPlacers(market_id, reply) => {
                 let _ = reply.send(state.sequencer.open_batch_unique_placers(market_id));
             }
             SequencerMsg::GetPlatformVolumes(now_ms, reply) => {
-                let _ = reply.send(state.sequencer.platform_volumes(now_ms));
+                let _ = reply.send(state.sequencer.analytics().platform_volumes(now_ms));
             }
             SequencerMsg::GetPlatformWelfare(now_ms, reply) => {
-                let _ = reply.send(state.sequencer.platform_welfare(now_ms));
+                let _ = reply.send(state.sequencer.analytics().platform_welfare(now_ms));
             }
             SequencerMsg::GetAllMarketVolumes24h(now_ms, reply) => {
-                let _ = reply.send(state.sequencer.all_market_volumes_24h(now_ms));
+                let _ = reply.send(state.sequencer.analytics().all_market_volumes_24h(now_ms));
             }
             SequencerMsg::GetAllMarketPricesNHoursAgo(n, now_ms, reply) => {
-                let _ = reply.send(state.sequencer.all_market_prices_n_hours_ago(n, now_ms));
+                let _ = reply.send(
+                    state
+                        .sequencer
+                        .analytics()
+                        .all_market_prices_n_hours_ago(n, now_ms),
+                );
             }
             SequencerMsg::GetLiquiditySnapshot(reply) => {
-                let liq = state.sequencer.all_liquidity_avg10();
+                let liq = state.sequencer.analytics().all_liquidity_avg10();
                 let band = state.sequencer.liquidity_band_nanos();
                 let _ = reply.send((liq, band));
             }
             SequencerMsg::GetOrderStatsByMarket(reply) => {
-                let _ = reply.send(state.sequencer.all_market_order_stats());
+                let _ = reply.send(state.sequencer.analytics().all_market_order_stats());
             }
             SequencerMsg::GetPlatformOrderStats(now_ms, reply) => {
-                let _ = reply.send(state.sequencer.platform_order_stats(now_ms));
+                let _ = reply.send(state.sequencer.analytics().platform_order_stats(now_ms));
             }
         }
         Ok(())
@@ -3799,14 +3819,19 @@ mod tests {
                 BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
             assert_replayed(&restored_seq);
             let created_history =
-                restored_seq.pending_account_history(created.id, None, Some("funding"));
+                restored_seq
+                    .analytics()
+                    .pending_account_history(created.id, None, Some("funding"));
             assert!(
                 created_history
                     .iter()
                     .any(|event| matches!(event.kind, crate::aggregates::HistoryKind::Created)),
                 "restart round {restart_round} should expose pending account creation history"
             );
-            let funding_history = restored_seq.pending_account_history(aid, None, Some("funding"));
+            let funding_history =
+                restored_seq
+                    .analytics()
+                    .pending_account_history(aid, None, Some("funding"));
             assert!(
                 funding_history
                     .iter()

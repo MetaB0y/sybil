@@ -832,7 +832,10 @@ impl Harness {
             .unwrap_or_else(|error| {
                 panic!("{context}: durable account history read failed for {account_id:?}: {error}")
             });
-        events.extend(seq.pending_account_history(account_id, None, None));
+        events.extend(
+            seq.analytics()
+                .pending_account_history(account_id, None, None),
+        );
         events.sort_by(|a, b| (b.block_height, b.seq).cmp(&(a.block_height, a.seq)));
         events.dedup_by_key(|event| (event.account_id.0, event.block_height, event.seq));
         events

@@ -28,7 +28,7 @@ use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{
     BlockInvariantFailure, Rejection, RejectionReason, SequencerError, VerifierFailure,
 };
-use crate::market_info::{AccountFillCursor, AccountFillRecord, MarketMetadata, PricePoint};
+use crate::market_info::MarketMetadata;
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::OrderBook;
 use crate::settlement;
@@ -261,6 +261,67 @@ struct FinalizedBlockState {
     mark_prices: HashMap<MarketId, Vec<Nanos>>,
     minting_cost: i64,
     invariant_failures: Vec<BlockInvariantFailure>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct OrderHistoryOptions {
+    include_price: bool,
+    reason: Option<&'static str>,
+    required_nanos: Option<i64>,
+    available_nanos: Option<i64>,
+}
+
+impl OrderHistoryOptions {
+    fn with_price() -> Self {
+        Self {
+            include_price: true,
+            ..Self::default()
+        }
+    }
+
+    fn rejection(reason: &RejectionReason) -> Self {
+        let (required_nanos, available_nanos) = reason.amounts();
+        Self {
+            include_price: true,
+            reason: Some(reason.code()),
+            required_nanos,
+            available_nanos,
+        }
+    }
+
+    fn complete_set_rejection() -> Self {
+        Self {
+            include_price: true,
+            reason: Some("complete_set"),
+            ..Self::default()
+        }
+    }
+}
+
+fn record_order_history(
+    analytics: &mut AnalyticsState,
+    account_id: AccountId,
+    kind: crate::aggregates::HistoryKind,
+    block_height: u64,
+    timestamp_ms: u64,
+    order: &Order,
+    options: OrderHistoryOptions,
+) {
+    let mut event =
+        crate::aggregates::HistoryEvent::new(account_id, kind, block_height, timestamp_ms);
+    event.order_id = Some(order.id);
+    event.market_id = order.active_markets().next();
+    event.qty = Some(order.max_fill.0);
+    if options.include_price {
+        event.price_nanos = Some(order.limit_price.0);
+    }
+    let (side, outcome) = crate::aggregates::side_outcome_from_order(order);
+    event.side = side;
+    event.outcome = outcome;
+    event.reason = options.reason;
+    event.required_nanos = options.required_nanos;
+    event.available_nanos = options.available_nanos;
+    analytics.record_history(event);
 }
 
 struct WitnessArtifacts {
@@ -1158,84 +1219,8 @@ impl BlockSequencer {
         self.lifecycle.market_metadata_all()
     }
 
-    pub fn last_clearing_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
-        self.analytics.last_clearing_prices()
-    }
-
-    pub fn last_mark_prices(&self) -> &HashMap<MarketId, Vec<Nanos>> {
-        self.analytics.last_mark_prices()
-    }
-
-    pub fn price_history(
-        &self,
-        market_id: MarketId,
-        from_ms: Option<u64>,
-        to_ms: Option<u64>,
-    ) -> Vec<PricePoint> {
-        self.analytics.price_history(market_id, from_ms, to_ms)
-    }
-
-    pub fn market_volume(&self, market_id: MarketId) -> u64 {
-        self.analytics.market_volume(market_id)
-    }
-
-    pub fn market_volumes(&self) -> &HashMap<MarketId, u64> {
-        self.analytics.market_volumes()
-    }
-
-    /// Rolling 24h volume for one market (±1h bucket resolution).
-    pub fn market_volume_24h(&self, market_id: MarketId, now_ms: u64) -> u64 {
-        self.analytics.market_volume_24h(market_id, now_ms)
-    }
-
-    /// All-market 24h volume map. Used by `list_markets` to populate every
-    /// `MarketResponse.volume_24h_nanos` in one pass.
-    pub fn all_market_volumes_24h(&self, now_ms: u64) -> HashMap<MarketId, u64> {
-        self.analytics.all_market_volumes_24h(now_ms)
-    }
-
-    /// Platform-wide volumes `(all_time, last_24h)` in one shot.
-    pub fn platform_volumes(&self, now_ms: u64) -> (u64, u64) {
-        self.analytics.platform_volumes(now_ms)
-    }
-
-    /// Platform-wide welfare `(all_time, last_24h)` — cumulative running sum
-    /// plus the rolling 24h window. Caller supplies `now_ms` for a
-    /// deterministic 24h cutoff.
-    pub fn platform_welfare(&self, now_ms: u64) -> (i64, i64) {
-        self.analytics.platform_welfare(now_ms)
-    }
-
-    /// Per-market clearing prices N hours ago. None when the market is too
-    /// young to have a bucket bracketing `now_ms - n * 3_600_000`.
-    pub fn price_n_hours_ago(
-        &self,
-        market_id: MarketId,
-        n: u64,
-        now_ms: u64,
-    ) -> Option<(u64, u64)> {
-        self.analytics.price_n_hours_ago(market_id, n, now_ms)
-    }
-
-    /// All-market N-hours-ago clearing prices in one pass — used by
-    /// `list_markets` so the response stays a single round-trip.
-    pub fn all_market_prices_n_hours_ago(
-        &self,
-        n: u64,
-        now_ms: u64,
-    ) -> HashMap<MarketId, (u64, u64)> {
-        self.analytics.all_market_prices_n_hours_ago(n, now_ms)
-    }
-
-    /// Last-10-batch ±band liquidity score for one market.
-    pub fn liquidity_avg10(&self, market_id: MarketId) -> u64 {
-        self.analytics.liquidity_avg10(market_id)
-    }
-
-    /// All-market last-10-batch liquidity in one pass — companion to
-    /// `all_market_volumes_24h` for the `list_markets` round-trip.
-    pub fn all_liquidity_avg10(&self) -> HashMap<MarketId, u64> {
-        self.analytics.all_liquidity_avg10()
+    pub fn analytics(&self) -> &AnalyticsState {
+        &self.analytics
     }
 
     /// Width of the band the LiquidityTracker is currently scoring against.
@@ -1243,48 +1228,6 @@ impl BlockSequencer {
     /// the next `record_block` will apply.
     pub fn liquidity_band_nanos(&self) -> u64 {
         self.config.liquidity_band_nanos
-    }
-
-    /// All-market all-time placed/matched/unmatched stats. Single-pass
-    /// companion to `all_market_volumes_24h` for `list_markets`.
-    pub fn all_market_order_stats(&self) -> HashMap<MarketId, crate::aggregates::OrderStats> {
-        self.analytics.all_market_order_stats()
-    }
-
-    /// Platform order stats — `(all_time, last_24h)`. Caller supplies
-    /// `now_ms` so the 24h cutoff is deterministic.
-    pub fn platform_order_stats(
-        &self,
-        now_ms: u64,
-    ) -> (crate::aggregates::OrderStats, crate::aggregates::OrderStats) {
-        self.analytics.platform_order_stats(now_ms)
-    }
-
-    /// All-time unique trader count for one market.
-    pub fn trader_count(&self, market_id: MarketId) -> u32 {
-        self.analytics.trader_count(market_id)
-    }
-
-    /// All-time unique trader counts per market (only markets with ≥1
-    /// recorded placer). Used by `list_markets` to populate every
-    /// `MarketResponse.trader_count` in one pass.
-    pub fn all_trader_counts(&self) -> HashMap<MarketId, u32> {
-        self.analytics.all_trader_counts()
-    }
-
-    /// All-time platform-wide unique trader count (excludes MM, MINT).
-    pub fn platform_trader_count(&self) -> u32 {
-        self.analytics.platform_trader_count()
-    }
-
-    /// Unique platform traders in the last 24h (±1h resolution).
-    pub fn platform_trader_24h_count(&self, now_ms: u64) -> u32 {
-        self.analytics.platform_trader_24h_count(now_ms)
-    }
-
-    /// Union of per-market placers across an event's markets.
-    pub fn event_trader_count(&self, market_ids: &[MarketId]) -> u32 {
-        self.analytics.event_trader_count(market_ids)
     }
 
     pub fn open_orders_for_account(&self, account_id: AccountId) -> usize {
@@ -1308,59 +1251,8 @@ impl BlockSequencer {
             .sum()
     }
 
-    pub fn account_fills(
-        &self,
-        account_id: AccountId,
-        market_id_filter: Option<MarketId>,
-        limit: usize,
-        offset: usize,
-    ) -> Vec<AccountFillRecord> {
-        self.analytics
-            .account_fills(account_id, market_id_filter, limit, offset)
-    }
-
-    pub fn account_fills_after(
-        &self,
-        account_id: AccountId,
-        market_id_filter: Option<MarketId>,
-        after: Option<AccountFillCursor>,
-        limit: usize,
-    ) -> Vec<AccountFillRecord> {
-        self.analytics
-            .account_fills_after(account_id, market_id_filter, after, limit)
-    }
-
-    pub fn equity_series(&self, account_id: AccountId) -> Vec<crate::aggregates::EquityPoint> {
-        self.analytics.equity_series(account_id)
-    }
-
     pub fn record_history(&mut self, event: crate::aggregates::HistoryEvent) {
         self.analytics.record_history(event);
-    }
-
-    pub fn pending_account_history(
-        &self,
-        account_id: AccountId,
-        before: Option<(u64, u64)>,
-        category: Option<&str>,
-    ) -> Vec<crate::aggregates::HistoryEvent> {
-        self.analytics
-            .pending_account_history(account_id, before, category)
-    }
-
-    pub fn account_history(
-        &self,
-        account_id: AccountId,
-        limit: usize,
-        before: Option<(u64, u64)>,
-        category: Option<&str>,
-    ) -> Vec<crate::aggregates::HistoryEvent> {
-        self.analytics
-            .account_history(account_id, limit, before, category)
-    }
-
-    pub fn analytics_memory_stats(&self) -> AnalyticsMemoryStats {
-        self.analytics.memory_stats()
     }
 
     pub fn record_trader_placement_analytics(
@@ -1533,13 +1425,6 @@ impl BlockSequencer {
             .note_first_deposit_at(account_id, timestamp_ms);
     }
 
-    /// First-deposit timestamp for an account, in ms since UNIX epoch.
-    /// Returns `None` if the account never received a recorded deposit
-    /// (e.g., system accounts or a restart that dropped the sidecar).
-    pub fn first_deposit_ms(&self, account_id: AccountId) -> Option<u64> {
-        self.analytics.first_deposit_ms(account_id)
-    }
-
     pub fn portfolio_summary(
         &self,
         account_id: AccountId,
@@ -1553,7 +1438,7 @@ impl BlockSequencer {
         })?;
         Ok(crate::portfolio::compute_portfolio(
             account,
-            self.last_mark_prices(),
+            self.analytics.last_mark_prices(),
             self.analytics.first_deposit_ms(account_id).unwrap_or(0),
             self.analytics.total_fills(account_id),
             self.analytics.cost_basis_tracker(),
@@ -1956,22 +1841,15 @@ impl BlockSequencer {
                         side,
                         remaining_quantity: ro.order.max_fill.0,
                     });
-                {
-                    use crate::aggregates::{HistoryEvent, HistoryKind};
-                    let mut e = HistoryEvent::new(
-                        account_id,
-                        HistoryKind::Cancelled,
-                        self.height,
-                        timestamp_ms,
-                    );
-                    e.order_id = Some(order_id);
-                    e.market_id = ro.order.active_markets().next();
-                    e.qty = Some(ro.order.max_fill.0);
-                    let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
-                    e.side = side;
-                    e.outcome = outcome;
-                    self.analytics.record_history(e);
-                }
+                record_order_history(
+                    &mut self.analytics,
+                    account_id,
+                    crate::aggregates::HistoryKind::Cancelled,
+                    self.height,
+                    timestamp_ms,
+                    &ro.order,
+                    OrderHistoryOptions::default(),
+                );
                 Ok(())
             }
             Err(crate::order_book::CancelError::NotFound) => Err(SequencerError::OrderNotFound),
@@ -2781,45 +2659,30 @@ impl BlockSequencer {
             }
         }
         for ro in &expired {
-            use crate::aggregates::{HistoryEvent, HistoryKind};
-            let mut e = HistoryEvent::new(
+            record_order_history(
+                &mut self.analytics,
                 ro.account_id,
-                HistoryKind::Expired,
+                crate::aggregates::HistoryKind::Expired,
                 self.height,
                 timestamp_ms,
+                &ro.order,
+                OrderHistoryOptions::default(),
             );
-            e.order_id = Some(ro.order.id);
-            e.market_id = ro.order.active_markets().next();
-            e.qty = Some(ro.order.max_fill.0);
-            let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
-            e.side = side;
-            e.outcome = outcome;
-            self.analytics.record_history(e);
         }
         // Resting orders evicted by revalidation for a genuine per-order reason
         // (insufficient balance/position) surface as Rejected history events.
         // Market-inactive / account-gone / insolvent removals carry `None`.
         for (ro, reason) in &revalidated {
             let Some(reason) = reason else { continue };
-            use crate::aggregates::{HistoryEvent, HistoryKind};
-            let mut e = HistoryEvent::new(
+            record_order_history(
+                &mut self.analytics,
                 ro.account_id,
-                HistoryKind::Rejected,
+                crate::aggregates::HistoryKind::Rejected,
                 self.height,
                 timestamp_ms,
+                &ro.order,
+                OrderHistoryOptions::rejection(reason),
             );
-            e.order_id = Some(ro.order.id);
-            e.market_id = ro.order.active_markets().next();
-            e.qty = Some(ro.order.max_fill.0);
-            e.price_nanos = Some(ro.order.limit_price.0);
-            let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
-            e.side = side;
-            e.outcome = outcome;
-            e.reason = Some(reason.code());
-            let (req, avail) = reason.amounts();
-            e.required_nanos = req;
-            e.available_nanos = avail;
-            self.analytics.record_history(e);
         }
 
         // Build batch-local account map from resting orders
@@ -2983,26 +2846,15 @@ impl BlockSequencer {
                                     account_id: account_id.0,
                                     reason: sybil_verifier::RejectionReason::CompleteSetFormation,
                                 });
-                                {
-                                    use crate::aggregates::{HistoryEvent, HistoryKind};
-                                    let o = &accepted.order;
-                                    let mut e = HistoryEvent::new(
-                                        account_id,
-                                        HistoryKind::Rejected,
-                                        self.height,
-                                        timestamp_ms,
-                                    );
-                                    e.order_id = Some(o.id);
-                                    e.market_id = o.active_markets().next();
-                                    e.qty = Some(o.max_fill.0);
-                                    e.price_nanos = Some(o.limit_price.0);
-                                    let (side, outcome) =
-                                        crate::aggregates::side_outcome_from_order(o);
-                                    e.side = side;
-                                    e.outcome = outcome;
-                                    e.reason = Some("complete_set");
-                                    self.analytics.record_history(e);
-                                }
+                                record_order_history(
+                                    &mut self.analytics,
+                                    account_id,
+                                    crate::aggregates::HistoryKind::Rejected,
+                                    self.height,
+                                    timestamp_ms,
+                                    &accepted.order,
+                                    OrderHistoryOptions::complete_set_rejection(),
+                                );
                                 rejections.push(Rejection {
                                     order_id: accepted.order.id,
                                     account_id,
@@ -3019,24 +2871,15 @@ impl BlockSequencer {
                                 account_id: account_id.0,
                                 is_mm: false,
                             });
-                            {
-                                use crate::aggregates::{HistoryEvent, HistoryKind};
-                                let o = &accepted.order;
-                                let mut e = HistoryEvent::new(
-                                    account_id,
-                                    HistoryKind::Placed,
-                                    self.height,
-                                    timestamp_ms,
-                                );
-                                e.order_id = Some(o.id);
-                                e.market_id = o.active_markets().next();
-                                e.qty = Some(o.max_fill.0);
-                                e.price_nanos = Some(o.limit_price.0);
-                                let (side, outcome) = crate::aggregates::side_outcome_from_order(o);
-                                e.side = side;
-                                e.outcome = outcome;
-                                self.analytics.record_history(e);
-                            }
+                            record_order_history(
+                                &mut self.analytics,
+                                account_id,
+                                crate::aggregates::HistoryKind::Placed,
+                                self.height,
+                                timestamp_ms,
+                                &accepted.order,
+                                OrderHistoryOptions::with_price(),
+                            );
                             accepted_orders.push(accepted.order);
                             // Count this order as one distinct admission — once,
                             // at intake. Carried resting orders never re-enter
@@ -3055,28 +2898,15 @@ impl BlockSequencer {
                                 account_id: account_id.0,
                                 reason: convert_rejection_reason(&reason),
                             });
-                            {
-                                use crate::aggregates::{HistoryEvent, HistoryKind};
-                                let mut e = HistoryEvent::new(
-                                    account_id,
-                                    HistoryKind::Rejected,
-                                    self.height,
-                                    timestamp_ms,
-                                );
-                                e.order_id = Some(order_id);
-                                e.market_id = order.active_markets().next();
-                                e.qty = Some(order.max_fill.0);
-                                e.price_nanos = Some(order.limit_price.0);
-                                let (side, outcome) =
-                                    crate::aggregates::side_outcome_from_order(&order);
-                                e.side = side;
-                                e.outcome = outcome;
-                                e.reason = Some(reason.code());
-                                let (req, avail) = reason.amounts();
-                                e.required_nanos = req;
-                                e.available_nanos = avail;
-                                self.analytics.record_history(e);
-                            }
+                            record_order_history(
+                                &mut self.analytics,
+                                account_id,
+                                crate::aggregates::HistoryKind::Rejected,
+                                self.height,
+                                timestamp_ms,
+                                &order,
+                                OrderHistoryOptions::rejection(&reason),
+                            );
                             rejections.push(Rejection {
                                 order_id,
                                 account_id,
@@ -3248,20 +3078,15 @@ impl BlockSequencer {
             // before expire()'s `>` check would, so this is the path that fires
             // for every normally-resting order that reaches expiry.
             if *exit == crate::order_book::RestingExit::Expired {
-                use crate::aggregates::{HistoryEvent, HistoryKind};
-                let mut e = HistoryEvent::new(
+                record_order_history(
+                    &mut self.analytics,
                     ro.account_id,
-                    HistoryKind::Expired,
+                    crate::aggregates::HistoryKind::Expired,
                     self.height,
                     timestamp_ms,
+                    &ro.order,
+                    OrderHistoryOptions::default(),
                 );
-                e.order_id = Some(ro.order.id);
-                e.market_id = ro.order.active_markets().next();
-                e.qty = Some(ro.order.max_fill.0);
-                let (side, outcome) = crate::aggregates::side_outcome_from_order(&ro.order);
-                e.side = side;
-                e.outcome = outcome;
-                self.analytics.record_history(e);
             }
         }
         let pending_orders_after = self.order_book.len();
@@ -3499,8 +3324,8 @@ mod tests {
 
     fn restored_analytics_from(seq: &BlockSequencer) -> crate::store::AnalyticsRestoredState {
         crate::store::AnalyticsRestoredState {
-            last_clearing_prices: seq.last_clearing_prices().clone(),
-            market_volumes: seq.market_volumes().clone(),
+            last_clearing_prices: seq.analytics().last_clearing_prices().clone(),
+            market_volumes: seq.analytics().market_volumes().clone(),
             account_fills: Vec::new(),
             trader_tracker: Default::default(),
             price_tracker_volume: Default::default(),
@@ -4001,7 +3826,7 @@ mod tests {
         );
         let first = seq.produce_block(vec![sub], 1_000);
         assert_eq!(first.analytics.orders_by_market.get(&m0).unwrap().placed, 1);
-        assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
+        assert_eq!(seq.analytics().platform_order_stats(1_000).0.placed, 1);
         assert_eq!(seq.order_book.len(), 1, "unfilled order should rest");
 
         let second = seq.produce_block(vec![], 2_000);
@@ -4011,14 +3836,17 @@ mod tests {
             "carried resting order is live in the next batch"
         );
         assert_eq!(
-            seq.platform_order_stats(2_000).0.placed,
+            seq.analytics().platform_order_stats(2_000).0.placed,
             2,
             "placed is order-batch participation, not one-time admission"
         );
         // The distinct counter, by contrast, stays at 1: the order was
         // admitted once (block 1) and merely participated again in block 2.
         assert_eq!(
-            seq.platform_order_stats(2_000).0.placed_distinct,
+            seq.analytics()
+                .platform_order_stats(2_000)
+                .0
+                .placed_distinct,
             1,
             "distinct counts admission once, not per-batch participation"
         );
@@ -4049,7 +3877,7 @@ mod tests {
         let production = seq.produce_block(vec![sub], 1_000);
         let m0_stats = production.analytics.orders_by_market.get(&m0).unwrap();
         assert_eq!(m0_stats.placed, 1);
-        assert_eq!(seq.platform_order_stats(1_000).0.placed, 1);
+        assert_eq!(seq.analytics().platform_order_stats(1_000).0.placed, 1);
         assert_eq!(
             production.analytics.unique_placers, 0,
             "MM orders count as orders but not as unique traders"
@@ -4058,7 +3886,7 @@ mod tests {
         // block and resolve in-place, so exactly one of the two ticks. This is
         // the property that lets distinct-placed reconcile with matched +
         // unmatched once carried orders have cycled out.
-        let stats = seq.platform_order_stats(1_000).0;
+        let stats = seq.analytics().platform_order_stats(1_000).0;
         assert_eq!(stats.placed_distinct, 1, "MM flash order admitted once");
         assert_eq!(
             stats.matched + stats.unmatched,
@@ -4424,8 +4252,8 @@ mod tests {
             bridge_state: BridgeState::default(),
             admit_log: Vec::new(),
             analytics: crate::store::AnalyticsRestoredState {
-                last_clearing_prices: seq_a.last_clearing_prices().clone(),
-                market_volumes: seq_a.market_volumes().clone(),
+                last_clearing_prices: seq_a.analytics().last_clearing_prices().clone(),
+                market_volumes: seq_a.analytics().market_volumes().clone(),
                 account_fills: Vec::new(),
                 trader_tracker: Default::default(),
                 price_tracker_volume: Default::default(),
@@ -4542,8 +4370,8 @@ mod tests {
             bridge_state: BridgeState::default(),
             admit_log: vec![replayed_admit],
             analytics: crate::store::AnalyticsRestoredState {
-                last_clearing_prices: committed.last_clearing_prices().clone(),
-                market_volumes: committed.market_volumes().clone(),
+                last_clearing_prices: committed.analytics().last_clearing_prices().clone(),
+                market_volumes: committed.analytics().market_volumes().clone(),
                 account_fills: Vec::new(),
                 trader_tracker: Default::default(),
                 price_tracker_volume: Default::default(),
@@ -4648,8 +4476,8 @@ mod tests {
             bridge_state: BridgeState::default(),
             admit_log: vec![replayed_admit],
             analytics: crate::store::AnalyticsRestoredState {
-                last_clearing_prices: committed.last_clearing_prices().clone(),
-                market_volumes: committed.market_volumes().clone(),
+                last_clearing_prices: committed.analytics().last_clearing_prices().clone(),
+                market_volumes: committed.analytics().market_volumes().clone(),
                 account_fills: Vec::new(),
                 trader_tracker: Default::default(),
                 price_tracker_volume: Default::default(),
@@ -5022,7 +4850,7 @@ mod tests {
         );
 
         // No trades yet → zero platform welfare.
-        assert_eq!(seq.platform_welfare(0), (0, 0));
+        assert_eq!(seq.analytics().platform_welfare(0), (0, 0));
 
         // Block 1: a crossing trade (bid 0.60 ≥ ask 0.40) → positive welfare.
         let buy1 = OrderSubmission {
@@ -5041,7 +4869,7 @@ mod tests {
             .total_welfare;
         assert!(w1 > 0, "crossing trade should produce positive welfare");
         // Live wiring: after one block, platform welfare == that block's scalar.
-        assert_eq!(seq.platform_welfare(1_000), (w1, w1));
+        assert_eq!(seq.analytics().platform_welfare(1_000), (w1, w1));
 
         // Block 2: another crossing trade — both sides still have capacity.
         let buy2 = OrderSubmission {
@@ -5060,7 +4888,7 @@ mod tests {
             .total_welfare;
         assert!(w2 > 0, "second crossing trade should also produce welfare");
         // All-time + 24h both accumulate the two blocks' welfare.
-        assert_eq!(seq.platform_welfare(2_000), (w1 + w2, w1 + w2));
+        assert_eq!(seq.analytics().platform_welfare(2_000), (w1 + w2, w1 + w2));
     }
 
     // --- Block height counter ---
@@ -6271,10 +6099,11 @@ mod tests {
             SequencerConfig::default(),
         );
 
-        assert!(seq.first_deposit_ms(aid).is_none());
+        assert!(seq.analytics().first_deposit_ms(aid).is_none());
 
         seq.fund_account(aid, 10 * NANOS_PER_DOLLAR as i64).unwrap();
         let ts_first = seq
+            .analytics()
             .first_deposit_ms(aid)
             .expect("first deposit should be recorded after fund_account");
 
@@ -6283,6 +6112,7 @@ mod tests {
 
         seq.fund_account(aid, NANOS_PER_DOLLAR as i64).unwrap();
         let ts_second = seq
+            .analytics()
             .first_deposit_ms(aid)
             .expect("first_deposit_ms must persist after a second deposit");
 
@@ -6425,6 +6255,7 @@ mod tests {
         // Verify the mark at this point differs from 50c so the subsequent
         // assertion is meaningful.
         let mark_after_cross = seq
+            .analytics()
             .last_mark_prices()
             .get(&m0)
             .and_then(|v| v.first().copied())
@@ -6451,6 +6282,7 @@ mod tests {
 
         // The mark must now be the book midpoint: (400_000_000 + 600_000_000) / 2 = 500_000_000.
         let mark_after_spread = seq
+            .analytics()
             .last_mark_prices()
             .get(&m0)
             .and_then(|v| v.first().copied())

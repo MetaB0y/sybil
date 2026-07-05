@@ -36,6 +36,7 @@ pub use actor::{
     MarketSearchResult, SequencerHandle, SequencerStateProof, SequencerStateProofKind,
     DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_PRICE_HISTORY_QUERY_POINTS,
 };
+pub use analytics::AnalyticsState;
 pub use block::{Block, BlockAnalytics, BlockProduction, SealedBlock};
 pub use bridge::{
     BridgeBlockData, BridgeState, BridgeWithdrawalRequest, EthAddress, L1Deposit, WithdrawalLeaf,

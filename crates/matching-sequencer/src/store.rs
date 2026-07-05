@@ -3646,7 +3646,8 @@ mod tests {
             crate::sequencer::SequencerConfig::default(),
         );
         assert_eq!(
-            seq.account_fills(account_id, Some(market_id), 10, 0),
+            seq.analytics()
+                .account_fills(account_id, Some(market_id), 10, 0),
             vec![fill]
         );
     }
@@ -3695,14 +3696,16 @@ mod tests {
         );
 
         assert!(
-            !seq.account_fills(buyer, None, 10, 0).is_empty(),
+            !seq.analytics().account_fills(buyer, None, 10, 0).is_empty(),
             "sanity check: block should record buyer fills before persistence"
         );
         store.save_block(seq.snapshot()).await.unwrap();
 
         let restored = store.load_state().await.unwrap().unwrap();
         let restored_seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
-        let fills = restored_seq.account_fills(buyer, Some(market_id), 10, 0);
+        let fills = restored_seq
+            .analytics()
+            .account_fills(buyer, Some(market_id), 10, 0);
         assert_eq!(fills.len(), 1);
         assert_eq!(fills[0].fill_qty, 5);
         assert_eq!(fills[0].block_height, 1);
@@ -3910,6 +3913,7 @@ mod tests {
 
         assert!(prepared
             .next_sequencer()
+            .analytics()
             .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
             .is_empty());
 
@@ -3919,6 +3923,7 @@ mod tests {
             .unwrap();
         seq.commit_prepared_block(prepared).unwrap();
         assert!(seq
+            .analytics()
             .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
             .is_empty());
 
@@ -4041,7 +4046,9 @@ mod tests {
         );
 
         let restored_seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
-        let fills = restored_seq.account_fills(buyer, Some(market_id), 10, 0);
+        let fills = restored_seq
+            .analytics()
+            .account_fills(buyer, Some(market_id), 10, 0);
         assert_eq!(fills.len(), 1);
         assert_eq!(fills[0].fill_qty, 5);
         assert_eq!(fills[0].block_height, 1);
