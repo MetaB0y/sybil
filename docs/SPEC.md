@@ -323,7 +323,7 @@ Surface (~50 endpoints; the OpenAPI spec currently under-reports a few — candl
 | Accounts | `POST /v1/accounts` (dev), `GET /{id}`, `POST /{id}/fund` (dev), `POST /{id}/keys` (register P256 key), `GET .../portfolio·fills·equity·events·orders·bridge-key` |
 | Markets | `GET /v1/markets`, `/summary`, `/search`, `/prices`, `/{id}`, `/{id}/prices/history·candles`, `/{id}/orderbook` (dev), `/{id}/open-batch`, `POST /v1/markets` (dev), `/groups`, `/{id}/resolve` (attested or dev-admin), `/{id}/metadata` (dev), `/prices/reference` (dev) |
 | Orders | `POST /v1/orders` (unsigned, optional `mm_budget_nanos`), `POST /v1/orders/signed`, `POST /v1/orders/cancel/signed`, `GET /v1/orders/pending` (dev) |
-| Blocks | `GET /v1/blocks`, `/latest`, `/{height}`, **SSE** `/v1/blocks/stream`, **WS** `/v1/blocks/ws?from_block=N` (versioned envelope, replay/resume, lag + retention-gap signals) |
+| Blocks | `GET /v1/blocks`, `/latest`, `/{height}`, **WS** `/v1/blocks/ws?from_block=N` (first-party versioned envelope, replay/resume, lag + retention-gap signals), **SSE** `/v1/blocks/stream` (third-party live convenience) |
 | Bridge | `GET /v1/bridge/status`, `POST deposits|withdrawals` (dev), `GET /withdrawals/{id}` |
 | Proofs | `GET /v1/proofs/state/{leaf_key_hex}` — qMDB inclusion/exclusion against the committed root |
 | Feeds | `GET|POST /v1/feeds` (POST dev) |
@@ -345,7 +345,7 @@ Surface (~50 endpoints; the OpenAPI spec currently under-reports a few — candl
 |---|---|---|
 | `SyncActor` | Gamma REST `/events?active=true` | creates markets (`resolution_template=polymarket_mirror`) and NegRisk groups; pushes display metadata + raw event JSON; persists bidirectional ID mapping |
 | `FeedActor` | CLOB WebSocket midpoints (REST fallback, 15-min proactive reconnect) | publishes `PriceSnapshot` via watch channel |
-| `MmActor` | Sybil SSE block stream + `PriceSnapshot` | per block: Avellaneda–Stoikov quotes (inventory-skewed reservation price, adaptive spread, position caps), rotated across markets with NegRisk group-coverage awareness, submitted as one-shot IOC orders with `mm_budget_nanos` |
+| `MmActor` | Sybil WebSocket block stream with `?from_block=` resume + `PriceSnapshot` | per block: Avellaneda–Stoikov quotes (inventory-skewed reservation price, adaptive spread, position caps), rotated across markets with NegRisk group-coverage awareness, submitted as one-shot IOC orders with `mm_budget_nanos` |
 | `ResolutionActor` | Gamma `/events?closed=true` | signs P256 attestations for clean binary settlements and resolves the mirrored markets |
 
 This is the system's liquidity and reality anchor on the devnet: real markets, real reference prices, real resolutions.

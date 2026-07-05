@@ -24,7 +24,7 @@ Polls Polymarket Gamma API for new events, creates corresponding markets/groups 
 WebSocket connection to Polymarket CLOB for real-time prices. Falls back to REST polling. Publishes `PriceSnapshot` via watch channel.
 
 ### MmActor (`mm.rs`)
-Listens to Sybil SSE block stream. Each block: reads latest Polymarket reference price, submits BuyYes + BuyNo as flash liquidity (mm_budget_nanos).
+Listens to the Sybil WebSocket block stream with `?from_block=` resume. Each block: reads latest Polymarket reference price, submits BuyYes + BuyNo as flash liquidity (mm_budget_nanos).
 
 ### ResolutionActor (`resolution.rs`)
 Polls mirrored Polymarket markets for resolution status and submits signed/authorized Sybil resolutions when outcomes settle.
@@ -39,7 +39,7 @@ Polls mirrored Polymarket markets for resolution status and submits signed/autho
 | `polymarket/types.rs` | Gamma event/market types, WS message types |
 | `polymarket/gamma.rs` | Gamma REST client, CLOB midpoint client |
 | `polymarket/ws.rs` | CLOB WebSocket price feed |
-| `sybil/client.rs` | Sybil HTTP client + SSE streaming using `sybil-api-types` DTOs |
+| `sybil/client.rs` | Legacy Sybil HTTP client surface; shared Rust client lives in `sybil-client` |
 | `sync.rs` | SyncActor |
 | `feed.rs` | FeedActor |
 | `mm.rs` | MmActor |

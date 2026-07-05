@@ -37,6 +37,22 @@ impl From<sybil_client::Error> for Error {
             // poisoned-market-from-400-body detection) keeps working unchanged.
             sybil_client::Error::Api { status, body } => Self::SybilApi { status, body },
             sybil_client::Error::Http(err) => Self::Http(err),
+            sybil_client::Error::Json(err) => Self::Json(err),
+            sybil_client::Error::WebSocket(message)
+            | sybil_client::Error::Protocol(message) => Self::WebSocket(message),
+            sybil_client::Error::BlockStreamLagged {
+                skipped,
+                last_sent_height,
+            } => Self::WebSocket(format!(
+                "block stream lagged: skipped {skipped}, last_sent_height={last_sent_height:?}"
+            )),
+            sybil_client::Error::RetentionGap {
+                requested_height,
+                retention_min_height,
+                head_height,
+            } => Self::WebSocket(format!(
+                "block stream retention gap: requested {requested_height}, retention_min_height={retention_min_height}, head_height={head_height}"
+            )),
         }
     }
 }

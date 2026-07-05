@@ -69,11 +69,16 @@ pub async fn get_block_by_height(
 }
 
 /// GET /v1/blocks/stream
+///
+/// Third-party convenience SSE stream. First-party clients should use
+/// `GET /v1/blocks/ws?from_block=N` for versioned replay/resume and explicit
+/// lag/retention-gap signalling.
 #[utoipa::path(
     get,
     path = "/v1/blocks/stream",
+    description = "Third-party convenience SSE stream of block events. First-party clients should use GET /v1/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.",
     responses(
-        (status = 200, description = "SSE stream of block events")
+        (status = 200, description = "Third-party convenience SSE stream of block events")
     )
 )]
 pub async fn stream_blocks(
@@ -96,11 +101,12 @@ pub async fn stream_blocks(
 #[utoipa::path(
     get,
     path = "/v1/blocks/ws",
+    description = "First-party WebSocket block stream. Supports ?from_block=N to replay retained committed blocks from that height before following live blocks. If from_block is below the retained blocks_full floor, the stream emits a retention_gap envelope and closes so clients can cold-resync.",
     params(
-        ("from_block" = Option<u64>, Query, description = "Replay from this block height")
+        ("from_block" = Option<u64>, Query, description = "Replay retained committed blocks from this height before switching to live")
     ),
     responses(
-        (status = 101, description = "WebSocket upgrade for block streaming")
+        (status = 101, description = "First-party WebSocket upgrade for block streaming")
     )
 )]
 pub async fn ws_blocks(

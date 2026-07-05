@@ -89,6 +89,7 @@ enum CliError {
     Json(serde_json::Error),
     Yaml(serde_yaml::Error),
     Api { status: StatusCode, message: String },
+    Client(String),
     InvalidArgs(String),
 }
 
@@ -100,6 +101,7 @@ impl Display for CliError {
             Self::Json(err) => write!(f, "{err}"),
             Self::Yaml(err) => write!(f, "{err}"),
             Self::Api { status, message } => write!(f, "API {status}: {message}"),
+            Self::Client(message) => write!(f, "{message}"),
             Self::InvalidArgs(message) => write!(f, "{message}"),
         }
     }
@@ -248,6 +250,7 @@ impl ApiClient {
                 Err(CliError::Api { status, message })
             }
             Err(sybil_client::Error::Http(err)) => Err(CliError::Http(err)),
+            Err(err) => Err(CliError::Client(err.to_string())),
         }
     }
 

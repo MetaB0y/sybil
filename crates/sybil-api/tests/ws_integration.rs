@@ -11,6 +11,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use matching_sequencer::{SequencerConfig, SequencerHandle};
 use sybil_api_types::ws::{BlockStreamMessage, BlockStreamPayload};
+use sybil_client::SybilClient;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -212,6 +213,42 @@ async fn ws_from_block_older_than_retention_sends_gap_envelope() {
         }
         other => panic!("expected retention_gap, got {:?}", other),
     }
+}
+
+#[tokio::test]
+async fn sybil_client_stream_blocks_uses_ws_from_block_resume() {
+    let (addr, handle) = spawn_server().await;
+    let b0 = handle.produce_block().await.unwrap();
+    let b1 = handle.produce_block().await.unwrap();
+
+    let client = SybilClient::with_defaults(format!("http://{addr}"), None);
+    let block_stream = client
+        .stream_blocks_from_block(Some(b0.canonical.header.height))
+        .await
+        .unwrap();
+    tokio::pin!(block_stream);
+
+    let first = timeout(Duration::from_secs(5), block_stream.next())
+        .await
+        .expect("timeout waiting for first replay block")
+        .expect("stream ended")
+        .expect("stream error");
+    assert_eq!(first.height, b0.canonical.header.height);
+
+    let second = timeout(Duration::from_secs(5), block_stream.next())
+        .await
+        .expect("timeout waiting for second replay block")
+        .expect("stream ended")
+        .expect("stream error");
+    assert_eq!(second.height, b1.canonical.header.height);
+
+    let live = handle.produce_block().await.unwrap();
+    let live_msg = timeout(Duration::from_secs(5), block_stream.next())
+        .await
+        .expect("timeout waiting for live block")
+        .expect("stream ended")
+        .expect("stream error");
+    assert_eq!(live_msg.height, live.canonical.header.height);
 }
 
 #[tokio::test]

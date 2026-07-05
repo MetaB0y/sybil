@@ -15,4 +15,38 @@ pub enum Error {
     /// A transport-level or response-decoding failure from `reqwest`.
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
+
+    /// A WebSocket transport failure while connecting to or reading the block
+    /// stream.
+    #[error("WebSocket error: {0}")]
+    WebSocket(String),
+
+    /// A JSON decoding failure for the WebSocket block stream envelope.
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// The WebSocket stream sent an unsupported or malformed protocol message.
+    #[error("block stream protocol error: {0}")]
+    Protocol(String),
+
+    /// The server-side broadcast buffer overflowed. Reconnect with
+    /// `last_sent_height + 1` when present, or cold-resync if the client never
+    /// received a block on this connection.
+    #[error(
+        "block stream lagged: skipped {skipped} blocks, last_sent_height={last_sent_height:?}"
+    )]
+    BlockStreamLagged {
+        skipped: u64,
+        last_sent_height: Option<u64>,
+    },
+
+    /// Requested replay starts before the retained `blocks_full` floor.
+    #[error(
+        "block stream retention gap: requested {requested_height}, retention_min_height={retention_min_height}, head_height={head_height}"
+    )]
+    RetentionGap {
+        requested_height: u64,
+        retention_min_height: u64,
+        head_height: u64,
+    },
 }

@@ -8,7 +8,8 @@
 //! It is typed against [`sybil_api_types`] (the shared DTO crate) and covers the
 //! union of both former surfaces: health, accounts, markets, market groups,
 //! resolution, orders, off-block metadata/snapshots/reference prices, and the
-//! SSE block stream. The Python SDK (`arena/`) is intentionally separate.
+//! first-party WebSocket block stream. The Python SDK (`arena/`) is
+//! intentionally separate.
 
 mod client;
 mod error;

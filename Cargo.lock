@@ -4235,6 +4235,7 @@ dependencies = [
  "serde_json",
  "sybil-api-types",
  "thiserror 2.0.18",
+ "tokio-tungstenite 0.29.0",
  "tracing",
 ]
 

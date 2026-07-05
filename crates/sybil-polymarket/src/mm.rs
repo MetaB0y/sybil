@@ -438,6 +438,7 @@ impl MmActor {
 
     pub async fn run(mut self, cancel: tokio_util::sync::CancellationToken) {
         info!(account_id = self.account_id, "MmActor started");
+        let mut next_from_block: Option<u64> = None;
 
         loop {
             // Wait for at least one market to be mirrored
@@ -458,12 +459,18 @@ impl MmActor {
                 continue;
             }
 
-            // Connect to SSE block stream
+            // Connect to the first-party WebSocket block stream. On reconnect,
+            // resume from the next height after the last block this actor saw.
             info!(
                 markets = self.state.markets.len(),
+                from_block = next_from_block,
                 "connecting to block stream"
             );
-            let block_stream = match self.sybil_client.stream_blocks().await {
+            let block_stream = match self
+                .sybil_client
+                .stream_blocks_from_block(next_from_block)
+                .await
+            {
                 Ok(s) => s,
                 Err(e) => {
                     warn!(error = %e, "failed to connect block stream, retrying in 5s");
@@ -489,7 +496,23 @@ impl MmActor {
                     block = block_stream.next() => {
                         match block {
                             Some(Ok(block)) => {
+                                next_from_block = Some(block.height.saturating_add(1));
                                 self.on_block(&block).await;
+                            }
+                            Some(Err(sybil_client::Error::RetentionGap {
+                                requested_height,
+                                retention_min_height,
+                                head_height,
+                            })) => {
+                                warn!(
+                                    requested_height,
+                                    retention_min_height,
+                                    head_height,
+                                    "block stream resume point is below retention floor; resyncing positions and resuming at floor"
+                                );
+                                self.sync_positions().await;
+                                next_from_block = Some(retention_min_height);
+                                break; // Reconnect from retained floor
                             }
                             Some(Err(e)) => {
                                 warn!(error = %e, "block stream error");

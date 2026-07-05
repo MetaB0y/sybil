@@ -130,18 +130,21 @@ Amounts are in **base units** (smallest tradeable quantity).
 
 Rate limits are per API key.
 
-## WebSocket (Coming Soon)
+## Realtime Blocks
 
-Real-time updates via WebSocket:
+First-party clients consume committed blocks over WebSocket:
 
+```text
+wss://<host>/v1/blocks/ws?from_block=123
 ```
-wss://ws.sybil.exchange/v1
-```
 
-Channels:
-- `market:{market_id}` — Market updates
-- `trades:{market_id}` — Trade feed
-- `account` — Your account updates
+`from_block` is optional. When present, the server replays retained committed
+blocks from that height through the current head, emits `replay_complete`, then
+continues live. If the requested height is below the retained block-history
+floor, the stream emits `retention_gap` and closes so the client can cold-resync.
+
+`GET /v1/blocks/stream` remains available as a third-party SSE convenience, but
+it is live-only and does not provide replay, lag, or retained-floor signalling.
 
 ## SDKs
 

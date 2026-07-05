@@ -6,23 +6,35 @@ status: current
 last_verified: 2026-04-30
 ---
 
-The SSE (Server-Sent Events) block stream is the primary way trading bots interact with the exchange in real time. When a client connects to `GET /v1/blocks/stream`, they receive a persistent HTTP connection that pushes each new block as it's produced — fills, clearing prices, rejections, and state updates. This is a one-way channel: the server pushes, the client listens.
+The SSE (Server-Sent Events) block stream is a third-party convenience endpoint
+for simple tooling and HTTP-native consumers. When a client connects to
+`GET /v1/blocks/stream`, they receive a persistent HTTP connection that pushes
+each new block as it's produced — fills, clearing prices, rejections, and state
+updates. This is a one-way channel: the server pushes, the client listens.
 
-SSE was chosen over WebSockets for simplicity: it's unidirectional (server-to-client only, which is exactly what block notifications need), works through HTTP proxies and load balancers without special configuration, automatically reconnects on connection loss, and is natively supported by browser `EventSource` APIs. Bots don't need to send data back over the stream — they submit orders via the [[REST API]]'s `POST /v1/orders` endpoint and then receive the result in the next block via SSE.
+First-party clients use the [[WebSocket Block Stream]] at
+`GET /v1/blocks/ws?from_block=N`. The WebSocket transport is versioned, can
+replay retained committed blocks from a requested height, signals lag
+explicitly, and returns a `retention_gap` envelope when `from_block` is below
+the retained `blocks_full` floor. SSE intentionally does not provide those
+resume guarantees: it is a thin live re-encoding of the same block broadcast.
 
-The [[Bot Framework]] is built around this pattern. A bot's main loop is `async for block in client.stream_blocks()` — it receives each block, analyzes clearing prices and its own fills, decides on new orders, and submits them via HTTP. The [[Python SDK]] wraps SSE into an async iterator that handles reconnection and parsing. This event-driven architecture means bots are reactive: they respond to market state changes rather than polling for them.
+The endpoint remains useful for `curl`, quick scripts, and third-party clients
+that prefer plain HTTP streams over a WebSocket upgrade. Long-lived Sybil-owned
+clients should reconnect with WebSocket `?from_block=<last_seen_height + 1>`
+instead.
 
 ## Key Properties
-- `GET /v1/blocks/stream` — persistent HTTP connection with server push
+- `GET /v1/blocks/stream` — third-party convenience HTTP stream with server push
 - Each block event includes fills, clearing prices, rejections, state root, and events root
 - Unidirectional: server → client only
-- Auto-reconnect on connection loss
-- Primary interaction pattern for [[Bot Framework|trading bots]]
-- Simpler than WebSockets: works through proxies, no upgrade handshake
+- No versioned envelope, replay cursor, lag signal, or retained-floor contract
+- First-party clients use `GET /v1/blocks/ws?from_block=N`
+- Simple proxy-friendly stream for external tooling
 
 ## Where This Lives
 > `crates/sybil-api/src/sse.rs` — SSE stream implementation
-> `arena/sybil_client/` — `stream_blocks()` async iterator
+> third-party scripts and generated clients that still prefer SSE
 
 ## See Also
 - [[REST API]] — order submission endpoint (the other half of the bot interaction)

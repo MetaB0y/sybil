@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
-use tracing::debug;
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::error::Error;
+use sybil_api_types::ws::{BlockStreamMessage, BlockStreamPayload, BLOCK_STREAM_VERSION};
 use sybil_api_types::*;
 
 /// HTTP client for the Sybil API. This is THE shared client (SYB-171); it is
@@ -18,8 +20,8 @@ pub struct SybilClient {
 
 impl SybilClient {
     /// Construct a client over a caller-provided `reqwest::Client`. Use this
-    /// when you want to control the transport (TLS backend, connection pool,
-    /// per-request timeouts such as the long-lived SSE stream).
+    /// when you want to control the HTTP transport (TLS backend, connection
+    /// pool, per-request timeouts).
     pub fn new(http: Client, base_url: String, service_token: Option<String>) -> Self {
         Self {
             http,
@@ -29,9 +31,8 @@ impl SybilClient {
     }
 
     /// Convenience constructor that builds a `reqwest::Client` with sane default
-    /// timeouts. Callers with their own transport requirements (e.g. the
-    /// long-poll SSE stream) should use [`SybilClient::new`] with a client they
-    /// configure themselves.
+    /// timeouts. Callers with their own HTTP transport requirements should use
+    /// [`SybilClient::new`] with a client they configure themselves.
     pub fn with_defaults(base_url: String, service_token: Option<String>) -> Self {
         let http = Client::builder()
             .timeout(Duration::from_secs(30))
@@ -42,6 +43,29 @@ impl SybilClient {
 
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
+    }
+
+    fn block_ws_url(&self, from_block: Option<u64>) -> Result<String, Error> {
+        let http_url = self.url("/v1/blocks/ws");
+        let mut url = if let Some(rest) = http_url.strip_prefix("http://") {
+            format!("ws://{rest}")
+        } else if let Some(rest) = http_url.strip_prefix("https://") {
+            format!("wss://{rest}")
+        } else if http_url.starts_with("ws://") || http_url.starts_with("wss://") {
+            http_url
+        } else {
+            return Err(Error::Protocol(format!(
+                "base_url must start with http:// or https:// for block stream: {}",
+                self.base_url
+            )));
+        };
+
+        if let Some(from) = from_block {
+            url.push(if url.contains('?') { '&' } else { '?' });
+            url.push_str("from_block=");
+            url.push_str(&from.to_string());
+        }
+        Ok(url)
     }
 
     fn with_service_auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -406,46 +430,124 @@ impl SybilClient {
         Ok(())
     }
 
-    // === Blocks (SSE) ===
+    // === Blocks (WebSocket) ===
 
-    /// Stream blocks via SSE. Returns an async iterator of `BlockResponse`.
-    /// The caller should handle reconnection on error.
+    /// Stream blocks via the first-party WebSocket transport.
+    ///
+    /// Returns an async iterator of `BlockResponse`. The caller should handle
+    /// reconnection on error; callers tracking a last seen height should use
+    /// [`SybilClient::stream_blocks_from_block`] so reconnects replay missed
+    /// committed blocks before switching back to live.
     pub async fn stream_blocks(
         &self,
     ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>>, Error> {
-        let resp = self
-            .with_service_auth(self.http.get(self.url("/v1/blocks/stream")))
-            .timeout(std::time::Duration::from_secs(86400)) // SSE stream: effectively no timeout
-            .send()
-            .await?;
-        let resp = self.check_response(resp).await?;
+        self.stream_blocks_from_block(None).await
+    }
 
-        let stream = futures_util::stream::unfold(resp, |mut resp| async move {
+    /// Stream blocks via WebSocket, optionally replaying from `from_block`.
+    ///
+    /// When `from_block` is `Some(N)`, the server sends every retained block
+    /// from `N` through the current head, then follows the live stream. If `N`
+    /// is below the retained `blocks_full` floor, the stream yields
+    /// [`Error::RetentionGap`] so the caller can cold-resync.
+    ///
+    /// The caller should handle reconnection on error.
+    pub async fn stream_blocks_from_block(
+        &self,
+        from_block: Option<u64>,
+    ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>>, Error> {
+        let url = self.block_ws_url(from_block)?;
+        let (socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .map_err(|e| Error::WebSocket(e.to_string()))?;
+
+        let stream = futures_util::stream::unfold(socket, |mut socket| async move {
             loop {
-                match resp.chunk().await {
-                    Ok(Some(chunk)) => {
-                        let text = String::from_utf8_lossy(&chunk);
-                        for line in text.lines() {
-                            if let Some(data) = line.strip_prefix("data:") {
-                                let data = data.trim();
-                                if data.is_empty() {
-                                    continue;
-                                }
-                                match serde_json::from_str::<BlockResponse>(data) {
-                                    Ok(block) => return Some((Ok(block), resp)),
-                                    Err(e) => {
-                                        debug!("skipping unparseable SSE data: {}", e);
-                                    }
-                                }
+                let msg = match socket.next().await {
+                    Some(Ok(msg)) => msg,
+                    Some(Err(e)) => return Some((Err(Error::WebSocket(e.to_string())), socket)),
+                    None => return None,
+                };
+
+                match msg {
+                    Message::Text(text) => match decode_block_stream_message(text.as_ref()) {
+                        Ok(Some(block)) => return Some((Ok(block), socket)),
+                        Ok(None) => continue,
+                        Err(e) => return Some((Err(e), socket)),
+                    },
+                    Message::Binary(bytes) => {
+                        let text = match std::str::from_utf8(bytes.as_ref()) {
+                            Ok(text) => text,
+                            Err(e) => {
+                                return Some((
+                                    Err(Error::Protocol(format!(
+                                        "non-UTF8 binary block stream message: {e}"
+                                    ))),
+                                    socket,
+                                ));
                             }
+                        };
+                        match decode_block_stream_message(text) {
+                            Ok(Some(block)) => return Some((Ok(block), socket)),
+                            Ok(None) => continue,
+                            Err(e) => return Some((Err(e), socket)),
                         }
                     }
-                    Ok(None) => return None, // Stream ended
-                    Err(e) => return Some((Err(Error::Http(e)), resp)),
+                    Message::Ping(data) => {
+                        if let Err(e) = socket.send(Message::Pong(data)).await {
+                            return Some((Err(Error::WebSocket(e.to_string())), socket));
+                        }
+                    }
+                    Message::Pong(_) => {}
+                    Message::Close(Some(frame)) => {
+                        if frame.reason.is_empty() {
+                            return None;
+                        }
+                        return Some((
+                            Err(Error::WebSocket(format!(
+                                "server closed block stream ({}): {}",
+                                frame.code, frame.reason
+                            ))),
+                            socket,
+                        ));
+                    }
+                    Message::Close(None) => return None,
+                    Message::Frame(_) => {}
                 }
             }
         });
 
         Ok(stream)
+    }
+}
+
+fn decode_block_stream_message(text: &str) -> Result<Option<BlockResponse>, Error> {
+    let msg: BlockStreamMessage = serde_json::from_str(text)?;
+    if msg.v != BLOCK_STREAM_VERSION {
+        return Err(Error::Protocol(format!(
+            "unsupported block stream version {}; expected {}",
+            msg.v, BLOCK_STREAM_VERSION
+        )));
+    }
+
+    match msg.payload {
+        BlockStreamPayload::Block { data } => Ok(Some(*data)),
+        BlockStreamPayload::ReplayComplete { .. } => Ok(None),
+        BlockStreamPayload::Lagged {
+            skipped,
+            last_sent_height,
+        } => Err(Error::BlockStreamLagged {
+            skipped,
+            last_sent_height,
+        }),
+        BlockStreamPayload::RetentionGap {
+            requested_height,
+            retention_min_height,
+            head_height,
+        } => Err(Error::RetentionGap {
+            requested_height,
+            retention_min_height,
+            head_height,
+        }),
     }
 }
