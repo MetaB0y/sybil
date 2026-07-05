@@ -148,3 +148,6 @@ Reset app state only when intentional:
 ```bash
 just deploy-reset-state CONFIRM
 ```
+
+For a full consensus-breaking redeploy (fresh genesis, verifier-adapter repin),
+follow `docs/runbooks/devnet-redeploy.md`.
