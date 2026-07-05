@@ -188,10 +188,11 @@ out by design, or (c) one durable half + one volatile half.
 **Headline:** most of the data is safe in prod. Balances, positions, cost basis,
 **open _and_ closed/cancelled/expired/rejected orders**, fills, the equity curve,
 the full account history, and per-market price history all persist across
-restart. The genuine restart-loss is now the **block-stream/list ring** (🟣 —
+restart. Raw Polymarket event JSON **now persists across restart** too (🟢 —
+SYB-153 stopped the boot-wipe; the snapshot dir is preserved on the durable
+volume). The genuine restart-loss is now the **block-stream/list ring** (🟣 —
 only the last ~100 blocks are queryable/list-replayable after a restart, though
-chain height survives) and **raw Polymarket event JSON** (🔴 — the snapshot dir
-is wiped on every boot). Historical chart serving still needs retention/pruning
+chain height survives). Historical chart serving still needs retention/pruning
 policy so raw/candle tables do not grow forever.
 
 ### List 1 — Data that must be persisted (action list)
@@ -205,8 +206,9 @@ that still need backend work:
    *Product decision: users should be able to browse all past batches, so the
    Activity page becomes a real block explorer and every batch-derived panel
    survives restart.*
-2. **Raw Polymarket event JSON** — stop wiping `event_snapshots` on boot, or
-   move snapshots into a durable table with explicit retention.
+2. ~~**Raw Polymarket event JSON** — stop wiping `event_snapshots` on boot.~~
+   ✅ **Done (SYB-153):** boot no longer wipes the snapshot dir; files on the
+   durable volume survive restart and are served immediately (no re-sync wait).
 3. **Price-history retention/pruning** — raw rows and candles are durable now;
    add per-resolution retention so long-running prod does not retain every
    price point forever.
@@ -223,10 +225,11 @@ that still need backend work:
 | Dev › Aggregates | Latest-block sidecar + recent cancellations | Lost on restart + only last ~100 batches | same (`block_history` ring) |
 | Home (`/`) | Clearing ticker strip | Lost on restart (quiet ~16 min until refill) | same (`block_history` ring) |
 
-> **List 2 (intended short-lived, no change needed):** raw Polymarket event JSON
-> (re-fetched by the mirror in ~2 min), the open-batch indicative snapshot (live
-> in-flight batch), and the rolling 24h volume / liquidity windows (trimmed by
-> design, and they already persist across restart). _Full List 2 table TBD._
+> **List 2 (intended short-lived, no change needed):** the open-batch indicative
+> snapshot (live in-flight batch) and the rolling 24h volume / liquidity windows
+> (trimmed by design, and they already persist across restart). _Full List 2
+> table TBD._ (Raw Polymarket event JSON was here as "re-fetched in ~2 min", but
+> SYB-153 made it durable across restart — see List 1.)
 
 ### Account-scoped (your portfolio data)
 
@@ -258,7 +261,7 @@ that still need backend work:
 | Activity overview — all-time volume / welfare / traders / orders | `GET /v1/activity/overview` (`all_time.*`) | 🟢 Persistent | Uncapped/forever: unbounded trader HashSet, i64 welfare sum, u64 counters; tracker snapshots written to redb every block + restored. **Concern**: trader sets serialized in full every block (memory/IO growth). |
 | Activity overview — last-24h | `GET /v1/activity/overview` (`last_24h.*`) | 🟣 Mixed | **Persistent across restart**, inherently **rolling** ≤25 hourly buckets/tracker (cap 25 each), summed over `[now-24h, now]`. Reads its own persisted buckets, not the block ring. |
 | Event trader count | `GET /v1/events/{id}/traders` | 🟢 Persistent | All-time **unbounded** union of per-market placer sets (the 25-bucket cap is only the 24h platform count); redb-backed + restored. Correct immediately after restart. |
-| Raw Polymarket event JSON | `GET /v1/events/{id}/raw` | 🔴 Restart-lost | Files on the persistent volume, but the `event_snapshots` dir is `remove_dir_all`'d + recreated on **every startup** (`main.rs:127-142`) → 404 for up to ~2 min until the mirror re-syncs (120s). No cap, ~zero cross-restart retention. |
+| Raw Polymarket event JSON | `GET /v1/events/{id}/raw` | 🟢 Persistent | `{event_id}.json` files on the durable volume (`event_snapshot_dir`). SYB-153 removed the boot-wipe: `main` now only ensures the dir exists, so previously mirrored raw JSON is served immediately on restart (no ~2 min 404 window). Refresh = idempotent overwrite-by-event-id upsert each mirror cycle (atomic temp+rename write; file mtime = last-updated marker). No retention cap. (Durable only where the dir is on a persistent volume — prod mounts `sybil-data:/data`; dev `docker-compose.yml` has no `/data` volume on `sybil-api`, so dev stays ephemeral until a volume is added.) |
 | Block stream / batches / heights | `GET /v1/blocks*`, `/v1/blocks/ws` | 🟣 Mixed | Exact-height `GET /v1/blocks/{height}` falls back to durable redb `blocks_full` after ring eviction/restart. Still ring-only: `/v1/blocks` recent list, `/latest`, and WS replay. Ring cap = **100** (~16.7 min @ 10s blocks), FIFO. Chain **height** is persisted → "Total batches" resumes, does not zero out. |
 | Open-batch indicative snapshot | `GET /v1/markets/{id}/open-batch` (dev) | 🔴 Restart-lost | In-memory intra-block placer state; resets to the fresh open batch on restart. Loss is inherent (the in-flight, not-yet-sealed batch) — acceptable. |
 
@@ -275,10 +278,13 @@ that still need backend work:
    and WS replay still read only the 100-deep RAM ring. Add store-backed
    `GetRecentBlocks`/`GetLatestBlock` and replay paths using the existing
    retention metadata.
-2. **🔴 medium — Stop wiping `event_snapshots` on startup.** `main.rs:127-142`
-   `remove_dir_all`s raw event JSON on every boot, causing ~2 min of 404s. Drop
-   the wipe (keep ensure-exists) so files on the persistent volume survive, or
-   shorten the mirror sync interval. Makes the raw-JSON half 🟢.
+2. ~~**🔴 medium — Stop wiping `event_snapshots` on startup.**~~ ✅ **Done
+   (SYB-153).** `main` no longer `remove_dir_all`s the snapshot dir on boot — it
+   only ensures the dir exists, so raw event JSON on the persistent volume
+   survives restart and is served immediately (no ~2 min 404 window). Writes are
+   now atomic (temp+rename). Raw-JSON half is 🟢. Follow-up: dev
+   `docker-compose.yml` still lacks a `/data` volume mount on `sybil-api`, so dev
+   snapshots remain container-ephemeral (prod already mounts `sybil-data:/data`).
 3. **🟣 medium — Add price-history retention/pruning.** Raw price points and
    candles now survive restart, but there is no policy for pruning raw rows or
    keeping progressively coarser candle resolutions. Add a retention table/knob

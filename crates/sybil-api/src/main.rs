@@ -133,16 +133,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(std::io::Error::other(msg).into());
     }
 
+    // SYB-153: raw Polymarket event JSON must survive restart. The snapshot dir
+    // lives on the durable data volume; ensure it exists WITHOUT wiping it, so
+    // previously mirrored raw event JSON is served immediately on boot (no ~2 min
+    // 404 window until the mirror re-syncs). Each mirror cycle re-pushes an
+    // idempotent overwrite-by-event-id upsert, so stale entries self-heal.
     if !config.event_snapshot_dir.is_empty() {
         let dir = std::path::Path::new(&config.event_snapshot_dir);
-        if dir.exists() {
-            if let Err(e) = std::fs::remove_dir_all(dir) {
-                tracing::warn!(dir = %dir.display(), error = %e, "failed to wipe event snapshot dir");
-            }
-        }
         match std::fs::create_dir_all(dir) {
             Ok(()) => {
-                tracing::info!(dir = %dir.display(), "event snapshot dir ready (wiped on startup)")
+                tracing::info!(dir = %dir.display(), "event snapshot dir ready (persisted across restart)")
             }
             Err(e) => {
                 tracing::warn!(dir = %dir.display(), error = %e, "failed to create event snapshot dir")

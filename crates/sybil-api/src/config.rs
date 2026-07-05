@@ -215,8 +215,9 @@ pub struct ApiConfig {
     pub market_ref_data_path: String,
 
     /// Directory holding full Polymarket event JSON snapshots, served at
-    /// `GET /v1/events/{id}/raw` and wiped+recreated on startup. Empty =
-    /// disabled (the raw endpoints return 404).
+    /// `GET /v1/events/{id}/raw`. Persisted across restarts (created if missing,
+    /// never wiped on boot — SYB-153) so mirror raw JSON survives a restart
+    /// without waiting for the next sync. Empty = disabled (raw endpoints 404).
     #[arg(long, default_value = "", env = "SYBIL_EVENT_SNAPSHOT_DIR")]
     pub event_snapshot_dir: String,
 

@@ -210,7 +210,8 @@ pub struct AppState {
     /// on the next sync cycle).
     pub market_ref_data_path: Option<PathBuf>,
     /// Directory for full Polymarket event JSON snapshots (`{event_id}.json`).
-    /// `None` disables the raw-event endpoints. Wiped on startup in `main`.
+    /// `None` disables the raw-event endpoints. Ensured to exist (never wiped)
+    /// on startup in `main` (SYB-153) so snapshots persist across restart.
     pub event_snapshot_dir: Option<PathBuf>,
     /// Path to arena's live decision database, when configured.
     pub arena_db_path: String,
@@ -233,10 +234,10 @@ impl AppState {
         let event_snapshot_dir = if config.event_snapshot_dir.is_empty() {
             None
         } else {
-            // Enabled only if the dir exists. `main` wipes+recreates it on
-            // startup; if that creation failed, self-disable (the endpoints
-            // return a clean "snapshots disabled" 404) instead of serving
-            // misleading per-event errors.
+            // Enabled only if the dir exists. `main` creates it on startup
+            // (without wiping — SYB-153); if that creation failed, self-disable
+            // (the endpoints return a clean "snapshots disabled" 404) instead of
+            // serving misleading per-event errors.
             let p = PathBuf::from(&config.event_snapshot_dir);
             p.is_dir().then_some(p)
         };
