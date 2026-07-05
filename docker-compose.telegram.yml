@@ -23,7 +23,11 @@ services:
       - "-remoteWrite.url=http://victoriametrics:8428"
       - "-remoteRead.url=http://victoriametrics:8428"
       - "-rule=/etc/alerts/rules.yml"
+      - "-rule=/etc/alerts/block-production.yml"
       - "-notifier.url=http://telegram-alerts:8080"
+      # PagerDuty-lite / generic webhook slot: uncomment and point at any
+      # Alertmanager-v2 webhook receiver (vmalert fans out to every -notifier.url).
+      # - "-notifier.url=${ALERT_WEBHOOK_URL}"
       - "-httpListenAddr=:8880"
     depends_on:
       victoriametrics:

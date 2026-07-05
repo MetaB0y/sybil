@@ -1,0 +1,96 @@
+# promtool unit tests for the block-production latency SLA (SYB-42).
+#
+# Run:  promtool test rules deploy/vmalert/tests/block-production_test.yml
+#
+# These rules are Prometheus-compatible, so promtool evaluates them even though
+# production uses VictoriaMetrics vmalert. Rule-file paths are relative to THIS
+# file. This directory is deliberately a subdirectory so vmalert's explicit
+# per-file -rule flags never pick the test up as a live rule set.
+#
+# Coverage:
+#   1. Synthetic overload — p99 solve latency held at 150ms fires the SLA
+#      warning; a run at 400ms additionally fires the critical tier.
+#   2. Healthy baseline — p99 at 50ms keeps both latency alerts silent.
+#   3. Stall — a flat sybil_blocks_produced counter with the API up fires
+#      BlockProductionStalled from rules.yml.
+
+rule_files:
+  - ../block-production.yml
+  - ../rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 1. Synthetic overload: p99 pinned at 150ms breaches the 100ms SLA.
+  - interval: 1m
+    input_series:
+      - series: 'sybil_solve_time_seconds{quantile="0.99", job="sybil-api", instance="sybil-api:3000"}'
+        values: "0.15+0x10"
+    alert_rule_test:
+      # Below the 5m `for`, the warning has not fired yet.
+      - eval_time: 4m
+        alertname: BlockProductionP99LatencyHigh
+        exp_alerts: []
+      # After 5m sustained above SLA, the warning fires; critical stays silent
+      # because 150ms is under the 250ms critical threshold.
+      - eval_time: 6m
+        alertname: BlockProductionP99LatencyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: sequencer
+            exp_annotations:
+              summary: "Block-production p99 latency above the 100ms SLA"
+              description: "p99 solve time has stayed above the 100ms SLA for 5m (current p99: 150ms). See docs/runbooks/block-production-latency.md."
+      - eval_time: 6m
+        alertname: BlockProductionP99LatencyCritical
+        exp_alerts: []
+
+  # 1b. Heavier overload: p99 at 400ms trips both tiers.
+  - interval: 1m
+    input_series:
+      - series: 'sybil_solve_time_seconds{quantile="0.99", job="sybil-api", instance="sybil-api:3000"}'
+        values: "0.40+0x10"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: BlockProductionP99LatencyCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: sequencer
+            exp_annotations:
+              summary: "Block-production p99 latency is half the block budget"
+              description: "p99 solve time has stayed above 250ms for 5m (current p99: 400ms) — over half the 500ms block interval. Block cadence and the redb commit backlog are at risk. See docs/runbooks/block-production-latency.md."
+
+  # 2. Healthy baseline: p99 at 50ms keeps the SLA alerts silent.
+  - interval: 1m
+    input_series:
+      - series: 'sybil_solve_time_seconds{quantile="0.99", job="sybil-api", instance="sybil-api:3000"}'
+        values: "0.05+0x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: BlockProductionP99LatencyHigh
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: BlockProductionP99LatencyCritical
+        exp_alerts: []
+
+  # 3. Stall: block counter frozen while the API is up -> BlockProductionStalled.
+  - interval: 1m
+    input_series:
+      - series: 'sybil_blocks_produced{job="sybil-api", instance="sybil-api:3000"}'
+        values: "1000+0x8"
+      - series: 'up{job="sybil-api", instance="sybil-api:3000"}'
+        values: "1+0x8"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: BlockProductionStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: sequencer
+              job: "sybil-api"
+              instance: "sybil-api:3000"
+            exp_annotations:
+              summary: "No blocks produced in the last 2m"
+              description: "sybil-api is up but has not produced any blocks for 2m — block production may be stalled."

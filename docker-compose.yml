@@ -171,6 +171,7 @@ services:
       - "-remoteWrite.url=http://victoriametrics:8428"
       - "-remoteRead.url=http://victoriametrics:8428"
       - "-rule=/etc/alerts/rules.yml"
+      - "-rule=/etc/alerts/block-production.yml"
       - "-notifier.blackhole"
       - "-httpListenAddr=:8880"
     depends_on:

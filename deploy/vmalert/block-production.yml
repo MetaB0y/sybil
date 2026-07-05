@@ -1,0 +1,81 @@
+# Block-production latency SLA — recording + alerting rules (SYB-42).
+#
+# Loaded by vmalert alongside rules.yml (see the `-rule` flags in
+# docker-compose.yml / docker-compose.telegram.yml). Runbook:
+# docs/runbooks/block-production-latency.md
+#
+# Metric provenance (all exported by sybil-api /metrics):
+#   * sybil_solve_time_seconds  — recorded once per block in
+#     crates/matching-sequencer/src/actor.rs as a metrics-rs histogram!.
+#     The Prometheus exporter (metrics-exporter-prometheus 0.18.1) is installed
+#     with PrometheusBuilder::new().install_recorder() and NO set_buckets(), so
+#     histograms render as SUMMARIES: a rolling p99 is published directly as
+#     sybil_solve_time_seconds{quantile="0.99"} (60s window = 3 x 20s buckets),
+#     alongside _sum and _count. There is no _bucket series, so p99 is read from
+#     the quantile label rather than histogram_quantile().
+#   * sybil_blocks_produced     — monotonic counter, one increment per produced
+#     block (no _total suffix under this exporter).
+#   * sybil_orders_per_block    — per-block order count, summary (p99 label).
+#
+# SLA rationale (thresholds):
+#   Block cadence is SYBIL_BLOCK_INTERVAL_MS: 500ms prod default, 10000ms in the
+#   dev compose. The solver runs once per block and its wall-time must fit inside
+#   the interval or blocks slip. SLA target: p99 solve latency < 100ms sustained.
+#   - 100ms keeps p99 solve <= 20% of the 500ms prod block budget, leaving room
+#     for redb persistence (spawn_blocking, SYB-169), verification and proof
+#     export. It is also strictly tighter than the pre-existing SolveTimeHigh
+#     alert, which pages on the *average* crossing 100ms; this SLA is tail-aware.
+#   - 250ms critical: solve now consumes half the 500ms block budget, cadence is
+#     at risk and the redb commit backlog begins to compound.
+#   The 5m `for` combines with the 60s summary window to ignore single heavy
+#   blocks / GC pauses while catching sustained degradation.
+#
+# The complementary "no blocks at all" signal is BlockProductionStalled in
+# rules.yml (rate(sybil_blocks_produced[2m]) == 0 and up == 1, critical). It is
+# intentionally not duplicated here; the runbook treats it as the top signal.
+
+groups:
+  - name: block_production_sla_recording
+    interval: 30s
+    rules:
+      # Rolling p99 block-production (solve) latency, in seconds.
+      - record: sequencer:solve_time_seconds:p99
+        expr: max(sybil_solve_time_seconds{quantile="0.99"})
+
+      # Average solve latency over 5m (companion to the p99 SLA; drives the
+      # Grafana latency panel and lets operators compare mean vs tail).
+      - record: sequencer:solve_time_seconds:avg5m
+        expr: |
+          sum(rate(sybil_solve_time_seconds_sum[5m]))
+          / clamp_min(sum(rate(sybil_solve_time_seconds_count[5m])), 0.001)
+
+      # Block-production throughput (blocks/sec) over 2m.
+      - record: sequencer:blocks_produced:rate2m
+        expr: sum(rate(sybil_blocks_produced[2m]))
+
+      # p99 orders per block — context for the "at N orders/block" SLA framing.
+      - record: sequencer:orders_per_block:p99
+        expr: max(sybil_orders_per_block{quantile="0.99"})
+
+  - name: block_production_sla
+    interval: 30s
+    rules:
+      - alert: BlockProductionP99LatencyHigh
+        expr: max(sybil_solve_time_seconds{quantile="0.99"}) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "Block-production p99 latency above the 100ms SLA"
+          description: "p99 solve time has stayed above the 100ms SLA for 5m (current p99: {{ $value | humanizeDuration }}). See docs/runbooks/block-production-latency.md."
+
+      - alert: BlockProductionP99LatencyCritical
+        expr: max(sybil_solve_time_seconds{quantile="0.99"}) > 0.25
+        for: 5m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Block-production p99 latency is half the block budget"
+          description: "p99 solve time has stayed above 250ms for 5m (current p99: {{ $value | humanizeDuration }}) — over half the 500ms block interval. Block cadence and the redb commit backlog are at risk. See docs/runbooks/block-production-latency.md."
