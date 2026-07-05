@@ -41,6 +41,7 @@ services:
       - "--mm-max-orders-per-block=64"
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--sync-interval-secs=120"
+      - "--curated-markets-path=/etc/sybil/curated_markets.json"
 
   sybil-arena:
     volumes:

@@ -217,6 +217,58 @@ impl GammaClient {
         Ok(all_events)
     }
 
+    /// Fetch curated Polymarket events by Gamma event id (SYB-150). Gamma's
+    /// `/events` endpoint accepts repeated `id` query parameters; we chunk at 50
+    /// ids to bound URL length (same bound the condition-id fetch uses). Only
+    /// events with at least one tradeable (active, non-closed) market are
+    /// returned, mirroring the tail filter of [`Self::fetch_active_events`], so
+    /// downstream sync logic sees the same event shape regardless of selection
+    /// mode. Category / volume filters are intentionally NOT applied: the
+    /// curated list is the allowlist.
+    pub async fn fetch_curated_events(
+        &self,
+        event_ids: &[String],
+    ) -> Result<Vec<GammaEvent>, Error> {
+        if event_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut all_events = Vec::with_capacity(event_ids.len());
+        for chunk in event_ids.chunks(50) {
+            let url = format!("{}/events", self.gamma_url);
+            let mut query = Vec::with_capacity(chunk.len() + 1);
+            query.push(("limit", chunk.len().to_string()));
+            query.extend(chunk.iter().map(|id| ("id", id.clone())));
+
+            let resp = self.http.get(&url).query(&query).send().await?;
+
+            if !resp.status().is_success() {
+                let status = resp.status().as_u16();
+                let body = resp.text().await.unwrap_or_default();
+                return Err(Error::PolymarketApi(format!(
+                    "GET /events?id returned {}: {}",
+                    status, body
+                )));
+            }
+
+            let events: Vec<GammaEvent> = resp.json().await?;
+            for event in events {
+                if event.markets.iter().any(|m| m.active && !m.closed) {
+                    all_events.push(event);
+                } else {
+                    debug!(
+                        event_id = event.id,
+                        title = event.title,
+                        "curated event has no tradeable market; skipping"
+                    );
+                }
+            }
+        }
+
+        debug!(count = all_events.len(), "fetched curated events");
+        Ok(all_events)
+    }
+
     /// Fetch Gamma markets by Polymarket condition id. Gamma accepts repeated
     /// `condition_ids` query parameters; keep chunks at 50 ids to bound URL
     /// length, matching the analytics snapshot tooling.

@@ -74,6 +74,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::parse();
     info!(?config, "starting sybil-polymarket");
+
+    // Curated seed set (SYB-150). When a path is configured the mirror syncs
+    // ONLY these events (by Polymarket event id); a parse failure is fatal so a
+    // typo can't silently fall back to the broad volume scan.
+    let curated_event_ids: Vec<String> = if config.curated_markets_path.is_empty() {
+        Vec::new()
+    } else {
+        let curated = sybil_polymarket::curated::CuratedMarkets::load(std::path::Path::new(
+            &config.curated_markets_path,
+        ))?;
+        let ids = curated.event_ids();
+        info!(
+            path = %config.curated_markets_path,
+            events = ids.len(),
+            "loaded curated markets seed set; mirroring by event id only"
+        );
+        ids
+    };
     let sybil_service_token = std::env::var("SYBIL_SERVICE_TOKEN")
         .ok()
         .and_then(|value| (!value.trim().is_empty()).then_some(value));
@@ -184,9 +202,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Channels — size MM channel to fit all existing markets for bootstrap.
     // When category filters are configured, apply the same filtered universe to
     // persisted mappings so an old broad mapping does not silently re-expand MM.
-    let allowed_conditions = if config.mirror_categories.is_empty()
-        && config.mirror_excluded_categories.is_empty()
-    {
+    let allowed_conditions = if !curated_event_ids.is_empty() {
+        // Curated mode: scope the MM bootstrap to the curated events' active
+        // conditions so a broad persisted mapping cannot re-expand the MM.
+        match gamma_client.fetch_curated_events(&curated_event_ids).await {
+            Ok(events) => {
+                let conditions: HashSet<String> = events
+                    .iter()
+                    .flat_map(|event| event.markets.iter())
+                    .filter(|market| market.active && !market.closed)
+                    .map(|market| market.condition_id.clone())
+                    .collect();
+                info!(
+                    allowed_conditions = conditions.len(),
+                    "scoped MM bootstrap to curated events"
+                );
+                Some(conditions)
+            }
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "failed to fetch curated events; bootstrapping all persisted mapped markets"
+                );
+                None
+            }
+        }
+    } else if config.mirror_categories.is_empty() && config.mirror_excluded_categories.is_empty() {
         None
     } else {
         match gamma_client
@@ -303,6 +344,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             feed_tx,
             mm_tx,
             mm_live_rx,
+            curated_event_ids,
         );
         actor.run(cancel_sync).await;
     });

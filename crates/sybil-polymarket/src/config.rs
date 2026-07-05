@@ -124,6 +124,13 @@ pub struct Config {
     #[arg(long, default_value = "", env = "MAPPING_STORE_PATH")]
     pub mapping_store_path: String,
 
+    /// Path to a curated markets JSON file (SYB-150). When set, the mirror
+    /// syncs ONLY the Polymarket events listed there, addressed by event id,
+    /// instead of the volume-ranked category scan. Empty = legacy broad-mirror
+    /// mode driven by `--mirror-categories` / `--max-events`.
+    #[arg(long, default_value = "", env = "CURATED_MARKETS_PATH")]
+    pub curated_markets_path: String,
+
     /// Path to the P256 signing key used to attest to resolutions. Empty
     /// disables the ResolutionActor (mirrored markets won't auto-resolve).
     /// The key's compressed SEC1 pubkey must be registered on sybil-api as

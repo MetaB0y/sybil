@@ -1,0 +1,65 @@
+{
+  "description": "Curated Polymarket mirror seed set for the AI/company/tech launch (SYB-150). Addressed by Polymarket Gamma event id so selection is deterministic and auditable. When `--curated-markets-path`/`CURATED_MARKETS_PATH` points at this file, the mirror fetches exactly these events by id and mirrors their active, non-closed child markets (instead of the volume-ranked category scan). Each resulting Sybil market carries its Polymarket condition id, parent event id, and the Polymarket event URL as mirror provenance. To update: verify an event is still live via `https://gamma-api.polymarket.com/events?id=<event_id>` (active=true, closed=false, >=1 active child market), then add/remove an entry here and redeploy sybil-polymarket. Verified live 2026-07-05.",
+  "events": [
+    {
+      "event_id": "556382",
+      "slug": "which-company-has-best-ai-model-end-of-2026",
+      "title": "Which company has best AI model end of 2026?",
+      "note": "NegRisk multi-outcome (-> Sybil MarketGroup). 15 active company outcomes + placeholder inactive slots (Company A..K) that the mirror skips. Ends 2026-12-31."
+    },
+    {
+      "event_id": "333737",
+      "slug": "will-a-chinese-company-have-the-best-ai-model-by-december-31",
+      "title": "Will a Chinese company have the best AI model by December 31?",
+      "note": "Single binary market. Ends 2026-12-31."
+    },
+    {
+      "event_id": "206787",
+      "slug": "which-companys-ai-will-first-hit-1550-on-chatbot-arena-in-2026",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?",
+      "note": "NegRisk multi-outcome (-> Sybil MarketGroup). ~11 active outcomes incl. a 'None in 2026' leg + placeholder inactive slots the mirror skips. Ends 2026-12-31."
+    },
+    {
+      "event_id": "79075",
+      "slug": "us-enacts-ai-safety-bill-before-2027",
+      "title": "U.S. enacts AI safety bill before 2027?",
+      "note": "Single binary market. Ends 2026-12-31."
+    },
+    {
+      "event_id": "85299",
+      "slug": "ai-bubble-burst-by",
+      "title": "AI bubble burst by...? (2026 leg)",
+      "note": "Container event 'AI bubble burst by...?' with three dated legs; only 'AI bubble burst in 2026?' (groupItemTitle 'December 31, 2026', condition 0x857398c4502bc725fef7efb3cd503a30d3e18e486ab8173fdf505a76cf83b168) is active. The March-31-2026 and Dec-31-2025 legs are already closed and are filtered out by the mirror's active/!closed gate. This is the ticket's 'AI bubble burst by December 31, 2026?' candidate. Ends 2026-12-31."
+    },
+    {
+      "event_id": "96557",
+      "slug": "will-ai-be-charged-with-a-crime-before-2027",
+      "title": "Will AI be charged with a crime before 2027?",
+      "note": "Single binary market. Ends 2026-12-31."
+    },
+    {
+      "event_id": "192873",
+      "slug": "what-kind-of-product-will-openai-announce-in-2026",
+      "title": "What kind of product will OpenAI announce in 2026?",
+      "note": "Multi-outcome (non-NegRisk): 10 independent product-type binaries sharing the event id, grouped as a frontend multi-card (no MarketGroup constraint). Ends 2026-12-31."
+    },
+    {
+      "event_id": "83771",
+      "slug": "which-ceos-will-be-out-before-2027",
+      "title": "Which CEOs will be out before 2027?",
+      "note": "Multi-outcome (non-NegRisk): 6 CEO binaries sharing the event id. The Tim Cook (Apple) leg is already closed and is skipped by the active/!closed gate. Ends 2026-12-31."
+    },
+    {
+      "event_id": "500753",
+      "slug": "will-anthropics-valuation-hit-by-december-31",
+      "title": "Will Anthropic's valuation hit __ by December 31?",
+      "note": "VALUATION-THRESHOLD EVENT (ticket 'configured threshold'). Non-NegRisk ladder of 13 threshold binaries (LOW $600B..$800B, HIGH $1.0T..$5.0T) sharing the event id; the mirror mirrors the whole live ladder as a frontend multi-card. Configured/at-the-money threshold documented for the ticket = HIGH $1.75T (condition 0xc68fea7daba83292fdd7bb704f26d38c4f678cbc2ff69c4175d47c55e74b4321), the live market closest to 50/50 (YES ~0.475) as of 2026-07-05. The $1.0T and $1.1T legs are already resolved YES (closed) and are skipped. Event resolves 2027-01-01T12:00:00Z (labelled 'by December 31')."
+    },
+    {
+      "event_id": "500775",
+      "slug": "will-openais-valuation-hit-by-december-31",
+      "title": "Will OpenAI's valuation hit __ by December 31?",
+      "note": "VALUATION-THRESHOLD EVENT (ticket 'configured threshold'). Non-NegRisk ladder of 15 threshold binaries (LOW $500B..$800B, HIGH $900B..$5.0T) sharing the event id; the mirror mirrors the whole live ladder as a frontend multi-card. Configured/at-the-money threshold documented for the ticket = HIGH $1.25T (condition 0x0a0fb756d8dc5c3cf0a16eebc7d6d39406155a41e13d00bf615fc0fcd9e9c31a), the live market closest to 50/50 (YES ~0.485) as of 2026-07-05. Event resolves 2027-01-01T12:00:00Z (labelled 'by December 31')."
+    }
+  ]
+}

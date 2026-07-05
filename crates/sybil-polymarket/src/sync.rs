@@ -33,6 +33,10 @@ pub struct SyncActor {
     /// after start, so schema additions backfill onto existing markets
     /// without wiping `market_ref_data.json`.
     first_sync: bool,
+    /// Curated Polymarket event ids to mirror (SYB-150). When non-empty the
+    /// sync fetches exactly these events by id instead of the volume-ranked
+    /// category scan.
+    curated_event_ids: Vec<String>,
 }
 
 struct PendingMmNotification {
@@ -140,6 +144,7 @@ impl SyncActor {
         feed_tx: mpsc::Sender<FeedMessage>,
         mm_tx: mpsc::Sender<MmMessage>,
         mm_live_rx: watch::Receiver<usize>,
+        curated_event_ids: Vec<String>,
     ) -> Self {
         Self {
             config,
@@ -150,6 +155,7 @@ impl SyncActor {
             mm_tx,
             mm_live_rx,
             first_sync: true,
+            curated_event_ids,
         }
     }
 
@@ -178,15 +184,22 @@ impl SyncActor {
     }
 
     async fn sync_once(&mut self) -> Result<(), crate::error::Error> {
-        let events = self
-            .gamma_client
-            .fetch_active_events(
-                self.config.max_events,
-                &self.config.mirror_categories,
-                &self.config.mirror_excluded_categories,
-                self.config.min_volume_usd,
-            )
-            .await?;
+        // Curated mode (SYB-150): mirror exactly the allowlisted events by id.
+        // Otherwise fall back to the volume-ranked category scan.
+        let events = if self.curated_event_ids.is_empty() {
+            self.gamma_client
+                .fetch_active_events(
+                    self.config.max_events,
+                    &self.config.mirror_categories,
+                    &self.config.mirror_excluded_categories,
+                    self.config.min_volume_usd,
+                )
+                .await?
+        } else {
+            self.gamma_client
+                .fetch_curated_events(&self.curated_event_ids)
+                .await?
+        };
 
         // Baseline live-set size for MM admission this cycle (PM-8). Copied out
         // of the watch so we never hold the borrow across an await, and bumped

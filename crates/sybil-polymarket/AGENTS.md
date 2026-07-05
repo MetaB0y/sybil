@@ -64,6 +64,77 @@ cargo run --release -p sybil-polymarket -- --sybil-url http://localhost:3000 --m
 - **WebSocket reconnect**: Proactive reconnect every 15 minutes to preempt Polymarket's known 18-22 minute zombie connection bug.
 - **Mapping persistence**: Optional JSON file. In-memory by default for dev.
 
+## Curated mirror seed set (SYB-150)
+
+For a hand-picked launch the mirror runs in **curated mode** instead of the
+broad volume-ranked scan. Set `--curated-markets-path` /
+`CURATED_MARKETS_PATH` to `curated_markets.json` and the `SyncActor` mirrors
+**only** the events listed there, addressed by Polymarket Gamma **event id**
+(deterministic, auditable). The deploy wires this via a read-only bind mount
+(`docker-compose.yml` → `/etc/sybil/curated_markets.json`). A parse error at
+startup is fatal, so a typo cannot silently fall back to the broad scan.
+
+Loader + validation: `src/curated.rs` (unit-tested, incl. an `include_str!`
+check of the checked-in file). Gamma fetch: `GammaClient::fetch_curated_events`
+(`src/polymarket/gamma.rs`) — repeated `?id=` params, keeps only events with a
+tradeable (active, non-closed) child market.
+
+### The set (verified live on Gamma 2026-07-05)
+
+| Event id | Slug | Shape | Ends |
+|---|---|---|---|
+| 556382 | which-company-has-best-ai-model-end-of-2026 | NegRisk group (15 active co. legs) | 2026-12-31 |
+| 333737 | will-a-chinese-company-have-the-best-ai-model-by-december-31 | Single binary | 2026-12-31 |
+| 206787 | which-companys-ai-will-first-hit-1550-on-chatbot-arena-in-2026 | NegRisk group (~11 legs + "None") | 2026-12-31 |
+| 79075 | us-enacts-ai-safety-bill-before-2027 | Single binary | 2026-12-31 |
+| 85299 | ai-bubble-burst-by | Multi (only the 2026 leg is live) | 2026-12-31 |
+| 96557 | will-ai-be-charged-with-a-crime-before-2027 | Single binary | 2026-12-31 |
+| 192873 | what-kind-of-product-will-openai-announce-in-2026 | Multi (10 product binaries) | 2026-12-31 |
+| 83771 | which-ceos-will-be-out-before-2027 | Multi (6 CEO binaries; Tim Cook leg closed) | 2026-12-31 |
+| 500753 | will-anthropics-valuation-hit-by-december-31 | Threshold ladder (13 binaries) | 2027-01-01 |
+| 500775 | will-openais-valuation-hit-by-december-31 | Threshold ladder (15 binaries) | 2027-01-01 |
+
+All ten ticket candidates are live; none are unavailable. "AI bubble burst"
+maps to the event's single active leg ("AI bubble burst in 2026?",
+groupItemTitle "December 31, 2026"); its March-2026 and Dec-2025 legs are
+already closed and are dropped by the active/!closed gate.
+
+### Valuation-threshold documentation (ticket "configured threshold")
+
+The two valuation candidates are threshold **ladders**, not single markets. The
+mirror mirrors the whole live ladder as a frontend multi-card. Per the ticket
+we also pin and document the *configured/at-the-money* threshold — the live
+market closest to 50/50 as of 2026-07-05:
+
+- **Anthropic** (event 500753): **HIGH $1.75T** — condition
+  `0xc68fea7daba83292fdd7bb704f26d38c4f678cbc2ff69c4175d47c55e74b4321`
+  (YES ≈ 0.475). The $1.0T / $1.1T legs are already resolved YES (closed).
+- **OpenAI** (event 500775): **HIGH $1.25T** — condition
+  `0x0a0fb756d8dc5c3cf0a16eebc7d6d39406155a41e13d00bf615fc0fcd9e9c31a`
+  (YES ≈ 0.485).
+
+Both ladders resolve `2027-01-01T12:00:00Z` (labelled "by December 31").
+
+### Provenance (mirror-with-source)
+
+No new metadata field is needed — the existing `set_market_metadata` path
+already marks each mirrored market end to end. `build_metadata_request`
+(`src/sync.rs`) sets `polymarket_condition_id`, `event_id` + `event_title`, and
+`external_url` (`https://polymarket.com/event/{slug}`, the "view on Polymarket"
+resolution link). Those flow mirror → sequencer `MarketRefData` → API
+`MarketResponse` (`polymarket_condition_id` / `event_id` / `external_url`).
+`polymarket_condition_id` being non-null **is** the mirror marker a frontend
+badge/filter reads; the arena also gets a live Polymarket reference via
+`reference_price_nanos` pushed by `MmActor::set_reference_prices`.
+
+### Updating the set
+
+Verify an event is still tradeable —
+`curl 'https://gamma-api.polymarket.com/events?id=<event_id>'` (`active:true`,
+`closed:false`, ≥1 active child) — then add/remove an entry in
+`curated_markets.json` and redeploy sybil-polymarket. The `curated.rs` unit
+tests keep the file parseable and honest.
+
 ## Polymarket API Notes
 
 - Gamma API: `gamma-api.polymarket.com` — no auth needed, 4000 req/10s
