@@ -60,6 +60,8 @@ pub enum ViolationKind {
     SettlementPositionMismatch,
     /// Arithmetic overflow during settlement re-derivation.
     SettlementOverflow,
+    /// A fill's enriched account id does not match the witness order account.
+    FillAccountMismatch,
     /// Account present in post-state but not in pre-state (or vice versa).
     SettlementAccountMismatch,
     /// Position imbalance exists but no clearing price for the market.
@@ -99,6 +101,18 @@ pub enum ViolationKind {
     FalseRejection,
     /// A rejection reason does not match the actual validation failure.
     IncorrectRejectionReason,
+
+    // === Layer 5: Sidecar transition verification ===
+    /// Resting order leaves and account reservation leaves disagree.
+    SidecarReservationMismatch,
+    /// A withdrawal event is not represented by the committed withdrawal sidecar.
+    SidecarWithdrawalMismatch,
+    /// The bridge deposit cursor does not match the witnessed L1 deposit prefix.
+    SidecarDepositCursorMismatch,
+    /// The bridge deposit root does not match the witnessed L1 deposit prefix.
+    SidecarDepositRootMismatch,
+    /// A market resolution event/list entry is not reflected in committed market status.
+    SidecarMarketStatusMismatch,
 }
 
 /// Result of running one or more verification layers.

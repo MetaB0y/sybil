@@ -461,6 +461,7 @@ dependencies = [
  "matching-engine",
  "serde",
  "sha2",
+ "sybil-l1-protocol",
  "thiserror",
 ]
 

@@ -6,8 +6,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{net_welfare, Fill, MarketId, Order, NANOS_PER_DOLLAR};
+use matching_engine::{Fill, MarketId, Order, NANOS_PER_DOLLAR};
 
+use crate::arithmetic::{checked_price_qty, checked_welfare};
 use crate::types::BlockWitness;
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
@@ -74,11 +75,12 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
             for &market in &group.markets {
                 if let Some(prices) = witness.clearing_prices.get(&market) {
                     if let Some(&yes_price) = prices.first() {
-                        sum += yes_price.0;
+                        sum = sum.saturating_add(yes_price.0);
                     }
                 }
             }
-            total_delta += (sum as i64 - NANOS_PER_DOLLAR as i64).unsigned_abs();
+            let delta = sum.abs_diff(NANOS_PER_DOLLAR);
+            total_delta = total_delta.saturating_add(delta);
         }
         stats.market_group_avg_delta = Some(total_delta / witness.market_groups.len() as u64);
     }
@@ -144,6 +146,25 @@ fn verify_fills(
         }
 
         // 5. Price constraint (seller-aware)
+        if order.limit_price.0 > NANOS_PER_DOLLAR {
+            violations.push(Violation {
+                kind: ViolationKind::SettlementOverflow,
+                details: format!(
+                    "Order {}: limit_price {} exceeds NANOS_PER_DOLLAR {}",
+                    order.id, order.limit_price, NANOS_PER_DOLLAR
+                ),
+            });
+        }
+        if fill.fill_price.0 > NANOS_PER_DOLLAR {
+            violations.push(Violation {
+                kind: ViolationKind::SettlementOverflow,
+                details: format!(
+                    "Order {}: fill_price {} exceeds NANOS_PER_DOLLAR {}",
+                    fill.order_id, fill.fill_price, NANOS_PER_DOLLAR
+                ),
+            });
+        }
+
         let price_violated = if order.is_seller() {
             fill.fill_price < order.limit_price
         } else {
@@ -165,7 +186,21 @@ fn verify_fills(
         }
 
         // 6. Per-fill welfare
-        let fill_welfare = fill.welfare(order);
+        let Some(fill_welfare) = checked_welfare(
+            order.limit_price,
+            fill.fill_price,
+            fill.fill_qty,
+            order.is_seller(),
+        ) else {
+            violations.push(Violation {
+                kind: ViolationKind::SettlementOverflow,
+                details: format!(
+                    "Order {}: welfare overflow (limit={}, fill_price={}, qty={})",
+                    fill.order_id, order.limit_price, fill.fill_price, fill.fill_qty
+                ),
+            });
+            continue;
+        };
         if fill_welfare < 0 {
             violations.push(Violation {
                 kind: ViolationKind::NegativeWelfare,
@@ -175,11 +210,56 @@ fn verify_fills(
                 ),
             });
         }
-        computed_gross_welfare += order.gross_welfare_contribution(fill.fill_qty);
+        let Some(gross_value) = checked_price_qty(order.limit_price, fill.fill_qty) else {
+            violations.push(Violation {
+                kind: ViolationKind::SettlementOverflow,
+                details: format!(
+                    "Order {}: gross welfare price*quantity overflow",
+                    fill.order_id
+                ),
+            });
+            continue;
+        };
+        let gross_contribution = if order.is_seller() {
+            match gross_value.checked_neg() {
+                Some(value) => value,
+                None => {
+                    violations.push(Violation {
+                        kind: ViolationKind::SettlementOverflow,
+                        details: format!("Order {}: gross welfare overflow", fill.order_id),
+                    });
+                    continue;
+                }
+            }
+        } else {
+            gross_value
+        };
+        let Some(updated_gross_welfare) = computed_gross_welfare.checked_add(gross_contribution)
+        else {
+            violations.push(Violation {
+                kind: ViolationKind::SettlementOverflow,
+                details: format!(
+                    "Order {}: accumulated gross welfare overflow",
+                    fill.order_id
+                ),
+            });
+            continue;
+        };
+        computed_gross_welfare = updated_gross_welfare;
     }
 
     stats.orders_checked = order_map.len();
-    stats.computed_welfare = net_welfare(computed_gross_welfare, minting_cost);
+    let Some(expected_welfare) = computed_gross_welfare.checked_sub(minting_cost) else {
+        violations.push(Violation {
+            kind: ViolationKind::SettlementOverflow,
+            details: format!(
+                "Computed gross welfare {} - minting_cost {} overflowed",
+                computed_gross_welfare, minting_cost
+            ),
+        });
+        return;
+    };
+    stats.computed_welfare = expected_welfare;
 
     // 7a. Minting cost must be non-negative (can only reduce welfare, never inflate it)
     if minting_cost < 0 {
@@ -193,8 +273,17 @@ fn verify_fills(
     }
 
     // 7b. Welfare consistency: total_welfare = gross_order_value - minting_cost
-    let expected_welfare = net_welfare(computed_gross_welfare, minting_cost);
-    let welfare_diff = (expected_welfare - reported_welfare).abs();
+    let Some(welfare_delta) = expected_welfare.checked_sub(reported_welfare) else {
+        violations.push(Violation {
+            kind: ViolationKind::SettlementOverflow,
+            details: format!(
+                "Expected welfare {} - reported welfare {} overflowed",
+                expected_welfare, reported_welfare
+            ),
+        });
+        return;
+    };
+    let welfare_diff = welfare_delta.unsigned_abs();
     if welfare_diff > 0 {
         violations.push(Violation {
             kind: ViolationKind::WelfareMismatch,
@@ -232,7 +321,13 @@ fn verify_mm_constraints(
             }
         }
 
-        let capital_used = mm.capital_used(&mm_fills);
+        let Some(capital_used) = mm.checked_capital_used(&mm_fills) else {
+            violations.push(Violation {
+                kind: ViolationKind::SettlementOverflow,
+                details: format!("MM {:?}: capital_used overflowed", mm.mm_id),
+            });
+            continue;
+        };
         if capital_used > mm.max_capital {
             violations.push(Violation {
                 kind: ViolationKind::MmBudgetExceeded,
@@ -329,8 +424,28 @@ fn verify_uniform_clearing_prices(
 /// Check 11: Price complementarity — YES + NO = $1 per binary market.
 fn verify_price_complementarity(witness: &BlockWitness, violations: &mut Vec<Violation>) {
     for (&market, prices) in &witness.clearing_prices {
+        for (outcome, price) in prices.iter().enumerate() {
+            if price.0 > NANOS_PER_DOLLAR {
+                violations.push(Violation {
+                    kind: ViolationKind::SettlementOverflow,
+                    details: format!(
+                        "Market {:?} outcome {}: clearing price {} exceeds NANOS_PER_DOLLAR {}",
+                        market, outcome, price, NANOS_PER_DOLLAR
+                    ),
+                });
+            }
+        }
         if prices.len() == 2 {
-            let sum = prices[0] + prices[1];
+            let Some(sum) = prices[0].checked_add(prices[1]) else {
+                violations.push(Violation {
+                    kind: ViolationKind::SettlementOverflow,
+                    details: format!(
+                        "Market {:?}: P(YES)={} + P(NO)={} overflowed",
+                        market, prices[0], prices[1]
+                    ),
+                });
+                continue;
+            };
             if sum.0 != NANOS_PER_DOLLAR {
                 violations.push(Violation {
                     kind: ViolationKind::PriceComplementarityViolation,
@@ -351,7 +466,17 @@ fn verify_market_group_constraints(witness: &BlockWitness, violations: &mut Vec<
         for &market in &group.markets {
             if let Some(prices) = witness.clearing_prices.get(&market) {
                 if let Some(&yes_price) = prices.first() {
-                    sum += yes_price.0;
+                    let Some(updated) = sum.checked_add(yes_price.0) else {
+                        violations.push(Violation {
+                            kind: ViolationKind::SettlementOverflow,
+                            details: format!(
+                                "Market group {}: YES price sum overflowed",
+                                group.name
+                            ),
+                        });
+                        continue;
+                    };
+                    sum = updated;
                 }
             }
         }
@@ -627,6 +752,45 @@ mod tests {
             .violations
             .iter()
             .any(|v| v.kind == ViolationKind::PriceExceedsLimit));
+    }
+
+    #[test]
+    fn limit_price_above_one_dollar_is_settlement_overflow() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let mut order = buy_order(&markets, 1, m0);
+        order.order.limit_price = Nanos(NANOS_PER_DOLLAR + 1);
+        let fills = vec![Fill::new(1, shares_to_qty(50), Nanos(500_000_000))];
+
+        let mut witness = make_witness(vec![order], fills);
+        witness.total_welfare = 0;
+
+        let result = verify_match(&witness, false);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::SettlementOverflow));
+    }
+
+    #[test]
+    fn fill_price_above_one_dollar_is_settlement_overflow() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let orders = vec![buy_order(&markets, 1, m0)];
+        let fills = vec![Fill::new(1, shares_to_qty(50), Nanos(NANOS_PER_DOLLAR + 1))];
+
+        let mut witness = make_witness(orders, fills);
+        witness.total_welfare = 0;
+
+        let result = verify_match(&witness, false);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::SettlementOverflow));
     }
 
     #[test]

@@ -321,6 +321,7 @@ pub fn verify_state_transition_input(
         sybil_verifier::verify_settlement(&input.witness),
     )?;
     ensure_valid("orders", sybil_verifier::verify_orders(&input.witness))?;
+    ensure_valid("sidecar", sybil_verifier::verify_sidecar(&input.witness))?;
     Ok(state_transition_public_input_hash(&input.public_inputs))
 }
 

@@ -38,6 +38,7 @@ mod header_hash {
 pub mod match_verifier;
 pub mod orders;
 pub mod settlement;
+pub mod sidecar;
 mod snapshot_schema;
 pub mod state_schema;
 pub mod types;
@@ -91,6 +92,11 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
     orders::verify_orders(witness)
 }
 
+/// Verify derivable non-account sidecar facts.
+pub fn verify_sidecar(witness: &BlockWitness) -> VerificationResult {
+    sidecar::verify_sidecar(witness)
+}
+
 /// Run all 4 verification layers and merge results.
 #[cfg(feature = "qmdb")]
 pub fn verify_full(witness: &BlockWitness, diagnostics: bool) -> VerificationResult {
@@ -98,5 +104,6 @@ pub fn verify_full(witness: &BlockWitness, diagnostics: bool) -> VerificationRes
     result.merge(verify_settlement(witness));
     result.merge(verify_block(witness));
     result.merge(verify_orders(witness));
+    result.merge(verify_sidecar(witness));
     result
 }

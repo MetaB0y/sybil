@@ -4345,6 +4345,7 @@ dependencies = [
  "proptest",
  "serde",
  "sha2 0.10.9",
+ "sybil-l1-protocol",
  "thiserror 2.0.18",
 ]
 

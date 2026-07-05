@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{notional_nanos_ceil, Nanos, Qty};
+use crate::types::{checked_notional_nanos_ceil, notional_nanos_ceil, Nanos, Qty};
 
 /// Unique identifier for a market maker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -60,6 +60,23 @@ impl MmSide {
         };
 
         notional_nanos_ceil(price_per_share, quantity)
+    }
+
+    /// Checked version of [`MmSide::capital_needed`].
+    pub fn checked_capital_needed(&self, price: Nanos, quantity: Qty) -> Option<Nanos> {
+        use crate::types::NANOS_PER_DOLLAR;
+
+        let price_per_share = match self {
+            MmSide::SellYes | MmSide::BuyNo => {
+                if price.0 > NANOS_PER_DOLLAR {
+                    return None;
+                }
+                Nanos(NANOS_PER_DOLLAR - price.0)
+            }
+            MmSide::BuyYes | MmSide::SellNo => price,
+        };
+
+        checked_notional_nanos_ceil(price_per_share, quantity)
     }
 }
 
@@ -122,6 +139,22 @@ impl MmConstraint {
             }
         }
         total
+    }
+
+    /// Checked version of [`MmConstraint::capital_used`].
+    pub fn checked_capital_used(
+        &self,
+        fills: &std::collections::HashMap<u64, (Nanos, Qty)>,
+    ) -> Option<Nanos> {
+        let mut total = Nanos::ZERO;
+        for &order_id in &self.order_ids {
+            if let (Some(&(price, qty)), Some(&side)) =
+                (fills.get(&order_id), self.order_sides.get(&order_id))
+            {
+                total = total.checked_add(side.checked_capital_needed(price, qty)?)?;
+            }
+        }
+        Some(total)
     }
 
     /// Check if the constraint is satisfied at given fills.

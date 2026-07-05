@@ -40,17 +40,22 @@ pub use order::{
 pub use order_builder::OrderBuilder;
 pub use problem::{MarketGroup, Problem, ProblemSummary};
 pub use settlement::{
-    compute_fill_settlement, derive_minting, derive_minting_cost, fill_balance_delta_from_fills,
+    compute_fill_settlement, compute_fill_settlement_checked, derive_minting,
+    derive_minting_checked, derive_minting_cost, fill_balance_delta_from_fills,
     gross_welfare_from_fills, market_totals_from_fills, minting_cost_from_adjustments,
-    minting_cost_from_balance_deltas, minting_cost_from_fills,
-    minting_cost_from_incremental_adjustments, net_welfare, MintAdjustment, SettlementDelta,
+    minting_cost_from_adjustments_checked, minting_cost_from_balance_deltas,
+    minting_cost_from_fills, minting_cost_from_incremental_adjustments,
+    minting_cost_from_incremental_adjustments_checked, net_welfare, MintAdjustment,
+    SettlementArithmeticError, SettlementDelta,
 };
 pub use state::{state_index, state_to_outcomes, StateSpace};
 pub use types::conversions::{dollars_to_nanos, nanos_to_dollars, nanos_to_price, price_to_nanos};
 pub use types::{
-    ceil_mul_ratio, notional_nanos, notional_nanos_ceil, shares_to_qty, signed_notional_nanos,
-    signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty, Side, MAX_ORDER_QTY,
-    NANOS_PER_DOLLAR, SHARE_SCALE,
+    ceil_mul_ratio, checked_notional_ceil_i64, checked_notional_i64, checked_notional_nanos,
+    checked_notional_nanos_ceil, checked_signed_notional_nanos,
+    checked_signed_price_delta_notional, notional_nanos, notional_nanos_ceil, shares_to_qty,
+    signed_notional_nanos, signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty, Side,
+    MAX_ORDER_QTY, NANOS_PER_DOLLAR, SHARE_SCALE,
 };
 
 // Re-export order_builder convenience functions

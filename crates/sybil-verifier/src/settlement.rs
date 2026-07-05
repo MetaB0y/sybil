@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use matching_engine::{
-    compute_fill_settlement, derive_minting, minting_cost_from_incremental_adjustments, Fill,
-    MarketId, Nanos, Order,
+    compute_fill_settlement_checked, derive_minting_checked,
+    minting_cost_from_incremental_adjustments_checked, Fill, MarketId, Nanos, NANOS_PER_DOLLAR,
 };
 
 use crate::types::{AccountSnapshot, BlockWitness, WitnessOrder};
@@ -37,14 +37,8 @@ fn derive_post_state(
     let mut result = DerivedSettlement::default();
 
     // Build order map
-    let order_map: HashMap<u64, &Order> =
-        orders.iter().map(|wo| (wo.order.id, &wo.order)).collect();
-
-    // Build order→account mapping (fallback for fills with account_id == 0)
-    let order_account: HashMap<u64, u64> = orders
-        .iter()
-        .map(|wo| (wo.order.id, wo.account_id))
-        .collect();
+    let order_map: HashMap<u64, &WitnessOrder> =
+        orders.iter().map(|wo| (wo.order.id, wo)).collect();
 
     // Clone post-system state into working state
     for snap in post_system_state {
@@ -62,8 +56,23 @@ fn derive_post_state(
         result.accounts_checked += 1;
     }
 
-    let pre_market_totals = market_totals_from_accounts(&result.accounts);
-    let pre_adjustments = derive_minting(&pre_market_totals, clearing_prices);
+    let pre_market_totals = match market_totals_from_accounts(&result.accounts) {
+        Ok(totals) => totals,
+        Err(details) => {
+            push_overflow(&mut result.violations, details);
+            Vec::new()
+        }
+    };
+    let pre_adjustments = match derive_minting_checked(&pre_market_totals, clearing_prices) {
+        Ok(adjustments) => adjustments,
+        Err(error) => {
+            push_overflow(
+                &mut result.violations,
+                format!("Pre-fill minting arithmetic overflow: {error:?}"),
+            );
+            Vec::new()
+        }
+    };
 
     // Apply each fill using the shared settlement function
     for fill in fills {
@@ -71,28 +80,106 @@ fn derive_post_state(
             continue;
         }
 
-        // Prefer fill.account_id (enriched by sequencer), fall back to order map
+        let Some(witness_order) = order_map.get(&fill.order_id) else {
+            continue;
+        };
+        if fill.account_id != 0 && fill.account_id != witness_order.account_id {
+            result.violations.push(Violation {
+                kind: ViolationKind::FillAccountMismatch,
+                details: format!(
+                    "Order {}: fill account {} != witness order account {}",
+                    fill.order_id, fill.account_id, witness_order.account_id
+                ),
+            });
+        }
+
+        // Prefer fill.account_id (enriched by sequencer), fall back to order map.
+        // The explicit equality check above binds the enriched id to the order.
         let account_id = if fill.account_id != 0 {
             fill.account_id
         } else {
-            match order_account.get(&fill.order_id) {
-                Some(&id) => id,
-                None => continue,
-            }
+            witness_order.account_id
         };
-        let Some(order) = order_map.get(&fill.order_id) else {
+        let order = &witness_order.order;
+
+        if order.limit_price.0 > NANOS_PER_DOLLAR {
+            push_overflow(
+                &mut result.violations,
+                format!(
+                    "Order {}: limit_price {} exceeds NANOS_PER_DOLLAR {}",
+                    order.id, order.limit_price, NANOS_PER_DOLLAR
+                ),
+            );
             continue;
-        };
+        }
+        if fill.fill_price.0 > NANOS_PER_DOLLAR {
+            push_overflow(
+                &mut result.violations,
+                format!(
+                    "Order {}: fill_price {} exceeds NANOS_PER_DOLLAR {}",
+                    fill.order_id, fill.fill_price, NANOS_PER_DOLLAR
+                ),
+            );
+            continue;
+        }
 
         // Ensure account exists in our working state
         let account = result.accounts.entry(account_id).or_default();
 
-        if let Some(delta) = compute_fill_settlement(order, fill) {
-            result.fill_balance_delta += delta.balance_delta;
-            account.balance += delta.balance_delta;
-            let pos = &mut account.positions;
-            for (market, outcome, qty_delta) in delta.position_deltas {
-                *pos.entry((market, outcome)).or_insert(0) += qty_delta;
+        match compute_fill_settlement_checked(order, fill) {
+            Ok(Some(delta)) => {
+                let Some(fill_balance_delta) =
+                    result.fill_balance_delta.checked_add(delta.balance_delta)
+                else {
+                    push_overflow(
+                        &mut result.violations,
+                        format!(
+                            "Order {}: accumulated fill balance delta overflowed",
+                            fill.order_id
+                        ),
+                    );
+                    continue;
+                };
+                result.fill_balance_delta = fill_balance_delta;
+
+                let Some(balance) = account.balance.checked_add(delta.balance_delta) else {
+                    push_overflow(
+                        &mut result.violations,
+                        format!(
+                            "Account {}: balance {} + delta {} overflowed",
+                            account_id, account.balance, delta.balance_delta
+                        ),
+                    );
+                    continue;
+                };
+                account.balance = balance;
+
+                let pos = &mut account.positions;
+                for (market, outcome, qty_delta) in delta.position_deltas {
+                    let entry = pos.entry((market, outcome)).or_insert(0);
+                    let Some(updated) = entry.checked_add(qty_delta) else {
+                        push_overflow(
+                            &mut result.violations,
+                            format!(
+                                "Account {} market {:?} outcome {}: position {} + delta {} overflowed",
+                                account_id, market, outcome, *entry, qty_delta
+                            ),
+                        );
+                        continue;
+                    };
+                    *entry = updated;
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                push_overflow(
+                    &mut result.violations,
+                    format!(
+                        "Order {}: settlement arithmetic overflow: {error:?}",
+                        fill.order_id
+                    ),
+                );
+                continue;
             }
         }
     }
@@ -110,29 +197,42 @@ fn derive_post_state(
             .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
             .collect();
 
-        let market_totals: Vec<(MarketId, i64, i64)> = all_markets
+        let market_totals: Vec<(MarketId, i64, i64)> = match all_markets
             .iter()
-            .map(|&market_id| {
-                let total_yes: i64 = result
-                    .accounts
-                    .values()
-                    .map(|account| account.positions.get(&(market_id, 0)).copied().unwrap_or(0))
-                    .sum();
-                let total_no: i64 = result
-                    .accounts
-                    .values()
-                    .map(|account| account.positions.get(&(market_id, 1)).copied().unwrap_or(0))
-                    .sum();
-                (market_id, total_yes, total_no)
-            })
-            .collect();
+            .map(|&market_id| market_total_for_accounts(&result.accounts, market_id))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(totals) => totals,
+            Err(details) => {
+                push_overflow(&mut result.violations, details);
+                Vec::new()
+            }
+        };
 
-        let adjustments = derive_minting(&market_totals, clearing_prices);
-        result.minting_cost = minting_cost_from_incremental_adjustments(
+        let adjustments = match derive_minting_checked(&market_totals, clearing_prices) {
+            Ok(adjustments) => adjustments,
+            Err(error) => {
+                push_overflow(
+                    &mut result.violations,
+                    format!("Post-fill minting arithmetic overflow: {error:?}"),
+                );
+                Vec::new()
+            }
+        };
+        result.minting_cost = match minting_cost_from_incremental_adjustments_checked(
             result.fill_balance_delta,
             &pre_adjustments,
             &adjustments,
-        );
+        ) {
+            Ok(cost) => cost,
+            Err(error) => {
+                push_overflow(
+                    &mut result.violations,
+                    format!("Minting cost arithmetic overflow: {error:?}"),
+                );
+                0
+            }
+        };
 
         if !adjustments.is_empty() {
             let mint = result.accounts.entry(MINT_ID).or_default();
@@ -146,7 +246,7 @@ fn derive_post_state(
                         details: format!(
                             "Market {:?}: position imbalance {} but no {} clearing price",
                             adj.market_id,
-                            adj.position_delta.abs(),
+                            adj.position_delta.unsigned_abs(),
                             side
                         ),
                     });
@@ -154,11 +254,33 @@ fn derive_post_state(
             }
 
             for adj in &adjustments {
-                *mint
+                let position = mint
                     .positions
                     .entry((adj.market_id, adj.outcome))
-                    .or_insert(0) += adj.position_delta;
-                mint.balance += adj.balance_delta;
+                    .or_insert(0);
+                let Some(updated_position) = position.checked_add(adj.position_delta) else {
+                    push_overflow(
+                        &mut result.violations,
+                        format!(
+                            "MINT market {:?} outcome {}: position {} + delta {} overflowed",
+                            adj.market_id, adj.outcome, *position, adj.position_delta
+                        ),
+                    );
+                    continue;
+                };
+                *position = updated_position;
+
+                let Some(updated_balance) = mint.balance.checked_add(adj.balance_delta) else {
+                    push_overflow(
+                        &mut result.violations,
+                        format!(
+                            "MINT balance {} + delta {} overflowed",
+                            mint.balance, adj.balance_delta
+                        ),
+                    );
+                    continue;
+                };
+                mint.balance = updated_balance;
             }
         }
     }
@@ -168,7 +290,7 @@ fn derive_post_state(
 
 fn market_totals_from_accounts(
     accounts: &HashMap<u64, DerivedAccountState>,
-) -> Vec<(MarketId, i64, i64)> {
+) -> Result<Vec<(MarketId, i64, i64)>, String> {
     let all_markets: std::collections::HashSet<MarketId> = accounts
         .values()
         .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
@@ -176,18 +298,30 @@ fn market_totals_from_accounts(
 
     all_markets
         .iter()
-        .map(|&market_id| {
-            let total_yes: i64 = accounts
-                .values()
-                .map(|account| account.positions.get(&(market_id, 0)).copied().unwrap_or(0))
-                .sum();
-            let total_no: i64 = accounts
-                .values()
-                .map(|account| account.positions.get(&(market_id, 1)).copied().unwrap_or(0))
-                .sum();
-            (market_id, total_yes, total_no)
-        })
+        .map(|&market_id| market_total_for_accounts(accounts, market_id))
         .collect()
+}
+
+fn market_total_for_accounts(
+    accounts: &HashMap<u64, DerivedAccountState>,
+    market_id: MarketId,
+) -> Result<(MarketId, i64, i64), String> {
+    let total_yes = accounts.values().try_fold(0i64, |sum, account| {
+        sum.checked_add(account.positions.get(&(market_id, 0)).copied().unwrap_or(0))
+            .ok_or_else(|| format!("Market {:?}: YES position total overflowed", market_id))
+    })?;
+    let total_no = accounts.values().try_fold(0i64, |sum, account| {
+        sum.checked_add(account.positions.get(&(market_id, 1)).copied().unwrap_or(0))
+            .ok_or_else(|| format!("Market {:?}: NO position total overflowed", market_id))
+    })?;
+    Ok((market_id, total_yes, total_no))
+}
+
+fn push_overflow(violations: &mut Vec<Violation>, details: String) {
+    violations.push(Violation {
+        kind: ViolationKind::SettlementOverflow,
+        details,
+    });
 }
 
 /// Verify that `post_system_state + fills → post_state`.
@@ -451,6 +585,144 @@ mod tests {
 
         let result = verify_settlement(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn fill_account_must_match_order_account() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let qty = q(10);
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, qty);
+        let mut fill = Fill::new(1, Qty(qty), Nanos(500_000_000));
+        fill.account_id = 7;
+
+        let initial_balance = 100 * NANOS_PER_DOLLAR as i64;
+        let fill_cost = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
+        let mint_id = u64::MAX;
+        let mut clearing_prices = HashMap::new();
+        clearing_prices.insert(m0, vec![Nanos(500_000_000), Nanos(500_000_000)]);
+
+        let post_system_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance,
+                total_deposited: 0,
+                positions: vec![],
+                events_digest: [0u8; 32],
+            },
+            AccountSnapshot {
+                id: 7,
+                balance: initial_balance,
+                total_deposited: 0,
+                positions: vec![],
+                events_digest: [0u8; 32],
+            },
+        ];
+
+        let post_state = vec![
+            AccountSnapshot {
+                id: 0,
+                balance: initial_balance,
+                total_deposited: 0,
+                positions: vec![],
+                events_digest: [0u8; 32],
+            },
+            AccountSnapshot {
+                id: 7,
+                balance: initial_balance - fill_cost,
+                total_deposited: 0,
+                positions: vec![(m0, 0, qty as i64)],
+                events_digest: [0u8; 32],
+            },
+            AccountSnapshot {
+                id: mint_id,
+                balance: fill_cost,
+                total_deposited: 0,
+                positions: vec![(m0, 0, -(qty as i64))],
+                events_digest: [0u8; 32],
+            },
+        ];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            system_events: vec![],
+            l1_deposits: vec![],
+            fills: vec![fill],
+            clearing_prices,
+            total_welfare: 0,
+            minting_cost: fill_cost,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: post_system_state.clone(),
+            post_system_state,
+            post_state,
+            state_sidecar: Default::default(),
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::FillAccountMismatch));
+    }
+
+    #[test]
+    fn settlement_notional_overflow_is_violation() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+
+        let qty = 9_223_372_036_855u64;
+        let order = outcome_buy(&markets, 1, m0, 0, NANOS_PER_DOLLAR, qty);
+        let fill = Fill::new(1, Qty(qty), Nanos(NANOS_PER_DOLLAR));
+
+        let pre_state = vec![AccountSnapshot {
+            id: 0,
+            balance: i64::MAX,
+            total_deposited: 0,
+            positions: vec![],
+            events_digest: [0u8; 32],
+        }];
+
+        let witness = BlockWitness {
+            header: empty_header(),
+            previous_header: None,
+            orders: vec![WitnessOrder {
+                order,
+                account_id: 0,
+                is_mm: false,
+            }],
+            rejections: vec![],
+            system_events: vec![],
+            l1_deposits: vec![],
+            fills: vec![fill],
+            clearing_prices: HashMap::new(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: pre_state.clone(),
+            post_system_state: pre_state.clone(),
+            post_state: pre_state,
+            state_sidecar: Default::default(),
+            resolved_markets: vec![],
+        };
+
+        let result = verify_settlement(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::SettlementOverflow));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::order::{Fill, Order};
-use crate::types::{notional_nanos, signed_notional_nanos, MarketId, Nanos, Qty};
+use crate::types::{checked_notional_i64, checked_signed_notional_nanos, MarketId, Nanos, Qty};
 
 /// Balance and position changes resulting from settling one fill.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +15,13 @@ pub struct SettlementDelta {
     pub balance_delta: i64,
     /// Position changes: `(market, outcome, qty_delta)`. Only non-zero deltas included.
     pub position_deltas: Vec<(MarketId, u8, i64)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettlementArithmeticError {
+    PriceQuantityOverflow,
+    PositionQuantityOverflow,
+    BalanceOverflow,
 }
 
 /// Compute the balance and position changes for a single fill.
@@ -37,12 +44,22 @@ pub struct SettlementDelta {
 /// - Credit each market's position based on marginal payoffs
 ///   (stride-based mixed-radix decomposition)
 pub fn compute_fill_settlement(order: &Order, fill: &Fill) -> Option<SettlementDelta> {
+    compute_fill_settlement_checked(order, fill).ok().flatten()
+}
+
+/// Checked version of [`compute_fill_settlement`].
+pub fn compute_fill_settlement_checked(
+    order: &Order,
+    fill: &Fill,
+) -> Result<Option<SettlementDelta>, SettlementArithmeticError> {
     if fill.fill_qty == Qty::ZERO {
-        return None;
+        return Ok(None);
     }
 
     let num_markets = order.num_markets as usize;
     let num_states = order.num_states as usize;
+    let fill_qty = i64::try_from(fill.fill_qty.0)
+        .map_err(|_| SettlementArithmeticError::PositionQuantityOverflow)?;
 
     // Single binary market: optimized fast path
     if num_markets == 1 && num_states == 2 {
@@ -52,32 +69,48 @@ pub fn compute_fill_settlement(order: &Order, fill: &Fill) -> Option<SettlementD
 
         if yes_payoff > 0 && no_payoff == 0 {
             // Buying YES
-            let cost = notional_nanos(fill.fill_price, fill.fill_qty).0 as i64;
-            return Some(SettlementDelta {
+            let cost = checked_notional_i64(fill.fill_price, fill.fill_qty)
+                .ok_or(SettlementArithmeticError::PriceQuantityOverflow)?;
+            return Ok(Some(SettlementDelta {
                 balance_delta: -cost,
-                position_deltas: vec![(market, 0, fill.fill_qty.0 as i64)],
-            });
+                position_deltas: vec![(market, 0, fill_qty)],
+            }));
         } else if yes_payoff == 0 && no_payoff > 0 {
             // Buying NO
-            let cost = notional_nanos(fill.fill_price, fill.fill_qty).0 as i64;
-            return Some(SettlementDelta {
+            let cost = checked_notional_i64(fill.fill_price, fill.fill_qty)
+                .ok_or(SettlementArithmeticError::PriceQuantityOverflow)?;
+            return Ok(Some(SettlementDelta {
                 balance_delta: -cost,
-                position_deltas: vec![(market, 1, fill.fill_qty.0 as i64)],
-            });
+                position_deltas: vec![(market, 1, fill_qty)],
+            }));
         } else if yes_payoff < 0 && no_payoff == 0 {
             // Selling YES
-            let revenue = notional_nanos(fill.fill_price, fill.fill_qty).0 as i64;
-            return Some(SettlementDelta {
+            let revenue = checked_notional_i64(fill.fill_price, fill.fill_qty)
+                .ok_or(SettlementArithmeticError::PriceQuantityOverflow)?;
+            return Ok(Some(SettlementDelta {
                 balance_delta: revenue,
-                position_deltas: vec![(market, 0, -(fill.fill_qty.0 as i64))],
-            });
+                position_deltas: vec![(
+                    market,
+                    0,
+                    fill_qty
+                        .checked_neg()
+                        .ok_or(SettlementArithmeticError::PositionQuantityOverflow)?,
+                )],
+            }));
         } else if yes_payoff == 0 && no_payoff < 0 {
             // Selling NO
-            let revenue = notional_nanos(fill.fill_price, fill.fill_qty).0 as i64;
-            return Some(SettlementDelta {
+            let revenue = checked_notional_i64(fill.fill_price, fill.fill_qty)
+                .ok_or(SettlementArithmeticError::PriceQuantityOverflow)?;
+            return Ok(Some(SettlementDelta {
                 balance_delta: revenue,
-                position_deltas: vec![(market, 1, -(fill.fill_qty.0 as i64))],
-            });
+                position_deltas: vec![(
+                    market,
+                    1,
+                    fill_qty
+                        .checked_neg()
+                        .ok_or(SettlementArithmeticError::PositionQuantityOverflow)?,
+                )],
+            }));
         }
         // else: general payoff vector — fall through to generic
     }
@@ -92,9 +125,12 @@ fn compute_generic_settlement(
     fill: &Fill,
     num_markets: usize,
     num_states: usize,
-) -> Option<SettlementDelta> {
+) -> Result<Option<SettlementDelta>, SettlementArithmeticError> {
     // Debit the cost
-    let cost = notional_nanos(fill.fill_price, fill.fill_qty).0 as i64;
+    let cost = checked_notional_i64(fill.fill_price, fill.fill_qty)
+        .ok_or(SettlementArithmeticError::PriceQuantityOverflow)?;
+    let fill_qty = i64::try_from(fill.fill_qty.0)
+        .map_err(|_| SettlementArithmeticError::PositionQuantityOverflow)?;
     let mut position_deltas = Vec::new();
 
     if num_markets == 1 {
@@ -104,10 +140,10 @@ fn compute_generic_settlement(
         let no_payoff = order.payoffs[1] as i64;
 
         if yes_payoff != 0 {
-            position_deltas.push((market, 0, yes_payoff * fill.fill_qty.0 as i64));
+            position_deltas.push((market, 0, checked_position_delta(yes_payoff, fill_qty, 1)?));
         }
         if no_payoff != 0 {
-            position_deltas.push((market, 1, no_payoff * fill.fill_qty.0 as i64));
+            position_deltas.push((market, 1, checked_position_delta(no_payoff, fill_qty, 1)?));
         }
     } else {
         // Multi-market: compute marginal position per market per outcome.
@@ -147,7 +183,7 @@ fn compute_generic_settlement(
                 position_deltas.push((
                     market,
                     0,
-                    yes_per_unit * fill.fill_qty.0 as i64 / yes_count as i64,
+                    checked_position_delta(yes_per_unit, fill_qty, yes_count as i64)?,
                 ));
             }
             if no_count > 0 && no_sum != 0 {
@@ -155,16 +191,27 @@ fn compute_generic_settlement(
                 position_deltas.push((
                     market,
                     1,
-                    no_per_unit * fill.fill_qty.0 as i64 / no_count as i64,
+                    checked_position_delta(no_per_unit, fill_qty, no_count as i64)?,
                 ));
             }
         }
     }
 
-    Some(SettlementDelta {
+    Ok(Some(SettlementDelta {
         balance_delta: -cost,
         position_deltas,
-    })
+    }))
+}
+
+fn checked_position_delta(
+    payoff_units: i64,
+    fill_qty: i64,
+    divisor: i64,
+) -> Result<i64, SettlementArithmeticError> {
+    payoff_units
+        .checked_mul(fill_qty)
+        .and_then(|value| value.checked_div(divisor))
+        .ok_or(SettlementArithmeticError::PositionQuantityOverflow)
 }
 
 // ---------------------------------------------------------------------------
@@ -199,10 +246,20 @@ pub fn derive_minting(
     market_totals: &[(MarketId, i64, i64)],
     clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> Vec<MintAdjustment> {
+    derive_minting_checked(market_totals, clearing_prices).unwrap_or_default()
+}
+
+/// Checked version of [`derive_minting`].
+pub fn derive_minting_checked(
+    market_totals: &[(MarketId, i64, i64)],
+    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+) -> Result<Vec<MintAdjustment>, SettlementArithmeticError> {
     let mut adjustments = Vec::new();
 
     for &(market_id, total_yes, total_no) in market_totals {
-        let diff = total_yes - total_no;
+        let diff = total_yes
+            .checked_sub(total_no)
+            .ok_or(SettlementArithmeticError::PositionQuantityOverflow)?;
         if diff == 0 {
             continue;
         }
@@ -217,7 +274,12 @@ pub fn derive_minting(
                 market_id,
                 outcome: 0,
                 position_delta: -diff,
-                balance_delta: signed_notional_nanos(yes_price, diff),
+                balance_delta: if yes_price == Nanos::ZERO {
+                    0
+                } else {
+                    checked_signed_notional_nanos(yes_price, diff)
+                        .ok_or(SettlementArithmeticError::PriceQuantityOverflow)?
+                },
             });
         } else {
             // More NO than YES → MINT shorts NO, receives no_price revenue
@@ -229,12 +291,17 @@ pub fn derive_minting(
                 market_id,
                 outcome: 1,
                 position_delta: diff, // negative: MINT shorts NO
-                balance_delta: notional_nanos(no_price, Qty(diff.unsigned_abs())).0 as i64,
+                balance_delta: if no_price == Nanos::ZERO {
+                    0
+                } else {
+                    checked_notional_i64(no_price, Qty(diff.unsigned_abs()))
+                        .ok_or(SettlementArithmeticError::PriceQuantityOverflow)?
+                },
             });
         }
     }
 
-    adjustments
+    Ok(adjustments)
 }
 
 /// Sum the welfare adjustment implied by MINT account settlement.
@@ -243,10 +310,17 @@ pub fn derive_minting(
 /// remain [`derive_minting`]; the cost is the MINT balance delta produced by
 /// those same adjustments.
 pub fn minting_cost_from_adjustments(adjustments: &[MintAdjustment]) -> i64 {
-    adjustments
-        .iter()
-        .map(|adjustment| adjustment.balance_delta)
-        .sum()
+    minting_cost_from_adjustments_checked(adjustments).unwrap_or_default()
+}
+
+/// Checked version of [`minting_cost_from_adjustments`].
+pub fn minting_cost_from_adjustments_checked(
+    adjustments: &[MintAdjustment],
+) -> Result<i64, SettlementArithmeticError> {
+    adjustments.iter().try_fold(0i64, |sum, adjustment| {
+        sum.checked_add(adjustment.balance_delta)
+            .ok_or(SettlementArithmeticError::BalanceOverflow)
+    })
 }
 
 /// Derive the reporting minting cost from real-fill cash flow and MINT
@@ -271,13 +345,36 @@ pub fn minting_cost_from_incremental_adjustments(
     pre_adjustments: &[MintAdjustment],
     post_adjustments: &[MintAdjustment],
 ) -> i64 {
-    let fill_cash_outflow = (-fill_balance_delta).max(0);
-    if fill_cash_outflow > 0 {
-        fill_cash_outflow
+    minting_cost_from_incremental_adjustments_checked(
+        fill_balance_delta,
+        pre_adjustments,
+        post_adjustments,
+    )
+    .unwrap_or_default()
+}
+
+/// Checked version of [`minting_cost_from_incremental_adjustments`].
+pub fn minting_cost_from_incremental_adjustments_checked(
+    fill_balance_delta: i64,
+    pre_adjustments: &[MintAdjustment],
+    post_adjustments: &[MintAdjustment],
+) -> Result<i64, SettlementArithmeticError> {
+    let fill_cash_outflow = if fill_balance_delta < 0 {
+        fill_balance_delta
+            .checked_neg()
+            .ok_or(SettlementArithmeticError::BalanceOverflow)?
     } else {
-        let pre_cost = minting_cost_from_adjustments(pre_adjustments);
-        let post_cost = minting_cost_from_adjustments(post_adjustments);
-        (post_cost - pre_cost).max(0)
+        0
+    };
+    if fill_cash_outflow > 0 {
+        Ok(fill_cash_outflow)
+    } else {
+        let pre_cost = minting_cost_from_adjustments_checked(pre_adjustments)?;
+        let post_cost = minting_cost_from_adjustments_checked(post_adjustments)?;
+        Ok(post_cost
+            .checked_sub(pre_cost)
+            .ok_or(SettlementArithmeticError::BalanceOverflow)?
+            .max(0))
     }
 }
 
@@ -525,6 +622,20 @@ mod tests {
         // Should not panic — i128 intermediate handles the multiplication
         let delta = compute_fill_settlement(&order, &fill);
         assert!(delta.is_some());
+    }
+
+    #[test]
+    fn checked_settlement_reports_notional_overflow() {
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("M0");
+        let qty = 9_223_372_036_855u64;
+        let order = outcome_buy(&markets, 1, m0, 0, NANOS_PER_DOLLAR, qty);
+        let fill = Fill::new(1, Qty(qty), Nanos(NANOS_PER_DOLLAR));
+
+        assert_eq!(
+            compute_fill_settlement_checked(&order, &fill),
+            Err(SettlementArithmeticError::PriceQuantityOverflow)
+        );
     }
 
     // --- Minting tests ---

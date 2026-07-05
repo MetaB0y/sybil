@@ -6,24 +6,11 @@
 
 use std::collections::HashMap;
 
-use matching_engine::SHARE_SCALE;
+use matching_engine::NANOS_PER_DOLLAR;
 
+use crate::arithmetic::{checked_position_qty, checked_price_qty_ceil};
 use crate::types::{AccountSnapshot, BlockWitness, RejectionReason};
 use crate::violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
-
-fn checked_notional_ceil_i64(price: u64, qty: u64) -> Option<i64> {
-    let numerator = (price as i128).checked_mul(qty as i128)?;
-    let rounded = numerator.checked_add(SHARE_SCALE as i128 - 1)? / SHARE_SCALE as i128;
-    i64::try_from(rounded).ok()
-}
-
-fn checked_sell_qty_i64(payoff: i8, max_fill: u64) -> Option<i64> {
-    if payoff >= 0 {
-        return None;
-    }
-    let qty = (-(payoff as i128)).checked_mul(max_fill as i128)?;
-    i64::try_from(qty).ok()
-}
 
 /// Verify order validation: balance/position checks and rejection correctness.
 pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
@@ -44,6 +31,17 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
     // Verify accepted orders
     for wo in &witness.orders {
         let order = &wo.order;
+        if order.limit_price.0 > NANOS_PER_DOLLAR {
+            violations.push(Violation {
+                kind: ViolationKind::SettlementOverflow,
+                details: format!(
+                    "Order {}: limit_price {} exceeds NANOS_PER_DOLLAR {}",
+                    order.id, order.limit_price, NANOS_PER_DOLLAR
+                ),
+            });
+            continue;
+        }
+
         if let Err(reason) = order.validate_binary_one_hot() {
             violations.push(Violation {
                 kind: ViolationKind::InvalidOrder,
@@ -86,16 +84,24 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 
         if has_positive && !has_negative {
             // Pure buy: check balance covers worst-case cost
-            let Some(max_cost) = checked_notional_ceil_i64(order.limit_price.0, order.max_fill.0)
-            else {
+            let Some(max_cost) = checked_price_qty_ceil(order.limit_price, order.max_fill) else {
                 violations.push(Violation {
-                    kind: ViolationKind::InvalidOrder,
+                    kind: ViolationKind::SettlementOverflow,
                     details: format!("Order {}: price*quantity overflow", order.id),
                 });
                 continue;
             };
             let reserved = *reserved_balance.get(&wo.account_id).unwrap_or(&0);
-            let available = snap.balance - reserved;
+            let Some(available) = snap.balance.checked_sub(reserved) else {
+                violations.push(Violation {
+                    kind: ViolationKind::SettlementOverflow,
+                    details: format!(
+                        "Order {} (account {}): balance {} - reserved {} overflowed",
+                        order.id, wo.account_id, snap.balance, reserved
+                    ),
+                });
+                continue;
+            };
 
             if max_cost > available {
                 violations.push(Violation {
@@ -108,7 +114,18 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
             }
 
             // Reserve this cost for subsequent orders in the batch
-            *reserved_balance.entry(wo.account_id).or_insert(0) += max_cost;
+            let entry = reserved_balance.entry(wo.account_id).or_insert(0);
+            let Some(updated) = entry.checked_add(max_cost) else {
+                violations.push(Violation {
+                    kind: ViolationKind::SettlementOverflow,
+                    details: format!(
+                        "Order {} (account {}): reserved balance {} + max_cost {} overflowed",
+                        order.id, wo.account_id, *entry, max_cost
+                    ),
+                });
+                continue;
+            };
+            *entry = updated;
         } else if has_negative && !has_positive {
             // Pure sell: check positions
             if order.num_markets == 1 {
@@ -116,11 +133,18 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                 for s in 0..num_states {
                     if order.payoffs[s] < 0 {
                         let outcome = s as u8;
-                        let Some(sell_qty) =
-                            checked_sell_qty_i64(order.payoffs[s], order.max_fill.0)
+                        let Some(raw_sell_qty) =
+                            checked_position_qty(order.payoffs[s], order.max_fill)
                         else {
                             violations.push(Violation {
-                                kind: ViolationKind::InvalidOrder,
+                                kind: ViolationKind::SettlementOverflow,
+                                details: format!("Order {}: sell quantity overflow", order.id),
+                            });
+                            continue;
+                        };
+                        let Some(sell_qty) = raw_sell_qty.checked_neg() else {
+                            violations.push(Violation {
+                                kind: ViolationKind::SettlementOverflow,
                                 details: format!("Order {}: sell quantity overflow", order.id),
                             });
                             continue;
@@ -181,11 +205,10 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                 let has_negative = order.payoffs[..num_states].iter().any(|&p| p < 0);
 
                 if has_positive && !has_negative {
-                    let Some(max_cost) =
-                        checked_notional_ceil_i64(order.limit_price.0, order.max_fill.0)
+                    let Some(max_cost) = checked_price_qty_ceil(order.limit_price, order.max_fill)
                     else {
                         violations.push(Violation {
-                            kind: ViolationKind::IncorrectRejectionReason,
+                            kind: ViolationKind::SettlementOverflow,
                             details: format!("Order {}: price*quantity overflow", order.id),
                         });
                         continue;

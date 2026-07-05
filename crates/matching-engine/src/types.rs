@@ -60,8 +60,24 @@ impl Nanos {
     }
 
     #[inline]
+    pub const fn checked_add(self, rhs: Nanos) -> Option<Nanos> {
+        match self.0.checked_add(rhs.0) {
+            Some(value) => Some(Nanos(value)),
+            None => None,
+        }
+    }
+
+    #[inline]
     pub const fn saturating_sub(self, rhs: Nanos) -> Nanos {
         Nanos(self.0.saturating_sub(rhs.0))
+    }
+
+    #[inline]
+    pub const fn checked_sub(self, rhs: Nanos) -> Option<Nanos> {
+        match self.0.checked_sub(rhs.0) {
+            Some(value) => Some(Nanos(value)),
+            None => None,
+        }
     }
 }
 
@@ -79,8 +95,24 @@ impl Qty {
     }
 
     #[inline]
+    pub const fn checked_add(self, rhs: Qty) -> Option<Qty> {
+        match self.0.checked_add(rhs.0) {
+            Some(value) => Some(Qty(value)),
+            None => None,
+        }
+    }
+
+    #[inline]
     pub const fn saturating_sub(self, rhs: Qty) -> Qty {
         Qty(self.0.saturating_sub(rhs.0))
+    }
+
+    #[inline]
+    pub const fn checked_sub(self, rhs: Qty) -> Option<Qty> {
+        match self.0.checked_sub(rhs.0) {
+            Some(value) => Some(Qty(value)),
+            None => None,
+        }
     }
 }
 
@@ -164,6 +196,19 @@ pub fn notional_nanos(price: Nanos, qty: Qty) -> Nanos {
     Nanos(((price.0 as u128 * qty.0 as u128) / SHARE_SCALE as u128) as u64)
 }
 
+/// Checked floor of `price_nanos * qty / SHARE_SCALE`, returned as [`Nanos`].
+pub fn checked_notional_nanos(price: Nanos, qty: Qty) -> Option<Nanos> {
+    let numerator = i128::from(price.0).checked_mul(i128::from(qty.0))?;
+    let scaled = numerator.checked_div(i128::from(SHARE_SCALE))?;
+    u64::try_from(scaled).ok().map(Nanos)
+}
+
+/// Checked floor of `price_nanos * qty / SHARE_SCALE`, returned as `i64`.
+pub fn checked_notional_i64(price: Nanos, qty: Qty) -> Option<i64> {
+    let nanos = checked_notional_nanos(price, qty)?;
+    i64::try_from(nanos.0).ok()
+}
+
 /// Ceiling of `price_nanos * qty / SHARE_SCALE`, returned as [`Nanos`].
 ///
 /// Use this for reservations and budget checks, where under-reserving by even
@@ -171,6 +216,19 @@ pub fn notional_nanos(price: Nanos, qty: Qty) -> Nanos {
 pub fn notional_nanos_ceil(price: Nanos, qty: Qty) -> Nanos {
     let numerator = price.0 as u128 * qty.0 as u128;
     Nanos(numerator.div_ceil(SHARE_SCALE as u128) as u64)
+}
+
+/// Checked ceiling of `price_nanos * qty / SHARE_SCALE`, returned as [`Nanos`].
+pub fn checked_notional_nanos_ceil(price: Nanos, qty: Qty) -> Option<Nanos> {
+    let numerator = i128::from(price.0).checked_mul(i128::from(qty.0))?;
+    let rounded = numerator.checked_add(i128::from(SHARE_SCALE - 1))? / i128::from(SHARE_SCALE);
+    u64::try_from(rounded).ok().map(Nanos)
+}
+
+/// Checked ceiling of `price_nanos * qty / SHARE_SCALE`, returned as `i64`.
+pub fn checked_notional_ceil_i64(price: Nanos, qty: Qty) -> Option<i64> {
+    let nanos = checked_notional_nanos_ceil(price, qty)?;
+    i64::try_from(nanos.0).ok()
 }
 
 /// Exact integer `ceil(value * numer / denom)` computed with `i128`
@@ -217,6 +275,16 @@ pub fn signed_notional_nanos(price: Nanos, qty: i64) -> i64 {
     }
 }
 
+/// Checked signed floor of `price_nanos * qty / SHARE_SCALE`.
+pub fn checked_signed_notional_nanos(price: Nanos, qty: i64) -> Option<i64> {
+    let abs = checked_notional_i64(price, Qty(qty.unsigned_abs()))?;
+    if qty < 0 {
+        abs.checked_neg()
+    } else {
+        Some(abs)
+    }
+}
+
 /// Signed floor of `price_delta_nanos * qty / SHARE_SCALE`.
 pub fn signed_price_delta_notional(price_delta: i64, qty: Qty) -> i64 {
     let abs = ((price_delta.unsigned_abs() as u128 * qty.0 as u128) / SHARE_SCALE as u128) as i64;
@@ -224,6 +292,16 @@ pub fn signed_price_delta_notional(price_delta: i64, qty: Qty) -> i64 {
         -abs
     } else {
         abs
+    }
+}
+
+/// Checked signed floor of `price_delta_nanos * qty / SHARE_SCALE`.
+pub fn checked_signed_price_delta_notional(price_delta: i64, qty: Qty) -> Option<i64> {
+    let abs = checked_notional_i64(Nanos(price_delta.unsigned_abs()), qty)?;
+    if price_delta < 0 {
+        abs.checked_neg()
+    } else {
+        Some(abs)
     }
 }
 

@@ -3,15 +3,21 @@
 //! All price*qty computations go through matching-engine helpers so verifier
 //! arithmetic matches the sequencer's fixed-point quantity semantics.
 
-use matching_engine::{notional_nanos, signed_price_delta_notional, Nanos, Qty, SHARE_SCALE};
+use matching_engine::{
+    checked_notional_ceil_i64, checked_notional_i64, checked_signed_price_delta_notional,
+    notional_nanos, Nanos, Qty,
+};
 
 /// Compute `price * qty / SHARE_SCALE` as i64.
 /// Returns `None` on overflow (value doesn't fit in i64).
 pub fn checked_price_qty(price: Nanos, qty: Qty) -> Option<i64> {
-    let result = (price.0 as i128)
-        .checked_mul(qty.0 as i128)?
-        .checked_div(SHARE_SCALE as i128)?;
-    i64::try_from(result).ok()
+    checked_notional_i64(price, qty)
+}
+
+/// Compute `ceil(price * qty / SHARE_SCALE)` as i64.
+/// Returns `None` on overflow (value doesn't fit in i64).
+pub fn checked_price_qty_ceil(price: Nanos, qty: Qty) -> Option<i64> {
+    checked_notional_ceil_i64(price, qty)
 }
 
 /// Compute `price * qty / SHARE_SCALE` as i64.
@@ -24,15 +30,34 @@ pub fn price_qty(price: Nanos, qty: Qty) -> i64 {
 /// Buyers: `(limit_price - fill_price) * fill_qty / SHARE_SCALE`
 /// Sellers: `(fill_price - limit_price) * fill_qty / SHARE_SCALE`
 pub fn welfare(limit_price: Nanos, fill_price: Nanos, fill_qty: Qty, is_seller: bool) -> i64 {
+    checked_welfare(limit_price, fill_price, fill_qty, is_seller).unwrap_or_default()
+}
+
+/// Checked welfare for a single fill.
+pub fn checked_welfare(
+    limit_price: Nanos,
+    fill_price: Nanos,
+    fill_qty: Qty,
+    is_seller: bool,
+) -> Option<i64> {
     if fill_qty == Qty::ZERO {
-        return 0;
+        return Some(0);
     }
     let surplus_per_unit = if is_seller {
-        fill_price.0 as i64 - limit_price.0 as i64
+        i64::try_from(fill_price.0)
+            .ok()?
+            .checked_sub(i64::try_from(limit_price.0).ok()?)?
     } else {
-        limit_price.0 as i64 - fill_price.0 as i64
+        i64::try_from(limit_price.0)
+            .ok()?
+            .checked_sub(i64::try_from(fill_price.0).ok()?)?
     };
-    signed_price_delta_notional(surplus_per_unit, fill_qty)
+    checked_signed_price_delta_notional(surplus_per_unit, fill_qty)
+}
+
+/// Compute `payoff * qty` as i64 for sell-side position checks.
+pub fn checked_position_qty(payoff: i8, qty: Qty) -> Option<i64> {
+    i64::from(payoff).checked_mul(i64::try_from(qty.0).ok()?)
 }
 
 #[cfg(test)]
