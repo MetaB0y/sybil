@@ -72,7 +72,7 @@ use crate::aggregates::{
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader, SealedBlock};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
 use crate::market_info::{
-    AccountFillCursor, AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage,
+    AccountFillCursor, AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage, PricePoint,
 };
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::RestingOrder;
@@ -400,7 +400,7 @@ const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks_fu
 
 /// Persistent store for sequencer state. Wraps a redb database.
 pub struct Store {
-    db: Database,
+    db: Arc<Database>,
     account_state_store: Box<dyn AccountStateStore>,
     #[cfg(test)]
     fault_injection: Arc<Mutex<StoreFaultInjection>>,
@@ -419,6 +419,21 @@ pub(crate) enum StoreFaultPoint {
 #[derive(Debug, Default)]
 struct StoreFaultInjection {
     save_block_faults: VecDeque<StoreFaultPoint>,
+}
+
+#[cfg(test)]
+fn pop_save_block_fault(
+    fault_injection: &Arc<Mutex<StoreFaultInjection>>,
+    point: StoreFaultPoint,
+) -> Result<(), StoreError> {
+    let mut faults = fault_injection
+        .lock()
+        .expect("store fault-injection lock poisoned");
+    if faults.save_block_faults.front().copied() == Some(point) {
+        faults.save_block_faults.pop_front();
+        return Err(StoreError::InjectedFault(format!("{point:?}")));
+    }
+    Ok(())
 }
 
 /// Retention settings for durable history tables.
@@ -475,6 +490,22 @@ pub struct HistoryPruneReport {
     pub blocks_full_pruned: usize,
     pub price_points_pruned: usize,
     pub meta: HistoryRetentionMeta,
+}
+
+fn read_history_retention_meta(db: &Database) -> Result<HistoryRetentionMeta, StoreError> {
+    let txn = db.begin_read()?;
+    let table = txn.open_table(HISTORY_META)?;
+    Ok(HistoryRetentionMeta {
+        blocks_full_min_height: table
+            .get(KEY_BLOCKS_FULL_MIN_HEIGHT)?
+            .map(|value| value.value()),
+        price_points_min_height: table
+            .get(KEY_PRICE_POINTS_MIN_HEIGHT)?
+            .map(|value| value.value()),
+        last_history_prune_height: table
+            .get(KEY_LAST_HISTORY_PRUNE_HEIGHT)?
+            .map(|value| value.value()),
+    })
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -629,6 +660,604 @@ pub struct SequencerSnapshot<'a> {
     pub bridge_state: &'a BridgeState,
 }
 
+struct RedbBlockCommit {
+    height: u64,
+    market_rows: Vec<(u32, Vec<u8>)>,
+    market_meta_rows: Vec<(u32, Vec<u8>)>,
+    market_status_rows: Vec<(u32, Vec<u8>)>,
+    market_group_rows: Vec<(u32, Vec<u8>)>,
+    header_bytes: Vec<u8>,
+    history_block_bytes: Option<Vec<u8>>,
+    witness_bytes: Option<Vec<u8>>,
+    pubkey_rows: Vec<(Vec<u8>, u64)>,
+    clearing_price_rows: Vec<(u32, Vec<u8>)>,
+    market_volume_rows: Vec<(u32, u64)>,
+    resting_orders_bytes: Vec<u8>,
+    fill_history_rows: Vec<([u8; 24], Vec<u8>)>,
+    equity_point_rows: Vec<([u8; 16], Vec<u8>)>,
+    history_event_rows: Vec<([u8; 24], Vec<u8>)>,
+    history_event_next_seq: u64,
+    price_point_rows: Vec<RedbPricePointRow>,
+    price_candle_resolutions_secs: Vec<u32>,
+    data_feed_rows: Vec<(u64, Vec<u8>)>,
+    resolution_template_rows: Vec<(String, Vec<u8>)>,
+    bridge_state_bytes: Vec<u8>,
+    trader_tracker_bytes: Vec<u8>,
+    price_tracker_volume_bytes: Vec<u8>,
+    price_tracker_clearing_history_bytes: Vec<u8>,
+    liquidity_tracker_bytes: Vec<u8>,
+    order_stats_tracker_bytes: Vec<u8>,
+    welfare_tracker_bytes: Vec<u8>,
+    first_deposit_ms_bytes: Vec<u8>,
+    fill_total_counts_bytes: Vec<u8>,
+    cost_basis_tracker_bytes: Vec<u8>,
+    counters: PersistedCoreCounters,
+}
+
+struct RedbPricePointRow {
+    market_id: MarketId,
+    point: PricePoint,
+    key: [u8; 12],
+    bytes: Vec<u8>,
+}
+
+fn build_redb_block_commit(
+    snapshot: &SequencerSnapshot<'_>,
+    witness: Option<&BlockWitness>,
+    history_block: Option<&SealedBlock>,
+    next_slot: AccountSnapshotSlot,
+) -> Result<RedbBlockCommit, StoreError> {
+    let mut market_rows = Vec::new();
+    for (id, market) in snapshot.markets.iter_with_ids() {
+        market_rows.push((id.0, rmp_serde::to_vec(market)?));
+    }
+
+    let mut market_status_rows = Vec::new();
+    for (&market_id, status) in snapshot.lifecycle.market_statuses() {
+        market_status_rows.push((market_id.0, rmp_serde::to_vec(status)?));
+    }
+
+    let mut market_meta_rows = Vec::new();
+    for (id, _) in snapshot.markets.iter_with_ids() {
+        if let Some(meta) = snapshot.lifecycle.market_metadata(*id) {
+            market_meta_rows.push((id.0, rmp_serde::to_vec(meta)?));
+        }
+    }
+
+    let mut market_group_rows = Vec::new();
+    for (i, group) in snapshot.market_groups.iter().enumerate() {
+        market_group_rows.push((i as u32, rmp_serde::to_vec(group)?));
+    }
+
+    let witness_bytes = witness.map(rmp_serde::to_vec).transpose()?;
+    let history_block_bytes = history_block.map(rmp_serde::to_vec).transpose()?;
+
+    let pubkey_rows = snapshot
+        .pubkey_registry
+        .iter()
+        .map(|(pubkey, account_id)| (pubkey.compressed_bytes().to_vec(), account_id.0))
+        .collect();
+
+    let mut clearing_price_rows = Vec::new();
+    for (&market_id, prices) in snapshot.analytics.last_clearing_prices {
+        clearing_price_rows.push((market_id.0, rmp_serde::to_vec(prices)?));
+    }
+
+    let market_volume_rows = snapshot
+        .analytics
+        .market_volumes
+        .iter()
+        .map(|(&market_id, &volume)| (market_id.0, volume))
+        .collect();
+
+    let mut fill_history_rows = Vec::new();
+    for (account_id, record) in &snapshot.analytics.account_fills {
+        fill_history_rows.push((
+            fill_history_key(*account_id, record),
+            rmp_serde::to_vec(record)?,
+        ));
+    }
+    for (account_id, record) in &snapshot.analytics.fill_history_delta {
+        fill_history_rows.push((
+            fill_history_key(*account_id, record),
+            rmp_serde::to_vec(record)?,
+        ));
+    }
+
+    let mut equity_point_rows = Vec::new();
+    for (aid, point) in &snapshot.analytics.equity_points_delta {
+        equity_point_rows.push((equity_key(*aid, point.height), rmp_serde::to_vec(point)?));
+    }
+
+    let mut history_event_rows = Vec::new();
+    for event in &snapshot.analytics.history_events_delta {
+        history_event_rows.push((
+            history_event_key(AccountId(event.account_id), event.block_height, event.seq),
+            rmp_serde::to_vec(event)?,
+        ));
+    }
+
+    let mut price_point_rows = Vec::new();
+    for (market_id, point) in &snapshot.analytics.price_points_delta {
+        price_point_rows.push(RedbPricePointRow {
+            market_id: *market_id,
+            point: point.clone(),
+            key: price_point_key(*market_id, point.height),
+            bytes: rmp_serde::to_vec(point)?,
+        });
+    }
+
+    let mut data_feed_rows = Vec::new();
+    for feed in snapshot.lifecycle.feeds().iter() {
+        data_feed_rows.push((feed.id.0, rmp_serde::to_vec(feed)?));
+    }
+
+    let mut resolution_template_rows = Vec::new();
+    for (template_id, template) in snapshot.lifecycle.templates().iter() {
+        resolution_template_rows.push((template_id.0.clone(), rmp_serde::to_vec(template)?));
+    }
+
+    let mut first_deposit_entries: Vec<(AccountId, u64)> = snapshot
+        .analytics
+        .first_deposit_ms
+        .iter()
+        .map(|(&aid, &ts)| (aid, ts))
+        .collect();
+    first_deposit_entries.sort_by_key(|(aid, _)| aid.0);
+
+    let mut fill_total_entries: Vec<(AccountId, u64)> = snapshot
+        .analytics
+        .fill_total_counts
+        .iter()
+        .map(|(&aid, &n)| (aid, n))
+        .collect();
+    fill_total_entries.sort_by_key(|(aid, _)| aid.0);
+
+    Ok(RedbBlockCommit {
+        height: snapshot.header.height,
+        market_rows,
+        market_meta_rows,
+        market_status_rows,
+        market_group_rows,
+        header_bytes: rmp_serde::to_vec(snapshot.header)?,
+        history_block_bytes,
+        witness_bytes,
+        pubkey_rows,
+        clearing_price_rows,
+        market_volume_rows,
+        resting_orders_bytes: rmp_serde::to_vec(&snapshot.resting_orders)?,
+        fill_history_rows,
+        equity_point_rows,
+        history_event_rows,
+        history_event_next_seq: snapshot.analytics.history_event_next_seq,
+        price_point_rows,
+        price_candle_resolutions_secs: snapshot.price_candle_resolutions_secs.to_vec(),
+        data_feed_rows,
+        resolution_template_rows,
+        bridge_state_bytes: rmp_serde::to_vec(snapshot.bridge_state)?,
+        trader_tracker_bytes: rmp_serde::to_vec(&snapshot.analytics.trader_tracker)?,
+        price_tracker_volume_bytes: rmp_serde::to_vec(&snapshot.analytics.price_tracker_volume)?,
+        price_tracker_clearing_history_bytes: rmp_serde::to_vec(
+            &snapshot.analytics.price_tracker_clearing_history,
+        )?,
+        liquidity_tracker_bytes: rmp_serde::to_vec(&snapshot.analytics.liquidity_tracker)?,
+        order_stats_tracker_bytes: rmp_serde::to_vec(&snapshot.analytics.order_stats_tracker)?,
+        welfare_tracker_bytes: rmp_serde::to_vec(&snapshot.analytics.welfare_tracker)?,
+        first_deposit_ms_bytes: rmp_serde::to_vec(&first_deposit_entries)?,
+        fill_total_counts_bytes: rmp_serde::to_vec(&fill_total_entries)?,
+        cost_basis_tracker_bytes: rmp_serde::to_vec(&snapshot.analytics.cost_basis_tracker)?,
+        counters: PersistedCoreCounters {
+            height: snapshot.header.height,
+            next_account_id: snapshot.accounts.next_id(),
+            next_market_id: snapshot.markets.next_id() as u64,
+            next_order_id: snapshot.next_order_id,
+            account_state_fence: AccountStateFence {
+                height: snapshot.header.height,
+                slot: next_slot,
+            },
+        },
+    })
+}
+
+#[cfg(test)]
+fn write_redb_block_commit(
+    db: &Database,
+    commit: RedbBlockCommit,
+    fault_injection: Arc<Mutex<StoreFaultInjection>>,
+) -> Result<(), StoreError> {
+    write_redb_block_commit_inner(db, commit, || {
+        pop_save_block_fault(&fault_injection, StoreFaultPoint::BeforeRedbFenceCommit)
+    })
+}
+
+#[cfg(not(test))]
+fn write_redb_block_commit(db: &Database, commit: RedbBlockCommit) -> Result<(), StoreError> {
+    write_redb_block_commit_inner(db, commit, || Ok(()))
+}
+
+fn write_redb_block_commit_inner<F>(
+    db: &Database,
+    commit: RedbBlockCommit,
+    before_commit: F,
+) -> Result<(), StoreError>
+where
+    F: FnOnce() -> Result<(), StoreError>,
+{
+    let txn = db.begin_write()?;
+
+    {
+        let mut table = txn.open_table(MARKETS)?;
+        for (id, bytes) in &commit.market_rows {
+            table.insert(*id, bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut meta_table = txn.open_table(MARKET_META)?;
+        let mut status_table = txn.open_table(MARKET_STATUSES)?;
+        for (market_id, bytes) in &commit.market_status_rows {
+            status_table.insert(*market_id, bytes.as_slice())?;
+        }
+        for (market_id, bytes) in &commit.market_meta_rows {
+            meta_table.insert(*market_id, bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(MARKET_GROUPS)?;
+        table.retain(|_, _| false)?;
+        for (index, bytes) in &commit.market_group_rows {
+            table.insert(*index, bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(BLOCK_HEADERS)?;
+        table.retain(|height, _| height == commit.height)?;
+        table.insert(commit.height, commit.header_bytes.as_slice())?;
+    }
+
+    if let Some(bytes) = &commit.history_block_bytes {
+        let mut table = txn.open_table(BLOCKS_FULL)?;
+        table.insert(commit.height, bytes.as_slice())?;
+    }
+
+    {
+        let mut table = txn.open_table(BLOCK_WITNESSES)?;
+        table.retain(|height, _| height == commit.height)?;
+        if let Some(bytes) = &commit.witness_bytes {
+            table.insert(commit.height, bytes.as_slice())?;
+        } else {
+            table.remove(commit.height)?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(PUBKEY_REGISTRY)?;
+        for (pubkey, account_id) in &commit.pubkey_rows {
+            table.insert(pubkey.as_slice(), *account_id)?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(CLEARING_PRICES)?;
+        for (market_id, bytes) in &commit.clearing_price_rows {
+            table.insert(*market_id, bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(MARKET_VOLUMES)?;
+        for (market_id, volume) in &commit.market_volume_rows {
+            table.insert(*market_id, *volume)?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(RESTING_ORDERS)?;
+        table.insert(
+            KEY_RESTING_ORDERS_SNAPSHOT,
+            commit.resting_orders_bytes.as_slice(),
+        )?;
+    }
+
+    {
+        let mut table = txn.open_table(FILL_HISTORY)?;
+        for (key, bytes) in &commit.fill_history_rows {
+            table.insert(key.as_slice(), bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(EQUITY_POINTS)?;
+        for (key, bytes) in &commit.equity_point_rows {
+            table.insert(key.as_slice(), bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(HISTORY_EVENTS)?;
+        for (key, bytes) in &commit.history_event_rows {
+            table.insert(key.as_slice(), bytes.as_slice())?;
+        }
+    }
+    {
+        let mut counters = txn.open_table(COUNTERS)?;
+        counters.insert(KEY_HISTORY_EVENT_NEXT_SEQ, commit.history_event_next_seq)?;
+    }
+
+    {
+        let mut table = txn.open_table(PRICE_POINTS)?;
+        for row in &commit.price_point_rows {
+            table.insert(row.key.as_slice(), row.bytes.as_slice())?;
+        }
+    }
+
+    if !commit.price_point_rows.is_empty() && !commit.price_candle_resolutions_secs.is_empty() {
+        let mut candles = txn.open_table(PRICE_CANDLES)?;
+        for row in &commit.price_point_rows {
+            for &resolution_secs in &commit.price_candle_resolutions_secs {
+                if resolution_secs == 0 {
+                    continue;
+                }
+                let mut candle = PriceCandle::from_point(resolution_secs, &row.point);
+                let key = price_candle_key(row.market_id, resolution_secs, candle.bucket_start_ms);
+                if let Some(existing) = {
+                    candles
+                        .get(key.as_slice())?
+                        .map(|value| rmp_serde::from_slice(value.value()))
+                        .transpose()?
+                } {
+                    candle = existing;
+                    candle.merge_point(&row.point);
+                }
+                let bytes = rmp_serde::to_vec(&candle)?;
+                candles.insert(key.as_slice(), bytes.as_slice())?;
+            }
+        }
+    }
+
+    {
+        let mut table = txn.open_table(DATA_FEEDS)?;
+        for (feed_id, bytes) in &commit.data_feed_rows {
+            table.insert(*feed_id, bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(RESOLUTION_TEMPLATES)?;
+        table.retain(|_, _| false)?;
+        for (template_id, bytes) in &commit.resolution_template_rows {
+            table.insert(template_id.as_str(), bytes.as_slice())?;
+        }
+    }
+
+    {
+        let mut table = txn.open_table(BRIDGE_STATE)?;
+        table.insert(KEY_BRIDGE_STATE, commit.bridge_state_bytes.as_slice())?;
+    }
+
+    {
+        let mut table = txn.open_table(PENDING_BUNDLES)?;
+        table.retain(|_, _| false)?;
+    }
+    {
+        let mut table = txn.open_table(ADMIT_LOG)?;
+        table.retain(|_, _| false)?;
+    }
+    {
+        let mut table = txn.open_table(CONTROL_PLANE_LOG)?;
+        table.retain(|_, _| false)?;
+    }
+    {
+        let mut table = txn.open_table(PENDING_L1_DEPOSITS)?;
+        table.retain(|_, _| false)?;
+    }
+    {
+        let mut table = txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
+        table.retain(|_, _| false)?;
+    }
+
+    {
+        let mut table = txn.open_table(TRADER_TRACKER)?;
+        table.insert(
+            KEY_TRADER_TRACKER_SNAPSHOT,
+            commit.trader_tracker_bytes.as_slice(),
+        )?;
+    }
+    {
+        let mut table = txn.open_table(PRICE_TRACKER_VOLUME)?;
+        table.insert(
+            KEY_PRICE_TRACKER_VOLUME_SNAPSHOT,
+            commit.price_tracker_volume_bytes.as_slice(),
+        )?;
+    }
+    {
+        let mut table = txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
+        table.insert(
+            KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT,
+            commit.price_tracker_clearing_history_bytes.as_slice(),
+        )?;
+    }
+    {
+        let mut table = txn.open_table(LIQUIDITY_TRACKER)?;
+        table.insert(
+            KEY_LIQUIDITY_TRACKER_SNAPSHOT,
+            commit.liquidity_tracker_bytes.as_slice(),
+        )?;
+    }
+    {
+        let mut table = txn.open_table(ORDER_STATS_TRACKER)?;
+        table.insert(
+            KEY_ORDER_STATS_TRACKER_SNAPSHOT,
+            commit.order_stats_tracker_bytes.as_slice(),
+        )?;
+    }
+    {
+        let mut table = txn.open_table(WELFARE_TRACKER)?;
+        table.insert(
+            KEY_WELFARE_TRACKER_SNAPSHOT,
+            commit.welfare_tracker_bytes.as_slice(),
+        )?;
+    }
+    {
+        let mut table = txn.open_table(FIRST_DEPOSIT_MS)?;
+        table.insert(
+            KEY_FIRST_DEPOSIT_MS_SNAPSHOT,
+            commit.first_deposit_ms_bytes.as_slice(),
+        )?;
+    }
+    {
+        let mut table = txn.open_table(FILL_TOTAL_COUNTS)?;
+        table.insert(
+            KEY_FILL_TOTAL_COUNTS_SNAPSHOT,
+            commit.fill_total_counts_bytes.as_slice(),
+        )?;
+    }
+    {
+        let mut table = txn.open_table(COST_BASIS_TRACKER)?;
+        table.insert(
+            KEY_COST_BASIS_TRACKER_SNAPSHOT,
+            commit.cost_basis_tracker_bytes.as_slice(),
+        )?;
+    }
+
+    {
+        let mut table = txn.open_table(COUNTERS)?;
+        write_core_counters(&mut table, commit.counters)?;
+    }
+
+    before_commit()?;
+    txn.commit()?;
+    Ok(())
+}
+
+fn prune_history_redb(
+    db: &Database,
+    head_height: u64,
+    policy: HistoryRetentionPolicy,
+    block_floor: Option<u64>,
+    price_floor: Option<u64>,
+) -> Result<HistoryPruneReport, StoreError> {
+    let txn = db.begin_write()?;
+    let mut remaining = policy.prune_max_rows;
+    let mut blocks_full_pruned = 0usize;
+    let mut price_points_pruned = 0usize;
+
+    if let Some(floor) = block_floor {
+        let keys: Vec<u64> = {
+            let table = txn.open_table(BLOCKS_FULL)?;
+            let mut keys = Vec::new();
+            for entry in table.range(0..floor)? {
+                let (key, _) = entry?;
+                keys.push(key.value());
+                if keys.len() >= remaining {
+                    break;
+                }
+            }
+            keys
+        };
+
+        if !keys.is_empty() {
+            let mut table = txn.open_table(BLOCKS_FULL)?;
+            for key in keys {
+                if table.remove(key)?.is_some() {
+                    blocks_full_pruned += 1;
+                }
+            }
+            remaining = remaining.saturating_sub(blocks_full_pruned);
+        }
+    }
+
+    if remaining > 0 {
+        if let Some(floor) = price_floor {
+            let keys: Vec<[u8; 12]> = {
+                let table = txn.open_table(PRICE_POINTS)?;
+                let mut keys = Vec::new();
+                for entry in table.iter()? {
+                    let (key, _) = entry?;
+                    let key_bytes = key.value();
+                    if price_point_height_from_key(key_bytes).is_some_and(|h| h < floor) {
+                        let mut owned = [0u8; 12];
+                        owned.copy_from_slice(key_bytes);
+                        keys.push(owned);
+                        if keys.len() >= remaining {
+                            break;
+                        }
+                    }
+                }
+                keys
+            };
+
+            if !keys.is_empty() {
+                let mut table = txn.open_table(PRICE_POINTS)?;
+                for key in keys {
+                    if table.remove(key.as_slice())?.is_some() {
+                        price_points_pruned += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    let blocks_full_min_height = if block_floor.is_some() {
+        let table = txn.open_table(BLOCKS_FULL)?;
+        let min_height = table
+            .iter()?
+            .next()
+            .transpose()?
+            .map(|(key, _)| key.value());
+        min_height
+    } else {
+        None
+    };
+    let price_points_min_height = if price_floor.is_some() {
+        let table = txn.open_table(PRICE_POINTS)?;
+        let mut min_height: Option<u64> = None;
+        for entry in table.iter()? {
+            let (key, _) = entry?;
+            if let Some(height) = price_point_height_from_key(key.value()) {
+                min_height = Some(min_height.map_or(height, |min| min.min(height)));
+            }
+        }
+        min_height
+    } else {
+        None
+    };
+
+    {
+        let mut meta = txn.open_table(HISTORY_META)?;
+        if block_floor.is_some() {
+            match blocks_full_min_height {
+                Some(height) => {
+                    meta.insert(KEY_BLOCKS_FULL_MIN_HEIGHT, height)?;
+                }
+                None => {
+                    meta.remove(KEY_BLOCKS_FULL_MIN_HEIGHT)?;
+                }
+            }
+        }
+        if price_floor.is_some() {
+            match price_points_min_height {
+                Some(height) => {
+                    meta.insert(KEY_PRICE_POINTS_MIN_HEIGHT, height)?;
+                }
+                None => {
+                    meta.remove(KEY_PRICE_POINTS_MIN_HEIGHT)?;
+                }
+            }
+        }
+        meta.insert(KEY_LAST_HISTORY_PRUNE_HEIGHT, head_height)?;
+    }
+
+    txn.commit()?;
+    Ok(HistoryPruneReport {
+        blocks_full_pruned,
+        price_points_pruned,
+        meta: read_history_retention_meta(db)?,
+    })
+}
+
 impl Store {
     /// Open (or create) a store at the given path.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
@@ -687,6 +1316,8 @@ impl Store {
             }
         }
 
+        let db = Arc::new(db);
+
         info!(?path, "store opened");
         Ok(Self {
             db,
@@ -707,15 +1338,27 @@ impl Store {
 
     #[cfg(test)]
     fn fail_save_block_at(&self, point: StoreFaultPoint) -> Result<(), StoreError> {
-        let mut faults = self
-            .fault_injection
-            .lock()
-            .expect("store fault-injection lock poisoned");
-        if faults.save_block_faults.front().copied() == Some(point) {
-            faults.save_block_faults.pop_front();
-            return Err(StoreError::InjectedFault(format!("{point:?}")));
-        }
-        Ok(())
+        pop_save_block_fault(&self.fault_injection, point)
+    }
+
+    async fn redb_write<R, F>(&self, write: F) -> Result<R, StoreError>
+    where
+        R: Send + 'static,
+        F: FnOnce(Arc<Database>) -> Result<R, StoreError> + Send + 'static,
+    {
+        let db = Arc::clone(&self.db);
+        // Redb begin_write/commit is synchronous and can fsync. The actor
+        // awaits this task before making the corresponding state visible or
+        // committing a prepared block, so the durable-before-visible and qMDB
+        // fence ordering stays identical while the Tokio worker is not blocked.
+        tokio::task::spawn_blocking(move || write(db))
+            .await
+            .map_err(|error| StoreError::BlockingTask(error.to_string()))?
+    }
+
+    #[cfg(test)]
+    fn save_block_faults(&self) -> Arc<Mutex<StoreFaultInjection>> {
+        Arc::clone(&self.fault_injection)
     }
 
     /// Save the sequencer state after a block. Single ACID transaction.
@@ -803,357 +1446,20 @@ impl Store {
         #[cfg(test)]
         self.fail_save_block_at(StoreFaultPoint::AfterQmdbPersistBeforeRedbFence)?;
 
-        let txn = self.db.begin_write()?;
-
-        // Markets
-        {
-            let mut table = txn.open_table(MARKETS)?;
-            for (id, market) in snapshot.markets.iter_with_ids() {
-                let bytes = rmp_serde::to_vec(market)?;
-                table.insert(id.0, bytes.as_slice())?;
-            }
-        }
-
-        // Market metadata + statuses
-        {
-            let mut meta_table = txn.open_table(MARKET_META)?;
-            let mut status_table = txn.open_table(MARKET_STATUSES)?;
-            for (&market_id, status) in snapshot.lifecycle.market_statuses() {
-                let bytes = rmp_serde::to_vec(status)?;
-                status_table.insert(market_id.0, bytes.as_slice())?;
-            }
-            for (id, _) in snapshot.markets.iter_with_ids() {
-                if let Some(meta) = snapshot.lifecycle.market_metadata(*id) {
-                    let bytes = rmp_serde::to_vec(meta)?;
-                    meta_table.insert(id.0, bytes.as_slice())?;
-                }
-            }
-        }
-
-        // Market groups. Resolution can shrink or dissolve groups, so clear
-        // stale rows before writing the current indexed snapshot.
-        {
-            let mut table = txn.open_table(MARKET_GROUPS)?;
-            table.retain(|_, _| false)?;
-            for (i, group) in snapshot.market_groups.iter().enumerate() {
-                let bytes = rmp_serde::to_vec(group)?;
-                table.insert(i as u32, bytes.as_slice())?;
-            }
-        }
-
-        // Block header
-        {
-            let mut table = txn.open_table(BLOCK_HEADERS)?;
-            table.retain(|height, _| height == snapshot.header.height)?;
-            let bytes = rmp_serde::to_vec(snapshot.header)?;
-            table.insert(snapshot.header.height, bytes.as_slice())?;
-        }
-
-        // Full historical block replay payload. This is append-only history
-        // data, so unlike headers/witnesses it is not retained latest-only.
-        if let Some(block) = history_block {
-            let mut table = txn.open_table(BLOCKS_FULL)?;
-            let bytes = rmp_serde::to_vec(block)?;
-            table.insert(snapshot.header.height, bytes.as_slice())?;
-        }
-
-        // Block witness, when produced by the actor path. Historical qMDB
-        // slots are not retained yet, so persisted witness export is latest
-        // only. Retaining older full-state witnesses grows redb quickly and
-        // does not produce independently provable historical blocks.
-        {
-            let mut table = txn.open_table(BLOCK_WITNESSES)?;
-            table.retain(|height, _| height == snapshot.header.height)?;
-            if let Some(witness) = witness {
-                let bytes = rmp_serde::to_vec(witness)?;
-                table.insert(snapshot.header.height, bytes.as_slice())?;
-            } else {
-                table.remove(snapshot.header.height)?;
-            }
-        }
-
-        // Pubkey registry
-        {
-            let mut table = txn.open_table(PUBKEY_REGISTRY)?;
-            for (pubkey, account_id) in snapshot.pubkey_registry {
-                let point = pubkey.compressed_bytes();
-                table.insert(point.as_slice(), account_id.0)?;
-            }
-        }
-
-        // Clearing prices
-        {
-            let mut table = txn.open_table(CLEARING_PRICES)?;
-            for (&market_id, prices) in snapshot.analytics.last_clearing_prices {
-                let bytes = rmp_serde::to_vec(prices)?;
-                table.insert(market_id.0, bytes.as_slice())?;
-            }
-        }
-
-        // Market volumes
-        {
-            let mut table = txn.open_table(MARKET_VOLUMES)?;
-            for (&market_id, &volume) in snapshot.analytics.market_volumes {
-                table.insert(market_id.0, volume)?;
-            }
-        }
-
-        // Resting order book snapshot
-        {
-            let mut table = txn.open_table(RESTING_ORDERS)?;
-            let bytes = rmp_serde::to_vec(&snapshot.resting_orders)?;
-            table.insert(KEY_RESTING_ORDERS_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // Fill history. The hot snapshot is bounded, but the per-block delta
-        // is captured before hot retention trim, so caps never suppress
-        // durable FILL_HISTORY rows. Re-inserting either path is idempotent
-        // because the key is account/block/order.
-        {
-            let mut table = txn.open_table(FILL_HISTORY)?;
-            for (account_id, record) in &snapshot.analytics.account_fills {
-                let key = fill_history_key(*account_id, record);
-                let bytes = rmp_serde::to_vec(record)?;
-                table.insert(key.as_slice(), bytes.as_slice())?;
-            }
-            for (account_id, record) in &snapshot.analytics.fill_history_delta {
-                let key = fill_history_key(*account_id, record);
-                let bytes = rmp_serde::to_vec(record)?;
-                table.insert(key.as_slice(), bytes.as_slice())?;
-            }
-        }
-
-        // Equity points delta — append new per-account equity rows from this block.
-        {
-            let mut eq = txn.open_table(EQUITY_POINTS)?;
-            for (aid, p) in &snapshot.analytics.equity_points_delta {
-                let key = equity_key(*aid, p.height);
-                let bytes = rmp_serde::to_vec(p)?;
-                eq.insert(key.as_slice(), bytes.as_slice())?;
-            }
-        }
-
-        // History events delta — append new per-account history events from this block.
-        {
-            let mut hist = txn.open_table(HISTORY_EVENTS)?;
-            for ev in &snapshot.analytics.history_events_delta {
-                let key = history_event_key(AccountId(ev.account_id), ev.block_height, ev.seq);
-                let bytes = rmp_serde::to_vec(ev)?;
-                hist.insert(key.as_slice(), bytes.as_slice())?;
-            }
-        }
-        {
-            let mut counters = txn.open_table(COUNTERS)?;
-            counters.insert(
-                KEY_HISTORY_EVENT_NEXT_SEQ,
-                snapshot.analytics.history_event_next_seq,
-            )?;
-        }
-
-        // Price points delta — append raw mark-price rows emitted this block.
-        {
-            let mut price_points = txn.open_table(PRICE_POINTS)?;
-            for (market_id, point) in &snapshot.analytics.price_points_delta {
-                let key = price_point_key(*market_id, point.height);
-                let bytes = rmp_serde::to_vec(point)?;
-                price_points.insert(key.as_slice(), bytes.as_slice())?;
-            }
-        }
-
-        // Price candles — downsample committed raw mark-price rows in the
-        // same transaction so new raw rows and their candle aggregates share
-        // one durability boundary.
-        if !snapshot.analytics.price_points_delta.is_empty()
-            && !snapshot.price_candle_resolutions_secs.is_empty()
-        {
-            let mut candles = txn.open_table(PRICE_CANDLES)?;
-            for (market_id, point) in &snapshot.analytics.price_points_delta {
-                for &resolution_secs in snapshot.price_candle_resolutions_secs {
-                    if resolution_secs == 0 {
-                        continue;
-                    }
-                    let mut candle = PriceCandle::from_point(resolution_secs, point);
-                    let key = price_candle_key(*market_id, resolution_secs, candle.bucket_start_ms);
-                    if let Some(existing) = {
-                        candles
-                            .get(key.as_slice())?
-                            .map(|value| rmp_serde::from_slice(value.value()))
-                            .transpose()?
-                    } {
-                        candle = existing;
-                        candle.merge_point(point);
-                    }
-                    let bytes = rmp_serde::to_vec(&candle)?;
-                    candles.insert(key.as_slice(), bytes.as_slice())?;
-                }
-            }
-        }
-
-        // Data feeds
-        {
-            let mut table = txn.open_table(DATA_FEEDS)?;
-            for feed in snapshot.lifecycle.feeds().iter() {
-                let bytes = rmp_serde::to_vec(feed)?;
-                table.insert(feed.id.0, bytes.as_slice())?;
-            }
-        }
-
-        // Resolution templates
-        {
-            let mut table = txn.open_table(RESOLUTION_TEMPLATES)?;
-            table.retain(|_, _| false)?;
-            for (template_id, template) in snapshot.lifecycle.templates().iter() {
-                let bytes = rmp_serde::to_vec(template)?;
-                table.insert(template_id.0.as_str(), bytes.as_slice())?;
-            }
-        }
-
-        // L1 bridge sidecar state.
-        {
-            let mut table = txn.open_table(BRIDGE_STATE)?;
-            let bytes = rmp_serde::to_vec(snapshot.bridge_state)?;
-            table.insert(KEY_BRIDGE_STATE, bytes.as_slice())?;
-        }
-
-        // Clear the pending-bundles buffer: everything admitted up to this
-        // block has now been consumed (or rejected and logged into the
-        // block's witness), so the recovery replay set resets atomically
-        // with the rest of the block commit.
-        {
-            let mut table = txn.open_table(PENDING_BUNDLES)?;
-            table.retain(|_, _| false)?;
-        }
-
-        // Same story for the admit log: non-MM admits from the last cycle
-        // are now encoded in the RESTING_ORDERS snapshot above, so drop
-        // the incremental log atomically in this txn.
-        {
-            let mut table = txn.open_table(ADMIT_LOG)?;
-            table.retain(|_, _| false)?;
-        }
-
-        // Control-plane commands are now represented by the committed
-        // account/pubkey snapshot, so clear the replay log atomically.
-        {
-            let mut table = txn.open_table(CONTROL_PLANE_LOG)?;
-            table.retain(|_, _| false)?;
-        }
-
-        // Bridge WALs: pending L1 deposits and withdrawals are committed by
-        // this block's system-event phase and captured in BRIDGE_STATE.
-        {
-            let mut table = txn.open_table(PENDING_L1_DEPOSITS)?;
-            table.retain(|_, _| false)?;
-        }
-        {
-            let mut table = txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
-            table.retain(|_, _| false)?;
-        }
-
-        // Trader tracker snapshot — rewritten atomically each block.
-        {
-            let mut table = txn.open_table(TRADER_TRACKER)?;
-            let bytes = rmp_serde::to_vec(&snapshot.analytics.trader_tracker)?;
-            table.insert(KEY_TRADER_TRACKER_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // Price-tracker volume extensions — same shape as TRADER_TRACKER.
-        {
-            let mut table = txn.open_table(PRICE_TRACKER_VOLUME)?;
-            let bytes = rmp_serde::to_vec(&snapshot.analytics.price_tracker_volume)?;
-            table.insert(KEY_PRICE_TRACKER_VOLUME_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // Price-tracker clearing-history slice — same pattern as the volume
-        // extensions; separate blob keeps B3's rollback footprint isolated.
-        {
-            let mut table = txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
-            let bytes = rmp_serde::to_vec(&snapshot.analytics.price_tracker_clearing_history)?;
-            table.insert(
-                KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT,
-                bytes.as_slice(),
-            )?;
-        }
-
-        // LiquidityTracker snapshot — single blob keyed "snapshot".
-        {
-            let mut table = txn.open_table(LIQUIDITY_TRACKER)?;
-            let bytes = rmp_serde::to_vec(&snapshot.analytics.liquidity_tracker)?;
-            table.insert(KEY_LIQUIDITY_TRACKER_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // OrderStatsTracker snapshot — single blob keyed "snapshot".
-        {
-            let mut table = txn.open_table(ORDER_STATS_TRACKER)?;
-            let bytes = rmp_serde::to_vec(&snapshot.analytics.order_stats_tracker)?;
-            table.insert(KEY_ORDER_STATS_TRACKER_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // WelfareTracker snapshot — single blob keyed "snapshot".
-        {
-            let mut table = txn.open_table(WELFARE_TRACKER)?;
-            let bytes = rmp_serde::to_vec(&snapshot.analytics.welfare_tracker)?;
-            table.insert(KEY_WELFARE_TRACKER_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // First-deposit timestamps (B8) — single blob, missing → empty map.
-        {
-            let mut table = txn.open_table(FIRST_DEPOSIT_MS)?;
-            // Serialize as Vec<(AccountId, u64)> for stable ordering.
-            let mut entries: Vec<(AccountId, u64)> = snapshot
-                .analytics
-                .first_deposit_ms
-                .iter()
-                .map(|(&aid, &ts)| (aid, ts))
-                .collect();
-            entries.sort_by_key(|(aid, _)| aid.0);
-            let bytes = rmp_serde::to_vec(&entries)?;
-            table.insert(KEY_FIRST_DEPOSIT_MS_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // All-time fill counters per account (B8) — single blob.
-        {
-            let mut table = txn.open_table(FILL_TOTAL_COUNTS)?;
-            let mut entries: Vec<(AccountId, u64)> = snapshot
-                .analytics
-                .fill_total_counts
-                .iter()
-                .map(|(&aid, &n)| (aid, n))
-                .collect();
-            entries.sort_by_key(|(aid, _)| aid.0);
-            let bytes = rmp_serde::to_vec(&entries)?;
-            table.insert(KEY_FILL_TOTAL_COUNTS_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // CostBasisTracker snapshot (C1) — single blob keyed "snapshot".
-        {
-            let mut table = txn.open_table(COST_BASIS_TRACKER)?;
-            let bytes = rmp_serde::to_vec(&snapshot.analytics.cost_basis_tracker)?;
-            table.insert(KEY_COST_BASIS_TRACKER_SNAPSHOT, bytes.as_slice())?;
-        }
-
-        // Counters
-        {
-            let mut table = txn.open_table(COUNTERS)?;
-            write_core_counters(
-                &mut table,
-                PersistedCoreCounters {
-                    height: snapshot.header.height,
-                    next_account_id: snapshot.accounts.next_id(),
-                    next_market_id: snapshot.markets.next_id() as u64,
-                    next_order_id: snapshot.next_order_id,
-                    account_state_fence: AccountStateFence {
-                        height: snapshot.header.height,
-                        slot: next_slot,
-                    },
-                },
-            )?;
-        }
-
+        let commit = build_redb_block_commit(&snapshot, witness, history_block, next_slot)?;
         #[cfg(test)]
-        self.fail_save_block_at(StoreFaultPoint::BeforeRedbFenceCommit)?;
-
-        txn.commit()?;
+        let fault_injection = self.save_block_faults();
+        self.redb_write(move |db| {
+            #[cfg(test)]
+            {
+                write_redb_block_commit(&db, commit, fault_injection)
+            }
+            #[cfg(not(test))]
+            {
+                write_redb_block_commit(&db, commit)
+            }
+        })
+        .await?;
 
         #[cfg(test)]
         self.fail_save_block_at(StoreFaultPoint::AfterRedbFenceCommit)?;
@@ -1247,19 +1553,7 @@ impl Store {
     }
 
     pub fn history_retention_meta(&self) -> Result<HistoryRetentionMeta, StoreError> {
-        let txn = self.db.begin_read()?;
-        let table = txn.open_table(HISTORY_META)?;
-        Ok(HistoryRetentionMeta {
-            blocks_full_min_height: table
-                .get(KEY_BLOCKS_FULL_MIN_HEIGHT)?
-                .map(|value| value.value()),
-            price_points_min_height: table
-                .get(KEY_PRICE_POINTS_MIN_HEIGHT)?
-                .map(|value| value.value()),
-            last_history_prune_height: table
-                .get(KEY_LAST_HISTORY_PRUNE_HEIGHT)?
-                .map(|value| value.value()),
-        })
+        read_history_retention_meta(&self.db)
     }
 
     /// Delete old durable history rows under a bounded row budget.
@@ -1267,7 +1561,7 @@ impl Store {
     /// This is deliberately separate from block commit. If the budget is too
     /// small to reach the target floor, rows remain and the metadata floor
     /// stays at the oldest row still present.
-    pub fn prune_history(
+    pub async fn prune_history(
         &self,
         head_height: u64,
         policy: HistoryRetentionPolicy,
@@ -1281,123 +1575,10 @@ impl Store {
             });
         }
 
-        let txn = self.db.begin_write()?;
-        let mut remaining = policy.prune_max_rows;
-        let mut blocks_full_pruned = 0usize;
-        let mut price_points_pruned = 0usize;
-
-        if let Some(floor) = block_floor {
-            let keys: Vec<u64> = {
-                let table = txn.open_table(BLOCKS_FULL)?;
-                let mut keys = Vec::new();
-                for entry in table.range(0..floor)? {
-                    let (key, _) = entry?;
-                    keys.push(key.value());
-                    if keys.len() >= remaining {
-                        break;
-                    }
-                }
-                keys
-            };
-
-            if !keys.is_empty() {
-                let mut table = txn.open_table(BLOCKS_FULL)?;
-                for key in keys {
-                    if table.remove(key)?.is_some() {
-                        blocks_full_pruned += 1;
-                    }
-                }
-                remaining = remaining.saturating_sub(blocks_full_pruned);
-            }
-        }
-
-        if remaining > 0 {
-            if let Some(floor) = price_floor {
-                let keys: Vec<[u8; 12]> = {
-                    let table = txn.open_table(PRICE_POINTS)?;
-                    let mut keys = Vec::new();
-                    for entry in table.iter()? {
-                        let (key, _) = entry?;
-                        let key_bytes = key.value();
-                        if price_point_height_from_key(key_bytes).is_some_and(|h| h < floor) {
-                            let mut owned = [0u8; 12];
-                            owned.copy_from_slice(key_bytes);
-                            keys.push(owned);
-                            if keys.len() >= remaining {
-                                break;
-                            }
-                        }
-                    }
-                    keys
-                };
-
-                if !keys.is_empty() {
-                    let mut table = txn.open_table(PRICE_POINTS)?;
-                    for key in keys {
-                        if table.remove(key.as_slice())?.is_some() {
-                            price_points_pruned += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        let blocks_full_min_height = if block_floor.is_some() {
-            let table = txn.open_table(BLOCKS_FULL)?;
-            let min_height = table
-                .iter()?
-                .next()
-                .transpose()?
-                .map(|(key, _)| key.value());
-            min_height
-        } else {
-            None
-        };
-        let price_points_min_height = if price_floor.is_some() {
-            let table = txn.open_table(PRICE_POINTS)?;
-            let mut min_height: Option<u64> = None;
-            for entry in table.iter()? {
-                let (key, _) = entry?;
-                if let Some(height) = price_point_height_from_key(key.value()) {
-                    min_height = Some(min_height.map_or(height, |min| min.min(height)));
-                }
-            }
-            min_height
-        } else {
-            None
-        };
-
-        {
-            let mut meta = txn.open_table(HISTORY_META)?;
-            if block_floor.is_some() {
-                match blocks_full_min_height {
-                    Some(height) => {
-                        meta.insert(KEY_BLOCKS_FULL_MIN_HEIGHT, height)?;
-                    }
-                    None => {
-                        meta.remove(KEY_BLOCKS_FULL_MIN_HEIGHT)?;
-                    }
-                }
-            }
-            if price_floor.is_some() {
-                match price_points_min_height {
-                    Some(height) => {
-                        meta.insert(KEY_PRICE_POINTS_MIN_HEIGHT, height)?;
-                    }
-                    None => {
-                        meta.remove(KEY_PRICE_POINTS_MIN_HEIGHT)?;
-                    }
-                }
-            }
-            meta.insert(KEY_LAST_HISTORY_PRUNE_HEIGHT, head_height)?;
-        }
-
-        txn.commit()?;
-        Ok(HistoryPruneReport {
-            blocks_full_pruned,
-            price_points_pruned,
-            meta: self.history_retention_meta()?,
+        self.redb_write(move |db| {
+            prune_history_redb(&db, head_height, policy, block_floor, price_floor)
         })
+        .await
     }
 
     /// Load raw mark-price points for one market. The scan is bounded in
@@ -2027,22 +2208,8 @@ impl Store {
         submission: &crate::sequencer::OrderSubmission,
     ) -> Result<(), StoreError> {
         let bytes = rmp_serde::to_vec(submission)?;
-        let txn = self.db.begin_write()?;
-        let next_seq = {
-            let table = txn.open_table(PENDING_BUNDLES)?;
-            let last_key = table
-                .iter()?
-                .next_back()
-                .transpose()?
-                .map(|(k, _)| k.value());
-            last_key.map(|k| k + 1).unwrap_or(0)
-        };
-        {
-            let mut table = txn.open_table(PENDING_BUNDLES)?;
-            table.insert(next_seq, bytes.as_slice())?;
-        }
-        txn.commit()?;
-        Ok(())
+        self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_BUNDLES, bytes))
+            .await
     }
 
     /// Append one `RestingOrder` to the admit-log WAL.
@@ -2053,40 +2220,32 @@ impl Store {
     /// once the admit is rolled into the next `RESTING_ORDERS` snapshot.
     pub async fn append_admit_log(&self, resting: &RestingOrder) -> Result<(), StoreError> {
         let bytes = rmp_serde::to_vec(resting)?;
-        let txn = self.db.begin_write()?;
-        let next_seq = {
-            let table = txn.open_table(ADMIT_LOG)?;
-            let last_key = table
-                .iter()?
-                .next_back()
-                .transpose()?
-                .map(|(k, _)| k.value());
-            last_key.map(|k| k + 1).unwrap_or(0)
-        };
-        {
-            let mut table = txn.open_table(ADMIT_LOG)?;
-            table.insert(next_seq, bytes.as_slice())?;
-        }
-        txn.commit()?;
-        Ok(())
+        self.redb_write(move |db| append_msgpack_row_bytes(&db, ADMIT_LOG, bytes))
+            .await
     }
 
     pub async fn append_control_plane_command(
         &self,
         command: &ControlPlaneCommand,
     ) -> Result<(), StoreError> {
-        append_msgpack_row(&self.db, CONTROL_PLANE_LOG, command)
+        let bytes = rmp_serde::to_vec(command)?;
+        self.redb_write(move |db| append_msgpack_row_bytes(&db, CONTROL_PLANE_LOG, bytes))
+            .await
     }
 
     pub async fn append_pending_l1_deposit(&self, deposit: &L1Deposit) -> Result<(), StoreError> {
-        append_msgpack_row(&self.db, PENDING_L1_DEPOSITS, deposit)
+        let bytes = rmp_serde::to_vec(deposit)?;
+        self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_L1_DEPOSITS, bytes))
+            .await
     }
 
     pub async fn append_pending_bridge_withdrawal(
         &self,
         request: &BridgeWithdrawalRequest,
     ) -> Result<(), StoreError> {
-        append_msgpack_row(&self.db, PENDING_BRIDGE_WITHDRAWALS, request)
+        let bytes = rmp_serde::to_vec(request)?;
+        self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_BRIDGE_WITHDRAWALS, bytes))
+            .await
     }
 
     /// Append this block's equity points and history events as individual rows.
@@ -2252,12 +2411,11 @@ impl Store {
     }
 }
 
-fn append_msgpack_row<T: serde::Serialize>(
+fn append_msgpack_row_bytes(
     db: &Database,
     table: TableDefinition<u64, &[u8]>,
-    value: &T,
+    bytes: Vec<u8>,
 ) -> Result<(), StoreError> {
-    let bytes = rmp_serde::to_vec(value)?;
     let txn = db.begin_write()?;
     let next_seq = {
         let table = txn.open_table(table)?;
@@ -2298,6 +2456,8 @@ pub enum StoreError {
     MsgpackEncode(#[from] rmp_serde::encode::Error),
     #[error("msgpack decode: {0}")]
     MsgpackDecode(#[from] rmp_serde::decode::Error),
+    #[error("blocking store task failed: {0}")]
+    BlockingTask(String),
     #[error("filesystem: {0}")]
     Io(#[from] std::io::Error),
     #[error("qmdb: {0}")]
@@ -2871,6 +3031,7 @@ mod tests {
                     prune_max_rows: 10,
                 },
             )
+            .await
             .unwrap();
 
         assert_eq!(report.blocks_full_pruned, 2);
@@ -2954,6 +3115,7 @@ mod tests {
                     prune_max_rows: 2,
                 },
             )
+            .await
             .unwrap();
 
         assert_eq!(report.blocks_full_pruned, 2);

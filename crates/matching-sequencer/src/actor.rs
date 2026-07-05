@@ -146,11 +146,6 @@ pub enum SequencerMsg {
     SubmitOrder(OrderSubmission, RpcReplyPort<Result<(), SequencerError>>),
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
-    GetLatestBlock(RpcReplyPort<Option<SealedBlock>>),
-    GetCommittedHeight(RpcReplyPort<Option<u64>>),
-    GetRecentBlocks(usize, RpcReplyPort<Vec<SealedBlock>>),
-    GetAccount(AccountId, RpcReplyPort<Option<Account>>),
-    GetStateRoot(RpcReplyPort<[u8; 32]>),
     GetStateProof(
         Vec<u8>,
         RpcReplyPort<Result<SequencerStateProof, SequencerError>>,
@@ -171,24 +166,17 @@ pub enum SequencerMsg {
         SignedBridgeWithdrawal,
         RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,
     ),
-    GetBridgeState(RpcReplyPort<BridgeState>),
-    GetBridgeAccountKey(AccountId, RpcReplyPort<Option<[u8; 32]>>),
-    GetBridgeAccountIdByKey([u8; 32], RpcReplyPort<Option<AccountId>>),
-    GetBridgeWithdrawal(u64, RpcReplyPort<Option<WithdrawalLeaf>>),
-    GetDefaultBridgeWithdrawalExpiry(RpcReplyPort<u64>),
     RegisterPubkey(
         AccountId,
         PublicKey,
         RpcReplyPort<Result<(), SequencerError>>,
     ),
-    ListMarkets(RpcReplyPort<MarketSet>),
     CreateMarket(String, RpcReplyPort<Result<MarketId, SequencerError>>),
     CreateMarketGroup(
         String,
         Vec<MarketId>,
         RpcReplyPort<Result<MarketGroup, SequencerError>>,
     ),
-    ListMarketGroups(RpcReplyPort<Vec<MarketGroup>>),
     ResolveMarket(
         MarketId,
         Nanos,
@@ -204,31 +192,16 @@ pub enum SequencerMsg {
         String,
         RpcReplyPort<Result<FeedId, SequencerError>>,
     ),
-    GetFeed(FeedId, RpcReplyPort<Option<DataFeed>>),
-    GetFeedByPubkey(FeedPubkey, RpcReplyPort<Option<DataFeed>>),
-    ListFeeds(RpcReplyPort<Vec<DataFeed>>),
     InstallTemplate(
         sybil_oracle::ResolutionTemplate,
         RpcReplyPort<Result<(), SequencerError>>,
     ),
-    TemplateExists(String, RpcReplyPort<bool>),
-    GetMarketStatus(MarketId, RpcReplyPort<MarketStatus>),
-    GetAllMarketStatuses(RpcReplyPort<HashMap<MarketId, MarketStatus>>),
     GetBlock(u64, RpcReplyPort<Result<SealedBlock, SequencerError>>),
-    GetMarketPrices(RpcReplyPort<HashMap<MarketId, Vec<Nanos>>>),
-    GetMarketVolume(MarketId, RpcReplyPort<u64>),
-    GetAllMarketVolumes(RpcReplyPort<HashMap<MarketId, u64>>),
-    GetAllMarketMetadata(RpcReplyPort<HashMap<MarketId, MarketMetadata>>),
-    GetPortfolio(
-        AccountId,
-        RpcReplyPort<Result<PortfolioSummary, SequencerError>>,
-    ),
     CreateMarketWithMetadata(
         String,
         MarketMetadata,
         RpcReplyPort<Result<MarketId, SequencerError>>,
     ),
-    GetMarketMetadata(MarketId, RpcReplyPort<Option<MarketMetadata>>),
     GetPriceHistory(
         MarketId,
         Option<u64>,
@@ -272,47 +245,9 @@ pub enum SequencerMsg {
         Option<String>,
         RpcReplyPort<Vec<crate::aggregates::HistoryEvent>>,
     ),
-    SearchMarkets(MarketSearchQuery, RpcReplyPort<Vec<MarketSearchResult>>),
-    GetPendingOrders(Option<AccountId>, RpcReplyPort<Vec<PendingOrderInfo>>),
-    GetMarketOrderBook(MarketId, RpcReplyPort<Vec<PendingOrderInfo>>),
     PauseBlockProduction(RpcReplyPort<()>),
     ResumeBlockProduction(RpcReplyPort<()>),
-    /// All-time trader count per market — fetched in bulk so `list_markets`
-    /// can populate `MarketResponse.trader_count` in one round-trip.
-    GetAllTraderCounts(RpcReplyPort<HashMap<MarketId, u32>>),
-    /// Platform-wide unique trader counts: `(all_time, last_24h)`. The
-    /// caller passes `now_ms` so the hourly-bucket cutoff is testable.
-    GetPlatformTraderCounts(u64, RpcReplyPort<(u32, u32)>),
-    /// Union of unique placers across an event's markets.
-    GetEventTraderCount(Vec<MarketId>, RpcReplyPort<u32>),
-    /// Unique placers in the open (uncommitted) batch for one market —
-    /// resting book ∪ pending bundles touching the market.
-    GetOpenBatchPlacers(MarketId, RpcReplyPort<u32>),
-    /// Platform-wide volume: `(all_time, last_24h)`. Caller supplies
-    /// `now_ms` so 24h-bucket cutoff is testable.
-    GetPlatformVolumes(u64, RpcReplyPort<(u64, u64)>),
-    /// Platform-wide welfare: `(all_time, last_24h)` in nanos (signed).
-    /// Caller supplies `now_ms` so the 24h cutoff is testable.
-    GetPlatformWelfare(u64, RpcReplyPort<(i64, i64)>),
-    /// All-market 24h volumes — used by `list_markets` to populate
-    /// `MarketResponse.volume_24h_nanos` in one round-trip.
-    GetAllMarketVolumes24h(u64, RpcReplyPort<HashMap<MarketId, u64>>),
-    /// All-market clearing prices `n` hours ago. Companion to
-    /// `GetAllMarketVolumes24h`; bulks the 24h-ago lookups for
-    /// `MarketResponse.{yes,no}_price_24h_ago_nanos` into one round-trip.
-    GetAllMarketPricesNHoursAgo(u64, u64, RpcReplyPort<HashMap<MarketId, (u64, u64)>>),
-    /// All-market last-10-batch liquidity score + the band currently in
-    /// effect. Bulks `MarketResponse.liquidity_*_nanos` into one round-trip.
-    GetLiquiditySnapshot(RpcReplyPort<(HashMap<MarketId, u64>, u64)>),
-    /// All-market all-time `OrderStats` — placed/matched/unmatched per
-    /// market. Bulks `MarketResponse.orders_*_total` into one round-trip.
-    GetOrderStatsByMarket(RpcReplyPort<HashMap<MarketId, crate::aggregates::OrderStats>>),
-    /// Platform-wide `OrderStats`: `(all_time, last_24h)`. Caller-supplied
-    /// `now_ms` keeps the 24h cutoff deterministic.
-    GetPlatformOrderStats(
-        u64,
-        RpcReplyPort<(crate::aggregates::OrderStats, crate::aggregates::OrderStats)>,
-    ),
+    Query(SequencerReadQuery),
     /// Periodic indicative-solve tick (C2). Fires from a dedicated timer
     /// task at ~750ms cadence, decoupled from block production. The arm
     /// kicks off a `spawn_blocking` shadow-solve over the resting book and
@@ -326,10 +261,30 @@ pub enum SequencerMsg {
         solver: String,
         error: String,
     },
-    /// Read the cached indicative snapshot for one market. Returns a
-    /// default (None/None/0/0) snapshot if the market hasn't been seen yet
-    /// (cold start, or market with no resting orders).
-    GetIndicative(MarketId, RpcReplyPort<IndicativeSnapshot>),
+}
+
+pub struct SequencerReadQuery {
+    run: Box<dyn FnOnce(&mut SequencerActorState) + Send + 'static>,
+}
+
+impl SequencerReadQuery {
+    fn new<T>(
+        reply: RpcReplyPort<T>,
+        query: impl FnOnce(&SequencerActorState) -> T + Send + 'static,
+    ) -> Self
+    where
+        T: Send + 'static,
+    {
+        Self {
+            run: Box::new(move |state| {
+                let _ = reply.send(query(state));
+            }),
+        }
+    }
+
+    fn execute(self, state: &mut SequencerActorState) {
+        (self.run)(state);
+    }
 }
 
 #[cfg(test)]
@@ -911,7 +866,7 @@ impl SequencerActorState {
                 prune_max_rows: self.sequencer.config.history_prune_max_rows,
             };
             if policy.should_prune_at(height) {
-                match store.prune_history(height, policy) {
+                match store.prune_history(height, policy).await {
                     Ok(report) => {
                         metrics::counter!(
                             "sybil_history_pruned_rows_total",
@@ -1857,13 +1812,8 @@ impl Actor for SequencerActor {
                 );
                 state.indicative_solve_gate.finish();
             }
-            SequencerMsg::GetIndicative(market_id, reply) => {
-                let snap = state
-                    .indicative_cache
-                    .get(&market_id)
-                    .cloned()
-                    .unwrap_or_default();
-                let _ = reply.send(snap);
+            SequencerMsg::Query(query) => {
+                query.execute(state);
             }
             SequencerMsg::SubmitOrder(submission, reply) => {
                 let order_count = submission.orders.len();
@@ -1889,27 +1839,6 @@ impl Actor for SequencerActor {
                 };
                 state.record_cancel_metrics("signed", &result);
                 let _ = reply.send(result);
-            }
-            SequencerMsg::GetLatestBlock(reply) => {
-                let _ = reply.send(state.latest_block.clone());
-            }
-            SequencerMsg::GetCommittedHeight(reply) => {
-                let height = state.sequencer.height();
-                let _ = reply.send((height > 0).then_some(height));
-            }
-            SequencerMsg::GetAccount(account_id, reply) => {
-                let _ = reply.send(state.sequencer.accounts.get(account_id).cloned());
-            }
-            SequencerMsg::GetStateRoot(reply) => {
-                let root = crate::block::compute_complete_state_root(
-                    &state.sequencer.accounts,
-                    state.sequencer.bridge_state(),
-                    state.sequencer.order_book(),
-                    state.sequencer.markets(),
-                    state.sequencer.market_groups(),
-                    state.sequencer.market_lifecycle(),
-                );
-                let _ = reply.send(root);
             }
             SequencerMsg::GetStateProof(leaf_key, reply) => {
                 let _ = reply.send(state.handle_state_proof(leaf_key).await);
@@ -1939,35 +1868,14 @@ impl Actor for SequencerActor {
             SequencerMsg::CreateSignedBridgeWithdrawal(signed, reply) => {
                 let _ = reply.send(state.handle_signed_bridge_withdrawal(signed).await);
             }
-            SequencerMsg::GetBridgeState(reply) => {
-                let _ = reply.send(state.sequencer.bridge_state().clone());
-            }
-            SequencerMsg::GetBridgeAccountKey(account_id, reply) => {
-                let _ = reply.send(state.sequencer.bridge_account_key(account_id));
-            }
-            SequencerMsg::GetBridgeAccountIdByKey(key, reply) => {
-                let _ = reply.send(state.sequencer.bridge_account_id_by_key(key));
-            }
-            SequencerMsg::GetBridgeWithdrawal(withdrawal_id, reply) => {
-                let _ = reply.send(state.sequencer.bridge_withdrawal(withdrawal_id).cloned());
-            }
-            SequencerMsg::GetDefaultBridgeWithdrawalExpiry(reply) => {
-                let _ = reply.send(state.sequencer.default_bridge_withdrawal_expiry_height());
-            }
             SequencerMsg::RegisterPubkey(account_id, pubkey, reply) => {
                 let _ = reply.send(state.handle_register_pubkey(account_id, pubkey).await);
-            }
-            SequencerMsg::ListMarkets(reply) => {
-                let _ = reply.send(state.sequencer.markets().clone());
             }
             SequencerMsg::CreateMarket(name, reply) => {
                 let _ = reply.send(state.handle_create_market(name).await);
             }
             SequencerMsg::CreateMarketGroup(name, market_ids, reply) => {
                 let _ = reply.send(state.handle_create_market_group(name, market_ids).await);
-            }
-            SequencerMsg::ListMarketGroups(reply) => {
-                let _ = reply.send(state.sequencer.market_groups().to_vec());
             }
             SequencerMsg::ResolveMarket(market_id, payout_nanos, reply) => {
                 let _ = reply.send(state.handle_resolve_market(market_id, payout_nanos).await);
@@ -1982,30 +1890,8 @@ impl Actor for SequencerActor {
             SequencerMsg::RegisterFeed(pubkey, name, reply) => {
                 let _ = reply.send(state.handle_register_feed(pubkey, name).await);
             }
-            SequencerMsg::GetFeed(id, reply) => {
-                let feed = state.sequencer.feed_by_id(id).cloned();
-                let _ = reply.send(feed);
-            }
-            SequencerMsg::GetFeedByPubkey(pubkey, reply) => {
-                let feed = state.sequencer.feed_by_pubkey(&pubkey).cloned();
-                let _ = reply.send(feed);
-            }
-            SequencerMsg::ListFeeds(reply) => {
-                let feeds: Vec<DataFeed> =
-                    state.sequencer.lifecycle.feeds().iter().cloned().collect();
-                let _ = reply.send(feeds);
-            }
             SequencerMsg::InstallTemplate(template, reply) => {
                 let _ = reply.send(state.handle_install_template(template).await);
-            }
-            SequencerMsg::TemplateExists(id, reply) => {
-                let _ = reply.send(state.sequencer.template_exists(&id));
-            }
-            SequencerMsg::GetMarketStatus(market_id, reply) => {
-                let _ = reply.send(state.sequencer.market_status(market_id));
-            }
-            SequencerMsg::GetAllMarketStatuses(reply) => {
-                let _ = reply.send(state.sequencer.market_statuses().clone());
             }
             SequencerMsg::GetBlock(height, reply) => {
                 let block = state
@@ -2043,43 +1929,12 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
-            SequencerMsg::GetRecentBlocks(n, reply) => {
-                let cap = state.sequencer.config.block_history_capacity;
-                let take = n.min(cap);
-                let blocks: Vec<SealedBlock> = state
-                    .block_history
-                    .iter()
-                    .rev()
-                    .take(take)
-                    .cloned()
-                    .collect();
-                let _ = reply.send(blocks);
-            }
-            SequencerMsg::GetMarketPrices(reply) => {
-                let _ = reply.send(state.sequencer.analytics().last_clearing_prices().clone());
-            }
-            SequencerMsg::GetMarketVolume(market_id, reply) => {
-                let _ = reply.send(state.sequencer.analytics().market_volume(market_id));
-            }
-            SequencerMsg::GetAllMarketVolumes(reply) => {
-                let _ = reply.send(state.sequencer.analytics().market_volumes().clone());
-            }
-            SequencerMsg::GetAllMarketMetadata(reply) => {
-                let _ = reply.send(state.sequencer.market_metadata_all().clone());
-            }
-            SequencerMsg::GetPortfolio(account_id, reply) => {
-                let result = state.sequencer.portfolio_summary(account_id);
-                let _ = reply.send(result);
-            }
             SequencerMsg::CreateMarketWithMetadata(name, metadata, reply) => {
                 let _ = reply.send(
                     state
                         .handle_create_market_with_metadata(name, metadata)
                         .await,
                 );
-            }
-            SequencerMsg::GetMarketMetadata(market_id, reply) => {
-                let _ = reply.send(state.sequencer.market_metadata(market_id).cloned());
             }
             SequencerMsg::GetPriceHistory(
                 market_id,
@@ -2246,15 +2101,6 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
-            SequencerMsg::SearchMarkets(query, reply) => {
-                let _ = reply.send(state.handle_search_markets(query));
-            }
-            SequencerMsg::GetPendingOrders(account_id, reply) => {
-                let _ = reply.send(state.sequencer.pending_orders_info(account_id));
-            }
-            SequencerMsg::GetMarketOrderBook(market_id, reply) => {
-                let _ = reply.send(state.sequencer.market_orderbook(market_id));
-            }
             SequencerMsg::PauseBlockProduction(reply) => {
                 state.pause_count = state.pause_count.saturating_add(1);
                 let _ = reply.send(());
@@ -2262,51 +2108,6 @@ impl Actor for SequencerActor {
             SequencerMsg::ResumeBlockProduction(reply) => {
                 state.pause_count = state.pause_count.saturating_sub(1);
                 let _ = reply.send(());
-            }
-            SequencerMsg::GetAllTraderCounts(reply) => {
-                let _ = reply.send(state.sequencer.analytics().all_trader_counts());
-            }
-            SequencerMsg::GetPlatformTraderCounts(now_ms, reply) => {
-                let all_time = state.sequencer.analytics().platform_trader_count();
-                let last_24h = state
-                    .sequencer
-                    .analytics()
-                    .platform_trader_24h_count(now_ms);
-                let _ = reply.send((all_time, last_24h));
-            }
-            SequencerMsg::GetEventTraderCount(market_ids, reply) => {
-                let _ = reply.send(state.sequencer.analytics().event_trader_count(&market_ids));
-            }
-            SequencerMsg::GetOpenBatchPlacers(market_id, reply) => {
-                let _ = reply.send(state.sequencer.open_batch_unique_placers(market_id));
-            }
-            SequencerMsg::GetPlatformVolumes(now_ms, reply) => {
-                let _ = reply.send(state.sequencer.analytics().platform_volumes(now_ms));
-            }
-            SequencerMsg::GetPlatformWelfare(now_ms, reply) => {
-                let _ = reply.send(state.sequencer.analytics().platform_welfare(now_ms));
-            }
-            SequencerMsg::GetAllMarketVolumes24h(now_ms, reply) => {
-                let _ = reply.send(state.sequencer.analytics().all_market_volumes_24h(now_ms));
-            }
-            SequencerMsg::GetAllMarketPricesNHoursAgo(n, now_ms, reply) => {
-                let _ = reply.send(
-                    state
-                        .sequencer
-                        .analytics()
-                        .all_market_prices_n_hours_ago(n, now_ms),
-                );
-            }
-            SequencerMsg::GetLiquiditySnapshot(reply) => {
-                let liq = state.sequencer.analytics().all_liquidity_avg10();
-                let band = state.sequencer.liquidity_band_nanos();
-                let _ = reply.send((liq, band));
-            }
-            SequencerMsg::GetOrderStatsByMarket(reply) => {
-                let _ = reply.send(state.sequencer.analytics().all_market_order_stats());
-            }
-            SequencerMsg::GetPlatformOrderStats(now_ms, reply) => {
-                let _ = reply.send(state.sequencer.analytics().platform_order_stats(now_ms));
             }
         }
         Ok(())
@@ -2512,6 +2313,17 @@ impl SequencerHandle {
         }
     }
 
+    async fn read_query<T>(
+        &self,
+        query: impl FnOnce(&SequencerActorState) -> T + Send + 'static,
+    ) -> Result<T, SequencerError>
+    where
+        T: Send + 'static,
+    {
+        self.rpc(|reply| SequencerMsg::Query(SequencerReadQuery::new(reply, query)))
+            .await
+    }
+
     /// Spawn with default config (1-second block interval).
     /// Prefer [`spawn_with_store`] for production use.
     pub fn spawn(sequencer: BlockSequencer) -> Self {
@@ -2662,23 +2474,37 @@ impl SequencerHandle {
     }
 
     pub async fn get_latest_block(&self) -> Result<Option<SealedBlock>, SequencerError> {
-        self.rpc(SequencerMsg::GetLatestBlock).await
+        self.read_query(|state| state.latest_block.clone()).await
     }
 
     pub async fn get_committed_height(&self) -> Result<Option<u64>, SequencerError> {
-        self.rpc(SequencerMsg::GetCommittedHeight).await
+        self.read_query(|state| {
+            let height = state.sequencer.height();
+            (height > 0).then_some(height)
+        })
+        .await
     }
 
     pub async fn get_account(
         &self,
         account_id: AccountId,
     ) -> Result<Option<Account>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetAccount(account_id, reply))
+        self.read_query(move |state| state.sequencer.accounts.get(account_id).cloned())
             .await
     }
 
     pub async fn get_state_root(&self) -> Result<[u8; 32], SequencerError> {
-        self.rpc(SequencerMsg::GetStateRoot).await
+        self.read_query(|state| {
+            crate::block::compute_complete_state_root(
+                &state.sequencer.accounts,
+                state.sequencer.bridge_state(),
+                state.sequencer.order_book(),
+                state.sequencer.markets(),
+                state.sequencer.market_groups(),
+                state.sequencer.market_lifecycle(),
+            )
+        })
+        .await
     }
 
     pub async fn get_state_proof(
@@ -2729,14 +2555,15 @@ impl SequencerHandle {
     }
 
     pub async fn get_bridge_state(&self) -> Result<BridgeState, SequencerError> {
-        self.rpc(SequencerMsg::GetBridgeState).await
+        self.read_query(|state| state.sequencer.bridge_state().clone())
+            .await
     }
 
     pub async fn get_bridge_account_key(
         &self,
         account_id: AccountId,
     ) -> Result<Option<[u8; 32]>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetBridgeAccountKey(account_id, reply))
+        self.read_query(move |state| state.sequencer.bridge_account_key(account_id))
             .await
     }
 
@@ -2744,7 +2571,7 @@ impl SequencerHandle {
         &self,
         key: [u8; 32],
     ) -> Result<Option<AccountId>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetBridgeAccountIdByKey(key, reply))
+        self.read_query(move |state| state.sequencer.bridge_account_id_by_key(key))
             .await
     }
 
@@ -2752,12 +2579,12 @@ impl SequencerHandle {
         &self,
         withdrawal_id: u64,
     ) -> Result<Option<WithdrawalLeaf>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetBridgeWithdrawal(withdrawal_id, reply))
+        self.read_query(move |state| state.sequencer.bridge_withdrawal(withdrawal_id).cloned())
             .await
     }
 
     pub async fn get_default_bridge_withdrawal_expiry(&self) -> Result<u64, SequencerError> {
-        self.rpc(SequencerMsg::GetDefaultBridgeWithdrawalExpiry)
+        self.read_query(|state| state.sequencer.default_bridge_withdrawal_expiry_height())
             .await
     }
 
@@ -2772,7 +2599,8 @@ impl SequencerHandle {
 
     #[tracing::instrument(skip_all)]
     pub async fn list_markets(&self) -> Result<MarketSet, SequencerError> {
-        self.rpc(SequencerMsg::ListMarkets).await
+        self.read_query(|state| state.sequencer.markets().clone())
+            .await
     }
 
     pub async fn create_market(&self, name: String) -> Result<MarketId, SequencerError> {
@@ -2790,7 +2618,8 @@ impl SequencerHandle {
     }
 
     pub async fn list_market_groups(&self) -> Result<Vec<MarketGroup>, SequencerError> {
-        self.rpc(SequencerMsg::ListMarketGroups).await
+        self.read_query(|state| state.sequencer.market_groups().to_vec())
+            .await
     }
 
     pub async fn resolve_market(
@@ -2821,19 +2650,21 @@ impl SequencerHandle {
     }
 
     pub async fn get_feed(&self, id: FeedId) -> Result<Option<DataFeed>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetFeed(id, reply)).await
+        self.read_query(move |state| state.sequencer.feed_by_id(id).cloned())
+            .await
     }
 
     pub async fn get_feed_by_pubkey(
         &self,
         pubkey: FeedPubkey,
     ) -> Result<Option<DataFeed>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetFeedByPubkey(pubkey, reply))
+        self.read_query(move |state| state.sequencer.feed_by_pubkey(&pubkey).cloned())
             .await
     }
 
     pub async fn list_feeds(&self) -> Result<Vec<DataFeed>, SequencerError> {
-        self.rpc(SequencerMsg::ListFeeds).await
+        self.read_query(|state| state.sequencer.lifecycle.feeds().iter().cloned().collect())
+            .await
     }
 
     pub async fn install_template(
@@ -2845,7 +2676,7 @@ impl SequencerHandle {
     }
 
     pub async fn template_exists(&self, id: String) -> Result<bool, SequencerError> {
-        self.rpc(|reply| SequencerMsg::TemplateExists(id, reply))
+        self.read_query(move |state| state.sequencer.template_exists(&id))
             .await
     }
 
@@ -2853,7 +2684,7 @@ impl SequencerHandle {
         &self,
         market_id: MarketId,
     ) -> Result<MarketStatus, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetMarketStatus(market_id, reply))
+        self.read_query(move |state| state.sequencer.market_status(market_id))
             .await
     }
 
@@ -2861,7 +2692,8 @@ impl SequencerHandle {
     pub async fn get_all_market_statuses(
         &self,
     ) -> Result<HashMap<MarketId, MarketStatus>, SequencerError> {
-        self.rpc(SequencerMsg::GetAllMarketStatuses).await
+        self.read_query(|state| state.sequencer.market_statuses().clone())
+            .await
     }
 
     pub async fn get_block(&self, height: u64) -> Result<SealedBlock, SequencerError> {
@@ -2870,8 +2702,18 @@ impl SequencerHandle {
     }
 
     pub async fn get_recent_blocks(&self, n: usize) -> Result<Vec<SealedBlock>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetRecentBlocks(n, reply))
-            .await
+        self.read_query(move |state| {
+            let cap = state.sequencer.config.block_history_capacity;
+            let take = n.min(cap);
+            state
+                .block_history
+                .iter()
+                .rev()
+                .take(take)
+                .cloned()
+                .collect()
+        })
+        .await
     }
 
     pub async fn subscribe_blocks(
@@ -2882,14 +2724,15 @@ impl SequencerHandle {
 
     #[tracing::instrument(skip_all)]
     pub async fn get_market_prices(&self) -> Result<HashMap<MarketId, Vec<Nanos>>, SequencerError> {
-        self.rpc(SequencerMsg::GetMarketPrices).await
+        self.read_query(|state| state.sequencer.analytics().last_clearing_prices().clone())
+            .await
     }
 
     pub async fn get_portfolio(
         &self,
         account_id: AccountId,
     ) -> Result<PortfolioSummary, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetPortfolio(account_id, reply))
+        self.read_query(move |state| state.sequencer.portfolio_summary(account_id))
             .await?
     }
 
@@ -2906,7 +2749,7 @@ impl SequencerHandle {
         &self,
         market_id: MarketId,
     ) -> Result<Option<MarketMetadata>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetMarketMetadata(market_id, reply))
+        self.read_query(move |state| state.sequencer.market_metadata(market_id).cloned())
             .await
     }
 
@@ -2998,7 +2841,7 @@ impl SequencerHandle {
         &self,
         account_id: Option<AccountId>,
     ) -> Result<Vec<PendingOrderInfo>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetPendingOrders(account_id, reply))
+        self.read_query(move |state| state.sequencer.pending_orders_info(account_id))
             .await
     }
 
@@ -3006,7 +2849,7 @@ impl SequencerHandle {
         &self,
         market_id: MarketId,
     ) -> Result<Vec<PendingOrderInfo>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetMarketOrderBook(market_id, reply))
+        self.read_query(move |state| state.sequencer.market_orderbook(market_id))
             .await
     }
 
@@ -3014,25 +2857,27 @@ impl SequencerHandle {
         &self,
         query: MarketSearchQuery,
     ) -> Result<Vec<MarketSearchResult>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::SearchMarkets(query, reply))
+        self.read_query(move |state| state.handle_search_markets(query))
             .await
     }
 
     pub async fn get_market_volume(&self, market_id: MarketId) -> Result<u64, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetMarketVolume(market_id, reply))
+        self.read_query(move |state| state.sequencer.analytics().market_volume(market_id))
             .await
     }
 
     #[tracing::instrument(skip_all)]
     pub async fn get_all_market_volumes(&self) -> Result<HashMap<MarketId, u64>, SequencerError> {
-        self.rpc(SequencerMsg::GetAllMarketVolumes).await
+        self.read_query(|state| state.sequencer.analytics().market_volumes().clone())
+            .await
     }
 
     #[tracing::instrument(skip_all)]
     pub async fn get_all_market_metadata(
         &self,
     ) -> Result<HashMap<MarketId, MarketMetadata>, SequencerError> {
-        self.rpc(SequencerMsg::GetAllMarketMetadata).await
+        self.read_query(|state| state.sequencer.market_metadata_all().clone())
+            .await
     }
 
     pub async fn pause_block_production(&self) -> Result<(), SequencerError> {
@@ -3045,7 +2890,8 @@ impl SequencerHandle {
 
     #[tracing::instrument(skip_all)]
     pub async fn get_all_trader_counts(&self) -> Result<HashMap<MarketId, u32>, SequencerError> {
-        self.rpc(SequencerMsg::GetAllTraderCounts).await
+        self.read_query(|state| state.sequencer.analytics().all_trader_counts())
+            .await
     }
 
     /// Platform-wide unique-trader counts `(all_time, last_24h)`. Caller
@@ -3055,8 +2901,15 @@ impl SequencerHandle {
         &self,
         now_ms: u64,
     ) -> Result<(u32, u32), SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetPlatformTraderCounts(now_ms, reply))
-            .await
+        self.read_query(move |state| {
+            let all_time = state.sequencer.analytics().platform_trader_count();
+            let last_24h = state
+                .sequencer
+                .analytics()
+                .platform_trader_24h_count(now_ms);
+            (all_time, last_24h)
+        })
+        .await
     }
 
     #[tracing::instrument(skip_all, fields(markets = market_ids.len()))]
@@ -3064,13 +2917,13 @@ impl SequencerHandle {
         &self,
         market_ids: Vec<MarketId>,
     ) -> Result<u32, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetEventTraderCount(market_ids, reply))
+        self.read_query(move |state| state.sequencer.analytics().event_trader_count(&market_ids))
             .await
     }
 
     #[tracing::instrument(skip_all, fields(market_id = market_id.0))]
     pub async fn get_open_batch_placers(&self, market_id: MarketId) -> Result<u32, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetOpenBatchPlacers(market_id, reply))
+        self.read_query(move |state| state.sequencer.open_batch_unique_placers(market_id))
             .await
     }
 
@@ -3078,7 +2931,7 @@ impl SequencerHandle {
     /// `now_ms` so 24h-bucket cutoff is deterministic for tests.
     #[tracing::instrument(skip_all)]
     pub async fn get_platform_volumes(&self, now_ms: u64) -> Result<(u64, u64), SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetPlatformVolumes(now_ms, reply))
+        self.read_query(move |state| state.sequencer.analytics().platform_volumes(now_ms))
             .await
     }
 
@@ -3089,7 +2942,7 @@ impl SequencerHandle {
         &self,
         now_ms: u64,
     ) -> Result<HashMap<MarketId, u64>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetAllMarketVolumes24h(now_ms, reply))
+        self.read_query(move |state| state.sequencer.analytics().all_market_volumes_24h(now_ms))
             .await
     }
 
@@ -3101,8 +2954,13 @@ impl SequencerHandle {
         n: u64,
         now_ms: u64,
     ) -> Result<HashMap<MarketId, (u64, u64)>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetAllMarketPricesNHoursAgo(n, now_ms, reply))
-            .await
+        self.read_query(move |state| {
+            state
+                .sequencer
+                .analytics()
+                .all_market_prices_n_hours_ago(n, now_ms)
+        })
+        .await
     }
 
     /// All-market liquidity averages + the band width currently in effect.
@@ -3112,7 +2970,12 @@ impl SequencerHandle {
     pub async fn get_liquidity_snapshot(
         &self,
     ) -> Result<(HashMap<MarketId, u64>, u64), SequencerError> {
-        self.rpc(SequencerMsg::GetLiquiditySnapshot).await
+        self.read_query(|state| {
+            let liq = state.sequencer.analytics().all_liquidity_avg10();
+            let band = state.sequencer.liquidity_band_nanos();
+            (liq, band)
+        })
+        .await
     }
 
     /// All-market all-time order stats — populates
@@ -3121,7 +2984,8 @@ impl SequencerHandle {
     pub async fn get_order_stats_by_market(
         &self,
     ) -> Result<HashMap<MarketId, crate::aggregates::OrderStats>, SequencerError> {
-        self.rpc(SequencerMsg::GetOrderStatsByMarket).await
+        self.read_query(|state| state.sequencer.analytics().all_market_order_stats())
+            .await
     }
 
     /// Platform order stats `(all_time, last_24h)` for the activity hero.
@@ -3131,14 +2995,14 @@ impl SequencerHandle {
         now_ms: u64,
     ) -> Result<(crate::aggregates::OrderStats, crate::aggregates::OrderStats), SequencerError>
     {
-        self.rpc(|reply| SequencerMsg::GetPlatformOrderStats(now_ms, reply))
+        self.read_query(move |state| state.sequencer.analytics().platform_order_stats(now_ms))
             .await
     }
 
     /// Platform welfare `(all_time, last_24h)` in nanos for the activity hero.
     #[tracing::instrument(skip_all)]
     pub async fn get_platform_welfare(&self, now_ms: u64) -> Result<(i64, i64), SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetPlatformWelfare(now_ms, reply))
+        self.read_query(move |state| state.sequencer.analytics().platform_welfare(now_ms))
             .await
     }
 
@@ -3151,8 +3015,14 @@ impl SequencerHandle {
         &self,
         market_id: MarketId,
     ) -> Result<IndicativeSnapshot, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetIndicative(market_id, reply))
-            .await
+        self.read_query(move |state| {
+            state
+                .indicative_cache
+                .get(&market_id)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .await
     }
 }
 
