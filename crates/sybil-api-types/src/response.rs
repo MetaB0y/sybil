@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountResponse {
     pub account_id: u64,
+    /// Available account balance. Integer nanodollars; 1_000_000_000 = $1.
     pub balance_nanos: i64,
     #[serde(default)]
     pub positions: Vec<PositionResponse>,
@@ -18,7 +19,7 @@ pub struct AccountResponse {
 pub struct PositionResponse {
     pub market_id: u32,
     pub outcome: String,
-    /// Signed position quantity in fixed-point share-units (`1000` = 1 share).
+    /// Signed position quantity. Integer share-units; 1000 units = 1 share.
     pub quantity: i64,
 }
 
@@ -27,9 +28,15 @@ pub struct PositionResponse {
 pub struct MarketResponse {
     pub market_id: u32,
     pub name: String,
+    /// Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub yes_price_nanos: Option<u64>,
+    /// Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub no_price_nanos: Option<u64>,
     pub status: String,
+    /// Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+    /// Payouts are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payout_nanos: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -46,9 +53,12 @@ pub struct MarketResponse {
     pub expiry_timestamp_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
+    /// All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
     #[serde(default)]
     pub volume_nanos: u64,
     /// Reference price from external system (e.g., Polymarket), display only.
+    /// Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_price_nanos: Option<u64>,
     /// External URL (e.g., Polymarket link).
@@ -89,24 +99,30 @@ pub struct MarketResponse {
     /// restart" until prod persistence is enabled.
     #[serde(default)]
     pub trader_count: u32,
-    /// Rolling 24h trading volume in nanos (±1h bucket resolution). Off-block;
+    /// Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+    /// Off-block;
     /// "since last restart" until prod persistence is enabled.
     #[serde(default)]
     pub volume_24h_nanos: u64,
-    /// Clearing YES price ~24h ago in nanos, derived from the per-market
+    /// Clearing YES price ~24h ago, derived from the per-market
     /// hourly snapshot. `None` for markets younger than 24h or wiped on
-    /// restart. FE computes the 24h delta as `current − snapshot`.
+    /// restart. FE computes the 24h delta as `current - snapshot`.
+    /// Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yes_price_24h_ago_nanos: Option<u64>,
-    /// Clearing NO price ~24h ago in nanos. See `yes_price_24h_ago_nanos`.
+    /// Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
+    /// Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_price_24h_ago_nanos: Option<u64>,
-    /// Rolling last-10-batch ±band depth average in nanos. Zero for markets
-    /// without a clearing price yet. Pair with `liquidity_band_nanos` for
-    /// labelling.
+    /// Rolling last-10-batch band depth average. Integer nanodollars;
+    /// 1_000_000_000 = $1. Zero for markets without a clearing price yet.
+    /// Pair with `liquidity_band_nanos` for labelling.
     #[serde(default)]
     pub liquidity_avg10_nanos: u64,
     /// Width of the band the liquidity score uses (the ± in "$X ±$0.05").
+    /// Integer nanodollars; 1_000_000_000 = $1.
     /// Always the live config value — `0` when no liquidity has been
     /// recorded yet.
     #[serde(default)]
@@ -151,28 +167,42 @@ pub struct MarketResponse {
 pub struct MarketSummaryResponse {
     pub market_id: u32,
     pub name: String,
+    /// Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub yes_price_nanos: Option<u64>,
+    /// Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub no_price_nanos: Option<u64>,
     /// Reference price from external system (e.g., Polymarket), display only.
+    /// Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_price_nanos: Option<u64>,
+    /// All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
     pub volume_nanos: u64,
     pub status: String,
     /// All-time unique trader count (mirrors `MarketResponse.trader_count`).
     #[serde(default)]
     pub trader_count: u32,
-    /// Rolling 24h trading volume in nanos (mirrors
+    /// Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+    /// Mirrors
     /// `MarketResponse.volume_24h_nanos`).
     #[serde(default)]
     pub volume_24h_nanos: u64,
-    /// Clearing YES / NO prices ~24h ago (mirror of `MarketResponse`).
+    /// Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yes_price_24h_ago_nanos: Option<u64>,
+    /// Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_price_24h_ago_nanos: Option<u64>,
-    /// Liquidity score + band (mirrors `MarketResponse`).
+    /// Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
+    /// Mirrors `MarketResponse`.
     #[serde(default)]
     pub liquidity_avg10_nanos: u64,
+    /// Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
+    /// Mirrors `MarketResponse`.
     #[serde(default)]
     pub liquidity_band_nanos: u64,
     /// All-time placed/matched/unmatched (mirrors `MarketResponse`).
@@ -195,13 +225,19 @@ pub struct MarketGroupResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MarketPricesResponse {
+    /// Market price map. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub prices: HashMap<String, MarketPriceResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MarketPriceResponse {
+    /// YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub yes_price_nanos: u64,
+    /// NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub no_price_nanos: u64,
 }
 
@@ -221,8 +257,10 @@ pub struct CancelOrderResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FillResponse {
     pub order_id: u64,
-    /// Fill quantity in fixed-point share-units (`1000` = 1 share).
+    /// Fill quantity. Integer share-units; 1000 units = 1 share.
     pub fill_qty: u64,
+    /// Fill price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub fill_price_nanos: u64,
     #[serde(default)]
     pub account_id: u64,
@@ -234,14 +272,17 @@ pub struct FillResponse {
 pub enum SystemEventResponse {
     CreateAccount {
         account_id: u64,
+        /// Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
         initial_balance_nanos: i64,
     },
     Deposit {
         account_id: u64,
+        /// Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
         amount_nanos: i64,
     },
     L1Deposit {
         account_id: u64,
+        /// Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
         amount_nanos: i64,
         deposit_id: u64,
         deposit_root_hex: String,
@@ -249,26 +290,31 @@ pub enum SystemEventResponse {
     },
     WithdrawalCreated {
         account_id: u64,
+        /// Account debit amount. Integer nanodollars; 1_000_000_000 = $1.
         amount_nanos: i64,
         withdrawal_id: u64,
         nullifier_hex: String,
     },
     MarketResolved {
         market_id: u32,
+        /// Resolution payout per YES share. Integer nanodollars;
+        /// 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
         payout_nanos: u64,
         affected_accounts: Vec<u64>,
     },
     /// On-chain cancellation event (D1). `side` is the categorical
     /// `OrderDirection` ("BuyYes"/"SellYes"/"BuyNo"/"SellNo") and
     /// `remaining_quantity` is the unfilled portion of `max_fill` at
-    /// cancel time, in fixed-point share-units. Forward-additive: old clients
-    /// ignore unknown
+    /// cancel time. Integer share-units; 1000 units = 1 share.
+    /// Forward-additive: old clients ignore unknown
     /// variants via serde's `#[serde(tag = "type")]` shape.
     OrderCancelled {
         account_id: u64,
         order_id: u64,
         market_ids: Vec<u32>,
         side: String,
+        /// Cancelled order's unfilled quantity. Integer share-units;
+        /// 1000 units = 1 share.
         remaining_quantity: u64,
     },
 }
@@ -292,10 +338,9 @@ pub struct BlockMarketStats {
     /// platform `unique_placers` scalar counts the account once.
     #[serde(default)]
     pub placers: u32,
-    /// Per-market volume contribution from this block's fills, in nanos.
-    /// Multi-market fills credit each active market with their full
-    /// notional; the platform `total_volume_nanos` scalar counts each fill
-    /// once.
+    /// Per-market volume contribution from this block's fills. Integer nanodollars;
+    /// 1_000_000_000 = $1. Multi-market fills credit each active market with their
+    /// full notional; the platform `total_volume_nanos` scalar counts each fill once.
     #[serde(default)]
     pub volume_nanos: u64,
     /// Non-MM admissions counted against this market in this block.
@@ -310,10 +355,10 @@ pub struct BlockMarketStats {
     /// block WITHOUT any fill. Cancels are excluded.
     #[serde(default)]
     pub unmatched: u32,
-    /// Per-market welfare contribution from this block's fills (B7).
-    /// Multi-market fills credit each active market with their full welfare;
-    /// the platform `total_welfare_nanos` counts each fill once. Signed —
-    /// solver rounding can yield small negatives.
+    /// Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
+    /// 1_000_000_000 = $1. Multi-market fills credit each active market with their
+    /// full welfare; the platform `total_welfare_nanos` counts each fill once.
+    /// Signed — solver rounding can yield small negatives.
     #[serde(default)]
     pub welfare_nanos: i64,
 }
@@ -332,13 +377,19 @@ pub struct BlockResponse {
     pub system_events: Vec<SystemEventResponse>,
     #[serde(default)]
     pub fills: Vec<FillResponse>,
+    /// Clearing price vectors by market/group. Integer nanodollars;
+    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
     #[serde(default)]
     pub clearing_prices_nanos: HashMap<String, Vec<u64>>,
     #[serde(default)]
     pub rejections: Vec<RejectionResponse>,
     #[serde(default)]
     pub bridge: BridgeBlockResponse,
+    /// Total solver welfare in the block. Integer nanodollars;
+    /// 1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
     pub total_welfare_nanos: i64,
+    /// Total traded notional in the block. Integer nanodollars;
+    /// 1_000_000_000 = $1.
     pub total_volume_nanos: u64,
     pub orders_filled: usize,
     /// Unique placers (non-MM accounts) admitted into this block. Platform
@@ -368,6 +419,7 @@ pub struct BridgeBlockResponse {
 pub struct BridgeDepositEventResponse {
     pub deposit_id: u64,
     pub account_id: u64,
+    /// Token base units accepted by the vault, e.g. USDC's 6-decimal units.
     pub amount_token_units: u64,
     pub deposit_root_hex: String,
 }
@@ -392,6 +444,7 @@ pub struct BridgeAccountKeyResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BridgeDepositResponse {
     pub account_id: u64,
+    /// Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
     pub balance_nanos: i64,
     pub deposit_id: u64,
     pub deposit_root_hex: String,
@@ -404,7 +457,10 @@ pub struct BridgeWithdrawalResponse {
     pub account_id: u64,
     pub recipient_hex: String,
     pub token_hex: String,
+    /// Token base units released by the vault.
     pub amount_token_units: u64,
+    /// Off-chain balance amount burned for the withdrawal. Integer nanodollars;
+    /// 1_000_000_000 = $1.
     pub amount_nanos: u64,
     pub expiry_height: u64,
     pub nullifier_hex: String,
@@ -494,6 +550,8 @@ pub struct QmdbStateRangeProofResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResolveMarketResponse {
     pub market_id: u32,
+    /// Resolution payout per YES share. Integer nanodollars;
+    /// 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
     pub payout_nanos: u64,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -508,6 +566,8 @@ pub struct ResolveMarketResponse {
 pub struct ResolutionResponse {
     pub market_id: u32,
     pub status: String,
+    /// Resolution payout per YES share. Integer nanodollars;
+    /// 1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payout_nanos: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -542,11 +602,17 @@ pub struct CreateMarketResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PortfolioResponse {
     pub account_id: u64,
+    /// Available account balance. Integer nanodollars; 1_000_000_000 = $1.
     pub balance_nanos: i64,
+    /// Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
     pub total_deposited_nanos: i64,
     pub positions: Vec<PositionValueResponse>,
+    /// Mark-to-market value of all positions. Integer nanodollars;
+    /// 1_000_000_000 = $1.
     pub total_position_value_nanos: i64,
+    /// Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
     pub portfolio_value_nanos: i64,
+    /// Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
     pub pnl_nanos: i64,
     /// First-deposit timestamp in ms since epoch (B8). `0` for accounts
     /// with no recorded deposit history (FE renders as "—"). Same
@@ -559,13 +625,15 @@ pub struct PortfolioResponse {
     /// so FE shows the real number instead of "200+".
     #[serde(default)]
     pub total_fill_count: u64,
-    /// Accumulated realized PnL across all closed positions (C1). Signed.
+    /// Accumulated realized PnL across all closed positions (C1). Integer nanodollars;
+    /// 1_000_000_000 = $1. Signed.
     /// `pnl_nanos = realized + unrealized` once both fields populate, but
     /// `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
     #[serde(default)]
     pub realized_pnl_nanos: i64,
-    /// Mark-to-market PnL on currently open positions (C1). Computed as
-    /// `Σ (current_price - avg_entry) * quantity / SHARE_SCALE` across positions.
+    /// Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
+    /// 1_000_000_000 = $1. Computed as
+    /// `sum((current_price - avg_entry) * quantity / SHARE_SCALE)` across positions.
     #[serde(default)]
     pub unrealized_pnl_nanos: i64,
 }
@@ -575,13 +643,17 @@ pub struct PortfolioResponse {
 pub struct PositionValueResponse {
     pub market_id: u32,
     pub outcome: String,
-    /// Signed position quantity in fixed-point share-units (`1000` = 1 share).
+    /// Signed position quantity. Integer share-units; 1000 units = 1 share.
     pub quantity: i64,
+    /// Current mark price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub current_price_nanos: u64,
+    /// Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
     pub value_nanos: i64,
     /// Weighted-average entry price for this side of the market (C1). `0`
     /// for positions opened before C1 landed (`#[serde(default)]` forward
-    /// compat). Same units as `current_price_nanos`.
+    /// compat). Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default)]
     pub avg_entry_price_nanos: u64,
 }
@@ -604,8 +676,13 @@ pub struct PriceHistoryResponse {
 pub struct PricePointResponse {
     pub height: u64,
     pub timestamp_ms: u64,
+    /// YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub yes_price_nanos: u64,
+    /// NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub no_price_nanos: u64,
+    /// Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
     pub volume_nanos: u64,
 }
 
@@ -628,14 +705,31 @@ pub struct PriceCandleResponse {
     pub bucket_end_ms: u64,
     pub first_height: u64,
     pub last_height: u64,
+    /// Bucket open YES price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub open_yes_price_nanos: u64,
+    /// Bucket high YES price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub high_yes_price_nanos: u64,
+    /// Bucket low YES price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub low_yes_price_nanos: u64,
+    /// Bucket close YES price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub close_yes_price_nanos: u64,
+    /// Bucket open NO price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub open_no_price_nanos: u64,
+    /// Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub high_no_price_nanos: u64,
+    /// Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub low_no_price_nanos: u64,
+    /// Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub close_no_price_nanos: u64,
+    /// Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1.
     pub volume_nanos: u64,
     pub point_count: u64,
 }
@@ -647,7 +741,9 @@ pub struct PriceCandleResponse {
 pub struct EquityPointResponse {
     pub timestamp_ms: u64,
     pub height: u64,
+    /// Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1.
     pub portfolio_value_nanos: i64,
+    /// Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1.
     pub deposited_nanos: i64,
 }
 
@@ -667,8 +763,10 @@ pub struct AccountFillResponse {
     /// Opaque to clients; current encoding is `<block_height>.<order_id>`.
     pub cursor: String,
     pub order_id: u64,
-    /// Fill quantity in fixed-point share-units (`1000` = 1 share).
+    /// Fill quantity. Integer share-units; 1000 units = 1 share.
     pub fill_qty: u64,
+    /// Fill price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub fill_price_nanos: u64,
     pub block_height: u64,
     pub timestamp_ms: u64,
@@ -680,6 +778,7 @@ pub struct AccountFillResponse {
 pub struct PositionDeltaResponse {
     pub market_id: u32,
     pub outcome: String,
+    /// Position quantity delta. Integer share-units; 1000 units = 1 share.
     pub delta: i64,
 }
 
@@ -690,13 +789,16 @@ pub struct PendingOrderResponse {
     pub account_id: u64,
     pub market_id: u32,
     pub side: String,
+    /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub limit_price_nanos: u64,
-    /// Remaining fill quantity in fixed-point share-units (`1000` = 1 share).
+    /// Remaining fill quantity. Integer share-units; 1000 units = 1 share.
     pub remaining_quantity: u64,
     pub created_at_block: u64,
     pub expires_at_block: u64,
-    /// Original `max_fill` at admit time, in fixed-point share-units (B8). Lets the FE render a
-    /// partial-fill progress bar as `(original - remaining) / original`.
+    /// Original `max_fill` at admit time. Integer share-units; 1000 units = 1 share.
+    /// Lets the FE render a partial-fill progress bar as
+    /// `(original - remaining) / original`.
     /// `0` for orders persisted before B5/B8 (#[serde(default)] forward
     /// compat).
     #[serde(default)]
@@ -717,11 +819,13 @@ pub struct PendingOrderResponse {
 pub struct OverviewBucketResponse {
     #[serde(default)]
     pub unique_traders: u64,
+    /// Total traded notional for this bucket. Integer nanodollars;
+    /// 1_000_000_000 = $1.
     #[serde(default)]
     pub total_volume_nanos: u64,
-    /// Cumulative platform welfare in nanos for this bucket — sum of per-block
-    /// `total_welfare` (each fill counted once). Signed: solver rounding can
-    /// yield small negatives.
+    /// Cumulative platform welfare for this bucket. Integer nanodollars;
+    /// 1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
+    /// once). Signed: solver rounding can yield small negatives.
     #[serde(default)]
     pub total_welfare_nanos: i64,
     #[serde(default)]
@@ -758,10 +862,16 @@ pub struct ActivityOverviewResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OpenBatchResponse {
     pub unique_placers: u32,
+    /// Indicative YES price for the open batch. Integer nanodollars;
+    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
     #[serde(default)]
     pub indicative_yes_price_nanos: Option<u64>,
+    /// Indicative NO price for the open batch. Integer nanodollars;
+    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
     #[serde(default)]
     pub indicative_no_price_nanos: Option<u64>,
+    /// Indicative traded notional for the open batch. Integer nanodollars;
+    /// 1_000_000_000 = $1.
     #[serde(default)]
     pub indicative_volume_nanos: u64,
     #[serde(default)]
@@ -793,12 +903,17 @@ pub struct HistoryEventResponse {
     pub side: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
+    /// Event quantity. Integer share-units; 1000 units = 1 share.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qty: Option<u64>,
+    /// Event price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub price_nanos: Option<u64>,
+    /// Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amount_nanos: Option<i64>,
+    /// Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub realized_pnl_nanos: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -807,8 +922,10 @@ pub struct HistoryEventResponse {
     /// | `complete_set` | …).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_nanos: Option<i64>,
+    /// Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub available_nanos: Option<i64>,
 }

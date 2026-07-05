@@ -24,6 +24,8 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
     "/metrics",
 ];
 
+const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 101;
+
 /// Unique path templates across all three mount tables, minus the non-API
 /// exemptions. `MatchedPath`/utoipa both key on the path template (not the
 /// method), so GET+PUT on the same path collapse to a single documented path.
@@ -41,6 +43,105 @@ fn documented_route_templates() -> BTreeSet<String> {
 /// Path templates present in the generated OpenAPI document.
 fn openapi_paths() -> BTreeSet<String> {
     ApiDoc::openapi().paths.paths.keys().cloned().collect()
+}
+
+fn openapi_json() -> serde_json::Value {
+    serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI document")
+}
+
+fn expected_unit_phrase(field: &str) -> Option<&'static str> {
+    if matches!(
+        field,
+        "quantity"
+            | "max_fill"
+            | "fill_qty"
+            | "remaining_quantity"
+            | "original_quantity"
+            | "qty"
+            | "delta"
+    ) {
+        Some("Integer share-units")
+    } else if field.ends_with("_nanos")
+        || matches!(
+            field,
+            "prices" | "min_yes_price" | "max_yes_price" | "min_volume"
+        )
+    {
+        Some("Integer nanodollars")
+    } else {
+        None
+    }
+}
+
+fn should_describe_probability_range(field: &str) -> bool {
+    field == "prices"
+        || field.contains("price")
+        || field == "payout_nanos"
+        || field == "clearing_prices_nanos"
+}
+
+fn normalize_description(description: &str) -> String {
+    description.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn check_schema_unit_descriptions(
+    value: &serde_json::Value,
+    path: &str,
+    missing: &mut Vec<String>,
+    covered: &mut usize,
+) {
+    let Some(object) = value.as_object() else {
+        if let Some(array) = value.as_array() {
+            for (index, child) in array.iter().enumerate() {
+                check_schema_unit_descriptions(
+                    child,
+                    &format!("{path}[{index}]"),
+                    missing,
+                    covered,
+                );
+            }
+        }
+        return;
+    };
+
+    if let Some(properties) = object
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (field, schema) in properties {
+            let Some(expected) = expected_unit_phrase(field) else {
+                continue;
+            };
+
+            let description = schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let normalized = normalize_description(description);
+
+            let unit_ok = normalized.contains(expected);
+            let probability_ok = !should_describe_probability_range(field)
+                || normalized.contains("per-share probabilities in [0, 1e9]")
+                || normalized.contains("per-share probabilities in `[0, 1e9]`");
+
+            if unit_ok && probability_ok {
+                *covered += 1;
+            } else {
+                missing.push(format!(
+                    "{path}.{field}: expected {expected:?}{} in description, got {description:?}",
+                    if should_describe_probability_range(field) {
+                        " and per-share probability range"
+                    } else {
+                        ""
+                    }
+                ));
+            }
+        }
+    }
+
+    for (key, child) in object {
+        check_schema_unit_descriptions(child, &format!("{path}.{key}"), missing, covered);
+    }
 }
 
 #[test]
@@ -82,4 +183,42 @@ fn openapi_exemptions_are_mounted_and_undocumented() {
             "exempt path {exempt} is documented in OpenAPI; drop it from the allowlist"
         );
     }
+}
+
+#[test]
+fn openapi_info_mentions_units_convention() {
+    let spec = openapi_json();
+    let description = spec
+        .pointer("/info/description")
+        .and_then(serde_json::Value::as_str)
+        .expect("OpenAPI info.description");
+
+    assert!(
+        description.contains("integer share-units")
+            && description.contains("integer nanodollars")
+            && description.contains("docs/architecture/REST%20API.md#units"),
+        "OpenAPI info.description must mention global unit conventions and link REST API units; got {description:?}"
+    );
+}
+
+#[test]
+fn openapi_unit_fields_have_unit_descriptions() {
+    let spec = openapi_json();
+    let schemas = spec
+        .pointer("/components/schemas")
+        .expect("OpenAPI components.schemas");
+
+    let mut missing = Vec::new();
+    let mut covered = 0;
+    check_schema_unit_descriptions(schemas, "components.schemas", &mut missing, &mut covered);
+
+    assert!(
+        missing.is_empty(),
+        "OpenAPI unit field descriptions are missing or incomplete:\n{}",
+        missing.join("\n")
+    );
+    assert_eq!(
+        covered, EXPECTED_UNIT_FIELD_DESCRIPTIONS,
+        "OpenAPI unit-bearing field description count changed; update the pin if deliberate"
+    );
 }

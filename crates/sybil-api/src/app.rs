@@ -152,7 +152,7 @@ use crate::util::now_ms;
     )),
     info(
         title = "Sybil API",
-        description = "HTTP API for AI agent trading on Sybil prediction markets",
+        description = "HTTP API for AI agent trading on Sybil prediction markets.\n\nUnits: protocol quantity fields use integer share-units (1000 units = 1 share). Money and `*_nanos` fields use integer nanodollars (1_000_000_000 = $1); prices are per-share probabilities in [0, 1e9]. See [REST API units](docs/architecture/REST%20API.md#units).",
         version = "0.1.0"
     )
 )]

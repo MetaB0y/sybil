@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateAccountRequest {
-    /// Initial balance in nanos (1 dollar = 1_000_000_000 nanos).
+    /// Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
     #[cfg_attr(feature = "openapi", schema(example = 100_000_000_000u64))]
     pub initial_balance_nanos: u64,
 }
@@ -13,7 +13,7 @@ pub struct CreateAccountRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FundAccountRequest {
-    /// Amount to add in nanos (1 dollar = 1_000_000_000 nanos).
+    /// Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1.
     #[cfg_attr(feature = "openapi", schema(example = 50_000_000_000u64))]
     pub amount_nanos: u64,
 }
@@ -131,8 +131,8 @@ pub struct ExtendMarketGroupRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResolveMarketRequest {
-    /// Payout per YES share in nanos (0 to 1_000_000_000).
-    /// 1_000_000_000 = YES wins ($1), 0 = NO wins, 700_000_000 = $0.70 fractional.
+    /// Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+    /// Payouts are per-share probabilities in [0, 1e9].
     #[cfg_attr(feature = "openapi", schema(example = 1_000_000_000u64))]
     pub payout_nanos: u64,
     /// Optional signed attestation. When provided, the market's resolution
@@ -178,7 +178,8 @@ pub struct SubmitOrderRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at_block: Option<u64>,
     /// If set, treat these orders as market maker orders with flash liquidity.
-    /// The value is the MM's total capital budget in nanos.
+    /// The value is the MM's total capital budget. Integer nanodollars;
+    /// 1_000_000_000 = $1.
     /// MM orders skip per-order balance validation; instead the solver enforces
     /// the portfolio-level budget constraint at clearing time.
     #[serde(default)]
@@ -207,30 +208,37 @@ pub enum OrderSpec {
     /// Buy YES share-units on a single market (`1000` units = 1 share).
     BuyYes {
         market_id: u32,
-        /// Limit price in nanos (0 to 1_000_000_000).
+        /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
+        /// Prices are per-share probabilities in [0, 1e9].
         limit_price_nanos: u64,
-        /// Quantity in fixed-point share-units.
+        /// Order quantity. Integer share-units; 1000 units = 1 share.
         quantity: u64,
     },
     /// Buy NO share-units on a single market (`1000` units = 1 share).
     BuyNo {
         market_id: u32,
+        /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
+        /// Prices are per-share probabilities in [0, 1e9].
         limit_price_nanos: u64,
-        /// Quantity in fixed-point share-units.
+        /// Order quantity. Integer share-units; 1000 units = 1 share.
         quantity: u64,
     },
     /// Sell YES share-units on a single market (`1000` units = 1 share).
     SellYes {
         market_id: u32,
+        /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
+        /// Prices are per-share probabilities in [0, 1e9].
         limit_price_nanos: u64,
-        /// Quantity in fixed-point share-units.
+        /// Order quantity. Integer share-units; 1000 units = 1 share.
         quantity: u64,
     },
     /// Sell NO share-units on a single market (`1000` units = 1 share).
     SellNo {
         market_id: u32,
+        /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
+        /// Prices are per-share probabilities in [0, 1e9].
         limit_price_nanos: u64,
-        /// Quantity in fixed-point share-units.
+        /// Order quantity. Integer share-units; 1000 units = 1 share.
         quantity: u64,
     },
 }
@@ -251,13 +259,15 @@ pub struct MarketSearchParams {
     /// Status filter ("active" or "resolved").
     #[serde(default)]
     pub status: Option<String>,
-    /// Minimum YES price in nanos.
+    /// Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default)]
     pub min_yes_price: Option<u64>,
-    /// Maximum YES price in nanos.
+    /// Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default)]
     pub max_yes_price: Option<u64>,
-    /// Minimum cumulative volume in nanos.
+    /// Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1.
     #[serde(default)]
     pub min_volume: Option<u64>,
     /// Sort field: "volume", "created_at", "name", "price".
@@ -310,16 +320,18 @@ pub struct SignedOrderData {
     pub market_ids: Vec<u32>,
     /// Payoff vector.
     pub payoffs: Vec<i8>,
-    /// Limit price in nanos (0 to 1_000_000_000).
+    /// Limit price. Integer nanodollars; 1_000_000_000 = $1.
+    /// Prices are per-share probabilities in [0, 1e9].
     pub limit_price_nanos: u64,
-    /// Maximum fill quantity in fixed-point share-units.
+    /// Maximum fill quantity. Integer share-units; 1000 units = 1 share.
     pub max_fill: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetReferencePricesRequest {
-    /// Map of market_id -> reference price in nanos.
+    /// Map of market_id -> reference price. Integer nanodollars;
+    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
     pub prices: std::collections::HashMap<u32, u64>,
 }
 
