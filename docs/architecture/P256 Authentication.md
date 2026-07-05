@@ -3,22 +3,26 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-03
+last_verified: 2026-07-05
 ---
 
 Sybil uses P256 (NIST secp256r1) ECDSA signatures for authenticated account actions. This is the same elliptic curve used by hardware security modules (HSMs), secure enclaves (Apple's Secure Enclave, Android's StrongBox), and WebAuthn/FIDO2 keys. The choice of P256 over secp256k1 (Bitcoin/Ethereum's curve) is deliberate: it enables direct hardware key integration without software key management.
 
-The authentication flow has two steps. First, the user registers a P256 public key via `POST /v1/accounts/{id}/keys`. This associates the key with their account — multiple keys can be registered for operational flexibility. Second, when submitting a signed action, the user signs the canonical payload with their private key. Signed orders go to `POST /v1/orders/signed`; signed bridge withdrawals go to `POST /v1/bridge/withdrawals/signed`. The API verifies the signature against the registered keys before forwarding the order to the [[Mempool]] or the withdrawal request to the bridge WAL.
+The authentication flow has two steps. First, the user registers a P256 public key via `POST /v1/accounts/{id}/keys`. This associates the key with their account — multiple keys can be registered for operational flexibility. Second, when submitting a signed action, the user signs the canonical payload with their private key. Signed orders go to `POST /v1/orders/signed`; signed cancellations go to `POST /v1/orders/cancel/signed`; signed bridge withdrawals go to `POST /v1/bridge/withdrawals/signed`. The API verifies the signature against the registered keys before forwarding the order to the [[Mempool]], applying the cancellation, or writing the withdrawal request to the bridge WAL.
+
+Every signed order, signed cancellation, and signed bridge withdrawal carries a per-account `nonce: u64` covered by the canonical P256 payload. The sequencer stores each account's highest accepted signed-action nonce and requires strict increase; gaps are allowed. Stale or duplicate nonces are rejected at the API boundary as `409 REPLAY_NONCE_STALE`. The nonce advance is durably logged before the signed action becomes live, so a process restart cannot reopen the replay window for an already acknowledged signed payload.
 
 Unsigned order submission (`POST /v1/orders`) is also available and is the primary path in dev mode. Production deployments would require all orders to be signed, ensuring that only the account holder can submit orders against their balance. The P256 choice also aligns with the [[ZK Integration Path]]: P256 signature verification has efficient implementations in SNARK circuits, enabling on-chain verification of order authenticity as part of the block proof.
 
-Signed bridge withdrawals are scaffolding for [[L1 Settlement and Vault]] rather than the final L1 authorization story. The signature proves account intent and covers `account_id`, destination chain/vault, recipient, token, amount, and `expiry_height`; the signed route requires `expiry_height` so the server cannot inject an unsigned default. SYB-178/SYB-188 still need the proof-backed vault release path before signatures alone can be treated as complete withdrawal authorization.
+Signed bridge withdrawals are scaffolding for [[L1 Settlement and Vault]] rather than the final L1 authorization story. The signature proves account intent and covers `account_id`, destination chain/vault, recipient, token, amount, `expiry_height`, and `nonce`; the signed route requires `expiry_height` and `nonce` so the server cannot inject unsigned defaults. SYB-178/SYB-188 still need the proof-backed vault release path before signatures alone can be treated as complete withdrawal authorization.
 
 ## Key Properties
 - P256 (secp256r1) ECDSA — same curve as hardware security modules
 - Key registration: `POST /accounts/{id}/keys` — multiple keys per account
 - Signed order submission: `POST /orders/signed` — signature verified against registered keys
+- Signed cancellation: `POST /orders/cancel/signed` — signature verified against registered keys
 - Signed withdrawal scaffold: `POST /bridge/withdrawals/signed` — signature verified against registered keys and service-gated
+- Replay protection: per-account strictly increasing signed-action nonce, persisted through restart
 - Unsigned path available for dev mode
 - Hardware-compatible: Secure Enclave, StrongBox, FIDO2 keys
 - ZK-friendly: efficient P256 verification circuits exist

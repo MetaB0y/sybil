@@ -562,7 +562,7 @@ async fn service_routes_succeed_with_token_in_prod() {
         amount_token_units: 1_000,
         expiry_height: 10,
     };
-    let msg = canonical_bridge_withdrawal_bytes(&signed_withdrawal);
+    let msg = canonical_bridge_withdrawal_bytes(&signed_withdrawal, 1);
     let signature: Signature = withdrawal_key.sign(&msg);
     let (status, body) = request_json(
         app.clone(),
@@ -578,6 +578,7 @@ async fn service_routes_succeed_with_token_in_prod() {
                 "token_address_hex": hex_bytes(0x20, 20),
                 "amount_token_units": 1_000u64,
                 "expiry_height": 10u64,
+                "nonce": 1u64,
             },
             "signer_pubkey_hex": withdrawal_pubkey_hex,
             "signature_hex": hex::encode(signature.to_bytes()),

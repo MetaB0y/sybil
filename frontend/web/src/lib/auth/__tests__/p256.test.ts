@@ -29,6 +29,7 @@ describe("p256 sign + verify roundtrip", () => {
       payoffs: [1, 0],
       limitPriceNanos: 550_000_000n,
       maxFill: 10n,
+      nonce: 7n,
     });
 
     const sigHex = await signBytes(kp.privateKey, bytes);

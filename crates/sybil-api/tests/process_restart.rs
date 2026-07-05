@@ -34,6 +34,7 @@ fn signed_buy_yes_payload(
     market_id: u32,
     limit_price_nanos: u64,
     quantity: u64,
+    nonce: u64,
     key: &SigningKey,
 ) -> Value {
     let mut order = Order::new(0);
@@ -45,7 +46,7 @@ fn signed_buy_yes_payload(
     order.payoffs[0] = 1;
     order.payoffs[1] = 0;
 
-    let signature: Signature = key.sign(&canonical_order_bytes(&order));
+    let signature: Signature = key.sign(&canonical_order_bytes(&order, nonce));
     json!({
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
         "order": {
@@ -54,16 +55,22 @@ fn signed_buy_yes_payload(
             "limit_price_nanos": limit_price_nanos,
             "max_fill": quantity
         },
+        "nonce": nonce,
         "signature_hex": to_hex(signature.to_bytes().as_slice())
     })
 }
 
-fn signed_cancel_payload(account_id: u64, order_id: u64, key: &SigningKey) -> Value {
-    let signature: Signature = key.sign(&canonical_cancel_bytes(AccountId(account_id), order_id));
+fn signed_cancel_payload(account_id: u64, order_id: u64, nonce: u64, key: &SigningKey) -> Value {
+    let signature: Signature = key.sign(&canonical_cancel_bytes(
+        AccountId(account_id),
+        order_id,
+        nonce,
+    ));
     json!({
         "account_id": account_id,
         "order_id": order_id,
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        "nonce": nonce,
         "signature_hex": to_hex(signature.to_bytes().as_slice())
     })
 }
@@ -233,11 +240,12 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     )
     .await;
 
+    let signed_order_nonce_1 = signed_buy_yes_payload(market_id as u32, 400, 3, 1, &signing_key);
     post_json(
         &client,
         &writer.base_url,
         "/v1/orders/signed",
-        signed_buy_yes_payload(market_id as u32, 400, 3, &signing_key),
+        signed_order_nonce_1.clone(),
     )
     .await;
     let pending = get_json(
@@ -252,11 +260,12 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     assert_eq!(pending.len(), 1);
     let order_id = pending[0]["order_id"].as_u64().unwrap();
 
+    let signed_cancel_nonce_2 = signed_cancel_payload(account_id, order_id, 2, &signing_key);
     post_json(
         &client,
         &writer.base_url,
         "/v1/orders/cancel/signed",
-        signed_cancel_payload(account_id, order_id, &signing_key),
+        signed_cancel_nonce_2.clone(),
     )
     .await;
     let pending_after_cancel = get_json(
@@ -353,11 +362,43 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         "signed cancel should survive restart without resurrecting the resting order"
     );
 
+    let replay_order_resp = client
+        .post(format!("{}/v1/orders/signed", reader.base_url))
+        .json(&signed_order_nonce_1)
+        .send()
+        .await
+        .expect("replay signed order request succeeds");
+    let replay_order_status = replay_order_resp.status();
+    let replay_order_body: Value =
+        serde_json::from_str(&replay_order_resp.text().await.unwrap_or_default())
+            .expect("replay signed order error body is JSON");
+    assert_eq!(replay_order_status, StatusCode::CONFLICT);
+    assert_eq!(
+        replay_order_body["code"].as_str(),
+        Some("REPLAY_NONCE_STALE")
+    );
+
+    let replay_cancel_resp = client
+        .post(format!("{}/v1/orders/cancel/signed", reader.base_url))
+        .json(&signed_cancel_nonce_2)
+        .send()
+        .await
+        .expect("replay signed cancel request succeeds");
+    let replay_cancel_status = replay_cancel_resp.status();
+    let replay_cancel_body: Value =
+        serde_json::from_str(&replay_cancel_resp.text().await.unwrap_or_default())
+            .expect("replay signed cancel error body is JSON");
+    assert_eq!(replay_cancel_status, StatusCode::CONFLICT);
+    assert_eq!(
+        replay_cancel_body["code"].as_str(),
+        Some("REPLAY_NONCE_STALE")
+    );
+
     post_json(
         &client,
         &reader.base_url,
         "/v1/orders/signed",
-        signed_buy_yes_payload(market_id as u32, 450, 2, &signing_key),
+        signed_buy_yes_payload(market_id as u32, 450, 2, 3, &signing_key),
     )
     .await;
     let post_restart_pending = get_json(

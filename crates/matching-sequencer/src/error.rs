@@ -112,6 +112,18 @@ pub enum SequencerError {
     /// The signed account_id does not match the signer registry mapping.
     #[error("signed account does not match signer public key")]
     SignerAccountMismatch,
+    /// The signed action nonce is not strictly greater than the last accepted nonce.
+    #[error(
+        "stale replay nonce for account {}: nonce {} must be greater than last accepted nonce {}",
+        .account_id.0,
+        nonce,
+        last_nonce
+    )]
+    ReplayNonceStale {
+        account_id: AccountId,
+        nonce: u64,
+        last_nonce: u64,
+    },
     /// Mempool capacity exceeded.
     #[error("mempool full")]
     MempoolFull,

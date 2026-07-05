@@ -1086,6 +1086,7 @@ impl SequencerActorState {
             .sequencer
             .lookup_pubkey(&signed.signer)
             .ok_or(SequencerError::UnknownSigner)?;
+        self.accept_replay_nonce(account_id, signed.nonce).await?;
 
         let submission = OrderSubmission {
             account_id,
@@ -1107,6 +1108,7 @@ impl SequencerActorState {
         if account_id != signed.account_id {
             return Err(SequencerError::SignerAccountMismatch);
         }
+        self.accept_replay_nonce(account_id, signed.nonce).await?;
 
         let timestamp_ms = current_timestamp_ms();
         let mut validation = self.sequencer.clone();
@@ -1446,6 +1448,17 @@ impl SequencerActorState {
         Ok(())
     }
 
+    async fn accept_replay_nonce(
+        &mut self,
+        account_id: AccountId,
+        nonce: u64,
+    ) -> Result<(), SequencerError> {
+        self.sequencer.validate_replay_nonce(account_id, nonce)?;
+        self.persist_control_plane(&ControlPlaneCommand::AdvanceReplayNonce { account_id, nonce })
+            .await?;
+        self.sequencer.advance_replay_nonce(account_id, nonce)
+    }
+
     async fn handle_create_account(
         &mut self,
         initial_balance: i64,
@@ -1654,6 +1667,7 @@ impl SequencerActorState {
         if account_id != signed.request.account_id {
             return Err(SequencerError::SignerAccountMismatch);
         }
+        self.accept_replay_nonce(account_id, signed.nonce).await?;
         self.handle_bridge_withdrawal(signed.request).await
     }
 
@@ -3700,7 +3714,7 @@ mod tests {
         handle.submit_order(sub).await.unwrap();
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert_eq!(pending.len(), 1);
-        let signed_cancel = sign_cancel(aid, pending[0].order_id, &signing_key);
+        let signed_cancel = sign_cancel(aid, pending[0].order_id, 1, &signing_key);
         handle.cancel_signed_order(signed_cancel).await.unwrap();
 
         let assert_replayed = |restored_seq: &BlockSequencer| {
@@ -3758,13 +3772,23 @@ mod tests {
             );
         };
 
-        const EXPECTED_CONTROL_PLANE_COMMANDS: usize = 12;
+        const EXPECTED_CONTROL_PLANE_COMMANDS: usize = 13;
         for restart_round in 0..3 {
             let restored = store.load_state().await.unwrap().unwrap();
             assert_eq!(
                 restored.control_plane_log.len(),
                 EXPECTED_CONTROL_PLANE_COMMANDS,
                 "restart round {restart_round} should see every acknowledged control-plane command before commit"
+            );
+            assert!(
+                restored.control_plane_log.iter().any(|command| matches!(
+                    command,
+                    ControlPlaneCommand::AdvanceReplayNonce {
+                        account_id,
+                        nonce: 1
+                    } if *account_id == aid
+                )),
+                "restart round {restart_round} should replay the signed cancel nonce"
             );
             assert_eq!(
                 restored.admit_log.len(),
@@ -3917,7 +3941,7 @@ mod tests {
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert_eq!(pending.len(), 1);
 
-        let signed_cancel = sign_cancel(aid, pending[0].order_id, &signing_key);
+        let signed_cancel = sign_cancel(aid, pending[0].order_id, 1, &signing_key);
         handle.cancel_signed_order(signed_cancel).await.unwrap();
 
         let withdrawal = handle
@@ -3936,7 +3960,14 @@ mod tests {
 
         let restored = store.load_state().await.unwrap().unwrap();
         assert_eq!(restored.admit_log.len(), 1);
-        assert_eq!(restored.control_plane_log.len(), 1);
+        assert_eq!(restored.control_plane_log.len(), 2);
+        assert!(restored.control_plane_log.iter().any(|command| matches!(
+            command,
+            ControlPlaneCommand::AdvanceReplayNonce {
+                account_id,
+                nonce: 1
+            } if *account_id == aid
+        )));
         assert_eq!(restored.pending_bridge_withdrawals.len(), 1);
         let restored_seq =
             BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
@@ -4005,11 +4036,50 @@ mod tests {
         handle.register_pubkey(aid, pubkey).await.unwrap();
 
         let order = outcome_buy(&ms, 0, m0, 0, 500_000_000, 1);
-        let signed = crate::crypto::sign_order(&order, &signing_key);
+        let signed = crate::crypto::sign_order(&order, 1, &signing_key);
         handle.submit_signed_order(signed).await.unwrap();
 
         let block = handle.produce_block().await.unwrap();
         assert!(block.canonical.header.order_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_signed_order_replay_rejected_and_nonce_gap_allowed() {
+        let (seq, aid) = make_test_sequencer();
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        handle.register_pubkey(aid, pubkey).await.unwrap();
+
+        let order = outcome_buy(&ms, 0, m0, 0, 500_000_000, 1);
+        handle
+            .submit_signed_order(crate::crypto::sign_order(&order, 1, &signing_key))
+            .await
+            .unwrap();
+
+        let replay_error = handle
+            .submit_signed_order(crate::crypto::sign_order(&order, 1, &signing_key))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            replay_error,
+            SequencerError::ReplayNonceStale {
+                account_id,
+                nonce: 1,
+                last_nonce: 1
+            } if account_id == aid
+        ));
+
+        handle
+            .submit_signed_order(crate::crypto::sign_order(&order, 10, &signing_key))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -4039,11 +4109,56 @@ mod tests {
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert_eq!(pending.len(), 1);
 
-        let cancel = crate::crypto::sign_cancel(aid, pending[0].order_id, &signing_key);
+        let cancel = crate::crypto::sign_cancel(aid, pending[0].order_id, 2, &signing_key);
         handle.cancel_signed_order(cancel).await.unwrap();
 
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_signed_cancel_replay_rejected() {
+        let (seq, aid) = make_test_sequencer();
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        handle.register_pubkey(aid, pubkey).await.unwrap();
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&ms, 1, m0, 0, 500_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+
+        let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        let order_id = pending[0].order_id;
+
+        handle
+            .cancel_signed_order(crate::crypto::sign_cancel(aid, order_id, 1, &signing_key))
+            .await
+            .unwrap();
+        let replay_error = handle
+            .cancel_signed_order(crate::crypto::sign_cancel(aid, order_id, 1, &signing_key))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            replay_error,
+            SequencerError::ReplayNonceStale {
+                account_id,
+                nonce: 1,
+                last_nonce: 1
+            } if account_id == aid
+        ));
     }
 
     #[tokio::test]
@@ -4072,7 +4187,7 @@ mod tests {
         handle.produce_block().await.unwrap();
 
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
-        let cancel = crate::crypto::sign_cancel(other, pending[0].order_id, &signing_key);
+        let cancel = crate::crypto::sign_cancel(other, pending[0].order_id, 2, &signing_key);
         let error = handle.cancel_signed_order(cancel).await.unwrap_err();
         assert!(matches!(error, SequencerError::SignerAccountMismatch));
     }

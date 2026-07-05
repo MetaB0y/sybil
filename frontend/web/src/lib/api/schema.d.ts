@@ -1114,6 +1114,11 @@ export interface components {
              * @description The pending order to cancel.
              */
             order_id: number;
+            /**
+             * Format: int64
+             * @description Per-account replay nonce covered by the P256 signature.
+             */
+            nonce: number;
             /** @description Hex-encoded P256 ECDSA signature over the canonical cancel payload. */
             signature_hex: string;
             /** @description Hex-encoded compressed P256 public key of the signer. */
@@ -1148,6 +1153,11 @@ export interface components {
              * @description Last Sybil block height at which this withdrawal leaf is valid.
              */
             expiry_height?: number | null;
+            /**
+             * Format: int64
+             * @description Per-account replay nonce. Required for signed bridge withdrawals.
+             */
+            nonce?: number | null;
             /** @description Hex-encoded L1 recipient address (20 bytes). */
             recipient_hex: string;
             /** @description Hex-encoded token contract address (20 bytes). */
@@ -2082,6 +2092,11 @@ export interface components {
             expires_at_block?: number | null;
             /** @description The order to submit. */
             order: components["schemas"]["SignedOrderData"];
+            /**
+             * Format: int64
+             * @description Per-account replay nonce covered by the P256 signature.
+             */
+            nonce: number;
             /** @description Hex-encoded P256 ECDSA signature. */
             signature_hex: string;
             /** @description Hex-encoded compressed P256 public key of the signer. */

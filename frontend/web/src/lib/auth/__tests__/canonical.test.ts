@@ -26,9 +26,10 @@ const ORDER_VECTORS: OrderVector[] = [
       payoffs: [1, 0],
       limitPriceNanos: 550_000_000n,
       maxFill: 10n,
+      nonce: 7n,
     },
     expectedHex:
-      "07000000ffffffffffffffffffffffffffffffff010100000000000000000000000000000000000000000000000000000000000000028055c820000000000a000000000000000000",
+      "07000000ffffffffffffffffffffffffffffffff010100000000000000000000000000000000000000000000000000000000000000028055c820000000000a0000000000000000000700000000000000",
   },
   {
     name: "sell_yes",
@@ -37,9 +38,10 @@ const ORDER_VECTORS: OrderVector[] = [
       payoffs: [-1, 0],
       limitPriceNanos: 425_000_000n,
       maxFill: 3n,
+      nonce: 7n,
     },
     expectedHex:
-      "07000000ffffffffffffffffffffffffffffffff01ff000000000000000000000000000000000000000000000000000000000000000240fc54190000000003000000000000000000",
+      "07000000ffffffffffffffffffffffffffffffff01ff000000000000000000000000000000000000000000000000000000000000000240fc541900000000030000000000000000000700000000000000",
   },
   {
     name: "spread",
@@ -48,9 +50,10 @@ const ORDER_VECTORS: OrderVector[] = [
       payoffs: [0, -1, 1, 0],
       limitPriceNanos: 125_000_000n,
       maxFill: 5n,
+      nonce: 7n,
     },
     expectedHex:
-      "0300000009000000ffffffffffffffffffffffff0200ff01000000000000000000000000000000000000000000000000000000000004405973070000000005000000000000000000",
+      "0300000009000000ffffffffffffffffffffffff0200ff010000000000000000000000000000000000000000000000000000000000044059730700000000050000000000000000000700000000000000",
   },
   {
     name: "bundle",
@@ -59,9 +62,10 @@ const ORDER_VECTORS: OrderVector[] = [
       payoffs: [0, 0, 0, 0, 0, 0, 0, 1],
       limitPriceNanos: 300_000_000n,
       maxFill: 2n,
+      nonce: 7n,
     },
     expectedHex:
-      "010000000200000004000000ffffffffffffffff0300000000000000010000000000000000000000000000000000000000000000000800a3e1110000000002000000000000000000",
+      "010000000200000004000000ffffffffffffffff0300000000000000010000000000000000000000000000000000000000000000000800a3e11100000000020000000000000000000700000000000000",
   },
   {
     name: "conditional",
@@ -70,6 +74,7 @@ const ORDER_VECTORS: OrderVector[] = [
       payoffs: [1, 0],
       limitPriceNanos: 610_000_000n,
       maxFill: 9n,
+      nonce: 7n,
       condition: {
         market: 11,
         threshold: 490_000_000n,
@@ -77,7 +82,7 @@ const ORDER_VECTORS: OrderVector[] = [
       },
     },
     expectedHex:
-      "05000000ffffffffffffffffffffffffffffffff0101000000000000000000000000000000000000000000000000000000000000000280dc5b24000000000900000000000000010b00000080ce341d000000000000",
+      "05000000ffffffffffffffffffffffffffffffff0101000000000000000000000000000000000000000000000000000000000000000280dc5b24000000000900000000000000010b00000080ce341d0000000000000700000000000000",
   },
 ];
 
@@ -95,6 +100,7 @@ describe("canonicalOrderBytes", () => {
       payoffs: [1, 0],
       limitPriceNanos: 550_000_000n,
       maxFill: 10n,
+      nonce: 7n,
       expiresAtBlock: 1000n,
     });
     const withoutExpiry = canonicalOrderBytes({
@@ -102,26 +108,28 @@ describe("canonicalOrderBytes", () => {
       payoffs: [1, 0],
       limitPriceNanos: 550_000_000n,
       maxFill: 10n,
+      nonce: 7n,
     });
-    // With expiry: tail should be `01` + 8 LE bytes of 1000 (= 0xe803000000000000).
-    // Without: tail should be `00`.
-    expect(toHex(withExpiry).endsWith("01e803000000000000")).toBe(true);
-    expect(toHex(withoutExpiry).endsWith("00")).toBe(true);
+    // With expiry: `01` + 8 LE bytes of 1000, then nonce 7.
+    // Without expiry: `00`, then nonce 7.
+    expect(toHex(withExpiry).endsWith("01e8030000000000000700000000000000")).toBe(true);
+    expect(toHex(withoutExpiry).endsWith("000700000000000000")).toBe(true);
     // Length: with-expiry has 8 extra payload bytes (1 discriminator already present).
     expect(withExpiry.length - withoutExpiry.length).toBe(8);
   });
 });
 
 describe("canonicalCancelBytes", () => {
-  it("encodes account_id + order_id as two u64 LE", () => {
-    const got = toHex(canonicalCancelBytes(7n, 42n));
+  it("encodes account_id + order_id + nonce as three u64 LE", () => {
+    const got = toHex(canonicalCancelBytes(7n, 42n, 11n));
     // 7 LE u64: 0700000000000000
     // 42 LE u64: 2a00000000000000
-    expect(got).toBe("07000000000000002a00000000000000");
+    // 11 LE u64: 0b00000000000000
+    expect(got).toBe("07000000000000002a000000000000000b00000000000000");
   });
 
   it("encodes large account_id correctly", () => {
-    const got = toHex(canonicalCancelBytes(0xdeadbeefn, 1n));
-    expect(got).toBe("efbeadde000000000100000000000000");
+    const got = toHex(canonicalCancelBytes(0xdeadbeefn, 1n, 2n));
+    expect(got).toBe("efbeadde0000000001000000000000000200000000000000");
   });
 });

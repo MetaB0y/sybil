@@ -21,6 +21,9 @@ pub struct Account {
     /// Total amount deposited (initial balance + all fund_account calls).
     /// Used for PnL calculation: PnL = portfolio_value - total_deposited.
     pub total_deposited: i64,
+    /// Highest accepted signed-action nonce for replay protection.
+    #[serde(default)]
+    pub last_nonce: u64,
     #[serde(default)]
     pub events_digest: [u8; 32],
 }
@@ -32,6 +35,7 @@ impl Account {
             balance,
             positions: HashMap::new(),
             total_deposited: balance,
+            last_nonce: 0,
             events_digest: [0u8; 32],
         }
     }

@@ -50,6 +50,7 @@ impl PublicKey {
 /// An order with a P256 ECDSA signature.
 pub struct SignedOrder {
     pub order: Order,
+    pub nonce: u64,
     pub signer: PublicKey,
     pub signature: Signature,
 }
@@ -58,6 +59,7 @@ pub struct SignedOrder {
 pub struct SignedCancel {
     pub account_id: crate::account::AccountId,
     pub order_id: u64,
+    pub nonce: u64,
     pub signer: PublicKey,
     pub signature: Signature,
 }
@@ -65,11 +67,12 @@ pub struct SignedCancel {
 /// A bridge withdrawal request authenticated by a P256 signature.
 pub struct SignedBridgeWithdrawal {
     pub request: crate::bridge::BridgeWithdrawalRequest,
+    pub nonce: u64,
     pub signer: PublicKey,
     pub signature: Signature,
 }
 
-fn to_canonical_order(order: &Order) -> CanonicalOrder {
+fn to_canonical_order(order: &Order, nonce: u64) -> CanonicalOrder {
     let mut markets = [CanonicalMarketId::NONE; sybil_signing::MAX_MARKETS_PER_ORDER];
     for (dst, src) in markets.iter_mut().zip(order.markets.iter()) {
         *dst = CanonicalMarketId(src.0);
@@ -96,14 +99,15 @@ fn to_canonical_order(order: &Order) -> CanonicalOrder {
         max_fill: order.max_fill.0,
         condition,
         expires_at_block: order.expires_at_block,
+        nonce,
     }
 }
 
 /// Deterministic canonical byte encoding of an Order for signing.
 ///
 /// NOTE: `id` is excluded because the sequencer assigns IDs after submission.
-pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
-    sybil_signing::canonical_order_bytes(&to_canonical_order(order))
+pub fn canonical_order_bytes(order: &Order, nonce: u64) -> Vec<u8> {
+    sybil_signing::canonical_order_bytes(&to_canonical_order(order, nonce))
 }
 
 /// Deterministic canonical byte encoding of a cancel request for signing.
@@ -111,12 +115,18 @@ pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
 /// Layout (all integers little-endian):
 /// - account_id: u64
 /// - order_id: u64
-pub fn canonical_cancel_bytes(account_id: crate::account::AccountId, order_id: u64) -> Vec<u8> {
-    sybil_signing::canonical_cancel_bytes(account_id.0, order_id)
+/// - nonce: u64
+pub fn canonical_cancel_bytes(
+    account_id: crate::account::AccountId,
+    order_id: u64,
+    nonce: u64,
+) -> Vec<u8> {
+    sybil_signing::canonical_cancel_bytes(account_id.0, order_id, nonce)
 }
 
 fn to_canonical_bridge_withdrawal(
     request: &crate::bridge::BridgeWithdrawalRequest,
+    nonce: u64,
 ) -> CanonicalBridgeWithdrawalRequest {
     CanonicalBridgeWithdrawalRequest {
         account_id: request.account_id.0,
@@ -126,19 +136,23 @@ fn to_canonical_bridge_withdrawal(
         token_address: request.token_address,
         amount_token_units: request.amount_token_units,
         expiry_height: request.expiry_height,
+        nonce,
     }
 }
 
 /// Deterministic canonical byte encoding of a bridge withdrawal request for signing.
 pub fn canonical_bridge_withdrawal_bytes(
     request: &crate::bridge::BridgeWithdrawalRequest,
+    nonce: u64,
 ) -> Vec<u8> {
-    sybil_signing::canonical_bridge_withdrawal_bytes(&to_canonical_bridge_withdrawal(request))
+    sybil_signing::canonical_bridge_withdrawal_bytes(&to_canonical_bridge_withdrawal(
+        request, nonce,
+    ))
 }
 
 /// Verify a signed order's P256 ECDSA signature.
 pub fn verify_signed_order(signed: &SignedOrder) -> Result<(), SequencerError> {
-    let msg = canonical_order_bytes(&signed.order);
+    let msg = canonical_order_bytes(&signed.order, signed.nonce);
     signed
         .signer
         .0
@@ -148,7 +162,7 @@ pub fn verify_signed_order(signed: &SignedOrder) -> Result<(), SequencerError> {
 
 /// Verify a signed cancel request's P256 ECDSA signature.
 pub fn verify_signed_cancel(signed: &SignedCancel) -> Result<(), SequencerError> {
-    let msg = canonical_cancel_bytes(signed.account_id, signed.order_id);
+    let msg = canonical_cancel_bytes(signed.account_id, signed.order_id, signed.nonce);
     signed
         .signer
         .0
@@ -160,7 +174,7 @@ pub fn verify_signed_cancel(signed: &SignedCancel) -> Result<(), SequencerError>
 pub fn verify_signed_bridge_withdrawal(
     signed: &SignedBridgeWithdrawal,
 ) -> Result<(), SequencerError> {
-    let msg = canonical_bridge_withdrawal_bytes(&signed.request);
+    let msg = canonical_bridge_withdrawal_bytes(&signed.request, signed.nonce);
     signed
         .signer
         .0
@@ -169,11 +183,12 @@ pub fn verify_signed_bridge_withdrawal(
 }
 
 /// Sign an order with a P256 signing key (for testing / client use).
-pub fn sign_order(order: &Order, key: &SigningKey) -> SignedOrder {
-    let msg = canonical_order_bytes(order);
+pub fn sign_order(order: &Order, nonce: u64, key: &SigningKey) -> SignedOrder {
+    let msg = canonical_order_bytes(order, nonce);
     let signature: Signature = key.sign(&msg);
     SignedOrder {
         order: order.clone(),
+        nonce,
         signer: PublicKey(*key.verifying_key()),
         signature,
     }
@@ -223,13 +238,15 @@ pub fn sign_attestation(attestation: ResolutionAttestation, key: &SigningKey) ->
 pub fn sign_cancel(
     account_id: crate::account::AccountId,
     order_id: u64,
+    nonce: u64,
     key: &SigningKey,
 ) -> SignedCancel {
-    let msg = canonical_cancel_bytes(account_id, order_id);
+    let msg = canonical_cancel_bytes(account_id, order_id, nonce);
     let signature: Signature = key.sign(&msg);
     SignedCancel {
         account_id,
         order_id,
+        nonce,
         signer: PublicKey(*key.verifying_key()),
         signature,
     }
@@ -238,12 +255,14 @@ pub fn sign_cancel(
 /// Sign a bridge withdrawal request with a P256 signing key (testing / client use).
 pub fn sign_bridge_withdrawal(
     request: crate::bridge::BridgeWithdrawalRequest,
+    nonce: u64,
     key: &SigningKey,
 ) -> SignedBridgeWithdrawal {
-    let msg = canonical_bridge_withdrawal_bytes(&request);
+    let msg = canonical_bridge_withdrawal_bytes(&request, nonce);
     let signature: Signature = key.sign(&msg);
     SignedBridgeWithdrawal {
         request,
+        nonce,
         signer: PublicKey(*key.verifying_key()),
         signature,
     }
@@ -269,7 +288,7 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let signed = sign_order(&order, &key);
+        let signed = sign_order(&order, 1, &key);
 
         assert!(verify_signed_order(&signed).is_ok());
     }
@@ -286,11 +305,12 @@ mod tests {
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
 
         // Sign with key1 but claim key2
-        let msg = canonical_order_bytes(&order);
+        let msg = canonical_order_bytes(&order, 1);
         let sig: Signature = key1.sign(&msg);
 
         let signed = SignedOrder {
             order,
+            nonce: 1,
             signer: PublicKey(*key2.verifying_key()),
             signature: sig,
         };
@@ -309,7 +329,7 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let mut signed = sign_order(&order, &key);
+        let mut signed = sign_order(&order, 1, &key);
 
         // Tamper with the order after signing
         signed.order.limit_price = matching_engine::Nanos(999_999_999);
@@ -328,7 +348,7 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let mut signed = sign_order(&order, &key);
+        let mut signed = sign_order(&order, 1, &key);
         signed.order.expires_at_block = Some(1);
 
         assert!(matches!(
@@ -341,7 +361,7 @@ mod tests {
     fn test_sign_verify_cancel_roundtrip() {
         let key =
             <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
-        let signed = sign_cancel(crate::account::AccountId(7), 42, &key);
+        let signed = sign_cancel(crate::account::AccountId(7), 42, 1, &key);
 
         assert!(verify_signed_cancel(&signed).is_ok());
     }
@@ -350,7 +370,7 @@ mod tests {
     fn test_tampered_cancel_rejected() {
         let key =
             <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
-        let mut signed = sign_cancel(crate::account::AccountId(7), 42, &key);
+        let mut signed = sign_cancel(crate::account::AccountId(7), 42, 1, &key);
         signed.order_id = 99;
 
         assert!(matches!(
@@ -372,7 +392,7 @@ mod tests {
             amount_token_units: 42_000_000,
             expiry_height: 123_456,
         };
-        let signed = sign_bridge_withdrawal(request, &key);
+        let signed = sign_bridge_withdrawal(request, 1, &key);
 
         assert!(verify_signed_bridge_withdrawal(&signed).is_ok());
     }
@@ -390,7 +410,7 @@ mod tests {
             amount_token_units: 42_000_000,
             expiry_height: 123_456,
         };
-        let mut signed = sign_bridge_withdrawal(request, &key);
+        let mut signed = sign_bridge_withdrawal(request, 1, &key);
         signed.request.amount_token_units = 43_000_000;
 
         assert!(matches!(
@@ -405,8 +425,8 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let bytes1 = canonical_order_bytes(&order);
-        let bytes2 = canonical_order_bytes(&order);
+        let bytes1 = canonical_order_bytes(&order, 1);
+        let bytes2 = canonical_order_bytes(&order, 1);
 
         assert_eq!(bytes1, bytes2);
     }
@@ -420,8 +440,8 @@ mod tests {
         let order2 = outcome_buy(&markets, 2, m0, 0, 600_000_000, 10);
 
         assert_ne!(
-            canonical_order_bytes(&order1),
-            canonical_order_bytes(&order2)
+            canonical_order_bytes(&order1, 1),
+            canonical_order_bytes(&order2, 1)
         );
     }
 
@@ -437,15 +457,15 @@ mod tests {
 
         // Same order content but different IDs should produce same canonical bytes
         assert_eq!(
-            canonical_order_bytes(&order1),
-            canonical_order_bytes(&order2)
+            canonical_order_bytes(&order1, 1),
+            canonical_order_bytes(&order2, 1)
         );
     }
 
     #[test]
     fn test_canonical_cancel_encoding_deterministic() {
-        let bytes1 = canonical_cancel_bytes(crate::account::AccountId(3), 17);
-        let bytes2 = canonical_cancel_bytes(crate::account::AccountId(3), 17);
+        let bytes1 = canonical_cancel_bytes(crate::account::AccountId(3), 17, 1);
+        let bytes2 = canonical_cancel_bytes(crate::account::AccountId(3), 17, 1);
 
         assert_eq!(bytes1, bytes2);
     }
@@ -461,9 +481,26 @@ mod tests {
             amount_token_units: 42_000_000,
             expiry_height: 123_456,
         };
-        let bytes1 = canonical_bridge_withdrawal_bytes(&request);
-        let bytes2 = canonical_bridge_withdrawal_bytes(&request);
+        let bytes1 = canonical_bridge_withdrawal_bytes(&request, 1);
+        let bytes2 = canonical_bridge_withdrawal_bytes(&request, 1);
 
         assert_eq!(bytes1, bytes2);
+    }
+
+    #[test]
+    fn test_nonce_is_signature_covered() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("Test");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let mut signed = sign_order(&order, 1, &key);
+        signed.nonce = 2;
+
+        assert!(matches!(
+            verify_signed_order(&signed),
+            Err(SequencerError::InvalidSignature)
+        ));
     }
 }

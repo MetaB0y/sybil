@@ -1,0 +1,5 @@
+---
+source: crates/sybil-signing/src/lib.rs
+expression: "hex::encode(canonical_cancel_bytes(7, 42, 11))"
+---
+07000000000000002a000000000000000b00000000000000

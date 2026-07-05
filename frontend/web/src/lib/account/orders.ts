@@ -31,6 +31,8 @@ export interface SubmitSignedOrderArgs {
   side: OrderSide;
   limitPriceNanos: bigint;
   maxFill: bigint;
+  /** Strictly increasing per-account replay nonce. Defaults to a browser-local monotonic nonce. */
+  nonce?: bigint;
   /** GTD horizon. Omit for GTC. Demo flows should set ~+5 blocks (≈10s). */
   expiresAtBlock?: bigint;
 }
@@ -46,11 +48,13 @@ export async function submitSignedOrder(
   }
 
   const payoffs = PAYOFFS[args.side];
+  const nonce = args.nonce ?? nextReplayNonce(args.accountId);
   const canonical = canonicalOrderBytes({
     marketIds: [args.marketId],
     payoffs,
     limitPriceNanos: args.limitPriceNanos,
     maxFill: args.maxFill,
+    nonce,
     ...(args.expiresAtBlock !== undefined
       ? { expiresAtBlock: args.expiresAtBlock }
       : {}),
@@ -67,6 +71,7 @@ export async function submitSignedOrder(
         limit_price_nanos: Number(args.limitPriceNanos) as unknown as string,
         max_fill: Number(args.maxFill),
       },
+      nonce: u64JsonNumber(nonce),
       signature_hex,
       ...(args.expiresAtBlock !== undefined
         ? {
@@ -89,6 +94,8 @@ export interface CancelSignedOrderArgs {
   accountId: number;
   publicKeyHex: string;
   orderId: number;
+  /** Strictly increasing per-account replay nonce. Defaults to a browser-local monotonic nonce. */
+  nonce?: bigint;
   /** Optional context cached locally for the Activity-tab CANCELLED row. */
   context?: {
     marketId: number;
@@ -108,9 +115,11 @@ export async function cancelSignedOrder(
     );
   }
 
+  const nonce = args.nonce ?? nextReplayNonce(args.accountId);
   const canonical = canonicalCancelBytes(
     BigInt(args.accountId),
     BigInt(args.orderId),
+    nonce,
   );
   const signature_hex = await signBytes(key, canonical);
 
@@ -119,6 +128,7 @@ export async function cancelSignedOrder(
       account_id: args.accountId,
       order_id: args.orderId,
       signer_pubkey_hex: args.publicKeyHex,
+      nonce: u64JsonNumber(nonce),
       signature_hex,
     },
   });
@@ -141,6 +151,32 @@ export async function cancelSignedOrder(
     });
   }
   return { cancelled };
+}
+
+function nextReplayNonce(accountId: number): bigint {
+  const now = BigInt(Date.now());
+  const storageKey = `sybil:account:${accountId}:lastReplayNonce`;
+  let previous = 0n;
+  try {
+    const raw = globalThis.localStorage?.getItem(storageKey);
+    if (raw) previous = BigInt(raw);
+  } catch {
+    previous = 0n;
+  }
+  const next = now > previous ? now : previous + 1n;
+  try {
+    globalThis.localStorage?.setItem(storageKey, next.toString());
+  } catch {
+    // Best effort only; the signed payload still carries the returned nonce.
+  }
+  return next;
+}
+
+function u64JsonNumber(value: bigint): number {
+  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("nonce exceeds JavaScript's safe JSON integer range");
+  }
+  return Number(value);
 }
 
 function serverErrorMessage(err: unknown): string {

@@ -38,6 +38,7 @@ const ORDER_SCHEMA = {
     max_fill: "u64",
     condition: { option: PRICE_CONDITION_SCHEMA },
     expires_at_block: { option: "u64" },
+    nonce: "u64",
   },
 };
 
@@ -45,6 +46,7 @@ const CANCEL_SCHEMA = {
   struct: {
     account_id: "u64",
     order_id: "u64",
+    nonce: "u64",
   },
 };
 
@@ -63,6 +65,7 @@ export interface CanonicalOrderInput {
   maxFill: bigint;
   condition?: PriceCondition;
   expiresAtBlock?: bigint;
+  nonce: bigint;
 }
 
 function padMarketIds(ids: readonly number[]): number[] {
@@ -106,17 +109,23 @@ export function canonicalOrderBytes(input: CanonicalOrderInput): Uint8Array {
     max_fill: input.maxFill,
     condition: encodeCondition(input.condition),
     expires_at_block: input.expiresAtBlock ?? null,
+    nonce: input.nonce,
   };
   // borsh-js types are loose; ORDER_SCHEMA is structurally correct but its
   // literal type doesn't satisfy the Schema union.
   return new Uint8Array(serialize(ORDER_SCHEMA as never, value));
 }
 
-export function canonicalCancelBytes(accountId: bigint, orderId: bigint): Uint8Array {
+export function canonicalCancelBytes(
+  accountId: bigint,
+  orderId: bigint,
+  nonce: bigint,
+): Uint8Array {
   return new Uint8Array(
     serialize(CANCEL_SCHEMA as never, {
       account_id: accountId,
       order_id: orderId,
+      nonce,
     }),
   );
 }

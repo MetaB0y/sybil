@@ -306,6 +306,30 @@ impl SybilClient {
         Ok(result.accepted)
     }
 
+    /// Submit a signed order. The caller must supply and sign a strictly
+    /// increasing per-account nonce in [`SubmitSignedOrderRequest::nonce`].
+    pub async fn submit_signed_order(&self, req: &SubmitSignedOrderRequest) -> Result<bool, Error> {
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/orders/signed")))
+            .json(req)
+            .send()
+            .await?;
+        let result: OrderAcceptedResponse = self.decode(resp).await?;
+        Ok(result.accepted)
+    }
+
+    /// Cancel a resting order with a signed payload. The caller must supply
+    /// and sign a strictly increasing per-account nonce.
+    pub async fn cancel_signed_order(&self, req: &CancelSignedOrderRequest) -> Result<bool, Error> {
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/orders/cancel/signed")))
+            .json(req)
+            .send()
+            .await?;
+        let result: CancelOrderResponse = self.decode(resp).await?;
+        Ok(result.cancelled)
+    }
+
     /// Push mirror-derived metadata (event id/title, images, end dates,
     /// category) to sybil-api. Off-block — never enters `MarketMetadata` or
     /// the block digest. In production this is a service route protected by

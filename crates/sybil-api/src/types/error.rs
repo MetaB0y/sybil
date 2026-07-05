@@ -102,6 +102,18 @@ impl AppError {
         }
     }
 
+    pub fn replay_nonce_stale(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            body: ErrorBody {
+                error: error.into(),
+                code: "REPLAY_NONCE_STALE".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
     pub fn service_unavailable(error: impl Into<String>) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -170,6 +182,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             }
             matching_sequencer::SequencerError::SignerAccountMismatch => {
                 AppError::forbidden("Signed account does not match signer public key")
+            }
+            matching_sequencer::SequencerError::ReplayNonceStale { .. } => {
+                AppError::replay_nonce_stale(format!("{}", err))
             }
             matching_sequencer::SequencerError::MempoolFull => AppError::mempool_full(),
             matching_sequencer::SequencerError::RateLimited { retry_after_secs } => {

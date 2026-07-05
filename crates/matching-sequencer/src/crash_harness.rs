@@ -594,7 +594,7 @@ impl Harness {
         let Some(key) = self.keys.get(&account_id) else {
             return;
         };
-        let signed = sign_cancel(account_id, order_id, key);
+        let signed = sign_cancel(account_id, order_id, self.op_index.saturating_add(1), key);
         if self.handle.cancel_signed_order(signed).await.is_ok() {
             self.ledger.active_orders.remove(&order_id);
             self.ledger.canceled_order_ids.insert(order_id);

@@ -495,6 +495,10 @@ pub enum ControlPlaneCommand {
         account_id: AccountId,
         compressed_pubkey: Vec<u8>,
     },
+    AdvanceReplayNonce {
+        account_id: AccountId,
+        nonce: u64,
+    },
     CreateMarket {
         name: String,
     },

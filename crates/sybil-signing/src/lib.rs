@@ -38,12 +38,14 @@ pub struct Order {
     pub max_fill: u64,
     pub condition: Option<PriceCondition>,
     pub expires_at_block: Option<u64>,
+    pub nonce: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct CancelRequest {
     account_id: u64,
     order_id: u64,
+    nonce: u64,
 }
 
 /// Canonical, stable byte layout of a bridge withdrawal request. This mirrors
@@ -57,6 +59,7 @@ pub struct BridgeWithdrawalRequest {
     pub token_address: [u8; 20],
     pub amount_token_units: u64,
     pub expiry_height: u64,
+    pub nonce: u64,
 }
 
 /// Canonical, stable byte layout of a resolution attestation. Mirrors
@@ -73,10 +76,11 @@ pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
     borsh::to_vec(order).expect("canonical order serialization should not fail")
 }
 
-pub fn canonical_cancel_bytes(account_id: u64, order_id: u64) -> Vec<u8> {
+pub fn canonical_cancel_bytes(account_id: u64, order_id: u64, nonce: u64) -> Vec<u8> {
     borsh::to_vec(&CancelRequest {
         account_id,
         order_id,
+        nonce,
     })
     .expect("canonical cancel serialization should not fail")
 }
@@ -109,6 +113,7 @@ mod tests {
             max_fill,
             condition,
             expires_at_block: None,
+            nonce: 7,
         };
 
         for (idx, market) in markets.iter().copied().enumerate() {
@@ -169,11 +174,17 @@ mod tests {
             token_address: [0x33; 20],
             amount_token_units: 42_000_000,
             expiry_height: 123_456,
+            nonce: 9,
         };
         insta::assert_snapshot!(
             "bridge_withdrawal",
             hex::encode(canonical_bridge_withdrawal_bytes(&request))
         );
+    }
+
+    #[test]
+    fn cancel_snapshot() {
+        insta::assert_snapshot!("cancel", hex::encode(canonical_cancel_bytes(7, 42, 11)));
     }
 
     #[test]

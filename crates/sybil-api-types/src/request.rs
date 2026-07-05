@@ -60,6 +60,9 @@ pub struct CreateBridgeWithdrawalRequest {
     /// Last Sybil block height at which this withdrawal leaf is valid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_height: Option<u64>,
+    /// Per-account replay nonce. Required for signed bridge withdrawals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,6 +275,8 @@ pub struct SubmitSignedOrderRequest {
     /// Last eligible block height, covered by the P256 signature. Required for signed IOC/GTD.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at_block: Option<u64>,
+    /// Per-account replay nonce covered by the P256 signature.
+    pub nonce: u64,
     /// Hex-encoded P256 ECDSA signature.
     pub signature_hex: String,
 }
@@ -285,6 +290,8 @@ pub struct CancelSignedOrderRequest {
     pub order_id: u64,
     /// Hex-encoded compressed P256 public key of the signer.
     pub signer_pubkey_hex: String,
+    /// Per-account replay nonce covered by the P256 signature.
+    pub nonce: u64,
     /// Hex-encoded P256 ECDSA signature over the canonical cancel payload.
     pub signature_hex: String,
 }

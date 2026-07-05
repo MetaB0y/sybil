@@ -971,6 +971,9 @@ impl BlockSequencer {
                     })?;
                 self.register_pubkey(account_id, pubkey)
             }
+            ControlPlaneCommand::AdvanceReplayNonce { account_id, nonce } => {
+                self.advance_replay_nonce(account_id, nonce)
+            }
             ControlPlaneCommand::CreateMarket { name } => {
                 self.create_market(name);
                 Ok(())
@@ -1394,6 +1397,45 @@ impl BlockSequencer {
 
     pub fn lookup_pubkey(&self, pubkey: &crate::crypto::PublicKey) -> Option<AccountId> {
         self.pubkey_registry.get(pubkey).copied()
+    }
+
+    pub fn validate_replay_nonce(
+        &self,
+        account_id: AccountId,
+        nonce: u64,
+    ) -> Result<(), SequencerError> {
+        let Some(account) = self.accounts.get(account_id) else {
+            return Err(SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            }));
+        };
+        if nonce <= account.last_nonce {
+            return Err(SequencerError::ReplayNonceStale {
+                account_id,
+                nonce,
+                last_nonce: account.last_nonce,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn advance_replay_nonce(
+        &mut self,
+        account_id: AccountId,
+        nonce: u64,
+    ) -> Result<(), SequencerError> {
+        self.validate_replay_nonce(account_id, nonce)?;
+        let account = self.accounts.get_mut(account_id).ok_or({
+            SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            })
+        })?;
+        account.last_nonce = nonce;
+        Ok(())
     }
 
     fn capture_system_account_baseline(&mut self, account_id: AccountId) {

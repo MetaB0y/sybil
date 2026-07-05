@@ -223,6 +223,7 @@ pub async fn create_withdrawal(
         (status = 200, description = "Signed withdrawal leaf created", body = BridgeWithdrawalResponse),
         (status = 400, description = "Invalid withdrawal or signature"),
         (status = 403, description = "Signer/account mismatch"),
+        (status = 409, description = "Replay nonce is stale or duplicate"),
         (status = 404, description = "Unknown signer")
     )
 )]
@@ -233,9 +234,14 @@ pub async fn create_signed_withdrawal(
     let expiry_height = req.withdrawal.expiry_height.ok_or_else(|| {
         AppError::bad_request("expiry_height is required for signed bridge withdrawals")
     })?;
+    let nonce = req
+        .withdrawal
+        .nonce
+        .ok_or_else(|| AppError::bad_request("nonce is required for signed bridge withdrawals"))?;
     let request = withdrawal_request_from_api(&req.withdrawal, expiry_height)?;
     let signed = SignedBridgeWithdrawal {
         request,
+        nonce,
         signer: parse_signer_public_key(&req.signer_pubkey_hex)?,
         signature: parse_signature(&req.signature_hex)?,
     };

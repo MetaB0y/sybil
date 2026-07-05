@@ -114,6 +114,7 @@ pub async fn submit_orders(
     responses(
         (status = 200, description = "Signed order accepted", body = OrderAcceptedResponse),
         (status = 400, description = "Invalid order or signature"),
+        (status = 409, description = "Replay nonce is stale or duplicate"),
         (status = 404, description = "Unknown signer")
     )
 )]
@@ -128,6 +129,7 @@ pub async fn submit_signed_order(
         .map_err(AppError::bad_request)?;
     let signed = SignedOrder {
         order,
+        nonce: req.nonce,
         signer,
         signature,
     };
@@ -146,6 +148,7 @@ pub async fn submit_signed_order(
         (status = 200, description = "Signed cancel accepted", body = CancelOrderResponse),
         (status = 400, description = "Invalid signature payload"),
         (status = 403, description = "Signer or owner mismatch"),
+        (status = 409, description = "Replay nonce is stale or duplicate"),
         (status = 404, description = "Unknown signer or pending order not found")
     )
 )]
@@ -158,6 +161,7 @@ pub async fn cancel_signed_order(
     let signed = SignedCancel {
         account_id: AccountId(req.account_id),
         order_id: req.order_id,
+        nonce: req.nonce,
         signer,
         signature,
     };

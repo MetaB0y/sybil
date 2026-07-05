@@ -111,18 +111,20 @@ fn signed_buy_yes_payload(
     market_id: u32,
     limit_price_nanos: u64,
     quantity: u64,
+    nonce: u64,
     key: &SigningKey,
 ) -> Value {
-    signed_order_payload(market_id, &[1, 0], limit_price_nanos, quantity, key)
+    signed_order_payload(market_id, &[1, 0], limit_price_nanos, quantity, nonce, key)
 }
 
 fn signed_sell_yes_payload(
     market_id: u32,
     limit_price_nanos: u64,
     quantity: u64,
+    nonce: u64,
     key: &SigningKey,
 ) -> Value {
-    signed_order_payload(market_id, &[-1, 0], limit_price_nanos, quantity, key)
+    signed_order_payload(market_id, &[-1, 0], limit_price_nanos, quantity, nonce, key)
 }
 
 fn signed_order_payload(
@@ -130,6 +132,7 @@ fn signed_order_payload(
     payoffs: &[i8],
     limit_price_nanos: u64,
     quantity: u64,
+    nonce: u64,
     key: &SigningKey,
 ) -> Value {
     let mut markets = MarketSet::new();
@@ -144,7 +147,7 @@ fn signed_order_payload(
     for (idx, payoff) in payoffs.iter().enumerate() {
         order.payoffs[idx] = *payoff;
     }
-    let signature: Signature = key.sign(&canonical_order_bytes(&order));
+    let signature: Signature = key.sign(&canonical_order_bytes(&order, nonce));
     json!({
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
         "order": {
@@ -153,19 +156,22 @@ fn signed_order_payload(
             "limit_price_nanos": limit_price_nanos,
             "max_fill": quantity
         },
+        "nonce": nonce,
         "signature_hex": to_hex(signature.to_bytes().as_slice())
     })
 }
 
-fn signed_cancel_payload(account_id: u64, order_id: u64, key: &SigningKey) -> Value {
+fn signed_cancel_payload(account_id: u64, order_id: u64, nonce: u64, key: &SigningKey) -> Value {
     let signature: Signature = key.sign(&canonical_cancel_bytes(
         matching_sequencer::AccountId(account_id),
         order_id,
+        nonce,
     ));
     json!({
         "account_id": account_id,
         "order_id": order_id,
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
+        "nonce": nonce,
         "signature_hex": to_hex(signature.to_bytes().as_slice())
     })
 }
@@ -993,7 +999,7 @@ async fn signed_cancel_removes_pending_order() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, &key);
+    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, 1, &key);
     let (status, _) = post_json(app.clone(), "/v1/orders/signed", order_payload).await;
     assert_eq!(status, StatusCode::OK);
 
@@ -1004,7 +1010,7 @@ async fn signed_cancel_removes_pending_order() {
     let pending = parse_json(&body);
     let order_id = pending.as_array().unwrap()[0]["order_id"].as_u64().unwrap();
 
-    let cancel_payload = signed_cancel_payload(account_id, order_id, &key);
+    let cancel_payload = signed_cancel_payload(account_id, order_id, 2, &key);
     let (status, body) = post_json(app.clone(), "/v1/orders/cancel/signed", cancel_payload).await;
     assert_eq!(status, StatusCode::OK);
     assert!(parse_json(&body)["cancelled"].as_bool().unwrap());
@@ -1012,6 +1018,62 @@ async fn signed_cancel_removes_pending_order() {
     let (status, body) = get(app, &format!("/v1/accounts/{}/orders", account_id)).await;
     assert_eq!(status, StatusCode::OK);
     assert!(parse_json(&body).as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn signed_order_and_cancel_replay_return_409() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    post_json(app.clone(), "/v1/markets", json!({ "name": "Test" })).await;
+
+    let key = new_signing_key();
+    let public_key_hex = to_hex(key.verifying_key().to_sec1_point(true).as_bytes());
+    let (status, _) = post_json(
+        app.clone(),
+        &format!("/v1/accounts/{}/keys", account_id),
+        json!({ "public_key_hex": public_key_hex }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, 1, &key);
+    let (status, _) = post_json(app.clone(), "/v1/orders/signed", order_payload.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = post_json(app.clone(), "/v1/orders/signed", order_payload).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        parse_json(&body)["code"].as_str(),
+        Some("REPLAY_NONCE_STALE")
+    );
+
+    handle.produce_block().await.unwrap();
+    let (status, body) = get(app.clone(), &format!("/v1/accounts/{}/orders", account_id)).await;
+    assert_eq!(status, StatusCode::OK);
+    let order_id = parse_json(&body).as_array().unwrap()[0]["order_id"]
+        .as_u64()
+        .unwrap();
+
+    let cancel_payload = signed_cancel_payload(account_id, order_id, 2, &key);
+    let (status, _) = post_json(
+        app.clone(),
+        "/v1/orders/cancel/signed",
+        cancel_payload.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = post_json(app, "/v1/orders/cancel/signed", cancel_payload).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        parse_json(&body)["code"].as_str(),
+        Some("REPLAY_NONCE_STALE")
+    );
 }
 
 #[tokio::test]
@@ -1036,7 +1098,7 @@ async fn signed_cancel_rejects_wrong_account_claim() {
     )
     .await;
 
-    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, &key);
+    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, 1, &key);
     post_json(app.clone(), "/v1/orders/signed", order_payload).await;
     handle.produce_block().await.unwrap();
 
@@ -1044,7 +1106,7 @@ async fn signed_cancel_rejects_wrong_account_claim() {
     let pending = parse_json(&body);
     let order_id = pending.as_array().unwrap()[0]["order_id"].as_u64().unwrap();
 
-    let cancel_payload = signed_cancel_payload(account_id + 1, order_id, &key);
+    let cancel_payload = signed_cancel_payload(account_id + 1, order_id, 2, &key);
     let (status, _) = post_json(app, "/v1/orders/cancel/signed", cancel_payload).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
@@ -1101,7 +1163,7 @@ async fn signed_sell_order_creates_pending_resting_order() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let payload = signed_sell_yes_payload(0, 550_000_000, 2, &key);
+    let payload = signed_sell_yes_payload(0, 550_000_000, 2, 1, &key);
     let (status, _) = post_json(app.clone(), "/v1/orders/signed", payload).await;
     assert_eq!(status, StatusCode::OK);
     handle.produce_block().await.unwrap();
@@ -1649,7 +1711,7 @@ async fn account_history_shows_placed_then_cancelled() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, &key);
+    let order_payload = signed_buy_yes_payload(account_id, 0, 500_000_000, 3, 1, &key);
     let (status, _) = post_json(app.clone(), "/v1/orders/signed", order_payload).await;
     assert_eq!(status, StatusCode::OK);
 
@@ -1660,7 +1722,7 @@ async fn account_history_shows_placed_then_cancelled() {
     let pending = parse_json(&body);
     let order_id = pending.as_array().unwrap()[0]["order_id"].as_u64().unwrap();
 
-    let cancel_payload = signed_cancel_payload(account_id, order_id, &key);
+    let cancel_payload = signed_cancel_payload(account_id, order_id, 2, &key);
     let (status, body) = post_json(app.clone(), "/v1/orders/cancel/signed", cancel_payload).await;
     assert_eq!(status, StatusCode::OK);
     assert!(parse_json(&body)["cancelled"].as_bool().unwrap());
