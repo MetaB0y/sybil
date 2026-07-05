@@ -24,6 +24,7 @@ import openai
 
 from sybil_client import Block
 
+from .costs import cost_of_call
 from .fair_value_bus import FairValueBus, FairValueUpdate
 from .news_feed import LiveArticle, NewsFeed, NewsSubscription
 from .pricing import market_price
@@ -89,6 +90,7 @@ class PersonaAnalyst:
         min_llm_interval_s: float = 60.0,
         name: str | None = None,
         metrics: "ArenaMetrics | None" = None,
+        llm_budget_usd: float | None = None,
     ):
         self.client = client
         self.news_feed = news_feed
@@ -103,6 +105,28 @@ class PersonaAnalyst:
         self.min_llm_interval_s = min_llm_interval_s
         self.name = name or "PersonaAnalyst"
         self.metrics = metrics
+
+        # SYB-64: per-agent LLM budget. The analyst is the persona's sole LLM
+        # caller (SYB-210), so this budget is a separate pool from the sizers'
+        # trading bankroll — the analyst holds no trading account. When it hits
+        # $0 the analyst PAUSES: it stops issuing LLM calls, so it publishes no
+        # new fair values and the persona's two sizers idle on stale FV (they
+        # place no new news-driven orders). Other personas' analysts are
+        # unaffected. ``None`` disables the budget (unlimited).
+        self.llm_budget_usd = llm_budget_usd
+        # Reconstruct cumulative spend from persisted rows so the budget and the
+        # pause decision survive an arena restart (SYB-64 acceptance).
+        self.llm_spent_usd = (
+            self.db.get_total_llm_cost(self.name) if self.db is not None else 0.0
+        )
+        self._paused = False
+        if self.llm_budget_usd is not None:
+            self._paused = self.llm_spent_usd >= self.llm_budget_usd
+            if self.metrics is not None:
+                self.metrics.record_llm_cost(
+                    self.name, 0.0, self.llm_budget_usd - self.llm_spent_usd
+                )
+                self.metrics.set_llm_paused(self.name, self._paused)
 
         # Own the subscription so the analyst drains its own view of the feed.
         self.news_sub: NewsSubscription | None = (
@@ -144,6 +168,36 @@ class PersonaAnalyst:
             )
         return self._llm_client
 
+    def _budget_remaining(self) -> float | None:
+        """Remaining USD LLM budget, or None when no budget is configured."""
+        if self.llm_budget_usd is None:
+            return None
+        return self.llm_budget_usd - self.llm_spent_usd
+
+    def _budget_exhausted(self) -> bool:
+        remaining = self._budget_remaining()
+        return remaining is not None and remaining <= 0
+
+    def _enter_paused(self) -> None:
+        """Pause the analyst on budget exhaustion (SYB-64).
+
+        Idempotent: the owner is notified once (error-level log — the arena has
+        no separate notification channel, so we do not invent one) when the
+        analyst first crosses into the paused state. Composes with the SYB-185
+        per-block crash guard: this is ordinary control flow, never an
+        exception, so ``run``'s fail-open loop keeps streaming blocks and other
+        analysts are untouched.
+        """
+        if not self._paused:
+            self._paused = True
+            log.error(
+                "[%s] LLM budget exhausted ($%.4f spent of $%.4f); PAUSING — no "
+                "further LLM calls or fair-value updates until budget is raised",
+                self.name, self.llm_spent_usd, self.llm_budget_usd,
+            )
+        if self.metrics is not None:
+            self.metrics.set_llm_paused(self.name, True)
+
     async def _call_llm(self, prompt: str) -> tuple[str, float]:
         llm = self._get_llm_client()
         t0 = time.monotonic()
@@ -152,24 +206,39 @@ class PersonaAnalyst:
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=2048,
-            extra_body={"reasoning": {"max_tokens": 1024}},
+            # SYB-64: ``usage.include`` makes OpenRouter return the actual billed
+            # USD cost in ``resp.usage.cost`` (0% error vs. billing). We fall
+            # back to a price table only when the field is absent.
+            extra_body={"reasoning": {"max_tokens": 1024}, "usage": {"include": True}},
         )
         text = resp.choices[0].message.content or ""
         duration = time.monotonic() - t0
         if resp.usage:
-            log.info(
-                "[%s] tokens: prompt=%d completion=%d (%.1fs)",
-                self.name, resp.usage.prompt_tokens,
-                resp.usage.completion_tokens, duration,
+            prompt_tokens = resp.usage.prompt_tokens
+            completion_tokens = resp.usage.completion_tokens
+            usd_cost, cost_source = cost_of_call(
+                resp.usage, self.model_name, prompt_tokens, completion_tokens
             )
+            # SYB-64: deduct from the agent's LLM budget and surface remaining.
+            self.llm_spent_usd += usd_cost
+            remaining = self._budget_remaining()
+            log.info(
+                "[%s] tokens: prompt=%d completion=%d cost=$%.5f (%s) spent=$%.4f (%.1fs)",
+                self.name, prompt_tokens, completion_tokens, usd_cost,
+                cost_source, self.llm_spent_usd, duration,
+            )
+            if self.metrics is not None:
+                self.metrics.record_llm_cost(self.name, usd_cost, remaining)
             if self.db:
                 # SYB-210: the analyst is now the sole LLM caller, so token cost
                 # is attributed to the analyst (N rows/batch) rather than each
                 # sizer (2N). sybil-api's token-usage endpoint groups by
                 # trader_name, so this surfaces the persona analyst there.
+                # SYB-64: usd_cost + source are persisted so spend is auditable
+                # and reconstructable across restarts.
                 self.db.log_token_usage(
-                    self.name, resp.usage.prompt_tokens,
-                    resp.usage.completion_tokens, self.model_name, duration,
+                    self.name, prompt_tokens, completion_tokens,
+                    self.model_name, duration, usd_cost, cost_source,
                 )
         return text, duration
 
@@ -275,6 +344,13 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             # Skip the warm-start block (the feed marks pre-existing candidates
             # seen without delivering them), matching the pre-split trader.
             self._observed_first_block = True
+            return
+
+        # SYB-64: if the LLM budget is exhausted, PAUSE — skip the whole block so
+        # no LLM call is issued and no fair value is published. This is checked
+        # before any draining/prompting, so a paused analyst does zero LLM work.
+        if self._budget_exhausted():
+            self._enter_paused()
             return
 
         # AR-6: the min interval is enforced per LLM *call*, not per block. A

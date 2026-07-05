@@ -24,6 +24,9 @@ class DecisionDB:
                 ("decisions", "article_urls", "TEXT"),
                 ("portfolio_snapshots", "total_fills", "INTEGER DEFAULT 0"),
                 ("portfolio_snapshots", "total_orders", "INTEGER DEFAULT 0"),
+                # SYB-64: per-call USD cost + its source (provider vs price table).
+                ("token_usage", "usd_cost", "REAL DEFAULT 0"),
+                ("token_usage", "cost_source", "TEXT"),
             ]:
                 try:
                     self.conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
@@ -93,7 +96,9 @@ class DecisionDB:
                     prompt_tokens INTEGER,
                     completion_tokens INTEGER,
                     model TEXT,
-                    duration_s REAL
+                    duration_s REAL,
+                    usd_cost REAL DEFAULT 0,
+                    cost_source TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_decisions_trader
@@ -213,12 +218,15 @@ class DecisionDB:
         completion_tokens: int,
         model: str,
         duration_s: float,
+        usd_cost: float = 0.0,
+        cost_source: str = "",
     ):
         with self._lock:
             self.conn.execute(
                 """INSERT INTO token_usage
-                   (trader_name, timestamp, prompt_tokens, completion_tokens, model, duration_s)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (trader_name, timestamp, prompt_tokens, completion_tokens,
+                    model, duration_s, usd_cost, cost_source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     datetime.now(timezone.utc).isoformat(),
@@ -226,9 +234,26 @@ class DecisionDB:
                     completion_tokens,
                     model,
                     duration_s,
+                    usd_cost,
+                    cost_source,
                 ),
             )
             self.conn.commit()
+
+    def get_total_llm_cost(self, trader_name: str) -> float:
+        """Sum of persisted USD LLM cost for a trader (SYB-64).
+
+        Lets a restarting analyst reconstruct its cumulative spend — and thus
+        its remaining budget — from the persisted token_usage rows, so the
+        pause-at-zero accounting survives an arena restart.
+        """
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COALESCE(SUM(usd_cost), 0) AS total FROM token_usage "
+                "WHERE trader_name = ?",
+                (trader_name,),
+            ).fetchone()
+        return float(row["total"]) if row is not None else 0.0
 
     def get_bot_account_id(self, persona: str, strategy: str) -> int | None:
         """Return the persisted account id for a (persona, strategy) bot, if any.

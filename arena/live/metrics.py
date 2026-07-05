@@ -100,6 +100,25 @@ class ArenaMetrics:
             ["trader"],
             registry=self.registry,
         )
+        # -- LLM cost accounting (SYB-64: USD spend + budget state per agent) --
+        self.llm_cost_usd = Counter(
+            "sybil_arena_llm_cost_usd",
+            "Cumulative USD LLM cost incurred by arena agents.",
+            ["trader"],
+            registry=self.registry,
+        )
+        self.llm_budget_remaining_usd = Gauge(
+            "sybil_arena_llm_budget_remaining_usd",
+            "Remaining USD LLM budget per arena agent.",
+            ["trader"],
+            registry=self.registry,
+        )
+        self.llm_paused = Gauge(
+            "sybil_arena_llm_paused",
+            "1 while an arena agent is paused for exhausting its LLM budget, else 0.",
+            ["trader"],
+            registry=self.registry,
+        )
 
     # -- Hooks (all fail-open) -------------------------------------------- #
 
@@ -141,6 +160,25 @@ class ArenaMetrics:
             self.llm_calls.labels(trader=trader_name).inc()
         except Exception:  # pragma: no cover - defensive
             log.debug("record_llm_call metrics update failed", exc_info=True)
+
+    def record_llm_cost(
+        self, trader_name: str, usd_cost: float, budget_remaining: float | None
+    ) -> None:
+        try:
+            if usd_cost > 0:
+                self.llm_cost_usd.labels(trader=trader_name).inc(usd_cost)
+            # Only publish the remaining-budget gauge for budgeted agents; an
+            # unlimited agent (budget None) has no meaningful "remaining".
+            if budget_remaining is not None:
+                self.llm_budget_remaining_usd.labels(trader=trader_name).set(budget_remaining)
+        except Exception:  # pragma: no cover - defensive
+            log.debug("record_llm_cost metrics update failed", exc_info=True)
+
+    def set_llm_paused(self, trader_name: str, paused: bool) -> None:
+        try:
+            self.llm_paused.labels(trader=trader_name).set(1 if paused else 0)
+        except Exception:  # pragma: no cover - defensive
+            log.debug("set_llm_paused metrics update failed", exc_info=True)
 
 
 def start_metrics_server(

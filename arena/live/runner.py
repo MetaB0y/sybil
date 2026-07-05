@@ -47,6 +47,11 @@ class LiveConfig:
     order_time_in_force: TimeInForce = "IOC"
     news_poll_interval: int = 300
     min_llm_interval: float = 60.0
+    # SYB-64: per-analyst LLM budget (USD). The analyst is a persona's sole LLM
+    # caller and holds no trading account, so this is a separate pool from the
+    # sizers' trading bankroll. Exhausting it pauses the persona's analyst.
+    # None (or <=0 on the CLI) disables the budget (unlimited).
+    llm_budget_usd: float | None = 5.0
     noise_count: int = 5
     noise_balance: float = 50.0
     db_path: str = ""
@@ -330,6 +335,7 @@ async def run_live(config: LiveConfig):
                 min_llm_interval_s=config.min_llm_interval,
                 name=f"{persona['name']} (Analyst)",
                 metrics=metrics,
+                llm_budget_usd=config.llm_budget_usd,
             )
             analysts.append(analyst)
 
@@ -512,6 +518,16 @@ def main():
         default=60.0,
         help="Min seconds between LLM calls",
     )
+    parser.add_argument(
+        "--llm-budget-usd",
+        type=float,
+        default=5.0,
+        help=(
+            "Per-analyst LLM budget in USD (SYB-64). When an analyst's spend "
+            "reaches this, it pauses (no more LLM calls / fair values). "
+            "<=0 disables the budget (unlimited)."
+        ),
+    )
     parser.add_argument("--db-path", default="", help="SQLite DB path")
     parser.add_argument(
         "--metrics-port",
@@ -565,6 +581,7 @@ def main():
         noise_count=args.noise_count,
         news_poll_interval=args.news_interval,
         min_llm_interval=args.min_llm_interval,
+        llm_budget_usd=args.llm_budget_usd if args.llm_budget_usd > 0 else None,
         db_path=args.db_path,
         metrics_host=args.metrics_host,
         metrics_port=args.metrics_port,
