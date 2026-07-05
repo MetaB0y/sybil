@@ -309,6 +309,7 @@ mod tests {
             orders,
             rejections,
             system_events: vec![],
+            l1_deposits: vec![],
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,

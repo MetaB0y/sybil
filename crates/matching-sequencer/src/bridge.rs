@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use sha3::{Digest, Keccak256};
+use sybil_l1_protocol::DepositLeaf;
 
 use crate::account::AccountId;
 
@@ -56,6 +57,8 @@ pub struct WithdrawalLeaf {
 pub struct BridgeState {
     pub deposit_cursor: u64,
     pub deposit_root: Bytes32,
+    #[serde(default)]
+    pub deposit_log: Vec<L1Deposit>,
     pub next_withdrawal_id: u64,
     pub withdrawals: BTreeMap<u64, WithdrawalLeaf>,
 }
@@ -65,6 +68,7 @@ impl Default for BridgeState {
         Self {
             deposit_cursor: 0,
             deposit_root: empty_deposit_root(),
+            deposit_log: Vec::new(),
             next_withdrawal_id: 1,
             withdrawals: BTreeMap::new(),
         }
@@ -89,6 +93,8 @@ pub enum BridgeError {
     AccountKeyMismatch,
     #[error("non-sequential deposit id: expected {expected}, got {actual}")]
     NonSequentialDeposit { expected: u64, actual: u64 },
+    #[error("deposit root mismatch: expected {expected:?}, got {actual:?}")]
+    DepositRootMismatch { expected: Bytes32, actual: Bytes32 },
     #[error("insufficient available balance: required {required}, available {available}")]
     InsufficientAvailableBalance { required: i64, available: i64 },
     #[error("withdrawal expiry {expiry_height} is before next committed height {next_height}")]
@@ -132,26 +138,31 @@ pub fn empty_deposit_root() -> Bytes32 {
 }
 
 pub fn deposit_leaf(deposit: &L1Deposit) -> Bytes32 {
-    keccak256(&abi_encode_domain_and_words(
-        b"sybil/l1-deposit/v1",
-        &[
-            AbiWord::Uint(deposit.chain_id),
-            AbiWord::Address(deposit.vault_address),
-            AbiWord::Uint(deposit.deposit_id),
-            AbiWord::Address(deposit.token_address),
-            AbiWord::Address(deposit.sender),
-            AbiWord::Bytes32(deposit.sybil_account_key),
-            AbiWord::Uint(deposit.amount_token_units),
-        ],
-    ))
+    sybil_l1_protocol::deposit_leaf(&deposit_leaf_for_protocol(deposit))
 }
 
 pub fn deposit_tree_leaf(deposit: &L1Deposit) -> Bytes32 {
-    let leaf = deposit_leaf(deposit);
-    let mut bytes = Vec::with_capacity(1 + 32);
-    bytes.push(0x00);
-    bytes.extend_from_slice(&leaf);
-    keccak256(&bytes)
+    sybil_l1_protocol::deposit_tree_leaf(&deposit_leaf_for_protocol(deposit))
+}
+
+pub fn deposit_leaf_for_protocol(deposit: &L1Deposit) -> DepositLeaf {
+    DepositLeaf {
+        chain_id: deposit.chain_id,
+        vault_address: deposit.vault_address,
+        deposit_id: deposit.deposit_id,
+        token_address: deposit.token_address,
+        sender: deposit.sender,
+        sybil_account_key: deposit.sybil_account_key,
+        amount_token_units: deposit.amount_token_units,
+    }
+}
+
+pub fn deposit_log_root(deposits: &[L1Deposit]) -> Bytes32 {
+    let leaves = deposits
+        .iter()
+        .map(deposit_leaf_for_protocol)
+        .collect::<Vec<_>>();
+    sybil_l1_protocol::deposit_root_from_prefix(&leaves)
 }
 
 pub fn withdrawal_nullifier(
@@ -231,7 +242,6 @@ fn keccak256(bytes: &[u8]) -> Bytes32 {
 enum AbiWord {
     Uint(u64),
     Address(EthAddress),
-    Bytes32(Bytes32),
 }
 
 fn abi_encode_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Vec<u8> {
@@ -246,7 +256,6 @@ fn abi_encode_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Vec<u8> {
                 encoded[12..].copy_from_slice(address);
                 out.extend_from_slice(&encoded);
             }
-            AbiWord::Bytes32(bytes) => out.extend_from_slice(bytes),
         }
     }
 

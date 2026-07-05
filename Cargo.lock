@@ -2463,6 +2463,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "sha3",
+ "sybil-l1-protocol",
  "sybil-oracle",
  "sybil-signing",
  "sybil-verifier",
@@ -4202,6 +4203,7 @@ dependencies = [
  "serde_yaml",
  "sybil-api-types",
  "sybil-client",
+ "sybil-l1-protocol",
  "sybil-oracle",
  "tokio",
  "tokio-stream",
@@ -4359,6 +4361,7 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "sha3",
+ "sybil-l1-protocol",
  "sybil-verifier",
 ]
 

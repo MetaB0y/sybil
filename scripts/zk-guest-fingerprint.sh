@@ -71,8 +71,9 @@ COMMIT_JSON="$GUEST_DIR/openvm/release/sybil-openvm-guest.commit.json"
 # built guest (the guest never compiles dev-deps or tests). So a pure test edit
 # can trip `--check` and demand a `--write`. That false "stale" is strictly
 # preferable to a false "fresh" -- the failure mode SYB-196 exposed, where a
-# real consensus drift slipped past a green gate.
-CLOSURE_CRATES=(crates/sybil-zk crates/sybil-verifier crates/matching-engine)
+# real consensus drift slipped past a green gate. sybil-l1-protocol joined
+# the closure when the guest gained deposit-inclusion verification (SYB-188).
+CLOSURE_CRATES=(crates/sybil-zk crates/sybil-verifier crates/matching-engine crates/sybil-l1-protocol)
 
 collect_source_files() {
     {

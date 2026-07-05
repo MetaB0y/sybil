@@ -36,6 +36,25 @@ fn hex_bytes(byte: u8, len: usize) -> String {
     hex::encode(vec![byte; len])
 }
 
+fn expected_deposit_root(
+    account_key_hex: &str,
+    deposit_id: u64,
+    amount_token_units: u64,
+) -> String {
+    let mut sybil_account_key = [0u8; 32];
+    hex::decode_to_slice(account_key_hex, &mut sybil_account_key).expect("account key hex");
+    let leaf = sybil_l1_protocol::DepositLeaf {
+        chain_id: 1,
+        vault_address: [0x10; 20],
+        deposit_id,
+        token_address: [0x20; 20],
+        sender: [0x30; 20],
+        sybil_account_key,
+        amount_token_units,
+    };
+    hex::encode(sybil_l1_protocol::deposit_root_from_prefix(&[leaf]))
+}
+
 fn new_signing_key() -> SigningKey {
     SigningKey::from_bytes((&[7u8; 32]).into()).expect("fixed signing key")
 }
@@ -362,7 +381,7 @@ async fn bridge_deposit_and_withdrawal_surface_in_block_response() {
         .unwrap()
         .to_string();
 
-    let deposit_root = hex_bytes(0x44, 32);
+    let deposit_root = expected_deposit_root(&account_key, 1, 10_000);
     let (status, body) = post_json(
         app.clone(),
         "/v1/bridge/deposits",

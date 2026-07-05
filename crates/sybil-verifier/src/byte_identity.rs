@@ -25,7 +25,7 @@ fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     let witness_bytes = witness_schema::canonical_witness_bytes(&witness);
 
     assert_eq!(state_leaves.len(), 11);
-    assert_eq!(witness_bytes.len(), 2473);
+    assert_eq!(witness_bytes.len(), 2481);
     assert_eq!(
         hash_header(&witness.header),
         [
@@ -43,8 +43,8 @@ fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     assert_eq!(
         digest_bytes(&witness_bytes),
         [
-            116, 166, 10, 63, 181, 249, 72, 122, 142, 155, 96, 192, 71, 7, 241, 96, 172, 180, 212,
-            138, 97, 76, 147, 219, 36, 221, 107, 234, 28, 54, 181, 206,
+            154, 119, 163, 69, 110, 95, 96, 53, 76, 179, 40, 37, 190, 166, 230, 218, 82, 105, 84,
+            32, 37, 204, 235, 84, 194, 64, 87, 28, 4, 214, 9, 148,
         ],
     );
 }
@@ -103,6 +103,7 @@ fn byte_identity_witness() -> BlockWitness {
             side: OrderDirection::SellNo,
             remaining_quantity: 321,
         }],
+        l1_deposits: vec![],
         fills: vec![Fill {
             order_id: 42,
             fill_qty: Qty(250),

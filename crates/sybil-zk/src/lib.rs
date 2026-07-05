@@ -2,7 +2,11 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use sha3::{Digest as _, Keccak256};
-use sybil_verifier::{commitments::witness_schema, BlockWitness, VerificationResult};
+use sybil_l1_protocol::DepositLeaf;
+use sybil_verifier::{
+    commitments::witness_schema, BlockWitness, L1DepositWitness, SystemEventWitness,
+    VerificationResult,
+};
 
 mod guest_commitments;
 mod header_hash {
@@ -24,6 +28,8 @@ pub const DA_COMMITMENT_DOMAIN: &[u8] = b"sybil/da-commitment/v1";
 pub const DA_WITNESS_PAYLOAD_DOMAIN: &[u8] = b"sybil/da/witness-payload/v1";
 pub const DA_EMPTY_PROVIDER_REFS_DOMAIN: &[u8] = b"sybil/da/provider-refs/empty/v1";
 pub const DA_PROVIDER_REFS_DOMAIN: &[u8] = b"sybil/da/provider-refs/v1";
+pub const BRIDGE_ACCOUNT_KEY_DOMAIN: &[u8] = b"sybil/bridge/account-key/v1";
+pub const NANOS_PER_TOKEN_UNIT: u64 = 1_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DaCommitmentComponents {
@@ -91,6 +97,45 @@ pub enum ZkTransitionError {
         expected: u64,
         actual: u64,
     },
+    DepositLogLengthMismatch {
+        expected: u64,
+        actual: usize,
+    },
+    DepositLogIdMismatch {
+        index: usize,
+        expected: u64,
+        actual: u64,
+    },
+    DepositLogRootMismatch {
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+    DepositEventCountExceedsCursor {
+        cursor: u64,
+        events: usize,
+    },
+    DepositEventIdMismatch {
+        expected: u64,
+        actual: u64,
+    },
+    DepositEventMissingFromLog {
+        deposit_id: u64,
+    },
+    DepositEventRootMismatch {
+        deposit_id: u64,
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+    DepositEventAccountKeyMismatch {
+        account_id: u64,
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+    DepositEventAmountMismatch {
+        deposit_id: u64,
+        expected: i64,
+        actual: i64,
+    },
     StateRootProofCountMismatch {
         expected: usize,
         actual: usize,
@@ -154,6 +199,73 @@ impl fmt::Display for ZkTransitionError {
                 write!(
                     f,
                     "deposit count mismatch: expected {expected}, got {actual}"
+                )
+            }
+            ZkTransitionError::DepositLogLengthMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "deposit log length mismatch: expected {expected}, got {actual}"
+                )
+            }
+            ZkTransitionError::DepositLogIdMismatch {
+                index,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "deposit log id mismatch at index {index}: expected {expected}, got {actual}"
+                )
+            }
+            ZkTransitionError::DepositLogRootMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "deposit log root mismatch: expected {expected:?}, got {actual:?}"
+                )
+            }
+            ZkTransitionError::DepositEventCountExceedsCursor { cursor, events } => {
+                write!(
+                    f,
+                    "deposit event count {events} exceeds committed cursor {cursor}"
+                )
+            }
+            ZkTransitionError::DepositEventIdMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "deposit event id mismatch: expected {expected}, got {actual}"
+                )
+            }
+            ZkTransitionError::DepositEventMissingFromLog { deposit_id } => {
+                write!(f, "deposit event id {deposit_id} missing from log witness")
+            }
+            ZkTransitionError::DepositEventRootMismatch {
+                deposit_id,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "deposit event root mismatch for id {deposit_id}: expected {expected:?}, got {actual:?}"
+                )
+            }
+            ZkTransitionError::DepositEventAccountKeyMismatch {
+                account_id,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "deposit account key mismatch for account {account_id}: expected {expected:?}, got {actual:?}"
+                )
+            }
+            ZkTransitionError::DepositEventAmountMismatch {
+                deposit_id,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "deposit event amount mismatch for id {deposit_id}: expected {expected}, got {actual}"
                 )
             }
             ZkTransitionError::StateRootProofCountMismatch { expected, actual } => {
@@ -464,8 +576,181 @@ fn verify_public_input_binding(
             actual: inputs.deposit_count,
         });
     }
+    verify_l1_deposit_checkpoint(inputs, witness)?;
 
     Ok(())
+}
+
+fn verify_l1_deposit_checkpoint(
+    inputs: &StateTransitionPublicInputs,
+    witness: &BlockWitness,
+) -> Result<(), ZkTransitionError> {
+    if witness.l1_deposits.len() as u64 != inputs.deposit_count {
+        return Err(ZkTransitionError::DepositLogLengthMismatch {
+            expected: inputs.deposit_count,
+            actual: witness.l1_deposits.len(),
+        });
+    }
+
+    for (index, deposit) in witness.l1_deposits.iter().enumerate() {
+        let expected = index as u64 + 1;
+        if deposit.deposit_id != expected {
+            return Err(ZkTransitionError::DepositLogIdMismatch {
+                index,
+                expected,
+                actual: deposit.deposit_id,
+            });
+        }
+    }
+
+    let leaves = witness
+        .l1_deposits
+        .iter()
+        .map(deposit_leaf_from_witness)
+        .collect::<Vec<_>>();
+    let prefix_roots = sybil_l1_protocol::deposit_prefix_roots(&leaves);
+    let computed_root = prefix_roots
+        .last()
+        .copied()
+        .unwrap_or_else(sybil_l1_protocol::empty_deposit_root);
+    if computed_root != inputs.deposit_root {
+        return Err(ZkTransitionError::DepositLogRootMismatch {
+            expected: inputs.deposit_root,
+            actual: computed_root,
+        });
+    }
+
+    for (index, deposit) in witness.l1_deposits.iter().enumerate() {
+        let expected = prefix_roots[index];
+        if deposit.deposit_root != expected {
+            return Err(ZkTransitionError::DepositEventRootMismatch {
+                deposit_id: deposit.deposit_id,
+                expected,
+                actual: deposit.deposit_root,
+            });
+        }
+    }
+
+    let credited_events = witness
+        .system_events
+        .iter()
+        .filter_map(|event| match event {
+            SystemEventWitness::L1Deposit {
+                account_id,
+                amount,
+                deposit_id,
+                deposit_root,
+                sybil_account_key,
+            } => Some((
+                *account_id,
+                *amount,
+                *deposit_id,
+                *deposit_root,
+                *sybil_account_key,
+            )),
+            SystemEventWitness::CreateAccount { .. }
+            | SystemEventWitness::Deposit { .. }
+            | SystemEventWitness::WithdrawalCreated { .. }
+            | SystemEventWitness::MarketResolved { .. }
+            | SystemEventWitness::OrderCancelled { .. } => None,
+        })
+        .collect::<Vec<_>>();
+
+    if credited_events.len() as u64 > inputs.deposit_count {
+        return Err(ZkTransitionError::DepositEventCountExceedsCursor {
+            cursor: inputs.deposit_count,
+            events: credited_events.len(),
+        });
+    }
+
+    let first_expected_id = inputs
+        .deposit_count
+        .saturating_sub(credited_events.len() as u64)
+        .saturating_add(1);
+    for (event_index, (account_id, amount, deposit_id, deposit_root, sybil_account_key)) in
+        credited_events.into_iter().enumerate()
+    {
+        let expected_id = first_expected_id + event_index as u64;
+        if deposit_id != expected_id {
+            return Err(ZkTransitionError::DepositEventIdMismatch {
+                expected: expected_id,
+                actual: deposit_id,
+            });
+        }
+        let Some(prefix_index) = deposit_id.checked_sub(1).map(|value| value as usize) else {
+            return Err(ZkTransitionError::DepositEventMissingFromLog { deposit_id });
+        };
+        let Some(deposit) = witness.l1_deposits.get(prefix_index) else {
+            return Err(ZkTransitionError::DepositEventMissingFromLog { deposit_id });
+        };
+
+        let expected_root = prefix_roots[prefix_index];
+        if deposit_root != expected_root {
+            return Err(ZkTransitionError::DepositEventRootMismatch {
+                deposit_id,
+                expected: expected_root,
+                actual: deposit_root,
+            });
+        }
+
+        let expected_key = bridge_account_key(account_id);
+        if sybil_account_key != expected_key {
+            return Err(ZkTransitionError::DepositEventAccountKeyMismatch {
+                account_id,
+                expected: expected_key,
+                actual: sybil_account_key,
+            });
+        }
+        if deposit.sybil_account_key != expected_key {
+            return Err(ZkTransitionError::DepositEventAccountKeyMismatch {
+                account_id,
+                expected: expected_key,
+                actual: deposit.sybil_account_key,
+            });
+        }
+
+        let expected_amount =
+            deposit_amount_nanos(deposit).ok_or(ZkTransitionError::DepositEventAmountMismatch {
+                deposit_id,
+                expected: i64::MAX,
+                actual: amount,
+            })?;
+        if amount != expected_amount {
+            return Err(ZkTransitionError::DepositEventAmountMismatch {
+                deposit_id,
+                expected: expected_amount,
+                actual: amount,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn deposit_leaf_from_witness(deposit: &L1DepositWitness) -> DepositLeaf {
+    DepositLeaf {
+        chain_id: deposit.chain_id,
+        vault_address: deposit.vault_address,
+        deposit_id: deposit.deposit_id,
+        token_address: deposit.token_address,
+        sender: deposit.sender,
+        sybil_account_key: deposit.sybil_account_key,
+        amount_token_units: deposit.amount_token_units,
+    }
+}
+
+fn deposit_amount_nanos(deposit: &L1DepositWitness) -> Option<i64> {
+    let amount = deposit
+        .amount_token_units
+        .checked_mul(NANOS_PER_TOKEN_UNIT)?;
+    i64::try_from(amount).ok()
+}
+
+fn bridge_account_key(account_id: u64) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(BRIDGE_ACCOUNT_KEY_DOMAIN);
+    hasher.update(&account_id.to_le_bytes());
+    *hasher.finalize().as_bytes()
 }
 
 fn ensure_valid(layer: &'static str, result: VerificationResult) -> Result<(), ZkTransitionError> {
@@ -546,8 +831,8 @@ mod tests {
     use sybil_verifier::{
         commitments::{event_schema, state_schema},
         AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot, MarketGroupSnapshot,
-        MarketSnapshot, MarketStatusSnapshot, StateSidecarSnapshot, WithdrawalSnapshot,
-        WitnessBlockHeader,
+        MarketSnapshot, MarketStatusSnapshot, StateSidecarSnapshot, SystemEventWitness,
+        WithdrawalSnapshot, WitnessBlockHeader,
     };
 
     const PAGE_SIZE: u16 = 4096;
@@ -567,6 +852,48 @@ mod tests {
         QMDB_STATE_CHUNK_SIZE,
     >;
     type NativeKeyValueProof = KeyValueProof<MmrFamily, Vec<u8>, QmdbDigest, QMDB_STATE_CHUNK_SIZE>;
+
+    fn empty_bridge_snapshot() -> BridgeStateSnapshot {
+        BridgeStateSnapshot {
+            deposit_root: sybil_l1_protocol::empty_deposit_root(),
+            ..BridgeStateSnapshot::default()
+        }
+    }
+
+    fn empty_state_sidecar() -> StateSidecarSnapshot {
+        StateSidecarSnapshot {
+            bridge: empty_bridge_snapshot(),
+            ..StateSidecarSnapshot::default()
+        }
+    }
+
+    fn address(byte: u8) -> [u8; 20] {
+        [byte; 20]
+    }
+
+    fn l1_deposit_prefix(count: u64, account_id: u64) -> Vec<L1DepositWitness> {
+        let mut deposits = (1..=count)
+            .map(|deposit_id| L1DepositWitness {
+                deposit_id,
+                chain_id: 31_337,
+                vault_address: address(0x10),
+                token_address: address(0x20),
+                sender: address(0x30 + deposit_id as u8),
+                sybil_account_key: bridge_account_key(account_id),
+                amount_token_units: 1_000 + deposit_id,
+                deposit_root: [0u8; 32],
+            })
+            .collect::<Vec<_>>();
+        let leaves = deposits
+            .iter()
+            .map(deposit_leaf_from_witness)
+            .collect::<Vec<_>>();
+        let roots = sybil_l1_protocol::deposit_prefix_roots(&leaves);
+        for (deposit, root) in deposits.iter_mut().zip(roots) {
+            deposit.deposit_root = root;
+        }
+        deposits
+    }
 
     #[test]
     fn hash_header_golden_vector() {
@@ -590,7 +917,7 @@ mod tests {
     }
 
     fn empty_guest_input() -> StateTransitionGuestInput {
-        let state_sidecar = StateSidecarSnapshot::default();
+        let state_sidecar = empty_state_sidecar();
         let leaves = state_schema::state_root_leaves(&[], &state_sidecar);
         let (state_root, state_root_proof) = state_root_and_proof(&leaves);
         let events_root = events_root_from_event_bytes(&[]).expect("empty events root");
@@ -609,6 +936,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
+            l1_deposits: vec![],
             fills: vec![],
             clearing_prices: Default::default(),
             total_welfare: 0,
@@ -670,10 +998,11 @@ mod tests {
         order.max_fill = matching_engine::Qty(12);
         order.expires_at_block = Some(10);
 
+        let l1_deposits = l1_deposit_prefix(5, account.id);
         let state_sidecar = StateSidecarSnapshot {
             bridge: BridgeStateSnapshot {
                 deposit_cursor: 5,
-                deposit_root: [8u8; 32],
+                deposit_root: l1_deposits.last().expect("non-empty prefix").deposit_root,
                 next_withdrawal_id: 5,
                 withdrawals: vec![withdrawal],
             },
@@ -713,6 +1042,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
+            l1_deposits,
             fills: vec![],
             clearing_prices: Default::default(),
             total_welfare: 0,
@@ -735,7 +1065,7 @@ mod tests {
     }
 
     fn many_account_guest_input(account_count: u64) -> StateTransitionGuestInput {
-        let state_sidecar = StateSidecarSnapshot::default();
+        let state_sidecar = empty_state_sidecar();
         let post_state = (0..account_count)
             .map(|id| AccountSnapshot {
                 id,
@@ -763,6 +1093,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
+            l1_deposits: vec![],
             fills: vec![],
             clearing_prices: Default::default(),
             total_welfare: 0,
@@ -783,6 +1114,46 @@ mod tests {
             da_provider_refs: vec![],
             state_root_proof,
         }
+    }
+
+    fn recompute_roots_and_public_inputs(input: &mut StateTransitionGuestInput) {
+        let leaves = state_schema::state_root_leaves(
+            &input.witness.post_state,
+            &input.witness.state_sidecar,
+        );
+        let (state_root, state_root_proof) = state_root_and_proof(&leaves);
+        input.witness.header.state_root = state_root;
+        input.state_root_proof = state_root_proof;
+
+        let events = event_schema::event_leaf_values(
+            &input.witness.system_events,
+            &input.witness.orders,
+            &input.witness.rejections,
+            &input.witness.fills,
+        );
+        input.witness.header.events_root =
+            events_root_from_event_bytes(&events).expect("event root");
+        input.public_inputs = public_inputs_from_witness(&input.witness);
+    }
+
+    fn l1_deposit_guest_input() -> StateTransitionGuestInput {
+        let mut input = empty_guest_input();
+        let account_id = 7;
+        let mut deposits = l1_deposit_prefix(1, account_id);
+        let deposit = deposits.pop().expect("one deposit");
+        let amount = deposit_amount_nanos(&deposit).expect("small deposit amount");
+        input.witness.system_events = vec![SystemEventWitness::L1Deposit {
+            account_id,
+            amount,
+            deposit_id: deposit.deposit_id,
+            deposit_root: deposit.deposit_root,
+            sybil_account_key: deposit.sybil_account_key,
+        }];
+        input.witness.l1_deposits = vec![deposit.clone()];
+        input.witness.state_sidecar.bridge.deposit_cursor = deposit.deposit_id;
+        input.witness.state_sidecar.bridge.deposit_root = deposit.deposit_root;
+        recompute_roots_and_public_inputs(&mut input);
+        input
     }
 
     fn state_root_and_proof(leaves: &[(Vec<u8>, Vec<u8>)]) -> ([u8; 32], QmdbStateRootProof) {
@@ -914,6 +1285,32 @@ mod tests {
     }
 
     #[test]
+    fn l1_deposit_transition_verifies_reconstructed_root() {
+        let input = l1_deposit_guest_input();
+        assert_eq!(
+            verify_state_transition_input(&input),
+            Ok(state_transition_public_input_hash(&input.public_inputs))
+        );
+    }
+
+    #[test]
+    fn forged_l1_deposit_credit_not_in_reconstructed_root_fails() {
+        let mut input = l1_deposit_guest_input();
+        let SystemEventWitness::L1Deposit { amount, .. } =
+            input.witness.system_events.first_mut().expect("l1 deposit")
+        else {
+            panic!("expected l1 deposit event");
+        };
+        *amount += NANOS_PER_TOKEN_UNIT as i64;
+        recompute_roots_and_public_inputs(&mut input);
+
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::DepositEventAmountMismatch { .. })
+        ));
+    }
+
+    #[test]
     fn large_transition_verifies_complete_bitmap_chunk() {
         let input = many_account_guest_input(300);
         assert_eq!(
@@ -928,8 +1325,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                219, 187, 192, 68, 241, 157, 93, 3, 112, 18, 214, 83, 19, 7, 85, 170, 58, 203, 196,
-                22, 88, 184, 218, 130, 85, 214, 46, 125, 247, 77, 210, 250,
+                91, 32, 206, 116, 184, 182, 186, 175, 49, 183, 56, 120, 128, 249, 183, 108, 168,
+                224, 232, 124, 3, 191, 23, 49, 19, 116, 42, 14, 178, 146, 177, 184,
             ]
         );
     }

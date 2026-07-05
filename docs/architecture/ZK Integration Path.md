@@ -62,6 +62,8 @@ The first guest boundary is intentionally narrow:
   key/value proofs for those leaves against the public `new_state_root`,
   verifies that each qMDB `next_key` pointer forms the exact sorted key ring,
   recomputes the keyless-qMDB `events_root` from canonical event leaf bytes,
+  reconstructs the L1 deposit checkpoint root from the private deposit-log
+  prefix and checks credited L1 deposit events against included leaves,
   recomputes `witness_root = BLAKE3("sybil/witness" || witness_bytes)`,
   then verifies the match, settlement, and order-validation layers through
   `sybil-verifier` with qMDB block-runtime features disabled. The guest uses

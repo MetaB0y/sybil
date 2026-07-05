@@ -51,6 +51,7 @@ pub fn build_witness(
         orders: witness_orders,
         rejections: vec![],
         system_events: vec![],
+        l1_deposits: vec![],
         fills: result.fills.clone(),
         clearing_prices,
         total_welfare: result.total_welfare(),

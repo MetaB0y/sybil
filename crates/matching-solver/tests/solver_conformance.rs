@@ -763,6 +763,7 @@ mod conformance {
             orders,
             rejections: vec![],
             system_events: vec![],
+            l1_deposits: vec![],
             fills: pipeline.result.fills.clone(),
             clearing_prices,
             total_welfare: pipeline.result.total_welfare(),

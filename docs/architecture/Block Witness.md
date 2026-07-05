@@ -27,7 +27,7 @@ that job. Everything else in this doc follows from two invariants:
 
 ## Rust type
 
-`crates/sybil-verifier/src/types.rs::BlockWitness` holds 16 fields:
+`crates/sybil-verifier/src/types.rs::BlockWitness` holds 17 fields:
 
 | Field | Purpose |
 |---|---|
@@ -36,6 +36,7 @@ that job. Everything else in this doc follows from two invariants:
 | `orders` | orders accepted into this batch, with account mapping |
 | `rejections` | orders rejected, with reasons |
 | `system_events` | state changes applied between blocks (create account, dev deposit, L1 deposit, withdrawal creation, resolution) |
+| `l1_deposits` | private L1 deposit-log prefix through `state_sidecar.bridge.deposit_cursor`, used by the guest to reconstruct the vault checkpoint root |
 | `fills` | real accepted-order fills produced by the solver; synthetic minting fills are not allowed |
 | `clearing_prices` | per-market clearing prices produced by the solver |
 | `total_welfare` | net welfare: gross order-value objective minus settlement-derived `minting_cost` |
@@ -82,6 +83,7 @@ seen inside the circuit, never exposed).
 | `orders` (individual, including expiry) | private |
 | `rejections` | private |
 | `system_events` (individual) | private (shape is public via events_root; bridge public inputs carry deposit/withdrawal commitments separately) |
+| `l1_deposits` | private (the guest proves the prefix root equals public `depositRoot`/`depositCount` and that credited L1 deposit events match included leaves) |
 | `fills` (individual) | private (shape is public via events_root) |
 | `mm_constraints`, `market_groups` | private |
 | `pre_state`, `post_system_state`, `post_state` | private |
@@ -104,13 +106,14 @@ with variable-length sections, each prefixed with `count:u64`.
 
 ```
 witness_bytes =
-    version:u8 = 0x01
+    version:u8 = 0x02
  || header_bytes                                              (120 bytes, see Canonical Serialization)
  || previous_header_tag:u8                                    (0x00 = none, 0x01 = present)
  || previous_header_bytes?                                    (120 bytes if present)
  || section[orders]
  || section[rejections]
  || section[system_events]
+ || section[l1_deposits]
  || section[fills]
  || section[clearing_prices]                                  (see below)
  || total_welfare:i64
@@ -144,6 +147,7 @@ executable schema in `crates/sybil-verifier/src/witness_schema.rs`:
 | `orders` | accepted-order event leaf bytes | by `order.order_id` ascending |
 | `rejections` | rejected-order event leaf bytes | by `order.order_id` ascending |
 | `system_events` | `SystemEventWitness` (tag-dispatched like events registry) | by emission order |
+| `l1_deposits` | L1 deposit leaf inputs plus cumulative post-deposit root | by append order, with `deposit_id == index + 1` |
 | `fills` | `Fill` (see Canonical Serialization) | solver output order (stable) |
 | `mm_constraints` | `MmConstraint` canonical bytes | by `mm_id` ascending |
 | `market_groups` | `MarketGroup` canonical bytes | by first market_id, then name |
@@ -194,7 +198,8 @@ changing the header.
 ## Format Changes
 
 - The witness bytes begin with a format byte. The shape in this doc uses
-  `0x01`; implementations MUST reject unknown format bytes.
+  `0x02`; implementations MUST reject unknown format bytes. `0x02` adds the
+  private `l1_deposits` prefix section after `system_events`.
 - Before launch, changing the witness layout updates the format byte, hash
   domain, and verifier together.
 - Adding a purely observational field that the verifier ignores must be an

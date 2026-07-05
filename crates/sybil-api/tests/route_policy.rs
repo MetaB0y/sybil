@@ -414,6 +414,25 @@ fn hex_bytes(byte: u8, len: usize) -> String {
     hex::encode(vec![byte; len])
 }
 
+fn expected_deposit_root(
+    account_key_hex: &str,
+    deposit_id: u64,
+    amount_token_units: u64,
+) -> String {
+    let mut sybil_account_key = [0u8; 32];
+    hex::decode_to_slice(account_key_hex, &mut sybil_account_key).expect("account key hex");
+    let leaf = sybil_l1_protocol::DepositLeaf {
+        chain_id: 1,
+        vault_address: [0x10; 20],
+        deposit_id,
+        token_address: [0x20; 20],
+        sender: [0x30; 20],
+        sybil_account_key,
+        amount_token_units,
+    };
+    hex::encode(sybil_l1_protocol::deposit_root_from_prefix(&[leaf]))
+}
+
 #[test]
 fn route_policy_mount_tables_are_exact() {
     assert_eq!(PUBLIC_ROUTE_TABLE, exact_public_routes());
@@ -515,7 +534,7 @@ async fn service_routes_succeed_with_token_in_prod() {
             "sender_hex": hex_bytes(0x30, 20),
             "sybil_account_key_hex": account_key,
             "amount_token_units": 10_000u64,
-            "deposit_root_hex": hex_bytes(0x44, 32),
+            "deposit_root_hex": expected_deposit_root(&account_key, 1, 10_000),
         }),
     )
     .await;

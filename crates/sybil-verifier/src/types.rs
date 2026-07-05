@@ -25,6 +25,12 @@ pub struct BlockWitness {
     pub rejections: Vec<WitnessRejection>,
     /// System state changes applied between blocks.
     pub system_events: Vec<SystemEventWitness>,
+    /// L1 deposit log prefix up to `state_sidecar.bridge.deposit_cursor`.
+    ///
+    /// This private witness section lets the ZK guest reconstruct the L1
+    /// deposit checkpoint root and prove credited deposits are included. It is
+    /// not a typed state leaf.
+    pub l1_deposits: Vec<L1DepositWitness>,
 
     // -- Solver output --
     pub fills: Vec<Fill>,
@@ -147,6 +153,18 @@ pub enum SystemEventWitness {
         side: OrderDirection,
         remaining_quantity: u64,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct L1DepositWitness {
+    pub deposit_id: u64,
+    pub chain_id: u64,
+    pub vault_address: [u8; 20],
+    pub token_address: [u8; 20],
+    pub sender: [u8; 20],
+    pub sybil_account_key: [u8; 32],
+    pub amount_token_units: u64,
+    pub deposit_root: [u8; 32],
 }
 
 /// Snapshot of a single account's state at a point in time.

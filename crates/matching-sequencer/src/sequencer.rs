@@ -8,8 +8,8 @@ use matching_engine::{
 use matching_solver::{PipelineResult, Solver};
 use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
 use sybil_verifier::{
-    AccountSnapshot, BlockWitness, SystemEventWitness, WitnessBlockHeader, WitnessOrder,
-    WitnessRejection,
+    AccountSnapshot, BlockWitness, L1DepositWitness, SystemEventWitness, WitnessBlockHeader,
+    WitnessOrder, WitnessRejection,
 };
 use tracing::{debug, error};
 
@@ -306,6 +306,19 @@ fn bridge_block_data(system_events: &[SystemEvent], bridge_state: &BridgeState) 
         deposit_root: bridge_state.deposit_root,
         consumed_deposits,
         withdrawal_leaves,
+    }
+}
+
+fn l1_deposit_witness(deposit: &L1Deposit) -> L1DepositWitness {
+    L1DepositWitness {
+        deposit_id: deposit.deposit_id,
+        chain_id: deposit.chain_id,
+        vault_address: deposit.vault_address,
+        token_address: deposit.token_address,
+        sender: deposit.sender,
+        sybil_account_key: deposit.sybil_account_key,
+        amount_token_units: deposit.amount_token_units,
+        deposit_root: deposit.deposit_root,
     }
 }
 
@@ -1562,6 +1575,18 @@ impl BlockSequencer {
                 BridgeError::AccountKeyMismatch.to_string(),
             ));
         }
+        let mut prefix = self.bridge.deposit_log.clone();
+        prefix.push(deposit.clone());
+        let expected_root = crate::bridge::deposit_log_root(&prefix);
+        if deposit.deposit_root != expected_root {
+            return Err(SequencerError::Bridge(
+                BridgeError::DepositRootMismatch {
+                    expected: expected_root,
+                    actual: deposit.deposit_root,
+                }
+                .to_string(),
+            ));
+        }
         amount_token_units_to_i64_nanos(deposit.amount_token_units)
             .map_err(|err| SequencerError::Bridge(err.to_string()))
     }
@@ -1583,6 +1608,7 @@ impl BlockSequencer {
         let updated = account.clone();
         self.bridge.deposit_cursor = deposit.deposit_id;
         self.bridge.deposit_root = deposit.deposit_root;
+        self.bridge.deposit_log.push(deposit.clone());
         self.record_system_event(SystemEvent::L1Deposit {
             account_id,
             amount,
@@ -2478,6 +2504,12 @@ impl BlockSequencer {
             orders: witness_orders,
             rejections: witness_rejections,
             system_events: system_event_witnesses,
+            l1_deposits: self
+                .bridge
+                .deposit_log
+                .iter()
+                .map(l1_deposit_witness)
+                .collect(),
             fills: fills.to_vec(),
             clearing_prices: clearing_prices.clone(),
             total_welfare,
@@ -3632,7 +3664,7 @@ mod tests {
     }
 
     fn l1_deposit(account_id: AccountId, deposit_id: u64, amount_token_units: u64) -> L1Deposit {
-        L1Deposit {
+        let mut deposit = L1Deposit {
             deposit_id,
             account_id,
             chain_id: 1,
@@ -3641,8 +3673,10 @@ mod tests {
             sender: eth_address(0x30),
             sybil_account_key: account_key(account_id),
             amount_token_units,
-            deposit_root: [deposit_id as u8; 32],
-        }
+            deposit_root: [0u8; 32],
+        };
+        deposit.deposit_root = crate::bridge::deposit_log_root(&[deposit.clone()]);
+        deposit
     }
 
     #[test]
@@ -3667,7 +3701,10 @@ mod tests {
 
         let block = seq.produce_block(vec![], 1_000).block;
         assert_eq!(block.bridge.deposit_count, 1);
-        assert_eq!(block.bridge.deposit_root, [1u8; 32]);
+        assert_eq!(
+            block.bridge.deposit_root,
+            l1_deposit(aid, 1, 10_000).deposit_root
+        );
         assert_eq!(block.bridge.consumed_deposits.len(), 1);
         assert_eq!(block.bridge.withdrawal_leaves, vec![withdrawal]);
         assert_eq!(seq.accounts.get(aid).unwrap().balance, 6_000_000);

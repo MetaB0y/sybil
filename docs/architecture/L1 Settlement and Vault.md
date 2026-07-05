@@ -298,16 +298,20 @@ prefix ending at `depositCount` and that typed state advances
 That keeps typed state to a single cursor rather than an unbounded consumed-id
 set.
 
-Current Rust scaffolding is intentionally weaker than this production model.
-`crates/sybil-l1-protocol` defines the `DepositReceived` ABI parser and the
-deposit hash/tree domains. `crates/sybil-l1-indexer` polls a dev/anvil-style
-JSON-RPC endpoint for those logs and submits them to `sybil-api` through the
-shared `sybil-client`; the API then uses the sequencer's existing
-`pending_l1_deposits` WAL entrypoint. This path is service-gated and ordered
-by deposit id, but it does not yet prove L1 receipt inclusion, finality, or
-that the submitted post-deposit root is a vault checkpoint. Those are explicit
-SYB-178/SYB-188 trust-boundary TODOs and must be closed before production
-deposit soundness.
+The Rust/OpenVM path now reconstructs the deposit checkpoint root inside the
+guest from the private `BlockWitness.l1_deposits` prefix using the same
+`sybil-l1-protocol` leaf/node domains as the vault. Each credited
+`L1Deposit` system event must match the included prefix entry by deposit id,
+account key, amount conversion, and cumulative post-deposit root. The
+sequencer also recomputes the expected root before accepting a service-gated
+L1 deposit, so honest witness generation and crash recovery use the same
+prefix the guest proves.
+
+Remaining bridge hardening is narrower: the sidecar/indexer still owns L1
+log finality/reorg policy, and cross-language golden vectors should add the
+Solidity side of `deposit_leaf`/root/public-input hashes. The Rust-Rust vector
+coverage lives in `sybil-l1-protocol` and the OpenVM guest imports those
+guest-clean primitives directly.
 
 ### Normal withdrawals
 

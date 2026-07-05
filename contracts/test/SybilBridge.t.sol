@@ -126,6 +126,40 @@ contract SybilBridgeTest {
         require(!ok, "bad deposit root accepted");
     }
 
+    function testStateRootSubmissionRejectsDepositCountBeyondVaultZeroRootBypass() public {
+        SybilTypes.StateTransitionPublicInputs memory inputs =
+            _nextRootInputs(bytes32(0), 0, keccak256("state-1"));
+        inputs.depositCount = vault.depositCount() + 1;
+        inputs.depositRoot = bytes32(0);
+
+        (bool ok,) = address(settlement)
+            .call(
+                abi.encodeWithSelector(
+                    SybilSettlement.submitStateRoot.selector, inputs, bytes("proof")
+                )
+            );
+        require(!ok, "unreached zero deposit root accepted");
+    }
+
+    function testStateRootSubmissionRejectsDepositCountRegression() public {
+        vault.deposit(1_000_000, ACCOUNT_KEY);
+        bytes32 stateRoot1 = keccak256("state-1");
+        settlement.submitStateRoot(_nextRootInputs(bytes32(0), 0, stateRoot1), "proof");
+
+        SybilTypes.StateTransitionPublicInputs memory inputs =
+            _nextRootInputs(stateRoot1, 1, keccak256("state-2"));
+        inputs.depositCount = 0;
+        inputs.depositRoot = vault.depositRootByCount(0);
+
+        (bool ok,) = address(settlement)
+            .call(
+                abi.encodeWithSelector(
+                    SybilSettlement.submitStateRoot.selector, inputs, bytes("proof")
+                )
+            );
+        require(!ok, "deposit count regression accepted");
+    }
+
     function testStateRootSubmissionStoresDaCommitment() public {
         SybilTypes.StateTransitionPublicInputs memory inputs =
             _nextRootInputs(bytes32(0), 0, keccak256("state-1"));

@@ -437,6 +437,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-l1-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "sha3",
+ "thiserror",
+]
+
+[[package]]
 name = "sybil-openvm-guest"
 version = "0.1.0"
 dependencies = [
@@ -463,6 +472,7 @@ dependencies = [
  "serde",
  "sha2",
  "sha3",
+ "sybil-l1-protocol",
  "sybil-verifier",
 ]
 

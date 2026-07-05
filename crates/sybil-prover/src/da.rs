@@ -263,7 +263,7 @@ fn da_manifest_json(
     DaManifestJson {
         version: 1,
         payload_kind: "block_witness",
-        payload_encoding: "sybil-canonical-witness-v1",
+        payload_encoding: "sybil-canonical-witness-v2",
         provider_refs_encoding: if provider_refs.is_empty() {
             "empty-v1"
         } else {

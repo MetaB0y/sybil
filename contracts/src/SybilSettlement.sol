@@ -19,6 +19,7 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
     uint64 public latestHeight;
     bytes32 public latestStateRoot;
     uint64 public latestRootVerifiedAt;
+    uint64 public latestDepositCount;
 
     mapping(uint64 height => SybilTypes.RootRecord record) private _rootByHeight;
     mapping(bytes32 stateRoot => uint64 height) public acceptedRootHeight;
@@ -40,6 +41,8 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
     error InvalidProof();
     error UnknownStateRoot(bytes32 stateRoot);
     error NonMonotonicHeight(uint64 expectedPrevious, uint64 providedPrevious);
+    error DepositCountBeyondVault(uint64 providedCount, uint64 vaultCount);
+    error NonMonotonicDepositCount(uint64 latestCount, uint64 providedCount);
     error DepositRootMismatch(bytes32 expectedRoot, bytes32 providedRoot);
     error RootAlreadyAccepted(bytes32 stateRoot, uint64 height);
     error RootSubmissionPaused();
@@ -102,8 +105,15 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
         uint64 existingHeight = acceptedRootHeight[inputs.newStateRoot];
         if (existingHeight != 0) revert RootAlreadyAccepted(inputs.newStateRoot, existingHeight);
 
+        uint64 vaultDepositCount = vault.depositCount();
+        if (inputs.depositCount > vaultDepositCount) {
+            revert DepositCountBeyondVault(inputs.depositCount, vaultDepositCount);
+        }
+        if (inputs.depositCount < latestDepositCount) {
+            revert NonMonotonicDepositCount(latestDepositCount, inputs.depositCount);
+        }
         bytes32 expectedDepositRoot = vault.depositRootByCount(inputs.depositCount);
-        if (expectedDepositRoot != inputs.depositRoot) {
+        if (expectedDepositRoot == bytes32(0) || expectedDepositRoot != inputs.depositRoot) {
             revert DepositRootMismatch(expectedDepositRoot, inputs.depositRoot);
         }
 
@@ -130,6 +140,7 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
         latestHeight = inputs.newHeight;
         latestStateRoot = inputs.newStateRoot;
         latestRootVerifiedAt = verifiedAt;
+        latestDepositCount = inputs.depositCount;
 
         emit StateRootVerified(
             inputs.newHeight,

@@ -633,7 +633,7 @@ impl Harness {
             return;
         };
         let deposit_id = bridge_state.deposit_cursor.saturating_add(1);
-        let deposit = L1Deposit {
+        let mut deposit = L1Deposit {
             deposit_id,
             account_id,
             chain_id: 1,
@@ -642,8 +642,11 @@ impl Harness {
             sender: eth_address(self.seed, self.op_index, 3),
             sybil_account_key: account_key(account_id),
             amount_token_units: 1_000 + self.op_index,
-            deposit_root: bytes32(self.seed, self.op_index, 4),
+            deposit_root: [0u8; 32],
         };
+        let mut prefix = bridge_state.deposit_log.clone();
+        prefix.push(deposit.clone());
+        deposit.deposit_root = crate::bridge::deposit_log_root(&prefix);
         let _ = self.handle.submit_l1_deposit(deposit).await;
     }
 

@@ -9,6 +9,7 @@ blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 sha2 = { version = "0.10", default-features = false }
 sha3 = "0.10"
+sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 sybil-verifier = { path = "../sybil-verifier", default-features = false }
 
 [dev-dependencies]

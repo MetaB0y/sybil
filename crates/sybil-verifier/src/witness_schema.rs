@@ -12,8 +12,9 @@ use crate::snapshot_schema::{
     append_witness_state_sidecar,
 };
 use crate::types::{AccountSnapshot, BlockWitness, WitnessBlockHeader};
+use crate::L1DepositWitness;
 
-pub const WITNESS_FORMAT_VERSION: u8 = 1;
+pub const WITNESS_FORMAT_VERSION: u8 = 2;
 
 pub fn canonical_witness_bytes(witness: &BlockWitness) -> Vec<u8> {
     let mut out = Vec::new();
@@ -45,6 +46,8 @@ pub fn canonical_witness_bytes(witness: &BlockWitness) -> Vec<u8> {
     for event in &witness.system_events {
         out.extend_from_slice(&system_event_leaf_value(event));
     }
+
+    append_l1_deposits(&mut out, &witness.l1_deposits);
 
     append_u64(&mut out, witness.fills.len() as u64);
     for fill in &witness.fills {
@@ -168,6 +171,21 @@ fn append_account_section(out: &mut Vec<u8>, accounts: &[AccountSnapshot]) {
     }
 }
 
+fn append_l1_deposits(out: &mut Vec<u8>, deposits: &[L1DepositWitness]) {
+    append_u64(out, deposits.len() as u64);
+    for deposit in deposits {
+        out.extend_from_slice(b"sybil/witness/l1-deposit");
+        append_u64(out, deposit.deposit_id);
+        append_u64(out, deposit.chain_id);
+        out.extend_from_slice(&deposit.vault_address);
+        out.extend_from_slice(&deposit.token_address);
+        out.extend_from_slice(&deposit.sender);
+        out.extend_from_slice(&deposit.sybil_account_key);
+        append_u64(out, deposit.amount_token_units);
+        out.extend_from_slice(&deposit.deposit_root);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +207,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
+            l1_deposits: vec![],
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -204,6 +223,6 @@ mod tests {
 
         let bytes = canonical_witness_bytes(&witness);
         assert_eq!(bytes[0], WITNESS_FORMAT_VERSION);
-        assert_eq!(bytes.len(), 341);
+        assert_eq!(bytes.len(), 349);
     }
 }

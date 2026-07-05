@@ -354,6 +354,7 @@ mod tests {
                 orders: vec![witness_order],
                 rejections: vec![],
                 system_events: vec![],
+                l1_deposits: vec![],
                 fills: vec![fill],
                 clearing_prices,
                 total_welfare: 0,

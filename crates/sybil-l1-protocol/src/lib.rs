@@ -122,11 +122,7 @@ pub fn parse_deposit_received(
 }
 
 pub fn empty_deposit_root() -> Bytes32 {
-    let mut root = [0u8; 32];
-    for _ in 0..DEPOSIT_TREE_DEPTH {
-        root = hash_node(root, root);
-    }
-    root
+    deposit_zero_hashes()[DEPOSIT_TREE_DEPTH]
 }
 
 pub fn deposit_leaf(deposit: &DepositLeaf) -> Bytes32 {
@@ -150,6 +146,42 @@ pub fn deposit_tree_leaf(deposit: &DepositLeaf) -> Bytes32 {
     bytes.push(0x00);
     bytes.extend_from_slice(&leaf);
     keccak256(&bytes)
+}
+
+/// Cumulative deposit roots after appending each leaf in order.
+///
+/// This mirrors `SybilVault._appendDepositLeaf`: the first item is appended at
+/// deposit index 0, the second at index 1, and so on. Callers that carry
+/// explicit `deposit_id`s must verify those ids are exactly `1..=n` before
+/// treating the returned final root as a checkpoint for count `n`.
+pub fn deposit_prefix_roots(deposits: &[DepositLeaf]) -> Vec<Bytes32> {
+    let zero_hashes = deposit_zero_hashes();
+    let mut filled_subtrees = [[0u8; 32]; DEPOSIT_TREE_DEPTH];
+    let mut roots = Vec::with_capacity(deposits.len());
+
+    for (deposit_index, deposit) in deposits.iter().enumerate() {
+        let mut index = deposit_index as u64;
+        let mut root = deposit_tree_leaf(deposit);
+        for level in 0..DEPOSIT_TREE_DEPTH {
+            if index & 1 == 0 {
+                filled_subtrees[level] = root;
+                root = hash_node(root, zero_hashes[level]);
+            } else {
+                root = hash_node(filled_subtrees[level], root);
+            }
+            index >>= 1;
+        }
+        roots.push(root);
+    }
+
+    roots
+}
+
+pub fn deposit_root_from_prefix(deposits: &[DepositLeaf]) -> Bytes32 {
+    deposit_prefix_roots(deposits)
+        .last()
+        .copied()
+        .unwrap_or_else(empty_deposit_root)
 }
 
 pub fn hash_node(left: Bytes32, right: Bytes32) -> Bytes32 {
@@ -207,6 +239,14 @@ fn keccak256(bytes: &[u8]) -> Bytes32 {
     let mut hasher = Keccak256::new();
     hasher.update(bytes);
     hasher.finalize().into()
+}
+
+fn deposit_zero_hashes() -> [Bytes32; DEPOSIT_TREE_DEPTH + 1] {
+    let mut zero_hashes = [[0u8; 32]; DEPOSIT_TREE_DEPTH + 1];
+    for level in 0..DEPOSIT_TREE_DEPTH {
+        zero_hashes[level + 1] = hash_node(zero_hashes[level], zero_hashes[level]);
+    }
+    zero_hashes
 }
 
 enum AbiWord {
@@ -367,5 +407,56 @@ mod tests {
     fn empty_deposit_root_is_deterministic() {
         assert_ne!(empty_deposit_root(), [0u8; 32]);
         assert_eq!(empty_deposit_root(), empty_deposit_root());
+    }
+
+    #[test]
+    fn deposit_leaf_and_prefix_roots_golden_vector() {
+        let deposits = vec![
+            DepositLeaf {
+                chain_id: 31_337,
+                vault_address: address(0x11),
+                deposit_id: 1,
+                token_address: address(0x22),
+                sender: address(0x33),
+                sybil_account_key: bytes32(0x44),
+                amount_token_units: 1_000_000,
+            },
+            DepositLeaf {
+                chain_id: 31_337,
+                vault_address: address(0x11),
+                deposit_id: 2,
+                token_address: address(0x22),
+                sender: address(0x55),
+                sybil_account_key: bytes32(0x66),
+                amount_token_units: 2_500_000,
+            },
+        ];
+
+        assert_eq!(
+            hex::encode(deposit_leaf(&deposits[0])),
+            "10348417835957783f646308469b0c1a7d42fcb7e8a67cc0774b969cd3bc4e78"
+        );
+        assert_eq!(
+            hex::encode(deposit_tree_leaf(&deposits[0])),
+            "cab93c3c5e862aa9e8fc0cff679d4d6febdf3305c81f65207871cea439975d5f"
+        );
+        assert_eq!(
+            hex::encode(empty_deposit_root()),
+            "7c1d0e8a93ea9c09cc13b91ead8f72de66a33cb695c30934dc2d75bffac1248e"
+        );
+        assert_eq!(
+            deposit_prefix_roots(&deposits)
+                .into_iter()
+                .map(hex::encode)
+                .collect::<Vec<_>>(),
+            vec![
+                "2e7fc1c1f7494f98b453f8be88ee3b99b47321b95425faf6853c3e59618de440",
+                "bf00beb7a033f95b583dfb040f9f962db5f538c56e11cb9b3fa303b69d820b1f",
+            ]
+        );
+        assert_eq!(
+            hex::encode(deposit_root_from_prefix(&deposits)),
+            "bf00beb7a033f95b583dfb040f9f962db5f538c56e11cb9b3fa303b69d820b1f"
+        );
     }
 }

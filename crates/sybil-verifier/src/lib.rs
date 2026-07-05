@@ -59,7 +59,7 @@ pub mod commitments {
 
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
+    ChallengeSnapshot, L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
     OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
     RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
     WitnessBlockHeader, WitnessOrder, WitnessRejection,

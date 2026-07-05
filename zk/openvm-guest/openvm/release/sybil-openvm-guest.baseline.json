@@ -1,5 +1,5 @@
 {
-  "app_exe_commit": "0x0036273c48a970e54ed59522f1097158ee715bb2aba3a6323e9551c6ab5777bf",
+  "app_exe_commit": "0x008471a989c96add5bd9df0e3778ceb5cf7859a32bdd27cea52b32b22d099b5c",
   "memory_dimensions": {
     "addr_space_height": 3,
     "address_height": 26
@@ -9,8 +9,8 @@
     "vk_pre_hash": "0x0054bd009621e9dea2105fb303d583fb6483a4645ab5e50654a73ef4618002f9"
   },
   "leaf_vk_commit": {
-    "cached_commit": "0x008599567fbdaea961b441d572cb4bc7e86c6281ffd2d892a538d07950751c3a",
-    "vk_pre_hash": "0x0072039f5164092443c88c2ae9be544477057b8739b240eff4c2adabc8d42c56"
+    "cached_commit": "0x00061cb93bd7e1e7f272a5f7c3530d8ed13e6dce60395c36dc14823930464ed3",
+    "vk_pre_hash": "0x0070e17a4096865511bbc3730d9981489e4c27b13ffb433cf763ac00298f8b2c"
   },
   "internal_for_leaf_vk_commit": {
     "cached_commit": "0x008df36a16e989e99c507bc783c209f45b5dafaff20424a390ab3f80e398d24b",
