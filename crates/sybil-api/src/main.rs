@@ -18,6 +18,8 @@ use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
 
+const SEQUENCER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
+
 struct Telemetry {
     prometheus_handle: metrics_exporter_prometheus::PrometheusHandle,
     tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
@@ -268,6 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("failed to bootstrap oracle feeds: {err}");
     }
 
+    let shutdown_handle = handle.clone();
     let state = AppState::new(handle, &config, prometheus_handle);
     let app = create_router(state);
     let addr = format!("0.0.0.0:{}", config.port);
@@ -282,6 +285,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+
+    if shutdown_handle
+        .stop_and_wait(SEQUENCER_SHUTDOWN_TIMEOUT)
+        .await
+    {
+        tracing::info!("sequencer actor stopped cleanly");
+    } else {
+        tracing::warn!(
+            "sequencer actor stop timed out after {}s",
+            SEQUENCER_SHUTDOWN_TIMEOUT.as_secs()
+        );
+    }
 
     if let Some(provider) = tracer_provider {
         if let Err(e) = provider.shutdown() {

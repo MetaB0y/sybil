@@ -5,7 +5,7 @@
 #![allow(clippy::disallowed_types)]
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort, SupervisionEvent};
@@ -143,6 +143,8 @@ pub enum SequencerMsg {
     Tick,
     #[cfg(test)]
     TestCrashOnNextBlock(SequencerTestCrashpoint),
+    #[cfg(test)]
+    TestHoldNextTick(SequencerTestTickHold, RpcReplyPort<()>),
     SubmitOrder(OrderSubmission, RpcReplyPort<Result<(), SequencerError>>),
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
@@ -299,6 +301,12 @@ pub enum SequencerTestCrashpoint {
     AfterPrepareBeforePersist,
     AfterPersistBeforeCommit,
     AfterCommit,
+}
+
+#[cfg(test)]
+pub struct SequencerTestTickHold {
+    pub started: tokio::sync::oneshot::Sender<()>,
+    pub release: tokio::sync::oneshot::Receiver<()>,
 }
 
 #[cfg(not(test))]
@@ -482,6 +490,8 @@ struct SequencerActorState {
     /// returns `IndicativeSnapshot::default()` (None/None/0/0).
     indicative_cache: HashMap<MarketId, IndicativeSnapshot>,
     indicative_solve_gate: IndicativeSolveGate,
+    #[cfg(test)]
+    next_tick_hold: Option<SequencerTestTickHold>,
 }
 
 #[derive(Clone, Debug)]
@@ -716,6 +726,9 @@ impl SequencerActorState {
             ));
         }
 
+        #[cfg(test)]
+        self.await_next_tick_hold_for_test().await;
+
         if let Err(error) = self.persist_block(&prepared).await {
             metrics::counter!("sybil_persistence_failures").increment(1);
             // The live sequencer still holds the pending bundles — the drain
@@ -770,6 +783,14 @@ impl SequencerActorState {
             "prepared block discarded before commit; block production halted"
         );
         self.halted_error = Some(error);
+    }
+
+    #[cfg(test)]
+    async fn await_next_tick_hold_for_test(&mut self) {
+        if let Some(hold) = self.next_tick_hold.take() {
+            let _ = hold.started.send(());
+            let _ = hold.release.await;
+        }
     }
 
     /// Indicative scheduler tick (C2). Builds a speculative `Problem` from
@@ -1749,6 +1770,8 @@ impl Actor for SequencerActor {
             mailbox_monitor: args.mailbox_monitor,
             indicative_cache: HashMap::new(),
             indicative_solve_gate: IndicativeSolveGate::default(),
+            #[cfg(test)]
+            next_tick_hold: None,
         })
     }
 
@@ -1810,6 +1833,11 @@ impl Actor for SequencerActor {
             #[cfg(test)]
             SequencerMsg::TestCrashOnNextBlock(crashpoint) => {
                 let _ = state.on_tick_inner(Some(crashpoint)).await?;
+            }
+            #[cfg(test)]
+            SequencerMsg::TestHoldNextTick(hold, reply) => {
+                state.next_tick_hold = Some(hold);
+                let _ = reply.send(());
             }
             SequencerMsg::IndicativeTick => {
                 state.on_indicative_tick(myself.clone());
@@ -2142,6 +2170,17 @@ struct SequencerHandleInner {
     actor: Arc<RwLock<Option<ActorRef<SequencerMsg>>>>,
     block_broadcast: broadcast::Sender<SealedBlock>,
     mailbox_monitor: MailboxMonitor,
+    shutdown_requested: Arc<AtomicBool>,
+}
+
+impl SequencerHandleInner {
+    fn publish_actor(&self, actor: Option<ActorRef<SequencerMsg>>) {
+        self.mailbox_monitor.reset();
+        *self
+            .actor
+            .write()
+            .expect("sequencer actor ref lock poisoned") = actor;
+    }
 }
 
 struct SequencerSupervisor;
@@ -2167,12 +2206,7 @@ enum SequencerSupervisorMsg {
 
 impl SequencerSupervisorState {
     fn publish_actor(&self, actor: Option<ActorRef<SequencerMsg>>) {
-        self.handle.mailbox_monitor.reset();
-        *self
-            .handle
-            .actor
-            .write()
-            .expect("sequencer actor ref lock poisoned") = actor;
+        self.handle.publish_actor(actor);
     }
 
     async fn spawn_child(
@@ -2199,6 +2233,10 @@ impl SequencerSupervisorState {
         self.current_actor = None;
         self.publish_actor(None);
 
+        if self.handle.shutdown_requested.load(Ordering::Acquire) {
+            return;
+        }
+
         let Some(store) = self.store.clone() else {
             tracing::error!(
                 "sequencer actor exited without a persistent store; restart unavailable"
@@ -2218,6 +2256,10 @@ impl SequencerSupervisorState {
             tracing::error!("no persisted sequencer snapshot available for restart");
             return;
         };
+
+        if self.handle.shutdown_requested.load(Ordering::Acquire) {
+            return;
+        }
 
         let sequencer = BlockSequencer::restore(state, self.oracle.clone(), self.config.clone());
 
@@ -2258,6 +2300,9 @@ impl Actor for SequencerSupervisor {
     ) -> Result<(), ActorProcessingErr> {
         match message {
             SequencerSupervisorMsg::AdoptChild(actor) => {
+                if state.handle.shutdown_requested.load(Ordering::Acquire) {
+                    return Ok(());
+                }
                 state.current_actor = Some(actor.clone());
                 state.publish_actor(Some(actor));
             }
@@ -2282,12 +2327,27 @@ impl Actor for SequencerSupervisor {
             SupervisionEvent::ActorFailed(actor, error)
                 if actor.get_id() == current_actor.get_id() =>
             {
+                if state.handle.shutdown_requested.load(Ordering::Acquire) {
+                    tracing::warn!(
+                        error = %error,
+                        "sequencer actor failed during shutdown; not restarting"
+                    );
+                    state.current_actor = None;
+                    state.publish_actor(None);
+                    return Ok(());
+                }
                 tracing::error!(error = %error, "sequencer actor failed; attempting restart");
                 state.restart_from_store(myself).await;
             }
             SupervisionEvent::ActorTerminated(actor, _, reason)
                 if actor.get_id() == current_actor.get_id() =>
             {
+                if state.handle.shutdown_requested.load(Ordering::Acquire) {
+                    state.current_actor = None;
+                    state.publish_actor(None);
+                    tracing::info!("sequencer actor terminated during shutdown");
+                    return Ok(());
+                }
                 if let Some(reason) = reason.as_deref() {
                     tracing::warn!(reason, "sequencer actor terminated; attempting restart");
                 } else {
@@ -2305,6 +2365,7 @@ impl Actor for SequencerSupervisor {
 #[derive(Clone)]
 pub struct SequencerHandle {
     inner: SequencerHandleInner,
+    supervisor: ActorRef<SequencerSupervisorMsg>,
 }
 
 impl SequencerHandle {
@@ -2383,6 +2444,7 @@ impl SequencerHandle {
             actor: Arc::new(RwLock::new(None)),
             block_broadcast: block_broadcast.clone(),
             mailbox_monitor,
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
         };
         let supervisor_args = SequencerSupervisorArgs {
             config,
@@ -2413,7 +2475,7 @@ impl SequencerHandle {
         supervisor
             .send_message(SequencerSupervisorMsg::AdoptChild(child))
             .expect("failed to hand child actor to supervisor");
-        Self { inner }
+        Self { inner, supervisor }
     }
 
     #[cfg(test)]
@@ -2479,6 +2541,86 @@ impl SequencerHandle {
             return Err(SequencerError::ActorGone);
         }
         self.wait_for_actor_restart_for_test(old_id).await
+    }
+
+    #[cfg(test)]
+    async fn hold_next_tick_for_test(
+        &self,
+        hold: SequencerTestTickHold,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::TestHoldNextTick(hold, reply))
+            .await
+    }
+
+    #[cfg(test)]
+    async fn send_tick_for_test(&self) -> Result<(), SequencerError> {
+        let actor = self.actor_ref().await?;
+        self.inner.mailbox_monitor.queued();
+        if actor.send_message(SequencerMsg::Tick).is_err() {
+            self.inner.mailbox_monitor.send_failed();
+            return Err(SequencerError::ActorGone);
+        }
+        Ok(())
+    }
+
+    /// Stop the sequencer actor and supervisor, waiting up to `timeout`.
+    ///
+    /// This uses ractor's graceful `stop_and_wait`, so the actor finishes the
+    /// message it is currently handling before shutdown completes. It does not
+    /// drain queued future messages.
+    pub async fn stop_and_wait(&self, timeout: std::time::Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        self.inner.shutdown_requested.store(true, Ordering::Release);
+
+        let actor = self
+            .inner
+            .actor
+            .read()
+            .expect("sequencer actor ref lock poisoned")
+            .clone();
+
+        if let Some(actor) = actor {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+
+            match actor
+                .stop_and_wait(Some("shutdown".to_string()), Some(remaining))
+                .await
+            {
+                Ok(()) => self.inner.publish_actor(None),
+                Err(ractor::RactorErr::Timeout) => return false,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "sequencer actor stop returned an error; continuing shutdown"
+                    );
+                    self.inner.publish_actor(None);
+                }
+            }
+        }
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+
+        match self
+            .supervisor
+            .stop_and_wait(Some("shutdown".to_string()), Some(remaining))
+            .await
+        {
+            Ok(()) => true,
+            Err(ractor::RactorErr::Timeout) => false,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "sequencer supervisor stop returned an error after actor shutdown"
+                );
+                true
+            }
+        }
     }
 
     pub async fn submit_order(&self, submission: OrderSubmission) -> Result<(), SequencerError> {
@@ -3406,6 +3548,55 @@ mod tests {
         drop(handle);
 
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    #[tokio::test]
+    async fn stop_and_wait_drains_in_flight_tick() {
+        let path = temp_store_path("stop-drain-in-flight");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config);
+        let handle = SequencerHandle::spawn_with_store_arc_for_test(seq, store.clone());
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        handle
+            .hold_next_tick_for_test(SequencerTestTickHold {
+                started: started_tx,
+                release: release_rx,
+            })
+            .await
+            .unwrap();
+
+        handle.send_tick_for_test().await.unwrap();
+        started_rx.await.unwrap();
+
+        let stopper = tokio::spawn({
+            let handle = handle.clone();
+            async move { handle.stop_and_wait(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(
+            !stopper.is_finished(),
+            "stop_and_wait returned before the in-flight Tick was released"
+        );
+
+        release_tx.send(()).unwrap();
+        assert!(stopper.await.unwrap());
+
+        let restored = store
+            .load_state()
+            .await
+            .unwrap()
+            .expect("in-flight Tick should persist a committed block");
+        assert_eq!(restored.height, 1);
+        assert!(matches!(
+            handle.get_latest_block().await,
+            Err(SequencerError::ActorGone)
+        ));
     }
 
     #[tokio::test]
