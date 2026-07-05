@@ -30,11 +30,13 @@
  * (`FILLS_SUBPAGE`) since one order can fill across hundreds of batches.
  */
 
+import { Download } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { MarketThumb } from "@/components/market-thumb";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
 import { Glossary } from "@/components/glossary";
+import { fillRowCount, fillsToCsv, downloadCsv } from "@/lib/account/fills-csv";
 import { notionalNanos, priceNanosFromNotional } from "@/lib/account/quantity";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
@@ -197,6 +199,53 @@ interface Props {
   marketsById: Map<number, Market>;
 }
 
+/**
+ * Client-side "Export CSV" of the account's full fill history (one row per
+ * fill). Pure browser Blob download — no server call. Disabled when there are
+ * no fills to export.
+ */
+function ExportCsvButton({
+  events,
+  marketsById,
+}: {
+  events: HistoryEvent[];
+  marketsById: Map<number, Market>;
+}) {
+  const count = useMemo(() => fillRowCount(events), [events]);
+  const onExport = () => {
+    if (count === 0) return;
+    const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    downloadCsv(`sybil-fills-${stamp}.csv`, fillsToCsv(events, marketsById));
+  };
+  return (
+    <button
+      type="button"
+      onClick={onExport}
+      disabled={count === 0}
+      aria-label="Export fills as CSV"
+      title={count === 0 ? "No fills to export" : `Export ${count} fills as CSV`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "5px 10px",
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-2)",
+        borderRadius: 6,
+        color: count === 0 ? "var(--fg-4)" : "var(--fg-2)",
+        fontFamily: "var(--font-sans)",
+        fontSize: 12,
+        fontWeight: 500,
+        cursor: count === 0 ? "not-allowed" : "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <Download size={13} aria-hidden />
+      Export CSV
+    </button>
+  );
+}
+
 export function TradesList({ tabs, events, marketsById }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [query, setQuery] = useState("");
@@ -344,18 +393,21 @@ export function TradesList({ tabs, events, marketsById }: Props) {
         search={!isEmpty && <SearchField value={query} onChange={onSearch} />}
       >
         {!isEmpty && (
-          <FilterDropdown
-            ariaLabel="Filter by market"
-            value={String(marketId)}
-            onChange={(v) => {
-              setMarketId(v === "all" ? "all" : Number(v));
-              paged.setPage(0);
-            }}
-            options={[
-              { value: "all", label: "All markets" },
-              ...marketOptions.map((m) => ({ value: String(m.id), label: m.name })),
-            ]}
-          />
+          <>
+            <FilterDropdown
+              ariaLabel="Filter by market"
+              value={String(marketId)}
+              onChange={(v) => {
+                setMarketId(v === "all" ? "all" : Number(v));
+                paged.setPage(0);
+              }}
+              options={[
+                { value: "all", label: "All markets" },
+                ...marketOptions.map((m) => ({ value: String(m.id), label: m.name })),
+              ]}
+            />
+            <ExportCsvButton events={events} marketsById={marketsById} />
+          </>
         )}
       </PortfolioToolbar>
       {isEmpty ? (

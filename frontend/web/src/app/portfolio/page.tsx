@@ -22,6 +22,7 @@ import {
   type PortfolioTab,
 } from "@/components/portfolio/portfolio-tabs";
 import { PositionsList } from "@/components/portfolio/positions-list";
+import { RealizedPnlPanel } from "@/components/portfolio/realized-pnl-panel";
 import { RangeTabs } from "@/components/portfolio/range-tabs";
 import {
   useAccountHydrated,
@@ -139,6 +140,7 @@ function Connected({
     positions: portfolioData?.positions.length ?? 0,
     orders: ordersData.length,
     trades: tradesCount,
+    pnl: 0, // badge hidden for P&L (chart tab, not a row count)
     history: history.events.length,
   };
 
@@ -204,6 +206,9 @@ function Connected({
           events={history.events}
           marketsById={marketsById}
         />
+      )}
+      {tab === "pnl" && (
+        <RealizedPnlPanel tabs={tabsStrip} events={history.events} />
       )}
       {tab === "history" && (
         <HistoryFeed

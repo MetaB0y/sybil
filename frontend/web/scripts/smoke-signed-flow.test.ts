@@ -155,11 +155,13 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       // 5. Sign + submit a BuyYes @ $0.50 × 1
       const priceNanos = 500_000_000n;
       const qty = 1n;
+      const orderNonce = BigInt(Date.now());
       const canonical = canonicalOrderBytes({
         marketIds: [market.market_id],
         payoffs: [1, 0],
         limitPriceNanos: priceNanos,
         maxFill: qty,
+        nonce: orderNonce,
       });
       const sigHex = await signBytes(kp.privateKey, canonical);
       log(`signed ${canonical.length} bytes, sig = ${sigHex.slice(0, 32)}...`);
@@ -174,6 +176,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
             payoffs: [1, 0],
             limit_price_nanos: Number(priceNanos),
             max_fill: Number(qty),
+            nonce: Number(orderNonce),
           },
           signature_hex: sigHex,
         }),
@@ -214,9 +217,11 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       // 7. If still pending, cancel
       if (hasPending) {
         const orderId = openOrders.body[0]!.order_id;
+        const cancelNonce = BigInt(Date.now());
         const cancelCanonical = canonicalCancelBytes(
           BigInt(accountId),
           BigInt(orderId),
+          cancelNonce,
         );
         const cancelSig = await signBytes(kp.privateKey, cancelCanonical);
         const cancelled = await rest<CancelResp>("/v1/orders/cancel/signed", {
@@ -225,6 +230,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
           body: JSON.stringify({
             account_id: accountId,
             order_id: orderId,
+            nonce: Number(cancelNonce),
             signer_pubkey_hex: pubHex,
             signature_hex: cancelSig,
           }),

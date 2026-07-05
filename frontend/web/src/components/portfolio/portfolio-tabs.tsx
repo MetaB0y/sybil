@@ -1,16 +1,24 @@
 "use client";
 
-export type PortfolioTab = "positions" | "orders" | "trades" | "history";
+export type PortfolioTab =
+  | "positions"
+  | "orders"
+  | "trades"
+  | "pnl"
+  | "history";
 
 interface TabSpec {
   id: PortfolioTab;
   label: string;
+  /** Tabs whose badge is a chart/summary, not a row count, hide the number. */
+  hideCount?: boolean;
 }
 
 const TABS: TabSpec[] = [
   { id: "positions", label: "Positions" },
   { id: "orders", label: "Open orders" },
   { id: "trades", label: "Trades" },
+  { id: "pnl", label: "P&L", hideCount: true },
   { id: "history", label: "History" },
 ];
 
@@ -59,16 +67,18 @@ export function PortfolioTabs({
             }}
           >
             <span>{t.label}</span>
-            <span
-              className="tabular"
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                color: "var(--fg-4)",
-              }}
-            >
-              {counts[t.id]}
-            </span>
+            {!t.hideCount && (
+              <span
+                className="tabular"
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--fg-4)",
+                }}
+              >
+                {counts[t.id]}
+              </span>
+            )}
           </button>
         );
       })}
