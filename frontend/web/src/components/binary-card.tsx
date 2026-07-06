@@ -7,7 +7,7 @@ import {
   formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
-import { isMirror, type Market } from "@/lib/markets/use-markets";
+import { isMirror, isNative, type Market } from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
 import { formatTraders } from "@/lib/mock";
 import {
@@ -150,7 +150,11 @@ function EyebrowRow({ market }: { market: Market }) {
           color: "var(--fg-3)",
         }}
       >
-        {isMirror(market) ? "mirror \u00b7 " : ""}
+        {isMirror(market)
+          ? "mirror \u00b7 "
+          : isNative(market)
+            ? "native \u00b7 "
+            : ""}
         {market.closed === true ? "closed" : "yes / no"}
       </span>
     </div>

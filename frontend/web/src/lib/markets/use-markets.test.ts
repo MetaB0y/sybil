@@ -3,6 +3,8 @@ import {
   assemble,
   eventVisibleOnIndex,
   isClosed,
+  isMirror,
+  isNative,
   type Market,
 } from "./use-markets";
 
@@ -19,6 +21,27 @@ describe("markets/use-markets helpers", () => {
     expect(isClosed(mk({ market_id: 1, closed: true }))).toBe(true);
     expect(isClosed(mk({ market_id: 2, closed: false }))).toBe(false);
     expect(isClosed(mk({ market_id: 3 }))).toBe(false);
+  });
+
+  it("isMirror/isNative partition on polymarket_condition_id (SYB-149)", () => {
+    const mirror = mk({ market_id: 1, polymarket_condition_id: "0xabc" });
+    const native = mk({ market_id: 2 });
+    const nativeExplicitNull = mk({ market_id: 3, polymarket_condition_id: null });
+
+    expect(isMirror(mirror)).toBe(true);
+    expect(isNative(mirror)).toBe(false);
+
+    expect(isNative(native)).toBe(true);
+    expect(isMirror(native)).toBe(false);
+
+    // Explicit null (not just absent) is still native.
+    expect(isNative(nativeExplicitNull)).toBe(true);
+    expect(isMirror(nativeExplicitNull)).toBe(false);
+
+    // Every market is exactly one of the two.
+    for (const m of [mirror, native, nativeExplicitNull]) {
+      expect(isMirror(m)).toBe(!isNative(m));
+    }
   });
 
   it("eventVisibleOnIndex hides only when every market is closed", () => {

@@ -193,6 +193,7 @@ function Header({
     market_icon_url?: string | null;
     event_image_url?: string | null;
     event_icon_url?: string | null;
+    polymarket_condition_id?: string | null;
   };
   /** Opens the place-order modal. Omitted (no button) when the market is closed. */
   onPlaceOrder?: () => void;
@@ -200,6 +201,9 @@ function Header({
   const { stats } = useMarketStats(marketId);
   const { primary } = pickDisplayCategory(market.categories, market.category);
   const resolvesMs = market.market_end_date_ms ?? market.expiry_timestamp_ms ?? null;
+  // Provenance (SYB-149): a `polymarket_condition_id` is the mirror linkage
+  // (see `isMirror`); its absence means the market was created natively on Sybil.
+  const origin = market.polymarket_condition_id != null ? "mirror" : "native";
 
   return (
     <header
@@ -270,6 +274,8 @@ function Header({
               <span>resolves {formatDate(resolvesMs)}</span>
             </>
           )}
+          <span style={{ color: "var(--fg-4)" }}>/</span>
+          <span>{origin}</span>
         </div>
 
         {/* Title + status pill */}
@@ -663,6 +669,10 @@ function DescriptionBlock({
   const sourceUrl = rawMarket
     ? rawMarket.resolutionSource?.trim() || null
     : market.external_url?.trim() || null;
+  // Native markets (SYB-149/151) point `external_url` at the resolution source,
+  // so name it as such; for mirrors the link is the upstream Gamma source page.
+  const sourceLabel =
+    market.polymarket_condition_id != null ? "source link" : "resolution source";
 
   return (
     <section
@@ -715,7 +725,7 @@ function DescriptionBlock({
       )}
       <div>
         <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-          {"// source link"}
+          {"// " + sourceLabel}
         </div>
         {sourceUrl ? (
           <a

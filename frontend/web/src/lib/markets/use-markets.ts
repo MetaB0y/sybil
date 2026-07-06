@@ -33,6 +33,17 @@ export function isMirror(m: Market): boolean {
   return m.polymarket_condition_id != null;
 }
 
+/**
+ * A Sybil-native market (SYB-151). The complement of {@link isMirror}: with no
+ * `polymarket_condition_id` there is no Polymarket linkage, so the market was
+ * created natively on Sybil. Natives carry their own `resolution_criteria` and
+ * `external_url` (the resolution source) and — unlike mirrors — may have no
+ * `event_id` or imagery.
+ */
+export function isNative(m: Market): boolean {
+  return !isMirror(m);
+}
+
 /** An event is shown on the index if at least one of its markets is still open. */
 export function eventVisibleOnIndex(markets: Market[]): boolean {
   return markets.some((m) => !isClosed(m));

@@ -8,7 +8,7 @@ import {
   formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
-import { isMirror, type Market } from "@/lib/markets/use-markets";
+import { isMirror, isNative, type Market } from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
 import { formatTraders } from "@/lib/mock";
 import { useEventTraders } from "@/lib/markets/use-event-traders";
@@ -201,11 +201,19 @@ function EyebrowRow({
           color: "var(--fg-3)",
         }}
       >
-        {markets.some(isMirror) && (
+        {markets.some(isMirror) ? (
           <>
             <span>mirror</span>
             <span style={{ margin: "0 4px", color: "var(--fg-4)" }}>·</span>
           </>
+        ) : (
+          markets.length > 0 &&
+          markets.every(isNative) && (
+            <>
+              <span>native</span>
+              <span style={{ margin: "0 4px", color: "var(--fg-4)" }}>·</span>
+            </>
+          )
         )}
         {allClosed && (
           <>
