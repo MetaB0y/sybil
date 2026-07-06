@@ -1,5 +1,6 @@
 pub mod app;
 pub(crate) mod arena;
+pub mod auto_resolution;
 pub mod config;
 pub mod convert;
 pub mod preflight;

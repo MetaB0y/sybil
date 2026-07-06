@@ -248,6 +248,22 @@ fn exact_service_routes() -> &'static [RouteMount] {
             method: "POST",
             path: "/v1/markets/{id}/metadata",
         },
+        RouteMount {
+            method: "POST",
+            path: "/v1/admin/auto-resolutions",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/admin/auto-resolutions",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/admin/auto-resolutions/{id}/approve",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/admin/auto-resolutions/{id}/reject",
+        },
     ]
 }
 
@@ -419,6 +435,28 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             Method::POST,
             "/v1/markets/0/metadata",
             json!({"event_id": "event"}),
+        ),
+        (
+            Method::POST,
+            "/v1/admin/auto-resolutions",
+            json!({
+                "market_id": 0,
+                "action": "review",
+                "payout_nanos": 1_000_000_000u64,
+                "confidence": 0.8,
+                "reasoning": "probe"
+            }),
+        ),
+        (Method::GET, "/v1/admin/auto-resolutions", json!({})),
+        (
+            Method::POST,
+            "/v1/admin/auto-resolutions/0/approve",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/v1/admin/auto-resolutions/0/reject",
+            json!({}),
         ),
     ]
 }

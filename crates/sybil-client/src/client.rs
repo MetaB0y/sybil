@@ -354,6 +354,35 @@ impl SybilClient {
         Ok(Some(self.decode(resp).await?))
     }
 
+    // === Automated resolution review board (SYB-48) ===
+
+    /// Record (or refresh) an auto-resolution proposal on the review board.
+    /// This never settles a market; finalization still flows through the signed
+    /// `resolve_market_attested` path. Returns the stored entry so the caller
+    /// learns the authoritative eta and any operator decision.
+    pub async fn submit_auto_resolution(
+        &self,
+        req: &SubmitAutoResolutionRequest,
+    ) -> Result<AutoResolutionEntryResponse, Error> {
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/admin/auto-resolutions")))
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    /// List every recorded auto-resolution proposal (pending, needs-review,
+    /// escalated, approved, rejected, resolved).
+    pub async fn list_auto_resolutions(&self) -> Result<Vec<AutoResolutionEntryResponse>, Error> {
+        let resp = self
+            .with_service_auth(self.http.get(self.url("/v1/admin/auto-resolutions")))
+            .send()
+            .await?;
+        let list: AutoResolutionListResponse = self.decode(resp).await?;
+        Ok(list.entries)
+    }
+
     // === Orders ===
 
     pub async fn submit_orders(&self, req: &SubmitOrderRequest) -> Result<bool, Error> {

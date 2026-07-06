@@ -4288,6 +4288,7 @@ dependencies = [
 name = "sybil-polymarket"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap",
  "futures-util",
  "getrandom 0.4.2",

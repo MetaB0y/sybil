@@ -29,6 +29,40 @@ Listens to the Sybil WebSocket block stream with `?from_block=` resume. Each blo
 ### ResolutionActor (`resolution.rs`)
 Polls mirrored Polymarket markets for resolution status and submits signed/authorized Sybil resolutions when outcomes settle.
 
+### AutoResolveActor (`autoresolve.rs`, SYB-48)
+LLM auto-resolution for **native** markets (the checked-in catalog, `native.rs`)
+whose `resolution_source` is `api_poll`. For each such market past its
+`end_time` it fetches the endpoint (plain `reqwest`, bounded timeout, per-source
+rate limit), sends the fetched content plus the market's **full**
+`resolution_criteria` to an LLM (`llm.rs`), and parses STRICT JSON **fail-closed**
+(garbled output escalates, never resolves). A confidence policy then routes it:
+
+- **≥ `confidence_propose`** (default 0.9): sign a resolution attestation and
+  hold it in a **resolver-side** pending queue for a **challenge window**
+  (default 24h). The proposal is posted to sybil-api's review board so operators
+  can **reject** (durable veto) or **approve** (finalize early). When the window
+  elapses with no veto, the resolver replays the signed attestation through the
+  **existing** `resolve_market_attested` money path — nothing bypasses the
+  oracle guards.
+- **≥ `confidence_review`** (default 0.7): review queue only. No attestation,
+  nothing auto-finalizes.
+- below that / any parse or fetch failure: escalate.
+
+`manual` sources are never touched (operator workflow). `deepseek/deepseek-v4-flash`
+by default; key from `OPENROUTER_API_KEY` (same var the arena uses).
+
+**Disabled by default.** Requires `AUTORESOLVE_ENABLED=true` **and** a
+`SIGNER_KEY_PATH` **and** `OPENROUTER_API_KEY` **and** a loaded native catalog;
+any missing → the actor stays a no-op.
+
+Review board (service-gated on sybil-api):
+`GET/POST /v1/admin/auto-resolutions`, `POST /v1/admin/auto-resolutions/{id}/approve`,
+`POST /v1/admin/auto-resolutions/{id}/reject`.
+
+Tuning env vars: `AUTORESOLVE_POLL_INTERVAL_SECS`, `AUTORESOLVE_CONFIDENCE_PROPOSE`,
+`AUTORESOLVE_CONFIDENCE_REVIEW`, `AUTORESOLVE_CHALLENGE_WINDOW_HOURS`,
+`AUTORESOLVE_SOURCE_MIN_INTERVAL_SECS`, `AUTORESOLVE_MODEL`.
+
 ## Module Map
 
 | Module | Purpose |
@@ -44,6 +78,8 @@ Polls mirrored Polymarket markets for resolution status and submits signed/autho
 | `feed.rs` | FeedActor |
 | `mm.rs` | MmActor |
 | `resolution.rs` | ResolutionActor |
+| `autoresolve.rs` | AutoResolveActor (SYB-48 LLM auto-resolution) |
+| `llm.rs` | LlmClient trait + OpenRouter impl + deterministic MockLlm |
 | `main.rs` | Orchestration + shutdown |
 
 ## Running

@@ -28,6 +28,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 tokio-util = "0.7"
+async-trait = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

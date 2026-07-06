@@ -78,6 +78,10 @@ use crate::util::now_ms;
         routes::bots::get_bot_decisions,
         routes::bots::get_bot_equity_series,
         routes::leaderboard::get_leaderboard,
+        routes::auto_resolution::submit_auto_resolution,
+        routes::auto_resolution::list_auto_resolutions,
+        routes::auto_resolution::approve_auto_resolution,
+        routes::auto_resolution::reject_auto_resolution,
     ),
     components(schemas(
         CreateAccountRequest,
@@ -166,6 +170,10 @@ use crate::util::now_ms;
         routes::bots::TokenUsageResponse,
         routes::bots::BotEquitySeriesResponse,
         routes::bots::BotEquityPointResponse,
+        SubmitAutoResolutionRequest,
+        AutoResolutionActionDto,
+        AutoResolutionEntryResponse,
+        AutoResolutionListResponse,
     )),
     info(
         title = "Sybil API",
@@ -617,6 +625,22 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
         method: "POST",
         path: "/v1/markets/{id}/metadata",
     },
+    RouteMount {
+        method: "POST",
+        path: "/v1/admin/auto-resolutions",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/admin/auto-resolutions",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/admin/auto-resolutions/{id}/approve",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/admin/auto-resolutions/{id}/reject",
+    },
 ];
 
 pub const DEV_ROUTE_TABLE: &[RouteMount] = &[
@@ -862,6 +886,19 @@ fn service_routes() -> Router<AppState> {
         .route(
             "/v1/markets/{id}/metadata",
             axum::routing::post(routes::markets::set_market_metadata),
+        )
+        .route(
+            "/v1/admin/auto-resolutions",
+            axum::routing::post(routes::auto_resolution::submit_auto_resolution)
+                .get(routes::auto_resolution::list_auto_resolutions),
+        )
+        .route(
+            "/v1/admin/auto-resolutions/{id}/approve",
+            axum::routing::post(routes::auto_resolution::approve_auto_resolution),
+        )
+        .route(
+            "/v1/admin/auto-resolutions/{id}/reject",
+            axum::routing::post(routes::auto_resolution::reject_auto_resolution),
         )
 }
 

@@ -501,6 +501,54 @@ pub struct SetMarketMetadataRequest {
     pub closed: Option<bool>,
 }
 
+/// Which confidence tier a proposed automated resolution (SYB-48) landed in.
+/// Mirrors the resolver-side confidence policy so the review board can render
+/// and gate each entry consistently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AutoResolutionActionDto {
+    /// High confidence: a signed attestation is held pending a challenge
+    /// window. Finalizes automatically when the window elapses unless an
+    /// operator rejects it first.
+    Propose,
+    /// Mid confidence: queued for human review only. No attestation is held
+    /// and nothing finalizes without an explicit operator approval.
+    Review,
+    /// Low confidence or unparseable model output: escalated for human
+    /// attention. Never finalizes automatically (fail-closed).
+    Escalate,
+}
+
+/// Body of `POST /v1/admin/auto-resolutions` (SYB-48). The auto-resolution
+/// resolver (sybil-polymarket) submits one of these per market it has
+/// evaluated with an LLM. This route NEVER settles a market: it only records a
+/// reviewable proposal. Finalization always flows back through the existing
+/// signed `POST /v1/markets/{id}/resolve` money path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SubmitAutoResolutionRequest {
+    /// Market the proposal is for.
+    pub market_id: u32,
+    /// Confidence tier the resolver's policy assigned.
+    pub action: AutoResolutionActionDto,
+    /// Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
+    /// Payouts are per-share probabilities in [0, 1e9].
+    #[cfg_attr(feature = "openapi", schema(example = 1_000_000_000u64))]
+    pub payout_nanos: u64,
+    /// Model confidence in [0, 1].
+    pub confidence: f64,
+    /// Model's free-text justification. Stored verbatim for review.
+    pub reasoning: String,
+    /// Short verbatim excerpts from the fetched source the model relied on.
+    #[serde(default)]
+    pub evidence_excerpts: Vec<String>,
+    /// Wall-clock deadline after which a `propose` entry may auto-finalize.
+    /// Unix milliseconds. Required for `propose`; ignored otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eta_ms: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -221,6 +221,9 @@ pub struct AppState {
     pub http_order_limiter: Arc<Mutex<HttpOrderRateLimiter>>,
     /// WebAuthn verifier policy for passkey account actions.
     pub webauthn: WebAuthnVerifierConfig,
+    /// Review board for automated LLM resolutions (SYB-48). Metadata only — it
+    /// records proposals and operator decisions but never settles a market.
+    pub auto_resolutions: crate::auto_resolution::AutoResolutionStore,
 }
 
 impl AppState {
@@ -281,6 +284,7 @@ impl AppState {
             arena_db_path: config.arena_db_path.clone(),
             http_order_limiter: Arc::new(Mutex::new(HttpOrderRateLimiter::new(config))),
             webauthn: WebAuthnVerifierConfig::from_api_config(config),
+            auto_resolutions: crate::auto_resolution::AutoResolutionStore::new(),
         }
     }
 }

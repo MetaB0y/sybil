@@ -1068,6 +1068,45 @@ pub struct HistoryEventResponse {
     pub available_nanos: Option<i64>,
 }
 
+/// One entry on the automated-resolution review board (SYB-48).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AutoResolutionEntryResponse {
+    pub market_id: u32,
+    /// Display status derived at read time from the operator decision AND the
+    /// market's live on-chain state: one of `pending`, `needs_review`,
+    /// `escalated`, `approved`, `rejected`, `resolved`.
+    pub status: String,
+    /// Confidence tier the resolver assigned (`propose` | `review` |
+    /// `escalate`).
+    pub action: crate::request::AutoResolutionActionDto,
+    /// Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
+    /// Payouts are per-share probabilities in [0, 1e9].
+    pub payout_nanos: u64,
+    /// Model confidence in [0, 1].
+    pub confidence: f64,
+    /// Model's free-text justification.
+    pub reasoning: String,
+    /// Short verbatim excerpts from the fetched source.
+    #[serde(default)]
+    pub evidence_excerpts: Vec<String>,
+    /// When the proposal was first recorded. Unix milliseconds.
+    pub proposed_at_ms: u64,
+    /// Auto-finalize deadline for `propose` entries. Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eta_ms: Option<u64>,
+    /// When an operator approved/rejected, if they did. Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at_ms: Option<u64>,
+}
+
+/// Response body of `GET /v1/admin/auto-resolutions` (SYB-48).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AutoResolutionListResponse {
+    pub entries: Vec<AutoResolutionEntryResponse>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

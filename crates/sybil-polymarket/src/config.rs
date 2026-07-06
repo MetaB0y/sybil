@@ -147,4 +147,46 @@ pub struct Config {
     /// Resolution poll interval in seconds.
     #[arg(long, default_value = "120", env = "RESOLUTION_POLL_INTERVAL_SECS")]
     pub resolution_poll_interval_secs: u64,
+
+    // --- SYB-48: LLM auto-resolution (native `api_poll` markets) ---
+    /// Enable the LLM auto-resolution actor. DEFAULT OFF: must be explicitly
+    /// turned on in deployment. Also requires `SIGNER_KEY_PATH` (for signing)
+    /// and `OPENROUTER_API_KEY` (for the model); if either is missing the actor
+    /// stays disabled.
+    #[arg(long, default_value = "false", env = "AUTORESOLVE_ENABLED")]
+    pub autoresolve_enabled: bool,
+
+    /// Auto-resolution poll interval in seconds.
+    #[arg(long, default_value = "300", env = "AUTORESOLVE_POLL_INTERVAL_SECS")]
+    pub autoresolve_poll_interval_secs: u64,
+
+    /// Confidence at/above which a signed proposal enters the challenge window.
+    #[arg(long, default_value = "0.9", env = "AUTORESOLVE_CONFIDENCE_PROPOSE")]
+    pub autoresolve_confidence_propose: f64,
+
+    /// Confidence at/above which a market is queued for human review (but below
+    /// the propose threshold).
+    #[arg(long, default_value = "0.7", env = "AUTORESOLVE_CONFIDENCE_REVIEW")]
+    pub autoresolve_confidence_review: f64,
+
+    /// Challenge window (hours) a proposed resolution is held before it
+    /// auto-finalizes, unless an operator rejects it first.
+    #[arg(long, default_value = "24", env = "AUTORESOLVE_CHALLENGE_WINDOW_HOURS")]
+    pub autoresolve_challenge_window_hours: u64,
+
+    /// Minimum seconds between fetches of the same resolution endpoint.
+    #[arg(
+        long,
+        default_value = "300",
+        env = "AUTORESOLVE_SOURCE_MIN_INTERVAL_SECS"
+    )]
+    pub autoresolve_source_min_interval_secs: u64,
+
+    /// OpenRouter model id used to evaluate resolutions.
+    #[arg(
+        long,
+        default_value = "deepseek/deepseek-v4-flash",
+        env = "AUTORESOLVE_MODEL"
+    )]
+    pub autoresolve_model: String,
 }

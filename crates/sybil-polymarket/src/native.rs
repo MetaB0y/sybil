@@ -135,6 +135,10 @@ pub struct NativeMarketSpec {
     resolution_criteria: String,
     source_url: String,
     event_title: String,
+    /// Resolution adapter config, copied from the parent template. Drives the
+    /// SYB-48 auto-resolution poller (`api_poll` is fetched + LLM-evaluated;
+    /// `manual` is left entirely to operators).
+    resolution_source: ResolutionSourceConfig,
 }
 
 impl NativeMarketCatalog {
@@ -310,6 +314,7 @@ impl NativeMarketTemplate {
                     resolution_criteria: self.resolution_criteria.clone(),
                     source_url: self.source_url.clone(),
                     event_title: self.title.clone(),
+                    resolution_source: self.resolution_source.clone(),
                 }]
             }
             NativeOutcomeSet::Categorical { outcomes } => {
@@ -335,6 +340,7 @@ impl NativeMarketTemplate {
                         resolution_criteria: self.resolution_criteria.clone(),
                         source_url: self.source_url.clone(),
                         event_title: self.title.clone(),
+                        resolution_source: self.resolution_source.clone(),
                     })
                     .collect()
             }
@@ -366,6 +372,36 @@ impl NativeQuoteRange {
 impl NativeMarketSpec {
     pub fn group_name(&self) -> &str {
         &self.event_title
+    }
+
+    /// Resolution adapter config inherited from the parent template.
+    pub fn resolution_source(&self) -> &ResolutionSourceConfig {
+        &self.resolution_source
+    }
+
+    /// Full, verbatim resolution criteria shown to operators and the LLM.
+    pub fn resolution_criteria(&self) -> &str {
+        &self.resolution_criteria
+    }
+
+    /// Primary source URL for this market's resolution.
+    pub fn source_url(&self) -> &str {
+        &self.source_url
+    }
+
+    /// The specific YES/NO question this child market settles. For a binary
+    /// template this is just the market name; for a categorical child it is
+    /// phrased as "did this outcome win?" so a single scalar payout in [0,1]
+    /// (YES probability) is always well defined.
+    pub fn resolution_question(&self) -> String {
+        match &self.outcome_title {
+            Some(outcome) => format!(
+                "For the event \"{}\": resolve YES if the outcome \"{}\" is the winning \
+                 outcome, otherwise NO.",
+                self.event_title, outcome
+            ),
+            None => self.name.clone(),
+        }
     }
 
     pub fn create_request(&self) -> CreateMarketRequest {

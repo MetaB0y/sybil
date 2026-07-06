@@ -9,8 +9,10 @@ use tracing::{error, info, warn};
 
 use sybil_api_types::NANOS_PER_DOLLAR;
 use sybil_client::SybilClient;
+use sybil_polymarket::autoresolve::{AutoResolveActor, AutoResolveConfig};
 use sybil_polymarket::config::Config;
 use sybil_polymarket::feed::{FeedActor, PriceSnapshot};
+use sybil_polymarket::llm::OpenRouterClient;
 use sybil_polymarket::mapping::MappingStore;
 use sybil_polymarket::mm::{MmActor, MmMessage, QuoteRange};
 use sybil_polymarket::native::{NativeMarketCatalog, NativeQuoteRange};
@@ -466,6 +468,80 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     };
 
+    // Auto-resolution actor (SYB-48). Native `api_poll` markets past their end
+    // time are fetched + LLM-judged; high-confidence outcomes are signed and
+    // held through a challenge window, then finalized through the SAME signed
+    // resolve path. DEFAULT OFF, and additionally requires a signer key +
+    // OPENROUTER_API_KEY — any of those missing keeps it disabled.
+    let autoresolve_handle: tokio::task::JoinHandle<()> = {
+        let openrouter_key = std::env::var("OPENROUTER_API_KEY")
+            .ok()
+            .and_then(|v| (!v.trim().is_empty()).then_some(v));
+        let disabled_reason = if !config.autoresolve_enabled {
+            Some("AUTORESOLVE_ENABLED is false")
+        } else if config.signer_key_path.is_empty() {
+            Some("SIGNER_KEY_PATH not set")
+        } else if native_catalog.is_empty() {
+            Some("no native market catalog loaded")
+        } else if openrouter_key.is_none() {
+            Some("OPENROUTER_API_KEY not set")
+        } else {
+            None
+        };
+
+        if let Some(reason) = disabled_reason {
+            info!(reason, "auto-resolution actor disabled");
+            let cancel_idle = cancel.clone();
+            tokio::spawn(async move { cancel_idle.cancelled().await })
+        } else {
+            let signer =
+                ResolutionSigner::load_or_create(std::path::Path::new(&config.signer_key_path))?;
+            info!(
+                pubkey = signer.pubkey_hex(),
+                model = %config.autoresolve_model,
+                "loaded auto-resolution signer; register this pubkey as a resolution feed on sybil-api"
+            );
+            let autoresolve_config = AutoResolveConfig {
+                enabled: true,
+                poll_interval_secs: config.autoresolve_poll_interval_secs,
+                confidence_propose: config.autoresolve_confidence_propose,
+                confidence_review: config.autoresolve_confidence_review,
+                challenge_window_ms: config.autoresolve_challenge_window_hours * 60 * 60 * 1000,
+                source_min_interval_secs: config.autoresolve_source_min_interval_secs,
+                fetch_timeout_secs: 30,
+                model: config.autoresolve_model.clone(),
+            };
+            let llm = Arc::new(OpenRouterClient::new(
+                http.clone(),
+                openrouter_key.expect("openrouter key present in enabled branch"),
+                config.autoresolve_model.clone(),
+            ));
+            let sybil_client_autoresolve = SybilClient::new(
+                http.clone(),
+                config.sybil_url.clone(),
+                std::env::var("SYBIL_SERVICE_TOKEN")
+                    .ok()
+                    .and_then(|value| (!value.trim().is_empty()).then_some(value)),
+            );
+            let catalog = native_catalog.clone();
+            let mapping_for_autoresolve = mapping.clone();
+            let http_autoresolve = http.clone();
+            let cancel_autoresolve = cancel.clone();
+            tokio::spawn(async move {
+                let actor = AutoResolveActor::new(
+                    autoresolve_config,
+                    catalog,
+                    mapping_for_autoresolve,
+                    sybil_client_autoresolve,
+                    llm,
+                    signer,
+                    http_autoresolve,
+                );
+                actor.run(cancel_autoresolve).await;
+            })
+        }
+    };
+
     // Wait for shutdown signal
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -491,6 +567,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error!(error = %e, "ResolutionActor panicked");
             } else {
                 error!("ResolutionActor exited unexpectedly");
+            }
+        }
+        r = autoresolve_handle => {
+            if let Err(e) = r {
+                error!(error = %e, "AutoResolveActor panicked");
+            } else {
+                error!("AutoResolveActor exited unexpectedly");
             }
         }
     }
