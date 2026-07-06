@@ -468,6 +468,7 @@ pub async fn create_market(
             resolution_config: req
                 .resolution_template
                 .map(|template| ResolutionConfig { template }),
+            committed_metadata_digest: None,
         };
         state
             .sequencer

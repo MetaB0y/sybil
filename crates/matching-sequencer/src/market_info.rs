@@ -27,6 +27,10 @@ pub struct MarketMetadata {
     /// migration.
     #[serde(default)]
     pub resolution_config: Option<ResolutionConfig>,
+    /// Recovery-only override for DA-imported markets where the witness proves
+    /// the metadata digest but does not carry the raw metadata fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub committed_metadata_digest: Option<[u8; 32]>,
 }
 
 impl MarketMetadata {

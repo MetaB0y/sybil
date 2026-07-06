@@ -473,6 +473,7 @@ impl Harness {
                 expiry_timestamp_ms: 1_900_000_000_000 + self.op_index,
                 created_at_ms: 1_800_000_000_000 + self.op_index,
                 resolution_config: None,
+                committed_metadata_digest: None,
             })
         } else {
             None

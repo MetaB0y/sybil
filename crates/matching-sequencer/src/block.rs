@@ -345,6 +345,9 @@ fn market_metadata_digest(metadata: Option<&MarketMetadata>) -> [u8; 32] {
     match metadata {
         None => payload.push(0),
         Some(metadata) => {
+            if let Some(digest) = metadata.committed_metadata_digest {
+                return digest;
+            }
             payload.push(1);
             append_string(&mut payload, &metadata.description);
             append_string(&mut payload, &metadata.category);

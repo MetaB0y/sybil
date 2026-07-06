@@ -52,15 +52,19 @@ use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos};
+use matching_engine::{Market, MarketGroup, MarketId, MarketSet, Nanos};
 use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use sybil_oracle::{
-    AdminOracle, DataFeed, FeedPubkey, MarketStatus, ResolutionTemplate, SignedAttestation,
+    AdminOracle, Challenge, ChallengeId, DataFeed, FeedId, FeedPubkey, MarketStatus, OracleSource,
+    ProposalId, ResolutionProposal, ResolutionRecord, ResolutionTemplate, SignedAttestation,
 };
-use sybil_verifier::BlockWitness;
+use sybil_verifier::{
+    AccountSnapshot, BlockWitness, DepositAccumulatorWitness, L1DepositWitness,
+    MarketStatusSnapshot, OracleSourceSnapshot, StateSidecarSnapshot, WitnessBlockHeader,
+};
 use tracing::{debug, info, warn};
 
-use crate::account::{AccountId, AccountStore};
+use crate::account::{Account, AccountId, AccountStore};
 use crate::account_storage::{
     AccountSnapshotSlot, AccountStateStore, CommittedAccountState, FencedAccountStorage,
     QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateRoot, RecoveryAccountState,
@@ -70,13 +74,17 @@ use crate::aggregates::{
     TraderTrackerSnapshot, WelfareTrackerSnapshot,
 };
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader, SealedBlock};
-use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit};
+use crate::bridge::{
+    BridgeState, BridgeWithdrawalRequest, L1Deposit, L1WithdrawalStatus, WithdrawalLeaf,
+};
 use crate::market_info::{
     AccountFillCursor, AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage, PricePoint,
+    ResolutionConfig,
 };
 use crate::market_lifecycle::MarketLifecycle;
-use crate::order_book::RestingOrder;
+use crate::order_book::{reservation_snapshots_from_resting_orders, OrderBook, RestingOrder};
 use crate::price_tracker::{PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot};
+use crate::sequencer::{BlockSequencer, SequencerConfig};
 
 // ---------------------------------------------------------------------------
 // Table definitions
@@ -992,6 +1000,23 @@ pub struct RestoredState {
     pub pending_l1_deposits: Vec<L1Deposit>,
     /// Bridge withdrawals durably accepted after the last committed block.
     pub pending_bridge_withdrawals: Vec<BridgeWithdrawalRequest>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WitnessImportSummary {
+    pub height: u64,
+    pub state_root: [u8; 32],
+    pub accounts: usize,
+    pub markets: usize,
+    pub market_groups: usize,
+    pub resting_orders: usize,
+    pub account_reservations: usize,
+    pub withdrawals: usize,
+    pub deposit_cursor: u64,
+    pub next_account_id: u64,
+    pub next_market_id: u32,
+    pub next_order_id: u64,
+    pub next_withdrawal_id: u64,
 }
 
 /// Borrowed analytics view needed to persist one block.
@@ -2366,6 +2391,118 @@ impl Store {
             .map_err(StoreError::from)
     }
 
+    /// Import a canonical witness as the committed head of an otherwise fresh store.
+    ///
+    /// This is the disaster-recovery "genesis-from-witness" path: it refuses
+    /// any non-empty store, rebuilds core sequencer state from the witness
+    /// post-state and sidecar, verifies that the rebuilt state commits to the
+    /// witness header root, and then persists through the same redb/qMDB fence
+    /// used by normal block commits.
+    pub async fn import_witness_genesis(
+        &self,
+        witness: BlockWitness,
+        expect_state_root: Option<[u8; 32]>,
+        config: SequencerConfig,
+    ) -> Result<WitnessImportSummary, StoreError> {
+        self.ensure_import_target_empty()?;
+        validate_import_witness_root(&witness, expect_state_root)?;
+
+        let restored = restored_state_from_witness(&witness, &config)?;
+        let oracle = Arc::new(AdminOracle::new());
+        let sequencer = BlockSequencer::restore(restored, oracle, config);
+        let snapshot = sequencer.snapshot();
+        let rebuilt_sidecar = state_sidecar_snapshot_from_resting_orders(
+            snapshot.bridge_state,
+            &snapshot.resting_orders,
+            snapshot.markets,
+            snapshot.market_groups,
+            snapshot.lifecycle,
+        );
+        let rebuilt_accounts =
+            crate::canonical_state::CanonicalState::from_accounts(snapshot.accounts);
+        let rebuilt_root = sybil_verifier::block::compute_state_root_with_sidecar(
+            rebuilt_accounts.as_snapshots(),
+            &rebuilt_sidecar,
+        );
+        if rebuilt_root != witness.header.state_root {
+            return Err(StoreError::WitnessImport(format!(
+                "rebuilt sequencer state root {} does not match witness header {}",
+                hex32(rebuilt_root),
+                hex32(witness.header.state_root)
+            )));
+        }
+
+        let summary = WitnessImportSummary {
+            height: witness.header.height,
+            state_root: witness.header.state_root,
+            accounts: snapshot.accounts.iter().count(),
+            markets: snapshot.markets.len(),
+            market_groups: snapshot.market_groups.len(),
+            resting_orders: snapshot.resting_orders.len(),
+            account_reservations: witness.state_sidecar.account_reservations.len(),
+            withdrawals: snapshot.bridge_state.withdrawals.len(),
+            deposit_cursor: snapshot.bridge_state.deposit_cursor,
+            next_account_id: snapshot.accounts.next_id(),
+            next_market_id: snapshot.markets.next_id(),
+            next_order_id: snapshot.next_order_id,
+            next_withdrawal_id: snapshot.bridge_state.next_withdrawal_id,
+        };
+
+        self.save_block_with_witness(snapshot, &witness).await?;
+        Ok(summary)
+    }
+
+    fn ensure_import_target_empty(&self) -> Result<(), StoreError> {
+        let txn = self.db.begin_read()?;
+        if read_recovery_metadata(&txn)?.is_some() {
+            return Err(StoreError::WitnessImport(
+                "store already has committed recovery metadata".to_string(),
+            ));
+        }
+
+        let data_rows = [
+            ("markets", txn.open_table(MARKETS)?.len()?),
+            ("market_meta", txn.open_table(MARKET_META)?.len()?),
+            ("market_statuses", txn.open_table(MARKET_STATUSES)?.len()?),
+            ("market_groups", txn.open_table(MARKET_GROUPS)?.len()?),
+            ("block_headers", txn.open_table(BLOCK_HEADERS)?.len()?),
+            ("blocks_full", txn.open_table(BLOCKS_FULL)?.len()?),
+            ("block_witnesses", txn.open_table(BLOCK_WITNESSES)?.len()?),
+            ("da_artifacts", txn.open_table(DA_ARTIFACTS)?.len()?),
+            ("pubkey_registry", txn.open_table(PUBKEY_REGISTRY)?.len()?),
+            ("clearing_prices", txn.open_table(CLEARING_PRICES)?.len()?),
+            ("market_volumes", txn.open_table(MARKET_VOLUMES)?.len()?),
+            ("resting_orders", txn.open_table(RESTING_ORDERS)?.len()?),
+            ("pending_bundles", txn.open_table(PENDING_BUNDLES)?.len()?),
+            ("admit_log", txn.open_table(ADMIT_LOG)?.len()?),
+            (
+                "control_plane_log",
+                txn.open_table(CONTROL_PLANE_LOG)?.len()?,
+            ),
+            ("fill_history", txn.open_table(FILL_HISTORY)?.len()?),
+            ("equity_points", txn.open_table(EQUITY_POINTS)?.len()?),
+            ("history_events", txn.open_table(HISTORY_EVENTS)?.len()?),
+            ("bridge_state", txn.open_table(BRIDGE_STATE)?.len()?),
+            (
+                "pending_l1_deposits",
+                txn.open_table(PENDING_L1_DEPOSITS)?.len()?,
+            ),
+            (
+                "pending_bridge_withdrawals",
+                txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?.len()?,
+            ),
+        ];
+        for (table, rows) in data_rows {
+            if rows != 0 {
+                return Err(StoreError::WitnessImport(format!(
+                    "store is not empty: table `{table}` has {rows} row(s)"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Load state from the store. Returns None if the store is empty (fresh start).
     pub async fn load_state(&self) -> Result<Option<RestoredState>, StoreError> {
         let txn = self.db.begin_read()?;
@@ -3166,9 +3303,547 @@ pub enum StoreError {
     UnsupportedLayout(String),
     #[error("corrupt store layout: {0}")]
     CorruptLayout(String),
+    #[error("witness import refused: {0}")]
+    WitnessImport(String),
     #[cfg(test)]
     #[error("injected store fault: {0}")]
     InjectedFault(String),
+}
+
+fn import_err(message: impl Into<String>) -> StoreError {
+    StoreError::WitnessImport(message.into())
+}
+
+fn hex32(bytes: [u8; 32]) -> String {
+    format!("0x{}", hex::encode(bytes))
+}
+
+fn validate_import_witness_root(
+    witness: &BlockWitness,
+    expect_state_root: Option<[u8; 32]>,
+) -> Result<(), StoreError> {
+    let computed = sybil_verifier::block::compute_state_root_with_sidecar(
+        &witness.post_state,
+        &witness.state_sidecar,
+    );
+    if computed != witness.header.state_root {
+        return Err(import_err(format!(
+            "witness post_state + sidecar root {} does not match header {}",
+            hex32(computed),
+            hex32(witness.header.state_root)
+        )));
+    }
+    if let Some(expected) = expect_state_root {
+        if expected != witness.header.state_root {
+            return Err(import_err(format!(
+                "--expect-state-root {} does not match witness header {}",
+                hex32(expected),
+                hex32(witness.header.state_root)
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn restored_state_from_witness(
+    witness: &BlockWitness,
+    config: &SequencerConfig,
+) -> Result<RestoredState, StoreError> {
+    let accounts = account_store_from_witness(&witness.post_state)?;
+    let (markets, market_statuses, market_metadata, market_groups) =
+        market_state_from_sidecar(&witness.state_sidecar)?;
+    let bridge_state = bridge_state_from_witness(witness)?;
+    let resting_orders = resting_orders_from_sidecar(&witness.state_sidecar);
+    let order_book = OrderBook::restore(resting_orders.clone(), config.order_ttl_blocks);
+    let restored_resting_orders = order_book.snapshot();
+    if restored_resting_orders.len() != resting_orders.len() {
+        return Err(import_err(
+            "resting order restore dropped one or more sidecar orders",
+        ));
+    }
+
+    let rebuilt_reservations = reservation_snapshots_from_resting_orders(&restored_resting_orders);
+    if rebuilt_reservations != witness.state_sidecar.account_reservations {
+        return Err(import_err(
+            "resting-order reservation aggregates do not match sidecar account_reservations",
+        ));
+    }
+
+    let mut lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+    for (&market_id, status) in &market_statuses {
+        lifecycle.set_market_status(market_id, status.clone());
+    }
+    for (&market_id, metadata) in &market_metadata {
+        lifecycle.set_market_metadata(market_id, metadata.clone());
+    }
+    let rebuilt_sidecar = state_sidecar_snapshot_from_resting_orders(
+        &bridge_state,
+        &restored_resting_orders,
+        &markets,
+        &market_groups,
+        &lifecycle,
+    );
+    let rebuilt_root = sybil_verifier::block::compute_state_root_with_sidecar(
+        crate::canonical_state::CanonicalState::from_accounts(&accounts).as_snapshots(),
+        &rebuilt_sidecar,
+    );
+    if rebuilt_root != witness.header.state_root {
+        return Err(import_err(format!(
+            "rebuilt import mapping root {} does not match witness header {}",
+            hex32(rebuilt_root),
+            hex32(witness.header.state_root)
+        )));
+    }
+
+    Ok(RestoredState {
+        accounts,
+        markets,
+        market_groups,
+        market_statuses,
+        market_metadata,
+        height: witness.header.height,
+        last_header: Some(block_header_from_witness(&witness.header)),
+        next_order_id: next_order_id_from_witness(witness)?,
+        pubkey_registry: HashMap::new(),
+        resting_orders: restored_resting_orders,
+        data_feeds: Vec::new(),
+        resolution_templates: Vec::new(),
+        pending_bundles: Vec::new(),
+        admit_log: Vec::new(),
+        control_plane_log: Vec::new(),
+        analytics: empty_import_analytics(),
+        bridge_state,
+        pending_l1_deposits: Vec::new(),
+        pending_bridge_withdrawals: Vec::new(),
+    })
+}
+
+fn account_store_from_witness(accounts: &[AccountSnapshot]) -> Result<AccountStore, StoreError> {
+    let mut map = HashMap::new();
+    let mut next_account_id = 0u64;
+    for snapshot in accounts {
+        let account_id = AccountId(snapshot.id);
+        if account_id != AccountId::MINT {
+            next_account_id = next_account_id.max(
+                snapshot
+                    .id
+                    .checked_add(1)
+                    .ok_or_else(|| import_err("account id overflow deriving next_account_id"))?,
+            );
+        }
+
+        let mut positions = HashMap::new();
+        for &(market, outcome, qty) in &snapshot.positions {
+            if positions.insert((market, outcome), qty).is_some() {
+                return Err(import_err(format!(
+                    "duplicate position in account {} for market {} outcome {}",
+                    snapshot.id, market.0, outcome
+                )));
+            }
+        }
+        let account = Account {
+            id: account_id,
+            balance: snapshot.balance,
+            positions,
+            total_deposited: snapshot.total_deposited,
+            // Replay nonces are not proven state; genesis-from-witness starts a
+            // fresh nonce space (SYB-224).
+            last_nonce: 0,
+            events_digest: snapshot.events_digest,
+            profile: Default::default(),
+            api_keys: Vec::new(),
+            next_api_key_id: 0,
+        };
+        if map.insert(account_id, account).is_some() {
+            return Err(import_err(format!("duplicate account id {}", snapshot.id)));
+        }
+    }
+    Ok(AccountStore::restore(map, next_account_id))
+}
+
+type ImportedMarketState = (
+    MarketSet,
+    HashMap<MarketId, MarketStatus>,
+    HashMap<MarketId, MarketMetadata>,
+    Vec<MarketGroup>,
+);
+
+fn market_state_from_sidecar(
+    sidecar: &StateSidecarSnapshot,
+) -> Result<ImportedMarketState, StoreError> {
+    let mut market_map = HashMap::new();
+    let mut statuses = HashMap::new();
+    let mut metadata = HashMap::new();
+    let mut next_market_id = 0u32;
+    for market in &sidecar.markets {
+        if market.num_outcomes != 2 {
+            return Err(import_err(format!(
+                "market {} has {} outcomes; importer only supports binary markets",
+                market.market_id.0, market.num_outcomes
+            )));
+        }
+        next_market_id = next_market_id.max(
+            market
+                .market_id
+                .0
+                .checked_add(1)
+                .ok_or_else(|| import_err("market id overflow deriving next_market_id"))?,
+        );
+        if market_map
+            .insert(
+                market.market_id,
+                Market::new(market.market_id, market.name.clone()),
+            )
+            .is_some()
+        {
+            return Err(import_err(format!(
+                "duplicate market id {}",
+                market.market_id.0
+            )));
+        }
+        statuses.insert(
+            market.market_id,
+            market_status_from_snapshot(&market.status),
+        );
+        metadata.insert(
+            market.market_id,
+            MarketMetadata {
+                resolution_config: Some(ResolutionConfig {
+                    template: market.resolution_template.clone(),
+                }),
+                committed_metadata_digest: Some(market.metadata_digest),
+                ..MarketMetadata::default()
+            },
+        );
+    }
+
+    let mut groups_with_ids = sidecar
+        .market_groups
+        .iter()
+        .map(|group| {
+            (
+                group.group_id,
+                MarketGroup {
+                    name: group.name.clone(),
+                    markets: group.markets.clone(),
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    groups_with_ids.sort_by_key(|(group_id, _)| *group_id);
+    for (index, (group_id, _)) in groups_with_ids.iter().enumerate() {
+        if *group_id != index as u64 {
+            return Err(import_err(format!(
+                "market group ids must be contiguous from 0; found group_id {} at index {}",
+                group_id, index
+            )));
+        }
+    }
+    let groups = groups_with_ids
+        .into_iter()
+        .map(|(_, group)| group)
+        .collect();
+
+    Ok((
+        MarketSet::restore(market_map, next_market_id),
+        statuses,
+        metadata,
+        groups,
+    ))
+}
+
+fn market_status_from_snapshot(status: &MarketStatusSnapshot) -> MarketStatus {
+    match status {
+        MarketStatusSnapshot::Active => MarketStatus::Active,
+        MarketStatusSnapshot::Proposed {
+            proposal,
+            challenge_deadline_ms,
+        } => MarketStatus::Proposed {
+            proposal: resolution_proposal_from_snapshot(proposal),
+            challenge_deadline_ms: *challenge_deadline_ms,
+        },
+        MarketStatusSnapshot::Challenged {
+            proposal,
+            challenge,
+        } => MarketStatus::Challenged {
+            proposal: resolution_proposal_from_snapshot(proposal),
+            challenge: challenge_from_snapshot(challenge),
+        },
+        MarketStatusSnapshot::Resolved { record } => MarketStatus::Resolved {
+            record: resolution_record_from_snapshot(record),
+        },
+        MarketStatusSnapshot::Voided => MarketStatus::Voided,
+    }
+}
+
+fn resolution_proposal_from_snapshot(
+    proposal: &sybil_verifier::ResolutionProposalSnapshot,
+) -> ResolutionProposal {
+    ResolutionProposal {
+        id: ProposalId(proposal.id),
+        market_id: proposal.market_id,
+        payout_nanos: proposal.payout_nanos,
+        source: oracle_source_from_snapshot(&proposal.source),
+        proposed_at_ms: proposal.proposed_at_ms,
+        reason: proposal.reason.clone(),
+    }
+}
+
+fn challenge_from_snapshot(challenge: &sybil_verifier::ChallengeSnapshot) -> Challenge {
+    Challenge {
+        id: ChallengeId(challenge.id),
+        challenger: challenge.challenger,
+        proposal_id: ProposalId(challenge.proposal_id),
+        bond_amount: challenge.bond_amount,
+        proposed_payout_nanos: challenge.proposed_payout_nanos,
+        reason: challenge.reason.clone(),
+        challenged_at_ms: challenge.challenged_at_ms,
+    }
+}
+
+fn resolution_record_from_snapshot(
+    record: &sybil_verifier::ResolutionRecordSnapshot,
+) -> ResolutionRecord {
+    ResolutionRecord {
+        market_id: record.market_id,
+        payout_nanos: record.payout_nanos,
+        resolved_by: oracle_source_from_snapshot(&record.resolved_by),
+        resolved_at_ms: record.resolved_at_ms,
+        proposal: record
+            .proposal
+            .as_ref()
+            .map(resolution_proposal_from_snapshot),
+        challenge: record.challenge.as_ref().map(challenge_from_snapshot),
+    }
+}
+
+fn oracle_source_from_snapshot(source: &OracleSourceSnapshot) -> OracleSource {
+    match source {
+        OracleSourceSnapshot::Admin => OracleSource::Admin,
+        OracleSourceSnapshot::DataFeed(feed_id) => OracleSource::DataFeed(FeedId(*feed_id)),
+        OracleSourceSnapshot::AutomatedL0 => OracleSource::AutomatedL0,
+    }
+}
+
+fn bridge_state_from_witness(witness: &BlockWitness) -> Result<BridgeState, StoreError> {
+    let deposit_frontier = folded_deposit_frontier(
+        &witness.deposit_accumulator,
+        &witness.pre_state_sidecar,
+        &witness.state_sidecar,
+    )?;
+    let mut withdrawals = BTreeMap::new();
+    for withdrawal in &witness.state_sidecar.bridge.withdrawals {
+        let leaf = WithdrawalLeaf {
+            withdrawal_id: withdrawal.withdrawal_id,
+            account_id: AccountId(withdrawal.account_id),
+            recipient: withdrawal.recipient,
+            token_address: withdrawal.token,
+            amount_token_units: withdrawal.amount_token_units,
+            amount_nanos: withdrawal.amount_nanos,
+            expiry_height: withdrawal.expiry_height,
+            nullifier: withdrawal.nullifier,
+            created_at_height: witness.header.height,
+            l1_status: L1WithdrawalStatus::NotRequested,
+            l1_requested_at_unix: None,
+            l1_executable_at_unix: None,
+            l1_finalized_at_unix: None,
+            l1_cancelled_at_unix: None,
+            l1_tx_hash: None,
+        };
+        if withdrawals.insert(leaf.withdrawal_id, leaf).is_some() {
+            return Err(import_err(format!(
+                "duplicate withdrawal id {}",
+                withdrawal.withdrawal_id
+            )));
+        }
+    }
+
+    Ok(BridgeState {
+        deposit_cursor: witness.state_sidecar.bridge.deposit_cursor,
+        deposit_root: witness.state_sidecar.bridge.deposit_root,
+        deposit_frontier,
+        deposit_log: Vec::new(),
+        next_withdrawal_id: witness.state_sidecar.bridge.next_withdrawal_id,
+        withdrawals,
+    })
+}
+
+fn folded_deposit_frontier(
+    accumulator: &DepositAccumulatorWitness,
+    pre_sidecar: &StateSidecarSnapshot,
+    post_sidecar: &StateSidecarSnapshot,
+) -> Result<sybil_l1_protocol::DepositFrontier, StoreError> {
+    if accumulator.pre_count != pre_sidecar.bridge.deposit_cursor {
+        return Err(import_err(format!(
+            "deposit pre_count {} does not match pre-sidecar cursor {}",
+            accumulator.pre_count, pre_sidecar.bridge.deposit_cursor
+        )));
+    }
+    let pre_root = sybil_l1_protocol::deposit_root_from_frontier(
+        &accumulator.pre_frontier,
+        accumulator.pre_count,
+    )
+    .ok_or_else(|| import_err("deposit pre-frontier count exceeds tree capacity"))?;
+    if pre_root != pre_sidecar.bridge.deposit_root {
+        return Err(import_err(format!(
+            "deposit pre-frontier root {} does not match pre-sidecar root {}",
+            hex32(pre_root),
+            hex32(pre_sidecar.bridge.deposit_root)
+        )));
+    }
+
+    let expected_post_count = accumulator
+        .pre_count
+        .checked_add(accumulator.new_deposits.len() as u64)
+        .ok_or_else(|| import_err("deposit cursor overflow"))?;
+    if expected_post_count != post_sidecar.bridge.deposit_cursor {
+        return Err(import_err(format!(
+            "deposit cursor after fold {} does not match post-sidecar cursor {}",
+            expected_post_count, post_sidecar.bridge.deposit_cursor
+        )));
+    }
+
+    let leaves = accumulator
+        .new_deposits
+        .iter()
+        .enumerate()
+        .map(|(index, deposit)| {
+            let expected_id = accumulator.pre_count + index as u64 + 1;
+            if deposit.deposit_id != expected_id {
+                return Err(import_err(format!(
+                    "deposit id mismatch at delta index {index}: expected {expected_id}, got {}",
+                    deposit.deposit_id
+                )));
+            }
+            Ok(deposit_leaf_from_witness(deposit))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let prefix_roots = sybil_l1_protocol::deposit_frontier_prefix_roots(
+        &accumulator.pre_frontier,
+        accumulator.pre_count,
+        &leaves,
+    )
+    .ok_or_else(|| import_err("deposit frontier delta exceeds tree capacity"))?;
+    for (deposit, root) in accumulator.new_deposits.iter().zip(&prefix_roots) {
+        if deposit.deposit_root != *root {
+            return Err(import_err(format!(
+                "deposit {} root {} does not match folded root {}",
+                deposit.deposit_id,
+                hex32(deposit.deposit_root),
+                hex32(*root)
+            )));
+        }
+    }
+    let post_root = prefix_roots.last().copied().unwrap_or(pre_root);
+    if post_root != post_sidecar.bridge.deposit_root {
+        return Err(import_err(format!(
+            "deposit post-frontier root {} does not match post-sidecar root {}",
+            hex32(post_root),
+            hex32(post_sidecar.bridge.deposit_root)
+        )));
+    }
+
+    sybil_l1_protocol::deposit_frontier_after_prefix(
+        &accumulator.pre_frontier,
+        accumulator.pre_count,
+        &leaves,
+    )
+    .ok_or_else(|| import_err("deposit frontier delta exceeds tree capacity"))
+}
+
+fn deposit_leaf_from_witness(deposit: &L1DepositWitness) -> sybil_l1_protocol::DepositLeaf {
+    sybil_l1_protocol::DepositLeaf {
+        chain_id: deposit.chain_id,
+        vault_address: deposit.vault_address,
+        deposit_id: deposit.deposit_id,
+        token_address: deposit.token_address,
+        sender: deposit.sender,
+        sybil_account_key: deposit.sybil_account_key,
+        amount_token_units: deposit.amount_token_units,
+    }
+}
+
+fn resting_orders_from_sidecar(sidecar: &StateSidecarSnapshot) -> Vec<RestingOrder> {
+    sidecar
+        .resting_orders
+        .iter()
+        .map(|snapshot| {
+            let reserved_positions = snapshot
+                .reserved_positions
+                .iter()
+                .map(|&(market, outcome, qty)| ((market, outcome), qty))
+                .collect();
+            RestingOrder {
+                order: snapshot.order.clone(),
+                account_id: AccountId(snapshot.account_id),
+                created_at: snapshot.created_at,
+                expires_at_block: snapshot.expires_at_block,
+                reserved_balance: snapshot.reserved_balance,
+                reserved_positions,
+                has_been_matched: false,
+                original_max_fill: snapshot.order.max_fill.0,
+                created_at_ms: 0,
+            }
+        })
+        .collect()
+}
+
+fn block_header_from_witness(header: &WitnessBlockHeader) -> BlockHeader {
+    BlockHeader {
+        height: header.height,
+        parent_hash: header.parent_hash,
+        state_root: header.state_root,
+        events_root: header.events_root,
+        order_count: header.order_count,
+        fill_count: header.fill_count,
+        timestamp_ms: header.timestamp_ms,
+    }
+}
+
+fn next_order_id_from_witness(witness: &BlockWitness) -> Result<u64, StoreError> {
+    let max_id = witness
+        .orders
+        .iter()
+        .map(|order| order.order.id)
+        .chain(
+            witness
+                .rejections
+                .iter()
+                .map(|rejection| rejection.order.id),
+        )
+        .chain(
+            witness
+                .state_sidecar
+                .resting_orders
+                .iter()
+                .map(|resting| resting.order.id),
+        )
+        .chain(witness.fills.iter().map(|fill| fill.order_id))
+        .max();
+    match max_id {
+        Some(max_id) => max_id
+            .checked_add(1)
+            .ok_or_else(|| import_err("order id overflow deriving next_order_id")),
+        None => Ok(1),
+    }
+}
+
+fn empty_import_analytics() -> AnalyticsRestoredState {
+    AnalyticsRestoredState {
+        last_clearing_prices: HashMap::new(),
+        market_volumes: HashMap::new(),
+        account_fills: Vec::new(),
+        trader_tracker: Default::default(),
+        price_tracker_volume: Default::default(),
+        price_tracker_clearing_history: Default::default(),
+        liquidity_tracker: Default::default(),
+        order_stats_tracker: Default::default(),
+        welfare_tracker: Default::default(),
+        first_deposit_ms: HashMap::new(),
+        fill_total_counts: HashMap::new(),
+        cost_basis_tracker: Default::default(),
+        history_event_next_seq: 0,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3391,6 +4066,36 @@ mod tests {
             pre_state_sidecar: sybil_verifier::StateSidecarSnapshot::default(),
             resolved_markets: Vec::new(),
         }
+    }
+
+    fn eth_address(seed: u8) -> [u8; 20] {
+        [seed; 20]
+    }
+
+    fn next_l1_deposit_for(
+        seq: &crate::sequencer::BlockSequencer,
+        account_id: AccountId,
+        amount_token_units: u64,
+    ) -> crate::bridge::L1Deposit {
+        let mut deposit = crate::bridge::L1Deposit {
+            deposit_id: seq.bridge_state().deposit_cursor.saturating_add(1),
+            account_id,
+            chain_id: 1,
+            vault_address: eth_address(0x10),
+            token_address: eth_address(0x20),
+            sender: eth_address(0x30),
+            sybil_account_key: crate::bridge::account_key(account_id),
+            amount_token_units,
+            deposit_root: [0; 32],
+        };
+        let mut frontier = seq.bridge_state().deposit_frontier;
+        deposit.deposit_root = crate::bridge::append_deposit_frontier(
+            &mut frontier,
+            seq.bridge_state().deposit_cursor,
+            &deposit,
+        )
+        .expect("test deposit fits in frontier");
+        deposit
     }
 
     fn sample_sealed_block(header: &BlockHeader) -> SealedBlock {
@@ -3651,6 +4356,7 @@ mod tests {
                         resolution_config: Some(crate::market_info::ResolutionConfig {
                             template: "admin_immediate".to_string(),
                         }),
+                        committed_metadata_digest: None,
                     },
                 );
             }
@@ -4803,6 +5509,341 @@ mod tests {
         assert_eq!(fills.len(), 1);
         assert_eq!(fills[0].fill_qty, 5);
         assert_eq!(fills[0].block_height, 1);
+    }
+
+    #[tokio::test]
+    async fn import_witness_drill_restores_head_and_produces_children() {
+        use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+        use matching_engine::{outcome_buy, outcome_sell, MarketId, NANOS_PER_DOLLAR};
+
+        let source_path = temp_db_path("store-import-witness-source");
+        let fresh_path = temp_db_path("store-import-witness-fresh");
+        let source_store = Store::open(&source_path).unwrap();
+        let oracle = Arc::new(AdminOracle::new());
+        let config = SequencerConfig::default();
+
+        let mut markets = MarketSet::new();
+        let active_a = markets.add_binary("Active A");
+        let active_b = markets.add_binary("Active B");
+        let fill_market = markets.add_binary("Fill Market");
+        let resolved_market = markets.add_binary("Resolved Market");
+
+        let mut accounts = AccountStore::new();
+        let resting_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let fill_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let fill_seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let resolve_buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let resolve_seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let bridge_account = accounts.create_account(0);
+        accounts
+            .get_mut(fill_seller)
+            .unwrap()
+            .positions
+            .insert((fill_market, 0), 10);
+        accounts
+            .get_mut(resolve_seller)
+            .unwrap()
+            .positions
+            .insert((resolved_market, 0), 10);
+
+        let mut group = matching_engine::MarketGroup::new("Active group");
+        group.add_market(active_a);
+        group.add_market(active_b);
+
+        let mut seq = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![group],
+            oracle.clone(),
+            config.clone(),
+        );
+
+        let opening_deposit = next_l1_deposit_for(&seq, bridge_account, 50_000);
+        seq.ingest_l1_deposit(opening_deposit).unwrap();
+
+        let first = seq.produce_block(
+            vec![
+                OrderSubmission {
+                    account_id: resting_buyer,
+                    orders: vec![outcome_buy(
+                        &markets,
+                        0,
+                        active_a,
+                        0,
+                        NANOS_PER_DOLLAR / 2,
+                        10,
+                    )],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: fill_buyer,
+                    orders: vec![outcome_buy(&markets, 0, fill_market, 0, 700_000_000, 5)],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: fill_seller,
+                    orders: vec![outcome_sell(&markets, 0, fill_market, 0, 300_000_000, 5)],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: resolve_buyer,
+                    orders: vec![outcome_buy(&markets, 0, resolved_market, 0, 700_000_000, 5)],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: resolve_seller,
+                    orders: vec![outcome_sell(
+                        &markets,
+                        0,
+                        resolved_market,
+                        0,
+                        300_000_000,
+                        5,
+                    )],
+                    mm_constraint: None,
+                },
+            ],
+            1_000,
+        );
+        assert_eq!(first.block.header.height, 1);
+        assert!(!first.block.fills.is_empty());
+        assert_eq!(
+            seq.order_book().len(),
+            1,
+            "first block leaves one order resting"
+        );
+
+        let deposit = next_l1_deposit_for(&seq, bridge_account, 100_000);
+        seq.ingest_l1_deposit(deposit).unwrap();
+        seq.request_bridge_withdrawal(crate::bridge::BridgeWithdrawalRequest {
+            account_id: bridge_account,
+            chain_id: 1,
+            vault_address: eth_address(0x10),
+            recipient: eth_address(0x40),
+            token_address: eth_address(0x20),
+            amount_token_units: 10_000,
+            expiry_height: 10,
+        })
+        .unwrap();
+        seq.resolve_market(resolved_market, Nanos(NANOS_PER_DOLLAR), 2_000)
+            .unwrap();
+
+        let second = seq.produce_block(
+            vec![
+                OrderSubmission {
+                    account_id: fill_buyer,
+                    orders: vec![outcome_buy(&markets, 0, fill_market, 0, 700_000_000, 5)],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: fill_seller,
+                    orders: vec![outcome_sell(&markets, 0, fill_market, 0, 300_000_000, 5)],
+                    mm_constraint: None,
+                },
+                OrderSubmission {
+                    account_id: AccountId(99_999),
+                    orders: vec![outcome_buy(&markets, 0, active_b, 0, 400_000_000, 1)],
+                    mm_constraint: None,
+                },
+            ],
+            2_000,
+        );
+
+        let witness = &second.witness;
+        assert_eq!(second.block.header.height, 2);
+        assert!(!witness.orders.is_empty());
+        assert!(!witness.rejections.is_empty());
+        assert!(!witness.system_events.is_empty());
+        assert!(!witness.deposit_accumulator.new_deposits.is_empty());
+        assert_ne!(
+            witness.deposit_accumulator.pre_frontier,
+            sybil_l1_protocol::empty_deposit_frontier()
+        );
+        assert!(!witness.fills.is_empty());
+        assert!(!witness.clearing_prices.is_empty());
+        assert!(!witness.market_groups.is_empty());
+        assert!(!witness.post_state.is_empty());
+        assert!(!witness.pre_state_sidecar.markets.is_empty());
+        assert!(!witness.state_sidecar.markets.is_empty());
+        assert!(!witness.state_sidecar.resting_orders.is_empty());
+        assert!(!witness.state_sidecar.account_reservations.is_empty());
+        assert!(!witness.state_sidecar.bridge.withdrawals.is_empty());
+        assert!(!witness.resolved_markets.is_empty());
+        assert!(witness.state_sidecar.markets.iter().any(|market| {
+            market.market_id == resolved_market
+                && matches!(
+                    market.status,
+                    sybil_verifier::MarketStatusSnapshot::Resolved { .. }
+                )
+        }));
+
+        source_store
+            .save_block_with_witness_and_history(seq.snapshot(), witness, &second.sealed_block())
+            .await
+            .unwrap();
+        source_store
+            .save_da_artifact(DaArtifact::from_witness(witness))
+            .await
+            .unwrap();
+        let artifact = source_store
+            .load_da_artifact(second.block.header.height)
+            .await
+            .unwrap()
+            .expect("DA artifact row exists");
+        artifact.verify_payload_integrity().unwrap();
+        let decoded = sybil_verifier::commitments::witness_schema::decode_canonical_witness_bytes(
+            &artifact.payload,
+        )
+        .unwrap();
+        assert_eq!(
+            sybil_verifier::commitments::witness_schema::canonical_witness_bytes(&decoded),
+            artifact.payload
+        );
+
+        let refused = source_store
+            .import_witness_genesis(
+                decoded.clone(),
+                Some(second.block.header.state_root),
+                config.clone(),
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(StoreError::WitnessImport(ref message)) if message.contains("already has committed recovery metadata")),
+            "expected typed non-empty-store refusal, got {refused:?}"
+        );
+
+        let fresh_store = Store::open(&fresh_path).unwrap();
+        let summary = fresh_store
+            .import_witness_genesis(
+                decoded.clone(),
+                Some(second.block.header.state_root),
+                config.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(summary.height, second.block.header.height);
+        assert_eq!(summary.state_root, second.block.header.state_root);
+        assert_eq!(summary.accounts, decoded.post_state.len());
+        assert_eq!(summary.markets, decoded.state_sidecar.markets.len());
+        assert_eq!(
+            summary.market_groups,
+            decoded.state_sidecar.market_groups.len()
+        );
+        assert_eq!(
+            summary.resting_orders,
+            decoded.state_sidecar.resting_orders.len()
+        );
+        assert_eq!(
+            summary.account_reservations,
+            decoded.state_sidecar.account_reservations.len()
+        );
+        assert_eq!(
+            summary.withdrawals,
+            decoded.state_sidecar.bridge.withdrawals.len()
+        );
+        assert_eq!(
+            summary.deposit_cursor,
+            decoded.state_sidecar.bridge.deposit_cursor
+        );
+
+        let latest = fresh_store
+            .latest_block_witness()
+            .unwrap()
+            .expect("import writes latest witness row");
+        assert_eq!(
+            sybil_verifier::commitments::witness_schema::canonical_witness_bytes(&latest),
+            sybil_verifier::commitments::witness_schema::canonical_witness_bytes(&decoded)
+        );
+
+        let restored = fresh_store.load_state().await.unwrap().unwrap();
+        assert_eq!(restored.height, second.block.header.height);
+        assert_eq!(restored.last_header.as_ref(), Some(&second.block.header));
+        assert_eq!(restored.accounts.iter().count(), summary.accounts);
+        assert_eq!(restored.markets.len(), summary.markets);
+        assert_eq!(restored.market_groups.len(), summary.market_groups);
+        assert_eq!(restored.resting_orders.len(), summary.resting_orders);
+        assert_eq!(restored.bridge_state.deposit_cursor, summary.deposit_cursor);
+        assert_eq!(restored.bridge_state.withdrawals.len(), summary.withdrawals);
+
+        let mut restored_seq =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let child = restored_seq.produce_block(Vec::new(), 3_000);
+        assert_eq!(child.block.header.height, second.block.header.height + 1);
+        assert_eq!(
+            child.block.header.parent_hash,
+            crate::block::hash_header(&second.block.header)
+        );
+        let child_verification = sybil_verifier::verify_full(&child.witness, false);
+        assert!(
+            child_verification.valid,
+            "violations: {:?}",
+            child_verification.violations
+        );
+        assert_eq!(
+            child.block.header.state_root,
+            sybil_verifier::block::compute_state_root_with_sidecar(
+                &child.witness.post_state,
+                &child.witness.state_sidecar,
+            )
+        );
+
+        let grandchild = restored_seq.produce_block(Vec::new(), 4_000);
+        assert_eq!(
+            grandchild.block.header.height,
+            second.block.header.height + 2
+        );
+        assert_eq!(
+            grandchild.block.header.parent_hash,
+            crate::block::hash_header(&child.block.header)
+        );
+        let grandchild_verification = sybil_verifier::verify_full(&grandchild.witness, false);
+        assert!(
+            grandchild_verification.valid,
+            "violations: {:?}",
+            grandchild_verification.violations
+        );
+        assert_eq!(
+            grandchild.block.header.state_root,
+            sybil_verifier::block::compute_state_root_with_sidecar(
+                &grandchild.witness.post_state,
+                &grandchild.witness.state_sidecar,
+            )
+        );
+
+        assert_eq!(
+            summary.next_market_id,
+            markets.iter().map(|market| market.id.0).max().unwrap_or(0) + 1
+        );
+        assert!(
+            summary.next_order_id
+                > witness
+                    .orders
+                    .iter()
+                    .map(|order| order.order.id)
+                    .max()
+                    .unwrap()
+        );
+        assert_eq!(summary.next_withdrawal_id, 2);
+        assert_eq!(
+            summary.next_account_id,
+            [
+                resting_buyer,
+                fill_buyer,
+                fill_seller,
+                resolve_buyer,
+                resolve_seller,
+                bridge_account,
+            ]
+            .into_iter()
+            .map(|account_id| account_id.0)
+            .max()
+            .unwrap()
+                + 1
+        );
+        assert!(seq
+            .markets()
+            .get(MarketId(summary.next_market_id))
+            .is_none());
     }
 
     #[tokio::test]

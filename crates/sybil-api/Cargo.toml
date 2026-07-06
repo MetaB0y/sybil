@@ -18,6 +18,7 @@ matching-sequencer = { path = "../matching-sequencer" }
 sybil-api-types = { path = "../sybil-api-types", features = ["openapi"] }
 sybil-client = { path = "../sybil-client" }
 sybil-oracle = { path = "../sybil-oracle" }
+sybil-verifier = { path = "../sybil-verifier" }
 axum = { version = "0.8", features = ["json", "ws"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -46,7 +47,6 @@ sha2 = "0.10"
 
 [dev-dependencies]
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
-sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
 blake3 = "1"
 tower = { version = "0.5", features = ["util"] }

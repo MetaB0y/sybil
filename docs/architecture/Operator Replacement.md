@@ -68,6 +68,34 @@ least one retrievable DA payload for an accepted root (SYB-80 §5 retention).
 6. **Users**: nothing to do. Keys unchanged, balances at H proven. In-flight
    orders after H are gone (batch-auction orders are short-lived by design).
 
+### Recovery drill
+
+Run this against a retained DA height from the source operator, then import into
+a brand-new data directory:
+
+```bash
+H=12345
+SRC=https://172-104-31-54.nip.io
+
+curl -fsS "$SRC/v1/da/$H" -o "da-$H.json"
+curl -fsS "$SRC/v1/da/$H/payload" -o "witness-$H.bin"
+EXPECT_STATE_ROOT=$(jq -r '.state_root' "da-$H.json")
+
+SYBIL_DATA_DIR=/var/lib/sybil-recovered \
+  sybil-api --import-witness \
+  --payload "witness-$H.bin" \
+  --expect-state-root "$EXPECT_STATE_ROOT"
+
+SYBIL_DATA_DIR=/var/lib/sybil-recovered sybil-api --port 3000
+```
+
+The import command refuses a non-empty store, decodes the canonical witness
+payload, recomputes the post-state root from `post_state + state_sidecar`, and
+persists H as the latest block header/witness so block H+1 links to H's header.
+Replay nonces are reset by design in this recovery path (SYB-224); signed
+orders/cancels from before replacement must be re-signed for the recovered
+operator.
+
 ### What survives, family by family (SYB-116 acceptance item)
 
 | Family | Source at recovery | Fidelity |

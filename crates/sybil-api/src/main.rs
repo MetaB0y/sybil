@@ -60,6 +60,131 @@ fn record_process_metrics() {
     }
 }
 
+fn sequencer_config_from_api(config: &ApiConfig) -> SequencerConfig {
+    SequencerConfig {
+        order_ttl_blocks: config.order_ttl_blocks,
+        block_interval: Duration::from_millis(config.block_interval_ms),
+        max_pending_bundles: config.max_pending_bundles,
+        max_orders_per_submission: config.max_orders_per_submission,
+        max_submissions_per_account_per_second: config.max_submissions_per_account_per_second,
+        submission_burst_per_account: config.submission_burst_per_account,
+        max_global_submissions_per_second: config.max_global_submissions_per_second,
+        global_submission_burst: config.global_submission_burst,
+        max_open_orders_per_account: config.max_open_orders_per_account,
+        max_pending_bundles_per_account: config.max_pending_bundles_per_account,
+        block_history_capacity: config.block_history_capacity,
+        max_price_history_points_per_market: config.max_price_history_points_per_market,
+        block_history_retention_blocks: config.block_history_retention_blocks,
+        raw_price_retention_blocks: config.raw_price_retention_blocks,
+        history_prune_interval_blocks: config.history_prune_interval_blocks,
+        history_prune_max_rows: config.history_prune_max_rows,
+        price_candle_resolutions_secs: config.price_candle_resolutions_secs.clone(),
+        price_candle_retention_secs: config.price_candle_retention_secs.clone(),
+        max_fill_history_per_account: config.max_fill_history_per_account,
+        max_equity_points_per_account: config.max_equity_points_per_account,
+        max_history_events_per_account: config.max_history_events_per_account,
+        actor_queue_warn_depth: config.actor_queue_warn_depth,
+        actor_queue_error_depth: config.actor_queue_error_depth,
+        liquidity_band_nanos: config.liquidity_band_nanos,
+        verification_fail_open: false,
+        debug_verify_full: false,
+    }
+}
+
+fn parse_expected_state_root(root: &str) -> Result<[u8; 32], String> {
+    let hex = root.strip_prefix("0x").unwrap_or(root);
+    let bytes = hex::decode(hex).map_err(|e| format!("decode --expect-state-root: {e}"))?;
+    let len = bytes.len();
+    bytes
+        .try_into()
+        .map_err(|_| format!("--expect-state-root must decode to 32 bytes, got {len}"))
+}
+
+fn hex32(bytes: &[u8; 32]) -> String {
+    format!("0x{}", hex::encode(bytes))
+}
+
+async fn run_witness_import(config: &ApiConfig) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{Error, ErrorKind};
+
+    if config.data_dir.is_empty() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "--import-witness requires --data-dir or SYBIL_DATA_DIR",
+        )
+        .into());
+    }
+    let payload = config.payload.as_ref().ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            "--import-witness requires --payload or SYBIL_IMPORT_WITNESS_PAYLOAD",
+        )
+    })?;
+    let expect_state_root = config
+        .expect_state_root
+        .as_deref()
+        .map(parse_expected_state_root)
+        .transpose()
+        .map_err(|e| Error::new(ErrorKind::InvalidInput, e))?;
+
+    let payload_bytes = std::fs::read(payload).map_err(|e| {
+        Error::new(
+            e.kind(),
+            format!("read witness payload {}: {e}", payload.display()),
+        )
+    })?;
+    let witness =
+        sybil_verifier::commitments::witness_schema::decode_canonical_witness_bytes(&payload_bytes)
+            .map_err(|e| {
+                Error::new(
+                    ErrorKind::InvalidData,
+                    format!("decode witness payload: {e}"),
+                )
+            })?;
+
+    let data_dir = std::path::Path::new(&config.data_dir);
+    std::fs::create_dir_all(data_dir).map_err(|e| {
+        Error::new(
+            e.kind(),
+            format!("create data dir {}: {e}", data_dir.display()),
+        )
+    })?;
+    let db_path = data_dir.join("sybil.redb");
+    let store = matching_sequencer::store::Store::open(&db_path)
+        .map_err(|e| Error::other(format!("open persistent store {}: {e}", db_path.display())))?;
+    let summary = store
+        .import_witness_genesis(
+            witness,
+            expect_state_root,
+            sequencer_config_from_api(config),
+        )
+        .await
+        .map_err(|e| Error::other(format!("import witness genesis: {e}")))?;
+
+    println!("imported canonical witness into {}", db_path.display());
+    println!("height={}", summary.height);
+    println!("state_root={}", hex32(&summary.state_root));
+    println!(
+        "accounts={} markets={} market_groups={} resting_orders={} reservations={} withdrawals={}",
+        summary.accounts,
+        summary.markets,
+        summary.market_groups,
+        summary.resting_orders,
+        summary.account_reservations,
+        summary.withdrawals
+    );
+    println!(
+        "deposit_cursor={} next_account_id={} next_market_id={} next_order_id={} next_withdrawal_id={}",
+        summary.deposit_cursor,
+        summary.next_account_id,
+        summary.next_market_id,
+        summary.next_order_id,
+        summary.next_withdrawal_id
+    );
+    println!("replay nonces reset during import (SYB-224); clients must re-sign submissions");
+    Ok(())
+}
+
 fn init_telemetry() -> Telemetry {
     // Prometheus metrics recorder
     let prometheus_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -126,6 +251,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = ApiConfig::parse();
 
+    if config.import_witness {
+        let result = run_witness_import(&config).await;
+        if let Some(provider) = tracer_provider {
+            if let Err(e) = provider.shutdown() {
+                tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
+            }
+        }
+        return result;
+    }
+
     // Deployment-profile preflight (SYB-133): log the active profile + every
     // knob diverging from the prod-intended baseline, and fail closed when a
     // `prod` start has dev-only knobs wired in. Runs before any store/socket
@@ -191,34 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let seq_config = SequencerConfig {
-        order_ttl_blocks: config.order_ttl_blocks,
-        block_interval: Duration::from_millis(config.block_interval_ms),
-        max_pending_bundles: config.max_pending_bundles,
-        max_orders_per_submission: config.max_orders_per_submission,
-        max_submissions_per_account_per_second: config.max_submissions_per_account_per_second,
-        submission_burst_per_account: config.submission_burst_per_account,
-        max_global_submissions_per_second: config.max_global_submissions_per_second,
-        global_submission_burst: config.global_submission_burst,
-        max_open_orders_per_account: config.max_open_orders_per_account,
-        max_pending_bundles_per_account: config.max_pending_bundles_per_account,
-        block_history_capacity: config.block_history_capacity,
-        max_price_history_points_per_market: config.max_price_history_points_per_market,
-        block_history_retention_blocks: config.block_history_retention_blocks,
-        raw_price_retention_blocks: config.raw_price_retention_blocks,
-        history_prune_interval_blocks: config.history_prune_interval_blocks,
-        history_prune_max_rows: config.history_prune_max_rows,
-        price_candle_resolutions_secs: config.price_candle_resolutions_secs.clone(),
-        price_candle_retention_secs: config.price_candle_retention_secs.clone(),
-        max_fill_history_per_account: config.max_fill_history_per_account,
-        max_equity_points_per_account: config.max_equity_points_per_account,
-        max_history_events_per_account: config.max_history_events_per_account,
-        actor_queue_warn_depth: config.actor_queue_warn_depth,
-        actor_queue_error_depth: config.actor_queue_error_depth,
-        liquidity_band_nanos: config.liquidity_band_nanos,
-        verification_fail_open: false,
-        debug_verify_full: false,
-    };
+    let seq_config = sequencer_config_from_api(&config);
 
     let handle = if let Some(state) = restored {
         tracing::info!(

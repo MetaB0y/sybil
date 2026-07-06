@@ -4505,6 +4505,7 @@ mod tests {
             resolution_config: Some(ResolutionConfig {
                 template: "wal_template".to_string(),
             }),
+            committed_metadata_digest: None,
         };
         let metadata_market = handle
             .create_market_with_metadata("metadata wal market".to_string(), metadata.clone())

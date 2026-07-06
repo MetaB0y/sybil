@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
@@ -229,6 +231,20 @@ pub struct ApiConfig {
     #[arg(long, default_value = "", env = "SYBIL_DATA_DIR")]
     pub data_dir: String,
 
+    /// Import a canonical block witness payload into an empty persistent store,
+    /// then exit. Replay nonces are reset during import (SYB-224); clients must
+    /// re-sign orders/cancels for the recovered operator.
+    #[arg(long, default_value = "false", env = "SYBIL_IMPORT_WITNESS")]
+    pub import_witness: bool,
+
+    /// Canonical witness payload file to import when `--import-witness` is set.
+    #[arg(long, env = "SYBIL_IMPORT_WITNESS_PAYLOAD", value_name = "PATH")]
+    pub payload: Option<PathBuf>,
+
+    /// Expected post-state root for the imported witness, as 32-byte hex.
+    #[arg(long, env = "SYBIL_IMPORT_WITNESS_EXPECT_STATE_ROOT")]
+    pub expect_state_root: Option<String>,
+
     /// Path to arena's live decisions SQLite database. Empty disables native
     /// bot-decision analytics in the dashboard.
     #[arg(long, default_value = "", env = "SYBIL_ARENA_DB_PATH")]
@@ -306,6 +322,9 @@ impl Default for ApiConfig {
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,
             data_dir: String::new(),
+            import_witness: false,
+            payload: None,
+            expect_state_root: None,
             arena_db_path: String::new(),
             market_ref_data_path: String::new(),
             event_snapshot_dir: String::new(),
