@@ -1,3 +1,11 @@
+---
+tags: [validium, recovery, design]
+layer: verification
+crate: sybil-l1-protocol
+status: planned
+last_verified: 2026-07-06
+---
+
 # Operator Replacement & Emergency State Disclosure
 
 Status: **DRAFT — for ratification** (SYB-116)
