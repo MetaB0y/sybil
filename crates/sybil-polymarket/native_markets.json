@@ -1,0 +1,266 @@
+{
+  "description": "Native Sybil AI benchmark market catalog (SYB-151). Entries are research-backed (2026-07-06 snapshot, see docs in the Linear ticket): every source access path was exercised live; resolution criteria are frontend-displayable and name the binding source, read time, tie-breaks, and discontinuation handling. openrouter_top_app_dec_2026 ships disabled until its outcome set is refreshed against the live apps board.",
+  "markets": [
+    {
+      "id": "aa_intelligence_leader_2026",
+      "enabled": true,
+      "title": "Which company will lead the Artificial Analysis Intelligence Index at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": { "min": 0.45, "max": 0.80, "initial": 0.62 }
+          },
+          {
+            "id": "openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": { "min": 0.08, "max": 0.40, "initial": 0.20 }
+          },
+          {
+            "id": "google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": { "min": 0.04, "max": 0.25, "initial": 0.10 }
+          },
+          {
+            "id": "z_ai",
+            "title": "Z AI",
+            "enabled": true,
+            "quote_range": { "min": 0.02, "max": 0.12, "initial": 0.03 }
+          },
+          {
+            "id": "other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": { "min": 0.02, "max": 0.20, "initial": 0.05 }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the AI provider whose model occupies rank #1 on the Artificial Analysis 'Intelligence Index' leaderboard at https://artificialanalysis.ai/leaderboards/models as read at 2026-12-31 23:59 UTC. Attribution is to the model's provider organization (any Claude model = Anthropic, any GPT model = OpenAI, any Gemini model = Google). If the top provider is not among the listed outcomes it resolves Other. Tie-break: if two models share the highest integer index score, the one listed higher in AA's own page ordering wins. If Artificial Analysis discontinues the leaderboard, renames the metric, or ships a new index methodology before the read date, resolution uses the highest-numbered 'Intelligence Index' variant still displayed on that page; if no such leaderboard exists, the market voids.",
+      "source_url": "https://artificialanalysis.ai/leaderboards/models",
+      "category": "AI",
+      "resolution_source": {
+        "type": "api_poll",
+        "endpoint": "https://artificialanalysis.ai/api/v2/data/llms/models",
+        "method": "GET",
+        "notes": "Requires an AA API key (free tier: 100 req/day, internal use + attribution only; redistribution needs a Commercial license). Resolve by provider of the top Intelligence Index model; the public leaderboard page is the human-readable backstop. Snapshot 2026-07-06: #1 Claude Fable 5 (index 60), Anthropic holds 4 of top 5."
+      }
+    },
+    {
+      "id": "openrouter_top_model_dec_2026",
+      "enabled": true,
+      "title": "Which model will be #1 by token usage on OpenRouter for the final week of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "deepseek",
+            "title": "A DeepSeek model",
+            "enabled": true,
+            "quote_range": { "min": 0.10, "max": 0.45, "initial": 0.25 }
+          },
+          {
+            "id": "xiaomi",
+            "title": "A Xiaomi model",
+            "enabled": true,
+            "quote_range": { "min": 0.08, "max": 0.40, "initial": 0.20 }
+          },
+          {
+            "id": "minimax",
+            "title": "A MiniMax model",
+            "enabled": true,
+            "quote_range": { "min": 0.05, "max": 0.35, "initial": 0.15 }
+          },
+          {
+            "id": "z_ai_glm",
+            "title": "A Z AI (GLM) model",
+            "enabled": true,
+            "quote_range": { "min": 0.03, "max": 0.25, "initial": 0.10 }
+          },
+          {
+            "id": "anthropic",
+            "title": "An Anthropic model",
+            "enabled": true,
+            "quote_range": { "min": 0.02, "max": 0.20, "initial": 0.08 }
+          },
+          {
+            "id": "google",
+            "title": "A Google model",
+            "enabled": true,
+            "quote_range": { "min": 0.02, "max": 0.15, "initial": 0.05 }
+          },
+          {
+            "id": "openai",
+            "title": "An OpenAI model",
+            "enabled": true,
+            "quote_range": { "min": 0.02, "max": 0.15, "initial": 0.05 }
+          },
+          {
+            "id": "other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": { "min": 0.05, "max": 0.30, "initial": 0.12 }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the authoring organization of the model with the highest total token usage on OpenRouter aggregated over the 7 UTC days 2026-12-25 through 2026-12-31 inclusive, per OpenRouter's daily rankings dataset (summed across those days), with the public weekly rankings page https://openrouter.ai/rankings as the human-readable backstop. If the top vendor is not a listed outcome, resolves Other. Tie-break: higher single-day peak inside the window. If OpenRouter stops publishing the rankings dataset before the read date, resolution uses the last complete published week of 2026; if no 2026 data is retrievable, the market voids.",
+      "source_url": "https://openrouter.ai/rankings",
+      "category": "AI",
+      "resolution_source": {
+        "type": "api_poll",
+        "endpoint": "https://openrouter.ai/docs/api/api-reference/datasets/get-rankings-daily",
+        "method": "GET",
+        "notes": "Dataset endpoint requires an OpenRouter API key (held for the arena bots); unauthenticated path guesses 404, so the endpoint URL here points at the dataset's API documentation - the adapter must follow the documented authenticated path. Snapshot 2026-07-05: #1 Xiaomi Mimo V2.5 (623.6B tok/day), DeepSeek V4 Flash 618.5B, MiniMax M3 528.6B; Chinese-origin models are over 45% of traffic."
+      }
+    },
+    {
+      "id": "openrouter_top_app_dec_2026",
+      "enabled": false,
+      "title": "What will be the #1 app by token usage on OpenRouter for the final week of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "cline",
+            "title": "Cline",
+            "enabled": true,
+            "quote_range": { "min": 0.10, "max": 0.45, "initial": 0.25 }
+          },
+          {
+            "id": "roo_code",
+            "title": "Roo Code",
+            "enabled": true,
+            "quote_range": { "min": 0.08, "max": 0.40, "initial": 0.20 }
+          },
+          {
+            "id": "kilo_code",
+            "title": "Kilo Code",
+            "enabled": true,
+            "quote_range": { "min": 0.05, "max": 0.35, "initial": 0.15 }
+          },
+          {
+            "id": "sillytavern",
+            "title": "SillyTavern",
+            "enabled": true,
+            "quote_range": { "min": 0.03, "max": 0.25, "initial": 0.10 }
+          },
+          {
+            "id": "openrouter_direct",
+            "title": "OpenRouter (direct)",
+            "enabled": true,
+            "quote_range": { "min": 0.03, "max": 0.25, "initial": 0.10 }
+          },
+          {
+            "id": "other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": { "min": 0.08, "max": 0.40, "initial": 0.20 }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the app ranked #1 by token usage on OpenRouter's public app rankings for the 7 UTC days 2026-12-25 through 2026-12-31, per OpenRouter's app-rankings dataset, with https://openrouter.ai/rankings/apps as the human-readable backstop. If the #1 app is not a listed outcome, resolves Other. Tie-break: higher trailing-week total. Voids if OpenRouter discontinues app rankings and no 2026 data is retrievable.",
+      "source_url": "https://openrouter.ai/rankings/apps",
+      "category": "AI",
+      "resolution_source": {
+        "type": "api_poll",
+        "endpoint": "https://openrouter.ai/docs/api/api-reference/datasets/get-app-rankings",
+        "method": "GET",
+        "notes": "DISABLED until the outcome set is refreshed against the live apps board (the 2026-07-06 research pass could not re-verify it; the listed apps are historically prominent OpenRouter coding agents). Dataset requires the OpenRouter API key."
+      }
+    },
+    {
+      "id": "metr_time_horizon_8h_eoy2026",
+      "enabled": true,
+      "title": "Will the best model exceed an 8-hour 50% time horizon on METR Time Horizons at end of 2026?",
+      "outcome_set": {
+        "type": "binary",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves YES if, on the METR Task-Completion Time Horizons leaderboard at https://metr.org/time-horizons/ read at 2026-12-31 23:59 UTC, the highest 50% time horizon among all displayed models is greater than 480 minutes (8 hours); otherwise NO. The value is read from the interactive chart and accompanying data by a designated human resolver (no public API exists). If METR displays a point estimate above its stated reliability ceiling (currently '>16 hrs unreliable'), the displayed central estimate still governs. If METR replaces the current methodology version with a later one, the then-current official 50% time-horizon leaderboard is used. Voids only if METR removes the time-horizon leaderboard entirely with no successor.",
+      "source_url": "https://metr.org/time-horizons/",
+      "quote_range": { "min": 0.50, "max": 0.88, "initial": 0.70 },
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Manual read-off of the METR time-horizons chart at the read date: take the maximum 50% time-horizon central estimate across all displayed models; YES iff strictly greater than 480 minutes. No machine-readable endpoint exists (chart is JS-rendered; the public GitHub repo gates computed values behind DVC). Snapshot 2026-07-06: TH1.1 blog leader Claude Opus 4.5 at 320 min; live board carries newer, higher entries."
+      }
+    },
+    {
+      "id": "context_window_above_10m_eoy2026",
+      "enabled": true,
+      "title": "Will any generally-available model advertise a context window larger than 10,000,000 tokens by end of 2026?",
+      "outcome_set": {
+        "type": "binary",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves YES if, by 2026-12-31 23:59 UTC, at least one generally-available AI model (usable via a public API or downloadable open weights; research-preview or waitlist-only access excluded) officially advertises a maximum context window strictly greater than 10,000,000 tokens, confirmed on that model's official provider documentation or launch announcement. Third-party trackers may surface the candidate, but the provider's own documentation is the binding source. Otherwise NO. The metric is the advertised maximum context window; benchmarked quality retention is not required.",
+      "source_url": "https://whatllm.org/largest-context-window-llm",
+      "quote_range": { "min": 0.18, "max": 0.55, "initial": 0.35 },
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Manual resolution by a designated resolver: identify the largest advertised context window among generally-available models via trackers (whatllm.org, morphllm.com) and confirm on the provider's official docs; YES iff strictly greater than 10,000,000 tokens. Snapshot 2026-07-06: current ceiling is Llama 4 Scout at exactly 10,000,000 (open weights), so the threshold sits strictly above today's maximum."
+      }
+    },
+    {
+      "id": "anthropic_opus_input_below_5_eoy2026",
+      "enabled": true,
+      "title": "Will Anthropic's flagship Opus base input API price be below $5/MTok at end of 2026?",
+      "outcome_set": {
+        "type": "binary",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves YES if, on Anthropic's official pricing documentation (https://platform.claude.com/docs/en/about-claude/pricing, mirror https://claude.com/pricing#api) read at 2026-12-31 23:59 UTC, the standard Base Input Tokens price of the current flagship Opus model (the highest-numbered non-deprecated Claude Opus entry) is strictly less than $5.00 per million tokens; otherwise NO. Use the standard global-inference, non-cached, non-batch price cell. If Anthropic retires the Opus line entirely, resolves NO.",
+      "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "quote_range": { "min": 0.10, "max": 0.45, "initial": 0.25 },
+      "category": "AI",
+      "resolution_source": {
+        "type": "api_poll",
+        "endpoint": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "method": "GET",
+        "notes": "Anthropic's pricing page is clean, structured, and fetches 200 to automated clients. Snapshot 2026-07-06: Opus 4.8 base input $5/MTok (output $25) - a genuine price-cut market."
+      }
+    },
+    {
+      "id": "openai_flagship_input_at_most_5_eoy2026",
+      "enabled": true,
+      "title": "Will OpenAI's flagship model standard input API price be at or below $5/MTok at end of 2026?",
+      "outcome_set": {
+        "type": "binary",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves YES if, on OpenAI's official API pricing documentation read at 2026-12-31 23:59 UTC, the standard short-context input price of OpenAI's then-current flagship general model (the highest-tier successor in the GPT-5.x/GPT-6 line) is at or below $5.00 per million input tokens; otherwise NO. The canonical page https://openai.com/api/pricing/ blocks automated fetches, so resolution reads the machine-readable mirror https://developers.openai.com/api/docs/pricing or is performed manually. Use the standard non-priority, non-batch, short-context input cell.",
+      "source_url": "https://developers.openai.com/api/docs/pricing",
+      "quote_range": { "min": 0.40, "max": 0.80, "initial": 0.60 },
+      "category": "AI",
+      "resolution_source": {
+        "type": "api_poll",
+        "endpoint": "https://developers.openai.com/api/docs/pricing",
+        "method": "GET",
+        "notes": "openai.com/api/pricing returns 403 to bots; the developers.openai.com mirror is the automatable source (manual read as fallback). Snapshot 2026-07-06: GPT-5.5 standard input $5/MTok (output $30), short-context tier at or below 272K."
+      }
+    }
+  ]
+}

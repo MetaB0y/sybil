@@ -131,6 +131,12 @@ pub struct Config {
     #[arg(long, default_value = "", env = "CURATED_MARKETS_PATH")]
     pub curated_markets_path: String,
 
+    /// Path to a native Sybil market template catalog (SYB-151). When set, the
+    /// sync actor ensures enabled native templates exist on Sybil before
+    /// mirroring Polymarket events. Empty = no native catalog.
+    #[arg(long, default_value = "", env = "NATIVE_MARKETS_PATH")]
+    pub native_markets_path: String,
+
     /// Path to the P256 signing key used to attest to resolutions. Empty
     /// disables the ResolutionActor (mirrored markets won't auto-resolve).
     /// The key's compressed SEC1 pubkey must be registered on sybil-api as

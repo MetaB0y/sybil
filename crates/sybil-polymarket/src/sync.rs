@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,7 +11,8 @@ use crate::categorize::derive_categories;
 use crate::config::Config;
 use crate::feed::FeedMessage;
 use crate::mapping::{GroupInfo, MappingStore};
-use crate::mm::MmMessage;
+use crate::mm::{MmMessage, QuoteRange};
+use crate::native::{NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange};
 use crate::polymarket::gamma::GammaClient;
 use crate::polymarket::types::{parse_iso8601_to_ms, GammaEvent, GammaMarket};
 use sybil_api_types::*;
@@ -37,6 +39,8 @@ pub struct SyncActor {
     /// sync fetches exactly these events by id instead of the volume-ranked
     /// category scan.
     curated_event_ids: Vec<String>,
+    /// Native market templates to ensure on Sybil before the mirror scan.
+    native_catalog: NativeMarketCatalog,
 }
 
 struct PendingMmNotification {
@@ -44,6 +48,11 @@ struct PendingMmNotification {
     condition_id: String,
     yes_token_id: String,
     initial_mid: f64,
+}
+
+struct PendingNativeMmNotification {
+    sybil_market_id: u32,
+    spec: NativeMarketSpec,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,6 +71,17 @@ fn plan_negrisk_group_action(
     existing_group: Option<&GroupInfo>,
 ) -> NegRiskGroupAction {
     if !event.is_neg_risk() || active_mapped_ids.len() <= 1 {
+        return NegRiskGroupAction::None;
+    }
+
+    plan_market_group_action(active_mapped_ids, existing_group)
+}
+
+fn plan_market_group_action(
+    active_mapped_ids: &[u32],
+    existing_group: Option<&GroupInfo>,
+) -> NegRiskGroupAction {
+    if active_mapped_ids.len() <= 1 {
         return NegRiskGroupAction::None;
     }
 
@@ -134,6 +154,27 @@ fn mm_group_membership(
     }
 }
 
+fn native_mm_group_membership(
+    sybil_market_id: u32,
+    expected_group_key: Option<String>,
+    group: Option<&GroupInfo>,
+) -> (Option<String>, usize) {
+    let Some(group_key) = expected_group_key else {
+        return (None, 0);
+    };
+    let in_group = group
+        .as_ref()
+        .is_some_and(|group| group.sybil_market_ids.contains(&sybil_market_id));
+    if in_group {
+        (
+            Some(group_key),
+            group.map(|group| group.sybil_market_ids.len()).unwrap_or(0),
+        )
+    } else {
+        (None, 0)
+    }
+}
+
 impl SyncActor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -145,6 +186,7 @@ impl SyncActor {
         mm_tx: mpsc::Sender<MmMessage>,
         mm_live_rx: watch::Receiver<usize>,
         curated_event_ids: Vec<String>,
+        native_catalog: NativeMarketCatalog,
     ) -> Self {
         Self {
             config,
@@ -156,6 +198,7 @@ impl SyncActor {
             mm_live_rx,
             first_sync: true,
             curated_event_ids,
+            native_catalog,
         }
     }
 
@@ -184,6 +227,12 @@ impl SyncActor {
     }
 
     async fn sync_once(&mut self) -> Result<(), crate::error::Error> {
+        // Native mode (SYB-151): ensure enabled checked-in templates exist
+        // before any Polymarket fetch. This path never uses raw Polymarket JSON
+        // and never writes `polymarket_condition_id`.
+        let mut mm_live = *self.mm_live_rx.borrow();
+        self.ensure_native_catalog(&mut mm_live).await?;
+
         // Curated mode (SYB-150): mirror exactly the allowlisted events by id.
         // Otherwise fall back to the volume-ranked category scan.
         let events = if self.curated_event_ids.is_empty() {
@@ -205,8 +254,6 @@ impl SyncActor {
         // of the watch so we never hold the borrow across an await, and bumped
         // locally as we admit so a single cycle cannot overshoot the cap before
         // the MM has processed our messages.
-        let mut mm_live = *self.mm_live_rx.borrow();
-
         let synced_before = self.mapping.read().await.event_count();
         info!(
             events = events.len(),
@@ -652,6 +699,328 @@ impl SyncActor {
 
         Ok(())
     }
+
+    async fn ensure_native_catalog(
+        &mut self,
+        mm_live: &mut usize,
+    ) -> Result<(), crate::error::Error> {
+        let specs = self.native_catalog.enabled_market_specs();
+        if specs.is_empty() {
+            return Ok(());
+        }
+
+        let mut seen_templates = HashSet::new();
+        let template_ids: Vec<String> = specs
+            .iter()
+            .filter(|spec| seen_templates.insert(spec.template_id.clone()))
+            .map(|spec| spec.template_id.clone())
+            .collect();
+
+        for template_id in template_ids {
+            let template_specs: Vec<_> = specs
+                .iter()
+                .filter(|spec| spec.template_id == template_id)
+                .cloned()
+                .collect();
+            self.ensure_native_template(&template_id, &template_specs, mm_live)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_native_template(
+        &mut self,
+        template_id: &str,
+        specs: &[NativeMarketSpec],
+        mm_live: &mut usize,
+    ) -> Result<(), crate::error::Error> {
+        if specs.is_empty() {
+            return Ok(());
+        }
+
+        let mut pending_mm = Vec::new();
+
+        for spec in specs {
+            if let Some(sybil_id) = self.mapping.read().await.native_market_id(&spec.market_key) {
+                if self.first_sync {
+                    let metadata_req = spec.metadata_request();
+                    if let Err(e) = self
+                        .sybil_client
+                        .set_market_metadata(sybil_id, &metadata_req)
+                        .await
+                    {
+                        warn!(
+                            sybil_id,
+                            native_market_key = %spec.market_key,
+                            error = %e,
+                            "native metadata backfill failed"
+                        );
+                    }
+                }
+                continue;
+            }
+
+            let create_req = spec.create_request();
+            match self.sybil_client.create_market(&create_req).await {
+                Ok(resp) => {
+                    let sybil_id = resp.market_id;
+                    info!(
+                        sybil_id,
+                        native_market_key = %spec.market_key,
+                        name = %spec.name,
+                        "created native market"
+                    );
+
+                    {
+                        let mut map = self.mapping.write().await;
+                        map.register_native_market(spec.market_key.clone(), sybil_id);
+                        if let Err(e) = map.save() {
+                            warn!(
+                                sybil_id,
+                                native_market_key = %spec.market_key,
+                                error = %e,
+                                "failed to persist native market mapping"
+                            );
+                        }
+                    }
+
+                    let metadata_req = spec.metadata_request();
+                    if let Err(e) = self
+                        .sybil_client
+                        .set_market_metadata(sybil_id, &metadata_req)
+                        .await
+                    {
+                        warn!(
+                            sybil_id,
+                            native_market_key = %spec.market_key,
+                            error = %e,
+                            "failed to set native market metadata (non-fatal; will retry next cycle)"
+                        );
+                    }
+
+                    pending_mm.push(PendingNativeMmNotification {
+                        sybil_market_id: sybil_id,
+                        spec: spec.clone(),
+                    });
+                }
+                Err(e) => {
+                    warn!(
+                        native_market_key = %spec.market_key,
+                        error = %e,
+                        "failed to create native market on Sybil"
+                    );
+                }
+            }
+        }
+
+        let active_mapped_ids: Vec<u32> = {
+            let map = self.mapping.read().await;
+            specs
+                .iter()
+                .filter_map(|spec| map.native_market_id(&spec.market_key))
+                .collect()
+        };
+        let unmapped_after = specs.len().saturating_sub(active_mapped_ids.len());
+        let is_grouped = specs.iter().any(|spec| spec.group_key.is_some());
+
+        if is_grouped {
+            let existing_group = self.mapping.read().await.native_group(template_id);
+            let group_action = if existing_group.is_none()
+                && active_mapped_ids.len() > 1
+                && unmapped_after > 0
+            {
+                warn!(
+                    template_id,
+                    mapped = active_mapped_ids.len(),
+                    unmapped = unmapped_after,
+                    "not creating partial native MarketGroup until all enabled child markets are mapped"
+                );
+                NegRiskGroupAction::None
+            } else {
+                plan_market_group_action(&active_mapped_ids, existing_group.as_ref())
+            };
+
+            match group_action {
+                NegRiskGroupAction::Create(market_ids) => {
+                    let group_name = specs[0].group_name().to_string();
+                    let group_req = CreateMarketGroupRequest {
+                        name: group_name.clone(),
+                        market_ids: market_ids.clone(),
+                    };
+                    match self.sybil_client.create_market_group(&group_req).await {
+                        Ok(_) => {
+                            info!(
+                                template_id,
+                                markets = market_ids.len(),
+                                "created native market group"
+                            );
+                            let mut map = self.mapping.write().await;
+                            map.register_native_group(
+                                template_id.to_string(),
+                                GroupInfo {
+                                    group_name,
+                                    sybil_market_ids: market_ids,
+                                    neg_risk: true,
+                                },
+                            );
+                            if let Err(e) = map.save() {
+                                warn!(
+                                    template_id,
+                                    error = %e,
+                                    "failed to persist native group mapping"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                template_id,
+                                error = %e,
+                                "failed to create native market group"
+                            );
+                        }
+                    }
+                }
+                NegRiskGroupAction::Extend {
+                    missing_market_ids,
+                    existing_group_market_ids,
+                } => {
+                    let groups = match self.sybil_client.list_market_groups().await {
+                        Ok(groups) => groups,
+                        Err(e) => {
+                            warn!(
+                                template_id,
+                                missing_market_ids = ?missing_market_ids,
+                                error = %e,
+                                "failed to list Sybil market groups before native extension"
+                            );
+                            Vec::new()
+                        }
+                    };
+                    let Some(existing_group) = existing_group.as_ref() else {
+                        warn!(
+                            template_id,
+                            missing_market_ids = ?missing_market_ids,
+                            "planned native group extension without a local group mapping"
+                        );
+                        return Ok(());
+                    };
+                    let Some(group_id) = matching_sybil_group_id(&groups, existing_group) else {
+                        warn!(
+                            template_id,
+                            missing_market_ids = ?missing_market_ids,
+                            existing_group_market_ids = ?existing_group_market_ids,
+                            "could not locate current Sybil MarketGroup for native extension"
+                        );
+                        return Ok(());
+                    };
+
+                    let mut extended = Vec::new();
+                    for market_id in &missing_market_ids {
+                        let req = ExtendMarketGroupRequest {
+                            market_id: *market_id,
+                        };
+                        match self.sybil_client.extend_market_group(group_id, &req).await {
+                            Ok(group) => {
+                                info!(
+                                    template_id,
+                                    group_id,
+                                    market_id,
+                                    members = group.market_ids.len(),
+                                    "extended native market group"
+                                );
+                                extended.push(*market_id);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    template_id,
+                                    group_id,
+                                    market_id,
+                                    error = %e,
+                                    "failed to extend native market group"
+                                );
+                            }
+                        }
+                    }
+                    if !extended.is_empty() {
+                        let mut map = self.mapping.write().await;
+                        map.extend_native_group(template_id, &extended);
+                        if let Err(e) = map.save() {
+                            warn!(
+                                template_id,
+                                error = %e,
+                                "failed to persist native group extension"
+                            );
+                        }
+                    }
+                }
+                NegRiskGroupAction::None => {}
+            }
+        }
+
+        let group_after_sync = self.mapping.read().await.native_group(template_id);
+        for pending in pending_mm {
+            let (group_key, group_size) = native_mm_group_membership(
+                pending.sybil_market_id,
+                pending.spec.group_key.clone(),
+                group_after_sync.as_ref(),
+            );
+
+            if pending.spec.group_key.is_some() && group_key.is_none() {
+                warn!(
+                    template_id,
+                    sybil_id = pending.sybil_market_id,
+                    native_market_key = %pending.spec.market_key,
+                    "skipping native MM notification until group is reflected in local mapping"
+                );
+                continue;
+            }
+
+            if self.config.mm_max_markets == 0 || *mm_live < self.config.mm_max_markets {
+                match self
+                    .mm_tx
+                    .send(MmMessage::MarketNative {
+                        sybil_market_id: pending.sybil_market_id,
+                        native_market_key: pending.spec.market_key.clone(),
+                        quote_range: to_mm_quote_range(pending.spec.quote_range),
+                        group_key,
+                        group_size,
+                    })
+                    .await
+                {
+                    Ok(()) => {
+                        *mm_live += 1;
+                    }
+                    Err(e) => {
+                        warn!(
+                            sybil_id = pending.sybil_market_id,
+                            native_market_key = %pending.spec.market_key,
+                            error = %e,
+                            "failed to notify MM about native market"
+                        );
+                    }
+                }
+            } else {
+                info!(
+                    sybil_id = pending.sybil_market_id,
+                    native_market_key = %pending.spec.market_key,
+                    limit = self.config.mm_max_markets,
+                    live = *mm_live,
+                    "created native market but skipped live MM tracking (cap reached)"
+                );
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn to_mm_quote_range(range: NativeQuoteRange) -> QuoteRange {
+    QuoteRange {
+        min: range.min,
+        max: range.max,
+        initial: range.initial,
+    }
 }
 
 /// Compose the off-block metadata POST payload from the Polymarket event +
@@ -806,6 +1175,24 @@ mod tests {
     }
 
     #[test]
+    fn native_group_with_late_child_plans_group_extension() {
+        let existing_group = GroupInfo {
+            group_name: "Native event".to_string(),
+            sybil_market_ids: vec![10, 11],
+            neg_risk: true,
+        };
+
+        let action = plan_market_group_action(&[10, 11, 12], Some(&existing_group));
+        assert_eq!(
+            action,
+            NegRiskGroupAction::Extend {
+                missing_market_ids: vec![12],
+                existing_group_market_ids: vec![10, 11],
+            }
+        );
+    }
+
+    #[test]
     fn late_negrisk_child_uses_group_membership_after_extension() {
         let mut existing_group = GroupInfo {
             group_name: "Election".to_string(),
@@ -821,6 +1208,28 @@ mod tests {
         assert_eq!(
             mm_group_membership("event-1", 2, Some(&existing_group)),
             (Some("event-1".to_string()), 3)
+        );
+    }
+
+    #[test]
+    fn native_mm_group_membership_requires_local_group_mapping() {
+        assert_eq!(
+            native_mm_group_membership(10, Some("native:event".to_string()), None),
+            (None, 0)
+        );
+
+        let group = GroupInfo {
+            group_name: "Native event".to_string(),
+            sybil_market_ids: vec![10, 11],
+            neg_risk: true,
+        };
+        assert_eq!(
+            native_mm_group_membership(10, Some("native:event".to_string()), Some(&group)),
+            (Some("native:event".to_string()), 2)
+        );
+        assert_eq!(
+            native_mm_group_membership(12, Some("native:event".to_string()), Some(&group)),
+            (None, 0)
         );
     }
 

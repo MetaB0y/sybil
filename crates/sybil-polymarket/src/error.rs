@@ -23,6 +23,9 @@ pub enum Error {
     #[error("Mapping error: {0}")]
     Mapping(String),
 
+    #[error("Native market catalog error: {0}")]
+    NativeCatalog(String),
+
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 

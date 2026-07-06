@@ -19,6 +19,13 @@ pub struct MappingStore {
     /// Set of polymarket event IDs already synced
     synced_events: HashSet<String>,
 
+    /// native market key -> sybil market_id
+    #[serde(default)]
+    native_to_sybil: HashMap<String, u32>,
+    /// native template id -> sybil group info
+    #[serde(default)]
+    native_template_to_group: HashMap<String, GroupInfo>,
+
     /// Persisted MM account id (PM-7). The mirror runs a single MM identity, so
     /// this is keyed implicitly by "the mirror's MM". Reattached on restart when
     /// the Sybil server still knows the account; otherwise a fresh account is
@@ -87,10 +94,32 @@ impl MappingStore {
         }
     }
 
+    /// Register a native catalog child market -> Sybil market mapping.
+    pub fn register_native_market(&mut self, native_market_key: String, sybil_market_id: u32) {
+        self.native_to_sybil
+            .insert(native_market_key, sybil_market_id);
+    }
+
+    /// Look up Sybil market_id from a native catalog child-market key.
+    pub fn native_market_id(&self, native_market_key: &str) -> Option<u32> {
+        self.native_to_sybil.get(native_market_key).copied()
+    }
+
     /// Register a NegRisk event → Sybil market group.
     pub fn register_event(&mut self, event_id: String, group_info: GroupInfo) {
         self.synced_events.insert(event_id.clone());
         self.event_to_group.insert(event_id, group_info);
+    }
+
+    /// Register a native categorical template → Sybil market group.
+    pub fn register_native_group(&mut self, template_id: String, group_info: GroupInfo) {
+        self.native_template_to_group
+            .insert(template_id, group_info);
+    }
+
+    /// Look up the Sybil market group registered for a native categorical template.
+    pub fn native_group(&self, template_id: &str) -> Option<GroupInfo> {
+        self.native_template_to_group.get(template_id).cloned()
     }
 
     /// Add newly observed Sybil markets to an existing NegRisk event mapping.
@@ -105,6 +134,17 @@ impl MappingStore {
                 }
             }
             self.synced_events.insert(event_id.to_string());
+        }
+    }
+
+    /// Add newly observed Sybil markets to an existing native group mapping.
+    pub fn extend_native_group(&mut self, template_id: &str, market_ids: &[u32]) {
+        if let Some(group) = self.native_template_to_group.get_mut(template_id) {
+            for &market_id in market_ids {
+                if !group.sybil_market_ids.contains(&market_id) {
+                    group.sybil_market_ids.push(market_id);
+                }
+            }
         }
     }
 
@@ -157,6 +197,11 @@ impl MappingStore {
         self.condition_to_sybil.len()
     }
 
+    /// Number of native child markets mapped from the checked-in catalog.
+    pub fn native_market_count(&self) -> usize {
+        self.native_to_sybil.len()
+    }
+
     /// Clear all persisted Sybil mappings while preserving the persistence path.
     ///
     /// The MM account id is cleared too: `clear()` is only invoked when the
@@ -170,6 +215,8 @@ impl MappingStore {
         self.token_to_sybil.clear();
         self.event_to_group.clear();
         self.synced_events.clear();
+        self.native_to_sybil.clear();
+        self.native_template_to_group.clear();
         self.mm_account_id = None;
     }
 
@@ -190,6 +237,23 @@ impl MappingStore {
         self.condition_to_sybil
             .iter()
             .map(|(c, id)| (c.clone(), *id))
+            .collect()
+    }
+
+    /// All mapped native catalog child markets.
+    pub fn all_native_mappings(&self) -> Vec<(String, u32)> {
+        self.native_to_sybil
+            .iter()
+            .map(|(key, id)| (key.clone(), *id))
+            .collect()
+    }
+
+    /// All Sybil market ids referenced by this mapping store.
+    pub fn all_sybil_market_ids(&self) -> Vec<u32> {
+        self.condition_to_sybil
+            .values()
+            .chain(self.native_to_sybil.values())
+            .copied()
             .collect()
     }
 
@@ -325,6 +389,7 @@ mod tests {
         let mut loaded = loaded;
         loaded.clear();
         assert_eq!(loaded.mm_account_id(), None);
+        assert_eq!(loaded.native_market_count(), 0);
     }
 
     #[test]
@@ -339,5 +404,37 @@ mod tests {
         }"#;
         let store: MappingStore = serde_json::from_str(json).unwrap();
         assert_eq!(store.mm_account_id(), None);
+        assert_eq!(store.native_market_count(), 0);
+    }
+
+    #[test]
+    fn native_markets_and_groups_roundtrip() {
+        let mut store = MappingStore::new(None);
+        store.register_native_market("native:event:a".into(), 10);
+        store.register_native_market("native:event:b".into(), 11);
+        store.register_native_group(
+            "event".into(),
+            GroupInfo {
+                group_name: "Native event".into(),
+                sybil_market_ids: vec![10, 11],
+                neg_risk: true,
+            },
+        );
+
+        assert_eq!(store.native_market_id("native:event:a"), Some(10));
+        assert_eq!(store.native_market_count(), 2);
+        assert_eq!(store.all_sybil_market_ids().len(), 2);
+
+        let json = serde_json::to_string(&store).unwrap();
+        let mut loaded: MappingStore = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.native_market_id("native:event:b"), Some(11));
+        let group = loaded.native_group("event").unwrap();
+        assert_eq!(group.sybil_market_ids, vec![10, 11]);
+
+        loaded.extend_native_group("event", &[11, 12, 12]);
+        assert_eq!(
+            loaded.native_group("event").unwrap().sybil_market_ids,
+            vec![10, 11, 12]
+        );
     }
 }

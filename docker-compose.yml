@@ -44,11 +44,13 @@ services:
       - "--mm-max-orders-per-block=64"
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--curated-markets-path=/etc/sybil/curated_markets.json"
+      - "--native-markets-path=/etc/sybil/native_markets.json"
     environment:
       RUST_LOG: "sybil_polymarket=info"
     volumes:
       - polymarket-data:/data
       - ./crates/sybil-polymarket/curated_markets.json:/etc/sybil/curated_markets.json:ro
+      - ./crates/sybil-polymarket/native_markets.json:/etc/sybil/native_markets.json:ro
     depends_on:
       sybil-api:
         condition: service_healthy

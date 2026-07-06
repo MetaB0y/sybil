@@ -21,6 +21,16 @@ const SHARE_SCALE_I64: i64 = 1_000;
 /// and stop trading rather than trading on a frozen value.
 const REFERENCE_PRICE_EVICTION_SENTINEL: u64 = 0;
 
+/// YES-price quote band for native markets. The MM seeds its midpoint from the
+/// template and keeps generated YES orders inside this range; NO orders use the
+/// complementary range.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct QuoteRange {
+    pub min: f64,
+    pub max: f64,
+    pub initial: f64,
+}
+
 fn shares_to_qty_units(shares: f64) -> u64 {
     if !shares.is_finite() || shares <= 0.0 {
         return 0;
@@ -41,7 +51,7 @@ fn qty_units_to_shares(qty_units: i64) -> f64 {
 // --------------------------------------------------------------------------- //
 
 /// Message from SyncActor to MmActor.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum MmMessage {
     /// A new market was mirrored onto Sybil.
     MarketMirrored {
@@ -55,6 +65,18 @@ pub enum MmMessage {
         /// Number of markets in the NegRisk group. 0 for standalone markets.
         group_size: usize,
     },
+    /// A native Sybil market was created from the checked-in template catalog.
+    MarketNative {
+        sybil_market_id: u32,
+        /// Stable native catalog child-market key.
+        native_market_key: String,
+        /// Template YES-price range used as the reference-free quoting source.
+        quote_range: QuoteRange,
+        /// Stable native group key for categorical markets.
+        group_key: Option<String>,
+        /// Number of markets in the categorical group. 0 for standalone binary.
+        group_size: usize,
+    },
 }
 
 // --------------------------------------------------------------------------- //
@@ -63,7 +85,7 @@ pub enum MmMessage {
 
 struct MarketState {
     sybil_market_id: u32,
-    yes_token_id: String,
+    price_source: PriceSource,
     group_key: Option<String>,
     group_size: usize,
     // Inventory (updated via periodic API sync)
@@ -74,8 +96,13 @@ struct MarketState {
     vol_window: usize,
 }
 
+enum PriceSource {
+    Mirror { yes_token_id: String },
+    Native { quote_range: QuoteRange },
+}
+
 impl MarketState {
-    fn new(
+    fn new_mirror(
         sybil_market_id: u32,
         yes_token_id: String,
         group_key: Option<String>,
@@ -87,7 +114,28 @@ impl MarketState {
         price_history.push_back(initial_mid);
         Self {
             sybil_market_id,
-            yes_token_id,
+            price_source: PriceSource::Mirror { yes_token_id },
+            group_key,
+            group_size,
+            yes_position: 0,
+            no_position: 0,
+            price_history,
+            vol_window,
+        }
+    }
+
+    fn new_native(
+        sybil_market_id: u32,
+        group_key: Option<String>,
+        group_size: usize,
+        quote_range: QuoteRange,
+        vol_window: usize,
+    ) -> Self {
+        let mut price_history = VecDeque::with_capacity(vol_window + 1);
+        price_history.push_back(quote_range.initial);
+        Self {
+            sybil_market_id,
+            price_source: PriceSource::Native { quote_range },
             group_key,
             group_size,
             yes_position: 0,
@@ -131,6 +179,15 @@ impl MarketState {
         let no_val = qty_units_to_shares(self.no_position) * (1.0 - mid);
         yes_val.abs() + no_val.abs()
     }
+
+    fn budget_mid(&self, snapshot: &PriceSnapshot) -> f64 {
+        match &self.price_source {
+            PriceSource::Mirror { yes_token_id } => {
+                snapshot.midpoints.get(yes_token_id).copied().unwrap_or(0.5)
+            }
+            PriceSource::Native { quote_range } => quote_range.initial,
+        }
+    }
 }
 
 // --------------------------------------------------------------------------- //
@@ -168,6 +225,7 @@ pub struct QuoteInput {
     pub no_position: i64,
     pub group_key: Option<String>,
     pub group_size: usize,
+    pub quote_range: Option<QuoteRange>,
 }
 
 /// Configuration for quote generation.
@@ -184,13 +242,26 @@ pub struct QuoteConfig {
 /// Generate orders for one market. Pure function — no IO, no state mutation.
 pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpec> {
     let mut orders = Vec::new();
+    let (reservation_min, reservation_max, yes_order_min, yes_order_max) =
+        if let Some(range) = input.quote_range {
+            (range.min, range.max, range.min, range.max)
+        } else {
+            (0.02, 0.98, 0.01, 0.99)
+        };
+    let no_order_min = 1.0 - yes_order_max;
+    let no_order_max = 1.0 - yes_order_min;
 
     // Avellaneda-Stoikov reservation price
-    let r = (input.mid - input.net_inventory * config.gamma * input.sigma_sq).clamp(0.02, 0.98);
+    let r = (input.mid - input.net_inventory * config.gamma * input.sigma_sq)
+        .clamp(reservation_min, reservation_max);
 
     // Adaptive spread: wider when volatile
     let vol_spread = config.base_spread * (1.0 + input.sigma_sq * 200.0);
-    let edge_room = r.min(1.0 - r);
+    let edge_room = if input.quote_range.is_some() {
+        (r - yes_order_min).min(yes_order_max - r)
+    } else {
+        r.min(1.0 - r)
+    };
     let half_spread =
         vol_spread.clamp(config.min_spread, (edge_room - 0.01).max(config.min_spread));
 
@@ -208,7 +279,7 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     let yes_bid = r - half_spread;
     let yes_ask = r + half_spread;
 
-    if !at_yes_limit && yes_bid > 0.01 && yes_bid < 0.99 {
+    if !at_yes_limit && price_in_band(yes_bid, yes_order_min, yes_order_max) {
         orders.push(OrderSpec::BuyYes {
             market_id: input.market_id,
             limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
@@ -216,7 +287,7 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         });
     }
 
-    if input.yes_position > 0 && yes_ask > 0.01 && yes_ask < 0.99 {
+    if input.yes_position > 0 && price_in_band(yes_ask, yes_order_min, yes_order_max) {
         let max_sell = input.yes_position as u64;
         let desired = shares_to_qty_units(sell_size / yes_ask);
         orders.push(OrderSpec::SellYes {
@@ -235,7 +306,7 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     let no_bid = (1.0 - r) - half_spread;
     let no_ask = (1.0 - r) + half_spread;
 
-    if !at_no_limit && no_bid > 0.01 && no_bid < 0.99 {
+    if !at_no_limit && price_in_band(no_bid, no_order_min, no_order_max) {
         orders.push(OrderSpec::BuyNo {
             market_id: input.market_id,
             limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
@@ -243,7 +314,7 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
         });
     }
 
-    if input.no_position > 0 && no_ask > 0.01 && no_ask < 0.99 {
+    if input.no_position > 0 && price_in_band(no_ask, no_order_min, no_order_max) {
         let max_sell = input.no_position as u64;
         let desired = shares_to_qty_units(sell_size / no_ask);
         orders.push(OrderSpec::SellNo {
@@ -254,6 +325,10 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     }
 
     orders
+}
+
+fn price_in_band(price: f64, min: f64, max: f64) -> bool {
+    price > 0.01 && price < 0.99 && price >= min && price <= max
 }
 
 /// Select a bounded, rotating slice of quotes for one block.
@@ -544,12 +619,41 @@ impl MmActor {
                 );
                 self.state.markets.insert(
                     sybil_market_id,
-                    MarketState::new(
+                    MarketState::new_mirror(
                         sybil_market_id,
                         yes_token_id,
                         group_key,
                         group_size,
                         initial_mid,
+                        self.config.mm_vol_window,
+                    ),
+                );
+                self.publish_live_count();
+            }
+            MmMessage::MarketNative {
+                sybil_market_id,
+                native_market_key,
+                quote_range,
+                group_key,
+                group_size,
+            } => {
+                info!(
+                    sybil_market_id,
+                    native_market_key,
+                    initial_mid = quote_range.initial,
+                    min = quote_range.min,
+                    max = quote_range.max,
+                    group_key,
+                    group_size,
+                    "MM tracking native market"
+                );
+                self.state.markets.insert(
+                    sybil_market_id,
+                    MarketState::new_native(
+                        sybil_market_id,
+                        group_key,
+                        group_size,
+                        quote_range,
                         self.config.mm_vol_window,
                     ),
                 );
@@ -603,14 +707,7 @@ impl MmActor {
             .state
             .markets
             .values()
-            .map(|ms| {
-                let mid = snapshot
-                    .midpoints
-                    .get(&ms.yes_token_id)
-                    .copied()
-                    .unwrap_or(0.5);
-                ms.exposure(mid)
-            })
+            .map(|ms| ms.exposure(ms.budget_mid(snapshot)))
             .sum();
 
         let ratio = (total_exposure / max_exposure).min(1.0);
@@ -660,32 +757,39 @@ impl MmActor {
         let mut quote_inputs = Vec::new();
 
         for ms in self.state.markets.values_mut() {
-            let Some(&mid) = snapshot.midpoints.get(&ms.yes_token_id) else {
-                // Never seen a price for this token; nothing to publish or quote.
-                continue;
+            let (mid, quote_range) = match &ms.price_source {
+                PriceSource::Mirror { yes_token_id } => {
+                    let Some(&mid) = snapshot.midpoints.get(yes_token_id) else {
+                        // Never seen a price for this token; nothing to publish or quote.
+                        continue;
+                    };
+
+                    if snapshot.token_is_stale(yes_token_id, now, staleness_ms) {
+                        // PM-6: a frozen token's reference price is evicted so downstream
+                        // `--require-reference-prices` consumers stop trading on it
+                        // rather than being picked off on the stale value.
+                        ref_prices.insert(ms.sybil_market_id, REFERENCE_PRICE_EVICTION_SENTINEL);
+                        continue;
+                    }
+
+                    // Publish the *current* reference price even when it has drifted out
+                    // of the tradeable band (PM-6): the reference must track reality
+                    // instead of freezing at the last in-band value. Quoting is still
+                    // suppressed outside the band below.
+                    ref_prices.insert(
+                        ms.sybil_market_id,
+                        (mid.clamp(0.0, 1.0) * NANOS_PER_DOLLAR as f64) as u64,
+                    );
+
+                    if !(mid > 0.01 && mid < 0.99) {
+                        // Out of band: near-resolved, don't quote.
+                        continue;
+                    }
+
+                    (mid, None)
+                }
+                PriceSource::Native { quote_range } => (quote_range.initial, Some(*quote_range)),
             };
-
-            if snapshot.token_is_stale(&ms.yes_token_id, now, staleness_ms) {
-                // PM-6: a frozen token's reference price is evicted so downstream
-                // `--require-reference-prices` consumers stop trading on it
-                // rather than being picked off on the stale value.
-                ref_prices.insert(ms.sybil_market_id, REFERENCE_PRICE_EVICTION_SENTINEL);
-                continue;
-            }
-
-            // Publish the *current* reference price even when it has drifted out
-            // of the tradeable band (PM-6): the reference must track reality
-            // instead of freezing at the last in-band value. Quoting is still
-            // suppressed outside the band below.
-            ref_prices.insert(
-                ms.sybil_market_id,
-                (mid.clamp(0.0, 1.0) * NANOS_PER_DOLLAR as f64) as u64,
-            );
-
-            if !(mid > 0.01 && mid < 0.99) {
-                // Out of band: near-resolved, don't quote.
-                continue;
-            }
 
             ms.push_price(mid);
 
@@ -698,6 +802,7 @@ impl MmActor {
                 no_position: ms.no_position,
                 group_key: ms.group_key.clone(),
                 group_size: ms.group_size,
+                quote_range,
             });
         }
         quote_inputs.sort_by_key(|input| input.market_id);
@@ -968,6 +1073,7 @@ mod tests {
             no_position: 0,
             group_key: None,
             group_size: 0,
+            quote_range: None,
         }
     }
 
@@ -1262,5 +1368,63 @@ mod tests {
 
         // Higher volatility → wider spread → lower bid
         assert!(high_bid < low_bid);
+    }
+
+    #[test]
+    fn native_quote_range_bounds_yes_and_no_prices() {
+        let config = default_config();
+        let mut input = default_input(0.5);
+        input.quote_range = Some(QuoteRange {
+            min: 0.45,
+            max: 0.55,
+            initial: 0.50,
+        });
+
+        let orders = generate_quotes(&input, &config);
+        assert!(!orders.is_empty());
+        for order in orders {
+            match order {
+                OrderSpec::BuyYes {
+                    limit_price_nanos, ..
+                }
+                | OrderSpec::SellYes {
+                    limit_price_nanos, ..
+                } => {
+                    assert!((450_000_000..=550_000_000).contains(&limit_price_nanos));
+                }
+                OrderSpec::BuyNo {
+                    limit_price_nanos, ..
+                }
+                | OrderSpec::SellNo {
+                    limit_price_nanos, ..
+                } => {
+                    assert!((450_000_000..=550_000_000).contains(&limit_price_nanos));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_market_budget_uses_template_mid_without_snapshot() {
+        let (live_tx, live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        actor.config.mm_max_exposure_dollars = 100.0;
+        actor.config.mm_budget_dollars = 1000.0;
+        actor.handle_message(MmMessage::MarketNative {
+            sybil_market_id: 99,
+            native_market_key: "native:event".to_string(),
+            quote_range: QuoteRange {
+                min: 0.30,
+                max: 0.70,
+                initial: 0.40,
+            },
+            group_key: None,
+            group_size: 0,
+        });
+        actor.state.markets.get_mut(&99).unwrap().yes_position = q(50);
+
+        assert_eq!(*live_rx.borrow(), 1);
+        let budget = actor.compute_budget(&PriceSnapshot::default());
+        assert!(budget > 0, "native budget should not require feed prices");
     }
 }

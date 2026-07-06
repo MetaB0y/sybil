@@ -12,7 +12,8 @@ use sybil_client::SybilClient;
 use sybil_polymarket::config::Config;
 use sybil_polymarket::feed::{FeedActor, PriceSnapshot};
 use sybil_polymarket::mapping::MappingStore;
-use sybil_polymarket::mm::MmActor;
+use sybil_polymarket::mm::{MmActor, MmMessage, QuoteRange};
+use sybil_polymarket::native::{NativeMarketCatalog, NativeQuoteRange};
 use sybil_polymarket::polymarket::gamma::GammaClient;
 use sybil_polymarket::resolution::ResolutionActor;
 use sybil_polymarket::signer::ResolutionSigner;
@@ -57,6 +58,14 @@ async fn resolve_mm_account(
     Ok(account.account_id)
 }
 
+fn to_mm_quote_range(range: NativeQuoteRange) -> QuoteRange {
+    QuoteRange {
+        min: range.min,
+        max: range.max,
+        initial: range.initial,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install rustls crypto provider (needed for WebSocket TLS)
@@ -92,6 +101,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         ids
     };
+    let native_catalog = if config.native_markets_path.is_empty() {
+        NativeMarketCatalog::default()
+    } else {
+        let catalog = NativeMarketCatalog::load(std::path::Path::new(&config.native_markets_path))?;
+        let enabled = catalog.enabled_market_specs().len();
+        info!(
+            path = %config.native_markets_path,
+            templates = catalog.len(),
+            enabled_markets = enabled,
+            "loaded native market template catalog"
+        );
+        catalog
+    };
     let sybil_service_token = std::env::var("SYBIL_SERVICE_TOKEN")
         .ok()
         .and_then(|value| (!value.trim().is_empty()).then_some(value));
@@ -111,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(
         events = mapping_store.event_count(),
         markets = mapping_store.market_count(),
+        native_markets = mapping_store.native_market_count(),
         "loaded mapping store"
     );
     let mapping = Arc::new(RwLock::new(mapping_store));
@@ -166,13 +189,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // mirror submit orders to markets that do not exist. Clear the mapping and
     // let the sync actor rebuild it from Polymarket.
     {
-        let mapped_markets = mapping.read().await.all_markets();
+        let mapped_markets = mapping.read().await.all_sybil_market_ids();
         if !mapped_markets.is_empty() {
             let sybil_markets = sybil_client_sync.list_market_summaries().await?;
             let sybil_ids: HashSet<u32> = sybil_markets.iter().map(|m| m.market_id).collect();
             let missing = mapped_markets
                 .iter()
-                .filter(|(market_id, _, _, _)| !sybil_ids.contains(market_id))
+                .filter(|market_id| !sybil_ids.contains(market_id))
                 .count();
 
             if missing > 0 {
@@ -262,28 +285,75 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let mut existing = {
+    let mut existing_mirror = {
         let mapping = mapping.read().await;
         match &allowed_conditions {
             Some(conditions) => mapping.all_markets_for_conditions(conditions),
             None => mapping.all_markets(),
         }
     };
-    existing.sort_by_key(|(sybil_market_id, _, _, _)| std::cmp::Reverse(*sybil_market_id));
-    if config.mm_max_markets > 0 && existing.len() > config.mm_max_markets {
+    existing_mirror.sort_by_key(|(sybil_market_id, _, _, _)| std::cmp::Reverse(*sybil_market_id));
+
+    let mut existing_mm = Vec::new();
+    {
+        let mapping = mapping.read().await;
+        for spec in native_catalog.enabled_market_specs() {
+            let Some(sybil_market_id) = mapping.native_market_id(&spec.market_key) else {
+                continue;
+            };
+            let (group_key, group_size) = if spec.group_key.is_some() {
+                let group = mapping.native_group(&spec.template_id);
+                let in_group = group
+                    .as_ref()
+                    .is_some_and(|group| group.sybil_market_ids.contains(&sybil_market_id));
+                if !in_group {
+                    warn!(
+                        sybil_market_id,
+                        native_market_key = %spec.market_key,
+                        "skipping native MM bootstrap until group mapping exists"
+                    );
+                    continue;
+                }
+                (
+                    spec.group_key.clone(),
+                    group.map(|group| group.sybil_market_ids.len()).unwrap_or(0),
+                )
+            } else {
+                (None, 0)
+            };
+            existing_mm.push(MmMessage::MarketNative {
+                sybil_market_id,
+                native_market_key: spec.market_key,
+                quote_range: to_mm_quote_range(spec.quote_range),
+                group_key,
+                group_size,
+            });
+        }
+    }
+    existing_mm.extend(existing_mirror.iter().map(
+        |(sybil_market_id, yes_token_id, group_key, group_size)| MmMessage::MarketMirrored {
+            sybil_market_id: *sybil_market_id,
+            yes_token_id: yes_token_id.clone(),
+            initial_mid: 0.5,
+            group_key: group_key.clone(),
+            group_size: *group_size,
+        },
+    ));
+
+    if config.mm_max_markets > 0 && existing_mm.len() > config.mm_max_markets {
         info!(
-            total = existing.len(),
+            total = existing_mm.len(),
             active = config.mm_max_markets,
-            "limiting MM bootstrap to newest mapped markets"
+            "limiting MM bootstrap to configured market cap"
         );
-        existing.truncate(config.mm_max_markets);
+        existing_mm.truncate(config.mm_max_markets);
     } else if config.mm_max_markets == 0 {
         info!(
-            total = existing.len(),
+            total = existing_mm.len(),
             "MM market cap disabled; bootstrapping all filtered mapped markets"
         );
     }
-    let mm_channel_size = (existing.len() + 256).max(256);
+    let mm_channel_size = (existing_mm.len() + 256).max(256);
     let (feed_tx, feed_rx) = mpsc::channel(64);
     let (mm_tx, mm_rx) = mpsc::channel(mm_channel_size);
     let (price_tx, price_rx) = watch::channel(PriceSnapshot::default());
@@ -292,26 +362,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mm_live_tx, mm_live_rx) = watch::channel(0usize);
 
     // Bootstrap MM with existing markets from mapping
-    if !existing.is_empty() {
+    if !existing_mm.is_empty() {
         info!(
-            count = existing.len(),
+            count = existing_mm.len(),
             "bootstrapping MM with existing markets"
         );
-        for (sybil_market_id, yes_token_id, group_key, group_size) in &existing {
-            let _ = mm_tx.try_send(sybil_polymarket::mm::MmMessage::MarketMirrored {
-                sybil_market_id: *sybil_market_id,
-                yes_token_id: yes_token_id.clone(),
-                initial_mid: 0.5,
-                group_key: group_key.clone(),
-                group_size: *group_size,
-            });
+        for msg in &existing_mm {
+            let _ = mm_tx.try_send(msg.clone());
         }
     }
 
     // Bootstrap Feed with existing token subscriptions
-    let all_tokens: Vec<String> = existing
+    let all_tokens: Vec<String> = existing_mm
         .iter()
-        .map(|(_, yes_token_id, _, _)| yes_token_id.clone())
+        .filter_map(|msg| match msg {
+            MmMessage::MarketMirrored { yes_token_id, .. } => Some(yes_token_id.clone()),
+            MmMessage::MarketNative { .. } => None,
+        })
         .collect();
     if !all_tokens.is_empty() {
         info!(
@@ -333,6 +400,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_sync = config.clone();
     let config_feed = config.clone();
     let config_mm = config.clone();
+    let native_catalog_sync = native_catalog.clone();
 
     let mapping_for_sync = mapping.clone();
     let sync_handle = tokio::spawn(async move {
@@ -345,6 +413,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             mm_tx,
             mm_live_rx,
             curated_event_ids,
+            native_catalog_sync,
         );
         actor.run(cancel_sync).await;
     });
