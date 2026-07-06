@@ -22,13 +22,23 @@ use crate::types::response::{HealthResponse, StateRootResponse};
 )]
 pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
     match state.sequencer.get_committed_height().await {
-        Ok(height) => (
-            StatusCode::OK,
-            Json(HealthResponse {
-                status: "ok".to_string(),
-                height,
-            }),
-        ),
+        Ok(height) => {
+            let genesis_hash = match state.sequencer.get_genesis_hash().await {
+                Ok(hash) => hash.map(hex::encode),
+                Err(err) => {
+                    tracing::warn!(error = %err, "health check: genesis hash unavailable");
+                    None
+                }
+            };
+            (
+                StatusCode::OK,
+                Json(HealthResponse {
+                    status: "ok".to_string(),
+                    height,
+                    genesis_hash,
+                }),
+            )
+        }
         Err(err) => {
             tracing::warn!(error = %err, "health check: sequencer unavailable");
             (
@@ -36,6 +46,7 @@ pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthRe
                 Json(HealthResponse {
                     status: "unhealthy".to_string(),
                     height: None,
+                    genesis_hash: None,
                 }),
             )
         }

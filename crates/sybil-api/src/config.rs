@@ -232,8 +232,8 @@ pub struct ApiConfig {
     pub data_dir: String,
 
     /// Import a canonical block witness payload into an empty persistent store,
-    /// then exit. Replay nonces are reset during import (SYB-224); clients must
-    /// re-sign orders/cancels for the recovered operator.
+    /// then exit. The imported store continues the witness chain instance; use
+    /// `--genesis-hash` when the payload cannot derive the height-1 header.
     #[arg(long, default_value = "false", env = "SYBIL_IMPORT_WITNESS")]
     pub import_witness: bool,
 
@@ -244,6 +244,11 @@ pub struct ApiConfig {
     /// Expected post-state root for the imported witness, as 32-byte hex.
     #[arg(long, env = "SYBIL_IMPORT_WITNESS_EXPECT_STATE_ROOT")]
     pub expect_state_root: Option<String>,
+
+    /// Original chain genesis hash for witness imports when the payload does
+    /// not include block 1. Required for importing heads beyond height 2.
+    #[arg(long, env = "SYBIL_IMPORT_WITNESS_GENESIS_HASH")]
+    pub genesis_hash: Option<String>,
 
     /// Path to arena's live decisions SQLite database. Empty disables native
     /// bot-decision analytics in the dashboard.
@@ -325,6 +330,7 @@ impl Default for ApiConfig {
             import_witness: false,
             payload: None,
             expect_state_root: None,
+            genesis_hash: None,
             arena_db_path: String::new(),
             market_ref_data_path: String::new(),
             event_snapshot_dir: String::new(),

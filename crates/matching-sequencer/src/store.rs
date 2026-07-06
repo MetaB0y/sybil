@@ -148,6 +148,11 @@ const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 /// are advanced only in the same transaction that deletes old rows.
 const HISTORY_META: TableDefinition<&str, u64> = TableDefinition::new("history_meta");
 
+/// Chain-instance metadata. `genesis_hash` is the hash of the height-1 block
+/// header and scopes order/cancel signatures across fresh-genesis redeploys.
+const CHAIN_META: TableDefinition<&str, &[u8]> = TableDefinition::new("chain_meta");
+const KEY_GENESIS_HASH: &str = "genesis_hash";
+
 /// Resting order book snapshot: single row keyed "snapshot" → msgpack(Vec<RestingOrder>).
 /// Rewritten atomically each block.
 const RESTING_ORDERS: TableDefinition<&str, &[u8]> = TableDefinition::new("resting_orders");
@@ -1014,6 +1019,7 @@ pub struct RestoredState {
     pub market_metadata: HashMap<MarketId, MarketMetadata>,
     pub height: u64,
     pub last_header: Option<BlockHeader>,
+    pub genesis_hash: [u8; 32],
     pub next_order_id: u64,
     pub pubkey_registry: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     pub resting_orders: Vec<RestingOrder>,
@@ -1047,6 +1053,7 @@ pub struct RestoredState {
 pub struct WitnessImportSummary {
     pub height: u64,
     pub state_root: [u8; 32],
+    pub genesis_hash: [u8; 32],
     pub accounts: usize,
     pub markets: usize,
     pub market_groups: usize,
@@ -1089,6 +1096,7 @@ pub struct SequencerSnapshot<'a> {
     pub market_groups: &'a [MarketGroup],
     pub lifecycle: &'a MarketLifecycle,
     pub header: &'a BlockHeader,
+    pub genesis_hash: [u8; 32],
     pub next_order_id: u64,
     pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     pub analytics: AnalyticsSnapshot<'a>,
@@ -1100,6 +1108,7 @@ pub struct SequencerSnapshot<'a> {
 
 struct RedbBlockCommit {
     height: u64,
+    genesis_hash: [u8; 32],
     market_rows: Vec<(u32, Vec<u8>)>,
     market_meta_rows: Vec<(u32, Vec<u8>)>,
     market_status_rows: Vec<(u32, Vec<u8>)>,
@@ -1253,6 +1262,7 @@ fn build_redb_block_commit(
 
     Ok(RedbBlockCommit {
         height: snapshot.header.height,
+        genesis_hash: snapshot.genesis_hash,
         market_rows,
         market_meta_rows,
         market_status_rows,
@@ -1353,6 +1363,11 @@ where
         let mut table = txn.open_table(BLOCK_HEADERS)?;
         table.retain(|height, _| height == commit.height)?;
         table.insert(commit.height, commit.header_bytes.as_slice())?;
+    }
+
+    {
+        let mut table = txn.open_table(CHAIN_META)?;
+        table.insert(KEY_GENESIS_HASH, commit.genesis_hash.as_slice())?;
     }
 
     if let Some(bytes) = &commit.history_block_bytes {
@@ -1901,6 +1916,7 @@ impl Store {
         txn.open_table(PUBKEY_AUTH_SCHEMES)?;
         txn.open_table(COUNTERS)?;
         txn.open_table(HISTORY_META)?;
+        txn.open_table(CHAIN_META)?;
         txn.open_table(CLEARING_PRICES)?;
         txn.open_table(MARKET_VOLUMES)?;
         txn.open_table(RESTING_ORDERS)?;
@@ -2444,12 +2460,14 @@ impl Store {
         &self,
         witness: BlockWitness,
         expect_state_root: Option<[u8; 32]>,
+        genesis_hash: Option<[u8; 32]>,
         config: SequencerConfig,
     ) -> Result<WitnessImportSummary, StoreError> {
         self.ensure_import_target_empty()?;
         validate_import_witness_root(&witness, expect_state_root)?;
+        let genesis_hash = import_genesis_hash(&witness, genesis_hash)?;
 
-        let restored = restored_state_from_witness(&witness, &config)?;
+        let restored = restored_state_from_witness(&witness, &config, genesis_hash)?;
         let oracle = Arc::new(AdminOracle::new());
         let sequencer = BlockSequencer::restore(restored, oracle, config);
         let snapshot = sequencer.snapshot();
@@ -2477,6 +2495,7 @@ impl Store {
         let summary = WitnessImportSummary {
             height: witness.header.height,
             state_root: witness.header.state_root,
+            genesis_hash,
             accounts: snapshot.accounts.iter().count(),
             markets: snapshot.markets.len(),
             market_groups: snapshot.market_groups.len(),
@@ -2524,6 +2543,7 @@ impl Store {
             ("fill_history", txn.open_table(FILL_HISTORY)?.len()?),
             ("equity_points", txn.open_table(EQUITY_POINTS)?.len()?),
             ("history_events", txn.open_table(HISTORY_EVENTS)?.len()?),
+            ("chain_meta", txn.open_table(CHAIN_META)?.len()?),
             ("bridge_state", txn.open_table(BRIDGE_STATE)?.len()?),
             (
                 "pending_l1_deposits",
@@ -2622,6 +2642,21 @@ impl Store {
         let latest_witness_exists = {
             let table = txn.open_table(BLOCK_WITNESSES)?;
             table.get(recovery_metadata.height)?.is_some()
+        };
+
+        let genesis_hash = {
+            let table = txn.open_table(CHAIN_META)?;
+            match table.get(KEY_GENESIS_HASH)? {
+                Some(value) => parse_hash32(value.value(), KEY_GENESIS_HASH)?,
+                None => match last_header.as_ref() {
+                    Some(header) if header.height == 1 => crate::block::hash_header(header),
+                    _ => {
+                        return Err(StoreError::CorruptLayout(
+                            "missing chain_meta genesis_hash".to_string(),
+                        ));
+                    }
+                },
+            }
         };
 
         // Pubkey registry
@@ -2947,6 +2982,7 @@ impl Store {
             market_metadata,
             height: recovery_metadata.height,
             last_header,
+            genesis_hash,
             next_order_id: recovery_metadata.next_order_id,
             pubkey_registry,
             resting_orders,
@@ -3390,6 +3426,51 @@ fn hex32(bytes: [u8; 32]) -> String {
     format!("0x{}", hex::encode(bytes))
 }
 
+fn parse_hash32(bytes: &[u8], context: &str) -> Result<[u8; 32], StoreError> {
+    bytes.try_into().map_err(|_| {
+        StoreError::CorruptLayout(format!("{context} must be 32 bytes, got {}", bytes.len()))
+    })
+}
+
+fn witness_header_hash(header: &WitnessBlockHeader) -> [u8; 32] {
+    crate::block::hash_header(&block_header_from_witness(header))
+}
+
+fn derivable_genesis_hash_from_witness(witness: &BlockWitness) -> Option<[u8; 32]> {
+    if witness.header.height == 1 {
+        return Some(witness_header_hash(&witness.header));
+    }
+    witness
+        .previous_header
+        .as_ref()
+        .filter(|header| header.height == 1)
+        .map(witness_header_hash)
+}
+
+fn import_genesis_hash(
+    witness: &BlockWitness,
+    provided: Option<[u8; 32]>,
+) -> Result<[u8; 32], StoreError> {
+    let derived = derivable_genesis_hash_from_witness(witness);
+    if let (Some(provided), Some(derived)) = (provided, derived) {
+        if provided != derived {
+            return Err(import_err(format!(
+                "--genesis-hash {} does not match witness-derived genesis hash {}",
+                hex32(provided),
+                hex32(derived)
+            )));
+        }
+    }
+    if let Some(provided) = provided {
+        return Ok(provided);
+    }
+    derived.ok_or_else(|| {
+        import_err(
+            "--genesis-hash is required when the imported witness does not include the genesis header",
+        )
+    })
+}
+
 fn validate_import_witness_root(
     witness: &BlockWitness,
     expect_state_root: Option<[u8; 32]>,
@@ -3420,6 +3501,7 @@ fn validate_import_witness_root(
 fn restored_state_from_witness(
     witness: &BlockWitness,
     config: &SequencerConfig,
+    genesis_hash: [u8; 32],
 ) -> Result<RestoredState, StoreError> {
     let accounts = account_store_from_witness(&witness.post_state)?;
     let (markets, market_statuses, market_metadata, market_groups) =
@@ -3475,6 +3557,7 @@ fn restored_state_from_witness(
         market_metadata,
         height: witness.header.height,
         last_header: Some(block_header_from_witness(&witness.header)),
+        genesis_hash,
         next_order_id: next_order_id_from_witness(witness)?,
         pubkey_registry: HashMap::new(),
         resting_orders: restored_resting_orders,
@@ -4249,6 +4332,7 @@ mod tests {
         empty_prices: HashMap<MarketId, Vec<Nanos>>,
         empty_volumes: HashMap<MarketId, u64>,
         bridge_state: BridgeState,
+        genesis_hash: [u8; 32],
     }
 
     impl TestEnv {
@@ -4258,6 +4342,7 @@ mod tests {
                 empty_prices: HashMap::new(),
                 empty_volumes: HashMap::new(),
                 bridge_state: BridgeState::default(),
+                genesis_hash: [0x42; 32],
             }
         }
 
@@ -4278,6 +4363,7 @@ mod tests {
                 market_groups: &[],
                 lifecycle,
                 header,
+                genesis_hash: self.genesis_hash,
                 next_order_id,
                 pubkey_registry: &self.empty_pk,
                 analytics: AnalyticsSnapshot {
@@ -4319,6 +4405,7 @@ mod tests {
                 market_groups: &[],
                 lifecycle,
                 header,
+                genesis_hash: self.genesis_hash,
                 next_order_id: 1,
                 pubkey_registry: &self.empty_pk,
                 analytics: AnalyticsSnapshot {
@@ -4360,6 +4447,7 @@ mod tests {
                 market_groups: &[],
                 lifecycle,
                 header,
+                genesis_hash: self.genesis_hash,
                 next_order_id: 1,
                 pubkey_registry: &self.empty_pk,
                 analytics: AnalyticsSnapshot {
@@ -4402,6 +4490,7 @@ mod tests {
                 market_groups: &[],
                 lifecycle,
                 header,
+                genesis_hash: self.genesis_hash,
                 next_order_id: 1,
                 pubkey_registry: &self.empty_pk,
                 analytics: AnalyticsSnapshot {
@@ -5803,6 +5892,7 @@ mod tests {
             .import_witness_genesis(
                 decoded.clone(),
                 Some(second.block.header.state_root),
+                None,
                 config.clone(),
             )
             .await;
@@ -5816,12 +5906,17 @@ mod tests {
             .import_witness_genesis(
                 decoded.clone(),
                 Some(second.block.header.state_root),
+                None,
                 config.clone(),
             )
             .await
             .unwrap();
         assert_eq!(summary.height, second.block.header.height);
         assert_eq!(summary.state_root, second.block.header.state_root);
+        assert_eq!(
+            summary.genesis_hash,
+            crate::block::hash_header(&first.block.header)
+        );
         assert_eq!(summary.accounts, decoded.post_state.len());
         assert_eq!(summary.markets, decoded.state_sidecar.markets.len());
         assert_eq!(
@@ -5863,7 +5958,30 @@ mod tests {
         assert_eq!(restored.resting_orders.len(), summary.resting_orders);
         assert_eq!(restored.bridge_state.deposit_cursor, summary.deposit_cursor);
         assert_eq!(restored.bridge_state.withdrawals.len(), summary.withdrawals);
+        assert_eq!(restored.genesis_hash, summary.genesis_hash);
 
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let mut signed_seq =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        signed_seq
+            .register_pubkey(
+                fill_buyer,
+                crate::crypto::PublicKey(*signing_key.verifying_key()),
+            )
+            .unwrap();
+        let signed_handle = crate::actor::SequencerHandle::spawn(signed_seq);
+        let signed = crate::crypto::sign_order(
+            &outcome_buy(&markets, 0, active_b, 0, 400_000_000, 1),
+            1,
+            summary.genesis_hash,
+            &signing_key,
+        );
+        signed_handle.submit_signed_order(signed).await.unwrap();
+
+        let restored = fresh_store.load_state().await.unwrap().unwrap();
         let mut restored_seq =
             BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
         let child = restored_seq.produce_block(Vec::new(), 3_000);

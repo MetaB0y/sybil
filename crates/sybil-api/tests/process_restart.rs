@@ -30,11 +30,20 @@ fn new_signing_key() -> SigningKey {
     SigningKey::from_bytes((&[9u8; 32]).into()).expect("fixed signing key")
 }
 
+fn genesis_hash_from_health(health: &Value) -> [u8; 32] {
+    let hash = health["genesis_hash"]
+        .as_str()
+        .expect("health exposes committed genesis_hash");
+    let bytes = hex::decode(hash.strip_prefix("0x").unwrap_or(hash)).expect("genesis_hash hex");
+    bytes.try_into().expect("genesis_hash is 32 bytes")
+}
+
 fn signed_buy_yes_payload(
     market_id: u32,
     limit_price_nanos: u64,
     quantity: u64,
     nonce: u64,
+    genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> Value {
     let mut order = Order::new(0);
@@ -46,7 +55,7 @@ fn signed_buy_yes_payload(
     order.payoffs[0] = 1;
     order.payoffs[1] = 0;
 
-    let signature: Signature = key.sign(&canonical_order_bytes(&order, nonce));
+    let signature: Signature = key.sign(&canonical_order_bytes(&order, nonce, genesis_hash));
     json!({
         "signer_pubkey_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes()),
         "order": {
@@ -60,11 +69,18 @@ fn signed_buy_yes_payload(
     })
 }
 
-fn signed_cancel_payload(account_id: u64, order_id: u64, nonce: u64, key: &SigningKey) -> Value {
+fn signed_cancel_payload(
+    account_id: u64,
+    order_id: u64,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> Value {
     let signature: Signature = key.sign(&canonical_cancel_bytes(
         AccountId(account_id),
         order_id,
         nonce,
+        genesis_hash,
     ));
     json!({
         "account_id": account_id,
@@ -169,6 +185,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     let pre_write_height = pre_write_health["height"]
         .as_u64()
         .expect("baseline height exists before WAL writes");
+    let genesis_hash = genesis_hash_from_health(&pre_write_health);
 
     let created = post_json(
         &client,
@@ -240,7 +257,8 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     )
     .await;
 
-    let signed_order_nonce_1 = signed_buy_yes_payload(market_id as u32, 400, 3, 1, &signing_key);
+    let signed_order_nonce_1 =
+        signed_buy_yes_payload(market_id as u32, 400, 3, 1, genesis_hash, &signing_key);
     post_json(
         &client,
         &writer.base_url,
@@ -260,7 +278,8 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     assert_eq!(pending.len(), 1);
     let order_id = pending[0]["order_id"].as_u64().unwrap();
 
-    let signed_cancel_nonce_2 = signed_cancel_payload(account_id, order_id, 2, &signing_key);
+    let signed_cancel_nonce_2 =
+        signed_cancel_payload(account_id, order_id, 2, genesis_hash, &signing_key);
     post_json(
         &client,
         &writer.base_url,
@@ -282,6 +301,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         Some(pre_write_height),
         "health should report restored committed height before a new block is produced"
     );
+    assert_eq!(genesis_hash_from_health(&post_restart_health), genesis_hash);
     pause_blocks(&client, &reader.base_url).await;
 
     let restored_account = get_json(
@@ -398,7 +418,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         &client,
         &reader.base_url,
         "/v1/orders/signed",
-        signed_buy_yes_payload(market_id as u32, 450, 2, 3, &signing_key),
+        signed_buy_yes_payload(market_id as u32, 450, 2, 3, genesis_hash, &signing_key),
     )
     .await;
     let post_restart_pending = get_json(

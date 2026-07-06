@@ -660,6 +660,9 @@ pub struct HealthResponse {
     pub status: String,
     #[serde(default)]
     pub height: Option<u64>,
+    /// Hash of the height-1 block header. Hex-encoded 32-byte chain instance id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub genesis_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

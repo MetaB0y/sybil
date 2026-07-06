@@ -14,6 +14,7 @@ import { serialize } from "borsh";
 export const MAX_MARKETS = 5;
 export const MAX_STATES = 32;
 export const MARKET_NONE = 0xffffffff;
+export const GENESIS_HASH_LEN = 32;
 
 const PRICE_CONDITION_SCHEMA = {
   struct: {
@@ -42,8 +43,16 @@ const ORDER_SCHEMA = {
   },
 };
 
+const ORDER_PAYLOAD_SCHEMA = {
+  struct: {
+    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
+    order: ORDER_SCHEMA,
+  },
+};
+
 const CANCEL_SCHEMA = {
   struct: {
+    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
     account_id: "u64",
     order_id: "u64",
     nonce: "u64",
@@ -66,6 +75,14 @@ export interface CanonicalOrderInput {
   condition?: PriceCondition;
   expiresAtBlock?: bigint;
   nonce: bigint;
+  genesisHash: Uint8Array;
+}
+
+function encodeGenesisHash(hash: Uint8Array): number[] {
+  if (hash.length !== GENESIS_HASH_LEN) {
+    throw new Error(`genesis hash must be ${GENESIS_HASH_LEN} bytes`);
+  }
+  return Array.from(hash);
 }
 
 function padMarketIds(ids: readonly number[]): number[] {
@@ -101,28 +118,33 @@ function encodeCondition(c: PriceCondition | undefined): EncodedCondition | null
 
 export function canonicalOrderBytes(input: CanonicalOrderInput): Uint8Array {
   const value = {
-    markets: padMarketIds(input.marketIds),
-    num_markets: input.marketIds.length,
-    payoffs: padPayoffs(input.payoffs),
-    num_states: 1 << input.marketIds.length,
-    limit_price: input.limitPriceNanos,
-    max_fill: input.maxFill,
-    condition: encodeCondition(input.condition),
-    expires_at_block: input.expiresAtBlock ?? null,
-    nonce: input.nonce,
+    genesis_hash: encodeGenesisHash(input.genesisHash),
+    order: {
+      markets: padMarketIds(input.marketIds),
+      num_markets: input.marketIds.length,
+      payoffs: padPayoffs(input.payoffs),
+      num_states: 1 << input.marketIds.length,
+      limit_price: input.limitPriceNanos,
+      max_fill: input.maxFill,
+      condition: encodeCondition(input.condition),
+      expires_at_block: input.expiresAtBlock ?? null,
+      nonce: input.nonce,
+    },
   };
   // borsh-js types are loose; ORDER_SCHEMA is structurally correct but its
   // literal type doesn't satisfy the Schema union.
-  return new Uint8Array(serialize(ORDER_SCHEMA as never, value));
+  return new Uint8Array(serialize(ORDER_PAYLOAD_SCHEMA as never, value));
 }
 
 export function canonicalCancelBytes(
   accountId: bigint,
   orderId: bigint,
   nonce: bigint,
+  genesisHash: Uint8Array,
 ): Uint8Array {
   return new Uint8Array(
     serialize(CANCEL_SCHEMA as never, {
+      genesis_hash: encodeGenesisHash(genesisHash),
       account_id: accountId,
       order_id: orderId,
       nonce,

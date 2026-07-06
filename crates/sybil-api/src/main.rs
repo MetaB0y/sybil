@@ -91,13 +91,21 @@ fn sequencer_config_from_api(config: &ApiConfig) -> SequencerConfig {
     }
 }
 
-fn parse_expected_state_root(root: &str) -> Result<[u8; 32], String> {
-    let hex = root.strip_prefix("0x").unwrap_or(root);
-    let bytes = hex::decode(hex).map_err(|e| format!("decode --expect-state-root: {e}"))?;
+fn parse_hash_arg(value: &str, flag: &str) -> Result<[u8; 32], String> {
+    let hex = value.strip_prefix("0x").unwrap_or(value);
+    let bytes = hex::decode(hex).map_err(|e| format!("decode {flag}: {e}"))?;
     let len = bytes.len();
     bytes
         .try_into()
-        .map_err(|_| format!("--expect-state-root must decode to 32 bytes, got {len}"))
+        .map_err(|_| format!("{flag} must decode to 32 bytes, got {len}"))
+}
+
+fn parse_expected_state_root(root: &str) -> Result<[u8; 32], String> {
+    parse_hash_arg(root, "--expect-state-root")
+}
+
+fn parse_genesis_hash(hash: &str) -> Result<[u8; 32], String> {
+    parse_hash_arg(hash, "--genesis-hash")
 }
 
 fn hex32(bytes: &[u8; 32]) -> String {
@@ -124,6 +132,12 @@ async fn run_witness_import(config: &ApiConfig) -> Result<(), Box<dyn std::error
         .expect_state_root
         .as_deref()
         .map(parse_expected_state_root)
+        .transpose()
+        .map_err(|e| Error::new(ErrorKind::InvalidInput, e))?;
+    let genesis_hash = config
+        .genesis_hash
+        .as_deref()
+        .map(parse_genesis_hash)
         .transpose()
         .map_err(|e| Error::new(ErrorKind::InvalidInput, e))?;
 
@@ -156,6 +170,7 @@ async fn run_witness_import(config: &ApiConfig) -> Result<(), Box<dyn std::error
         .import_witness_genesis(
             witness,
             expect_state_root,
+            genesis_hash,
             sequencer_config_from_api(config),
         )
         .await
@@ -164,6 +179,7 @@ async fn run_witness_import(config: &ApiConfig) -> Result<(), Box<dyn std::error
     println!("imported canonical witness into {}", db_path.display());
     println!("height={}", summary.height);
     println!("state_root={}", hex32(&summary.state_root));
+    println!("genesis_hash={}", hex32(&summary.genesis_hash));
     println!(
         "accounts={} markets={} market_groups={} resting_orders={} reservations={} withdrawals={}",
         summary.accounts,

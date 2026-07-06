@@ -34,6 +34,7 @@ import {
 import {
   canonicalOrderBytes,
   canonicalCancelBytes,
+  fromHex,
 } from "../src/lib/auth/canonical";
 
 const BASE = process.env.SYBIL_API_BASE ?? "https://172-104-31-54.nip.io";
@@ -98,6 +99,12 @@ interface CancelResp {
   cancelled: boolean;
 }
 
+interface HealthResp {
+  status: string;
+  height?: number | null;
+  genesis_hash?: string | null;
+}
+
 // Gate the smoke off `pnpm test` runs — only `pnpm smoke` sets SYBIL_SMOKE=1.
 const RUN = process.env.SYBIL_SMOKE === "1";
 
@@ -140,6 +147,12 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       ).toBe(true);
       log("pubkey registered");
 
+      const health = await rest<HealthResp>("/v1/health");
+      expect(health.ok).toBe(true);
+      const genesisHashHex = health.body.genesis_hash;
+      if (!genesisHashHex) throw new Error("/v1/health did not return genesis_hash");
+      const genesisHash = fromHex(genesisHashHex);
+
       // 4. Pick a market — prefer Active binary
       const summary = await rest<MarketSummary[]>("/v1/markets/summary");
       expect(summary.ok).toBe(true);
@@ -162,6 +175,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
         limitPriceNanos: priceNanos,
         maxFill: qty,
         nonce: orderNonce,
+        genesisHash,
       });
       const sigHex = await signBytes(kp.privateKey, canonical);
       log(`signed ${canonical.length} bytes, sig = ${sigHex.slice(0, 32)}...`);
@@ -176,8 +190,8 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
             payoffs: [1, 0],
             limit_price_nanos: Number(priceNanos),
             max_fill: Number(qty),
-            nonce: Number(orderNonce),
           },
+          nonce: Number(orderNonce),
           signature_hex: sigHex,
         }),
       });
@@ -222,6 +236,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
           BigInt(accountId),
           BigInt(orderId),
           cancelNonce,
+          genesisHash,
         );
         const cancelSig = await signBytes(kp.privateKey, cancelCanonical);
         const cancelled = await rest<CancelResp>("/v1/orders/cancel/signed", {

@@ -30,6 +30,7 @@ describe("p256 sign + verify roundtrip", () => {
       limitPriceNanos: 550_000_000n,
       maxFill: 10n,
       nonce: 7n,
+      genesisHash: new Uint8Array(32).fill(0xab),
     });
 
     const sigHex = await signBytes(kp.privateKey, bytes);

@@ -10,7 +10,7 @@
  */
 
 import { api } from "@/lib/api/client";
-import { canonicalCancelBytes, canonicalOrderBytes } from "@/lib/auth/canonical";
+import { canonicalCancelBytes, canonicalOrderBytes, fromHex } from "@/lib/auth/canonical";
 import { signBytes } from "@/lib/auth/p256";
 import { signWebAuthnBytes } from "@/lib/auth/webauthn";
 import { getKeyHandle, useAccountStore } from "./store";
@@ -74,12 +74,14 @@ export async function submitSignedOrder(
 
   const payoffs = PAYOFFS[args.side];
   const nonce = args.nonce ?? nextReplayNonce(args.accountId);
+  const genesisHash = await getGenesisHashBytes();
   const canonical = canonicalOrderBytes({
     marketIds: [args.marketId],
     payoffs,
     limitPriceNanos: args.limitPriceNanos,
     maxFill: args.maxFill,
     nonce,
+    genesisHash,
     ...(expiresAtBlock !== undefined ? { expiresAtBlock } : {}),
   });
   const auth = resolveAuthContext(args);
@@ -150,10 +152,12 @@ export async function cancelSignedOrder(
   args: CancelSignedOrderArgs,
 ): Promise<{ cancelled: boolean }> {
   const nonce = args.nonce ?? nextReplayNonce(args.accountId);
+  const genesisHash = await getGenesisHashBytes();
   const canonical = canonicalCancelBytes(
     BigInt(args.accountId),
     BigInt(args.orderId),
     nonce,
+    genesisHash,
   );
   const auth = resolveAuthContext(args);
 
@@ -223,6 +227,27 @@ function resolveAuthContext(args: {
     return { authScheme, credentialIdB64url };
   }
   return { authScheme: "raw_p256" };
+}
+
+let genesisHashPromise: Promise<Uint8Array> | null = null;
+
+async function getGenesisHashBytes(): Promise<Uint8Array> {
+  genesisHashPromise ??= (async () => {
+    const { data, error } = await api.GET("/v1/health");
+    if (error || !data) {
+      throw new Error("health request failed while loading genesis hash");
+    }
+    if (!data.genesis_hash) {
+      throw new Error("genesis_hash is unavailable until the genesis block is committed");
+    }
+    return fromHex(data.genesis_hash);
+  })();
+  try {
+    return await genesisHashPromise;
+  } catch (err) {
+    genesisHashPromise = null;
+    throw err;
+  }
 }
 
 async function signRawBytes(accountId: number, canonical: Uint8Array): Promise<string> {

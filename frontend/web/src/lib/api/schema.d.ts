@@ -1672,6 +1672,8 @@ export interface components {
             amount_nanos: string;
         };
         HealthResponse: {
+            /** @description Hash of the height-1 block header. Hex-encoded 32-byte chain instance id. */
+            genesis_hash?: string | null;
             /** Format: int64 */
             height?: number | null;
             status: string;

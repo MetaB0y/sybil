@@ -186,6 +186,9 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::ReplayNonceStale { .. } => {
                 AppError::replay_nonce_stale(format!("{}", err))
             }
+            matching_sequencer::SequencerError::GenesisHashUnavailable => {
+                AppError::service_unavailable(format!("{}", err))
+            }
             matching_sequencer::SequencerError::MempoolFull => AppError::mempool_full(),
             matching_sequencer::SequencerError::RateLimited { retry_after_secs } => {
                 AppError::rate_limited(*retry_after_secs)

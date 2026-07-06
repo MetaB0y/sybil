@@ -1,5 +1,5 @@
 ---
 source: crates/sybil-signing/src/lib.rs
-expression: "hex::encode(canonical_order_bytes(&order))"
+expression: "hex::encode(canonical_order_bytes(&order, GENESIS_HASH))"
 ---
-07000000ffffffffffffffffffffffffffffffff010100000000000000000000000000000000000000000000000000000000000000028055c820000000000a0000000000000000000700000000000000
+abababababababababababababababababababababababababababababababab07000000ffffffffffffffffffffffffffffffff010100000000000000000000000000000000000000000000000000000000000000028055c820000000000a0000000000000000000700000000000000

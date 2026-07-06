@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_MARKETS_PER_ORDER: usize = 5;
 pub const MAX_STATES: usize = 32;
+pub type GenesisHash = [u8; 32];
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
@@ -42,7 +43,14 @@ pub struct Order {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct OrderRequest {
+    genesis_hash: GenesisHash,
+    order: Order,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct CancelRequest {
+    genesis_hash: GenesisHash,
     account_id: u64,
     order_id: u64,
     nonce: u64,
@@ -117,12 +125,22 @@ pub struct ResolutionAttestation {
     pub nonce: u64,
 }
 
-pub fn canonical_order_bytes(order: &Order) -> Vec<u8> {
-    borsh::to_vec(order).expect("canonical order serialization should not fail")
+pub fn canonical_order_bytes(order: &Order, genesis_hash: GenesisHash) -> Vec<u8> {
+    borsh::to_vec(&OrderRequest {
+        genesis_hash,
+        order: order.clone(),
+    })
+    .expect("canonical order serialization should not fail")
 }
 
-pub fn canonical_cancel_bytes(account_id: u64, order_id: u64, nonce: u64) -> Vec<u8> {
+pub fn canonical_cancel_bytes(
+    account_id: u64,
+    order_id: u64,
+    nonce: u64,
+    genesis_hash: GenesisHash,
+) -> Vec<u8> {
     borsh::to_vec(&CancelRequest {
+        genesis_hash,
         account_id,
         order_id,
         nonce,
@@ -195,6 +213,8 @@ pub fn canonical_api_key_revoke_bytes(account_id: u64, api_key_id: u64, nonce: u
 mod tests {
     use super::*;
 
+    const GENESIS_HASH: GenesisHash = [0xab; 32];
+
     fn order_with(
         markets: &[u32],
         payoffs: &[i8],
@@ -228,25 +248,37 @@ mod tests {
     #[test]
     fn buy_yes_snapshot() {
         let order = order_with(&[7], &[1, 0], 550_000_000, 10, None);
-        insta::assert_snapshot!("buy_yes", hex::encode(canonical_order_bytes(&order)));
+        insta::assert_snapshot!(
+            "buy_yes",
+            hex::encode(canonical_order_bytes(&order, GENESIS_HASH))
+        );
     }
 
     #[test]
     fn sell_yes_snapshot() {
         let order = order_with(&[7], &[-1, 0], 425_000_000, 3, None);
-        insta::assert_snapshot!("sell_yes", hex::encode(canonical_order_bytes(&order)));
+        insta::assert_snapshot!(
+            "sell_yes",
+            hex::encode(canonical_order_bytes(&order, GENESIS_HASH))
+        );
     }
 
     #[test]
     fn spread_snapshot() {
         let order = order_with(&[3, 9], &[0, -1, 1, 0], 125_000_000, 5, None);
-        insta::assert_snapshot!("spread", hex::encode(canonical_order_bytes(&order)));
+        insta::assert_snapshot!(
+            "spread",
+            hex::encode(canonical_order_bytes(&order, GENESIS_HASH))
+        );
     }
 
     #[test]
     fn bundle_snapshot() {
         let order = order_with(&[1, 2, 4], &[0, 0, 0, 0, 0, 0, 0, 1], 300_000_000, 2, None);
-        insta::assert_snapshot!("bundle", hex::encode(canonical_order_bytes(&order)));
+        insta::assert_snapshot!(
+            "bundle",
+            hex::encode(canonical_order_bytes(&order, GENESIS_HASH))
+        );
     }
 
     #[test]
@@ -282,7 +314,10 @@ mod tests {
 
     #[test]
     fn cancel_snapshot() {
-        insta::assert_snapshot!("cancel", hex::encode(canonical_cancel_bytes(7, 42, 11)));
+        insta::assert_snapshot!(
+            "cancel",
+            hex::encode(canonical_cancel_bytes(7, 42, 11, GENESIS_HASH))
+        );
     }
 
     #[test]
@@ -351,6 +386,9 @@ mod tests {
                 direction: ConditionDir::Above,
             }),
         );
-        insta::assert_snapshot!("conditional", hex::encode(canonical_order_bytes(&order)));
+        insta::assert_snapshot!(
+            "conditional",
+            hex::encode(canonical_order_bytes(&order, GENESIS_HASH))
+        );
     }
 }

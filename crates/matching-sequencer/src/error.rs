@@ -124,6 +124,9 @@ pub enum SequencerError {
         nonce: u64,
         last_nonce: u64,
     },
+    /// Order/cancel signatures are chain-instance scoped; no instance hash exists yet.
+    #[error("genesis hash unavailable until the genesis block is committed")]
+    GenesisHashUnavailable,
     /// Mempool capacity exceeded.
     #[error("mempool full")]
     MempoolFull,

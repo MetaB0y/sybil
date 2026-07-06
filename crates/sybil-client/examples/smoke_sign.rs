@@ -18,10 +18,11 @@
 //!   cargo run -p sybil-client --example smoke_sign -- keygen
 //!     -> {"private_key_hex":..,"public_key_hex":..}
 //!   cargo run -p sybil-client --example smoke_sign -- order \
-//!       --priv HEX --market N --nonce N [--price NANOS] [--qty UNITS] [--payoffs a,b]
+//!       --priv HEX --market N --nonce N --genesis-hash HEX32 \
+//!       [--price NANOS] [--qty UNITS] [--payoffs a,b]
 //!     -> {"signer_pubkey_hex":..,"signature_hex":..}
 //!   cargo run -p sybil-client --example smoke_sign -- cancel \
-//!       --priv HEX --account N --order N --nonce N
+//!       --priv HEX --account N --order N --nonce N --genesis-hash HEX32
 //!     -> {"signer_pubkey_hex":..,"signature_hex":..}
 //!   cargo run -p sybil-client --example smoke_sign -- withdrawal \
 //!       --priv HEX --account N --chain-id N --vault HEX20 --recipient HEX20 \
@@ -94,6 +95,14 @@ fn parse_addr20(value: &str, name: &str) -> [u8; 20] {
         .unwrap_or_else(|_: Vec<u8>| die(&format!("--{name} must be 20 bytes")))
 }
 
+fn parse_hash32(value: &str, name: &str) -> [u8; 32] {
+    let stripped = value.strip_prefix("0x").unwrap_or(value);
+    let bytes = hex::decode(stripped).unwrap_or_else(|_| die(&format!("--{name} must be hex")));
+    bytes
+        .try_into()
+        .unwrap_or_else(|_: Vec<u8>| die(&format!("--{name} must be 32 bytes")))
+}
+
 /// Load a signing key from a 32-byte hex private scalar.
 fn key_from_hex(priv_hex: &str) -> SigningKey {
     let stripped = priv_hex.strip_prefix("0x").unwrap_or(priv_hex);
@@ -136,6 +145,7 @@ fn cmd_order(flags: &HashMap<String, String>) {
     let key = key_from_hex(req(flags, "priv"));
     let market = req_u64(flags, "market") as u32;
     let nonce = req_u64(flags, "nonce");
+    let genesis_hash = parse_hash32(req(flags, "genesis-hash"), "genesis-hash");
     let price = opt_u64(flags, "price", 500_000_000); // $0.50
     let qty = opt_u64(flags, "qty", 1_000); // 1 share
     let (p0, p1) = match flags.get("payoffs") {
@@ -169,7 +179,7 @@ fn cmd_order(flags: &HashMap<String, String>) {
         expires_at_block: None,
         nonce,
     };
-    emit_signed(&key, &canonical_order_bytes(&order));
+    emit_signed(&key, &canonical_order_bytes(&order, genesis_hash));
 }
 
 fn cmd_cancel(flags: &HashMap<String, String>) {
@@ -177,7 +187,11 @@ fn cmd_cancel(flags: &HashMap<String, String>) {
     let account = req_u64(flags, "account");
     let order = req_u64(flags, "order");
     let nonce = req_u64(flags, "nonce");
-    emit_signed(&key, &canonical_cancel_bytes(account, order, nonce));
+    let genesis_hash = parse_hash32(req(flags, "genesis-hash"), "genesis-hash");
+    emit_signed(
+        &key,
+        &canonical_cancel_bytes(account, order, nonce, genesis_hash),
+    );
 }
 
 fn cmd_withdrawal(flags: &HashMap<String, String>) {

@@ -796,6 +796,8 @@ pub struct BlockSequencer {
     market_groups: Vec<MarketGroup>,
     /// Last block header for hash chaining.
     last_header: Option<BlockHeader>,
+    /// Hash of the first committed block header; scopes signed order/cancel bytes.
+    genesis_hash: Option<[u8; 32]>,
     /// Non-account sidecar at the last committed header. Live state may include
     /// acknowledged writes for the next block; v3 pre-sidecar must not.
     committed_state_sidecar: sybil_verifier::StateSidecarSnapshot,
@@ -856,6 +858,7 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header: None,
+            genesis_hash: None,
             committed_state_sidecar,
             committed_deposit_frontier,
             analytics: AnalyticsState::new(&config),
@@ -962,6 +965,7 @@ impl BlockSequencer {
             markets: state.markets,
             market_groups: state.market_groups,
             last_header: state.last_header,
+            genesis_hash: Some(state.genesis_hash),
             committed_state_sidecar,
             committed_deposit_frontier,
             analytics: AnalyticsState::restore(state.analytics, &config),
@@ -1216,6 +1220,10 @@ impl BlockSequencer {
         self.height
     }
 
+    pub fn genesis_hash(&self) -> Option<[u8; 32]> {
+        self.genesis_hash
+    }
+
     pub fn order_ttl_blocks(&self) -> u64 {
         self.config.order_ttl_blocks
     }
@@ -1236,6 +1244,9 @@ impl BlockSequencer {
             market_groups: &self.market_groups,
             lifecycle: &self.lifecycle,
             header,
+            genesis_hash: self
+                .genesis_hash
+                .expect("snapshot called before genesis hash was available"),
             next_order_id: self.next_order_id,
             pubkey_registry: &self.pubkey_registry,
             analytics: self.analytics.snapshot(),
@@ -3596,6 +3607,9 @@ impl BlockSequencer {
             });
 
         self.last_header = Some(header.clone());
+        if self.height == 1 {
+            self.genesis_hash = Some(hash_header(&header));
+        }
         self.committed_state_sidecar = witness.state_sidecar.clone();
         self.committed_deposit_frontier = self.bridge.deposit_frontier;
 
@@ -3919,6 +3933,7 @@ mod tests {
             market_metadata: HashMap::new(),
             height: seq.height(),
             last_header: seq.last_header().cloned(),
+            genesis_hash: seq.genesis_hash().unwrap_or([0; 32]),
             next_order_id: seq.next_order_id(),
             pubkey_registry: seq.pubkey_registry().clone(),
             resting_orders,
@@ -4932,6 +4947,7 @@ mod tests {
             market_metadata: HashMap::new(),
             height: seq_a.height(),
             last_header: seq_a.last_header().cloned(),
+            genesis_hash: seq_a.genesis_hash().unwrap_or([0; 32]),
             next_order_id: seq_a.next_order_id(),
             pubkey_registry: seq_a.pubkey_registry().clone(),
             resting_orders: seq_a.order_book.snapshot(),
@@ -5050,6 +5066,7 @@ mod tests {
             market_metadata: HashMap::new(),
             height: committed.height(),
             last_header: committed.last_header().cloned(),
+            genesis_hash: committed.genesis_hash().unwrap_or([0; 32]),
             next_order_id: committed.next_order_id(),
             pubkey_registry: committed.pubkey_registry().clone(),
             resting_orders: committed.order_book.snapshot(),
@@ -5156,6 +5173,7 @@ mod tests {
             market_metadata: HashMap::new(),
             height: committed.height(),
             last_header: committed.last_header().cloned(),
+            genesis_hash: committed.genesis_hash().unwrap_or([0; 32]),
             next_order_id: committed.next_order_id(),
             pubkey_registry: committed.pubkey_registry().clone(),
             resting_orders: committed.order_book.snapshot(),

@@ -1192,7 +1192,11 @@ impl SequencerActorState {
     }
 
     async fn handle_signed_order(&mut self, signed: SignedOrder) -> Result<(), SequencerError> {
-        verify_signed_order(&signed)?;
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        verify_signed_order(&signed, genesis_hash)?;
         self.handle_authenticated_order(AuthenticatedOrder {
             order: signed.order,
             nonce: signed.nonce,
@@ -1222,7 +1226,11 @@ impl SequencerActorState {
     }
 
     async fn handle_signed_cancel(&mut self, signed: SignedCancel) -> Result<(), SequencerError> {
-        verify_signed_cancel(&signed)?;
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        verify_signed_cancel(&signed, genesis_hash)?;
         self.handle_authenticated_cancel(AuthenticatedCancel {
             account_id: signed.account_id,
             order_id: signed.order_id,
@@ -3253,6 +3261,11 @@ impl SequencerHandle {
         .await
     }
 
+    pub async fn get_genesis_hash(&self) -> Result<Option<[u8; 32]>, SequencerError> {
+        self.read_query(|state| state.sequencer.genesis_hash())
+            .await
+    }
+
     pub async fn get_state_proof(
         &self,
         leaf_key: Vec<u8>,
@@ -4601,7 +4614,8 @@ mod tests {
         handle.submit_order(sub).await.unwrap();
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert_eq!(pending.len(), 1);
-        let signed_cancel = sign_cancel(aid, pending[0].order_id, 1, &signing_key);
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let signed_cancel = sign_cancel(aid, pending[0].order_id, 1, genesis_hash, &signing_key);
         handle.cancel_signed_order(signed_cancel).await.unwrap();
 
         let assert_replayed = |restored_seq: &BlockSequencer| {
@@ -4844,7 +4858,8 @@ mod tests {
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert_eq!(pending.len(), 1);
 
-        let signed_cancel = sign_cancel(aid, pending[0].order_id, 1, &signing_key);
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let signed_cancel = sign_cancel(aid, pending[0].order_id, 1, genesis_hash, &signing_key);
         handle.cancel_signed_order(signed_cancel).await.unwrap();
 
         let withdrawal = handle
@@ -4937,13 +4952,49 @@ mod tests {
         let pubkey = PublicKey(*signing_key.verifying_key());
 
         handle.register_pubkey(aid, pubkey).await.unwrap();
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
 
         let order = outcome_buy(&ms, 0, m0, 0, 500_000_000, 1);
-        let signed = crate::crypto::sign_order(&order, 1, &signing_key);
+        let signed = crate::crypto::sign_order(&order, 1, genesis_hash, &signing_key);
         handle.submit_signed_order(signed).await.unwrap();
 
         let block = handle.produce_block().await.unwrap();
         assert!(block.canonical.header.order_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_signed_order_replay_across_fresh_genesis_rejected() {
+        let (mut seq_a, _) = make_test_sequencer();
+        let (mut seq_b, aid_b) = make_test_sequencer();
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        seq_b.register_pubkey(aid_b, pubkey).unwrap();
+
+        seq_a.produce_block(Vec::new(), 1_000);
+        seq_b.produce_block(Vec::new(), 2_000);
+        let genesis_a = seq_a.genesis_hash().unwrap();
+        let genesis_b = seq_b.genesis_hash().unwrap();
+        assert_ne!(genesis_a, genesis_b);
+
+        let handle_b = SequencerHandle::spawn(seq_b);
+        let order = outcome_buy(&ms, 0, m0, 0, 500_000_000, 1);
+        let err = handle_b
+            .submit_signed_order(crate::crypto::sign_order(
+                &order,
+                1,
+                genesis_a,
+                &signing_key,
+            ))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SequencerError::InvalidSignature));
     }
 
     #[tokio::test]
@@ -4959,15 +5010,27 @@ mod tests {
             );
         let pubkey = PublicKey(*signing_key.verifying_key());
         handle.register_pubkey(aid, pubkey).await.unwrap();
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
 
         let order = outcome_buy(&ms, 0, m0, 0, 500_000_000, 1);
         handle
-            .submit_signed_order(crate::crypto::sign_order(&order, 1, &signing_key))
+            .submit_signed_order(crate::crypto::sign_order(
+                &order,
+                1,
+                genesis_hash,
+                &signing_key,
+            ))
             .await
             .unwrap();
 
         let replay_error = handle
-            .submit_signed_order(crate::crypto::sign_order(&order, 1, &signing_key))
+            .submit_signed_order(crate::crypto::sign_order(
+                &order,
+                1,
+                genesis_hash,
+                &signing_key,
+            ))
             .await
             .unwrap_err();
         assert!(matches!(
@@ -4980,7 +5043,12 @@ mod tests {
         ));
 
         handle
-            .submit_signed_order(crate::crypto::sign_order(&order, 10, &signing_key))
+            .submit_signed_order(crate::crypto::sign_order(
+                &order,
+                10,
+                genesis_hash,
+                &signing_key,
+            ))
             .await
             .unwrap();
     }
@@ -5012,7 +5080,9 @@ mod tests {
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert_eq!(pending.len(), 1);
 
-        let cancel = crate::crypto::sign_cancel(aid, pending[0].order_id, 2, &signing_key);
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let cancel =
+            crate::crypto::sign_cancel(aid, pending[0].order_id, 2, genesis_hash, &signing_key);
         handle.cancel_signed_order(cancel).await.unwrap();
 
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
@@ -5045,13 +5115,27 @@ mod tests {
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert_eq!(pending.len(), 1);
         let order_id = pending[0].order_id;
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
 
         handle
-            .cancel_signed_order(crate::crypto::sign_cancel(aid, order_id, 1, &signing_key))
+            .cancel_signed_order(crate::crypto::sign_cancel(
+                aid,
+                order_id,
+                1,
+                genesis_hash,
+                &signing_key,
+            ))
             .await
             .unwrap();
         let replay_error = handle
-            .cancel_signed_order(crate::crypto::sign_cancel(aid, order_id, 1, &signing_key))
+            .cancel_signed_order(crate::crypto::sign_cancel(
+                aid,
+                order_id,
+                1,
+                genesis_hash,
+                &signing_key,
+            ))
             .await
             .unwrap_err();
         assert!(matches!(
@@ -5090,7 +5174,9 @@ mod tests {
         handle.produce_block().await.unwrap();
 
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
-        let cancel = crate::crypto::sign_cancel(other, pending[0].order_id, 2, &signing_key);
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let cancel =
+            crate::crypto::sign_cancel(other, pending[0].order_id, 2, genesis_hash, &signing_key);
         let error = handle.cancel_signed_order(cancel).await.unwrap_err();
         assert!(matches!(error, SequencerError::SignerAccountMismatch));
     }

@@ -275,13 +275,14 @@ fn to_canonical_order(order: &Order, nonce: u64) -> CanonicalOrder {
 /// Deterministic canonical byte encoding of an Order for signing.
 ///
 /// NOTE: `id` is excluded because the sequencer assigns IDs after submission.
-pub fn canonical_order_bytes(order: &Order, nonce: u64) -> Vec<u8> {
-    sybil_signing::canonical_order_bytes(&to_canonical_order(order, nonce))
+pub fn canonical_order_bytes(order: &Order, nonce: u64, genesis_hash: [u8; 32]) -> Vec<u8> {
+    sybil_signing::canonical_order_bytes(&to_canonical_order(order, nonce), genesis_hash)
 }
 
 /// Deterministic canonical byte encoding of a cancel request for signing.
 ///
 /// Layout (all integers little-endian):
+/// - genesis_hash: [u8; 32]
 /// - account_id: u64
 /// - order_id: u64
 /// - nonce: u64
@@ -289,8 +290,9 @@ pub fn canonical_cancel_bytes(
     account_id: crate::account::AccountId,
     order_id: u64,
     nonce: u64,
+    genesis_hash: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_cancel_bytes(account_id.0, order_id, nonce)
+    sybil_signing::canonical_cancel_bytes(account_id.0, order_id, nonce, genesis_hash)
 }
 
 fn to_canonical_bridge_withdrawal(
@@ -404,8 +406,11 @@ pub fn verify_signed_api_key_revoke(signed: &SignedApiKeyRevoke) -> Result<(), S
 }
 
 /// Verify a signed order's P256 ECDSA signature.
-pub fn verify_signed_order(signed: &SignedOrder) -> Result<(), SequencerError> {
-    let msg = canonical_order_bytes(&signed.order, signed.nonce);
+pub fn verify_signed_order(
+    signed: &SignedOrder,
+    genesis_hash: [u8; 32],
+) -> Result<(), SequencerError> {
+    let msg = canonical_order_bytes(&signed.order, signed.nonce, genesis_hash);
     signed
         .signer
         .0
@@ -414,8 +419,16 @@ pub fn verify_signed_order(signed: &SignedOrder) -> Result<(), SequencerError> {
 }
 
 /// Verify a signed cancel request's P256 ECDSA signature.
-pub fn verify_signed_cancel(signed: &SignedCancel) -> Result<(), SequencerError> {
-    let msg = canonical_cancel_bytes(signed.account_id, signed.order_id, signed.nonce);
+pub fn verify_signed_cancel(
+    signed: &SignedCancel,
+    genesis_hash: [u8; 32],
+) -> Result<(), SequencerError> {
+    let msg = canonical_cancel_bytes(
+        signed.account_id,
+        signed.order_id,
+        signed.nonce,
+        genesis_hash,
+    );
     signed
         .signer
         .0
@@ -436,8 +449,13 @@ pub fn verify_signed_bridge_withdrawal(
 }
 
 /// Sign an order with a P256 signing key (for testing / client use).
-pub fn sign_order(order: &Order, nonce: u64, key: &SigningKey) -> SignedOrder {
-    let msg = canonical_order_bytes(order, nonce);
+pub fn sign_order(
+    order: &Order,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> SignedOrder {
+    let msg = canonical_order_bytes(order, nonce, genesis_hash);
     let signature: Signature = key.sign(&msg);
     SignedOrder {
         order: order.clone(),
@@ -492,9 +510,10 @@ pub fn sign_cancel(
     account_id: crate::account::AccountId,
     order_id: u64,
     nonce: u64,
+    genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> SignedCancel {
-    let msg = canonical_cancel_bytes(account_id, order_id, nonce);
+    let msg = canonical_cancel_bytes(account_id, order_id, nonce, genesis_hash);
     let signature: Signature = key.sign(&msg);
     SignedCancel {
         account_id,
@@ -621,6 +640,9 @@ mod tests {
     use p256::ecdsa::SigningKey;
     use p256::elliptic_curve::rand_core::UnwrapErr;
 
+    const GENESIS_HASH: [u8; 32] = [0xab; 32];
+    const OTHER_GENESIS_HASH: [u8; 32] = [0xcd; 32];
+
     fn crypto_rng() -> UnwrapErr<SysRng> {
         UnwrapErr(SysRng)
     }
@@ -633,9 +655,9 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let signed = sign_order(&order, 1, &key);
+        let signed = sign_order(&order, 1, GENESIS_HASH, &key);
 
-        assert!(verify_signed_order(&signed).is_ok());
+        assert!(verify_signed_order(&signed, GENESIS_HASH).is_ok());
     }
 
     #[test]
@@ -650,7 +672,7 @@ mod tests {
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
 
         // Sign with key1 but claim key2
-        let msg = canonical_order_bytes(&order, 1);
+        let msg = canonical_order_bytes(&order, 1, GENESIS_HASH);
         let sig: Signature = key1.sign(&msg);
 
         let signed = SignedOrder {
@@ -661,7 +683,7 @@ mod tests {
         };
 
         assert!(matches!(
-            verify_signed_order(&signed),
+            verify_signed_order(&signed, GENESIS_HASH),
             Err(SequencerError::InvalidSignature)
         ));
     }
@@ -674,13 +696,13 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let mut signed = sign_order(&order, 1, &key);
+        let mut signed = sign_order(&order, 1, GENESIS_HASH, &key);
 
         // Tamper with the order after signing
         signed.order.limit_price = matching_engine::Nanos(999_999_999);
 
         assert!(matches!(
-            verify_signed_order(&signed),
+            verify_signed_order(&signed, GENESIS_HASH),
             Err(SequencerError::InvalidSignature)
         ));
     }
@@ -693,11 +715,11 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let mut signed = sign_order(&order, 1, &key);
+        let mut signed = sign_order(&order, 1, GENESIS_HASH, &key);
         signed.order.expires_at_block = Some(1);
 
         assert!(matches!(
-            verify_signed_order(&signed),
+            verify_signed_order(&signed, GENESIS_HASH),
             Err(SequencerError::InvalidSignature)
         ));
     }
@@ -706,20 +728,20 @@ mod tests {
     fn test_sign_verify_cancel_roundtrip() {
         let key =
             <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
-        let signed = sign_cancel(crate::account::AccountId(7), 42, 1, &key);
+        let signed = sign_cancel(crate::account::AccountId(7), 42, 1, GENESIS_HASH, &key);
 
-        assert!(verify_signed_cancel(&signed).is_ok());
+        assert!(verify_signed_cancel(&signed, GENESIS_HASH).is_ok());
     }
 
     #[test]
     fn test_tampered_cancel_rejected() {
         let key =
             <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
-        let mut signed = sign_cancel(crate::account::AccountId(7), 42, 1, &key);
+        let mut signed = sign_cancel(crate::account::AccountId(7), 42, 1, GENESIS_HASH, &key);
         signed.order_id = 99;
 
         assert!(matches!(
-            verify_signed_cancel(&signed),
+            verify_signed_cancel(&signed, GENESIS_HASH),
             Err(SequencerError::InvalidSignature)
         ));
     }
@@ -770,8 +792,8 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let bytes1 = canonical_order_bytes(&order, 1);
-        let bytes2 = canonical_order_bytes(&order, 1);
+        let bytes1 = canonical_order_bytes(&order, 1, GENESIS_HASH);
+        let bytes2 = canonical_order_bytes(&order, 1, GENESIS_HASH);
 
         assert_eq!(bytes1, bytes2);
     }
@@ -785,8 +807,8 @@ mod tests {
         let order2 = outcome_buy(&markets, 2, m0, 0, 600_000_000, 10);
 
         assert_ne!(
-            canonical_order_bytes(&order1, 1),
-            canonical_order_bytes(&order2, 1)
+            canonical_order_bytes(&order1, 1, GENESIS_HASH),
+            canonical_order_bytes(&order2, 1, GENESIS_HASH)
         );
     }
 
@@ -802,15 +824,15 @@ mod tests {
 
         // Same order content but different IDs should produce same canonical bytes
         assert_eq!(
-            canonical_order_bytes(&order1, 1),
-            canonical_order_bytes(&order2, 1)
+            canonical_order_bytes(&order1, 1, GENESIS_HASH),
+            canonical_order_bytes(&order2, 1, GENESIS_HASH)
         );
     }
 
     #[test]
     fn test_canonical_cancel_encoding_deterministic() {
-        let bytes1 = canonical_cancel_bytes(crate::account::AccountId(3), 17, 1);
-        let bytes2 = canonical_cancel_bytes(crate::account::AccountId(3), 17, 1);
+        let bytes1 = canonical_cancel_bytes(crate::account::AccountId(3), 17, 1, GENESIS_HASH);
+        let bytes2 = canonical_cancel_bytes(crate::account::AccountId(3), 17, 1, GENESIS_HASH);
 
         assert_eq!(bytes1, bytes2);
     }
@@ -840,11 +862,39 @@ mod tests {
         let m0 = markets.add_binary("Test");
 
         let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
-        let mut signed = sign_order(&order, 1, &key);
+        let mut signed = sign_order(&order, 1, GENESIS_HASH, &key);
         signed.nonce = 2;
 
         assert!(matches!(
-            verify_signed_order(&signed),
+            verify_signed_order(&signed, GENESIS_HASH),
+            Err(SequencerError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn test_genesis_hash_is_signature_covered() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let mut markets = MarketSet::new();
+        let m0 = markets.add_binary("Test");
+
+        let order = outcome_buy(&markets, 1, m0, 0, 500_000_000, 10);
+        let signed = sign_order(&order, 1, GENESIS_HASH, &key);
+
+        assert!(matches!(
+            verify_signed_order(&signed, OTHER_GENESIS_HASH),
+            Err(SequencerError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn test_cancel_genesis_hash_is_signature_covered() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let signed = sign_cancel(crate::account::AccountId(7), 42, 1, GENESIS_HASH, &key);
+
+        assert!(matches!(
+            verify_signed_cancel(&signed, OTHER_GENESIS_HASH),
             Err(SequencerError::InvalidSignature)
         ));
     }

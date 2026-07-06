@@ -178,7 +178,12 @@ pub async fn submit_signed_order(
             let assertion = req.webauthn_assertion.as_ref().ok_or_else(|| {
                 AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
             })?;
-            let canonical = canonical_order_bytes(&order, req.nonce);
+            let genesis_hash = state
+                .sequencer
+                .get_genesis_hash()
+                .await?
+                .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
+            let canonical = canonical_order_bytes(&order, req.nonce, genesis_hash);
             webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
                 |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
             )?;
@@ -232,8 +237,17 @@ pub async fn cancel_signed_order(
             let assertion = req.webauthn_assertion.as_ref().ok_or_else(|| {
                 AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
             })?;
-            let canonical =
-                canonical_cancel_bytes(AccountId(req.account_id), req.order_id, req.nonce);
+            let genesis_hash = state
+                .sequencer
+                .get_genesis_hash()
+                .await?
+                .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
+            let canonical = canonical_cancel_bytes(
+                AccountId(req.account_id),
+                req.order_id,
+                req.nonce,
+                genesis_hash,
+            );
             webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
                 |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
             )?;

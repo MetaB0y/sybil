@@ -11,8 +11,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { postMock } = vi.hoisted(() => ({ postMock: vi.fn() }));
-vi.mock("@/lib/api/client", () => ({ api: { POST: postMock } }));
+const { getMock, postMock } = vi.hoisted(() => ({
+  getMock: vi.fn(),
+  postMock: vi.fn(),
+}));
+vi.mock("@/lib/api/client", () => ({ api: { GET: getMock, POST: postMock } }));
 
 import { canonicalOrderBytes } from "@/lib/auth/canonical";
 import { exportPublicKeyCompressedHex, generateKeyPair } from "@/lib/auth/p256";
@@ -21,11 +24,19 @@ import { setKeyHandle } from "./store";
 
 const ACCOUNT_ID = 42;
 const MARKET_ID = 7;
+const GENESIS_HASH = new Uint8Array(32).fill(0xab);
+const GENESIS_HASH_HEX = "ab".repeat(32);
 
 let pubHex: string;
 let publicKey: CryptoKey;
 
 beforeEach(async () => {
+  getMock.mockReset();
+  getMock.mockResolvedValue({
+    data: { status: "ok", height: 1, genesis_hash: GENESIS_HASH_HEX },
+    error: undefined,
+    response: { status: 200 },
+  });
   postMock.mockReset();
   postMock.mockResolvedValue({
     data: { accepted: true },
@@ -99,6 +110,7 @@ describe("submitSignedOrder", () => {
         limitPriceNanos,
         maxFill,
         nonce,
+        genesisHash: GENESIS_HASH,
       }),
     );
   });
@@ -131,6 +143,7 @@ describe("submitSignedOrder", () => {
         limitPriceNanos: 300_000_000n,
         maxFill: 1000n,
         nonce,
+        genesisHash: GENESIS_HASH,
         expiresAtBlock,
       }),
     );

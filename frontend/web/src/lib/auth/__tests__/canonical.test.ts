@@ -18,6 +18,9 @@ interface OrderVector {
   expectedHex: string;
 }
 
+const GENESIS_HASH = new Uint8Array(32).fill(0xab);
+const GENESIS_HEX = "ab".repeat(32);
+
 const ORDER_VECTORS: OrderVector[] = [
   {
     name: "buy_yes",
@@ -27,8 +30,10 @@ const ORDER_VECTORS: OrderVector[] = [
       limitPriceNanos: 550_000_000n,
       maxFill: 10n,
       nonce: 7n,
+      genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      GENESIS_HEX +
       "07000000ffffffffffffffffffffffffffffffff010100000000000000000000000000000000000000000000000000000000000000028055c820000000000a0000000000000000000700000000000000",
   },
   {
@@ -39,8 +44,10 @@ const ORDER_VECTORS: OrderVector[] = [
       limitPriceNanos: 425_000_000n,
       maxFill: 3n,
       nonce: 7n,
+      genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      GENESIS_HEX +
       "07000000ffffffffffffffffffffffffffffffff01ff000000000000000000000000000000000000000000000000000000000000000240fc541900000000030000000000000000000700000000000000",
   },
   {
@@ -51,8 +58,10 @@ const ORDER_VECTORS: OrderVector[] = [
       limitPriceNanos: 125_000_000n,
       maxFill: 5n,
       nonce: 7n,
+      genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      GENESIS_HEX +
       "0300000009000000ffffffffffffffffffffffff0200ff010000000000000000000000000000000000000000000000000000000000044059730700000000050000000000000000000700000000000000",
   },
   {
@@ -63,8 +72,10 @@ const ORDER_VECTORS: OrderVector[] = [
       limitPriceNanos: 300_000_000n,
       maxFill: 2n,
       nonce: 7n,
+      genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      GENESIS_HEX +
       "010000000200000004000000ffffffffffffffff0300000000000000010000000000000000000000000000000000000000000000000800a3e11100000000020000000000000000000700000000000000",
   },
   {
@@ -80,8 +91,10 @@ const ORDER_VECTORS: OrderVector[] = [
         threshold: 490_000_000n,
         direction: "Above",
       },
+      genesisHash: GENESIS_HASH,
     },
     expectedHex:
+      GENESIS_HEX +
       "05000000ffffffffffffffffffffffffffffffff0101000000000000000000000000000000000000000000000000000000000000000280dc5b24000000000900000000000000010b00000080ce341d0000000000000700000000000000",
   },
 ];
@@ -101,6 +114,7 @@ describe("canonicalOrderBytes", () => {
       limitPriceNanos: 550_000_000n,
       maxFill: 10n,
       nonce: 7n,
+      genesisHash: GENESIS_HASH,
       expiresAtBlock: 1000n,
     });
     const withoutExpiry = canonicalOrderBytes({
@@ -109,6 +123,7 @@ describe("canonicalOrderBytes", () => {
       limitPriceNanos: 550_000_000n,
       maxFill: 10n,
       nonce: 7n,
+      genesisHash: GENESIS_HASH,
     });
     // With expiry: `01` + 8 LE bytes of 1000, then nonce 7.
     // Without expiry: `00`, then nonce 7.
@@ -121,15 +136,19 @@ describe("canonicalOrderBytes", () => {
 
 describe("canonicalCancelBytes", () => {
   it("encodes account_id + order_id + nonce as three u64 LE", () => {
-    const got = toHex(canonicalCancelBytes(7n, 42n, 11n));
+    const got = toHex(canonicalCancelBytes(7n, 42n, 11n, GENESIS_HASH));
     // 7 LE u64: 0700000000000000
     // 42 LE u64: 2a00000000000000
     // 11 LE u64: 0b00000000000000
-    expect(got).toBe("07000000000000002a000000000000000b00000000000000");
+    expect(got).toBe(
+      GENESIS_HEX + "07000000000000002a000000000000000b00000000000000",
+    );
   });
 
   it("encodes large account_id correctly", () => {
-    const got = toHex(canonicalCancelBytes(0xdeadbeefn, 1n, 2n));
-    expect(got).toBe("efbeadde0000000001000000000000000200000000000000");
+    const got = toHex(canonicalCancelBytes(0xdeadbeefn, 1n, 2n, GENESIS_HASH));
+    expect(got).toBe(
+      GENESIS_HEX + "efbeadde0000000001000000000000000200000000000000",
+    );
   });
 });
