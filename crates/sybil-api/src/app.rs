@@ -32,6 +32,7 @@ use crate::util::now_ms;
         routes::accounts::fund_account,
         routes::accounts::get_account,
         routes::accounts::register_key,
+        routes::accounts::register_signed_key,
         routes::accounts::set_profile,
         routes::accounts::list_account_keys,
         routes::accounts::revoke_key,
@@ -100,6 +101,7 @@ use crate::util::now_ms;
         CreateBridgeWithdrawalRequest,
         CreateSignedBridgeWithdrawalRequest,
         RegisterKeyRequest,
+        SignedRegisterKeyRequest,
         KeyScope,
         SetProfileRequest,
         RevokeKeyRequest,
@@ -493,12 +495,12 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/accounts/{id}",
     },
     RouteMount {
-        method: "POST",
+        method: "GET",
         path: "/v1/accounts/{id}/keys",
     },
     RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/keys",
+        method: "POST",
+        path: "/v1/accounts/{id}/keys/register",
     },
     RouteMount {
         method: "POST",
@@ -656,6 +658,10 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/accounts/{id}/fund",
     },
     RouteMount {
+        method: "POST",
+        path: "/v1/accounts/{id}/keys",
+    },
+    RouteMount {
         method: "GET",
         path: "/v1/bridge/accounts/by-key/{key_hex}",
     },
@@ -789,8 +795,11 @@ fn public_routes() -> Router<AppState> {
         )
         .route(
             "/v1/accounts/{id}/keys",
-            axum::routing::post(routes::accounts::register_key)
-                .get(routes::accounts::list_account_keys),
+            axum::routing::get(routes::accounts::list_account_keys),
+        )
+        .route(
+            "/v1/accounts/{id}/keys/register",
+            axum::routing::post(routes::accounts::register_signed_key),
         )
         .route(
             "/v1/accounts/{id}/keys/revoke",
@@ -946,6 +955,12 @@ fn service_routes() -> Router<AppState> {
         .route(
             "/v1/accounts/{id}/fund",
             axum::routing::post(routes::accounts::fund_account),
+        )
+        // SYB-229: first-key bootstrap is service-token gated (unsigned, zero-key
+        // only). Additional keys use the public SIGNED path in `public_routes`.
+        .route(
+            "/v1/accounts/{id}/keys",
+            axum::routing::post(routes::accounts::register_key),
         )
         .route(
             "/v1/bridge/accounts/by-key/{key_hex}",

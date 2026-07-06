@@ -388,7 +388,8 @@ that still need backend work:
 |---|---|---|
 | `GET /v1/accounts/{id}` | connect / import flow | Verify an account exists before storing the session (body unrendered) |
 | `POST /v1/accounts` | connect / create demo account | Create account |
-| `POST /v1/accounts/{id}/keys` | connect flow, Settings (add agent key) | Register signer pubkey (optional `label` + `scope`) |
+| `POST /v1/accounts/{id}/keys` | connect flow (first key only) | Bootstrap the account's FIRST signer pubkey — unsigned, service-token gated, zero-key only (SYB-229) |
+| `POST /v1/accounts/{id}/keys/register` | Settings (add agent key) | Register an ADDITIONAL signer pubkey, signed by an existing key (replay nonce + genesis domain, SYB-229) |
 | `POST /v1/accounts/{id}/fund` | funding | Fund account |
 | `POST /v1/orders/signed` | Portfolio, trade rail | Place signed order (TIF GTC/IOC/GTD + replay nonce) |
 | `POST /v1/orders/cancel/signed` | Portfolio, trade rail | Cancel open order |

@@ -159,6 +159,54 @@ pub struct RegisterKeyRequest {
     pub scope: KeyScope,
 }
 
+/// Signed request to register a NEW signing key on an account (SYB-229).
+///
+/// Required whenever the account already has at least one registered key. The
+/// first key is bootstrapped over the service tier (`POST /v1/accounts/{id}/keys`);
+/// every subsequent key must be authorized by a signature from an existing
+/// account key. Like orders/cancels, the canonical payload is domain-separated
+/// by the chain `genesis_hash` (SYB-224).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SignedRegisterKeyRequest {
+    /// Hex-encoded compressed P256 public key (33 bytes) of the NEW key.
+    #[cfg_attr(feature = "openapi", schema(example = "02a1b2c3..."))]
+    pub public_key_hex: String,
+    /// Authentication scheme of the NEW key. Defaults to `raw_p256`. When
+    /// `webauthn`, `webauthn_registration` must prove possession of the new key.
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    /// Base64url credential id for a WebAuthn new key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_id_b64url: Option<String>,
+    /// Optional WebAuthn registration payload for a WebAuthn new key. When
+    /// present, the server parses the attestation object's COSE EC2 public key
+    /// and requires it to match `public_key_hex`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_registration: Option<WebAuthnRegistration>,
+    /// Optional human label for the new key, e.g. "agent:pricer".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Scope tag for the new key. Defaults to `primary`.
+    #[serde(default)]
+    pub scope: KeyScope,
+    /// Hex-encoded compressed P256 public key of the SIGNER — an existing active
+    /// key on this account authorizing the registration.
+    pub signer_pubkey_hex: String,
+    /// Authentication scheme of the SIGNER. Defaults to `raw_p256`.
+    #[serde(default)]
+    pub signer_auth_scheme: AuthScheme,
+    /// Hex-encoded raw P256 ECDSA signature over the canonical registration
+    /// payload. Required when `signer_auth_scheme` is `raw_p256`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    /// WebAuthn assertion envelope. Required when `signer_auth_scheme` is `webauthn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+    /// Per-account replay nonce (strictly increasing).
+    pub nonce: u64,
+}
+
 /// Scope tag for a registered signing key (SYB-60).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

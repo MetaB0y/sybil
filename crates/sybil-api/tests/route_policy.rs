@@ -68,12 +68,12 @@ fn exact_public_routes() -> &'static [RouteMount] {
             path: "/v1/accounts/{id}",
         },
         RouteMount {
-            method: "POST",
+            method: "GET",
             path: "/v1/accounts/{id}/keys",
         },
         RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/keys",
+            method: "POST",
+            path: "/v1/accounts/{id}/keys/register",
         },
         RouteMount {
             method: "POST",
@@ -231,6 +231,10 @@ fn exact_service_routes() -> &'static [RouteMount] {
         RouteMount {
             method: "POST",
             path: "/v1/accounts/{id}/fund",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/accounts/{id}/keys",
         },
         RouteMount {
             method: "GET",
@@ -419,6 +423,11 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             Method::POST,
             "/v1/accounts/1/fund",
             json!({"amount_nanos": 1000}),
+        ),
+        (
+            Method::POST,
+            "/v1/accounts/1/keys",
+            json!({"public_key_hex": "00"}),
         ),
         (Method::GET, "/v1/bridge/accounts/by-key/00", json!({})),
         (
@@ -634,11 +643,12 @@ async fn service_routes_succeed_with_token_in_prod() {
     let withdrawal_key = SigningKey::from_bytes((&[8u8; 32]).into()).expect("fixed signing key");
     let withdrawal_pubkey = PublicKey(*withdrawal_key.verifying_key());
     let withdrawal_pubkey_hex = hex::encode(withdrawal_pubkey.compressed_bytes());
+    // SYB-229: first-key bootstrap is now service-token gated.
     let (status, body) = request_json(
         app.clone(),
         Method::POST,
         &format!("/v1/accounts/{account_id}/keys"),
-        None,
+        Some(TOKEN),
         json!({"public_key_hex": withdrawal_pubkey_hex}),
     )
     .await;

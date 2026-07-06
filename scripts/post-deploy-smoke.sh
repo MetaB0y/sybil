@@ -208,6 +208,10 @@ check_account_lifecycle() {
     priv="$(echo "$kp" | jq -r '.private_key_hex')"
     pub="$(echo "$kp" | jq -r '.public_key_hex')"
 
+    # SYB-229: first-key bootstrap moved to the service tier (unsigned, zero-key
+    # only). The `http` helper already sends the service token when set, and this
+    # is a fresh account, so the registration still succeeds on dev and prod
+    # stacks alike; additional keys would require the signed /keys/register path.
     http POST "/v1/accounts/$acct/keys" "$(jq -n --arg pk "$pub" '{public_key_hex:$pk}')"
     if is_2xx "$HTTP_CODE"; then pass "registered P256 key"
     else fail "register key -> $HTTP_CODE: $HTTP_BODY"; return; fi

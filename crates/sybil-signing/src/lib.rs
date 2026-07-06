@@ -80,6 +80,27 @@ struct KeyRevocation {
     nonce: u64,
 }
 
+/// Canonical, stable byte layout of a signing-key registration (SYB-229).
+///
+/// A signed key registration is required whenever the target account already
+/// has at least one registered key (the first key is bootstrapped over the
+/// service tier). Like orders/cancels (SYB-224), the payload is domain-separated
+/// by `genesis_hash` so a registration signature cannot be replayed onto a
+/// different chain/genesis. `new_key_auth_scheme` is `0` for raw P256 and `1`
+/// for WebAuthn. Both `new_key_pubkey` and `signer_pubkey` are 33-byte
+/// compressed SEC1 points; covering both by signature binds the new key to the
+/// authorizing signer so a relay can neither swap in a different key nor
+/// redirect the authorization.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct KeyRegistration {
+    genesis_hash: GenesisHash,
+    account_id: u64,
+    new_key_auth_scheme: u8,
+    new_key_pubkey: Vec<u8>,
+    signer_pubkey: Vec<u8>,
+    nonce: u64,
+}
+
 /// Canonical, stable byte layout of a read API-key creation (SYB-60).
 ///
 /// The bearer token itself is server-generated entropy and is deliberately NOT
@@ -187,6 +208,30 @@ pub fn canonical_key_revocation_bytes(
         nonce,
     })
     .expect("canonical key revocation serialization should not fail")
+}
+
+/// Canonical bytes for a signed signing-key registration (SYB-229).
+///
+/// `new_key_auth_scheme` is `0` for raw P256 and `1` for WebAuthn. Both
+/// `new_key_pubkey` and `signer_pubkey` must be the 33-byte compressed SEC1
+/// encodings of the respective keys.
+pub fn canonical_key_registration_bytes(
+    genesis_hash: GenesisHash,
+    account_id: u64,
+    new_key_auth_scheme: u8,
+    new_key_pubkey: &[u8],
+    signer_pubkey: &[u8],
+    nonce: u64,
+) -> Vec<u8> {
+    borsh::to_vec(&KeyRegistration {
+        genesis_hash,
+        account_id,
+        new_key_auth_scheme,
+        new_key_pubkey: new_key_pubkey.to_vec(),
+        signer_pubkey: signer_pubkey.to_vec(),
+        nonce,
+    })
+    .expect("canonical key registration serialization should not fail")
 }
 
 /// Canonical bytes for a signed read API-key creation (SYB-60).
@@ -342,6 +387,65 @@ mod tests {
         assert_ne!(
             a,
             canonical_profile_update_bytes(8, Some("alice"), Some("seed-1"), 11)
+        );
+    }
+
+    #[test]
+    fn key_registration_snapshot() {
+        // Stable vector mirrored by the TS canonical encoder parity fixtures
+        // (frontend/web/src/lib/auth/__tests__/canonical-settings.test.ts).
+        let new_key = vec![0x02u8; 33];
+        let signer = vec![0x03u8; 33];
+        insta::assert_snapshot!(
+            "key_registration",
+            hex::encode(canonical_key_registration_bytes(
+                GENESIS_HASH,
+                7,
+                1,
+                &new_key,
+                &signer,
+                42
+            ))
+        );
+    }
+
+    #[test]
+    fn key_registration_bytes_cover_all_fields() {
+        let new_key = [0x02u8; 33];
+        let signer = [0x03u8; 33];
+        let a = canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &new_key, &signer, 42);
+        assert_eq!(
+            a,
+            canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &new_key, &signer, 42),
+            "encoding must be deterministic"
+        );
+        // Every field is signature-covered.
+        assert_ne!(
+            a,
+            canonical_key_registration_bytes([0xcd; 32], 7, 0, &new_key, &signer, 42),
+            "genesis_hash must be covered"
+        );
+        assert_ne!(
+            a,
+            canonical_key_registration_bytes(GENESIS_HASH, 8, 0, &new_key, &signer, 42)
+        );
+        assert_ne!(
+            a,
+            canonical_key_registration_bytes(GENESIS_HASH, 7, 1, &new_key, &signer, 42),
+            "new_key_auth_scheme must be covered"
+        );
+        assert_ne!(
+            a,
+            canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &[0x04; 33], &signer, 42)
+        );
+        assert_ne!(
+            a,
+            canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &new_key, &[0x05; 33], 42),
+            "signer_pubkey must be covered"
+        );
+        assert_ne!(
+            a,
+            canonical_key_registration_bytes(GENESIS_HASH, 7, 0, &new_key, &signer, 43)
         );
     }
 

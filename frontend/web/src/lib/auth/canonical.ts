@@ -178,6 +178,27 @@ const KEY_REVOCATION_SCHEMA = {
   },
 };
 
+// SYB-229: signing-key registration. Domain-separated by genesis_hash like
+// orders/cancels (SYB-224). `new_key_auth_scheme` is 0 for raw_p256, 1 for
+// webauthn. Field ORDER matches `KeyRegistration` in the Rust signing crate.
+const KEY_REGISTRATION_SCHEMA = {
+  struct: {
+    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
+    account_id: "u64",
+    new_key_auth_scheme: "u8",
+    new_key_pubkey: { array: { type: "u8" } },
+    signer_pubkey: { array: { type: "u8" } },
+    nonce: "u64",
+  },
+};
+
+/** Auth-scheme byte tag; MUST match `AccountAuthScheme::canonical_byte` in Rust. */
+export type CanonicalAuthScheme = "raw_p256" | "webauthn";
+
+function authSchemeByte(scheme: CanonicalAuthScheme): number {
+  return scheme === "webauthn" ? 1 : 0;
+}
+
 const API_KEY_CREATE_SCHEMA = {
   struct: {
     account_id: "u64",
@@ -228,6 +249,31 @@ export function canonicalKeyRevocationBytes(
     serialize(KEY_REVOCATION_SCHEMA as never, {
       account_id: accountId,
       target_pubkey: targetPubkey,
+      nonce,
+    }),
+  );
+}
+
+/**
+ * Canonical bytes for a signed signing-key registration (SYB-229). Mirrors
+ * `KeyRegistration`. `newKeyPubkey` and `signerPubkey` must each be the 33 raw
+ * compressed SEC1 bytes of the respective keys (use `fromHex`).
+ */
+export function canonicalKeyRegistrationBytes(
+  accountId: bigint,
+  newKeyAuthScheme: CanonicalAuthScheme,
+  newKeyPubkey: Uint8Array,
+  signerPubkey: Uint8Array,
+  nonce: bigint,
+  genesisHash: Uint8Array,
+): Uint8Array {
+  return new Uint8Array(
+    serialize(KEY_REGISTRATION_SCHEMA as never, {
+      genesis_hash: encodeGenesisHash(genesisHash),
+      account_id: accountId,
+      new_key_auth_scheme: authSchemeByte(newKeyAuthScheme),
+      new_key_pubkey: newKeyPubkey,
+      signer_pubkey: signerPubkey,
       nonce,
     }),
   );

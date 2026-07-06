@@ -16,6 +16,7 @@ import { api } from "@/lib/api/client";
 import {
   canonicalApiKeyCreateBytes,
   canonicalApiKeyRevokeBytes,
+  canonicalKeyRegistrationBytes,
   canonicalKeyRevocationBytes,
   canonicalProfileUpdateBytes,
   fromHex,
@@ -27,6 +28,7 @@ import {
   signBytes,
 } from "@/lib/auth/p256";
 import { signWebAuthnBytes } from "@/lib/auth/webauthn";
+import { getGenesisHashBytes } from "./orders";
 import { getKeyHandle, useAccountStore } from "./store";
 import type { AccountAuthScheme } from "./storage";
 
@@ -77,8 +79,7 @@ export async function setProfile(args: SetProfileArgs): Promise<void> {
 
 // --- Signing keys ---------------------------------------------------------
 
-export interface AddAgentKeyArgs {
-  accountId: number;
+export interface AddAgentKeyArgs extends SettingsSignerArgs {
   label?: string;
 }
 
@@ -89,29 +90,76 @@ export interface AddAgentKeyResult {
 }
 
 /**
- * POST /v1/accounts/{id}/keys — register a NEW agent P256 signing key.
+ * POST /v1/accounts/{id}/keys/register — register a NEW agent P256 signing key,
+ * authorized by the session's existing key (SYB-229).
  *
- * Registration itself is unsigned (mirrors the connect flow). The generated
- * private JWK is returned so the caller can display it exactly once; it is not
- * stored anywhere by this function.
+ * The registration is SIGNED (raw P256 or WebAuthn, per the session scheme) over
+ * canonical bytes domain-separated by the chain `genesis_hash` (SYB-224). Public
+ * unsigned registration is gone; only the first key is bootstrapped over the
+ * service tier during onboarding. The generated private JWK is returned so the
+ * caller can display it exactly once; it is not stored anywhere by this function.
  */
 export async function addAgentKey(
   args: AddAgentKeyArgs,
 ): Promise<AddAgentKeyResult> {
   const kp = await generateKeyPair();
   const publicKeyHex = await exportPublicKeyCompressedHex(kp.publicKey);
-  const res = await api.POST("/v1/accounts/{id}/keys", {
+  const nonce = args.nonce ?? nextReplayNonce(args.accountId);
+  const genesisHash = await getGenesisHashBytes();
+  // The new agent key is always raw P256; the SIGNER may be raw or WebAuthn.
+  const canonical = canonicalKeyRegistrationBytes(
+    BigInt(args.accountId),
+    "raw_p256",
+    fromHex(publicKeyHex),
+    fromHex(args.publicKeyHex),
+    nonce,
+    genesisHash,
+  );
+
+  const body = {
+    public_key_hex: publicKeyHex,
+    auth_scheme: "raw_p256" as const,
+    scope: "agent" as const,
+    ...(args.label ? { label: args.label } : {}),
+    signer_pubkey_hex: args.publicKeyHex,
+    nonce: u64JsonNumber(nonce),
+  };
+
+  const res = await api.POST("/v1/accounts/{id}/keys/register", {
     params: { path: { id: args.accountId } },
-    body: {
-      public_key_hex: publicKeyHex,
-      auth_scheme: "raw_p256",
-      scope: "agent",
-      ...(args.label ? { label: args.label } : {}),
-    },
+    body: await attachSignerAuth(args, body, canonical),
   });
   throwIfError(res, "register_agent_key");
   const jwk = await exportPrivateJwk(kp.privateKey);
   return { publicKeyHex, jwk };
+}
+
+/**
+ * Append the SIGNER's auth fields to a signed key-registration body. Unlike
+ * `attachSignature`, the signer scheme lives in `signer_auth_scheme` (the plain
+ * `auth_scheme` field describes the NEW key being registered).
+ */
+async function attachSignerAuth<T extends Record<string, unknown>>(
+  args: SettingsSignerArgs,
+  body: T,
+  canonical: Uint8Array,
+): Promise<T & Record<string, unknown>> {
+  const auth = resolveAuthContext(args);
+  if (auth.authScheme === "webauthn") {
+    return {
+      ...body,
+      signer_auth_scheme: "webauthn" as const,
+      webauthn_assertion: await signWebAuthnBytes(
+        auth.credentialIdB64url,
+        canonical,
+      ),
+    };
+  }
+  return {
+    ...body,
+    signer_auth_scheme: "raw_p256" as const,
+    signature_hex: await signRawBytes(args.accountId, canonical),
+  };
 }
 
 export interface RevokeSigningKeyArgs extends SettingsSignerArgs {

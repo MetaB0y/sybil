@@ -231,7 +231,7 @@ function resolveAuthContext(args: {
 
 let genesisHashPromise: Promise<Uint8Array> | null = null;
 
-async function getGenesisHashBytes(): Promise<Uint8Array> {
+export async function getGenesisHashBytes(): Promise<Uint8Array> {
   genesisHashPromise ??= (async () => {
     const { data, error } = await api.GET("/v1/health");
     if (error || !data) {

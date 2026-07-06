@@ -179,6 +179,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/accounts/{id}/keys/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/accounts/{id}/keys/register — register an additional signing key (signed) (SYB-229) */
+        post: operations["register_signed_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/accounts/{id}/keys/revoke": {
         parameters: {
             query?: never;
@@ -2571,6 +2588,32 @@ export interface components {
             scope?: components["schemas"]["KeyScope"];
             webauthn_registration?: null | components["schemas"]["WebAuthnRegistration"];
         };
+        /** @description Signed request to register a NEW signing key on an account (SYB-229). */
+        SignedRegisterKeyRequest: {
+            /** @description Authentication scheme of the NEW key. Defaults to `raw_p256`. */
+            auth_scheme?: components["schemas"]["AuthScheme"];
+            /** @description Base64url credential id for a WebAuthn new key. */
+            credential_id_b64url?: string | null;
+            /** @description Optional human label for the new key, e.g. "agent:pricer". */
+            label?: string | null;
+            /**
+             * Format: int64
+             * @description Per-account replay nonce (strictly increasing).
+             */
+            nonce: number;
+            /** @description Hex-encoded compressed P256 public key (33 bytes) of the NEW key. */
+            public_key_hex: string;
+            /** @description Scope tag for the new key. Defaults to `primary`. */
+            scope?: components["schemas"]["KeyScope"];
+            /** @description Hex-encoded raw P256 ECDSA signature over the canonical registration payload. */
+            signature_hex?: string | null;
+            /** @description Authentication scheme of the SIGNER. Defaults to `raw_p256`. */
+            signer_auth_scheme?: components["schemas"]["AuthScheme"];
+            /** @description Hex-encoded compressed P256 public key of the SIGNER — an existing active key on this account. */
+            signer_pubkey_hex: string;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+            webauthn_registration?: null | components["schemas"]["WebAuthnRegistration"];
+        };
         /** @description Registered data feed view, returned by GET/POST /v1/feeds. */
         RegisteredFeedResponse: {
             /** Format: int64 */
@@ -3483,6 +3526,66 @@ export interface operations {
             };
             /** @description Account not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Account already has a key; use the signed register path */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    register_signed_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignedRegisterKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Key registered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid key or signature */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signer/account mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown signer or account */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Key already registered, or stale nonce */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

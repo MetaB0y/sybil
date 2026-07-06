@@ -4,14 +4,16 @@ use axum::Json;
 
 use matching_engine::MarketId;
 use matching_sequencer::crypto::{
-    canonical_api_key_create_bytes, canonical_api_key_revoke_bytes, canonical_key_revocation_bytes,
+    canonical_api_key_create_bytes, canonical_api_key_revoke_bytes,
+    canonical_key_registration_bytes, canonical_key_revocation_bytes,
     canonical_profile_update_bytes,
 };
 use matching_sequencer::{
     api_key_hash, AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId,
-    AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke, AuthenticatedKeyRevocation,
-    AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey, SignedApiKeyCreate,
-    SignedApiKeyRevoke, SignedKeyRevocation, SignedProfileUpdate,
+    AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke, AuthenticatedKeyRegistration,
+    AuthenticatedKeyRevocation, AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey,
+    SignedApiKeyCreate, SignedApiKeyRevoke, SignedKeyRegistration, SignedKeyRevocation,
+    SignedProfileUpdate,
 };
 use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
@@ -22,7 +24,7 @@ use crate::types::error::AppError;
 use crate::types::request::{
     AuthScheme, CreateAccountRequest, CreateApiKeyRequest, FundAccountRequest,
     KeyScope as KeyScopeDto, RegisterKeyRequest, RevokeApiKeyRequest, RevokeKeyRequest,
-    SetProfileRequest, WebAuthnAssertion,
+    SetProfileRequest, SignedRegisterKeyRequest, WebAuthnAssertion,
 };
 use crate::types::response::*;
 use crate::util::now_ms;
@@ -114,35 +116,24 @@ pub async fn get_account(
     Ok(Json(account_to_response(&account)))
 }
 
-/// POST /v1/accounts/{id}/keys
-#[utoipa::path(
-    post,
-    path = "/v1/accounts/{id}/keys",
-    params(("id" = u64, Path, description = "Account ID")),
-    request_body = RegisterKeyRequest,
-    responses(
-        (status = 200, description = "Key registered"),
-        (status = 400, description = "Invalid key"),
-        (status = 404, description = "Account not found")
-    )
-)]
-pub async fn register_key(
-    State(state): State<AppState>,
-    Path(id): Path<u64>,
-    Json(req): Json<RegisterKeyRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let key_bytes = hex::decode(&req.public_key_hex)
-        .map_err(|_| AppError::bad_request("Invalid hex encoding"))?;
-
+/// Parse + validate the NEW key material shared by the first-key (service) and
+/// signed (public) registration paths. Returns the compressed public key. For
+/// WebAuthn keys, `webauthn_registration` must prove possession of the new key.
+fn parse_new_key(
+    state: &AppState,
+    public_key_hex: &str,
+    auth_scheme: AuthScheme,
+    webauthn_registration: Option<&crate::types::request::WebAuthnRegistration>,
+) -> Result<PublicKey, AppError> {
+    let key_bytes =
+        hex::decode(public_key_hex).map_err(|_| AppError::bad_request("Invalid hex encoding"))?;
     let sec1_point = Sec1Point::from_bytes(&key_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
-
     let verifying_key = VerifyingKey::from_sec1_point(&sec1_point)
         .map_err(|_| AppError::bad_request("Invalid P256 public key"))?;
-
     let pubkey = PublicKey(verifying_key);
-    if req.auth_scheme == AuthScheme::WebAuthn {
-        let registration = req.webauthn_registration.as_ref().ok_or_else(|| {
+    if auth_scheme == AuthScheme::WebAuthn {
+        let registration = webauthn_registration.ok_or_else(|| {
             AppError::bad_request("webauthn_registration is required for webauthn keys")
         })?;
         let extracted = webauthn::public_key_from_registration(&state.webauthn, registration)
@@ -155,14 +146,60 @@ pub async fn register_key(
             ));
         }
     }
+    Ok(pubkey)
+}
+
+/// POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
+///
+/// SYB-229: public unsigned key registration is a critical auth hole — anyone
+/// could attach their own key to any account and then sign as it. This endpoint
+/// is service-token gated (like account creation) and accepts an UNSIGNED
+/// registration ONLY when the account has zero registered keys. Once an account
+/// has a key, every subsequent key must be added via the SIGNED path
+/// (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{id}/keys",
+    params(("id" = u64, Path, description = "Account ID")),
+    request_body = RegisterKeyRequest,
+    responses(
+        (status = 200, description = "First key registered"),
+        (status = 400, description = "Invalid key"),
+        (status = 404, description = "Account not found"),
+        (status = 409, description = "Account already has a key; use the signed register path")
+    )
+)]
+pub async fn register_key(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(req): Json<RegisterKeyRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account_id = AccountId(id);
+    // First-key bootstrap only: refuse if the account already has a key so this
+    // unsigned service endpoint can never overwrite/append to an established
+    // account. Additional keys go through the signed path.
+    let existing = state.sequencer.signing_keys_for_account(account_id).await?;
+    if !existing.is_empty() {
+        return Err(AppError::conflict(
+            "Account already has a signing key; register additional keys via \
+             POST /v1/accounts/{id}/keys/register (signed by an existing key)",
+        ));
+    }
+
+    let pubkey = parse_new_key(
+        &state,
+        &req.public_key_hex,
+        req.auth_scheme,
+        req.webauthn_registration.as_ref(),
+    )?;
 
     state
         .sequencer
         .register_pubkey_with_meta(
-            AccountId(id),
+            account_id,
             pubkey,
             RegisteredPubkey {
-                account_id: AccountId(id),
+                account_id,
                 auth_scheme: sequencer_auth_scheme(req.auth_scheme),
                 label: req.label.clone(),
                 scope: sequencer_key_scope(req.scope),
@@ -170,6 +207,93 @@ pub async fn register_key(
             },
         )
         .await?;
+
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// POST /v1/accounts/{id}/keys/register — register an additional signing key,
+/// authorized by a signature from an existing account key (SYB-229).
+///
+/// Mirrors the SYB-60 revoke shape: canonical bytes cover the account, the new
+/// key (scheme + compressed SEC1), the signer, and a replay nonce, and are
+/// domain-separated by `genesis_hash` (SYB-224). The `raw_p256` signer path
+/// hands a `SignedKeyRegistration` to the sequencer (which re-verifies and burns
+/// the nonce); the `webauthn` signer path verifies the assertion at the edge and
+/// hands an already-authenticated intent.
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{id}/keys/register",
+    params(("id" = u64, Path, description = "Account ID")),
+    request_body = SignedRegisterKeyRequest,
+    responses(
+        (status = 200, description = "Key registered"),
+        (status = 400, description = "Invalid key or signature"),
+        (status = 403, description = "Signer/account mismatch"),
+        (status = 404, description = "Unknown signer or account"),
+        (status = 409, description = "Key already registered, or stale nonce")
+    )
+)]
+pub async fn register_signed_key(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(req): Json<SignedRegisterKeyRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account_id = AccountId(id);
+    let new_pubkey = parse_new_key(
+        &state,
+        &req.public_key_hex,
+        req.auth_scheme,
+        req.webauthn_registration.as_ref(),
+    )?;
+    let signer = parse_signer(&req.signer_pubkey_hex)?;
+    let new_auth_scheme = sequencer_auth_scheme(req.auth_scheme);
+    let scope = sequencer_key_scope(req.scope);
+    let label = req.label.clone();
+
+    match req.signer_auth_scheme {
+        AuthScheme::RawP256 => {
+            let signed = SignedKeyRegistration {
+                account_id,
+                new_pubkey,
+                new_auth_scheme,
+                label,
+                scope,
+                nonce: req.nonce,
+                signer,
+                signature: parse_raw_signature(req.signature_hex.as_deref())?,
+            };
+            state.sequencer.register_key_signed(signed).await?;
+        }
+        AuthScheme::WebAuthn => {
+            let genesis_hash = state
+                .sequencer
+                .get_genesis_hash()
+                .await?
+                .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
+            let canonical = canonical_key_registration_bytes(
+                account_id,
+                new_auth_scheme,
+                &new_pubkey.compressed_bytes(),
+                &signer.compressed_bytes(),
+                req.nonce,
+                genesis_hash,
+            );
+            verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
+                .await?;
+            state
+                .sequencer
+                .register_key_authenticated(AuthenticatedKeyRegistration {
+                    account_id,
+                    new_pubkey,
+                    new_auth_scheme,
+                    label,
+                    scope,
+                    nonce: req.nonce,
+                    signer,
+                })
+                .await?;
+        }
+    }
 
     Ok(Json(serde_json::json!({ "success": true })))
 }

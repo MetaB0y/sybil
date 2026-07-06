@@ -17,10 +17,14 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use matching_sequencer::crypto::{
-    canonical_api_key_create_bytes, canonical_api_key_revoke_bytes, canonical_key_revocation_bytes,
+    canonical_api_key_create_bytes, canonical_api_key_revoke_bytes,
+    canonical_key_registration_bytes, canonical_key_revocation_bytes,
     canonical_profile_update_bytes,
 };
-use matching_sequencer::AccountId;
+use matching_sequencer::{
+    AccountAuthScheme, AccountId, AuthenticatedKeyRegistration, KeyScope, PublicKey,
+    SequencerHandle,
+};
 
 fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -58,14 +62,55 @@ async fn account_with_key(app: &axum::Router, seed: u8) -> (u64, SigningKey) {
     (account_id, key)
 }
 
-async fn register_extra_key(app: &axum::Router, account_id: u64, key: &SigningKey, label: &str) {
+/// Establish the genesis hash (SYB-224) needed by the signed register path.
+async fn ensure_genesis(handle: &SequencerHandle) -> [u8; 32] {
+    if let Some(g) = handle.get_genesis_hash().await.unwrap() {
+        return g;
+    }
+    handle.produce_block().await.unwrap();
+    handle
+        .get_genesis_hash()
+        .await
+        .unwrap()
+        .expect("genesis hash after first committed block")
+}
+
+/// SYB-229: register an additional agent key via the SIGNED path, authorized by
+/// `signer` (an existing account key).
+#[allow(clippy::too_many_arguments)]
+async fn register_extra_key(
+    app: &axum::Router,
+    account_id: u64,
+    signer: &SigningKey,
+    new_key: &SigningKey,
+    label: &str,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+) -> StatusCode {
+    let new_hex = pubkey_hex(new_key);
+    let signer_hex = pubkey_hex(signer);
+    let sig: Signature = signer.sign(&canonical_key_registration_bytes(
+        AccountId(account_id),
+        AccountAuthScheme::RawP256,
+        &hex::decode(&new_hex).unwrap(),
+        &hex::decode(&signer_hex).unwrap(),
+        nonce,
+        genesis_hash,
+    ));
     let (status, _) = post_json(
         app.clone(),
-        &format!("/v1/accounts/{account_id}/keys"),
-        json!({ "public_key_hex": pubkey_hex(key), "scope": "agent", "label": label }),
+        &format!("/v1/accounts/{account_id}/keys/register"),
+        json!({
+            "public_key_hex": new_hex,
+            "scope": "agent",
+            "label": label,
+            "signer_pubkey_hex": signer_hex,
+            "signature_hex": to_hex(sig.to_bytes().as_slice()),
+            "nonce": nonce,
+        }),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    status
 }
 
 async fn get_with_bearer(app: axum::Router, uri: &str, token: &str) -> (StatusCode, Vec<u8>) {
@@ -180,10 +225,21 @@ async fn profile_set_rejects_bad_signature_and_replay() {
 
 #[tokio::test]
 async fn list_keys_reflects_registered_metadata() {
-    let (app, _handle) = test_app(true).await;
-    let (account_id, _primary) = account_with_key(&app, 13).await;
+    let (app, handle) = test_app(true).await;
+    let (account_id, primary) = account_with_key(&app, 13).await;
+    let genesis = ensure_genesis(&handle).await;
     let agent = signing_key(23);
-    register_extra_key(&app, account_id, &agent, "agent:pricer").await;
+    let status = register_extra_key(
+        &app,
+        account_id,
+        &primary,
+        &agent,
+        "agent:pricer",
+        1,
+        genesis,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 
     let (status, body) = get(app, &format!("/v1/accounts/{account_id}/keys")).await;
     assert_eq!(status, StatusCode::OK);
@@ -200,8 +256,9 @@ async fn list_keys_reflects_registered_metadata() {
 
 #[tokio::test]
 async fn revoke_last_key_is_refused_but_second_key_can_be_revoked() {
-    let (app, _handle) = test_app(true).await;
+    let (app, handle) = test_app(true).await;
     let (account_id, primary) = account_with_key(&app, 14).await;
+    let genesis = ensure_genesis(&handle).await;
 
     // Revoking the sole key must be refused (lockout protection) → 409.
     let nonce = 1u64;
@@ -231,7 +288,8 @@ async fn revoke_last_key_is_refused_but_second_key_can_be_revoked() {
 
     // Add a second key, then revoking the agent key succeeds (one remains).
     let agent = signing_key(24);
-    register_extra_key(&app, account_id, &agent, "agent").await;
+    let status = register_extra_key(&app, account_id, &primary, &agent, "agent", 1, genesis).await;
+    assert_eq!(status, StatusCode::OK);
     let agent_hex = pubkey_hex(&agent);
     let nonce = 2u64;
     let sig: Signature = primary.sign(&canonical_key_revocation_bytes(
@@ -258,6 +316,153 @@ async fn revoke_last_key_is_refused_but_second_key_can_be_revoked() {
     let arr = arr.as_array().unwrap();
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["public_key_hex"], target);
+}
+
+// --- SYB-229 signed key registration ---------------------------------------
+
+/// A fresh account rejects a SECOND unsigned key over the (now service-tier,
+/// dev-bypassed) first-key endpoint — the unsigned path is first-key only.
+#[tokio::test]
+async fn unsigned_register_second_key_conflicts() {
+    let (app, _handle) = test_app(true).await;
+    let (account_id, _primary) = account_with_key(&app, 40).await;
+
+    let intruder = signing_key(41);
+    let (status, body) = post_json(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/keys"),
+        json!({ "public_key_hex": pubkey_hex(&intruder) }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "second unsigned key must be refused: {}",
+        String::from_utf8_lossy(&body)
+    );
+
+    // The intruder key was never attached.
+    let (_, body) = get(app, &format!("/v1/accounts/{account_id}/keys")).await;
+    let arr = parse(&body);
+    assert_eq!(arr.as_array().unwrap().len(), 1);
+}
+
+/// Signed registration by an existing key attaches the new key; replaying the
+/// same nonce is refused.
+#[tokio::test]
+async fn signed_register_accepted_and_replay_rejected() {
+    let (app, handle) = test_app(true).await;
+    let (account_id, primary) = account_with_key(&app, 42).await;
+    let genesis = ensure_genesis(&handle).await;
+
+    let agent = signing_key(43);
+    let status = register_extra_key(
+        &app,
+        account_id,
+        &primary,
+        &agent,
+        "agent:pricer",
+        7,
+        genesis,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, body) = get(app.clone(), &format!("/v1/accounts/{account_id}/keys")).await;
+    let arr = parse(&body);
+    assert_eq!(arr.as_array().unwrap().len(), 2);
+
+    // Replaying the same nonce with a different new key → 409 stale nonce.
+    let other = signing_key(44);
+    let status =
+        register_extra_key(&app, account_id, &primary, &other, "agent:dup", 7, genesis).await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "replayed nonce must be refused"
+    );
+}
+
+/// A registration signed by a key that belongs to a DIFFERENT account is
+/// refused (signer/account mismatch), and one signed by an unregistered key is
+/// refused as an unknown signer.
+#[tokio::test]
+async fn signed_register_rejects_wrong_signer() {
+    let (app, handle) = test_app(true).await;
+    let (account_a, _key_a) = account_with_key(&app, 50).await;
+    let (_account_b, key_b) = account_with_key(&app, 51).await;
+    let genesis = ensure_genesis(&handle).await;
+
+    // key_b is a valid key, but on account B → mismatch (403) for account A.
+    let new_key = signing_key(52);
+    let status = register_extra_key(&app, account_a, &key_b, &new_key, "agent", 1, genesis).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "cross-account signer must 403"
+    );
+
+    // A signer not registered anywhere → unknown signer (404).
+    let stranger = signing_key(53);
+    let status =
+        register_extra_key(&app, account_a, &stranger, &new_key, "agent", 2, genesis).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "unknown signer must 404");
+
+    // Neither attempt attached the new key.
+    let (_, body) = get(app, &format!("/v1/accounts/{account_a}/keys")).await;
+    assert_eq!(parse(&body).as_array().unwrap().len(), 1);
+}
+
+/// The WebAuthn signer path (post-assertion "authenticated" intent) registers
+/// the new key, resolves the signer to the account, and burns the replay nonce.
+#[tokio::test]
+async fn webauthn_authenticated_register_registers_and_burns_nonce() {
+    let (app, handle) = test_app(true).await;
+    let (account_id, primary) = account_with_key(&app, 60).await;
+    let _ = ensure_genesis(&handle).await;
+
+    let signer = PublicKey(*primary.verifying_key());
+    let new_key = signing_key(61);
+    let new_pubkey = PublicKey(*new_key.verifying_key());
+
+    let intent = || AuthenticatedKeyRegistration {
+        account_id: AccountId(account_id),
+        new_pubkey: new_pubkey.clone(),
+        new_auth_scheme: AccountAuthScheme::WebAuthn,
+        label: Some("passkey-agent".to_string()),
+        scope: KeyScope::Agent,
+        nonce: 5,
+        signer: signer.clone(),
+    };
+
+    handle.register_key_authenticated(intent()).await.unwrap();
+
+    let (_, body) = get(app, &format!("/v1/accounts/{account_id}/keys")).await;
+    let arr = parse(&body);
+    assert_eq!(arr.as_array().unwrap().len(), 2);
+    let entry = arr
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["public_key_hex"] == pubkey_hex(&new_key))
+        .expect("new key present");
+    assert_eq!(entry["auth_scheme"], "webauthn");
+    assert_eq!(entry["scope"], "agent");
+
+    // Reusing the same nonce (with a fresh key so we reach the nonce check
+    // rather than the duplicate-key guard) is refused: the nonce was burned.
+    let third_key = signing_key(62);
+    let replay = AuthenticatedKeyRegistration {
+        account_id: AccountId(account_id),
+        new_pubkey: PublicKey(*third_key.verifying_key()),
+        new_auth_scheme: AccountAuthScheme::WebAuthn,
+        label: None,
+        scope: KeyScope::Agent,
+        nonce: 5,
+        signer: signer.clone(),
+    };
+    let err = handle.register_key_authenticated(replay).await;
+    assert!(err.is_err(), "replayed authenticated nonce must be refused");
 }
 
 #[tokio::test]

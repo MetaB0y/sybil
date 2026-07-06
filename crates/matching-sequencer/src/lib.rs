@@ -49,10 +49,10 @@ pub use bridge::{
 };
 pub use crypto::{
     api_key_hash, AccountAuthScheme, AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke,
-    AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedKeyRevocation,
-    AuthenticatedOrder, AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey,
-    SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
-    SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
+    AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedKeyRegistration,
+    AuthenticatedKeyRevocation, AuthenticatedOrder, AuthenticatedProfileUpdate, KeyScope,
+    PublicKey, RegisteredPubkey, SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal,
+    SignedCancel, SignedKeyRegistration, SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
 };
 pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{

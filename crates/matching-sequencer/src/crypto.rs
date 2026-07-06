@@ -27,6 +27,17 @@ pub enum AccountAuthScheme {
     WebAuthn,
 }
 
+impl AccountAuthScheme {
+    /// Stable byte tag used in the SYB-229 key-registration canonical form.
+    /// MUST stay in sync with the TS canonical encoder.
+    pub fn canonical_byte(self) -> u8 {
+        match self {
+            AccountAuthScheme::RawP256 => 0,
+            AccountAuthScheme::WebAuthn => 1,
+        }
+    }
+}
+
 /// Scope tag for a registered signing key (SYB-60).
 ///
 /// This describes *what the key is for*, not what it may sign: every registered
@@ -121,6 +132,35 @@ pub struct SignedKeyRevocation {
 pub struct AuthenticatedKeyRevocation {
     pub account_id: crate::account::AccountId,
     pub target_pubkey: Vec<u8>,
+    pub nonce: u64,
+    pub signer: PublicKey,
+}
+
+/// A signed request to register a NEW signing key on an account (SYB-229).
+///
+/// Required whenever the account already has at least one registered key; the
+/// first key is bootstrapped over the service tier instead. The signature (by an
+/// existing account key) authorizes attaching `new_pubkey`, and — like orders —
+/// is domain-separated by `genesis_hash`.
+pub struct SignedKeyRegistration {
+    pub account_id: crate::account::AccountId,
+    /// The key being registered.
+    pub new_pubkey: PublicKey,
+    pub new_auth_scheme: AccountAuthScheme,
+    pub label: Option<String>,
+    pub scope: KeyScope,
+    pub nonce: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
+/// A key registration whose signature was verified before the sequencer.
+pub struct AuthenticatedKeyRegistration {
+    pub account_id: crate::account::AccountId,
+    pub new_pubkey: PublicKey,
+    pub new_auth_scheme: AccountAuthScheme,
+    pub label: Option<String>,
+    pub scope: KeyScope,
     pub nonce: u64,
     pub signer: PublicKey,
 }
@@ -349,6 +389,27 @@ pub fn canonical_api_key_create_bytes(
     sybil_signing::canonical_api_key_create_bytes(account_id.0, label, nonce)
 }
 
+/// Canonical bytes for a signed signing-key registration (SYB-229).
+///
+/// Domain-separated by `genesis_hash`, mirroring orders/cancels (SYB-224).
+pub fn canonical_key_registration_bytes(
+    account_id: crate::account::AccountId,
+    new_auth_scheme: AccountAuthScheme,
+    new_pubkey: &[u8],
+    signer_pubkey: &[u8],
+    nonce: u64,
+    genesis_hash: [u8; 32],
+) -> Vec<u8> {
+    sybil_signing::canonical_key_registration_bytes(
+        genesis_hash,
+        account_id.0,
+        new_auth_scheme.canonical_byte(),
+        new_pubkey,
+        signer_pubkey,
+        nonce,
+    )
+}
+
 /// Canonical bytes for a signed read API-key revocation (SYB-60).
 pub fn canonical_api_key_revoke_bytes(
     account_id: crate::account::AccountId,
@@ -377,6 +438,26 @@ pub fn verify_signed_profile_update(signed: &SignedProfileUpdate) -> Result<(), 
 pub fn verify_signed_key_revocation(signed: &SignedKeyRevocation) -> Result<(), SequencerError> {
     let msg =
         canonical_key_revocation_bytes(signed.account_id, &signed.target_pubkey, signed.nonce);
+    signed
+        .signer
+        .0
+        .verify(&msg, &signed.signature)
+        .map_err(|_| SequencerError::InvalidSignature)
+}
+
+/// Verify a signed signing-key registration's P256 ECDSA signature (SYB-229).
+pub fn verify_signed_key_registration(
+    signed: &SignedKeyRegistration,
+    genesis_hash: [u8; 32],
+) -> Result<(), SequencerError> {
+    let msg = canonical_key_registration_bytes(
+        signed.account_id,
+        signed.new_auth_scheme,
+        &signed.new_pubkey.compressed_bytes(),
+        &signed.signer.compressed_bytes(),
+        signed.nonce,
+        genesis_hash,
+    );
     signed
         .signer
         .0
@@ -590,6 +671,40 @@ pub fn sign_key_revocation(
         target_pubkey,
         nonce,
         signer: PublicKey(*key.verifying_key()),
+        signature,
+    }
+}
+
+/// Sign a signing-key registration with a P256 signing key (testing / client use).
+#[allow(clippy::too_many_arguments)]
+pub fn sign_key_registration(
+    account_id: crate::account::AccountId,
+    new_pubkey: PublicKey,
+    new_auth_scheme: AccountAuthScheme,
+    label: Option<String>,
+    scope: KeyScope,
+    nonce: u64,
+    genesis_hash: [u8; 32],
+    key: &SigningKey,
+) -> SignedKeyRegistration {
+    let signer = PublicKey(*key.verifying_key());
+    let msg = canonical_key_registration_bytes(
+        account_id,
+        new_auth_scheme,
+        &new_pubkey.compressed_bytes(),
+        &signer.compressed_bytes(),
+        nonce,
+        genesis_hash,
+    );
+    let signature: Signature = key.sign(&msg);
+    SignedKeyRegistration {
+        account_id,
+        new_pubkey,
+        new_auth_scheme,
+        label,
+        scope,
+        nonce,
+        signer,
         signature,
     }
 }

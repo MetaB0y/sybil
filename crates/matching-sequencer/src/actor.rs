@@ -24,12 +24,13 @@ use crate::bridge::{
 };
 use crate::crypto::{
     verify_signed_api_key_create, verify_signed_api_key_revoke, verify_signed_bridge_withdrawal,
-    verify_signed_cancel, verify_signed_key_revocation, verify_signed_order,
-    verify_signed_profile_update, AccountAuthScheme, AuthenticatedApiKeyCreate,
-    AuthenticatedApiKeyRevoke, AuthenticatedBridgeWithdrawal, AuthenticatedCancel,
-    AuthenticatedKeyRevocation, AuthenticatedOrder, AuthenticatedProfileUpdate, PublicKey,
-    RegisteredPubkey, SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
-    SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
+    verify_signed_cancel, verify_signed_key_registration, verify_signed_key_revocation,
+    verify_signed_order, verify_signed_profile_update, AccountAuthScheme,
+    AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke, AuthenticatedBridgeWithdrawal,
+    AuthenticatedCancel, AuthenticatedKeyRegistration, AuthenticatedKeyRevocation,
+    AuthenticatedOrder, AuthenticatedProfileUpdate, PublicKey, RegisteredPubkey,
+    SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
+    SignedKeyRegistration, SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
 };
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{
@@ -202,6 +203,14 @@ pub enum SequencerMsg {
         AccountId,
         PublicKey,
         RegisteredPubkey,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
+    RegisterKeySigned(
+        SignedKeyRegistration,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
+    RegisterKeyAuthenticated(
+        AuthenticatedKeyRegistration,
         RpcReplyPort<Result<(), SequencerError>>,
     ),
     SetProfileSigned(
@@ -1866,6 +1875,76 @@ impl SequencerActorState {
             .register_pubkey_with_meta(account_id, pubkey, meta)
     }
 
+    /// Register a NEW signing key authorized by an existing account key (SYB-229).
+    ///
+    /// Unlike the first-key bootstrap (`handle_register_pubkey_with_meta`, service
+    /// tier), this path requires a signature by a key that already belongs to the
+    /// account. The genesis domain is checked by the caller
+    /// (`handle_signed_key_registration`); WebAuthn intents are pre-verified at the
+    /// API edge, exactly like the other SYB-60 mutations.
+    async fn handle_signed_key_registration(
+        &mut self,
+        signed: SignedKeyRegistration,
+    ) -> Result<(), SequencerError> {
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        verify_signed_key_registration(&signed, genesis_hash)?;
+        self.handle_authenticated_key_registration(AuthenticatedKeyRegistration {
+            account_id: signed.account_id,
+            new_pubkey: signed.new_pubkey,
+            new_auth_scheme: signed.new_auth_scheme,
+            label: signed.label,
+            scope: signed.scope,
+            nonce: signed.nonce,
+            signer: signed.signer,
+        })
+        .await
+    }
+
+    async fn handle_authenticated_key_registration(
+        &mut self,
+        authenticated: AuthenticatedKeyRegistration,
+    ) -> Result<(), SequencerError> {
+        // The signer must already be an active key on the target account. This
+        // also implies the account has >= 1 key, so the signed path can never be
+        // used to bootstrap the very first key (that stays on the service tier).
+        self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
+        // Reject a duplicate registration BEFORE burning the nonce so a rejected
+        // request doesn't consume it (mirrors the revoke validation ordering).
+        if self
+            .sequencer
+            .lookup_pubkey(&authenticated.new_pubkey)
+            .is_some()
+        {
+            return Err(SequencerError::AccountAlreadyRegistered);
+        }
+        self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
+            .await?;
+        let meta = RegisteredPubkey {
+            account_id: authenticated.account_id,
+            auth_scheme: authenticated.new_auth_scheme,
+            label: authenticated.label.clone(),
+            scope: authenticated.scope,
+            created_at_ms: current_timestamp_ms(),
+        };
+        self.persist_control_plane(&ControlPlaneCommand::RegisterPubkeyWithMeta {
+            account_id: authenticated.account_id,
+            compressed_pubkey: authenticated.new_pubkey.compressed_bytes(),
+            auth_scheme: meta.auth_scheme,
+            label: meta.label.clone(),
+            scope: meta.scope,
+            created_at_ms: meta.created_at_ms,
+        })
+        .await?;
+        self.sequencer.register_pubkey_with_meta(
+            authenticated.account_id,
+            authenticated.new_pubkey,
+            meta,
+        )
+    }
+
     /// Resolve the account for a verified signer and confirm it matches the
     /// account named in the request (shared by all SYB-60 mutations).
     fn resolve_signer_account(
@@ -2320,6 +2399,16 @@ impl Actor for SequencerActor {
                 let _ = reply.send(
                     state
                         .handle_register_pubkey_with_meta(account_id, pubkey, meta)
+                        .await,
+                );
+            }
+            SequencerMsg::RegisterKeySigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_key_registration(signed).await);
+            }
+            SequencerMsg::RegisterKeyAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_key_registration(authenticated)
                         .await,
                 );
             }
@@ -3398,6 +3487,24 @@ impl SequencerHandle {
         meta: RegisteredPubkey,
     ) -> Result<(), SequencerError> {
         self.rpc(|reply| SequencerMsg::RegisterPubkeyWithMeta(account_id, pubkey, meta, reply))
+            .await?
+    }
+
+    /// Register a NEW signing key from a raw-P256-signed request (SYB-229).
+    pub async fn register_key_signed(
+        &self,
+        signed: SignedKeyRegistration,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::RegisterKeySigned(signed, reply))
+            .await?
+    }
+
+    /// Register a NEW signing key from a WebAuthn-authenticated request (SYB-229).
+    pub async fn register_key_authenticated(
+        &self,
+        authenticated: AuthenticatedKeyRegistration,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::RegisterKeyAuthenticated(authenticated, reply))
             .await?
     }
 
