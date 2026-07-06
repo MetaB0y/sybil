@@ -51,8 +51,11 @@ provider_refs_hash =
 ```
 
 `canonical_witness_bytes` is the same canonical `BlockWitness` byte string
-used by `witness_root` (`sybil-canonical-witness-v2`, which includes the
-private L1 deposit-prefix section). This plaintext witness payload is acceptable for local
+used by `witness_root` (`sybil-canonical-witness-v3`, wire version byte 3). It
+begins with the format-version byte and includes the pre- and post-state
+account sections, the pre- and post-state sidecars, and the deposit-accumulator
+section (its pre-frontier, pre-count, and new-deposit stream) — i.e. the full
+private witness the guest re-derives, not just the visible fields. This plaintext witness payload is acceptable for local
 smoke tests and prover orchestration, but should not be treated as production
 public DA for a private validium. The OpenVM guest recomputes the DA
 commitment from the private witness and rejects any public input that does not

@@ -5,6 +5,10 @@ witness-schema bump that closes the H4 sidecar-transition gap, unblocks the SYB-
 view extraction, folds in SYB-212 group-membership derivation, and fixes the SYB-214
 O(total-deposits) witness growth — arranged so **exactly one guest-commitment move** happens.*
 
+> **Note on naming:** the filename is the design series name, not the wire version. The
+> ratified wire format is **version 3** (payload label `sybil-canonical-witness-v3`,
+> `WITNESS_FORMAT_VERSION = 3`), landed 2026-07-06 in commits `9771218c` + `80acf067`.
+
 **Status (2026-07-05): RATIFIED** — all four headline decisions approved (unproven view
 sidecar; full pre-sidecar at devnet scale; vault-tree frontier, no MMR; fresh-genesis
 migration), with two riders now binding on the implementation tickets:

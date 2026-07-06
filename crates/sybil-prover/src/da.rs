@@ -36,7 +36,7 @@ pub struct PrepareFileDaArgs {
 
 #[derive(Args)]
 pub struct PublishDaArgs {
-    /// MessagePack-encoded StateTransitionGuestInput produced by `prepare`.
+    /// MessagePack-encoded StateTransitionGuestInput produced by `prepare-file-da`.
     #[arg(long)]
     pub guest_input: PathBuf,
     /// Output path for canonical witness payload bytes.
@@ -263,7 +263,7 @@ fn da_manifest_json(
     DaManifestJson {
         version: 1,
         payload_kind: "block_witness",
-        payload_encoding: "sybil-canonical-witness-v2",
+        payload_encoding: "sybil-canonical-witness-v3",
         provider_refs_encoding: if provider_refs.is_empty() {
             "empty-v1"
         } else {
