@@ -38,6 +38,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/accounts/{id}/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/accounts/{id}/api-keys — list read API keys (metadata only) (SYB-60) */
+        get: operations["list_api_keys"];
+        put?: never;
+        /**
+         * POST /v1/accounts/{id}/api-keys — create a read API key (signed) (SYB-60)
+         * @description The bearer token is returned exactly once; only its blake3 hash is stored.
+         */
+        post: operations["create_api_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/accounts/{id}/api-keys/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/accounts/{id}/api-keys/revoke — revoke a read API key (signed) */
+        post: operations["revoke_api_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/accounts/{id}/bridge-key": {
         parameters: {
             query?: never;
@@ -130,10 +168,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** GET /v1/accounts/{id}/keys — list registered signing keys with metadata */
+        get: operations["list_account_keys"];
         put?: never;
         /** POST /v1/accounts/{id}/keys */
         post: operations["register_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/accounts/{id}/keys/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60) */
+        post: operations["revoke_key"];
         delete?: never;
         options?: never;
         head?: never;
@@ -174,6 +230,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/accounts/{id}/private-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
+         * @description Template endpoint demonstrating `Authorization: Bearer` gating. It returns
+         *     the same account data the public endpoints already expose, but only to a
+         *     read key that belongs to the requested account.
+         */
+        get: operations["get_private_summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/accounts/{id}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/accounts/{id}/profile — set/clear opt-in profile (signed) (SYB-60) */
+        post: operations["set_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/activity/overview": {
         parameters: {
             query?: never;
@@ -198,7 +293,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/blocks?limit=N — last N blocks, newest-first, from in-memory history. */
+        /** GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height. */
         get: operations["get_recent_blocks"];
         put?: never;
         post?: never;
@@ -232,7 +327,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/blocks/stream */
+        /**
+         * GET /v1/blocks/stream
+         * @description Third-party convenience SSE stream of block events. First-party clients should use GET /v1/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
+         */
         get: operations["stream_blocks"];
         put?: never;
         post?: never;
@@ -251,14 +349,7 @@ export interface paths {
         };
         /**
          * GET /v1/blocks/ws
-         * @description WebSocket stream of committed blocks. See
-         *     `docs/architecture/WebSocket Block Stream.md` for the message schema,
-         *     backpressure policy, and reconnect semantics.
-         *
-         *     Query parameters:
-         *     - `from_block=<height>` — replay every block from `height` up to the
-         *       current head before switching to live. Used by clients to resume
-         *       after a `lagged` close without gaps.
+         * @description First-party WebSocket block stream. Supports ?from_block=N to replay retained committed blocks from that height before following live blocks. If from_block is below the retained blocks_full floor, the stream emits a retention_gap envelope and closes so clients can cold-resync.
          */
         get: operations["ws_blocks"];
         put?: never;
@@ -328,6 +419,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bridge/accounts/by-key/{key_hex}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/bridge/accounts/by-key/{key_hex} */
+        get: operations["account_by_key"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bridge/deposits": {
         parameters: {
             query?: never;
@@ -373,6 +481,40 @@ export interface paths {
         put?: never;
         /** POST /v1/bridge/withdrawals */
         post: operations["create_withdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bridge/withdrawals/l1-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/bridge/withdrawals/l1-events */
+        post: operations["submit_l1_withdrawal_event"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/bridge/withdrawals/signed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/bridge/withdrawals/signed */
+        post: operations["create_signed_withdrawal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -525,6 +667,23 @@ export interface paths {
         put?: never;
         /** POST /v1/markets/groups */
         post: operations["create_market_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/markets/groups/{group_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/markets/groups/{group_id}/members */
+        post: operations["extend_market_group"];
         delete?: never;
         options?: never;
         head?: never;
@@ -886,26 +1045,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @enum {string} */
-        AuthScheme: "raw_p256" | "webauthn";
-        WebAuthnAssertion: {
-            /** @description Base64url credential id returned by the authenticator. */
-            credential_id_b64url: string;
-            /** @description Base64url authenticatorData bytes from `navigator.credentials.get`. */
-            authenticator_data_b64url: string;
-            /** @description Base64url clientDataJSON bytes from `navigator.credentials.get`. */
-            client_data_json_b64url: string;
-            /** @description Base64url DER-encoded ECDSA signature from `navigator.credentials.get`. */
-            signature_b64url: string;
-            /** @description Optional base64url userHandle returned by the authenticator. */
-            user_handle_b64url?: string | null;
-        };
-        WebAuthnRegistration: {
-            /** @description Base64url-encoded WebAuthn attestationObject from `navigator.credentials.create`. */
-            attestation_object_b64url: string;
-            /** @description Base64url-encoded WebAuthn clientDataJSON from `navigator.credentials.create`. */
-            client_data_json_b64url: string;
-        };
         AccountFillResponse: {
             /** Format: int64 */
             block_height: number;
@@ -914,11 +1053,15 @@ export interface components {
              *     Opaque to clients; current encoding is `<block_height>.<order_id>`.
              */
             cursor: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             fill_price_nanos: string;
             /**
              * Format: int64
-             * @description Fill quantity in fixed-point share-units (`1000` = 1 share).
+             * @description Fill quantity. Integer share-units; 1000 units = 1 share.
              */
             fill_qty: number;
             /** Format: int64 */
@@ -927,11 +1070,37 @@ export interface components {
             /** Format: int64 */
             timestamp_ms: number;
         };
+        /** @description A registered signing key with SYB-60 management metadata. */
+        AccountKeyResponse: {
+            /** @description Authentication scheme: `raw_p256` or `webauthn`. */
+            auth_scheme: string;
+            /**
+             * Format: int64
+             * @description Registration time in Unix milliseconds (0 for keys predating SYB-60).
+             */
+            created_at_ms: number;
+            /** @description Optional human label. */
+            label?: string | null;
+            /** @description Hex-encoded compressed P256 public key (33 bytes). */
+            public_key_hex: string;
+            /** @description Scope tag: `primary`, `agent`, or `custom`. */
+            scope: string;
+        };
         AccountResponse: {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /** @description Optional deterministic identicon seed (SYB-60). */
+            avatar_seed?: string | null;
+            /**
+             * Format: int64
+             * @description Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+             */
             balance_nanos: string;
+            /**
+             * @description Optional opt-in display name (SYB-60). Not yet used for leaderboard
+             *     labels — that flip is a deliberate follow-up.
+             */
+            display_name?: string | null;
             positions?: components["schemas"]["PositionResponse"][];
         };
         /** @description Response shape for `GET /v1/activity/overview`. All-time + 24h slices. */
@@ -939,6 +1108,39 @@ export interface components {
             all_time: components["schemas"]["OverviewBucketResponse"];
             last_24h: components["schemas"]["OverviewBucketResponse"];
         };
+        AdmitTimingViewResponse: {
+            /** Format: int64 */
+            account_id: number;
+            /** Format: int64 */
+            admit_height: number;
+            /**
+             * Format: int64
+             * @description Admission timestamp in Unix epoch milliseconds.
+             */
+            admit_timestamp_ms: number;
+            is_mm: boolean;
+            is_new: boolean;
+            /** Format: int64 */
+            order_id: number;
+        };
+        /** @description A read-scoped bearer API key's metadata (never the token or its hash). */
+        ApiKeyResponse: {
+            /** Format: int64 */
+            created_at_ms: number;
+            /**
+             * Format: int64
+             * @description Stable id used to reference this key for revocation.
+             */
+            id: number;
+            label?: string | null;
+            /**
+             * Format: int64
+             * @description Revocation time in Unix milliseconds, if revoked.
+             */
+            revoked_at_ms?: number | null;
+        };
+        /** @enum {string} */
+        AuthScheme: "raw_p256" | "webauthn";
         /**
          * @description Nested per-market sidecar on `BlockResponse.by_market`. Grows append-only
          *     across steps (each new field carries `#[serde(default)]` so partial
@@ -972,18 +1174,17 @@ export interface components {
             unmatched?: number;
             /**
              * Format: int64
-             * @description Per-market volume contribution from this block's fills, in nanos.
-             *     Multi-market fills credit each active market with their full
-             *     notional; the platform `total_volume_nanos` scalar counts each fill
-             *     once.
+             * @description Per-market volume contribution from this block's fills. Integer nanodollars;
+             *     1_000_000_000 = $1. Multi-market fills credit each active market with their
+             *     full notional; the platform `total_volume_nanos` scalar counts each fill once.
              */
             volume_nanos?: string;
             /**
              * Format: int64
-             * @description Per-market welfare contribution from this block's fills (B7).
-             *     Multi-market fills credit each active market with their full welfare;
-             *     the platform `total_welfare_nanos` counts each fill once. Signed —
-             *     solver rounding can yield small negatives.
+             * @description Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
+             *     1_000_000_000 = $1. Multi-market fills credit each active market with their
+             *     full welfare; the platform `total_welfare_nanos` counts each fill once.
+             *     Signed — solver rounding can yield small negatives.
              */
             welfare_nanos?: string;
         };
@@ -997,9 +1198,19 @@ export interface components {
             by_market?: {
                 [key: string]: components["schemas"]["BlockMarketStats"];
             };
+            /**
+             * @description Clearing price vectors by market/group. Integer nanodollars;
+             *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+             */
             clearing_prices_nanos?: {
                 [key: string]: string[];
             };
+            /**
+             * @description Unproven derived-view lifecycle sidecar. The field is exposed on the
+             *     same block surface as canonical data, but its `provenance` marks it as
+             *     derived read-model data rather than consensus-proven data.
+             */
+            derived_view_sidecar?: components["schemas"]["DerivedViewSidecarResponse"];
             events_root: string;
             /** Format: int32 */
             fill_count: number;
@@ -1015,9 +1226,17 @@ export interface components {
             system_events?: components["schemas"]["SystemEventResponse"][];
             /** Format: int64 */
             timestamp_ms: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total traded notional in the block. Integer nanodollars;
+             *     1_000_000_000 = $1.
+             */
             total_volume_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total solver welfare in the block. Integer nanodollars;
+             *     1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
+             */
             total_welfare_nanos: string;
             /**
              * Format: int32
@@ -1147,7 +1366,10 @@ export interface components {
         BridgeDepositEventResponse: {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
+             */
             amount_token_units: number;
             /** Format: int64 */
             deposit_id: number;
@@ -1156,31 +1378,56 @@ export interface components {
         BridgeDepositResponse: {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
+             */
             balance_nanos: string;
             /** Format: int64 */
             deposit_id: number;
             deposit_root_hex: string;
         };
         BridgeStatusResponse: {
+            cancelled_withdrawal_count?: number;
             /** Format: int64 */
             deposit_cursor: number;
             deposit_root_hex: string;
+            finalized_withdrawal_count?: number;
             /** Format: int64 */
             next_withdrawal_id: number;
+            queued_withdrawal_count?: number;
             withdrawal_count: number;
         };
+        /** @enum {string} */
+        BridgeWithdrawalL1Status: "not_requested" | "queued" | "finalized" | "cancelled";
         BridgeWithdrawalResponse: {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Off-chain balance amount burned for the withdrawal. Integer nanodollars;
+             *     1_000_000_000 = $1.
+             */
             amount_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Token base units released by the vault.
+             */
             amount_token_units: number;
             /** Format: int64 */
             created_at_height: number;
             /** Format: int64 */
             expiry_height: number;
+            /** Format: int64 */
+            l1_cancelled_at_unix?: number | null;
+            /** Format: int64 */
+            l1_executable_at_unix?: number | null;
+            /** Format: int64 */
+            l1_finalized_at_unix?: number | null;
+            /** Format: int64 */
+            l1_requested_at_unix?: number | null;
+            l1_status?: components["schemas"]["BridgeWithdrawalL1Status"];
+            l1_tx_hash_hex?: string | null;
             nullifier_hex: string;
             recipient_hex: string;
             token_hex: string;
@@ -1202,28 +1449,59 @@ export interface components {
             auth_scheme?: components["schemas"]["AuthScheme"];
             /**
              * Format: int64
+             * @description Per-account replay nonce covered by the P256 signature.
+             */
+            nonce: number;
+            /**
+             * Format: int64
              * @description The pending order to cancel.
              */
             order_id: number;
             /**
-             * Format: int64
-             * @description Per-account replay nonce covered by the P256 signature.
+             * @description Hex-encoded raw P256 ECDSA signature over the canonical cancel payload.
+             *     Required when `auth_scheme` is `raw_p256`.
              */
-            nonce: number;
-            /** @description Hex-encoded raw P256 ECDSA signature over the canonical cancel payload. Required when `auth_scheme` is `raw_p256`. */
             signature_hex?: string | null;
             /** @description Hex-encoded compressed P256 public key of the signer. */
             signer_pubkey_hex: string;
-            /** @description WebAuthn assertion envelope. Required when `auth_scheme` is `webauthn`. */
-            webauthn_assertion?: components["schemas"]["WebAuthnAssertion"] | null;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
         };
         CreateAccountRequest: {
             /**
              * Format: int64
-             * @description Initial balance in nanos (1 dollar = 1_000_000_000 nanos).
+             * @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
              * @example 100000000000
              */
             initial_balance_nanos: string;
+        };
+        /**
+         * @description Signed request to create a read-scoped bearer API key (SYB-60).
+         *
+         *     The bearer token is generated server-side, returned exactly once in the
+         *     response, and never recoverable afterwards (only its blake3 hash is stored).
+         */
+        CreateApiKeyRequest: {
+            auth_scheme?: components["schemas"]["AuthScheme"];
+            /** @description Optional human label, e.g. "grafana". */
+            label?: string | null;
+            /** Format: int64 */
+            nonce: number;
+            signature_hex?: string | null;
+            signer_pubkey_hex: string;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+        };
+        /**
+         * @description Response to creating a read API key (SYB-60). The plaintext `token` is shown
+         *     exactly once here and is not recoverable afterwards.
+         */
+        CreateApiKeyResponse: {
+            /** Format: int64 */
+            created_at_ms: number;
+            /** Format: int64 */
+            id: number;
+            label?: string | null;
+            /** @description The bearer token. Store it now — the server keeps only its blake3 hash. */
+            token: string;
         };
         CreateBridgeWithdrawalRequest: {
             /**
@@ -1297,12 +1575,56 @@ export interface components {
             market_id: number;
             name: string;
         };
+        CreateSignedBridgeWithdrawalRequest: {
+            /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
+            auth_scheme?: components["schemas"]["AuthScheme"];
+            /**
+             * @description Hex-encoded raw P256 ECDSA signature over the canonical withdrawal payload.
+             *     Required when `auth_scheme` is `raw_p256`.
+             */
+            signature_hex?: string | null;
+            /** @description Hex-encoded compressed P256 public key of the signer. */
+            signer_pubkey_hex: string;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+            /** @description Withdrawal payload covered by the P256 signature. */
+            withdrawal: components["schemas"]["CreateBridgeWithdrawalRequest"];
+        };
+        DerivedViewSidecarResponse: {
+            /**
+             * @description Admission timing rows. `is_new=false` means the order was carried from
+             *     a prior block's resting book; `is_new=true` means a distinct admission
+             *     first became visible to this block's view.
+             */
+            admits?: components["schemas"]["AdmitTimingViewResponse"][];
+            /**
+             * @description Always `derived_unproven`: this sidecar is sequencer-derived read-model
+             *     data and is not part of the witness, state root, events root, witness
+             *     root, DA commitment, or ZK guest input.
+             */
+            provenance: string;
+            /**
+             * @description Rejection rows that were intentionally mirrored into account history.
+             *     Canonical rejections remain in `BlockResponse.rejections`.
+             */
+            rejection_history?: components["schemas"]["RejectedOrderViewResponse"][];
+            /**
+             * @description Resting orders removed during block production. Derived/unproven view
+             *     rows used for analytics and lifecycle displays.
+             */
+            removed_orders?: components["schemas"]["RemovedOrderViewResponse"][];
+        };
         EquityPointResponse: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1.
+             */
             deposited_nanos: string;
             /** Format: int64 */
             height: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1.
+             */
             portfolio_value_nanos: string;
             /** Format: int64 */
             timestamp_ms: number;
@@ -1317,14 +1639,25 @@ export interface components {
             /** Format: int32 */
             trader_count: number;
         };
+        ExtendMarketGroupRequest: {
+            /**
+             * Format: int32
+             * @description Market ID to add to the existing group.
+             */
+            market_id: number;
+        };
         FillResponse: {
             /** Format: int64 */
             account_id?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             fill_price_nanos: string;
             /**
              * Format: int64
-             * @description Fill quantity in fixed-point share-units (`1000` = 1 share).
+             * @description Fill quantity. Integer share-units; 1000 units = 1 share.
              */
             fill_qty: number;
             /** Format: int64 */
@@ -1333,7 +1666,7 @@ export interface components {
         FundAccountRequest: {
             /**
              * Format: int64
-             * @description Amount to add in nanos (1 dollar = 1_000_000_000 nanos).
+             * @description Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1.
              * @example 50000000000
              */
             amount_nanos: string;
@@ -1345,9 +1678,15 @@ export interface components {
         };
         /** @description One entry in the per-account history feed (`GET /v1/accounts/{id}/events`). */
         HistoryEventResponse: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
+             */
             amount_nanos?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
+             */
             available_nanos?: string | null;
             /** Format: int64 */
             block_height: number;
@@ -1359,24 +1698,42 @@ export interface components {
             order_id?: number | null;
             outcome?: string | null;
             payout_outcome?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Event price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             price_nanos?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Event quantity. Integer share-units; 1000 units = 1 share.
+             */
             qty?: number | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
+             */
             realized_pnl_nanos?: string | null;
             /**
              * @description Rejected only: reason code (`insufficient_balance` | `insufficient_position`
              *     | `complete_set` | …).
              */
             reason?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
+             */
             required_nanos?: string | null;
             side?: string | null;
             /** Format: int64 */
             timestamp_ms: number;
             type: string;
         };
+        /**
+         * @description Scope tag for a registered signing key (SYB-60).
+         * @enum {string}
+         */
+        KeyScope: "primary" | "agent" | "custom";
         LeaderboardEntryResponse: {
             /**
              * Format: int64
@@ -1417,16 +1774,30 @@ export interface components {
             window: string;
         };
         MarketGroupResponse: {
+            /** Format: int64 */
+            group_id: number;
             market_ids: number[];
             name: string;
         };
         MarketPriceResponse: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             no_price_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             yes_price_nanos: string;
         };
         MarketPricesResponse: {
+            /**
+             * @description Market price map. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             prices: {
                 [key: string]: components["schemas"]["MarketPriceResponse"];
             };
@@ -1480,14 +1851,15 @@ export interface components {
             group_item_title?: string | null;
             /**
              * Format: int64
-             * @description Rolling last-10-batch ±band depth average in nanos. Zero for markets
-             *     without a clearing price yet. Pair with `liquidity_band_nanos` for
-             *     labelling.
+             * @description Rolling last-10-batch band depth average. Integer nanodollars;
+             *     1_000_000_000 = $1. Zero for markets without a clearing price yet.
+             *     Pair with `liquidity_band_nanos` for labelling.
              */
             liquidity_avg10_nanos?: string;
             /**
              * Format: int64
              * @description Width of the band the liquidity score uses (the ± in "$X ±$0.05").
+             *     Integer nanodollars; 1_000_000_000 = $1.
              *     Always the live config value — `0` when no liquidity has been
              *     recorded yet.
              */
@@ -1511,10 +1883,16 @@ export interface components {
             name: string;
             /**
              * Format: int64
-             * @description Clearing NO price ~24h ago in nanos. See `yes_price_24h_ago_nanos`.
+             * @description Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
+             *     Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             no_price_24h_ago_nanos?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             no_price_nanos?: string | null;
             /**
              * Format: int64
@@ -1535,7 +1913,11 @@ export interface components {
              *     are tracked separately and do not count here.
              */
             orders_unmatched_total?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+             *     Payouts are per-share probabilities in [0, 1e9].
+             */
             payout_nanos?: string | null;
             /**
              * @description Polymarket on-chain condition id — FE join key into
@@ -1545,6 +1927,8 @@ export interface components {
             /**
              * Format: int64
              * @description Reference price from external system (e.g., Polymarket), display only.
+             *     Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             reference_price_nanos?: string | null;
             resolution_criteria?: string | null;
@@ -1559,20 +1943,30 @@ export interface components {
             trader_count?: number;
             /**
              * Format: int64
-             * @description Rolling 24h trading volume in nanos (±1h bucket resolution). Off-block;
+             * @description Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+             *     Off-block;
              *     "since last restart" until prod persistence is enabled.
              */
             volume_24h_nanos?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+             */
             volume_nanos?: string;
             /**
              * Format: int64
-             * @description Clearing YES price ~24h ago in nanos, derived from the per-market
+             * @description Clearing YES price ~24h ago, derived from the per-market
              *     hourly snapshot. `None` for markets younger than 24h or wiped on
-             *     restart. FE computes the 24h delta as `current − snapshot`.
+             *     restart. FE computes the 24h delta as `current - snapshot`.
+             *     Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             yes_price_24h_ago_nanos?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             yes_price_nanos?: string | null;
         };
         /** @description Query parameters for market search. */
@@ -1582,17 +1976,19 @@ export interface components {
             limit?: number | null;
             /**
              * Format: int64
-             * @description Maximum YES price in nanos.
+             * @description Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             max_yes_price?: number | null;
             /**
              * Format: int64
-             * @description Minimum cumulative volume in nanos.
+             * @description Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1.
              */
             min_volume?: number | null;
             /**
              * Format: int64
-             * @description Minimum YES price in nanos.
+             * @description Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             min_yes_price?: number | null;
             offset?: number | null;
@@ -1609,17 +2005,30 @@ export interface components {
         MarketSummaryResponse: {
             /**
              * Format: int64
-             * @description Liquidity score + band (mirrors `MarketResponse`).
+             * @description Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
+             *     Mirrors `MarketResponse`.
              */
             liquidity_avg10_nanos?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
+             *     Mirrors `MarketResponse`.
+             */
             liquidity_band_nanos?: string;
             /** Format: int32 */
             market_id: number;
             name: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             no_price_24h_ago_nanos?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             no_price_nanos?: string | null;
             /** Format: int64 */
             orders_matched_total?: number;
@@ -1633,6 +2042,8 @@ export interface components {
             /**
              * Format: int64
              * @description Reference price from external system (e.g., Polymarket), display only.
+             *     Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             reference_price_nanos?: string | null;
             status: string;
@@ -1643,18 +2054,27 @@ export interface components {
             trader_count?: number;
             /**
              * Format: int64
-             * @description Rolling 24h trading volume in nanos (mirrors
+             * @description Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+             *     Mirrors
              *     `MarketResponse.volume_24h_nanos`).
              */
             volume_24h_nanos?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+             */
             volume_nanos: string;
             /**
              * Format: int64
-             * @description Clearing YES / NO prices ~24h ago (mirror of `MarketResponse`).
+             * @description Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             yes_price_24h_ago_nanos?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             yes_price_nanos?: string | null;
         };
         /**
@@ -1664,11 +2084,23 @@ export interface components {
         OpenBatchResponse: {
             /** Format: int64 */
             indicative_computed_at_ms?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Indicative NO price for the open batch. Integer nanodollars;
+             *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+             */
             indicative_no_price_nanos?: string | null;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Indicative traded notional for the open batch. Integer nanodollars;
+             *     1_000_000_000 = $1.
+             */
             indicative_volume_nanos?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Indicative YES price for the open batch. Integer nanodollars;
+             *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+             */
             indicative_yes_price_nanos?: string | null;
             /** Format: int32 */
             unique_placers: number;
@@ -1686,50 +2118,63 @@ export interface components {
         OrderSpec: {
             /**
              * Format: int64
-             * @description Limit price in nanos (0 to 1_000_000_000).
+             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
             /**
              * Format: int64
-             * @description Quantity in fixed-point share-units.
+             * @description Order quantity. Integer share-units; 1000 units = 1 share.
              */
             quantity: number;
             /** @enum {string} */
             type: "BuyYes";
         } | {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
             /**
              * Format: int64
-             * @description Quantity in fixed-point share-units.
+             * @description Order quantity. Integer share-units; 1000 units = 1 share.
              */
             quantity: number;
             /** @enum {string} */
             type: "BuyNo";
         } | {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
             /**
              * Format: int64
-             * @description Quantity in fixed-point share-units.
+             * @description Order quantity. Integer share-units; 1000 units = 1 share.
              */
             quantity: number;
             /** @enum {string} */
             type: "SellYes";
         } | {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
             /**
              * Format: int64
-             * @description Quantity in fixed-point share-units.
+             * @description Order quantity. Integer share-units; 1000 units = 1 share.
              */
             quantity: number;
             /** @enum {string} */
@@ -1742,13 +2187,17 @@ export interface components {
          */
         OverviewBucketResponse: {
             orders?: components["schemas"]["OverviewOrderStatsResponse"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total traded notional for this bucket. Integer nanodollars;
+             *     1_000_000_000 = $1.
+             */
             total_volume_nanos?: string;
             /**
              * Format: int64
-             * @description Cumulative platform welfare in nanos for this bucket — sum of per-block
-             *     `total_welfare` (each fill counted once). Signed: solver rounding can
-             *     yield small negatives.
+             * @description Cumulative platform welfare for this bucket. Integer nanodollars;
+             *     1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
+             *     once). Signed: solver rounding can yield small negatives.
              */
             total_welfare_nanos?: string;
             /** Format: int64 */
@@ -1782,7 +2231,11 @@ export interface components {
             created_at_ms?: number;
             /** Format: int64 */
             expires_at_block: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             limit_price_nanos: string;
             /** Format: int32 */
             market_id: number;
@@ -1790,15 +2243,16 @@ export interface components {
             order_id: number;
             /**
              * Format: int64
-             * @description Original `max_fill` at admit time, in fixed-point share-units (B8). Lets the FE render a
-             *     partial-fill progress bar as `(original - remaining) / original`.
+             * @description Original `max_fill` at admit time. Integer share-units; 1000 units = 1 share.
+             *     Lets the FE render a partial-fill progress bar as
+             *     `(original - remaining) / original`.
              *     `0` for orders persisted before B5/B8 (#[serde(default)] forward
              *     compat).
              */
             original_quantity?: number;
             /**
              * Format: int64
-             * @description Remaining fill quantity in fixed-point share-units (`1000` = 1 share).
+             * @description Remaining fill quantity. Integer share-units; 1000 units = 1 share.
              */
             remaining_quantity: number;
             side: string;
@@ -1806,7 +2260,10 @@ export interface components {
         PortfolioResponse: {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+             */
             balance_nanos: string;
             /**
              * Format: int64
@@ -1816,19 +2273,29 @@ export interface components {
              *     until persistence runs in prod.
              */
             first_deposit_ms?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
+             */
             pnl_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+             */
             portfolio_value_nanos: string;
             positions: components["schemas"]["PositionValueResponse"][];
             /**
              * Format: int64
-             * @description Accumulated realized PnL across all closed positions (C1). Signed.
+             * @description Accumulated realized PnL across all closed positions (C1). Integer nanodollars;
+             *     1_000_000_000 = $1. Signed.
              *     `pnl_nanos = realized + unrealized` once both fields populate, but
              *     `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
              */
             realized_pnl_nanos?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
+             */
             total_deposited_nanos: string;
             /**
              * Format: int64
@@ -1837,17 +2304,25 @@ export interface components {
              *     so FE shows the real number instead of "200+".
              */
             total_fill_count?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Mark-to-market value of all positions. Integer nanodollars;
+             *     1_000_000_000 = $1.
+             */
             total_position_value_nanos: string;
             /**
              * Format: int64
-             * @description Mark-to-market PnL on currently open positions (C1). Computed as
-             *     `Σ (current_price - avg_entry) * quantity / SHARE_SCALE` across positions.
+             * @description Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
+             *     1_000_000_000 = $1. Computed as
+             *     `sum((current_price - avg_entry) * quantity / SHARE_SCALE)` across positions.
              */
             unrealized_pnl_nanos?: string;
         };
         PositionDeltaResponse: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Position quantity delta. Integer share-units; 1000 units = 1 share.
+             */
             delta: number;
             /** Format: int32 */
             market_id: number;
@@ -1859,7 +2334,7 @@ export interface components {
             outcome: string;
             /**
              * Format: int64
-             * @description Signed position quantity in fixed-point share-units (`1000` = 1 share).
+             * @description Signed position quantity. Integer share-units; 1000 units = 1 share.
              */
             quantity: number;
         };
@@ -1868,20 +2343,28 @@ export interface components {
              * Format: int64
              * @description Weighted-average entry price for this side of the market (C1). `0`
              *     for positions opened before C1 landed (`#[serde(default)]` forward
-             *     compat). Same units as `current_price_nanos`.
+             *     compat). Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             avg_entry_price_nanos?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Current mark price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             current_price_nanos: string;
             /** Format: int32 */
             market_id: number;
             outcome: string;
             /**
              * Format: int64
-             * @description Signed position quantity in fixed-point share-units (`1000` = 1 share).
+             * @description Signed position quantity. Integer share-units; 1000 units = 1 share.
              */
             quantity: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
+             */
             value_nanos: string;
         };
         PriceCandleResponse: {
@@ -1889,29 +2372,64 @@ export interface components {
             bucket_end_ms: number;
             /** Format: int64 */
             bucket_start_ms: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             close_no_price_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket close YES price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             close_yes_price_nanos: string;
             /** Format: int64 */
             first_height: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             high_no_price_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket high YES price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             high_yes_price_nanos: string;
             /** Format: int64 */
             last_height: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             low_no_price_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket low YES price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             low_yes_price_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket open NO price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             open_no_price_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket open YES price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             open_yes_price_nanos: string;
             /** Format: int64 */
             point_count: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1.
+             */
             volume_nanos: string;
         };
         PriceCandlesResponse: {
@@ -1937,14 +2455,59 @@ export interface components {
         PricePointResponse: {
             /** Format: int64 */
             height: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             no_price_nanos: string;
             /** Format: int64 */
             timestamp_ms: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
+             */
             volume_nanos: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
+             */
             yes_price_nanos: string;
+        };
+        /**
+         * @description Private account summary served behind a read-scoped bearer token (SYB-60).
+         *
+         *     This is the template for bearer-gated private reads: it exposes the same
+         *     data the public account/portfolio endpoints already do, but demonstrates the
+         *     `Authorization: Bearer` gating pattern on a NEW endpoint. Gating the existing
+         *     public endpoints is a deliberate future breaking change, not done here.
+         */
+        PrivateAccountSummaryResponse: {
+            /** Format: int64 */
+            account_id: number;
+            /**
+             * Format: int64
+             * @description Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+             */
+            balance_nanos: string;
+            display_name?: string | null;
+            /**
+             * Format: int64
+             * @description Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1.
+             */
+            pnl_nanos: string;
+            /**
+             * Format: int64
+             * @description Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+             */
+            portfolio_value_nanos: string;
+            positions?: components["schemas"]["PositionResponse"][];
+            /**
+             * Format: int64
+             * @description Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
+             */
+            total_deposited_nanos: string;
         };
         QmdbStateExclusionProofResponse: {
             metadata_hex?: string | null;
@@ -1980,17 +2543,31 @@ export interface components {
             pubkey_hex: string;
         };
         RegisterKeyRequest: {
-            /** @description Authentication scheme associated with this account key. Defaults to `raw_p256`. */
+            /**
+             * @description Authentication scheme associated with this account key. Defaults to
+             *     `raw_p256` so existing bots, SDKs, and arena clients are unchanged.
+             */
             auth_scheme?: components["schemas"]["AuthScheme"];
-            /** @description Base64url credential id for WebAuthn keys. */
+            /**
+             * @description Base64url credential id for WebAuthn keys. Stored client-side today and
+             *     documented here so passkey clients can round-trip the registration payload.
+             */
             credential_id_b64url?: string | null;
+            /** @description Optional human label for this key, e.g. "agent:pricer" (SYB-60). */
+            label?: string | null;
             /**
              * @description Hex-encoded compressed P256 public key (33 bytes).
              * @example 02a1b2c3...
              */
             public_key_hex: string;
-            /** @description Optional WebAuthn registration payload. */
-            webauthn_registration?: components["schemas"]["WebAuthnRegistration"] | null;
+            /**
+             * @description Scope tag describing what this key is for (SYB-60). Defaults to `primary`.
+             *     Register an agent trade key by passing `agent` with its own P256 keypair —
+             *     it then signs like any account key (bearer API keys are read-only and
+             *     cannot trade).
+             */
+            scope?: components["schemas"]["KeyScope"];
+            webauthn_registration?: null | components["schemas"]["WebAuthnRegistration"];
         };
         /** @description Registered data feed view, returned by GET/POST /v1/feeds. */
         RegisteredFeedResponse: {
@@ -2001,12 +2578,47 @@ export interface components {
             name: string;
             pubkey_hex: string;
         };
+        RejectedOrderViewResponse: {
+            /** Format: int64 */
+            account_id: number;
+            /** Format: int64 */
+            order_id: number;
+            reason: string;
+        };
         RejectionResponse: {
             /** Format: int64 */
             account_id: number;
             /** Format: int64 */
             order_id: number;
             reason: string;
+        };
+        RemovedOrderViewResponse: {
+            /** Format: int64 */
+            account_id: number;
+            active_markets?: number[];
+            exit_reason: string;
+            has_been_matched: boolean;
+            /** Format: int64 */
+            order_id: number;
+            phase: string;
+            rejection_reason?: string | null;
+            /**
+             * Format: int64
+             * @description Released reserved cash. Integer nanodollars; 1_000_000_000 = $1.
+             */
+            reserved_balance_released: number;
+            reserved_positions_released?: components["schemas"]["ReservedPositionReleaseResponse"][];
+        };
+        ReservedPositionReleaseResponse: {
+            /** Format: int32 */
+            market_id: number;
+            /** Format: int32 */
+            outcome: number;
+            /**
+             * Format: int64
+             * @description Released reserved position quantity. Integer share-units; 1000 units = 1 share.
+             */
+            quantity: number;
         };
         /**
          * @description Detailed view of a market's resolution state. Unresolved markets return
@@ -2016,7 +2628,11 @@ export interface components {
         ResolutionResponse: {
             /** Format: int32 */
             market_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Resolution payout per YES share. Integer nanodollars;
+             *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
+             */
             payout_nanos?: string | null;
             /** Format: int64 */
             resolved_at_ms?: number | null;
@@ -2030,8 +2646,8 @@ export interface components {
             attestation?: null | components["schemas"]["SignedAttestationDto"];
             /**
              * Format: int64
-             * @description Payout per YES share in nanos (0 to 1_000_000_000).
-             *     1_000_000_000 = YES wins ($1), 0 = NO wins, 700_000_000 = $0.70 fractional.
+             * @description Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+             *     Payouts are per-share probabilities in [0, 1e9].
              * @example 1000000000
              */
             payout_nanos: string;
@@ -2041,9 +2657,43 @@ export interface components {
             challenge_deadline_ms?: number | null;
             /** Format: int32 */
             market_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Resolution payout per YES share. Integer nanodollars;
+             *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
+             */
             payout_nanos: string;
             status: string;
+        };
+        /** @description Signed request to revoke a read-scoped bearer API key by id (SYB-60). */
+        RevokeApiKeyRequest: {
+            /**
+             * Format: int64
+             * @description Id of the API key to revoke (from the API-key listing).
+             */
+            api_key_id: number;
+            auth_scheme?: components["schemas"]["AuthScheme"];
+            /** Format: int64 */
+            nonce: number;
+            signature_hex?: string | null;
+            signer_pubkey_hex: string;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+        };
+        /** @description Signed request to revoke a registered signing key (SYB-60). */
+        RevokeKeyRequest: {
+            auth_scheme?: components["schemas"]["AuthScheme"];
+            /** Format: int64 */
+            nonce: number;
+            signature_hex?: string | null;
+            /**
+             * @description Hex-encoded compressed P256 public key of the signer (any active key on
+             *     the account may authorize revocation, including the target itself as long
+             *     as another key remains).
+             */
+            signer_pubkey_hex: string;
+            /** @description Hex-encoded compressed P256 public key (33 bytes) of the key to revoke. */
+            target_pubkey_hex: string;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
         };
         SetMarketMetadataRequest: {
             /**
@@ -2115,8 +2765,39 @@ export interface components {
              */
             polymarket_condition_id?: string | null;
         };
+        /**
+         * @description Common P256/WebAuthn signature envelope shared by SYB-60 account-management
+         *     mutations. Mirrors the fields on `CreateSignedBridgeWithdrawalRequest`.
+         */
+        SetProfileRequest: {
+            /** @description Authentication scheme for this signer. Defaults to raw P256. */
+            auth_scheme?: components["schemas"]["AuthScheme"];
+            /** @description New identicon seed, or `null` to clear it. There is no image upload. */
+            avatar_seed?: string | null;
+            /**
+             * @description New display name, or `null` to clear it (SYB-60). Validated for
+             *     length (1-32) and charset at the API edge.
+             */
+            display_name?: string | null;
+            /**
+             * Format: int64
+             * @description Per-account replay nonce (strictly increasing).
+             */
+            nonce: number;
+            /**
+             * @description Hex-encoded raw P256 ECDSA signature over the canonical profile payload.
+             *     Required when `auth_scheme` is `raw_p256`.
+             */
+            signature_hex?: string | null;
+            /** @description Hex-encoded compressed P256 public key of the signer. */
+            signer_pubkey_hex: string;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+        };
         SetReferencePricesRequest: {
-            /** @description Map of market_id -> reference price in nanos. */
+            /**
+             * @description Map of market_id -> reference price. Integer nanodollars;
+             *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+             */
             prices: {
                 [key: string]: number;
             };
@@ -2136,14 +2817,15 @@ export interface components {
         SignedOrderData: {
             /**
              * Format: int64
-             * @description Limit price in nanos (0 to 1_000_000_000).
+             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+             *     Prices are per-share probabilities in [0, 1e9].
              */
             limit_price_nanos: string;
             /** @description Market IDs this order spans. */
             market_ids: number[];
             /**
              * Format: int64
-             * @description Maximum fill quantity in fixed-point share-units.
+             * @description Maximum fill quantity. Integer share-units; 1000 units = 1 share.
              */
             max_fill: number;
             /** @description Payoff vector. */
@@ -2198,6 +2880,24 @@ export interface components {
             /** @description Hex-encoded vault contract address (20 bytes). */
             vault_address_hex: string;
         };
+        SubmitL1WithdrawalEventRequest: {
+            /**
+             * Format: int64
+             * @description Event timestamp from the vault event, in Unix seconds.
+             */
+            event_at_unix: number;
+            /**
+             * Format: int64
+             * @description Finalization ETA emitted by the vault, in Unix seconds.
+             */
+            executable_at_unix?: number | null;
+            /** @description Withdrawal nullifier emitted by SybilVault. */
+            nullifier_hex: string;
+            /** @description Queue state observed from the vault event. */
+            status: components["schemas"]["BridgeWithdrawalL1Status"];
+            /** @description L1 transaction hash carrying the event, if indexed from logs. */
+            tx_hash_hex?: string | null;
+        };
         SubmitOrderRequest: {
             /**
              * Format: int64
@@ -2212,7 +2912,8 @@ export interface components {
             /**
              * Format: int64
              * @description If set, treat these orders as market maker orders with flash liquidity.
-             *     The value is the MM's total capital budget in nanos.
+             *     The value is the MM's total capital budget. Integer nanodollars;
+             *     1_000_000_000 = $1.
              *     MM orders skip per-order balance validation; instead the solver enforces
              *     the portfolio-level budget constraint at clearing time.
              */
@@ -2230,40 +2931,51 @@ export interface components {
              * @description Last eligible block height, covered by the P256 signature. Required for signed IOC/GTD.
              */
             expires_at_block?: number | null;
-            /** @description The order to submit. */
-            order: components["schemas"]["SignedOrderData"];
             /**
              * Format: int64
              * @description Per-account replay nonce covered by the P256 signature.
              */
             nonce: number;
-            /** @description Hex-encoded raw P256 ECDSA signature over the canonical order payload. Required when `auth_scheme` is `raw_p256`. */
+            /** @description The order to submit. */
+            order: components["schemas"]["SignedOrderData"];
+            /**
+             * @description Hex-encoded raw P256 ECDSA signature over the canonical order payload.
+             *     Required when `auth_scheme` is `raw_p256`.
+             */
             signature_hex?: string | null;
             /** @description Hex-encoded compressed P256 public key of the signer. */
             signer_pubkey_hex: string;
             /** @description API time-in-force policy. Signed IOC/GTD orders commit to `expires_at_block`. */
             time_in_force?: components["schemas"]["TimeInForce"];
-            /** @description WebAuthn assertion envelope. Required when `auth_scheme` is `webauthn`. */
-            webauthn_assertion?: components["schemas"]["WebAuthnAssertion"] | null;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
         };
         SystemEventResponse: {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
+             */
             initial_balance_nanos: string;
             /** @enum {string} */
             type: "create_account";
         } | {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
+             */
             amount_nanos: string;
             /** @enum {string} */
             type: "deposit";
         } | {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
+             */
             amount_nanos: string;
             /** Format: int64 */
             deposit_id: number;
@@ -2274,7 +2986,10 @@ export interface components {
         } | {
             /** Format: int64 */
             account_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Account debit amount. Integer nanodollars; 1_000_000_000 = $1.
+             */
             amount_nanos: string;
             nullifier_hex: string;
             /** @enum {string} */
@@ -2285,7 +3000,11 @@ export interface components {
             affected_accounts: number[];
             /** Format: int32 */
             market_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Resolution payout per YES share. Integer nanodollars;
+             *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
+             */
             payout_nanos: string;
             /** @enum {string} */
             type: "market_resolved";
@@ -2295,11 +3014,22 @@ export interface components {
             market_ids: number[];
             /** Format: int64 */
             order_id: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Cancelled order's unfilled quantity. Integer share-units;
+             *     1000 units = 1 share.
+             */
             remaining_quantity: number;
             side: string;
             /** @enum {string} */
             type: "order_cancelled";
+        } | {
+            /** Format: int64 */
+            group_id: number;
+            /** Format: int32 */
+            market_id: number;
+            /** @enum {string} */
+            type: "market_group_extended";
         };
         /** @enum {string} */
         TimeInForce: "GTC" | "IOC" | "GTD";
@@ -2314,6 +3044,24 @@ export interface components {
             /** Format: int64 */
             prompt_tokens: number;
             trader_name: string;
+        };
+        WebAuthnAssertion: {
+            /** @description Base64url authenticatorData bytes from `navigator.credentials.get`. */
+            authenticator_data_b64url: string;
+            /** @description Base64url clientDataJSON bytes from `navigator.credentials.get`. */
+            client_data_json_b64url: string;
+            /** @description Base64url credential id returned by the authenticator. */
+            credential_id_b64url: string;
+            /** @description Base64url DER-encoded ECDSA signature from `navigator.credentials.get`. */
+            signature_b64url: string;
+            /** @description Optional base64url userHandle returned by the authenticator. */
+            user_handle_b64url?: string | null;
+        };
+        WebAuthnRegistration: {
+            /** @description Base64url-encoded WebAuthn attestationObject from `navigator.credentials.create`. */
+            attestation_object_b64url: string;
+            /** @description Base64url-encoded WebAuthn clientDataJSON from `navigator.credentials.create`. */
+            client_data_json_b64url: string;
         };
     };
     responses: never;
@@ -2378,6 +3126,137 @@ export interface operations {
             };
             /** @description Account not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_api_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read API keys */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyResponse"][];
+                };
+            };
+        };
+    };
+    create_api_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateApiKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description API key created (token shown once) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateApiKeyResponse"];
+                };
+            };
+            /** @description Invalid request or signature */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signer/account mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown signer */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Replay nonce is stale or duplicate */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    revoke_api_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeApiKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description API key revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request or signature */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signer/account mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown signer or API key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Replay nonce is stale or duplicate */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2478,7 +3357,7 @@ export interface operations {
                 market_id?: number;
                 /** @description Stable cursor returned as `cursor` on each fill. When present, returns fills strictly after this cursor in ascending order. Use `0.0` to start from the beginning. */
                 after?: string;
-                /** @description Result limit */
+                /** @description Result limit (default 100, cap 500) */
                 limit?: number;
                 /**
                  * @deprecated
@@ -2547,6 +3426,29 @@ export interface operations {
             };
         };
     };
+    list_account_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registered signing keys */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountKeyResponse"][];
+                };
+            };
+        };
+    };
     register_key: {
         parameters: {
             query?: never;
@@ -2579,6 +3481,59 @@ export interface operations {
             };
             /** @description Account not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    revoke_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Key revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request or signature */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signer/account mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown signer or key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Cannot revoke the last key, or stale nonce */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2639,6 +3594,105 @@ export interface operations {
             };
         };
     };
+    get_private_summary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Private account summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivateAccountSummaryResponse"];
+                };
+            };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Account not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Account ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Profile updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description Invalid profile or signature */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signer/account mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown signer */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Replay nonce is stale or duplicate */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_activity_overview: {
         parameters: {
             query?: never;
@@ -2662,8 +3716,10 @@ export interface operations {
     get_recent_blocks: {
         parameters: {
             query?: {
-                /** @description Recent blocks, newest-first; clamped to history capacity (default 20) */
+                /** @description Recent blocks, newest-first; default 20, cap 500 */
                 limit?: number;
+                /** @description Return blocks with height strictly below this cursor */
+                before_height?: number;
             };
             header?: never;
             path?: never;
@@ -2671,7 +3727,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Recent blocks, newest-first */
+            /** @description Blocks newest-first */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2718,7 +3774,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description SSE stream of block events */
+            /** @description Third-party convenience SSE stream of block events */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2730,7 +3786,7 @@ export interface operations {
     ws_blocks: {
         parameters: {
             query?: {
-                /** @description Replay from this block height */
+                /** @description Replay retained committed blocks from this height before switching to live */
                 from_block?: number;
             };
             header?: never;
@@ -2739,7 +3795,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description WebSocket upgrade for block streaming */
+            /** @description First-party WebSocket upgrade for block streaming */
             101: {
                 headers: {
                     [name: string]: unknown;
@@ -2783,12 +3839,12 @@ export interface operations {
             query?: {
                 /** @description Maximum returned decisions, clamped to 1..=500 (default 50) */
                 limit?: number;
+                /** @description Filter decisions to a single trader name */
+                trader?: string;
                 /** @description Filter decisions to one market ID. Combine with `trader` for FV-drift history. */
                 market_id?: number;
                 /** @description ISO-8601 lower-bound timestamp filter (`decisions.timestamp >= since`) for historical reads. */
                 since?: string;
-                /** @description Filter decisions to a single trader name */
-                trader?: string;
             };
             header?: never;
             path?: never;
@@ -2810,12 +3866,12 @@ export interface operations {
     get_bot_equity_series: {
         parameters: {
             query?: {
-                /** @description Maximum returned sampled points, clamped to 1..=1000 (default 200). Dense rows are downsampled by a naive stride. */
-                limit?: number;
-                /** @description ISO-8601 lower-bound timestamp filter (`portfolio_snapshots.timestamp >= since`) */
-                since?: string;
                 /** @description Filter portfolio snapshots to a single trader name */
                 trader?: string;
+                /** @description ISO-8601 lower-bound timestamp filter (`portfolio_snapshots.timestamp >= since`) */
+                since?: string;
+                /** @description Maximum returned sampled points, clamped to 1..=1000 (default 200). Dense rows are downsampled by a naive stride. */
+                limit?: number;
             };
             header?: never;
             path?: never;
@@ -2831,6 +3887,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BotEquitySeriesResponse"];
                 };
+            };
+        };
+    };
+    account_by_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Hex-encoded Sybil bridge account key */
+                key_hex: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Account bridge key mapping */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BridgeAccountKeyResponse"];
+                };
+            };
+            /** @description Bridge key not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2909,6 +3995,96 @@ export interface operations {
             };
             /** @description Dev mode required */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    submit_l1_withdrawal_event: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitL1WithdrawalEventRequest"];
+            };
+        };
+        responses: {
+            /** @description L1 withdrawal queue status applied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BridgeWithdrawalResponse"];
+                };
+            };
+            /** @description Invalid L1 withdrawal event */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Withdrawal not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_signed_withdrawal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSignedBridgeWithdrawalRequest"];
+            };
+        };
+        responses: {
+            /** @description Signed withdrawal leaf created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BridgeWithdrawalResponse"];
+                };
+            };
+            /** @description Invalid withdrawal or signature */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signer/account mismatch */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown signer */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Replay nonce is stale or duplicate */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3262,6 +4438,47 @@ export interface operations {
             };
             /** @description Dev mode required */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    extend_market_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Current market group index */
+                group_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExtendMarketGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description Market group extended or already contained the member */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketGroupResponse"];
+                };
+            };
+            /** @description Market group or market not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Market is resolved or already belongs to another group */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3687,6 +4904,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Replay nonce is stale or duplicate */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     get_all_pending_orders: {
@@ -3740,6 +4964,13 @@ export interface operations {
             };
             /** @description Unknown signer */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Replay nonce is stale or duplicate */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

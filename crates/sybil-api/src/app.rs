@@ -30,6 +30,13 @@ use crate::util::now_ms;
         routes::accounts::fund_account,
         routes::accounts::get_account,
         routes::accounts::register_key,
+        routes::accounts::set_profile,
+        routes::accounts::list_account_keys,
+        routes::accounts::revoke_key,
+        routes::accounts::list_api_keys,
+        routes::accounts::create_api_key,
+        routes::accounts::revoke_api_key,
+        routes::accounts::get_private_summary,
         routes::accounts::get_portfolio,
         routes::accounts::get_account_fills,
         routes::accounts::get_equity,
@@ -91,6 +98,15 @@ use crate::util::now_ms;
         CreateBridgeWithdrawalRequest,
         CreateSignedBridgeWithdrawalRequest,
         RegisterKeyRequest,
+        KeyScope,
+        SetProfileRequest,
+        RevokeKeyRequest,
+        CreateApiKeyRequest,
+        RevokeApiKeyRequest,
+        AccountKeyResponse,
+        ApiKeyResponse,
+        CreateApiKeyResponse,
+        PrivateAccountSummaryResponse,
         CreateMarketRequest,
         CreateMarketGroupRequest,
         ExtendMarketGroupRequest,
@@ -175,6 +191,7 @@ use crate::util::now_ms;
         AutoResolutionEntryResponse,
         AutoResolutionListResponse,
     )),
+    modifiers(&BearerReadAddon),
     info(
         title = "Sybil API",
         description = "HTTP API for AI agent trading on Sybil prediction markets.\n\nUnits: protocol quantity fields use integer share-units (1000 units = 1 share). Money and `*_nanos` fields use integer nanodollars (1_000_000_000 = $1); prices are per-share probabilities in [0, 1e9]. See [REST API units](docs/architecture/REST%20API.md#units).",
@@ -182,6 +199,31 @@ use crate::util::now_ms;
     )
 )]
 pub struct ApiDoc;
+
+/// Defines the `bearer_read` security scheme referenced by SYB-60's
+/// read-only, bearer-gated private endpoints (e.g. `GET
+/// /v1/accounts/{id}/private-summary`). These bearer tokens are READ-ONLY —
+/// mutating actions always require a P256 signature, never a bearer token.
+struct BearerReadAddon;
+
+impl utoipa::Modify for BearerReadAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+        let components = openapi.components.get_or_insert_with(Default::default);
+        components.add_security_scheme(
+            "bearer_read",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .description(Some(
+                        "Read-scoped API key (SYB-60). Read-only: cannot place orders, \
+                         cancels, or withdrawals — those require a P256 signature.",
+                    ))
+                    .build(),
+            ),
+        );
+    }
+}
 
 async fn openapi_json() -> impl IntoResponse {
     Json(ApiDoc::openapi())
@@ -444,6 +486,34 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
+        path: "/v1/accounts/{id}/keys",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/accounts/{id}/keys/revoke",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/accounts/{id}/profile",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/api-keys",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/accounts/{id}/api-keys",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/accounts/{id}/api-keys/revoke",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/private-summary",
+    },
+    RouteMount {
+        method: "GET",
         path: "/v1/accounts/{id}/portfolio",
     },
     RouteMount {
@@ -699,7 +769,29 @@ fn public_routes() -> Router<AppState> {
         )
         .route(
             "/v1/accounts/{id}/keys",
-            axum::routing::post(routes::accounts::register_key),
+            axum::routing::post(routes::accounts::register_key)
+                .get(routes::accounts::list_account_keys),
+        )
+        .route(
+            "/v1/accounts/{id}/keys/revoke",
+            axum::routing::post(routes::accounts::revoke_key),
+        )
+        .route(
+            "/v1/accounts/{id}/profile",
+            axum::routing::post(routes::accounts::set_profile),
+        )
+        .route(
+            "/v1/accounts/{id}/api-keys",
+            axum::routing::get(routes::accounts::list_api_keys)
+                .post(routes::accounts::create_api_key),
+        )
+        .route(
+            "/v1/accounts/{id}/api-keys/revoke",
+            axum::routing::post(routes::accounts::revoke_api_key),
+        )
+        .route(
+            "/v1/accounts/{id}/private-summary",
+            axum::routing::get(routes::accounts::get_private_summary),
         )
         .route(
             "/v1/accounts/{id}/portfolio",

@@ -11,6 +11,65 @@ impl AccountId {
     pub const MINT: AccountId = AccountId(u64::MAX);
 }
 
+/// Optional, opt-in account profile metadata (SYB-60).
+///
+/// Set/cleared only via a P256-signed, nonce-protected mutation (see
+/// `sequencer::set_profile`). Purely descriptive: it never affects balances,
+/// matching, or settlement. `display_name` is intended to eventually replace
+/// the "Trader #id" leaderboard label (SYB-59), but that wiring is a deliberate
+/// follow-up — nothing reads `display_name` for ranking yet.
+#[derive(Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AccountProfile {
+    /// Optional display name (validated for length/charset at the API edge).
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Deterministic identicon seed. There is no image upload — the seed is the
+    /// only stored avatar state and the client renders the identicon from it.
+    #[serde(default)]
+    pub avatar_seed: Option<String>,
+}
+
+impl AccountProfile {
+    pub fn is_empty(&self) -> bool {
+        self.display_name.is_none() && self.avatar_seed.is_none()
+    }
+}
+
+/// A read-scoped bearer API key (SYB-60).
+///
+/// SECURITY MODEL: bearer tokens are READ-ONLY. Sybil authenticates every
+/// mutating action (orders, cancels, withdrawals, profile/key changes) with a
+/// P256 signature over canonical bytes plus a replay nonce. A bearer token
+/// deliberately cannot place orders/cancels/withdrawals — doing so would bypass
+/// the signing model and its replay protection. To give an agent trade
+/// authority you register an additional P256 key (scope `Agent`) that signs
+/// like any other key; see `RegisteredPubkey`.
+///
+/// Only the blake3 hash of the token is stored (never the plaintext), so a
+/// database or WAL leak cannot recover live tokens.
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ApiKeyRecord {
+    /// Stable id used to reference the key for revocation (derived from the
+    /// first 8 bytes of the token hash — the plaintext is never needed again).
+    pub id: u64,
+    /// blake3(token) — the only representation of the secret kept at rest.
+    pub hash: [u8; 32],
+    /// Optional human label, e.g. "grafana" or "read-bot".
+    #[serde(default)]
+    pub label: Option<String>,
+    pub created_at_ms: u64,
+    /// `Some(ts)` once revoked; a revoked key is rejected by the bearer
+    /// extractor but retained for audit/listing.
+    #[serde(default)]
+    pub revoked_at_ms: Option<u64>,
+}
+
+impl ApiKeyRecord {
+    pub fn is_active(&self) -> bool {
+        self.revoked_at_ms.is_none()
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Account {
     pub id: AccountId,
@@ -26,6 +85,16 @@ pub struct Account {
     pub last_nonce: u64,
     #[serde(default)]
     pub events_digest: [u8; 32],
+    /// Optional, signed opt-in profile metadata (SYB-60).
+    #[serde(default)]
+    pub profile: AccountProfile,
+    /// Read-scoped bearer API keys (SYB-60). Hashes only; never plaintext.
+    #[serde(default)]
+    pub api_keys: Vec<ApiKeyRecord>,
+    /// Monotonic counter backing `ApiKeyRecord::id` (never reused, so revoked
+    /// ids stay stable even as keys are added/removed).
+    #[serde(default)]
+    pub next_api_key_id: u64,
 }
 
 impl Account {
@@ -37,6 +106,9 @@ impl Account {
             total_deposited: balance,
             last_nonce: 0,
             events_digest: [0u8; 32],
+            profile: AccountProfile::default(),
+            api_keys: Vec::new(),
+            next_api_key_id: 0,
         }
     }
 

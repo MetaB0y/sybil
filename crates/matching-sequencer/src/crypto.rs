@@ -27,12 +27,141 @@ pub enum AccountAuthScheme {
     WebAuthn,
 }
 
-/// Account registration metadata attached to a public key.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Scope tag for a registered signing key (SYB-60).
+///
+/// This describes *what the key is for*, not what it may sign: every registered
+/// key can sign every mutation for its account. The tag is metadata that lets a
+/// UI/operator reason about keys (e.g. hide agent keys, warn before revoking the
+/// primary) and feeds the planned `keys_digest` (SYB-225).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum KeyScope {
+    /// The account's own primary key (typically the first key registered).
+    #[default]
+    Primary,
+    /// A delegated agent/trade key registered under the account. An agent gets
+    /// its own P256 keypair and signs like any key — this is the mechanism for
+    /// "agent trade keys" (as opposed to a read-only bearer token).
+    Agent,
+    /// Any other operator-defined key.
+    Custom,
+}
+
+impl KeyScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            KeyScope::Primary => "primary",
+            KeyScope::Agent => "agent",
+            KeyScope::Custom => "custom",
+        }
+    }
+}
+
+/// Account registration metadata attached to a public key (SYB-60).
+///
+/// Extends the original `{account_id, auth_scheme}` with a label, scope tag, and
+/// creation timestamp so keys can be listed and managed. All new fields are
+/// `#[serde(default)]` so previously persisted rows deserialize as a labelless
+/// primary key created at time 0.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RegisteredPubkey {
     pub account_id: crate::account::AccountId,
     #[serde(default)]
     pub auth_scheme: AccountAuthScheme,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub scope: KeyScope,
+    #[serde(default)]
+    pub created_at_ms: u64,
+}
+
+impl RegisteredPubkey {
+    /// Construct a primary, labelless registration (back-compat constructor).
+    pub fn primary(account_id: crate::account::AccountId, auth_scheme: AccountAuthScheme) -> Self {
+        Self {
+            account_id,
+            auth_scheme,
+            label: None,
+            scope: KeyScope::Primary,
+            created_at_ms: 0,
+        }
+    }
+}
+
+/// A signed request to set/clear an account profile (SYB-60).
+pub struct SignedProfileUpdate {
+    pub account_id: crate::account::AccountId,
+    pub display_name: Option<String>,
+    pub avatar_seed: Option<String>,
+    pub nonce: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
+/// A profile update whose signature was verified before entering the sequencer.
+pub struct AuthenticatedProfileUpdate {
+    pub account_id: crate::account::AccountId,
+    pub display_name: Option<String>,
+    pub avatar_seed: Option<String>,
+    pub nonce: u64,
+    pub signer: PublicKey,
+}
+
+/// A signed request to revoke a registered signing key (SYB-60).
+pub struct SignedKeyRevocation {
+    pub account_id: crate::account::AccountId,
+    /// Compressed SEC1 bytes (33) of the key being revoked.
+    pub target_pubkey: Vec<u8>,
+    pub nonce: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
+/// A key revocation whose signature was verified before entering the sequencer.
+pub struct AuthenticatedKeyRevocation {
+    pub account_id: crate::account::AccountId,
+    pub target_pubkey: Vec<u8>,
+    pub nonce: u64,
+    pub signer: PublicKey,
+}
+
+/// A signed request to create a read-scoped bearer API key (SYB-60).
+///
+/// `token_hash` is blake3(token); the plaintext token is generated at the API
+/// edge, returned to the caller once, and never signed or persisted.
+pub struct SignedApiKeyCreate {
+    pub account_id: crate::account::AccountId,
+    pub label: Option<String>,
+    pub token_hash: [u8; 32],
+    pub nonce: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
+/// An API-key creation whose signature was verified before the sequencer.
+pub struct AuthenticatedApiKeyCreate {
+    pub account_id: crate::account::AccountId,
+    pub label: Option<String>,
+    pub token_hash: [u8; 32],
+    pub nonce: u64,
+    pub signer: PublicKey,
+}
+
+/// A signed request to revoke a read-scoped bearer API key (SYB-60).
+pub struct SignedApiKeyRevoke {
+    pub account_id: crate::account::AccountId,
+    pub api_key_id: u64,
+    pub nonce: u64,
+    pub signer: PublicKey,
+    pub signature: Signature,
+}
+
+/// An API-key revocation whose signature was verified before the sequencer.
+pub struct AuthenticatedApiKeyRevoke {
+    pub account_id: crate::account::AccountId,
+    pub api_key_id: u64,
+    pub nonce: u64,
+    pub signer: PublicKey,
 }
 
 /// A P256 public key (secp256r1 / passkey-compatible).
@@ -190,6 +319,90 @@ pub fn canonical_bridge_withdrawal_bytes(
     ))
 }
 
+/// Canonical bytes for a signed account-profile update (SYB-60).
+pub fn canonical_profile_update_bytes(
+    account_id: crate::account::AccountId,
+    display_name: Option<&str>,
+    avatar_seed: Option<&str>,
+    nonce: u64,
+) -> Vec<u8> {
+    sybil_signing::canonical_profile_update_bytes(account_id.0, display_name, avatar_seed, nonce)
+}
+
+/// Canonical bytes for a signed signing-key revocation (SYB-60).
+pub fn canonical_key_revocation_bytes(
+    account_id: crate::account::AccountId,
+    target_pubkey: &[u8],
+    nonce: u64,
+) -> Vec<u8> {
+    sybil_signing::canonical_key_revocation_bytes(account_id.0, target_pubkey, nonce)
+}
+
+/// Canonical bytes for a signed read API-key creation (SYB-60).
+pub fn canonical_api_key_create_bytes(
+    account_id: crate::account::AccountId,
+    label: Option<&str>,
+    nonce: u64,
+) -> Vec<u8> {
+    sybil_signing::canonical_api_key_create_bytes(account_id.0, label, nonce)
+}
+
+/// Canonical bytes for a signed read API-key revocation (SYB-60).
+pub fn canonical_api_key_revoke_bytes(
+    account_id: crate::account::AccountId,
+    api_key_id: u64,
+    nonce: u64,
+) -> Vec<u8> {
+    sybil_signing::canonical_api_key_revoke_bytes(account_id.0, api_key_id, nonce)
+}
+
+/// Verify a signed profile update's P256 ECDSA signature (SYB-60).
+pub fn verify_signed_profile_update(signed: &SignedProfileUpdate) -> Result<(), SequencerError> {
+    let msg = canonical_profile_update_bytes(
+        signed.account_id,
+        signed.display_name.as_deref(),
+        signed.avatar_seed.as_deref(),
+        signed.nonce,
+    );
+    signed
+        .signer
+        .0
+        .verify(&msg, &signed.signature)
+        .map_err(|_| SequencerError::InvalidSignature)
+}
+
+/// Verify a signed signing-key revocation's P256 ECDSA signature (SYB-60).
+pub fn verify_signed_key_revocation(signed: &SignedKeyRevocation) -> Result<(), SequencerError> {
+    let msg =
+        canonical_key_revocation_bytes(signed.account_id, &signed.target_pubkey, signed.nonce);
+    signed
+        .signer
+        .0
+        .verify(&msg, &signed.signature)
+        .map_err(|_| SequencerError::InvalidSignature)
+}
+
+/// Verify a signed API-key creation's P256 ECDSA signature (SYB-60).
+pub fn verify_signed_api_key_create(signed: &SignedApiKeyCreate) -> Result<(), SequencerError> {
+    let msg =
+        canonical_api_key_create_bytes(signed.account_id, signed.label.as_deref(), signed.nonce);
+    signed
+        .signer
+        .0
+        .verify(&msg, &signed.signature)
+        .map_err(|_| SequencerError::InvalidSignature)
+}
+
+/// Verify a signed API-key revocation's P256 ECDSA signature (SYB-60).
+pub fn verify_signed_api_key_revoke(signed: &SignedApiKeyRevoke) -> Result<(), SequencerError> {
+    let msg = canonical_api_key_revoke_bytes(signed.account_id, signed.api_key_id, signed.nonce);
+    signed
+        .signer
+        .0
+        .verify(&msg, &signed.signature)
+        .map_err(|_| SequencerError::InvalidSignature)
+}
+
 /// Verify a signed order's P256 ECDSA signature.
 pub fn verify_signed_order(signed: &SignedOrder) -> Result<(), SequencerError> {
     let msg = canonical_order_bytes(&signed.order, signed.nonce);
@@ -302,6 +515,98 @@ pub fn sign_bridge_withdrawal(
     let signature: Signature = key.sign(&msg);
     SignedBridgeWithdrawal {
         request,
+        nonce,
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    }
+}
+
+/// blake3 hash of a bearer API-key token (SYB-60).
+///
+/// blake3 (not argon2) is the correct choice here: API tokens are 256 bits of
+/// CSPRNG entropy, so there is no low-entropy password to brute-force. A slow
+/// memory-hard KDF only buys resistance to guessing weak secrets; for
+/// high-entropy tokens a fast cryptographic hash gives the same at-rest safety
+/// (a hash leak can't be inverted) while keeping bearer auth O(1) per request.
+pub fn api_key_hash(token: &[u8]) -> [u8; 32] {
+    *blake3::hash(token).as_bytes()
+}
+
+/// Sign a profile update with a P256 signing key (testing / client use).
+pub fn sign_profile_update(
+    account_id: crate::account::AccountId,
+    display_name: Option<String>,
+    avatar_seed: Option<String>,
+    nonce: u64,
+    key: &SigningKey,
+) -> SignedProfileUpdate {
+    let msg = canonical_profile_update_bytes(
+        account_id,
+        display_name.as_deref(),
+        avatar_seed.as_deref(),
+        nonce,
+    );
+    let signature: Signature = key.sign(&msg);
+    SignedProfileUpdate {
+        account_id,
+        display_name,
+        avatar_seed,
+        nonce,
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    }
+}
+
+/// Sign a signing-key revocation with a P256 signing key (testing / client use).
+pub fn sign_key_revocation(
+    account_id: crate::account::AccountId,
+    target_pubkey: Vec<u8>,
+    nonce: u64,
+    key: &SigningKey,
+) -> SignedKeyRevocation {
+    let msg = canonical_key_revocation_bytes(account_id, &target_pubkey, nonce);
+    let signature: Signature = key.sign(&msg);
+    SignedKeyRevocation {
+        account_id,
+        target_pubkey,
+        nonce,
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    }
+}
+
+/// Sign an API-key creation with a P256 signing key (testing / client use).
+pub fn sign_api_key_create(
+    account_id: crate::account::AccountId,
+    label: Option<String>,
+    token_hash: [u8; 32],
+    nonce: u64,
+    key: &SigningKey,
+) -> SignedApiKeyCreate {
+    let msg = canonical_api_key_create_bytes(account_id, label.as_deref(), nonce);
+    let signature: Signature = key.sign(&msg);
+    SignedApiKeyCreate {
+        account_id,
+        label,
+        token_hash,
+        nonce,
+        signer: PublicKey(*key.verifying_key()),
+        signature,
+    }
+}
+
+/// Sign an API-key revocation with a P256 signing key (testing / client use).
+pub fn sign_api_key_revoke(
+    account_id: crate::account::AccountId,
+    api_key_id: u64,
+    nonce: u64,
+    key: &SigningKey,
+) -> SignedApiKeyRevoke {
+    let msg = canonical_api_key_revoke_bytes(account_id, api_key_id, nonce);
+    let signature: Signature = key.sign(&msg);
+    SignedApiKeyRevoke {
+        account_id,
+        api_key_id,
         nonce,
         signer: PublicKey(*key.verifying_key()),
         signature,

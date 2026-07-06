@@ -145,6 +145,19 @@ pub enum SequencerError {
     /// A public key is already registered to an account.
     #[error("public key already registered to an account")]
     AccountAlreadyRegistered,
+    /// The signing key targeted for revocation is not registered (SYB-60).
+    #[error("signing key not found")]
+    KeyNotFound,
+    /// Refused to revoke an account's last remaining signing key (SYB-60).
+    /// Doing so would permanently lock the account out of all signed actions.
+    #[error("cannot revoke the account's last remaining signing key")]
+    LastSigningKey,
+    /// The requested read API key was not found (SYB-60).
+    #[error("api key not found")]
+    ApiKeyNotFound,
+    /// Profile field failed length/charset validation (SYB-60).
+    #[error("invalid profile: {0}")]
+    ProfileInvalid(String),
     /// The requested market was not found.
     #[error("market not found")]
     MarketNotFound,

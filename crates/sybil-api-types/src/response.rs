@@ -14,6 +14,81 @@ pub struct AccountResponse {
     pub balance_nanos: i64,
     #[serde(default)]
     pub positions: Vec<PositionResponse>,
+    /// Optional opt-in display name (SYB-60). Not yet used for leaderboard
+    /// labels — that flip is a deliberate follow-up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Optional deterministic identicon seed (SYB-60).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_seed: Option<String>,
+}
+
+/// A registered signing key with SYB-60 management metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AccountKeyResponse {
+    /// Hex-encoded compressed P256 public key (33 bytes).
+    pub public_key_hex: String,
+    /// Authentication scheme: `raw_p256` or `webauthn`.
+    pub auth_scheme: String,
+    /// Scope tag: `primary`, `agent`, or `custom`.
+    pub scope: String,
+    /// Optional human label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Registration time in Unix milliseconds (0 for keys predating SYB-60).
+    pub created_at_ms: u64,
+}
+
+/// A read-scoped bearer API key's metadata (never the token or its hash).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ApiKeyResponse {
+    /// Stable id used to reference this key for revocation.
+    pub id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub created_at_ms: u64,
+    /// Revocation time in Unix milliseconds, if revoked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<u64>,
+}
+
+/// Response to creating a read API key (SYB-60). The plaintext `token` is shown
+/// exactly once here and is not recoverable afterwards.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateApiKeyResponse {
+    pub id: u64,
+    /// The bearer token. Store it now — the server keeps only its blake3 hash.
+    pub token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub created_at_ms: u64,
+}
+
+/// Private account summary served behind a read-scoped bearer token (SYB-60).
+///
+/// This is the template for bearer-gated private reads: it exposes the same
+/// data the public account/portfolio endpoints already do, but demonstrates the
+/// `Authorization: Bearer` gating pattern on a NEW endpoint. Gating the existing
+/// public endpoints is a deliberate future breaking change, not done here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PrivateAccountSummaryResponse {
+    pub account_id: u64,
+    /// Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+    pub balance_nanos: i64,
+    /// Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
+    pub total_deposited_nanos: i64,
+    /// Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+    pub portfolio_value_nanos: i64,
+    /// Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1.
+    pub pnl_nanos: i64,
+    #[serde(default)]
+    pub positions: Vec<PositionResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

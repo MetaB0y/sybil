@@ -120,6 +120,12 @@ pub enum AuthScheme {
     #[default]
     RawP256,
     /// WebAuthn assertion with challenge `base64url(sha256(canonical_bytes))`.
+    ///
+    /// Explicit rename: `snake_case` of `WebAuthn` would be `web_authn`, but the
+    /// documented and deployed wire format — used by the entire frontend, the
+    /// SDKs, and every `auth_scheme` doc string — is `webauthn`. (SYB-60 caught
+    /// this as a silent wire regression when regenerating the OpenAPI client.)
+    #[serde(rename = "webauthn")]
     WebAuthn,
 }
 
@@ -142,6 +148,109 @@ pub struct RegisterKeyRequest {
     /// `public_key_hex`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webauthn_registration: Option<WebAuthnRegistration>,
+    /// Optional human label for this key, e.g. "agent:pricer" (SYB-60).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Scope tag describing what this key is for (SYB-60). Defaults to `primary`.
+    /// Register an agent trade key by passing `agent` with its own P256 keypair —
+    /// it then signs like any account key (bearer API keys are read-only and
+    /// cannot trade).
+    #[serde(default)]
+    pub scope: KeyScope,
+}
+
+/// Scope tag for a registered signing key (SYB-60).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum KeyScope {
+    #[default]
+    Primary,
+    Agent,
+    Custom,
+}
+
+/// Common P256/WebAuthn signature envelope shared by SYB-60 account-management
+/// mutations. Mirrors the fields on `CreateSignedBridgeWithdrawalRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SetProfileRequest {
+    /// New display name, or `null` to clear it (SYB-60). Validated for
+    /// length (1-32) and charset at the API edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// New identicon seed, or `null` to clear it. There is no image upload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_seed: Option<String>,
+    /// Hex-encoded compressed P256 public key of the signer.
+    pub signer_pubkey_hex: String,
+    /// Authentication scheme for this signer. Defaults to raw P256.
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    /// Hex-encoded raw P256 ECDSA signature over the canonical profile payload.
+    /// Required when `auth_scheme` is `raw_p256`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    /// WebAuthn assertion envelope. Required when `auth_scheme` is `webauthn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+    /// Per-account replay nonce (strictly increasing).
+    pub nonce: u64,
+}
+
+/// Signed request to revoke a registered signing key (SYB-60).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RevokeKeyRequest {
+    /// Hex-encoded compressed P256 public key (33 bytes) of the key to revoke.
+    pub target_pubkey_hex: String,
+    /// Hex-encoded compressed P256 public key of the signer (any active key on
+    /// the account may authorize revocation, including the target itself as long
+    /// as another key remains).
+    pub signer_pubkey_hex: String,
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+    pub nonce: u64,
+}
+
+/// Signed request to create a read-scoped bearer API key (SYB-60).
+///
+/// The bearer token is generated server-side, returned exactly once in the
+/// response, and never recoverable afterwards (only its blake3 hash is stored).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateApiKeyRequest {
+    /// Optional human label, e.g. "grafana".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub signer_pubkey_hex: String,
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+    pub nonce: u64,
+}
+
+/// Signed request to revoke a read-scoped bearer API key by id (SYB-60).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RevokeApiKeyRequest {
+    /// Id of the API key to revoke (from the API-key listing).
+    pub api_key_id: u64,
+    pub signer_pubkey_hex: String,
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+    pub nonce: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -553,6 +662,26 @@ pub struct SubmitAutoResolutionRequest {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Wire-format pin: the frontend, SDKs, and deployed clients all send
+    /// `"webauthn"` (not snake_case `"web_authn"`). A rename of the variant
+    /// must never silently change the wire string again.
+    #[test]
+    fn auth_scheme_wire_format_is_pinned() {
+        assert_eq!(
+            serde_json::to_string(&AuthScheme::RawP256).unwrap(),
+            "\"raw_p256\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AuthScheme::WebAuthn).unwrap(),
+            "\"webauthn\""
+        );
+        assert_eq!(
+            serde_json::from_str::<AuthScheme>("\"webauthn\"").unwrap(),
+            AuthScheme::WebAuthn
+        );
+        assert!(serde_json::from_str::<AuthScheme>("\"web_authn\"").is_err());
+    }
 
     #[test]
     fn custom_order_spec_is_not_part_of_public_submit_api() {

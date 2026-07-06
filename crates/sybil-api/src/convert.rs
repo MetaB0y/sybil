@@ -102,6 +102,8 @@ pub fn account_to_response(account: &Account) -> AccountResponse {
         account_id: account.id.0,
         balance_nanos: account.balance,
         positions,
+        display_name: account.profile.display_name.clone(),
+        avatar_seed: account.profile.avatar_seed.clone(),
     }
 }
 

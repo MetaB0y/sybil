@@ -130,6 +130,123 @@ export function canonicalCancelBytes(
   );
 }
 
+// --- SYB-60 account-management canonical payloads -------------------------
+//
+// These mirror `crates/sybil-signing/src/lib.rs` byte-for-byte. borsh mapping:
+//   Option<T> → { option: T }  (1-byte tag + value; JS `null` → None)
+//   String    → borsh "string"  (u32 len prefix + utf8 bytes)
+//   Vec<u8>   → { array: { type: "u8" } }  (u32 len prefix + raw bytes)
+//   u64       → bigint (8 bytes little-endian)
+// Field ORDER matters — it must match the Rust struct declaration exactly.
+
+const PROFILE_UPDATE_SCHEMA = {
+  struct: {
+    account_id: "u64",
+    display_name: { option: "string" },
+    avatar_seed: { option: "string" },
+    nonce: "u64",
+  },
+};
+
+const KEY_REVOCATION_SCHEMA = {
+  struct: {
+    account_id: "u64",
+    target_pubkey: { array: { type: "u8" } },
+    nonce: "u64",
+  },
+};
+
+const API_KEY_CREATE_SCHEMA = {
+  struct: {
+    account_id: "u64",
+    label: { option: "string" },
+    nonce: "u64",
+  },
+};
+
+const API_KEY_REVOKE_SCHEMA = {
+  struct: {
+    account_id: "u64",
+    api_key_id: "u64",
+    nonce: "u64",
+  },
+};
+
+/**
+ * Canonical bytes for a signed account-profile update (SYB-60). Mirrors
+ * `ProfileUpdate`. Pass `null` for either field to clear it (borsh None).
+ */
+export function canonicalProfileUpdateBytes(
+  accountId: bigint,
+  displayName: string | null,
+  avatarSeed: string | null,
+  nonce: bigint,
+): Uint8Array {
+  return new Uint8Array(
+    serialize(PROFILE_UPDATE_SCHEMA as never, {
+      account_id: accountId,
+      display_name: displayName,
+      avatar_seed: avatarSeed,
+      nonce,
+    }),
+  );
+}
+
+/**
+ * Canonical bytes for a signed signing-key revocation (SYB-60). Mirrors
+ * `KeyRevocation`. `targetPubkey` must be the 33 raw compressed SEC1 bytes of
+ * the key being revoked (use `fromHex` on the target hex).
+ */
+export function canonicalKeyRevocationBytes(
+  accountId: bigint,
+  targetPubkey: Uint8Array,
+  nonce: bigint,
+): Uint8Array {
+  return new Uint8Array(
+    serialize(KEY_REVOCATION_SCHEMA as never, {
+      account_id: accountId,
+      target_pubkey: targetPubkey,
+      nonce,
+    }),
+  );
+}
+
+/**
+ * Canonical bytes for a signed read API-key creation (SYB-60). Mirrors
+ * `ApiKeyCreate`. `null` label → borsh None.
+ */
+export function canonicalApiKeyCreateBytes(
+  accountId: bigint,
+  label: string | null,
+  nonce: bigint,
+): Uint8Array {
+  return new Uint8Array(
+    serialize(API_KEY_CREATE_SCHEMA as never, {
+      account_id: accountId,
+      label,
+      nonce,
+    }),
+  );
+}
+
+/**
+ * Canonical bytes for a signed read API-key revocation (SYB-60). Mirrors
+ * `ApiKeyRevoke`.
+ */
+export function canonicalApiKeyRevokeBytes(
+  accountId: bigint,
+  apiKeyId: bigint,
+  nonce: bigint,
+): Uint8Array {
+  return new Uint8Array(
+    serialize(API_KEY_REVOKE_SCHEMA as never, {
+      account_id: accountId,
+      api_key_id: apiKeyId,
+      nonce,
+    }),
+  );
+}
+
 export function toHex(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))

@@ -120,6 +120,11 @@ const PUBKEY_REGISTRY: TableDefinition<&[u8], u64> = TableDefinition::new("pubke
 /// Pubkey auth scheme: compressed_point (33 bytes) → scheme tag.
 const PUBKEY_AUTH_SCHEMES: TableDefinition<&[u8], u8> = TableDefinition::new("pubkey_auth_schemes");
 
+/// Pubkey management metadata (SYB-60): compressed_point (33 bytes) →
+/// msgpack({label, scope, created_at_ms}). Written alongside the registry each
+/// block; rows for revoked keys are cleared with the registry.
+const PUBKEY_META: TableDefinition<&[u8], &[u8]> = TableDefinition::new("pubkey_meta");
+
 /// Last clearing prices: market_id (u32) → msgpack(Vec<Nanos>)
 const CLEARING_PRICES: TableDefinition<u32, &[u8]> = TableDefinition::new("clearing_prices");
 
@@ -692,6 +697,73 @@ pub enum ControlPlaneCommand {
         group_id: u64,
         market_id: MarketId,
     },
+    /// Register a signing key carrying SYB-60 management metadata.
+    RegisterPubkeyWithMeta {
+        account_id: AccountId,
+        compressed_pubkey: Vec<u8>,
+        #[serde(default)]
+        auth_scheme: crate::crypto::AccountAuthScheme,
+        #[serde(default)]
+        label: Option<String>,
+        #[serde(default)]
+        scope: crate::crypto::KeyScope,
+        #[serde(default)]
+        created_at_ms: u64,
+    },
+    /// Revoke a registered signing key (SYB-60).
+    RevokeSigningKey {
+        account_id: AccountId,
+        compressed_pubkey: Vec<u8>,
+    },
+    /// Set/clear an account's opt-in profile (SYB-60).
+    SetProfile {
+        account_id: AccountId,
+        #[serde(default)]
+        display_name: Option<String>,
+        #[serde(default)]
+        avatar_seed: Option<String>,
+    },
+    /// Create a read-scoped bearer API key from its blake3 hash (SYB-60).
+    CreateApiKey {
+        account_id: AccountId,
+        token_hash: [u8; 32],
+        #[serde(default)]
+        label: Option<String>,
+        created_at_ms: u64,
+    },
+    /// Revoke a read-scoped bearer API key by id (SYB-60).
+    RevokeApiKey {
+        account_id: AccountId,
+        api_key_id: u64,
+        revoked_at_ms: u64,
+    },
+}
+
+/// Persisted management metadata for a signing key (SYB-60).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PubkeyMetaRow {
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    scope: u8,
+    #[serde(default)]
+    created_at_ms: u64,
+}
+
+fn key_scope_to_store(scope: crate::crypto::KeyScope) -> u8 {
+    match scope {
+        crate::crypto::KeyScope::Primary => 0,
+        crate::crypto::KeyScope::Agent => 1,
+        crate::crypto::KeyScope::Custom => 2,
+    }
+}
+
+fn key_scope_from_store(value: u8) -> crate::crypto::KeyScope {
+    match value {
+        1 => crate::crypto::KeyScope::Agent,
+        2 => crate::crypto::KeyScope::Custom,
+        _ => crate::crypto::KeyScope::Primary,
+    }
 }
 
 fn account_auth_scheme_to_store(scheme: crate::crypto::AccountAuthScheme) -> u8 {
@@ -877,7 +949,7 @@ fn build_redb_block_commit(
     let pubkey_rows = snapshot
         .pubkey_registry
         .iter()
-        .map(|(pubkey, registered)| (pubkey.compressed_bytes().to_vec(), *registered))
+        .map(|(pubkey, registered)| (pubkey.compressed_bytes().to_vec(), registered.clone()))
         .collect();
 
     let mut clearing_price_rows = Vec::new();
@@ -1075,14 +1147,28 @@ where
     }
 
     {
+        // SYB-60: the registry is rewritten in full each block, so clear the
+        // three parallel tables first — this makes signing-key REVOCATION
+        // durable (a removed key leaves no lingering row) rather than only
+        // supporting additions.
         let mut table = txn.open_table(PUBKEY_REGISTRY)?;
         let mut scheme_table = txn.open_table(PUBKEY_AUTH_SCHEMES)?;
+        let mut meta_table = txn.open_table(PUBKEY_META)?;
+        table.retain(|_, _| false)?;
+        scheme_table.retain(|_, _| false)?;
+        meta_table.retain(|_, _| false)?;
         for (pubkey, registered) in &commit.pubkey_rows {
             table.insert(pubkey.as_slice(), registered.account_id.0)?;
             scheme_table.insert(
                 pubkey.as_slice(),
                 account_auth_scheme_to_store(registered.auth_scheme),
             )?;
+            let meta = PubkeyMetaRow {
+                label: registered.label.clone(),
+                scope: key_scope_to_store(registered.scope),
+                created_at_ms: registered.created_at_ms,
+            };
+            meta_table.insert(pubkey.as_slice(), rmp_serde::to_vec(&meta)?.as_slice())?;
         }
     }
 
@@ -2149,6 +2235,7 @@ impl Store {
         let pubkey_registry = {
             let table = txn.open_table(PUBKEY_REGISTRY)?;
             let scheme_table = txn.open_table(PUBKEY_AUTH_SCHEMES)?;
+            let meta_table = txn.open_table(PUBKEY_META)?;
             let mut registry = HashMap::new();
             for entry in table.iter()? {
                 let (key, value) = entry?;
@@ -2158,11 +2245,23 @@ impl Store {
                         .get(bytes)?
                         .map(|stored| account_auth_scheme_from_store(stored.value()))
                         .unwrap_or_default();
+                    // SYB-60 metadata; absent for keys registered before the
+                    // feature landed, which default to a labelless primary key.
+                    let meta: Option<PubkeyMetaRow> = meta_table
+                        .get(bytes)?
+                        .and_then(|stored| rmp_serde::from_slice(stored.value()).ok());
+                    let (label, scope, created_at_ms) = match meta {
+                        Some(m) => (m.label, key_scope_from_store(m.scope), m.created_at_ms),
+                        None => (None, crate::crypto::KeyScope::Primary, 0),
+                    };
                     registry.insert(
                         pubkey,
                         crate::crypto::RegisteredPubkey {
                             account_id: AccountId(value.value()),
                             auth_scheme,
+                            label,
+                            scope,
+                            created_at_ms,
                         },
                     );
                 } else {

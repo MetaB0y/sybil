@@ -48,6 +48,51 @@ struct CancelRequest {
     nonce: u64,
 }
 
+/// Canonical, stable byte layout of an account profile update (SYB-60).
+///
+/// `display_name`/`avatar_seed` are `None` to clear. Both the set and clear
+/// intents are covered by the signature so a relay cannot forge either.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct ProfileUpdate {
+    account_id: u64,
+    display_name: Option<String>,
+    avatar_seed: Option<String>,
+    nonce: u64,
+}
+
+/// Canonical, stable byte layout of a signing-key revocation (SYB-60).
+///
+/// `target_pubkey` is the 33-byte compressed SEC1 point of the key being
+/// revoked. Covering it by signature prevents a relay from redirecting the
+/// revocation at a different key.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct KeyRevocation {
+    account_id: u64,
+    target_pubkey: Vec<u8>,
+    nonce: u64,
+}
+
+/// Canonical, stable byte layout of a read API-key creation (SYB-60).
+///
+/// The bearer token itself is server-generated entropy and is deliberately NOT
+/// part of the signed payload; the signature authorizes the *creation intent*
+/// (and burns a replay nonce) while the token material never touches signed or
+/// persisted bytes in plaintext.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct ApiKeyCreate {
+    account_id: u64,
+    label: Option<String>,
+    nonce: u64,
+}
+
+/// Canonical, stable byte layout of a read API-key revocation (SYB-60).
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct ApiKeyRevoke {
+    account_id: u64,
+    api_key_id: u64,
+    nonce: u64,
+}
+
 /// Canonical, stable byte layout of a bridge withdrawal request. This mirrors
 /// `matching_sequencer::bridge::BridgeWithdrawalRequest` without importing it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -91,6 +136,59 @@ pub fn canonical_attestation_bytes(att: &ResolutionAttestation) -> Vec<u8> {
 
 pub fn canonical_bridge_withdrawal_bytes(request: &BridgeWithdrawalRequest) -> Vec<u8> {
     borsh::to_vec(request).expect("canonical bridge withdrawal serialization should not fail")
+}
+
+/// Canonical bytes for a signed account-profile update (SYB-60).
+pub fn canonical_profile_update_bytes(
+    account_id: u64,
+    display_name: Option<&str>,
+    avatar_seed: Option<&str>,
+    nonce: u64,
+) -> Vec<u8> {
+    borsh::to_vec(&ProfileUpdate {
+        account_id,
+        display_name: display_name.map(str::to_owned),
+        avatar_seed: avatar_seed.map(str::to_owned),
+        nonce,
+    })
+    .expect("canonical profile update serialization should not fail")
+}
+
+/// Canonical bytes for a signed signing-key revocation (SYB-60).
+///
+/// `target_pubkey` must be the 33-byte compressed SEC1 encoding of the key
+/// being revoked.
+pub fn canonical_key_revocation_bytes(
+    account_id: u64,
+    target_pubkey: &[u8],
+    nonce: u64,
+) -> Vec<u8> {
+    borsh::to_vec(&KeyRevocation {
+        account_id,
+        target_pubkey: target_pubkey.to_vec(),
+        nonce,
+    })
+    .expect("canonical key revocation serialization should not fail")
+}
+
+/// Canonical bytes for a signed read API-key creation (SYB-60).
+pub fn canonical_api_key_create_bytes(account_id: u64, label: Option<&str>, nonce: u64) -> Vec<u8> {
+    borsh::to_vec(&ApiKeyCreate {
+        account_id,
+        label: label.map(str::to_owned),
+        nonce,
+    })
+    .expect("canonical api key create serialization should not fail")
+}
+
+/// Canonical bytes for a signed read API-key revocation (SYB-60).
+pub fn canonical_api_key_revoke_bytes(account_id: u64, api_key_id: u64, nonce: u64) -> Vec<u8> {
+    borsh::to_vec(&ApiKeyRevoke {
+        account_id,
+        api_key_id,
+        nonce,
+    })
+    .expect("canonical api key revoke serialization should not fail")
 }
 
 #[cfg(test)]
@@ -185,6 +283,59 @@ mod tests {
     #[test]
     fn cancel_snapshot() {
         insta::assert_snapshot!("cancel", hex::encode(canonical_cancel_bytes(7, 42, 11)));
+    }
+
+    #[test]
+    fn profile_update_bytes_deterministic_and_field_covering() {
+        let a = canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 11);
+        let b = canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 11);
+        assert_eq!(a, b, "encoding must be deterministic");
+        // Clearing (None) differs from setting, and each field is covered.
+        assert_ne!(a, canonical_profile_update_bytes(7, None, None, 11));
+        assert_ne!(
+            a,
+            canonical_profile_update_bytes(7, Some("bob"), Some("seed-1"), 11)
+        );
+        assert_ne!(
+            a,
+            canonical_profile_update_bytes(7, Some("alice"), Some("seed-2"), 11)
+        );
+        assert_ne!(
+            a,
+            canonical_profile_update_bytes(7, Some("alice"), Some("seed-1"), 12)
+        );
+        assert_ne!(
+            a,
+            canonical_profile_update_bytes(8, Some("alice"), Some("seed-1"), 11)
+        );
+    }
+
+    #[test]
+    fn key_revocation_bytes_cover_target_and_nonce() {
+        let a = canonical_key_revocation_bytes(3, &[0x02; 33], 5);
+        assert_eq!(a, canonical_key_revocation_bytes(3, &[0x02; 33], 5));
+        assert_ne!(a, canonical_key_revocation_bytes(3, &[0x03; 33], 5));
+        assert_ne!(a, canonical_key_revocation_bytes(3, &[0x02; 33], 6));
+        assert_ne!(a, canonical_key_revocation_bytes(4, &[0x02; 33], 5));
+    }
+
+    #[test]
+    fn api_key_bytes_cover_all_fields() {
+        let create = canonical_api_key_create_bytes(9, Some("grafana"), 2);
+        assert_eq!(
+            create,
+            canonical_api_key_create_bytes(9, Some("grafana"), 2)
+        );
+        assert_ne!(create, canonical_api_key_create_bytes(9, None, 2));
+        assert_ne!(
+            create,
+            canonical_api_key_create_bytes(9, Some("grafana"), 3)
+        );
+
+        let revoke = canonical_api_key_revoke_bytes(9, 42, 2);
+        assert_eq!(revoke, canonical_api_key_revoke_bytes(9, 42, 2));
+        assert_ne!(revoke, canonical_api_key_revoke_bytes(9, 43, 2));
+        assert_ne!(revoke, canonical_api_key_revoke_bytes(9, 42, 3));
     }
 
     #[test]

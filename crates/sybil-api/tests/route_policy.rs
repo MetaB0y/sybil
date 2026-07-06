@@ -65,6 +65,34 @@ fn exact_public_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
+            path: "/v1/accounts/{id}/keys",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/accounts/{id}/keys/revoke",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/accounts/{id}/profile",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/api-keys",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/accounts/{id}/api-keys",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/accounts/{id}/api-keys/revoke",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/private-summary",
+        },
+        RouteMount {
+            method: "GET",
             path: "/v1/accounts/{id}/portfolio",
         },
         RouteMount {

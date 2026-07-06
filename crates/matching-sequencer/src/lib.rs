@@ -26,7 +26,7 @@ pub mod validation;
 #[cfg(test)]
 mod crash_harness;
 
-pub use account::{Account, AccountId, AccountStore};
+pub use account::{Account, AccountId, AccountProfile, AccountStore, ApiKeyRecord};
 pub use account_storage::{
     AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
     QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateOperationProofParts,
@@ -48,8 +48,11 @@ pub use bridge::{
     L1Deposit, L1WithdrawalStatus, WithdrawalLeaf,
 };
 pub use crypto::{
-    AccountAuthScheme, AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedOrder,
-    PublicKey, RegisteredPubkey, SignedBridgeWithdrawal, SignedCancel, SignedOrder,
+    api_key_hash, AccountAuthScheme, AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke,
+    AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedKeyRevocation,
+    AuthenticatedOrder, AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey,
+    SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
+    SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
 };
 pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{

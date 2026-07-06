@@ -201,6 +201,18 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::AccountAlreadyRegistered => {
                 AppError::conflict("Public key already registered to an account")
             }
+            matching_sequencer::SequencerError::KeyNotFound => {
+                AppError::not_found("Signing key not found")
+            }
+            matching_sequencer::SequencerError::LastSigningKey => {
+                AppError::conflict("Cannot revoke the account's last remaining signing key")
+            }
+            matching_sequencer::SequencerError::ApiKeyNotFound => {
+                AppError::not_found("API key not found")
+            }
+            matching_sequencer::SequencerError::ProfileInvalid(ref msg) => {
+                AppError::bad_request(format!("Invalid profile: {msg}"))
+            }
             matching_sequencer::SequencerError::MarketNotFound => {
                 AppError::not_found("Market not found")
             }

@@ -1,18 +1,28 @@
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::Json;
 
 use matching_engine::MarketId;
-use matching_sequencer::{
-    AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId, PublicKey,
+use matching_sequencer::crypto::{
+    canonical_api_key_create_bytes, canonical_api_key_revoke_bytes, canonical_key_revocation_bytes,
+    canonical_profile_update_bytes,
 };
-use p256::ecdsa::VerifyingKey;
+use matching_sequencer::{
+    api_key_hash, AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId,
+    AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke, AuthenticatedKeyRevocation,
+    AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey, SignedApiKeyCreate,
+    SignedApiKeyRevoke, SignedKeyRevocation, SignedProfileUpdate,
+};
+use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
 
 use crate::convert::account_to_response;
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
-    AuthScheme, CreateAccountRequest, FundAccountRequest, RegisterKeyRequest,
+    AuthScheme, CreateAccountRequest, CreateApiKeyRequest, FundAccountRequest,
+    KeyScope as KeyScopeDto, RegisterKeyRequest, RevokeApiKeyRequest, RevokeKeyRequest,
+    SetProfileRequest, WebAuthnAssertion,
 };
 use crate::types::response::*;
 use crate::util::now_ms;
@@ -148,14 +158,133 @@ pub async fn register_key(
 
     state
         .sequencer
-        .register_pubkey_with_scheme(
+        .register_pubkey_with_meta(
             AccountId(id),
             pubkey,
-            sequencer_auth_scheme(req.auth_scheme),
+            RegisteredPubkey {
+                account_id: AccountId(id),
+                auth_scheme: sequencer_auth_scheme(req.auth_scheme),
+                label: req.label.clone(),
+                scope: sequencer_key_scope(req.scope),
+                created_at_ms: now_ms(),
+            },
         )
         .await?;
 
     Ok(Json(serde_json::json!({ "success": true })))
+}
+
+fn sequencer_key_scope(scope: KeyScopeDto) -> KeyScope {
+    match scope {
+        KeyScopeDto::Primary => KeyScope::Primary,
+        KeyScopeDto::Agent => KeyScope::Agent,
+        KeyScopeDto::Custom => KeyScope::Custom,
+    }
+}
+
+// --- SYB-60 shared signed-mutation helpers ---
+//
+// Bearer-vs-signing boundary: every mutation below is P256-signed over canonical
+// bytes plus a replay nonce, exactly like orders/cancels/withdrawals. Bearer API
+// keys (created here) are READ-ONLY and can never authorize these mutations —
+// that is what preserves the signing model's replay protection. To grant an
+// agent trade authority, register an additional P256 key (`scope: agent`), which
+// signs like any other key.
+
+fn parse_signer(public_key_hex: &str) -> Result<PublicKey, AppError> {
+    let key_bytes = hex::decode(public_key_hex.trim_start_matches("0x"))
+        .map_err(|_| AppError::bad_request("Invalid hex encoding for signer public key"))?;
+    let sec1_point = Sec1Point::from_bytes(&key_bytes)
+        .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
+    let verifying_key = VerifyingKey::from_sec1_point(&sec1_point)
+        .map_err(|_| AppError::bad_request("Invalid P256 public key"))?;
+    Ok(PublicKey(verifying_key))
+}
+
+fn parse_raw_signature(signature_hex: Option<&str>) -> Result<Signature, AppError> {
+    let hex_str = signature_hex.ok_or_else(|| {
+        AppError::bad_request("signature_hex is required for raw_p256 signed requests")
+    })?;
+    let sig_bytes = hex::decode(hex_str.trim_start_matches("0x"))
+        .map_err(|_| AppError::bad_request("Invalid hex encoding for signature"))?;
+    Signature::from_slice(&sig_bytes)
+        .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))
+}
+
+/// For the WebAuthn path, confirm the signer is registered as a WebAuthn key and
+/// verify the assertion over the canonical bytes. Returns Ok once the intent is
+/// authenticated (the caller then hands an `Authenticated*` value to the
+/// sequencer, which re-checks signer↔account and burns the nonce).
+async fn verify_webauthn_intent(
+    state: &AppState,
+    signer: &PublicKey,
+    canonical: &[u8],
+    assertion: Option<&WebAuthnAssertion>,
+) -> Result<(), AppError> {
+    let registered = state
+        .sequencer
+        .lookup_registered_pubkey(signer.clone())
+        .await?
+        .ok_or_else(|| AppError::not_found("No account registered for this public key"))?;
+    if registered.auth_scheme != AccountAuthScheme::WebAuthn {
+        return Err(AppError::forbidden(
+            "Signer key is not registered for the webauthn auth scheme",
+        ));
+    }
+    let assertion = assertion.ok_or_else(|| {
+        AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
+    })?;
+    webauthn::verify_assertion(&state.webauthn, &signer.0, canonical, assertion)
+        .map_err(|err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")))
+}
+
+const DISPLAY_NAME_MAX: usize = 32;
+const AVATAR_SEED_MAX: usize = 64;
+
+/// Validate optional profile fields (length + charset). Empty strings are
+/// treated as "clear" (mapped to None) so a UI can clear via `""`.
+fn validate_profile_fields(
+    display_name: Option<String>,
+    avatar_seed: Option<String>,
+) -> Result<(Option<String>, Option<String>), AppError> {
+    let display_name = match display_name.map(|s| s.trim().to_string()) {
+        Some(s) if s.is_empty() => None,
+        Some(s) => {
+            if s.chars().count() > DISPLAY_NAME_MAX {
+                return Err(AppError::bad_request(format!(
+                    "display_name must be at most {DISPLAY_NAME_MAX} characters"
+                )));
+            }
+            if !s.chars().all(|c| c.is_alphanumeric() || " _-.".contains(c)) {
+                return Err(AppError::bad_request(
+                    "display_name may only contain letters, digits, spaces, and _-.",
+                ));
+            }
+            Some(s)
+        }
+        None => None,
+    };
+    let avatar_seed = match avatar_seed {
+        Some(s) if s.is_empty() => None,
+        Some(s) => {
+            if s.len() > AVATAR_SEED_MAX {
+                return Err(AppError::bad_request(format!(
+                    "avatar_seed must be at most {AVATAR_SEED_MAX} characters"
+                )));
+            }
+            if !s
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
+            {
+                return Err(AppError::bad_request(
+                    "avatar_seed may only contain ASCII letters, digits, and _-.",
+                ));
+            }
+            Some(s)
+        }
+        None => None,
+    };
+    Ok((display_name, avatar_seed))
 }
 
 /// GET /v1/accounts/{id}/portfolio
@@ -396,6 +525,375 @@ pub async fn get_equity(
     Ok(Json(EquitySeriesResponse {
         account_id: id,
         points,
+    }))
+}
+
+/// POST /v1/accounts/{id}/profile — set/clear opt-in profile (signed) (SYB-60)
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{id}/profile",
+    params(("id" = u64, Path, description = "Account ID")),
+    request_body = SetProfileRequest,
+    responses(
+        (status = 200, description = "Profile updated", body = AccountResponse),
+        (status = 400, description = "Invalid profile or signature"),
+        (status = 403, description = "Signer/account mismatch"),
+        (status = 404, description = "Unknown signer"),
+        (status = 409, description = "Replay nonce is stale or duplicate")
+    )
+)]
+pub async fn set_profile(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(req): Json<SetProfileRequest>,
+) -> Result<Json<AccountResponse>, AppError> {
+    let account_id = AccountId(id);
+    let (display_name, avatar_seed) = validate_profile_fields(req.display_name, req.avatar_seed)?;
+    let signer = parse_signer(&req.signer_pubkey_hex)?;
+    let canonical = canonical_profile_update_bytes(
+        account_id,
+        display_name.as_deref(),
+        avatar_seed.as_deref(),
+        req.nonce,
+    );
+
+    let account = match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            let signed = SignedProfileUpdate {
+                account_id,
+                display_name,
+                avatar_seed,
+                nonce: req.nonce,
+                signer,
+                signature: parse_raw_signature(req.signature_hex.as_deref())?,
+            };
+            state.sequencer.set_profile_signed(signed).await?
+        }
+        AuthScheme::WebAuthn => {
+            verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
+                .await?;
+            state
+                .sequencer
+                .set_profile_authenticated(AuthenticatedProfileUpdate {
+                    account_id,
+                    display_name,
+                    avatar_seed,
+                    nonce: req.nonce,
+                    signer,
+                })
+                .await?
+        }
+    };
+    Ok(Json(account_to_response(&account)))
+}
+
+/// GET /v1/accounts/{id}/keys — list registered signing keys with metadata
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{id}/keys",
+    params(("id" = u64, Path, description = "Account ID")),
+    responses((status = 200, description = "Registered signing keys", body = [AccountKeyResponse]))
+)]
+pub async fn list_account_keys(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<Json<Vec<AccountKeyResponse>>, AppError> {
+    let keys = state
+        .sequencer
+        .signing_keys_for_account(AccountId(id))
+        .await?;
+    let out = keys
+        .into_iter()
+        .map(|(pubkey, meta)| AccountKeyResponse {
+            public_key_hex: hex::encode(pubkey),
+            auth_scheme: match meta.auth_scheme {
+                AccountAuthScheme::RawP256 => "raw_p256".to_string(),
+                AccountAuthScheme::WebAuthn => "webauthn".to_string(),
+            },
+            scope: meta.scope.as_str().to_string(),
+            label: meta.label,
+            created_at_ms: meta.created_at_ms,
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+/// POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60)
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{id}/keys/revoke",
+    params(("id" = u64, Path, description = "Account ID")),
+    request_body = RevokeKeyRequest,
+    responses(
+        (status = 200, description = "Key revoked"),
+        (status = 400, description = "Invalid request or signature"),
+        (status = 403, description = "Signer/account mismatch"),
+        (status = 404, description = "Unknown signer or key"),
+        (status = 409, description = "Cannot revoke the last key, or stale nonce")
+    )
+)]
+pub async fn revoke_key(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(req): Json<RevokeKeyRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account_id = AccountId(id);
+    // Normalize the target to compressed SEC1 bytes so the signed canonical form
+    // is stable regardless of the caller's hex casing / prefix.
+    let target = parse_signer(&req.target_pubkey_hex)?;
+    let target_bytes = target.compressed_bytes();
+    let signer = parse_signer(&req.signer_pubkey_hex)?;
+    let canonical = canonical_key_revocation_bytes(account_id, &target_bytes, req.nonce);
+
+    match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            let signed = SignedKeyRevocation {
+                account_id,
+                target_pubkey: target_bytes,
+                nonce: req.nonce,
+                signer,
+                signature: parse_raw_signature(req.signature_hex.as_deref())?,
+            };
+            state.sequencer.revoke_signing_key_signed(signed).await?;
+        }
+        AuthScheme::WebAuthn => {
+            verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
+                .await?;
+            state
+                .sequencer
+                .revoke_signing_key_authenticated(AuthenticatedKeyRevocation {
+                    account_id,
+                    target_pubkey: target_bytes,
+                    nonce: req.nonce,
+                    signer,
+                })
+                .await?;
+        }
+    }
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// GET /v1/accounts/{id}/api-keys — list read API keys (metadata only) (SYB-60)
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{id}/api-keys",
+    params(("id" = u64, Path, description = "Account ID")),
+    responses((status = 200, description = "Read API keys", body = [ApiKeyResponse]))
+)]
+pub async fn list_api_keys(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<Json<Vec<ApiKeyResponse>>, AppError> {
+    let keys = state.sequencer.api_keys_for_account(AccountId(id)).await?;
+    let out = keys
+        .into_iter()
+        .map(|k| ApiKeyResponse {
+            id: k.id,
+            label: k.label,
+            created_at_ms: k.created_at_ms,
+            revoked_at_ms: k.revoked_at_ms,
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+/// POST /v1/accounts/{id}/api-keys — create a read API key (signed) (SYB-60)
+///
+/// The bearer token is returned exactly once; only its blake3 hash is stored.
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{id}/api-keys",
+    params(("id" = u64, Path, description = "Account ID")),
+    request_body = CreateApiKeyRequest,
+    responses(
+        (status = 200, description = "API key created (token shown once)", body = CreateApiKeyResponse),
+        (status = 400, description = "Invalid request or signature"),
+        (status = 403, description = "Signer/account mismatch"),
+        (status = 404, description = "Unknown signer"),
+        (status = 409, description = "Replay nonce is stale or duplicate")
+    )
+)]
+pub async fn create_api_key(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(req): Json<CreateApiKeyRequest>,
+) -> Result<Json<CreateApiKeyResponse>, AppError> {
+    let account_id = AccountId(id);
+    let label = req.label.clone().filter(|s| !s.is_empty());
+    let signer = parse_signer(&req.signer_pubkey_hex)?;
+    let canonical = canonical_api_key_create_bytes(account_id, label.as_deref(), req.nonce);
+
+    // Generate the token server-side (256 bits of CSPRNG entropy). The plaintext
+    // is returned once below and never persisted; only blake3(token) is stored.
+    let mut raw = [0u8; 32];
+    getrandom::fill(&mut raw)
+        .map_err(|_| AppError::internal("Failed to generate API key entropy"))?;
+    let token = format!("sybk_{}", hex::encode(raw));
+    let token_hash = api_key_hash(token.as_bytes());
+
+    let key_id = match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            let signed = SignedApiKeyCreate {
+                account_id,
+                label: label.clone(),
+                token_hash,
+                nonce: req.nonce,
+                signer,
+                signature: parse_raw_signature(req.signature_hex.as_deref())?,
+            };
+            state.sequencer.create_api_key_signed(signed).await?
+        }
+        AuthScheme::WebAuthn => {
+            verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
+                .await?;
+            state
+                .sequencer
+                .create_api_key_authenticated(AuthenticatedApiKeyCreate {
+                    account_id,
+                    label: label.clone(),
+                    token_hash,
+                    nonce: req.nonce,
+                    signer,
+                })
+                .await?
+        }
+    };
+    Ok(Json(CreateApiKeyResponse {
+        id: key_id,
+        token,
+        label,
+        created_at_ms: now_ms(),
+    }))
+}
+
+/// POST /v1/accounts/{id}/api-keys/revoke — revoke a read API key (signed)
+#[utoipa::path(
+    post,
+    path = "/v1/accounts/{id}/api-keys/revoke",
+    params(("id" = u64, Path, description = "Account ID")),
+    request_body = RevokeApiKeyRequest,
+    responses(
+        (status = 200, description = "API key revoked"),
+        (status = 400, description = "Invalid request or signature"),
+        (status = 403, description = "Signer/account mismatch"),
+        (status = 404, description = "Unknown signer or API key"),
+        (status = 409, description = "Replay nonce is stale or duplicate")
+    )
+)]
+pub async fn revoke_api_key(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(req): Json<RevokeApiKeyRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let account_id = AccountId(id);
+    let signer = parse_signer(&req.signer_pubkey_hex)?;
+    let canonical = canonical_api_key_revoke_bytes(account_id, req.api_key_id, req.nonce);
+
+    match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            let signed = SignedApiKeyRevoke {
+                account_id,
+                api_key_id: req.api_key_id,
+                nonce: req.nonce,
+                signer,
+                signature: parse_raw_signature(req.signature_hex.as_deref())?,
+            };
+            state.sequencer.revoke_api_key_signed(signed).await?;
+        }
+        AuthScheme::WebAuthn => {
+            verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
+                .await?;
+            state
+                .sequencer
+                .revoke_api_key_authenticated(AuthenticatedApiKeyRevoke {
+                    account_id,
+                    api_key_id: req.api_key_id,
+                    nonce: req.nonce,
+                    signer,
+                })
+                .await?;
+        }
+    }
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// Extract and authenticate a read-scoped bearer token from `Authorization`.
+///
+/// Returns the account the token belongs to (active keys only). This is the
+/// reusable gating primitive for private read endpoints. It is applied to ONE
+/// new endpoint (`private-summary`) as the template — existing public endpoints
+/// are intentionally left ungated, because gating them is a breaking change and
+/// a deliberate future step.
+async fn bearer_account(state: &AppState, headers: &HeaderMap) -> Result<AccountId, AppError> {
+    let header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| AppError::unauthorized("Missing bearer token"))?;
+    let token = header
+        .strip_prefix("Bearer ")
+        .or_else(|| header.strip_prefix("bearer "))
+        .ok_or_else(|| AppError::unauthorized("Malformed Authorization header"))?
+        .trim();
+    let token_hash = api_key_hash(token.as_bytes());
+    state
+        .sequencer
+        .lookup_api_key(token_hash)
+        .await?
+        .ok_or_else(|| AppError::unauthorized("Invalid or revoked API key"))
+}
+
+/// GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
+///
+/// Template endpoint demonstrating `Authorization: Bearer` gating. It returns
+/// the same account data the public endpoints already expose, but only to a
+/// read key that belongs to the requested account.
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{id}/private-summary",
+    params(("id" = u64, Path, description = "Account ID")),
+    responses(
+        (status = 200, description = "Private account summary", body = PrivateAccountSummaryResponse),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account"),
+        (status = 404, description = "Account not found")
+    ),
+    security(("bearer_read" = []))
+)]
+pub async fn get_private_summary(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    headers: HeaderMap,
+) -> Result<Json<PrivateAccountSummaryResponse>, AppError> {
+    let authed = bearer_account(&state, &headers).await?;
+    if authed != AccountId(id) {
+        return Err(AppError::forbidden(
+            "Bearer token does not grant access to this account",
+        ));
+    }
+    let account = state
+        .sequencer
+        .get_account(AccountId(id))
+        .await?
+        .ok_or_else(|| AppError::not_found(format!("Account {id} not found")))?;
+    let portfolio = state.sequencer.get_portfolio(AccountId(id)).await?;
+    let positions: Vec<PositionResponse> = account
+        .positions
+        .iter()
+        .filter(|(_, &qty)| qty != 0)
+        .map(|(&(market_id, outcome), &qty)| PositionResponse {
+            market_id: market_id.0,
+            outcome: if outcome == 0 { "YES" } else { "NO" }.to_string(),
+            quantity: qty,
+        })
+        .collect();
+    Ok(Json(PrivateAccountSummaryResponse {
+        account_id: id,
+        balance_nanos: account.balance,
+        total_deposited_nanos: portfolio.total_deposited_nanos,
+        portfolio_value_nanos: portfolio.portfolio_value_nanos,
+        pnl_nanos: portfolio.pnl_nanos,
+        positions,
+        display_name: account.profile.display_name.clone(),
     }))
 }
 

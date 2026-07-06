@@ -23,9 +23,13 @@ use crate::bridge::{
     BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf,
 };
 use crate::crypto::{
-    verify_signed_bridge_withdrawal, verify_signed_cancel, verify_signed_order, AccountAuthScheme,
-    AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedOrder, PublicKey,
-    RegisteredPubkey, SignedBridgeWithdrawal, SignedCancel, SignedOrder,
+    verify_signed_api_key_create, verify_signed_api_key_revoke, verify_signed_bridge_withdrawal,
+    verify_signed_cancel, verify_signed_key_revocation, verify_signed_order,
+    verify_signed_profile_update, AccountAuthScheme, AuthenticatedApiKeyCreate,
+    AuthenticatedApiKeyRevoke, AuthenticatedBridgeWithdrawal, AuthenticatedCancel,
+    AuthenticatedKeyRevocation, AuthenticatedOrder, AuthenticatedProfileUpdate, PublicKey,
+    RegisteredPubkey, SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
+    SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
 };
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{
@@ -190,6 +194,41 @@ pub enum SequencerMsg {
         AccountId,
         PublicKey,
         AccountAuthScheme,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
+    RegisterPubkeyWithMeta(
+        AccountId,
+        PublicKey,
+        RegisteredPubkey,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
+    SetProfileSigned(
+        SignedProfileUpdate,
+        RpcReplyPort<Result<Account, SequencerError>>,
+    ),
+    SetProfileAuthenticated(
+        AuthenticatedProfileUpdate,
+        RpcReplyPort<Result<Account, SequencerError>>,
+    ),
+    RevokeSigningKeySigned(
+        SignedKeyRevocation,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
+    RevokeSigningKeyAuthenticated(
+        AuthenticatedKeyRevocation,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
+    CreateApiKeySigned(
+        SignedApiKeyCreate,
+        RpcReplyPort<Result<u64, SequencerError>>,
+    ),
+    CreateApiKeyAuthenticated(
+        AuthenticatedApiKeyCreate,
+        RpcReplyPort<Result<u64, SequencerError>>,
+    ),
+    RevokeApiKeySigned(SignedApiKeyRevoke, RpcReplyPort<Result<(), SequencerError>>),
+    RevokeApiKeyAuthenticated(
+        AuthenticatedApiKeyRevoke,
         RpcReplyPort<Result<(), SequencerError>>,
     ),
     CreateMarket(String, RpcReplyPort<Result<MarketId, SequencerError>>),
@@ -1745,6 +1784,211 @@ impl SequencerActorState {
         self.handle_bridge_withdrawal(authenticated.request).await
     }
 
+    // --- SYB-60 account management signed mutations ---
+    //
+    // All four follow the same shape as bridge withdrawals: verify the P256
+    // signature (or accept an already-verified WebAuthn intent), confirm the
+    // signer key is registered to the target account, burn a replay nonce, then
+    // persist a control-plane WAL row before applying the in-memory change so a
+    // crash between the mutation and the next block commit cannot lose it.
+
+    async fn handle_register_pubkey_with_meta(
+        &mut self,
+        account_id: AccountId,
+        pubkey: PublicKey,
+        meta: RegisteredPubkey,
+    ) -> Result<(), SequencerError> {
+        if self.sequencer.accounts.get(account_id).is_none() {
+            return Err(SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            }));
+        }
+        if self.sequencer.lookup_pubkey(&pubkey).is_some() {
+            return Err(SequencerError::AccountAlreadyRegistered);
+        }
+        self.persist_control_plane(&ControlPlaneCommand::RegisterPubkeyWithMeta {
+            account_id,
+            compressed_pubkey: pubkey.compressed_bytes(),
+            auth_scheme: meta.auth_scheme,
+            label: meta.label.clone(),
+            scope: meta.scope,
+            created_at_ms: meta.created_at_ms,
+        })
+        .await?;
+        self.sequencer
+            .register_pubkey_with_meta(account_id, pubkey, meta)
+    }
+
+    /// Resolve the account for a verified signer and confirm it matches the
+    /// account named in the request (shared by all SYB-60 mutations).
+    fn resolve_signer_account(
+        &self,
+        signer: &PublicKey,
+        claimed: AccountId,
+    ) -> Result<(), SequencerError> {
+        let account_id = self
+            .sequencer
+            .lookup_pubkey(signer)
+            .ok_or(SequencerError::UnknownSigner)?;
+        if account_id != claimed {
+            return Err(SequencerError::SignerAccountMismatch);
+        }
+        Ok(())
+    }
+
+    async fn handle_signed_profile_update(
+        &mut self,
+        signed: SignedProfileUpdate,
+    ) -> Result<Account, SequencerError> {
+        verify_signed_profile_update(&signed)?;
+        self.handle_authenticated_profile_update(AuthenticatedProfileUpdate {
+            account_id: signed.account_id,
+            display_name: signed.display_name,
+            avatar_seed: signed.avatar_seed,
+            nonce: signed.nonce,
+            signer: signed.signer,
+        })
+        .await
+    }
+
+    async fn handle_authenticated_profile_update(
+        &mut self,
+        authenticated: AuthenticatedProfileUpdate,
+    ) -> Result<Account, SequencerError> {
+        self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
+        self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
+            .await?;
+        self.persist_control_plane(&ControlPlaneCommand::SetProfile {
+            account_id: authenticated.account_id,
+            display_name: authenticated.display_name.clone(),
+            avatar_seed: authenticated.avatar_seed.clone(),
+        })
+        .await?;
+        self.sequencer.set_profile(
+            authenticated.account_id,
+            authenticated.display_name,
+            authenticated.avatar_seed,
+        )
+    }
+
+    async fn handle_signed_key_revocation(
+        &mut self,
+        signed: SignedKeyRevocation,
+    ) -> Result<(), SequencerError> {
+        verify_signed_key_revocation(&signed)?;
+        self.handle_authenticated_key_revocation(AuthenticatedKeyRevocation {
+            account_id: signed.account_id,
+            target_pubkey: signed.target_pubkey,
+            nonce: signed.nonce,
+            signer: signed.signer,
+        })
+        .await
+    }
+
+    async fn handle_authenticated_key_revocation(
+        &mut self,
+        authenticated: AuthenticatedKeyRevocation,
+    ) -> Result<(), SequencerError> {
+        self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
+        let target = PublicKey::from_compressed_bytes(&authenticated.target_pubkey)
+            .ok_or(SequencerError::KeyNotFound)?;
+        // Validate the revocation (ownership + last-key lockout) against a clone
+        // before burning the nonce or writing the WAL, so a rejected revocation
+        // doesn't consume the nonce.
+        let mut validation = self.sequencer.clone();
+        validation.revoke_signing_key(authenticated.account_id, &target)?;
+        self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
+            .await?;
+        self.persist_control_plane(&ControlPlaneCommand::RevokeSigningKey {
+            account_id: authenticated.account_id,
+            compressed_pubkey: authenticated.target_pubkey,
+        })
+        .await?;
+        self.sequencer
+            .revoke_signing_key(authenticated.account_id, &target)
+    }
+
+    async fn handle_signed_api_key_create(
+        &mut self,
+        signed: SignedApiKeyCreate,
+    ) -> Result<u64, SequencerError> {
+        verify_signed_api_key_create(&signed)?;
+        self.handle_authenticated_api_key_create(AuthenticatedApiKeyCreate {
+            account_id: signed.account_id,
+            label: signed.label,
+            token_hash: signed.token_hash,
+            nonce: signed.nonce,
+            signer: signed.signer,
+        })
+        .await
+    }
+
+    async fn handle_authenticated_api_key_create(
+        &mut self,
+        authenticated: AuthenticatedApiKeyCreate,
+    ) -> Result<u64, SequencerError> {
+        self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
+        self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
+            .await?;
+        let created_at_ms = current_timestamp_ms();
+        self.persist_control_plane(&ControlPlaneCommand::CreateApiKey {
+            account_id: authenticated.account_id,
+            token_hash: authenticated.token_hash,
+            label: authenticated.label.clone(),
+            created_at_ms,
+        })
+        .await?;
+        self.sequencer.create_api_key(
+            authenticated.account_id,
+            authenticated.token_hash,
+            authenticated.label,
+            created_at_ms,
+        )
+    }
+
+    async fn handle_signed_api_key_revoke(
+        &mut self,
+        signed: SignedApiKeyRevoke,
+    ) -> Result<(), SequencerError> {
+        verify_signed_api_key_revoke(&signed)?;
+        self.handle_authenticated_api_key_revoke(AuthenticatedApiKeyRevoke {
+            account_id: signed.account_id,
+            api_key_id: signed.api_key_id,
+            nonce: signed.nonce,
+            signer: signed.signer,
+        })
+        .await
+    }
+
+    async fn handle_authenticated_api_key_revoke(
+        &mut self,
+        authenticated: AuthenticatedApiKeyRevoke,
+    ) -> Result<(), SequencerError> {
+        self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
+        let revoked_at_ms = current_timestamp_ms();
+        let mut validation = self.sequencer.clone();
+        validation.revoke_api_key(
+            authenticated.account_id,
+            authenticated.api_key_id,
+            revoked_at_ms,
+        )?;
+        self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
+            .await?;
+        self.persist_control_plane(&ControlPlaneCommand::RevokeApiKey {
+            account_id: authenticated.account_id,
+            api_key_id: authenticated.api_key_id,
+            revoked_at_ms,
+        })
+        .await?;
+        self.sequencer.revoke_api_key(
+            authenticated.account_id,
+            authenticated.api_key_id,
+            revoked_at_ms,
+        )
+    }
+
     async fn handle_state_proof(
         &self,
         leaf_key: Vec<u8>,
@@ -2024,6 +2268,53 @@ impl Actor for SequencerActor {
                 let _ = reply.send(
                     state
                         .handle_register_pubkey(account_id, pubkey, auth_scheme)
+                        .await,
+                );
+            }
+            SequencerMsg::RegisterPubkeyWithMeta(account_id, pubkey, meta, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_register_pubkey_with_meta(account_id, pubkey, meta)
+                        .await,
+                );
+            }
+            SequencerMsg::SetProfileSigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_profile_update(signed).await);
+            }
+            SequencerMsg::SetProfileAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_profile_update(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::RevokeSigningKeySigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_key_revocation(signed).await);
+            }
+            SequencerMsg::RevokeSigningKeyAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_key_revocation(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::CreateApiKeySigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_api_key_create(signed).await);
+            }
+            SequencerMsg::CreateApiKeyAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_api_key_create(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::RevokeApiKeySigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_api_key_revoke(signed).await);
+            }
+            SequencerMsg::RevokeApiKeyAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_api_key_revoke(authenticated)
                         .await,
                 );
             }
@@ -3001,6 +3292,117 @@ impl SequencerHandle {
         pubkey: PublicKey,
     ) -> Result<Option<RegisteredPubkey>, SequencerError> {
         self.read_query(move |state| state.sequencer.lookup_registered_pubkey(&pubkey))
+            .await
+    }
+
+    /// Register a signing key with SYB-60 management metadata (label/scope).
+    pub async fn register_pubkey_with_meta(
+        &self,
+        account_id: AccountId,
+        pubkey: PublicKey,
+        meta: RegisteredPubkey,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::RegisterPubkeyWithMeta(account_id, pubkey, meta, reply))
+            .await?
+    }
+
+    /// List an account's registered signing keys with metadata (SYB-60).
+    pub async fn signing_keys_for_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<(Vec<u8>, RegisteredPubkey)>, SequencerError> {
+        self.read_query(move |state| state.sequencer.signing_keys_for_account(account_id))
+            .await
+    }
+
+    /// Apply a raw-P256-signed profile update (SYB-60).
+    pub async fn set_profile_signed(
+        &self,
+        signed: SignedProfileUpdate,
+    ) -> Result<Account, SequencerError> {
+        self.rpc(|reply| SequencerMsg::SetProfileSigned(signed, reply))
+            .await?
+    }
+
+    /// Apply a WebAuthn-authenticated profile update (SYB-60).
+    pub async fn set_profile_authenticated(
+        &self,
+        authenticated: AuthenticatedProfileUpdate,
+    ) -> Result<Account, SequencerError> {
+        self.rpc(|reply| SequencerMsg::SetProfileAuthenticated(authenticated, reply))
+            .await?
+    }
+
+    /// Revoke a signing key from a raw-P256-signed request (SYB-60).
+    pub async fn revoke_signing_key_signed(
+        &self,
+        signed: SignedKeyRevocation,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::RevokeSigningKeySigned(signed, reply))
+            .await?
+    }
+
+    /// Revoke a signing key from a WebAuthn-authenticated request (SYB-60).
+    pub async fn revoke_signing_key_authenticated(
+        &self,
+        authenticated: AuthenticatedKeyRevocation,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::RevokeSigningKeyAuthenticated(authenticated, reply))
+            .await?
+    }
+
+    /// Create a read API key from a raw-P256-signed request (SYB-60).
+    pub async fn create_api_key_signed(
+        &self,
+        signed: SignedApiKeyCreate,
+    ) -> Result<u64, SequencerError> {
+        self.rpc(|reply| SequencerMsg::CreateApiKeySigned(signed, reply))
+            .await?
+    }
+
+    /// Create a read API key from a WebAuthn-authenticated request (SYB-60).
+    pub async fn create_api_key_authenticated(
+        &self,
+        authenticated: AuthenticatedApiKeyCreate,
+    ) -> Result<u64, SequencerError> {
+        self.rpc(|reply| SequencerMsg::CreateApiKeyAuthenticated(authenticated, reply))
+            .await?
+    }
+
+    /// Revoke a read API key from a raw-P256-signed request (SYB-60).
+    pub async fn revoke_api_key_signed(
+        &self,
+        signed: SignedApiKeyRevoke,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::RevokeApiKeySigned(signed, reply))
+            .await?
+    }
+
+    /// Revoke a read API key from a WebAuthn-authenticated request (SYB-60).
+    pub async fn revoke_api_key_authenticated(
+        &self,
+        authenticated: AuthenticatedApiKeyRevoke,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::RevokeApiKeyAuthenticated(authenticated, reply))
+            .await?
+    }
+
+    /// List an account's read API keys (metadata only) (SYB-60).
+    pub async fn api_keys_for_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Vec<crate::account::ApiKeyRecord>, SequencerError> {
+        self.read_query(move |state| state.sequencer.api_keys_for_account(account_id))
+            .await
+    }
+
+    /// Resolve a bearer token hash to its owning account if the key is active
+    /// (SYB-60). Read-only; used by the API bearer extractor.
+    pub async fn lookup_api_key(
+        &self,
+        token_hash: [u8; 32],
+    ) -> Result<Option<AccountId>, SequencerError> {
+        self.read_query(move |state| state.sequencer.lookup_api_key(&token_hash))
             .await
     }
 

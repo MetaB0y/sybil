@@ -386,10 +386,33 @@ that still need backend work:
 |---|---|---|
 | `GET /v1/accounts/{id}` | connect / import flow | Verify an account exists before storing the session (body unrendered) |
 | `POST /v1/accounts` | connect / create demo account | Create account |
-| `POST /v1/accounts/{id}/keys` | connect flow | Register signer pubkey |
+| `POST /v1/accounts/{id}/keys` | connect flow, Settings (add agent key) | Register signer pubkey (optional `label` + `scope`) |
 | `POST /v1/accounts/{id}/fund` | funding | Fund account |
 | `POST /v1/orders/signed` | Portfolio, trade rail | Place signed order (TIF GTC/IOC/GTD + replay nonce) |
 | `POST /v1/orders/cancel/signed` | Portfolio, trade rail | Cancel open order |
+| `POST /v1/accounts/{id}/profile` | Settings → Profile | Set/clear display name + identicon seed (signed, SYB-60) |
+| `POST /v1/accounts/{id}/keys/revoke` | Settings → Signing keys | Revoke a signing key (signed; 409 on last key, SYB-60) |
+| `POST /v1/accounts/{id}/api-keys` | Settings → Read API keys | Create a read-only bearer API key; token shown once (signed, SYB-60) |
+| `POST /v1/accounts/{id}/api-keys/revoke` | Settings → Read API keys | Revoke a read API key by id (signed, SYB-60) |
+
+---
+
+## Settings page (`/settings`, SYB-60)
+
+Account-management surface. All reads are React Query hooks in
+`src/lib/account/use-settings-data.ts`; all mutations are signed borsh payloads
+in `src/lib/account/settings.ts` (mirroring `orders.ts`).
+
+| Data | Endpoint | Notes |
+|---|---|---|
+| Current profile (display name, avatar seed) | `GET /v1/accounts/{id}` | `AccountResponse.display_name` / `avatar_seed` seed the Profile form |
+| Signing / agent keys list | `GET /v1/accounts/{id}/keys` | `AccountKeyResponse[]` — scope badge, label, auth scheme, created_at |
+| Read API keys list | `GET /v1/accounts/{id}/api-keys` | `ApiKeyResponse[]` — id, label, created/revoked; never the token |
+
+Security framing: read API keys (`sybk_…` bearer) are READ-ONLY and cannot
+trade; trade authority comes only from a registered signing key with
+`scope: "agent"`. The bearer-gated `GET /v1/accounts/{id}/private-summary`
+endpoint exists but the settings UI does not call it.
 
 ---
 
