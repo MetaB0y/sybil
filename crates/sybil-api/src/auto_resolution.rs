@@ -15,6 +15,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use matching_sequencer::{AutoResolutionAction, AutoResolutionRecord};
+use sha2::{Digest as _, Sha256};
 use sybil_api_types::request::{AutoResolutionActionDto, SubmitAutoResolutionRequest};
 
 /// Operator decision recorded against a proposal.
@@ -39,6 +41,11 @@ pub struct AutoResolutionEntry {
     pub eta_ms: Option<u64>,
     pub decision: Option<Decision>,
     pub decided_at_ms: Option<u64>,
+    pub approved_at_ms: Option<u64>,
+    pub rejected_at_ms: Option<u64>,
+    pub rejected_payout_nanos: Option<u64>,
+    pub rejected_reasoning_hash: Option<[u8; 32]>,
+    pub operator_note: Option<String>,
 }
 
 impl AutoResolutionEntry {
@@ -48,6 +55,84 @@ impl AutoResolutionEntry {
     fn is_vetoed(&self) -> bool {
         self.decision == Some(Decision::Rejected)
     }
+
+    pub fn to_record(&self) -> AutoResolutionRecord {
+        AutoResolutionRecord {
+            market_id: self.market_id,
+            action: to_record_action(self.action),
+            payout_nanos: self.payout_nanos,
+            confidence_ppm: confidence_to_ppm(self.confidence),
+            reasoning: self.reasoning.clone(),
+            evidence_excerpts: self.evidence_excerpts.clone(),
+            proposed_at_ms: self.proposed_at_ms,
+            eta_ms: self.eta_ms,
+            approved_at_ms: self.approved_at_ms,
+            rejected_at_ms: self.rejected_at_ms,
+            rejected_payout_nanos: self.rejected_payout_nanos,
+            rejected_reasoning_hash: self.rejected_reasoning_hash,
+            operator_note: self.operator_note.clone(),
+        }
+    }
+
+    pub fn from_record(record: AutoResolutionRecord) -> Self {
+        let decision = if record.rejected_at_ms.is_some() {
+            Some(Decision::Rejected)
+        } else if record.approved_at_ms.is_some() {
+            Some(Decision::Approved)
+        } else {
+            None
+        };
+        let decided_at_ms = match decision {
+            Some(Decision::Rejected) => record.rejected_at_ms,
+            Some(Decision::Approved) => record.approved_at_ms,
+            None => None,
+        };
+        Self {
+            market_id: record.market_id,
+            action: from_record_action(record.action),
+            payout_nanos: record.payout_nanos,
+            confidence: confidence_from_ppm(record.confidence_ppm),
+            reasoning: record.reasoning,
+            evidence_excerpts: record.evidence_excerpts,
+            proposed_at_ms: record.proposed_at_ms,
+            eta_ms: record.eta_ms,
+            decision,
+            decided_at_ms,
+            approved_at_ms: record.approved_at_ms,
+            rejected_at_ms: record.rejected_at_ms,
+            rejected_payout_nanos: record.rejected_payout_nanos,
+            rejected_reasoning_hash: record.rejected_reasoning_hash,
+            operator_note: record.operator_note,
+        }
+    }
+}
+
+fn to_record_action(action: AutoResolutionActionDto) -> AutoResolutionAction {
+    match action {
+        AutoResolutionActionDto::Propose => AutoResolutionAction::Propose,
+        AutoResolutionActionDto::Review => AutoResolutionAction::Review,
+        AutoResolutionActionDto::Escalate => AutoResolutionAction::Escalate,
+    }
+}
+
+fn from_record_action(action: AutoResolutionAction) -> AutoResolutionActionDto {
+    match action {
+        AutoResolutionAction::Propose => AutoResolutionActionDto::Propose,
+        AutoResolutionAction::Review => AutoResolutionActionDto::Review,
+        AutoResolutionAction::Escalate => AutoResolutionActionDto::Escalate,
+    }
+}
+
+fn reasoning_hash(reasoning: &str) -> [u8; 32] {
+    Sha256::digest(reasoning.as_bytes()).into()
+}
+
+fn confidence_to_ppm(confidence: f64) -> u32 {
+    (confidence.clamp(0.0, 1.0) * 1_000_000.0).round() as u32
+}
+
+fn confidence_from_ppm(confidence_ppm: u32) -> f64 {
+    f64::from(confidence_ppm.min(1_000_000)) / 1_000_000.0
 }
 
 /// Thread-safe review board keyed by market id.
@@ -68,7 +153,17 @@ impl AutoResolutionStore {
     pub fn upsert(&self, req: &SubmitAutoResolutionRequest, now_ms: u64) -> AutoResolutionEntry {
         let mut guard = self.inner.lock().expect("auto-resolution store poisoned");
         match guard.get_mut(&req.market_id) {
-            Some(existing) if existing.is_vetoed() => existing.clone(),
+            Some(existing) if existing.is_vetoed() => {
+                if req.action != AutoResolutionActionDto::Propose {
+                    existing.action = req.action;
+                    existing.payout_nanos = req.payout_nanos;
+                    existing.confidence = req.confidence;
+                    existing.reasoning = req.reasoning.clone();
+                    existing.evidence_excerpts = req.evidence_excerpts.clone();
+                    existing.eta_ms = req.eta_ms;
+                }
+                existing.clone()
+            }
             Some(existing) => {
                 existing.action = req.action;
                 existing.payout_nanos = req.payout_nanos;
@@ -94,6 +189,11 @@ impl AutoResolutionStore {
                     eta_ms: req.eta_ms,
                     decision: None,
                     decided_at_ms: None,
+                    approved_at_ms: None,
+                    rejected_at_ms: None,
+                    rejected_payout_nanos: None,
+                    rejected_reasoning_hash: None,
+                    operator_note: None,
                 };
                 guard.insert(req.market_id, entry.clone());
                 entry
@@ -111,9 +211,29 @@ impl AutoResolutionStore {
     ) -> Option<AutoResolutionEntry> {
         let mut guard = self.inner.lock().expect("auto-resolution store poisoned");
         let entry = guard.get_mut(&market_id)?;
+        if entry.is_vetoed() && decision != Decision::Rejected {
+            return Some(entry.clone());
+        }
         entry.decision = Some(decision);
         entry.decided_at_ms = Some(now_ms);
+        match decision {
+            Decision::Approved => {
+                entry.approved_at_ms = Some(now_ms);
+            }
+            Decision::Rejected => {
+                entry.rejected_at_ms = Some(now_ms);
+                entry.rejected_payout_nanos = Some(entry.payout_nanos);
+                entry.rejected_reasoning_hash = Some(reasoning_hash(&entry.reasoning));
+            }
+        }
         Some(entry.clone())
+    }
+
+    pub fn rehydrate(&self, records: Vec<AutoResolutionRecord>) {
+        let mut guard = self.inner.lock().expect("auto-resolution store poisoned");
+        for record in records {
+            guard.insert(record.market_id, AutoResolutionEntry::from_record(record));
+        }
     }
 
     /// Snapshot every recorded proposal.

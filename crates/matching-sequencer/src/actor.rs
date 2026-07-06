@@ -41,7 +41,9 @@ use crate::sequencer::{
     BlockSequencer, LeaderboardRow, OrderSubmission, PendingOrderInfo, PreparedBlock,
     SequencerConfig,
 };
-use crate::store::{ControlPlaneCommand, DaArtifact, DaArtifactLookup, HistoryRetentionPolicy};
+use crate::store::{
+    AutoResolutionRecord, ControlPlaneCommand, DaArtifact, DaArtifactLookup, HistoryRetentionPolicy,
+};
 use crate::{
     AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
     QMDB_STATE_MAX_KEY_BYTES,
@@ -320,6 +322,11 @@ pub enum SequencerMsg {
         Option<(u64, u64)>,
         Option<String>,
         RpcReplyPort<Vec<crate::aggregates::HistoryEvent>>,
+    ),
+    ListAutoResolutionRecords(RpcReplyPort<Result<Vec<AutoResolutionRecord>, SequencerError>>),
+    PutAutoResolutionRecord(
+        AutoResolutionRecord,
+        RpcReplyPort<Result<(), SequencerError>>,
     ),
     PauseBlockProduction(RpcReplyPort<()>),
     ResumeBlockProduction(RpcReplyPort<()>),
@@ -2684,6 +2691,25 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
+            SequencerMsg::ListAutoResolutionRecords(reply) => {
+                let result = match &state.store {
+                    Some(store) => store
+                        .auto_resolution_records()
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(Vec::new()),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::PutAutoResolutionRecord(record, reply) => {
+                let result = match &state.store {
+                    Some(store) => store
+                        .put_auto_resolution_record(record)
+                        .await
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(()),
+                };
+                let _ = reply.send(result);
+            }
             SequencerMsg::PauseBlockProduction(reply) => {
                 state.pause_count = state.pause_count.saturating_add(1);
                 let _ = reply.send(());
@@ -3736,6 +3762,20 @@ impl SequencerHandle {
     ) -> Result<Vec<crate::aggregates::HistoryEvent>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply))
             .await
+    }
+
+    pub async fn list_auto_resolution_records(
+        &self,
+    ) -> Result<Vec<AutoResolutionRecord>, SequencerError> {
+        self.rpc(SequencerMsg::ListAutoResolutionRecords).await?
+    }
+
+    pub async fn put_auto_resolution_record(
+        &self,
+        record: AutoResolutionRecord,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::PutAutoResolutionRecord(record, reply))
+            .await?
     }
 
     pub async fn get_pending_orders(

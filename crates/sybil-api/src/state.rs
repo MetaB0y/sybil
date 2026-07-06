@@ -287,4 +287,12 @@ impl AppState {
             auto_resolutions: crate::auto_resolution::AutoResolutionStore::new(),
         }
     }
+
+    pub async fn rehydrate_auto_resolutions(
+        &self,
+    ) -> Result<(), matching_sequencer::SequencerError> {
+        let records = self.sequencer.list_auto_resolution_records().await?;
+        self.auto_resolutions.rehydrate(records);
+        Ok(())
+    }
 }

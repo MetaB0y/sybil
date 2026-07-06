@@ -92,11 +92,22 @@ pub enum Classification {
 impl AutoResolveConfig {
     /// Apply the confidence policy to a verdict. Pure and total.
     pub fn classify(&self, confidence: f64) -> Classification {
+        self.classify_with_veto(confidence, false)
+    }
+
+    /// Apply the confidence policy, downgrading otherwise-proposable verdicts
+    /// for vetoed markets to review-only. A durable market-level veto never
+    /// creates a fresh signed pending item.
+    pub fn classify_with_veto(&self, confidence: f64, vetoed: bool) -> Classification {
         if !confidence.is_finite() {
             return Classification::Escalate;
         }
         if confidence >= self.confidence_propose {
-            Classification::Propose
+            if vetoed {
+                Classification::Review
+            } else {
+                Classification::Propose
+            }
         } else if confidence >= self.confidence_review {
             Classification::Review
         } else {
@@ -282,11 +293,12 @@ impl AutoResolveActor {
 
         let entry = board.get(&sybil_market_id);
         let entry_status = entry.map(|(s, _)| s.as_str());
+        let vetoed = entry_status == Some("rejected");
 
-        // Durable operator veto: respect it regardless of local state.
-        if entry_status == Some("rejected") {
+        // Durable operator veto: any held attestation is dead. We still allow
+        // a fresh evidence pass below, but route it as review-only.
+        if vetoed {
             self.pending.remove(&sybil_market_id);
-            return Ok(());
         }
 
         // Finalization path: a signed proposal we are already holding.
@@ -369,6 +381,7 @@ impl AutoResolveActor {
             &verdict,
             entry.and_then(|(_, eta)| *eta),
             now_ms,
+            vetoed,
         )
         .await
     }
@@ -380,8 +393,9 @@ impl AutoResolveActor {
         verdict: &LlmVerdict,
         existing_eta_ms: Option<u64>,
         now_ms: u64,
+        vetoed: bool,
     ) -> Result<(), Error> {
-        match self.config.classify(verdict.confidence) {
+        match self.config.classify_with_veto(verdict.confidence, vetoed) {
             Classification::Propose => {
                 // Preserve any in-flight challenge window; else open a fresh one.
                 let eta_ms = existing_eta_ms.unwrap_or(now_ms + self.config.challenge_window_ms);
@@ -596,6 +610,16 @@ mod tests {
         let verdict = mock.evaluate(&sample_req()).await.unwrap();
         assert_eq!(verdict.payout_nanos, NANOS_PER_DOLLAR);
         assert_eq!(cfg().classify(verdict.confidence), Classification::Propose);
+    }
+
+    #[tokio::test]
+    async fn vetoed_high_confidence_repoll_flows_to_review_queue() {
+        let mock = MockLlm::verdict(1.0, 0.95);
+        let verdict = mock.evaluate(&sample_req()).await.unwrap();
+        assert_eq!(
+            cfg().classify_with_veto(verdict.confidence, true),
+            Classification::Review
+        );
     }
 
     #[tokio::test]

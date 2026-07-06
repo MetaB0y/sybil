@@ -280,6 +280,11 @@ const KEY_FILL_TOTAL_COUNTS_SNAPSHOT: &str = "snapshot";
 const COST_BASIS_TRACKER: TableDefinition<&str, &[u8]> = TableDefinition::new("cost_basis_tracker");
 const KEY_COST_BASIS_TRACKER_SNAPSHOT: &str = "snapshot";
 
+/// Durable auto-resolution review-board decisions. Keyed by market_id and
+/// off-block: these rows gate resolver automation, not settlement verification.
+const AUTO_RESOLUTION_RECORDS: TableDefinition<u32, &[u8]> =
+    TableDefinition::new("auto_resolution_records");
+
 // Counter keys
 const KEY_STORE_LAYOUT_VERSION: &str = "store_layout_version";
 const KEY_HEIGHT: &str = "height";
@@ -509,6 +514,42 @@ pub struct Store {
     account_state_store: Box<dyn AccountStateStore>,
     #[cfg(test)]
     fault_injection: Arc<Mutex<StoreFaultInjection>>,
+}
+
+/// Durable operator decision state for an automated resolution proposal.
+///
+/// This is off-block metadata used by sybil-api/sybil-polymarket to preserve
+/// operator vetoes and approvals across process restarts. It intentionally does
+/// not enter the state root or verifier witness.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct AutoResolutionRecord {
+    pub market_id: u32,
+    pub action: AutoResolutionAction,
+    pub payout_nanos: u64,
+    pub confidence_ppm: u32,
+    pub reasoning: String,
+    #[serde(default)]
+    pub evidence_excerpts: Vec<String>,
+    pub proposed_at_ms: u64,
+    #[serde(default)]
+    pub eta_ms: Option<u64>,
+    #[serde(default)]
+    pub approved_at_ms: Option<u64>,
+    #[serde(default)]
+    pub rejected_at_ms: Option<u64>,
+    #[serde(default)]
+    pub rejected_payout_nanos: Option<u64>,
+    #[serde(default)]
+    pub rejected_reasoning_hash: Option<[u8; 32]>,
+    #[serde(default)]
+    pub operator_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum AutoResolutionAction {
+    Propose,
+    Review,
+    Escalate,
 }
 
 #[cfg(test)]
@@ -1887,6 +1928,7 @@ impl Store {
         txn.open_table(FIRST_DEPOSIT_MS)?;
         txn.open_table(FILL_TOTAL_COUNTS)?;
         txn.open_table(COST_BASIS_TRACKER)?;
+        txn.open_table(AUTO_RESOLUTION_RECORDS)?;
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
@@ -3244,6 +3286,36 @@ impl Store {
         }
         Ok(out)
     }
+
+    /// Persist or replace one auto-resolution review-board record.
+    pub async fn put_auto_resolution_record(
+        &self,
+        record: AutoResolutionRecord,
+    ) -> Result<(), StoreError> {
+        let bytes = rmp_serde::to_vec(&record)?;
+        self.redb_write(move |db| {
+            let txn = db.begin_write()?;
+            {
+                let mut table = txn.open_table(AUTO_RESOLUTION_RECORDS)?;
+                table.insert(record.market_id, bytes.as_slice())?;
+            }
+            txn.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Load every durable auto-resolution review-board record.
+    pub fn auto_resolution_records(&self) -> Result<Vec<AutoResolutionRecord>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(AUTO_RESOLUTION_RECORDS)?;
+        let mut out = Vec::new();
+        for entry in table.iter()? {
+            let (_, value) = entry?;
+            out.push(rmp_serde::from_slice(value.value())?);
+        }
+        Ok(out)
+    }
 }
 
 fn append_msgpack_row_bytes(
@@ -4031,6 +4103,33 @@ mod tests {
             "sybil-{prefix}-{}-{unique}.redb",
             std::process::id()
         ))
+    }
+
+    #[tokio::test]
+    async fn auto_resolution_records_round_trip() {
+        let path = temp_db_path("auto-resolution-records");
+        let store = Store::open(&path).unwrap();
+        let record = AutoResolutionRecord {
+            market_id: 7,
+            action: AutoResolutionAction::Propose,
+            payout_nanos: 1_000_000_000,
+            confidence_ppm: 950_000,
+            reasoning: "clear yes".to_string(),
+            evidence_excerpts: vec!["evidence".to_string()],
+            proposed_at_ms: 1_000,
+            eta_ms: Some(90_000),
+            approved_at_ms: None,
+            rejected_at_ms: Some(2_000),
+            rejected_payout_nanos: Some(1_000_000_000),
+            rejected_reasoning_hash: Some([9; 32]),
+            operator_note: Some("bad source".to_string()),
+        };
+
+        store
+            .put_auto_resolution_record(record.clone())
+            .await
+            .unwrap();
+        assert_eq!(store.auto_resolution_records().unwrap(), vec![record]);
     }
 
     fn sample_header(height: u64) -> BlockHeader {

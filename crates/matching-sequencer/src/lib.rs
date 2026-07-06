@@ -65,8 +65,9 @@ pub use sequencer::{
     LeaderboardRow, OrderSubmission, PendingOrderInfo, SequencerConfig, DEFAULT_ORDER_TTL_BLOCKS,
 };
 pub use store::{
-    DaArtifact, DaArtifactIntegrityError, DaArtifactLookup, DaArtifactManifest, DaProviderRef,
-    DA_FILE_PROVIDER_REF_ENCODING, DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
+    AutoResolutionAction, AutoResolutionRecord, DaArtifact, DaArtifactIntegrityError,
+    DaArtifactLookup, DaArtifactManifest, DaProviderRef, DA_FILE_PROVIDER_REF_ENCODING,
+    DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
     DA_PROVIDER_REFS_ENCODING_BYTES,
 };
 pub use system_event::SystemEvent;

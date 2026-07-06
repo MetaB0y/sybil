@@ -10,6 +10,9 @@ mod common;
 use axum::http::StatusCode;
 use common::{get, post_json, test_app};
 use serde_json::json;
+use sybil_api::app::create_router;
+use sybil_api::config::ApiConfig;
+use sybil_api::state::AppState;
 
 fn parse(body: &[u8]) -> serde_json::Value {
     serde_json::from_slice(body).expect("valid JSON")
@@ -73,6 +76,54 @@ async fn propose_then_reject_is_a_durable_veto() {
 }
 
 #[tokio::test]
+async fn veto_survives_api_restart_from_sequencer_store() {
+    let (app, handle) = common::test_app_with_store(true).await;
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/admin/auto-resolutions",
+        json!({
+            "market_id": 11,
+            "action": "propose",
+            "payout_nanos": 1_000_000_000u64,
+            "confidence": 0.95,
+            "reasoning": "first pass says yes",
+            "evidence_excerpts": ["YES"],
+            "eta_ms": 9_999_999_999_999u64
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/admin/auto-resolutions/11/reject",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let state = AppState::new(
+        handle,
+        &ApiConfig {
+            dev_mode: true,
+            ..ApiConfig::default()
+        },
+        prometheus,
+    );
+    let restarted_app = create_router(state);
+
+    let (status, body) = get(restarted_app, "/v1/admin/auto-resolutions").await;
+    assert_eq!(status, StatusCode::OK);
+    let entries = parse(&body)["entries"].as_array().unwrap().clone();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["market_id"], 11);
+    assert_eq!(entries[0]["status"], "rejected");
+}
+
+#[tokio::test]
 async fn review_entry_can_be_approved() {
     let (app, _seq) = test_app(true).await;
 
@@ -99,6 +150,53 @@ async fn review_entry_can_be_approved() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(parse(&body)["status"], "approved");
+}
+
+#[tokio::test]
+async fn approval_survives_api_restart_from_sequencer_store() {
+    let (app, handle) = common::test_app_with_store(true).await;
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/admin/auto-resolutions",
+        json!({
+            "market_id": 12,
+            "action": "propose",
+            "payout_nanos": 1_000_000_000u64,
+            "confidence": 0.95,
+            "reasoning": "yes",
+            "eta_ms": 9_999_999_999_999u64
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/admin/auto-resolutions/12/approve",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let state = AppState::new(
+        handle,
+        &ApiConfig {
+            dev_mode: true,
+            ..ApiConfig::default()
+        },
+        prometheus,
+    );
+    let restarted_app = create_router(state);
+
+    let (status, body) = get(restarted_app, "/v1/admin/auto-resolutions").await;
+    assert_eq!(status, StatusCode::OK);
+    let entries = parse(&body)["entries"].as_array().unwrap().clone();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["market_id"], 12);
+    assert_eq!(entries[0]["status"], "approved");
 }
 
 #[tokio::test]

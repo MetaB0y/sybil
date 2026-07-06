@@ -17,6 +17,22 @@ use crate::types::request::{AutoResolutionActionDto, SubmitAutoResolutionRequest
 use crate::types::response::{AutoResolutionEntryResponse, AutoResolutionListResponse};
 use sybil_api_types::NANOS_PER_DOLLAR;
 
+async fn rehydrate(state: &AppState) -> Result<(), AppError> {
+    state.rehydrate_auto_resolutions().await?;
+    Ok(())
+}
+
+async fn persist(
+    state: &AppState,
+    entry: &crate::auto_resolution::AutoResolutionEntry,
+) -> Result<(), AppError> {
+    state
+        .sequencer
+        .put_auto_resolution_record(entry.to_record())
+        .await?;
+    Ok(())
+}
+
 /// Compute the display status for an entry, folding in the live on-chain
 /// resolution state so the board never shows a settled market as still pending.
 async fn display_status(
@@ -84,6 +100,7 @@ pub async fn submit_auto_resolution(
     State(state): State<AppState>,
     Json(req): Json<SubmitAutoResolutionRequest>,
 ) -> Result<Json<AutoResolutionEntryResponse>, AppError> {
+    rehydrate(&state).await?;
     if req.payout_nanos > NANOS_PER_DOLLAR {
         return Err(AppError::bad_request(format!(
             "Payout must be between 0 and {NANOS_PER_DOLLAR} nanos, got {}",
@@ -102,6 +119,7 @@ pub async fn submit_auto_resolution(
     }
 
     let entry = state.auto_resolutions.upsert(&req, now_ms());
+    persist(&state, &entry).await?;
     Ok(Json(to_response(&state, &entry).await))
 }
 
@@ -117,6 +135,7 @@ pub async fn submit_auto_resolution(
 pub async fn list_auto_resolutions(
     State(state): State<AppState>,
 ) -> Result<Json<AutoResolutionListResponse>, AppError> {
+    rehydrate(&state).await?;
     let mut entries = Vec::new();
     for entry in state.auto_resolutions.list() {
         entries.push(to_response(&state, &entry).await);
@@ -141,10 +160,12 @@ pub async fn approve_auto_resolution(
     State(state): State<AppState>,
     Path(id): Path<u32>,
 ) -> Result<Json<AutoResolutionEntryResponse>, AppError> {
+    rehydrate(&state).await?;
     let entry = state
         .auto_resolutions
         .decide(id, Decision::Approved, now_ms())
         .ok_or_else(|| AppError::not_found("no auto-resolution proposal for this market"))?;
+    persist(&state, &entry).await?;
     Ok(Json(to_response(&state, &entry).await))
 }
 
@@ -164,9 +185,11 @@ pub async fn reject_auto_resolution(
     State(state): State<AppState>,
     Path(id): Path<u32>,
 ) -> Result<Json<AutoResolutionEntryResponse>, AppError> {
+    rehydrate(&state).await?;
     let entry = state
         .auto_resolutions
         .decide(id, Decision::Rejected, now_ms())
         .ok_or_else(|| AppError::not_found("no auto-resolution proposal for this market"))?;
+    persist(&state, &entry).await?;
     Ok(Json(to_response(&state, &entry).await))
 }

@@ -382,6 +382,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let shutdown_handle = handle.clone();
     let state = AppState::new(handle, &config, prometheus_handle);
+    if let Err(err) = state.rehydrate_auto_resolutions().await {
+        tracing::warn!(error = %err, "failed to rehydrate auto-resolution review board");
+    }
     let app = create_router(state);
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = TcpListener::bind(&addr).await.unwrap();
