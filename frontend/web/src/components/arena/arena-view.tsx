@@ -12,9 +12,11 @@ import {
   articleLabel,
   articleList,
   articleUrl,
+  driftPointsFromDecisions,
   estimateTokenCost,
   extractStrategy,
   formatDecisionOrder,
+  marketOptionsFromDecisions,
   orderList,
   orderSideTone,
   strategyRows,
@@ -23,9 +25,12 @@ import {
   totalTokens,
 } from "@/lib/arena/derive";
 import {
+  useArenaDecisionHistory,
+  useArenaEquitySeries,
   useArenaFeed,
   type ArenaBotSummary,
   type ArenaDecision,
+  type ArenaEquityPoint,
   type ArenaTokenUsage,
 } from "@/lib/arena/use-arena-feed";
 import { useActivityOverview } from "@/lib/activity/use-activity-overview";
@@ -68,6 +73,7 @@ const EMPTY_TOKEN_USAGE: ArenaTokenUsage[] = [];
 
 export function ArenaView() {
   const [selectedTrader, setSelectedTrader] = useState("");
+  const [selectedMarketId, setSelectedMarketId] = useState("");
   const feed = useArenaFeed({
     limit: 140,
     trader: selectedTrader || undefined,
@@ -82,6 +88,35 @@ export function ArenaView() {
   const decisions = data?.decisions ?? EMPTY_DECISIONS;
   const tokenUsage = data?.token_usage ?? EMPTY_TOKEN_USAGE;
   const traderNames = summaries.map((bot) => bot.trader_name);
+  const activeTrader = selectedTrader || traderNames[0] || "";
+  const equity = useArenaEquitySeries({
+    trader: activeTrader || undefined,
+    limit: 360,
+  });
+  const traderHistory = useArenaDecisionHistory({
+    trader: activeTrader || undefined,
+    limit: 500,
+  });
+  const marketOptions = useMemo(
+    () => marketOptionsFromDecisions(traderHistory.data?.decisions ?? EMPTY_DECISIONS),
+    [traderHistory.data?.decisions],
+  );
+  const selectedMarketStillVisible = marketOptions.some(
+    (option) => String(option.marketId) === selectedMarketId,
+  );
+  const effectiveMarketId =
+    selectedMarketStillVisible || marketOptions.length === 0
+      ? selectedMarketId
+      : String(marketOptions[0]!.marketId);
+  const numericMarketId =
+    effectiveMarketId === "" ? undefined : Number(effectiveMarketId);
+  const hasDriftMarket =
+    numericMarketId !== undefined && Number.isFinite(numericMarketId);
+  const driftFeed = useArenaDecisionHistory({
+    trader: hasDriftMarket ? activeTrader || undefined : undefined,
+    marketId: hasDriftMarket ? numericMarketId : undefined,
+    limit: 500,
+  });
   const totals = useMemo(() => summarizeBots(summaries), [summaries]);
   const strategies = useMemo(() => strategyRows(summaries), [summaries]);
   const tokenCost = estimateTokenCost(tokenUsage);
@@ -173,6 +208,34 @@ export function ArenaView() {
       >
         <StrategyPanel rows={strategies} />
         <LlmUsagePanel rows={tokenUsage} />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+          gap: 12,
+          marginTop: 12,
+        }}
+      >
+        <EquityCurvePanel
+          trader={activeTrader}
+          points={equity.data?.points ?? []}
+          isLoading={equity.isPending}
+          downsampled={equity.data?.downsampled === true}
+          stride={equity.data?.stride ?? 1}
+          sourceRows={equity.data?.source_rows ?? 0}
+        />
+        <FvDriftPanel
+          trader={activeTrader}
+          traderNames={traderNames}
+          onSelectTrader={setSelectedTrader}
+          marketOptions={marketOptions}
+          selectedMarketId={effectiveMarketId}
+          onSelectMarketId={setSelectedMarketId}
+          decisions={driftFeed.data?.decisions ?? EMPTY_DECISIONS}
+          isLoading={traderHistory.isPending || driftFeed.isPending}
+        />
       </div>
 
       <BotRosterPanel
@@ -323,6 +386,175 @@ function LlmUsagePanel({ rows }: { rows: ArenaTokenUsage[] }) {
   );
 }
 
+function EquityCurvePanel({
+  trader,
+  points,
+  isLoading,
+  downsampled,
+  stride,
+  sourceRows,
+}: {
+  trader: string;
+  points: ArenaEquityPoint[];
+  isLoading: boolean;
+  downsampled: boolean;
+  stride: number;
+  sourceRows: number;
+}) {
+  const chartPoints = useMemo(() => equityChartPoints(points), [points]);
+  const latest = chartPoints[chartPoints.length - 1];
+  return (
+    <Panel>
+      <PanelHead
+        title="Equity Curve"
+        actions={
+          <span style={muted}>
+            {trader
+              ? downsampled
+                ? `${trader} · ${fmtInt(sourceRows)} rows · stride ${stride}`
+                : trader
+              : "select a bot"}
+          </span>
+        }
+      />
+      <PanelBody>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+            gap: 10,
+            marginBottom: 10,
+          }}
+        >
+          <MiniStat
+            label="Latest Equity"
+            value={latest ? money(latest.value) : "-"}
+            tone="accent"
+          />
+          <MiniStat
+            label="Range PnL"
+            value={
+              chartPoints.length >= 2
+                ? money(
+                    chartPoints[chartPoints.length - 1]!.value -
+                      chartPoints[0]!.value,
+                    true,
+                  )
+                : "-"
+            }
+            tone={
+              chartPoints.length >= 2 &&
+              chartPoints[chartPoints.length - 1]!.value >= chartPoints[0]!.value
+                ? "yes"
+                : "no"
+            }
+          />
+        </div>
+        <EquityLineChart points={chartPoints} isLoading={isLoading} />
+      </PanelBody>
+    </Panel>
+  );
+}
+
+function FvDriftPanel({
+  trader,
+  traderNames,
+  onSelectTrader,
+  marketOptions,
+  selectedMarketId,
+  onSelectMarketId,
+  decisions,
+  isLoading,
+}: {
+  trader: string;
+  traderNames: string[];
+  onSelectTrader: (trader: string) => void;
+  marketOptions: ReturnType<typeof marketOptionsFromDecisions>;
+  selectedMarketId: string;
+  onSelectMarketId: (marketId: string) => void;
+  decisions: ArenaDecision[];
+  isLoading: boolean;
+}) {
+  const points = useMemo(() => driftPointsFromDecisions(decisions), [decisions]);
+  const latest = points[points.length - 1];
+  const selectedMarket = marketOptions.find(
+    (option) => String(option.marketId) === selectedMarketId,
+  );
+  return (
+    <Panel>
+      <PanelHead
+        title="FV Drift Monitor"
+        actions={
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <select
+              value={trader}
+              onChange={(event) => onSelectTrader(event.target.value)}
+              style={{ ...controlStyle, minWidth: 160 }}
+            >
+              {traderNames.length === 0 ? (
+                <option value="">No bots</option>
+              ) : null}
+              {traderNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedMarketId}
+              onChange={(event) => onSelectMarketId(event.target.value)}
+              style={{ ...controlStyle, minWidth: 190 }}
+            >
+              {marketOptions.length === 0 ? (
+                <option value="">No markets</option>
+              ) : null}
+              {marketOptions.map((option) => (
+                <option key={option.marketId} value={option.marketId}>
+                  {option.marketName}
+                </option>
+              ))}
+            </select>
+          </div>
+        }
+      />
+      <PanelBody>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))",
+            gap: 10,
+            marginBottom: 10,
+          }}
+        >
+          <MiniStat
+            label="Fair Value"
+            value={latest ? pct(latest.fairValue) : "-"}
+            tone="yes"
+          />
+          <MiniStat
+            label="Market"
+            value={latest ? pct(latest.marketPrice) : "-"}
+            tone="accent"
+          />
+          <MiniStat
+            label="Drift"
+            value={latest ? pct(latest.edge) : "-"}
+            tone={latest && latest.edge >= 0.1 ? "warn" : "accent"}
+          />
+        </div>
+        <div style={{ ...muted, marginBottom: 8 }}>
+          {selectedMarket
+            ? selectedMarket.marketName
+            : trader
+              ? "No market history for selected bot"
+              : "Select a bot"}
+        </div>
+        <DriftLineChart points={points} isLoading={isLoading} />
+      </PanelBody>
+    </Panel>
+  );
+}
+
 function BotRosterPanel({
   summaries,
   selectedTrader,
@@ -336,7 +568,7 @@ function BotRosterPanel({
     <Panel style={{ marginTop: 12 }}>
       <PanelHead
         title="Bot Roster"
-        actions={<span style={muted}>current snapshots; historical curves need an API</span>}
+        actions={<span style={muted}>click a row to inspect bot history</span>}
       />
       <PanelBody>
         <DataTable maxHeight={430} minWidth={1120}>
@@ -580,16 +812,18 @@ function MiniStat({
 }: {
   label: string;
   value: string;
-  tone?: "yes" | "no" | "accent";
+  tone?: "yes" | "no" | "accent" | "warn";
 }) {
   const color =
     tone === "yes"
       ? "var(--yes)"
       : tone === "no"
         ? "var(--no)"
-        : tone === "accent"
-          ? "var(--accent)"
-          : "var(--fg-1)";
+        : tone === "warn"
+          ? "var(--warn)"
+          : tone === "accent"
+            ? "var(--accent)"
+            : "var(--fg-1)";
   return (
     <div
       style={{
@@ -613,6 +847,316 @@ function MiniStat({
       </div>
     </div>
   );
+}
+
+interface EquityChartPoint {
+  t: number;
+  value: number;
+  timestamp: string | null;
+}
+
+function EquityLineChart({
+  points,
+  isLoading,
+}: {
+  points: EquityChartPoint[];
+  isLoading: boolean;
+}) {
+  const W = 640;
+  const H = 230;
+  const pad = { l: 44, r: 18, t: 18, b: 30 };
+  if (points.length < 2) {
+    return (
+      <ChartBox>
+        <ChartEmpty>
+          {isLoading ? "Loading equity..." : "No equity history yet."}
+        </ChartEmpty>
+      </ChartBox>
+    );
+  }
+
+  const values = points.map((point) => point.value);
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (!(max > min)) {
+    const padValue = Math.max(1, Math.abs(max) * 0.02);
+    min -= padValue;
+    max += padValue;
+  }
+  const yPad = (max - min) * 0.08;
+  min -= yPad;
+  max += yPad;
+  const tMin = points[0]!.t;
+  const tMax = points[points.length - 1]!.t;
+  const tSpan = Math.max(1, tMax - tMin);
+  const ySpan = Math.max(1e-9, max - min);
+  const innerW = W - pad.l - pad.r;
+  const innerH = H - pad.t - pad.b;
+  const xFor = (t: number) => pad.l + ((t - tMin) / tSpan) * innerW;
+  const yFor = (value: number) => pad.t + (1 - (value - min) / ySpan) * innerH;
+  const line = points
+    .map(
+      (point, index) =>
+        `${index === 0 ? "M" : "L"} ${xFor(point.t).toFixed(2)} ${yFor(point.value).toFixed(2)}`,
+    )
+    .join(" ");
+  const area = `${line} L ${xFor(tMax).toFixed(2)} ${H - pad.b} L ${xFor(tMin).toFixed(2)} ${H - pad.b} Z`;
+  const end = points[points.length - 1]!;
+  const start = points[0]!;
+  const tone = end.value >= start.value ? "var(--yes)" : "var(--no)";
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((n) => min + (max - min) * n);
+
+  return (
+    <ChartBox>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="none">
+        {ticks.map((tick) => {
+          const y = yFor(tick);
+          return (
+            <g key={tick}>
+              <line
+                x1={pad.l}
+                x2={W - pad.r}
+                y1={y}
+                y2={y}
+                stroke="var(--chart-grid)"
+                vectorEffect="non-scaling-stroke"
+              />
+              <text
+                x={pad.l - 8}
+                y={y + 3}
+                textAnchor="end"
+                fill="var(--fg-4)"
+                fontFamily="var(--font-mono)"
+                fontSize={9}
+              >
+                {axisMoney(tick)}
+              </text>
+            </g>
+          );
+        })}
+        <path d={area} fill={tone} opacity={0.09} />
+        <path
+          d={line}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle cx={xFor(end.t)} cy={yFor(end.value)} r={3.5} fill="var(--accent)" />
+        <AxisText x={pad.l} y={H - 9} text={shortDate(start.timestamp ?? start.t)} />
+        <AxisText
+          x={W - pad.r}
+          y={H - 9}
+          text={shortDate(end.timestamp ?? end.t)}
+          anchor="end"
+        />
+      </svg>
+    </ChartBox>
+  );
+}
+
+function DriftLineChart({
+  points,
+  isLoading,
+}: {
+  points: ReturnType<typeof driftPointsFromDecisions>;
+  isLoading: boolean;
+}) {
+  const W = 640;
+  const H = 230;
+  const pad = { l: 38, r: 18, t: 18, b: 30 };
+  if (points.length < 2) {
+    return (
+      <ChartBox>
+        <ChartEmpty>
+          {isLoading ? "Loading drift..." : "No FV drift history yet."}
+        </ChartEmpty>
+      </ChartBox>
+    );
+  }
+
+  const tMin = points[0]!.t;
+  const tMax = points[points.length - 1]!.t;
+  const tSpan = Math.max(1, tMax - tMin);
+  const innerW = W - pad.l - pad.r;
+  const innerH = H - pad.t - pad.b;
+  const xFor = (t: number) => pad.l + ((t - tMin) / tSpan) * innerW;
+  const yFor = (value: number) => pad.t + (1 - value) * innerH;
+  const pathFor = (key: "fairValue" | "marketPrice") =>
+    points
+      .map(
+        (point, index) =>
+          `${index === 0 ? "M" : "L"} ${xFor(point.t).toFixed(2)} ${yFor(point[key]).toFixed(2)}`,
+      )
+      .join(" ");
+  const start = points[0]!;
+  const end = points[points.length - 1]!;
+
+  return (
+    <ChartBox>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="none">
+        {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+          const y = yFor(tick);
+          return (
+            <g key={tick}>
+              <line
+                x1={pad.l}
+                x2={W - pad.r}
+                y1={y}
+                y2={y}
+                stroke="var(--chart-grid)"
+                vectorEffect="non-scaling-stroke"
+              />
+              <text
+                x={pad.l - 8}
+                y={y + 3}
+                textAnchor="end"
+                fill="var(--fg-4)"
+                fontFamily="var(--font-mono)"
+                fontSize={9}
+              >
+                {Math.round(tick * 100) + "%"}
+              </text>
+            </g>
+          );
+        })}
+        <path
+          d={pathFor("marketPrice")}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        <path
+          d={pathFor("fairValue")}
+          fill="none"
+          stroke="var(--yes)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle cx={xFor(end.t)} cy={yFor(end.marketPrice)} r={3.2} fill="var(--accent)" />
+        <circle cx={xFor(end.t)} cy={yFor(end.fairValue)} r={3.2} fill="var(--yes)" />
+        <AxisText x={pad.l} y={H - 9} text={shortDate(start.timestamp ?? start.t)} />
+        <AxisText
+          x={W - pad.r}
+          y={H - 9}
+          text={shortDate(end.timestamp ?? end.t)}
+          anchor="end"
+        />
+      </svg>
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 12,
+          display: "flex",
+          gap: 8,
+          fontSize: 11,
+          color: "var(--fg-3)",
+        }}
+      >
+        <LegendItem color="var(--yes)" label="FV" />
+        <LegendItem color="var(--accent)" label="Market" />
+      </div>
+    </ChartBox>
+  );
+}
+
+function ChartBox({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        height: 250,
+        minHeight: 250,
+        border: "1px solid var(--border-2)",
+        borderRadius: 8,
+        overflow: "hidden",
+        background: "var(--surface-2)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ChartEmpty({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "var(--fg-4)",
+        fontSize: 12,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function AxisText({
+  x,
+  y,
+  text,
+  anchor = "start",
+}: {
+  x: number;
+  y: number;
+  text: string;
+  anchor?: "start" | "end";
+}) {
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="var(--fg-4)"
+      fontFamily="var(--font-mono)"
+      fontSize={9}
+      textAnchor={anchor}
+    >
+      {text}
+    </text>
+  );
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 999,
+          background: color,
+          display: "inline-block",
+        }}
+      />
+      {label}
+    </span>
+  );
+}
+
+function equityChartPoints(points: ArenaEquityPoint[]): EquityChartPoint[] {
+  return points
+    .map((point) => {
+      const value = Number(point.portfolio_value);
+      const parsedTime = point.timestamp ? new Date(point.timestamp).getTime() : NaN;
+      const t = Number.isFinite(parsedTime) ? parsedTime : Number(point.id);
+      if (!Number.isFinite(value) || !Number.isFinite(t)) return null;
+      return { t, value, timestamp: point.timestamp ?? null };
+    })
+    .filter((point): point is EquityChartPoint => point != null)
+    .sort((a, b) => a.t - b.t);
 }
 
 function DecisionsPanel({
@@ -827,6 +1371,13 @@ function money(value: number | null | undefined, sign = false): string {
   );
 }
 
+function axisMoney(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 100_000) return "$" + Math.round(value / 1_000) + "K";
+  if (abs >= 10_000) return "$" + (value / 1_000).toFixed(1) + "K";
+  return "$" + Math.round(value).toLocaleString();
+}
+
 function pct(value: number | null | undefined): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
@@ -851,6 +1402,16 @@ function shortTime(value: number | string | null | undefined): string {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+function shortDate(value: number | string | null | undefined): string {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
   });
 }
 

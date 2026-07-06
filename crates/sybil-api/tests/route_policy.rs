@@ -37,6 +37,10 @@ fn exact_public_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
+            path: "/v1/bots/equity-series",
+        },
+        RouteMount {
+            method: "GET",
             path: "/v1/health",
         },
         RouteMount {

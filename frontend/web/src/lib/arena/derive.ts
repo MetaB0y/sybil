@@ -23,6 +23,24 @@ export interface ArenaTotals {
   fills: number;
 }
 
+export interface ArenaMarketOption {
+  marketId: number;
+  marketName: string;
+  decisions: number;
+  latestId: number;
+  latestTimestamp: string | null;
+  latestEdge: number | null;
+}
+
+export interface ArenaDriftPoint {
+  id: number;
+  t: number;
+  timestamp: string | null;
+  fairValue: number;
+  marketPrice: number;
+  edge: number;
+}
+
 export function extractStrategy(name: string): StrategyName {
   if (name.includes("(Kelly)")) return "Kelly";
   if (name.includes("(Flat)")) return "Flat";
@@ -101,6 +119,75 @@ export function totalTokens(rows: ArenaTokenUsage[]): number {
   );
 }
 
+export function marketOptionsFromDecisions(
+  decisions: ArenaDecision[],
+): ArenaMarketOption[] {
+  const byId = new Map<number, ArenaMarketOption>();
+  for (const decision of decisions) {
+    if (decision.market_id == null) continue;
+    const marketId = Number(decision.market_id);
+    if (!Number.isFinite(marketId)) continue;
+    const current = byId.get(marketId);
+    const latestId = Number(decision.id);
+    const latestEdge =
+      decision.edge != null && Number.isFinite(decision.edge)
+        ? Number(decision.edge)
+        : null;
+    if (!current) {
+      byId.set(marketId, {
+        marketId,
+        marketName: decision.market_name || "Market #" + marketId,
+        decisions: 1,
+        latestId,
+        latestTimestamp: decision.timestamp ?? null,
+        latestEdge,
+      });
+      continue;
+    }
+    current.decisions += 1;
+    if (latestId > current.latestId) {
+      current.latestId = latestId;
+      current.marketName = decision.market_name || current.marketName;
+      current.latestTimestamp = decision.timestamp ?? null;
+      current.latestEdge = latestEdge;
+    }
+  }
+  return [...byId.values()].sort((a, b) => {
+    return (
+      b.latestId - a.latestId ||
+      b.decisions - a.decisions ||
+      a.marketName.localeCompare(b.marketName)
+    );
+  });
+}
+
+export function driftPointsFromDecisions(
+  decisions: ArenaDecision[],
+): ArenaDriftPoint[] {
+  return decisions
+    .map((decision) => {
+      const fairValue = finiteOrNull(decision.fair_value);
+      const marketPrice = finiteOrNull(decision.market_price);
+      if (fairValue == null || marketPrice == null) return null;
+      const parsedTime = decision.timestamp
+        ? new Date(decision.timestamp).getTime()
+        : NaN;
+      const t = Number.isFinite(parsedTime)
+        ? parsedTime
+        : Number(decision.id);
+      return {
+        id: Number(decision.id),
+        t,
+        timestamp: decision.timestamp ?? null,
+        fairValue,
+        marketPrice,
+        edge: Math.abs(fairValue - marketPrice),
+      };
+    })
+    .filter((point): point is ArenaDriftPoint => point != null)
+    .sort((a, b) => a.t - b.t || a.id - b.id);
+}
+
 export function orderList(decision: Pick<ArenaDecision, "orders">): unknown[] {
   return Array.isArray(decision.orders) ? decision.orders : [];
 }
@@ -159,6 +246,11 @@ function formatOrderPrice(value: number): string {
 
 function num(value: number | null | undefined): number {
   return Number.isFinite(value) ? Number(value) : 0;
+}
+
+function finiteOrNull(value: number | null | undefined): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function text(value: unknown, fallback: string): string {

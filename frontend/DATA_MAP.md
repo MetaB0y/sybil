@@ -96,7 +96,9 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 | Bot Arena | Top stats + LLM usage table: calls, tokens, avg latency, model, estimated cost | `GET /v1/bots/decisions?limit=140` → `token_usage[]`; token totals and estimated cost (`$0.70 / 1M tokens`, matching Streamlit's estimate) are FE-derived. Per-bot USD budget / true provider cost is not exposed. |
 | Bot Arena | Strategy snapshot table (Kelly / Flat / Legacy / Noise) | `GET /v1/bots/decisions?limit=140` → `summaries[]`; strategy classification is FE-derived from `trader_name` (`(Kelly)`, `(Flat)`, `Noise*`) |
 | Bot Arena | Bot roster: name, strategy, decisions, portfolio, PnL, latest market, FV, market price, edge, orders/fills | `GET /v1/bots/decisions?limit=140` → `summaries[]` |
-| Bot Arena | Bot roster "equity snapshot" mini-line | `GET /v1/bots/decisions?limit=140` → `summaries[].{portfolio_value,pnl}`; baseline is FE-derived as `portfolio_value - pnl`. Historical per-bot equity curves from Streamlit's `portfolio_snapshots` table are **not exposed** by the browser API. |
+| Bot Arena | Bot roster "equity snapshot" mini-line | `GET /v1/bots/decisions?limit=140` → `summaries[].{portfolio_value,pnl}`; baseline is FE-derived as `portfolio_value - pnl`. |
+| Bot Arena | Selected-bot equity curve (portfolio value over time, downsample badge) | `GET /v1/bots/equity-series?trader=&limit=360` → `points[].{timestamp,portfolio_value,pnl}` plus `source_rows`, `returned_rows`, `downsampled`, `stride`; backed by arena SQLite `portfolio_snapshots` |
+| Bot Arena | FV drift monitor for selected bot/market (FV line vs market-price line, latest drift stats, market selector) | `GET /v1/bots/decisions?limit=500&trader=` discovers recent markets for the selected bot; `GET /v1/bots/decisions?limit=500&trader=&market_id=` returns historical `decisions[]` rows for the selected pair (`fair_value`, `market_price`, `timestamp`) sorted FE-side for the chart |
 | Bot Arena | Market activity / welfare mini-stats | `GET /v1/activity/overview` → `all_time` / `last_24h`; `GET /v1/markets/summary` inside `useActivityOverview` for live-market count parity with Activity hook |
 | Bot Arena | Recent volume/fills charts + recent-batch table | `GET /v1/blocks/latest` + `GET /v1/blocks/{height}` backfill via `useDevRecentBlocks`, merged with live store blocks from WS `/v1/blocks/ws`; uses `BlockResponse.{total_volume_nanos,total_welfare_nanos,order_count,fill_count,by_market}` |
 | Bot Arena | Recent decisions reasoning cards (analysis, motivation, orders, source links, FV/market/edge, balance/position, LLM latency) | `GET /v1/bots/decisions?limit=140&trader=` → `decisions[]`; `orders` and `article_urls` are parsed FE-side from JSON values returned by the API |
@@ -186,11 +188,11 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 - **Mocked (no real backend yet):** Activity batch-detail TX hash / sequencer /
   clearing-duration; the `/m-dev` open-batch panel (a real
   `/v1/markets/{id}/open-batch` *is* used on Dev › Aggregates).
-- **Bot Arena gaps inherited from Streamlit:** raw news-feed rows, fair-value
-  drift history, strategy PnL time series, per-trader portfolio snapshot series,
-  and bot-account ids exist in `arena/live/decisions.db` but are not exposed by
-  `/v1/bots/decisions`. The `/arena` page therefore shows current bot snapshots
-  and recent reasoning only; historical equity curves need a backend read model.
+- **Bot Arena gaps inherited from Streamlit:** raw news-feed rows, strategy PnL
+  time series, and bot-account ids exist in `arena/live/decisions.db` but are not
+  exposed by the browser API. Per-trader equity curves are now exposed by
+  `/v1/bots/equity-series`; selected bot/market FV drift history is exposed
+  through `/v1/bots/decisions?trader=&market_id=`.
 - **In schema but unused by the FE (reads):** `/v1/markets/search`,
   `/v1/markets/{id}/orderbook`, `/v1/markets/{id}/resolution`,
   `/v1/markets/prices/reference`, `/v1/state-root`, `/v1/proofs/state/*`,

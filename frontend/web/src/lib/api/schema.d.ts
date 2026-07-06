@@ -306,6 +306,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bots/equity-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /v1/bots/equity-series
+         * @description Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
+         *     Public (unauthenticated) read route. Dense result sets are downsampled with a
+         *     naive stride after a bounded count query; the latest point is retained.
+         */
+        get: operations["get_bot_equity_series"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bridge/deposits": {
         parameters: {
             query?: never;
@@ -1022,6 +1044,36 @@ export interface components {
             trader_name: string;
             /** Format: int64 */
             yes_pos?: number | null;
+        };
+        BotEquityPointResponse: {
+            /** Format: double */
+            balance?: number | null;
+            /** Format: int64 */
+            id: number;
+            /** Format: double */
+            pnl?: number | null;
+            /** Format: double */
+            portfolio_value?: number | null;
+            timestamp?: string | null;
+            /** Format: int64 */
+            total_fills?: number | null;
+            /** Format: int64 */
+            total_orders?: number | null;
+            trader_name: string;
+        };
+        BotEquitySeriesResponse: {
+            db_available: boolean;
+            db_path?: string | null;
+            downsampled: boolean;
+            error?: string | null;
+            limit: number;
+            points: components["schemas"]["BotEquityPointResponse"][];
+            returned_rows: number;
+            server_cap: number;
+            since?: string | null;
+            source_rows: number;
+            stride: number;
+            trader?: string | null;
         };
         BotStatsResponse: {
             /** Format: int64 */
@@ -2673,8 +2725,12 @@ export interface operations {
     get_bot_decisions: {
         parameters: {
             query?: {
-                /** @description Maximum returned decisions, clamped to 1..=200 (default 50) */
+                /** @description Maximum returned decisions, clamped to 1..=500 (default 50) */
                 limit?: number;
+                /** @description Filter decisions to one market ID. Combine with `trader` for FV-drift history. */
+                market_id?: number;
+                /** @description ISO-8601 lower-bound timestamp filter (`decisions.timestamp >= since`) for historical reads. */
+                since?: string;
                 /** @description Filter decisions to a single trader name */
                 trader?: string;
             };
@@ -2691,6 +2747,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BotDecisionFeedResponse"];
+                };
+            };
+        };
+    };
+    get_bot_equity_series: {
+        parameters: {
+            query?: {
+                /** @description Maximum returned sampled points, clamped to 1..=1000 (default 200). Dense rows are downsampled by a naive stride. */
+                limit?: number;
+                /** @description ISO-8601 lower-bound timestamp filter (`portfolio_snapshots.timestamp >= since`) */
+                since?: string;
+                /** @description Filter portfolio snapshots to a single trader name */
+                trader?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bot portfolio-value time series */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotEquitySeriesResponse"];
                 };
             };
         };

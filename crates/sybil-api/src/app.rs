@@ -75,6 +75,7 @@ use crate::util::now_ms;
         routes::events::get_event_raw,
         routes::events::put_event_raw,
         routes::bots::get_bot_decisions,
+        routes::bots::get_bot_equity_series,
     ),
     components(schemas(
         CreateAccountRequest,
@@ -157,6 +158,8 @@ use crate::util::now_ms;
         routes::bots::BotSummaryResponse,
         routes::bots::BotDecisionResponse,
         routes::bots::TokenUsageResponse,
+        routes::bots::BotEquitySeriesResponse,
+        routes::bots::BotEquityPointResponse,
     )),
     info(
         title = "Sybil API",
@@ -399,6 +402,10 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
+        path: "/v1/bots/equity-series",
+    },
+    RouteMount {
+        method: "GET",
         path: "/v1/health",
     },
     RouteMount {
@@ -627,6 +634,10 @@ fn public_routes() -> Router<AppState> {
         .route(
             "/v1/bots/decisions",
             axum::routing::get(routes::bots::get_bot_decisions),
+        )
+        .route(
+            "/v1/bots/equity-series",
+            axum::routing::get(routes::bots::get_bot_equity_series),
         )
         // System
         .route("/v1/health", axum::routing::get(routes::system::health))
