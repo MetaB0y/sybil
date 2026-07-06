@@ -30,6 +30,28 @@ services:
       retries: 10
       start_period: 10s
 
+  sybil-web:
+    # Next.js frontend (standalone server, non-root). NEXT_PUBLIC_* are baked at
+    # BUILD time, so the API/WS base URLs are build args, not runtime env.
+    image: sybil-web:latest
+    build:
+      context: ./frontend/web
+      args:
+        NEXT_PUBLIC_API_BASE: "${NEXT_PUBLIC_API_BASE:-https://172-104-31-54.nip.io}"
+        NEXT_PUBLIC_WS_BASE: "${NEXT_PUBLIC_WS_BASE:-wss://172-104-31-54.nip.io}"
+        NEXT_PUBLIC_WEBAUTHN_RP_ID: "${NEXT_PUBLIC_WEBAUTHN_RP_ID:-}"
+    mem_limit: "256m"
+    memswap_limit: "256m"
+    restart: unless-stopped
+    healthcheck:
+      # node:slim ships no curl/wget; use Node's global fetch instead.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+    logging: *default-logging
   sybil-polymarket:
     image: sybil-api:latest
     mem_limit: "256m"

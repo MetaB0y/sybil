@@ -447,6 +447,17 @@ deploy-monitoring: deploy-sync deploy-prod-env-check
 deploy-telegram-alerts: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env && {{COMPOSE_TELEGRAM}} up -d telegram-alerts vmalert'
 
+# Build and deploy the Next.js web frontend, then reload Caddy for its vhost.
+# NEXT_PUBLIC_* are baked at build time; override the API/WS base or WebAuthn
+# rpId by exporting them before running, e.g.:
+#   NEXT_PUBLIC_API_BASE=https://api.sybil.exchange \
+#   NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange \
+#   NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange just deploy-web
+deploy-web: deploy-sync deploy-prod-env-check
+    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
+    docker save sybil-web:latest | ssh {{SERVER}} docker load
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-web caddy'
+
 # Deploy Caddy HTTPS reverse proxy
 deploy-caddy: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d caddy'

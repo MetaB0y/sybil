@@ -73,6 +73,12 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
 
     logging: *default-logging
+  sybil-web:
+    # Frontend has no runtime env/volumes to override; keep prod logging parity.
+    # NEXT_PUBLIC_* are baked at image build time (see docker-compose.yml build
+    # args + frontend/web/Dockerfile). Set NEXT_PUBLIC_WEBAUTHN_RP_ID at build
+    # time to the public web domain when passkeys are served off a subdomain.
+    logging: *default-logging
   caddy:
     image: caddy:latest
     mem_limit: "128m"
@@ -89,6 +95,8 @@ services:
       - caddy-config:/config
     depends_on:
       sybil-api:
+        condition: service_healthy
+      sybil-web:
         condition: service_healthy
     restart: unless-stopped
 

@@ -1,26 +1,32 @@
 import type { Metadata } from "next";
-import { Syne, Inter, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { ConnectModal } from "@/components/auth/connect-modal";
 import { GlobalNav } from "@/components/global-nav";
 import { Providers } from "./providers";
 import "./globals.css";
 
-const display = Syne({
+// Fonts are vendored (next/font/local) rather than fetched from
+// fonts.googleapis.com at build time. This makes `next build` hermetic and
+// network-free — the recurring "fonts fetch failed during build" breakage
+// can no longer happen. The .woff2 files are the latin-subset variable fonts
+// (same subset as the previous `subsets: ["latin"]`). CSS variable names are
+// unchanged so nothing downstream needs to change. See src/app/fonts/README.md.
+const display = localFont({
   variable: "--font-display",
-  subsets: ["latin"],
   display: "swap",
+  src: [{ path: "./fonts/Syne-Variable.woff2", weight: "400 800", style: "normal" }],
 });
 
-const sans = Inter({
+const sans = localFont({
   variable: "--font-sans",
-  subsets: ["latin"],
   display: "swap",
+  src: [{ path: "./fonts/Inter-Variable.woff2", weight: "100 900", style: "normal" }],
 });
 
-const mono = JetBrains_Mono({
+const mono = localFont({
   variable: "--font-mono",
-  subsets: ["latin"],
   display: "swap",
+  src: [{ path: "./fonts/JetBrainsMono-Variable.woff2", weight: "100 800", style: "normal" }],
 });
 
 export const metadata: Metadata = {

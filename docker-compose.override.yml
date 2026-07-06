@@ -12,6 +12,10 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
 
+  sybil-web:
+    ports:
+      - "127.0.0.1:3005:3000"
+
   sybil-polymarket:
     build:
       context: .

@@ -35,6 +35,16 @@
     }
 }
 
+# Public-facing Next.js web app. Kept on its own hostname so the trading API
+# stays at the root domain (which is what NEXT_PUBLIC_API_BASE / NEXT_PUBLIC_WS_BASE
+# are baked to point at). Caddy auto-provisions TLS for this name too.
+# For a real product domain, Valery can instead make the apex serve the app and
+# move the API to api.<domain> (rebuild sybil-web with the new NEXT_PUBLIC_* args).
+app.172-104-31-54.nip.io {
+    encode zstd gzip
+    reverse_proxy sybil-web:3000
+}
+
 arena.172-104-31-54.nip.io {
     encode zstd gzip
 
