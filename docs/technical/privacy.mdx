@@ -5,7 +5,19 @@ description: How Sybil protects your trading activity with TEE and ZK proofs
 
 # Privacy Architecture
 
-Sybil provides **real privacy** — not "trust us" privacy. Your orders are protected cryptographically, and execution is verified mathematically.
+Sybil is designed for **real privacy** — not "trust us" privacy. Orders are
+protected cryptographically, and execution is verified mathematically.
+
+<Info>
+**How to read this page.** This describes Sybil's privacy *model*. Two of its
+pillars are still being brought up: the **TEE enclave isolation** (production
+key-sealing not yet deployed — see [TEE](#trusted-execution-environment-tee))
+and **ZK selective disclosure** (designed, not implemented — see
+[Selective Disclosure](#selective-disclosure)). Execution correctness is
+ZK-proven today; enclave-enforced order privacy is the intended production
+posture, not the current deployment. Status callouts mark what is not yet
+shipped.
+</Info>
 
 ## Why Privacy Matters
 
@@ -62,6 +74,20 @@ graph LR
 ```
 
 ## Trusted Execution Environment (TEE)
+
+<Note>
+**Status: enclave isolation is the intended production posture, not the current
+deployment.** The sequencer is designed as an enclave whose only external inputs
+are signed attestations (the split is "TEE-correct by construction" — see
+`docs/architecture/Oracle System.md`). But production **key-sealing to the
+enclave is not yet deployed**: dev builds store operator/admin keys on disk for
+convenience (SYB-23), and the broader TEE track is currently parked
+(`docs/architecture/Operator Replacement.md` §3). Until enclave attestation
+ships, the operator is *trusted* to not inspect or reorder orders rather than
+*constrained by hardware* from doing so. What holds unconditionally today is
+that execution is **ZK-proven**: the operator cannot cheat on matching,
+pricing, or balances regardless of the enclave status.
+</Note>
 
 The TEE is a secure enclave that:
 
@@ -125,7 +151,17 @@ Currently, deposits link your L1 address to Sybil. Future improvements:
 
 ## Selective Disclosure
 
-Privacy is the default. But you can **choose** to reveal information via ZK proofs.
+Privacy is the default. The design lets you **choose** to reveal information via
+ZK proofs.
+
+<Info>
+**Status: future design, not implemented.** The provable-claim proofs below
+(prove PnL / rank / Sharpe / trade count without revealing trades) are a
+roadmap item, not a shipped feature. They would each need their own ZK guest
+program over committed state; none exists today. Balance and position queries
+via signed request (see [Privacy Model](#privacy-model)) are the disclosure
+mechanism that exists now.
+</Info>
 
 ### Provable Claims
 
