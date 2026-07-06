@@ -226,6 +226,34 @@ Run in order; each is a gate, not a suggestion.
 
 ---
 
+## Post-deploy verification (one command)
+
+After the manual gates above pass, run the automated post-deploy smoke test.
+It covers liveness (health / state-root / advancing blocks), native+mirror
+market presence, the full signed account lifecycle (create → register key →
+fund → signed order → cancel → empty book), a signed bridge-withdrawal shape
+check, WebSocket replay/resume, and `/v1/bots/decisions`. It prints PASS/FAIL
+lines and exits non-zero on any failure.
+
+```bash
+# Against the live devnet (dev-mode enables the account lifecycle checks):
+scripts/post-deploy-smoke.sh https://172-104-31-54.nip.io
+
+# Against a non-dev-mode / prod stack (service-gated routes need a token; the
+# account-lifecycle block auto-SKIPs when dev endpoints are unavailable):
+scripts/post-deploy-smoke.sh https://api.example.com --service-token "$SYBIL_SERVICE_TOKEN"
+
+# Tune the expected block time (default 10s) for the liveness/advancement poll:
+scripts/post-deploy-smoke.sh http://localhost:3000 --block-interval 1
+```
+
+The signed-flow steps shell out to `cargo run -p sybil-client --example
+smoke_sign` (canonical bytes live only in `sybil-signing`); if `cargo`/the repo
+are unavailable on the host, those steps SKIP rather than fail. Run it from a
+repo checkout so the signing helper can build.
+
+---
+
 ## Step 5 — Post-deploy cleanup
 
 Once the redeploy is verified healthy, the parked hotfix chain is dead:

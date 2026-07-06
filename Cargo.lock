@@ -4234,10 +4234,14 @@ name = "sybil-client"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "getrandom 0.4.2",
+ "hex",
+ "p256 0.14.0-rc.8",
  "reqwest",
  "serde",
  "serde_json",
  "sybil-api-types",
+ "sybil-signing",
  "thiserror 2.0.18",
  "tokio-tungstenite 0.29.0",
  "tracing",
