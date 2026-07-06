@@ -27,7 +27,7 @@ class AccountResponse:
     """ 
         Attributes:
             account_id (int):
-            balance_nanos (int):
+            balance_nanos (int): Available account balance. Integer nanodollars; 1_000_000_000 = $1.
             positions (list[PositionResponse] | Unset):
      """
 

@@ -24,9 +24,11 @@ from .create_bridge_withdrawal_request import CreateBridgeWithdrawalRequest
 from .create_market_group_request import CreateMarketGroupRequest
 from .create_market_request import CreateMarketRequest
 from .create_market_response import CreateMarketResponse
+from .create_signed_bridge_withdrawal_request import CreateSignedBridgeWithdrawalRequest
 from .equity_point_response import EquityPointResponse
 from .equity_series_response import EquitySeriesResponse
 from .event_traders_response import EventTradersResponse
+from .extend_market_group_request import ExtendMarketGroupRequest
 from .fill_response import FillResponse
 from .fund_account_request import FundAccountRequest
 from .health_response import HealthResponse
@@ -120,9 +122,11 @@ __all__ = (
     "CreateMarketGroupRequest",
     "CreateMarketRequest",
     "CreateMarketResponse",
+    "CreateSignedBridgeWithdrawalRequest",
     "EquityPointResponse",
     "EquitySeriesResponse",
     "EventTradersResponse",
+    "ExtendMarketGroupRequest",
     "FillResponse",
     "FundAccountRequest",
     "HealthResponse",

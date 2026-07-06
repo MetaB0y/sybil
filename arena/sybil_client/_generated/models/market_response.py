@@ -48,18 +48,22 @@ class MarketResponse:
             group_item_title (None | str | Unset): Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). Off-
                 block; the frontend uses it as the per-outcome name so it needn't fetch
                 the raw event JSON just for labels.
-            liquidity_avg10_nanos (int | Unset): Rolling last-10-batch ±band depth average in nanos. Zero for markets
-                without a clearing price yet. Pair with `liquidity_band_nanos` for
-                labelling.
+            liquidity_avg10_nanos (int | Unset): Rolling last-10-batch band depth average. Integer nanodollars;
+                1_000_000_000 = $1. Zero for markets without a clearing price yet.
+                Pair with `liquidity_band_nanos` for labelling.
             liquidity_band_nanos (int | Unset): Width of the band the liquidity score uses (the ± in "$X ±$0.05").
+                Integer nanodollars; 1_000_000_000 = $1.
                 Always the live config value — `0` when no liquidity has been
                 recorded yet.
             market_end_date_ms (int | None | Unset): Per-market expected end date (epoch ms). Display only.
             market_icon_url (None | str | Unset): Per-market icon URL (secondary image fallback).
             market_image_url (None | str | Unset): Per-market image URL.
             market_start_date_ms (int | None | Unset): Per-market start date (epoch ms) from Polymarket. Display/sort only.
-            no_price_24h_ago_nanos (int | None | Unset): Clearing NO price ~24h ago in nanos. See `yes_price_24h_ago_nanos`.
-            no_price_nanos (int | None | Unset):
+            no_price_24h_ago_nanos (int | None | Unset): Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
+                Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
+            no_price_nanos (int | None | Unset): Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
             orders_matched_total (int | Unset): All-time admissions that received at least one fill (B5's
                 `has_been_matched` true at removal time). Cancels are NOT counted.
             orders_placed_total (int | Unset): All-time non-MM admissions counted against this market. Multi-market
@@ -67,23 +71,30 @@ class MarketResponse:
                 the platform total — that's the documented attribution rule.
             orders_unmatched_total (int | Unset): All-time admissions that exited the book without any fill. Cancels
                 are tracked separately and do not count here.
-            payout_nanos (int | None | Unset):
+            payout_nanos (int | None | Unset): Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+                Payouts are per-share probabilities in [0, 1e9].
             polymarket_condition_id (None | str | Unset): Polymarket on-chain condition id — FE join key into
                 `GET /v1/events/{event_id}/raw` `markets[].conditionId`. Off-block.
             reference_price_nanos (int | None | Unset): Reference price from external system (e.g., Polymarket), display
                 only.
+                Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
             resolution_criteria (None | str | Unset):
             tags (list[str] | None | Unset):
             trader_count (int | Unset): All-time unique trader count for this market (decision Q-table:
                 MM, MINT, multi-market split, etc.). Off-block — "since last
                 restart" until prod persistence is enabled.
-            volume_24h_nanos (int | Unset): Rolling 24h trading volume in nanos (±1h bucket resolution). Off-block;
+            volume_24h_nanos (int | Unset): Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+                Off-block;
                 "since last restart" until prod persistence is enabled.
-            volume_nanos (int | Unset):
-            yes_price_24h_ago_nanos (int | None | Unset): Clearing YES price ~24h ago in nanos, derived from the per-market
+            volume_nanos (int | Unset): All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+            yes_price_24h_ago_nanos (int | None | Unset): Clearing YES price ~24h ago, derived from the per-market
                 hourly snapshot. `None` for markets younger than 24h or wiped on
-                restart. FE computes the 24h delta as `current − snapshot`.
-            yes_price_nanos (int | None | Unset):
+                restart. FE computes the 24h delta as `current - snapshot`.
+                Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
+            yes_price_nanos (int | None | Unset): Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
      """
 
     market_id: int

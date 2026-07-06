@@ -67,14 +67,9 @@ def sync_detailed(
 ) -> Response[Any]:
     """ GET /v1/blocks/ws
 
-     WebSocket stream of committed blocks. See
-    `docs/architecture/WebSocket Block Stream.md` for the message schema,
-    backpressure policy, and reconnect semantics.
-
-    Query parameters:
-    - `from_block=<height>` — replay every block from `height` up to the
-      current head before switching to live. Used by clients to resume
-      after a `lagged` close without gaps.
+     First-party WebSocket block stream. Supports ?from_block=N to replay retained committed blocks from
+    that height before following live blocks. If from_block is below the retained blocks_full floor, the
+    stream emits a retention_gap envelope and closes so clients can cold-resync.
 
     Args:
         from_block (int | Unset):
@@ -108,14 +103,9 @@ async def asyncio_detailed(
 ) -> Response[Any]:
     """ GET /v1/blocks/ws
 
-     WebSocket stream of committed blocks. See
-    `docs/architecture/WebSocket Block Stream.md` for the message schema,
-    backpressure policy, and reconnect semantics.
-
-    Query parameters:
-    - `from_block=<height>` — replay every block from `height` up to the
-      current head before switching to live. Used by clients to resume
-      after a `lagged` close without gaps.
+     First-party WebSocket block stream. Supports ?from_block=N to replay retained committed blocks from
+    that height before following live blocks. If from_block is below the retained blocks_full floor, the
+    stream emits a retention_gap envelope and closes so clients can cold-resync.
 
     Args:
         from_block (int | Unset):

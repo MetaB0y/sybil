@@ -44,13 +44,17 @@ class BlockResponse:
             parent_hash (str):
             state_root (str):
             timestamp_ms (int):
-            total_volume_nanos (int):
-            total_welfare_nanos (int):
+            total_volume_nanos (int): Total traded notional in the block. Integer nanodollars;
+                1_000_000_000 = $1.
+            total_welfare_nanos (int): Total solver welfare in the block. Integer nanodollars;
+                1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
             bridge (BridgeBlockResponse | Unset):
             by_market (BlockResponseByMarket | Unset): Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
                 `BlockMarketStats` carries the per-market splits for this block. Old
                 clients ignore it; new clients consume what they recognise.
-            clearing_prices_nanos (BlockResponseClearingPricesNanos | Unset):
+            clearing_prices_nanos (BlockResponseClearingPricesNanos | Unset): Clearing price vectors by market/group.
+                Integer nanodollars;
+                1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
             fills (list[FillResponse] | Unset):
             rejections (list[RejectionResponse] | Unset):
             system_events (list[SystemEventResponseType0 | SystemEventResponseType1 | SystemEventResponseType2 |

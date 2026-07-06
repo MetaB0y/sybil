@@ -23,8 +23,9 @@ T = TypeVar("T", bound="FillResponse")
 class FillResponse:
     """ 
         Attributes:
-            fill_price_nanos (int):
-            fill_qty (int): Fill quantity in fixed-point share-units (`1000` = 1 share).
+            fill_price_nanos (int): Fill price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
+            fill_qty (int): Fill quantity. Integer share-units; 1000 units = 1 share.
             order_id (int):
             account_id (int | Unset):
      """

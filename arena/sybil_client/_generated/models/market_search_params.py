@@ -27,9 +27,11 @@ class MarketSearchParams:
         Attributes:
             category (None | str | Unset): Exact category match.
             limit (int | None | Unset):
-            max_yes_price (int | None | Unset): Maximum YES price in nanos.
-            min_volume (int | None | Unset): Minimum cumulative volume in nanos.
-            min_yes_price (int | None | Unset): Minimum YES price in nanos.
+            max_yes_price (int | None | Unset): Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
+            min_volume (int | None | Unset): Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1.
+            min_yes_price (int | None | Unset): Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
             offset (int | None | Unset):
             q (None | str | Unset): Text search (searches name + description).
             sort (None | str | Unset): Sort field: "volume", "created_at", "name", "price".

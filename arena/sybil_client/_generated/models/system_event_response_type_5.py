@@ -25,15 +25,16 @@ class SystemEventResponseType5:
     """ On-chain cancellation event (D1). `side` is the categorical
     `OrderDirection` ("BuyYes"/"SellYes"/"BuyNo"/"SellNo") and
     `remaining_quantity` is the unfilled portion of `max_fill` at
-    cancel time, in fixed-point share-units. Forward-additive: old clients
-    ignore unknown
+    cancel time. Integer share-units; 1000 units = 1 share.
+    Forward-additive: old clients ignore unknown
     variants via serde's `#[serde(tag = "type")]` shape.
 
         Attributes:
             account_id (int):
             market_ids (list[int]):
             order_id (int):
-            remaining_quantity (int):
+            remaining_quantity (int): Cancelled order's unfilled quantity. Integer share-units;
+                1000 units = 1 share.
             side (str):
             type_ (SystemEventResponseType5Type):
      """

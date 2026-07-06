@@ -24,7 +24,7 @@ class SystemEventResponseType1:
     """ 
         Attributes:
             account_id (int):
-            amount_nanos (int):
+            amount_nanos (int): Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
             type_ (SystemEventResponseType1Type):
      """
 

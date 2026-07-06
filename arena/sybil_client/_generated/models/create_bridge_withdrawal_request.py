@@ -31,6 +31,7 @@ class CreateBridgeWithdrawalRequest:
             token_address_hex (str): Hex-encoded token contract address (20 bytes).
             vault_address_hex (str): Hex-encoded vault contract address (20 bytes).
             expiry_height (int | None | Unset): Last Sybil block height at which this withdrawal leaf is valid.
+            nonce (int | None | Unset): Per-account replay nonce. Required for signed bridge withdrawals.
      """
 
     account_id: int
@@ -40,6 +41,7 @@ class CreateBridgeWithdrawalRequest:
     token_address_hex: str
     vault_address_hex: str
     expiry_height: int | None | Unset = UNSET
+    nonce: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -65,6 +67,12 @@ class CreateBridgeWithdrawalRequest:
         else:
             expiry_height = self.expiry_height
 
+        nonce: int | None | Unset
+        if isinstance(self.nonce, Unset):
+            nonce = UNSET
+        else:
+            nonce = self.nonce
+
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -78,6 +86,8 @@ class CreateBridgeWithdrawalRequest:
         })
         if expiry_height is not UNSET:
             field_dict["expiry_height"] = expiry_height
+        if nonce is not UNSET:
+            field_dict["nonce"] = nonce
 
         return field_dict
 
@@ -108,6 +118,16 @@ class CreateBridgeWithdrawalRequest:
         expiry_height = _parse_expiry_height(d.pop("expiry_height", UNSET))
 
 
+        def _parse_nonce(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        nonce = _parse_nonce(d.pop("nonce", UNSET))
+
+
         create_bridge_withdrawal_request = cls(
             account_id=account_id,
             amount_token_units=amount_token_units,
@@ -116,6 +136,7 @@ class CreateBridgeWithdrawalRequest:
             token_address_hex=token_address_hex,
             vault_address_hex=vault_address_hex,
             expiry_height=expiry_height,
+            nonce=nonce,
         )
 
 

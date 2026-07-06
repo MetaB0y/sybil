@@ -23,14 +23,16 @@ T = TypeVar("T", bound="PositionValueResponse")
 class PositionValueResponse:
     """ 
         Attributes:
-            current_price_nanos (int):
+            current_price_nanos (int): Current mark price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
             market_id (int):
             outcome (str):
-            quantity (int): Signed position quantity in fixed-point share-units (`1000` = 1 share).
-            value_nanos (int):
+            quantity (int): Signed position quantity. Integer share-units; 1000 units = 1 share.
+            value_nanos (int): Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
             avg_entry_price_nanos (int | Unset): Weighted-average entry price for this side of the market (C1). `0`
                 for positions opened before C1 landed (`#[serde(default)]` forward
-                compat). Same units as `current_price_nanos`.
+                compat). Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
      """
 
     current_price_nanos: int

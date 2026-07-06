@@ -28,9 +28,12 @@ class OpenBatchResponse:
         Attributes:
             unique_placers (int):
             indicative_computed_at_ms (int | Unset):
-            indicative_no_price_nanos (int | None | Unset):
-            indicative_volume_nanos (int | Unset):
-            indicative_yes_price_nanos (int | None | Unset):
+            indicative_no_price_nanos (int | None | Unset): Indicative NO price for the open batch. Integer nanodollars;
+                1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+            indicative_volume_nanos (int | Unset): Indicative traded notional for the open batch. Integer nanodollars;
+                1_000_000_000 = $1.
+            indicative_yes_price_nanos (int | None | Unset): Indicative YES price for the open batch. Integer nanodollars;
+                1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
      """
 
     unique_placers: int

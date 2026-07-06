@@ -20,7 +20,8 @@ T = TypeVar("T", bound="SetReferencePricesRequestPrices")
 
 @_attrs_define
 class SetReferencePricesRequestPrices:
-    """ Map of market_id -> reference price in nanos.
+    """ Map of market_id -> reference price. Integer nanodollars;
+    1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
 
      """
 

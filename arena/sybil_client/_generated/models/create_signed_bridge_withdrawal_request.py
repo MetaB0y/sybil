@@ -8,32 +8,31 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from typing import cast
+
+if TYPE_CHECKING:
+  from ..models.create_bridge_withdrawal_request import CreateBridgeWithdrawalRequest
 
 
 
 
 
-
-T = TypeVar("T", bound="CancelSignedOrderRequest")
+T = TypeVar("T", bound="CreateSignedBridgeWithdrawalRequest")
 
 
 
 @_attrs_define
-class CancelSignedOrderRequest:
+class CreateSignedBridgeWithdrawalRequest:
     """ 
         Attributes:
-            account_id (int): Account ID claiming ownership of the order being cancelled.
-            nonce (int): Per-account replay nonce covered by the P256 signature.
-            order_id (int): The pending order to cancel.
-            signature_hex (str): Hex-encoded P256 ECDSA signature over the canonical cancel payload.
+            signature_hex (str): Hex-encoded P256 ECDSA signature over the canonical withdrawal payload.
             signer_pubkey_hex (str): Hex-encoded compressed P256 public key of the signer.
+            withdrawal (CreateBridgeWithdrawalRequest):
      """
 
-    account_id: int
-    nonce: int
-    order_id: int
     signature_hex: str
     signer_pubkey_hex: str
+    withdrawal: CreateBridgeWithdrawalRequest
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -41,25 +40,20 @@ class CancelSignedOrderRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
-        account_id = self.account_id
-
-        nonce = self.nonce
-
-        order_id = self.order_id
-
+        from ..models.create_bridge_withdrawal_request import CreateBridgeWithdrawalRequest
         signature_hex = self.signature_hex
 
         signer_pubkey_hex = self.signer_pubkey_hex
+
+        withdrawal = self.withdrawal.to_dict()
 
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "account_id": account_id,
-            "nonce": nonce,
-            "order_id": order_id,
             "signature_hex": signature_hex,
             "signer_pubkey_hex": signer_pubkey_hex,
+            "withdrawal": withdrawal,
         })
 
         return field_dict
@@ -68,28 +62,26 @@ class CancelSignedOrderRequest:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.create_bridge_withdrawal_request import CreateBridgeWithdrawalRequest
         d = dict(src_dict)
-        account_id = d.pop("account_id")
-
-        nonce = d.pop("nonce")
-
-        order_id = d.pop("order_id")
-
         signature_hex = d.pop("signature_hex")
 
         signer_pubkey_hex = d.pop("signer_pubkey_hex")
 
-        cancel_signed_order_request = cls(
-            account_id=account_id,
-            nonce=nonce,
-            order_id=order_id,
+        withdrawal = CreateBridgeWithdrawalRequest.from_dict(d.pop("withdrawal"))
+
+
+
+
+        create_signed_bridge_withdrawal_request = cls(
             signature_hex=signature_hex,
             signer_pubkey_hex=signer_pubkey_hex,
+            withdrawal=withdrawal,
         )
 
 
-        cancel_signed_order_request.additional_properties = d
-        return cancel_signed_order_request
+        create_signed_bridge_withdrawal_request.additional_properties = d
+        return create_signed_bridge_withdrawal_request
 
     @property
     def additional_keys(self) -> list[str]:

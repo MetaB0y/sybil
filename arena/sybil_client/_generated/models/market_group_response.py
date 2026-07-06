@@ -23,10 +23,12 @@ T = TypeVar("T", bound="MarketGroupResponse")
 class MarketGroupResponse:
     """ 
         Attributes:
+            group_id (int):
             market_ids (list[int]):
             name (str):
      """
 
+    group_id: int
     market_ids: list[int]
     name: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -36,6 +38,8 @@ class MarketGroupResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        group_id = self.group_id
+
         market_ids = self.market_ids
 
 
@@ -46,6 +50,7 @@ class MarketGroupResponse:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
+            "group_id": group_id,
             "market_ids": market_ids,
             "name": name,
         })
@@ -57,12 +62,15 @@ class MarketGroupResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        group_id = d.pop("group_id")
+
         market_ids = cast(list[int], d.pop("market_ids"))
 
 
         name = d.pop("name")
 
         market_group_response = cls(
+            group_id=group_id,
             market_ids=market_ids,
             name=name,
         )

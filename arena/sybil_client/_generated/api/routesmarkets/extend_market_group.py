@@ -8,15 +8,16 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.cancel_order_response import CancelOrderResponse
-from ...models.cancel_signed_order_request import CancelSignedOrderRequest
+from ...models.extend_market_group_request import ExtendMarketGroupRequest
+from ...models.market_group_response import MarketGroupResponse
 from typing import cast
 
 
 
 def _get_kwargs(
+    group_id: int,
     *,
-    body: CancelSignedOrderRequest,
+    body: ExtendMarketGroupRequest,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -28,7 +29,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/v1/orders/cancel/signed",
+        "url": "/v1/markets/groups/{group_id}/members".format(group_id=quote(str(group_id), safe=""),),
     }
 
     _kwargs["json"] = body.to_dict()
@@ -40,21 +41,13 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | CancelOrderResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | MarketGroupResponse | None:
     if response.status_code == 200:
-        response_200 = CancelOrderResponse.from_dict(response.json())
+        response_200 = MarketGroupResponse.from_dict(response.json())
 
 
 
         return response_200
-
-    if response.status_code == 400:
-        response_400 = cast(Any, None)
-        return response_400
-
-    if response.status_code == 403:
-        response_403 = cast(Any, None)
-        return response_403
 
     if response.status_code == 404:
         response_404 = cast(Any, None)
@@ -70,7 +63,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | CancelOrderResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | MarketGroupResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -80,27 +73,30 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
+    group_id: int,
     *,
     client: AuthenticatedClient | Client,
-    body: CancelSignedOrderRequest,
+    body: ExtendMarketGroupRequest,
 
-) -> Response[Any | CancelOrderResponse]:
-    """ POST /v1/orders/cancel/signed
+) -> Response[Any | MarketGroupResponse]:
+    """ POST /v1/markets/groups/{group_id}/members
 
     Args:
-        body (CancelSignedOrderRequest):
+        group_id (int):
+        body (ExtendMarketGroupRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | CancelOrderResponse]
+        Response[Any | MarketGroupResponse]
      """
 
 
     kwargs = _get_kwargs(
-        body=body,
+        group_id=group_id,
+body=body,
 
     )
 
@@ -111,53 +107,59 @@ def sync_detailed(
     return _build_response(client=client, response=response)
 
 def sync(
+    group_id: int,
     *,
     client: AuthenticatedClient | Client,
-    body: CancelSignedOrderRequest,
+    body: ExtendMarketGroupRequest,
 
-) -> Any | CancelOrderResponse | None:
-    """ POST /v1/orders/cancel/signed
+) -> Any | MarketGroupResponse | None:
+    """ POST /v1/markets/groups/{group_id}/members
 
     Args:
-        body (CancelSignedOrderRequest):
+        group_id (int):
+        body (ExtendMarketGroupRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | CancelOrderResponse
+        Any | MarketGroupResponse
      """
 
 
     return sync_detailed(
-        client=client,
+        group_id=group_id,
+client=client,
 body=body,
 
     ).parsed
 
 async def asyncio_detailed(
+    group_id: int,
     *,
     client: AuthenticatedClient | Client,
-    body: CancelSignedOrderRequest,
+    body: ExtendMarketGroupRequest,
 
-) -> Response[Any | CancelOrderResponse]:
-    """ POST /v1/orders/cancel/signed
+) -> Response[Any | MarketGroupResponse]:
+    """ POST /v1/markets/groups/{group_id}/members
 
     Args:
-        body (CancelSignedOrderRequest):
+        group_id (int):
+        body (ExtendMarketGroupRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | CancelOrderResponse]
+        Response[Any | MarketGroupResponse]
      """
 
 
     kwargs = _get_kwargs(
-        body=body,
+        group_id=group_id,
+body=body,
 
     )
 
@@ -168,27 +170,30 @@ async def asyncio_detailed(
     return _build_response(client=client, response=response)
 
 async def asyncio(
+    group_id: int,
     *,
     client: AuthenticatedClient | Client,
-    body: CancelSignedOrderRequest,
+    body: ExtendMarketGroupRequest,
 
-) -> Any | CancelOrderResponse | None:
-    """ POST /v1/orders/cancel/signed
+) -> Any | MarketGroupResponse | None:
+    """ POST /v1/markets/groups/{group_id}/members
 
     Args:
-        body (CancelSignedOrderRequest):
+        group_id (int):
+        body (ExtendMarketGroupRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | CancelOrderResponse
+        Any | MarketGroupResponse
      """
 
 
     return (await asyncio_detailed(
-        client=client,
+        group_id=group_id,
+client=client,
 body=body,
 
     )).parsed

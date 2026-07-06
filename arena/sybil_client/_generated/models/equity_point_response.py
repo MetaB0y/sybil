@@ -22,9 +22,9 @@ T = TypeVar("T", bound="EquityPointResponse")
 class EquityPointResponse:
     """ 
         Attributes:
-            deposited_nanos (int):
+            deposited_nanos (int): Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1.
             height (int):
-            portfolio_value_nanos (int):
+            portfolio_value_nanos (int): Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1.
             timestamp_ms (int):
      """
 

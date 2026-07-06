@@ -22,7 +22,7 @@ T = TypeVar("T", bound="PositionDeltaResponse")
 class PositionDeltaResponse:
     """ 
         Attributes:
-            delta (int):
+            delta (int): Position quantity delta. Integer share-units; 1000 units = 1 share.
             market_id (int):
             outcome (str):
      """

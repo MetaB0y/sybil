@@ -30,18 +30,19 @@ class HistoryEventResponse:
             id (str):
             timestamp_ms (int):
             type_ (str):
-            amount_nanos (int | None | Unset):
-            available_nanos (int | None | Unset):
+            amount_nanos (int | None | Unset): Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
+            available_nanos (int | None | Unset): Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
             market_id (int | None | Unset):
             order_id (int | None | Unset):
             outcome (None | str | Unset):
             payout_outcome (None | str | Unset):
-            price_nanos (int | None | Unset):
-            qty (int | None | Unset):
-            realized_pnl_nanos (int | None | Unset):
+            price_nanos (int | None | Unset): Event price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
+            qty (int | None | Unset): Event quantity. Integer share-units; 1000 units = 1 share.
+            realized_pnl_nanos (int | None | Unset): Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
             reason (None | str | Unset): Rejected only: reason code (`insufficient_balance` | `insufficient_position`
                 | `complete_set` | …).
-            required_nanos (int | None | Unset):
+            required_nanos (int | None | Unset): Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
             side (None | str | Unset):
      """
 

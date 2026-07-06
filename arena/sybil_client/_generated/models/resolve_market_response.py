@@ -25,7 +25,8 @@ class ResolveMarketResponse:
     """ 
         Attributes:
             market_id (int):
-            payout_nanos (int):
+            payout_nanos (int): Resolution payout per YES share. Integer nanodollars;
+                1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
             status (str):
             challenge_deadline_ms (int | None | Unset):
      """

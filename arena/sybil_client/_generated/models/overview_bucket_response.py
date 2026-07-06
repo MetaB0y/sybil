@@ -30,10 +30,11 @@ class OverviewBucketResponse:
 
         Attributes:
             orders (OverviewOrderStatsResponse | Unset):
-            total_volume_nanos (int | Unset):
-            total_welfare_nanos (int | Unset): Cumulative platform welfare in nanos for this bucket — sum of per-block
-                `total_welfare` (each fill counted once). Signed: solver rounding can
-                yield small negatives.
+            total_volume_nanos (int | Unset): Total traded notional for this bucket. Integer nanodollars;
+                1_000_000_000 = $1.
+            total_welfare_nanos (int | Unset): Cumulative platform welfare for this bucket. Integer nanodollars;
+                1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
+                once). Signed: solver rounding can yield small negatives.
             unique_traders (int | Unset):
      """
 

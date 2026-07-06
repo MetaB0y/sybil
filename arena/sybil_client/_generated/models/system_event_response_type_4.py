@@ -26,7 +26,8 @@ class SystemEventResponseType4:
         Attributes:
             affected_accounts (list[int]):
             market_id (int):
-            payout_nanos (int):
+            payout_nanos (int): Resolution payout per YES share. Integer nanodollars;
+                1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
             type_ (SystemEventResponseType4Type):
      """
 

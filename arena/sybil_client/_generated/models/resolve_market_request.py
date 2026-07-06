@@ -26,8 +26,8 @@ T = TypeVar("T", bound="ResolveMarketRequest")
 class ResolveMarketRequest:
     """ 
         Attributes:
-            payout_nanos (int): Payout per YES share in nanos (0 to 1_000_000_000).
-                1_000_000_000 = YES wins ($1), 0 = NO wins, 700_000_000 = $0.70 fractional. Example: 1000000000.
+            payout_nanos (int): Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+                Payouts are per-share probabilities in [0, 1e9]. Example: 1000000000.
             attestation (None | SignedAttestationDto | Unset):
      """
 

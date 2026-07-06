@@ -26,16 +26,17 @@ class PendingOrderResponse:
             account_id (int):
             created_at_block (int):
             expires_at_block (int):
-            limit_price_nanos (int):
+            limit_price_nanos (int): Limit price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
             market_id (int):
             order_id (int):
-            remaining_quantity (int): Remaining fill quantity in fixed-point share-units (`1000` = 1 share).
+            remaining_quantity (int): Remaining fill quantity. Integer share-units; 1000 units = 1 share.
             side (str):
             created_at_ms (int | Unset): Wall-clock admit time, ms since epoch. `0` for orders admitted before
                 this field shipped (#[serde(default)] forward compat).
-            original_quantity (int | Unset): Original `max_fill` at admit time, in fixed-point share-units (B8). Lets the FE
-                render a
-                partial-fill progress bar as `(original - remaining) / original`.
+            original_quantity (int | Unset): Original `max_fill` at admit time. Integer share-units; 1000 units = 1 share.
+                Lets the FE render a partial-fill progress bar as
+                `(original - remaining) / original`.
                 `0` for orders persisted before B5/B8 (#[serde(default)] forward
                 compat).
      """

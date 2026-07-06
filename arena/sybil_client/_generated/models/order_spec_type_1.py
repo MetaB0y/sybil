@@ -24,9 +24,10 @@ class OrderSpecType1:
     """ Buy NO share-units on a single market (`1000` units = 1 share).
 
         Attributes:
-            limit_price_nanos (int):
+            limit_price_nanos (int): Limit price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
             market_id (int):
-            quantity (int): Quantity in fixed-point share-units.
+            quantity (int): Order quantity. Integer share-units; 1000 units = 1 share.
             type_ (OrderSpecType1Type):
      """
 

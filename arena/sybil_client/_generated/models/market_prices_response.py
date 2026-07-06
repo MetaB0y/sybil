@@ -25,7 +25,8 @@ T = TypeVar("T", bound="MarketPricesResponse")
 class MarketPricesResponse:
     """ 
         Attributes:
-            prices (MarketPricesResponsePrices):
+            prices (MarketPricesResponsePrices): Market price map. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
      """
 
     prices: MarketPricesResponsePrices

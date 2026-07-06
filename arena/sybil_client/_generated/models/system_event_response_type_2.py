@@ -24,7 +24,7 @@ class SystemEventResponseType2:
     """ 
         Attributes:
             account_id (int):
-            amount_nanos (int):
+            amount_nanos (int): Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
             deposit_id (int):
             deposit_root_hex (str):
             sybil_account_key_hex (str):

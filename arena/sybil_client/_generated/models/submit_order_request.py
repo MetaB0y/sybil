@@ -34,7 +34,8 @@ class SubmitOrderRequest:
             orders (list[OrderSpecType0 | OrderSpecType1 | OrderSpecType2 | OrderSpecType3]): Orders to submit.
             expires_at_block (int | None | Unset): Last eligible block height for explicit-expiry orders.
             mm_budget_nanos (int | None | Unset): If set, treat these orders as market maker orders with flash liquidity.
-                The value is the MM's total capital budget in nanos.
+                The value is the MM's total capital budget. Integer nanodollars;
+                1_000_000_000 = $1.
                 MM orders skip per-order balance validation; instead the solver enforces
                 the portfolio-level budget constraint at clearing time.
             time_in_force (TimeInForce | Unset):

@@ -22,7 +22,8 @@ T = TypeVar("T", bound="FundAccountRequest")
 class FundAccountRequest:
     """ 
         Attributes:
-            amount_nanos (int): Amount to add in nanos (1 dollar = 1_000_000_000 nanos). Example: 50000000000.
+            amount_nanos (int): Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1. Example:
+                50000000000.
      """
 
     amount_nanos: int

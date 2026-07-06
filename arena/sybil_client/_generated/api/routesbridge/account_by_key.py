@@ -8,61 +8,42 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.cancel_order_response import CancelOrderResponse
-from ...models.cancel_signed_order_request import CancelSignedOrderRequest
+from ...models.bridge_account_key_response import BridgeAccountKeyResponse
 from typing import cast
 
 
 
 def _get_kwargs(
-    *,
-    body: CancelSignedOrderRequest,
+    key_hex: str,
 
 ) -> dict[str, Any]:
-    headers: dict[str, Any] = {}
-
+    
 
     
 
     
 
     _kwargs: dict[str, Any] = {
-        "method": "post",
-        "url": "/v1/orders/cancel/signed",
+        "method": "get",
+        "url": "/v1/bridge/accounts/by-key/{key_hex}".format(key_hex=quote(str(key_hex), safe=""),),
     }
 
-    _kwargs["json"] = body.to_dict()
 
-    headers["Content-Type"] = "application/json"
-
-    _kwargs["headers"] = headers
     return _kwargs
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | CancelOrderResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | BridgeAccountKeyResponse | None:
     if response.status_code == 200:
-        response_200 = CancelOrderResponse.from_dict(response.json())
+        response_200 = BridgeAccountKeyResponse.from_dict(response.json())
 
 
 
         return response_200
 
-    if response.status_code == 400:
-        response_400 = cast(Any, None)
-        return response_400
-
-    if response.status_code == 403:
-        response_403 = cast(Any, None)
-        return response_403
-
     if response.status_code == 404:
         response_404 = cast(Any, None)
         return response_404
-
-    if response.status_code == 409:
-        response_409 = cast(Any, None)
-        return response_409
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -70,7 +51,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | CancelOrderResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | BridgeAccountKeyResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -80,27 +61,27 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
+    key_hex: str,
     *,
     client: AuthenticatedClient | Client,
-    body: CancelSignedOrderRequest,
 
-) -> Response[Any | CancelOrderResponse]:
-    """ POST /v1/orders/cancel/signed
+) -> Response[Any | BridgeAccountKeyResponse]:
+    """ GET /v1/bridge/accounts/by-key/{key_hex}
 
     Args:
-        body (CancelSignedOrderRequest):
+        key_hex (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | CancelOrderResponse]
+        Response[Any | BridgeAccountKeyResponse]
      """
 
 
     kwargs = _get_kwargs(
-        body=body,
+        key_hex=key_hex,
 
     )
 
@@ -111,53 +92,53 @@ def sync_detailed(
     return _build_response(client=client, response=response)
 
 def sync(
+    key_hex: str,
     *,
     client: AuthenticatedClient | Client,
-    body: CancelSignedOrderRequest,
 
-) -> Any | CancelOrderResponse | None:
-    """ POST /v1/orders/cancel/signed
+) -> Any | BridgeAccountKeyResponse | None:
+    """ GET /v1/bridge/accounts/by-key/{key_hex}
 
     Args:
-        body (CancelSignedOrderRequest):
+        key_hex (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | CancelOrderResponse
+        Any | BridgeAccountKeyResponse
      """
 
 
     return sync_detailed(
-        client=client,
-body=body,
+        key_hex=key_hex,
+client=client,
 
     ).parsed
 
 async def asyncio_detailed(
+    key_hex: str,
     *,
     client: AuthenticatedClient | Client,
-    body: CancelSignedOrderRequest,
 
-) -> Response[Any | CancelOrderResponse]:
-    """ POST /v1/orders/cancel/signed
+) -> Response[Any | BridgeAccountKeyResponse]:
+    """ GET /v1/bridge/accounts/by-key/{key_hex}
 
     Args:
-        body (CancelSignedOrderRequest):
+        key_hex (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | CancelOrderResponse]
+        Response[Any | BridgeAccountKeyResponse]
      """
 
 
     kwargs = _get_kwargs(
-        body=body,
+        key_hex=key_hex,
 
     )
 
@@ -168,27 +149,27 @@ async def asyncio_detailed(
     return _build_response(client=client, response=response)
 
 async def asyncio(
+    key_hex: str,
     *,
     client: AuthenticatedClient | Client,
-    body: CancelSignedOrderRequest,
 
-) -> Any | CancelOrderResponse | None:
-    """ POST /v1/orders/cancel/signed
+) -> Any | BridgeAccountKeyResponse | None:
+    """ GET /v1/bridge/accounts/by-key/{key_hex}
 
     Args:
-        body (CancelSignedOrderRequest):
+        key_hex (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | CancelOrderResponse
+        Any | BridgeAccountKeyResponse
      """
 
 
     return (await asyncio_detailed(
-        client=client,
-body=body,
+        key_hex=key_hex,
+client=client,
 
     )).parsed

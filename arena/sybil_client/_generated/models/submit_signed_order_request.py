@@ -27,6 +27,7 @@ T = TypeVar("T", bound="SubmitSignedOrderRequest")
 class SubmitSignedOrderRequest:
     """ 
         Attributes:
+            nonce (int): Per-account replay nonce covered by the P256 signature.
             order (SignedOrderData):
             signature_hex (str): Hex-encoded P256 ECDSA signature.
             signer_pubkey_hex (str): Hex-encoded compressed P256 public key of the signer.
@@ -35,6 +36,7 @@ class SubmitSignedOrderRequest:
             time_in_force (TimeInForce | Unset):
      """
 
+    nonce: int
     order: SignedOrderData
     signature_hex: str
     signer_pubkey_hex: str
@@ -48,6 +50,8 @@ class SubmitSignedOrderRequest:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.signed_order_data import SignedOrderData
+        nonce = self.nonce
+
         order = self.order.to_dict()
 
         signature_hex = self.signature_hex
@@ -69,6 +73,7 @@ class SubmitSignedOrderRequest:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
+            "nonce": nonce,
             "order": order,
             "signature_hex": signature_hex,
             "signer_pubkey_hex": signer_pubkey_hex,
@@ -86,6 +91,8 @@ class SubmitSignedOrderRequest:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.signed_order_data import SignedOrderData
         d = dict(src_dict)
+        nonce = d.pop("nonce")
+
         order = SignedOrderData.from_dict(d.pop("order"))
 
 
@@ -116,6 +123,7 @@ class SubmitSignedOrderRequest:
 
 
         submit_signed_order_request = cls(
+            nonce=nonce,
             order=order,
             signature_hex=signature_hex,
             signer_pubkey_hex=signer_pubkey_hex,

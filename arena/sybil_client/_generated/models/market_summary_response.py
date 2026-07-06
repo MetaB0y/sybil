@@ -28,21 +28,32 @@ class MarketSummaryResponse:
             market_id (int):
             name (str):
             status (str):
-            volume_nanos (int):
-            liquidity_avg10_nanos (int | Unset): Liquidity score + band (mirrors `MarketResponse`).
-            liquidity_band_nanos (int | Unset):
-            no_price_24h_ago_nanos (int | None | Unset):
-            no_price_nanos (int | None | Unset):
+            volume_nanos (int): All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+            liquidity_avg10_nanos (int | Unset): Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
+                Mirrors `MarketResponse`.
+            liquidity_band_nanos (int | Unset): Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
+                Mirrors `MarketResponse`.
+            no_price_24h_ago_nanos (int | None | Unset): Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 =
+                $1.
+                Prices are per-share probabilities in [0, 1e9].
+            no_price_nanos (int | None | Unset): Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
             orders_matched_total (int | Unset):
             orders_placed_total (int | Unset): All-time placed/matched/unmatched (mirrors `MarketResponse`).
             orders_unmatched_total (int | Unset):
             reference_price_nanos (int | None | Unset): Reference price from external system (e.g., Polymarket), display
                 only.
+                Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
             trader_count (int | Unset): All-time unique trader count (mirrors `MarketResponse.trader_count`).
-            volume_24h_nanos (int | Unset): Rolling 24h trading volume in nanos (mirrors
+            volume_24h_nanos (int | Unset): Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+                Mirrors
                 `MarketResponse.volume_24h_nanos`).
-            yes_price_24h_ago_nanos (int | None | Unset): Clearing YES / NO prices ~24h ago (mirror of `MarketResponse`).
-            yes_price_nanos (int | None | Unset):
+            yes_price_24h_ago_nanos (int | None | Unset): Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 =
+                $1.
+                Prices are per-share probabilities in [0, 1e9].
+            yes_price_nanos (int | None | Unset): Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+                Prices are per-share probabilities in [0, 1e9].
      """
 
     market_id: int

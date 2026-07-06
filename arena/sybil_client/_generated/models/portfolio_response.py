@@ -27,24 +27,28 @@ class PortfolioResponse:
     """ 
         Attributes:
             account_id (int):
-            balance_nanos (int):
-            pnl_nanos (int):
-            portfolio_value_nanos (int):
+            balance_nanos (int): Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+            pnl_nanos (int): Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
+            portfolio_value_nanos (int): Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
             positions (list[PositionValueResponse]):
-            total_deposited_nanos (int):
-            total_position_value_nanos (int):
+            total_deposited_nanos (int): Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
+            total_position_value_nanos (int): Mark-to-market value of all positions. Integer nanodollars;
+                1_000_000_000 = $1.
             first_deposit_ms (int | Unset): First-deposit timestamp in ms since epoch (B8). `0` for accounts
                 with no recorded deposit history (FE renders as "—"). Same
                 "since last restart" caveat as the other off-block aggregates
                 until persistence runs in prod.
-            realized_pnl_nanos (int | Unset): Accumulated realized PnL across all closed positions (C1). Signed.
+            realized_pnl_nanos (int | Unset): Accumulated realized PnL across all closed positions (C1). Integer
+                nanodollars;
+                1_000_000_000 = $1. Signed.
                 `pnl_nanos = realized + unrealized` once both fields populate, but
                 `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
             total_fill_count (int | Unset): All-time fill count (B8). The bounded fill window in
                 `account_fills` may cap older trades; this counter never does,
                 so FE shows the real number instead of "200+".
-            unrealized_pnl_nanos (int | Unset): Mark-to-market PnL on currently open positions (C1). Computed as
-                `Σ (current_price - avg_entry) * quantity / SHARE_SCALE` across positions.
+            unrealized_pnl_nanos (int | Unset): Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
+                1_000_000_000 = $1. Computed as
+                `sum((current_price - avg_entry) * quantity / SHARE_SCALE)` across positions.
      """
 
     account_id: int

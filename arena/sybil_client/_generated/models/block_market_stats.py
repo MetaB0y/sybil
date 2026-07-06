@@ -35,14 +35,13 @@ class BlockMarketStats:
                 platform `unique_placers` scalar counts the account once.
             unmatched (int | Unset): Resting orders touching this market that exited the book this
                 block WITHOUT any fill. Cancels are excluded.
-            volume_nanos (int | Unset): Per-market volume contribution from this block's fills, in nanos.
-                Multi-market fills credit each active market with their full
-                notional; the platform `total_volume_nanos` scalar counts each fill
-                once.
-            welfare_nanos (int | Unset): Per-market welfare contribution from this block's fills (B7).
-                Multi-market fills credit each active market with their full welfare;
-                the platform `total_welfare_nanos` counts each fill once. Signed —
-                solver rounding can yield small negatives.
+            volume_nanos (int | Unset): Per-market volume contribution from this block's fills. Integer nanodollars;
+                1_000_000_000 = $1. Multi-market fills credit each active market with their
+                full notional; the platform `total_volume_nanos` scalar counts each fill once.
+            welfare_nanos (int | Unset): Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
+                1_000_000_000 = $1. Multi-market fills credit each active market with their
+                full welfare; the platform `total_welfare_nanos` counts each fill once.
+                Signed — solver rounding can yield small negatives.
      """
 
     matched: int | Unset = UNSET

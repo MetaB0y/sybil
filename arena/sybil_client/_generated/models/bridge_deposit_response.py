@@ -23,7 +23,7 @@ class BridgeDepositResponse:
     """ 
         Attributes:
             account_id (int):
-            balance_nanos (int):
+            balance_nanos (int): Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
             deposit_id (int):
             deposit_root_hex (str):
      """

@@ -23,7 +23,7 @@ class BridgeDepositEventResponse:
     """ 
         Attributes:
             account_id (int):
-            amount_token_units (int):
+            amount_token_units (int): Token base units accepted by the vault, e.g. USDC's 6-decimal units.
             deposit_id (int):
             deposit_root_hex (str):
      """

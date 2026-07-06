@@ -22,7 +22,8 @@ T = TypeVar("T", bound="CreateAccountRequest")
 class CreateAccountRequest:
     """ 
         Attributes:
-            initial_balance_nanos (int): Initial balance in nanos (1 dollar = 1_000_000_000 nanos). Example: 100000000000.
+            initial_balance_nanos (int): Initial account balance. Integer nanodollars; 1_000_000_000 = $1. Example:
+                100000000000.
      """
 
     initial_balance_nanos: int

@@ -21,7 +21,9 @@ T = TypeVar("T", bound="BlockResponseClearingPricesNanos")
 
 @_attrs_define
 class BlockResponseClearingPricesNanos:
-    """ 
+    """ Clearing price vectors by market/group. Integer nanodollars;
+    1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+
      """
 
     additional_properties: dict[str, list[int]] = _attrs_field(init=False, factory=dict)

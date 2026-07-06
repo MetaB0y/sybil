@@ -30,7 +30,8 @@ class ResolutionResponse:
             market_id (int):
             status (str):
             template (str):
-            payout_nanos (int | None | Unset):
+            payout_nanos (int | None | Unset): Resolution payout per YES share. Integer nanodollars;
+                1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
             resolved_at_ms (int | None | Unset):
             resolved_by_feed_id (int | None | Unset):
             resolved_by_feed_name (None | str | Unset):

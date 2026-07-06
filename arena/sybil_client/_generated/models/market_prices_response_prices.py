@@ -23,7 +23,9 @@ T = TypeVar("T", bound="MarketPricesResponsePrices")
 
 @_attrs_define
 class MarketPricesResponsePrices:
-    """ 
+    """ Market price map. Integer nanodollars; 1_000_000_000 = $1.
+    Prices are per-share probabilities in [0, 1e9].
+
      """
 
     additional_properties: dict[str, MarketPriceResponse] = _attrs_field(init=False, factory=dict)

@@ -24,7 +24,7 @@ class PositionResponse:
         Attributes:
             market_id (int):
             outcome (str):
-            quantity (int): Signed position quantity in fixed-point share-units (`1000` = 1 share).
+            quantity (int): Signed position quantity. Integer share-units; 1000 units = 1 share.
      """
 
     market_id: int

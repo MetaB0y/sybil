@@ -27,6 +27,11 @@ REPO_ROOT="$(cd "$ARENA_DIR/.." && pwd)"
 OUT_DIR="$ARENA_DIR/sybil_client/_generated"
 CONFIG="$ARENA_DIR/scripts/openapi-python-client-config.yml"
 
+# Pin the generator so the vendored tree is reproducible byte-for-byte across
+# machines and CI. Bumping this is a deliberate, reviewed change (regenerate and
+# commit the diff). Keep in sync with sybil_client/README.md.
+GENERATOR_VERSION="0.29.0"
+
 SPEC="$(mktemp -t sybil-openapi.XXXXXX.json)"
 SERVER_PID=""
 
@@ -69,7 +74,7 @@ fi
 
 echo "==> Regenerating $OUT_DIR"
 rm -rf "$OUT_DIR"
-uvx openapi-python-client generate \
+uvx "openapi-python-client@${GENERATOR_VERSION}" generate \
     --path "$SPEC" \
     --meta none \
     --output-path "$OUT_DIR" \
