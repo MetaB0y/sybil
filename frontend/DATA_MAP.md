@@ -4,7 +4,10 @@ Per-page inventory of every piece of backend-sourced data the Sybil frontend
 displays — direct REST reads, REST + client-side processing, and data derived
 from the live WebSocket block stream. Living doc; iterate freely.
 
-_Generated 2026-06-29 by tracing each page's component tree → hooks → endpoints._
+_Generated 2026-06-29 by tracing each page's component tree → hooks → endpoints.
+Re-audited 2026-07-06 against `main` (SYB-156); a vitest guard
+(`src/lib/api/data-map.test.ts`) now fails CI if this file drifts from the API
+surface — see "Staleness guard" at the bottom._
 
 ## How the data flows (foundation)
 
@@ -12,13 +15,23 @@ Two channels feed everything:
 
 - **REST** — `openapi-fetch` client (`src/lib/api/client.ts`) against
   `https://172-104-31-54.nip.io`, base `/v1/...`, wrapped in React Query hooks.
-- **WebSocket** `/v1/blocks/ws` — the live block stream (`BlockResponse` every
-  ~2s). On mount the app **hydrates** with `GET /v1/blocks/latest` +
-  `GET /v1/markets/prices` (`src/lib/ws/realtime-provider.tsx`), seeds the
-  Zustand store (`src/lib/store/index.ts`), then the WS keeps `latestBlock`,
-  `recentBlocks` (ring buffer ~80) and `pricesByMarketId` (from
+- **WebSocket** `/v1/blocks/ws` — the **first-party** live block stream
+  (`BlockResponse` every ~2s) (`src/lib/ws/client.ts`). On mount the app
+  **hydrates** with `GET /v1/blocks/latest` + `GET /v1/markets/prices`
+  (`src/lib/ws/realtime-provider.tsx`), seeds the Zustand store
+  (`src/lib/store/index.ts`), connects the socket with `?from_block=H₀+1` (server
+  replays anything committed during hydration, then goes live), then the WS keeps
+  `latestBlock`, `recentBlocks` (ring buffer ~80) and `pricesByMarketId` (from
   `clearing_prices_nanos`) live. Most "live price / live mark / countdown" data
-  is derived from this store, not re-fetched.
+  is derived from this store, not re-fetched. The SSE endpoint
+  `/v1/blocks/stream` still exists but is a third-party convenience only — the FE
+  never opens it (SYB-171).
+
+**Unit conventions** (documented in OpenAPI per SYB-164, formatted in
+`src/lib/format/nanos.ts`): monetary `*_nanos` fields are **nanodollars**
+(`1e9` = $1); order/fill/position quantities are fixed-point **share-units**
+(`1000` = 1 share); a binary price in nanos IS its probability (`1e7` nanos =
+1¢ = 1% odds).
 
 Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-side.
 
@@ -31,6 +44,7 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 | Global nav (all pages) | Account chip: live portfolio total | `GET /v1/accounts/{id}/portfolio` → `portfolio_value_nanos` / positions marked at live WS prices; invalidated each block |
 | Global nav (all pages) | Account chip: available cash | `GET /v1/accounts/{id}/portfolio` → `balance_nanos`, minus cash reserved by open buys (`GET /v1/accounts/{id}/orders`); FE-derived |
 | Global nav (all pages) | Account chip: account ID / alias / pubkey | Local session (no fetch) |
+| Global nav (all pages) | Connect modal: verify an imported account exists before storing the session | `GET /v1/accounts/{id}` (`connectExistingAccount` in `src/lib/account/actions.ts`); response body itself isn't rendered — a 404 surfaces "account not found" |
 | Global nav (all pages) | Batch pill: latest block height, 2s countdown, connection state | WS `/v1/blocks/ws` → `BlockResponse.height` + `perf.now()` anchor; hydrated by `GET /v1/blocks/latest` |
 | Global nav (all pages) | Nav search dropdown (names, YES odds, volume, outcome count, category dot) | `GET /v1/markets` filtered **client-side** (`/v1/markets/search` exists in schema but is unused) + live prices from store |
 
@@ -82,7 +96,8 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 | Market detail (/m/[id]) | Price chart (per-outcome series) | `GET /v1/markets/{id}/prices/history` + WS `clearing_prices_nanos`; `buildChartSeries` merges onto shared time grid |
 | Market detail (/m/[id]) | Chart legend (outcomes, colors, current prices) | `GET /v1/markets` (event group) + live store prices; short labels FE-derived |
 | Market detail (/m/[id]) | Chart mode (area/stacked/lines) | `GET /v1/events/{id}/raw` (negRisk flag) + `detectStackable` heuristic |
-| Market detail (/m/[id]) | Description, resolution criteria, source link | `GET /v1/markets/{id}` (`description`, `resolution_criteria`, `external_url`) + `GET /v1/events/{id}/raw` (preferred for Polymarket: `description`, `resolutionSource`) |
+| Market detail (/m/[id]) | Provenance badge (mirror vs native) + source-link label | `GET /v1/markets/{id}` → `polymarket_condition_id` non-null ⇒ "mirror" (Polymarket), null ⇒ native Sybil market; label toggles "source link" vs "resolution source" FE-side (SYB-149/150/151) |
+| Market detail (/m/[id]) | Description, resolution criteria, source link | `GET /v1/markets/{id}` (`description`, `resolution_criteria`, `external_url`) + `GET /v1/events/{id}/raw` (preferred for Polymarket mirrors: `description`, `resolutionSource`; natives use their own `resolution_criteria`/`external_url`) |
 | Market detail (/m/[id]) | Event holdings: user positions (shares, entry→mark, value, P&L) | `GET /v1/accounts/{id}/portfolio` + live marks (WS) + `GET /v1/accounts/{id}/fills` for avg entry (FE-derived) |
 | Market detail (/m/[id]) | Event holdings: open orders | `GET /v1/accounts/{id}/orders` |
 | Market detail (/m/[id]) | Event holdings: closed orders (avg fill, realized PnL) | `GET /v1/accounts/{id}/events` → reconstructed FE-side from event log |
@@ -114,10 +129,12 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 | Portfolio › Positions | Per-position: thumbnail, name, side, shares, entry/mark ¢, 7d sparkline, value, PnL, resolve date | `GET /v1/accounts/{id}/portfolio` + `GET /v1/accounts/{id}/fills` (entry) + `GET /v1/markets` (names/images/dates) + `GET /v1/markets/{id}/prices/history` (sparkline); PnL FE-computed |
 | Portfolio › Orders | Open orders: action/side, placed/filled/remaining qty, limit ¢, avg fill ¢, value, age, TIF, cancel | `GET /v1/accounts/{id}/orders` + `GET /v1/accounts/{id}/fills` (avg fill) + `GET /v1/markets` (names) |
 | Portfolio › Trades | Executed fills: action/side, exec price, requested price, welfare edge, value, realized PnL, time | `GET /v1/accounts/{id}/events` (filled/partial_fill) + `GET /v1/markets`; welfare/edge FE-computed |
+| Portfolio › Trades | Realized-PnL panel: cumulative realized-PnL curve + total (SYB-55) | FE-derived from `GET /v1/accounts/{id}/events` — `cumulativeRealizedPnl`/`totalRealizedPnl` (`src/lib/account/realized-pnl.ts`), no new endpoint |
+| Portfolio › Trades | "Export CSV" of full fill history (SYB-55) | FE-derived, client-side download — `fillsToCsv`/`downloadCsv` (`src/lib/account/fills-csv.ts`) over `GET /v1/accounts/{id}/events` + `GET /v1/markets` names; no server round-trip |
 | Portfolio › History | Full event timeline (created/placed/fill/cancel/expire/reject/deposit/withdraw/resolved + cash impact, block height); filters | `GET /v1/accounts/{id}/events` → `HistoryEventResponse[]`, **full history** walked via the `before` cursor (500/page, newest-first, `MAX_PAGES` safety cap); self-contained. The History/Trades **counts** are derived from this list, so loading the whole history (not one page) is what keeps History from saturating and Trades from shrinking as you bet. |
 | Portfolio (all tabs) | Live refresh as blocks land | WS `/v1/blocks/ws` invalidates the React Query caches above |
 
-**Mutations on this page:** `POST /v1/orders/signed` (place), `POST /v1/orders/cancel/signed` (cancel).
+**Mutations on this page:** `POST /v1/orders/signed` (place), `POST /v1/orders/cancel/signed` (cancel). Both are P-256-signed; the place path (shared with the market-rail order modal, `src/lib/account/orders.ts`) carries a **time-in-force** — GTC / IOC / GTD, where IOC & GTD sign an `expires_at_block` and GTC signs `None` — and a strictly-increasing per-account **replay nonce** (SYB-54/191).
 
 ---
 
@@ -152,10 +169,24 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 - **Mocked (no real backend yet):** Activity batch-detail TX hash / sequencer /
   clearing-duration; the `/m-dev` open-batch panel (a real
   `/v1/markets/{id}/open-batch` *is* used on Dev › Aggregates).
-- **In schema but unused by the FE:** `/v1/markets/search`,
+- **In schema but unused by the FE (reads):** `/v1/markets/search`,
   `/v1/markets/{id}/orderbook`, `/v1/markets/{id}/resolution`,
   `/v1/markets/prices/reference`, `/v1/state-root`, `/v1/proofs/state/*`,
-  `/v1/bridge/*`, `/v1/feeds`.
+  `/v1/bridge/*`, `/v1/feeds`, `/v1/blocks/stream` (SSE — the WS is primary),
+  `/v1/accounts/{id}/bridge-key`.
+- **In schema but admin/write-only (never called by the app):**
+  `/v1/markets/{id}/metadata`, `/v1/markets/{id}/resolve`,
+  `/v1/simulation/pause`, `/v1/simulation/resume` — operator/mirror tooling, not
+  wired into any page.
+- **`BlockResponse.derived_view_sidecar` (SYB-216 inc0):** claimed as a new
+  provenance sidecar, but as of this audit it is **absent from the FE OpenAPI
+  types** (`src/lib/api/schema.d.ts`) and consumed nowhere in `frontend/web/src`,
+  so there is no frontend-visible datum to map yet. (The `by_market`
+  `BlockMarketStats` sidecar the FE *does* read — volume/placed/matched/welfare
+  per market — is a different field; see Activity / dev batch rows above.)
+- **`GET /v1/blocks` paging:** the FE only passes `?limit=` (`use-batches.ts`);
+  the `?before_height=` durable-paging param is not requested by any hook in this
+  build.
 - **Heavily FE-derived, not direct reads:** all PnL / welfare / available-balance
   figures, equity-curve live tip, 24h deltas, chart series, dev-page aggregates
   (`src/lib/dev/derive.ts`).
@@ -319,10 +350,33 @@ that still need backend work:
 
 | Endpoint | Used by | Purpose |
 |---|---|---|
+| `GET /v1/accounts/{id}` | connect / import flow | Verify an account exists before storing the session (body unrendered) |
 | `POST /v1/accounts` | connect / create demo account | Create account |
 | `POST /v1/accounts/{id}/keys` | connect flow | Register signer pubkey |
 | `POST /v1/accounts/{id}/fund` | funding | Fund account |
-| `POST /v1/orders/signed` | Portfolio, trade rail | Place signed order |
+| `POST /v1/orders/signed` | Portfolio, trade rail | Place signed order (TIF GTC/IOC/GTD + replay nonce) |
 | `POST /v1/orders/cancel/signed` | Portfolio, trade rail | Cancel open order |
+
+---
+
+## Staleness guard
+
+`frontend/web/src/lib/api/data-map.test.ts` (vitest, picked up automatically by
+`pnpm vitest run`) keeps this file from silently rotting:
+
+- **Check A** — every `/v1/...` endpoint this map names must still be a path key
+  in the generated OpenAPI types (`src/lib/api/schema.d.ts`). Catches
+  renamed/deleted endpoints and typos.
+- **Check B** — every `/v1/...` path the frontend `api` client actually calls
+  (`api.GET(...)`, `api.POST(...)`, …) must appear somewhere in this map.
+  Catches new UI endpoints nobody documented.
+
+**Limits (by design, to stay low-false-positive):** it is pure path-string
+matching — it does **not** check HTTP method, query params, response shape, field
+names, or whether a row's prose is still true. Path placeholders are normalised
+(`{id}`≡`{event_id}`≡`{}`); doc-only glob rows (`/v1/bridge/*`, `/v1/proofs/state/*`)
+are skipped in check A; the WebSocket (`/v1/blocks/ws`, reached via `ws/client.ts`
+not the `api` client) is invisible to check B; and test/smoke harness files are
+excluded from check B (they hit `/v1/health` and other non-product endpoints).
 </content>
 </invoke>
