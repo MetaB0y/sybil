@@ -863,6 +863,35 @@ pub struct EquitySeriesResponse {
     pub points: Vec<EquityPointResponse>,
 }
 
+// --- Leaderboard (SYB-59) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LeaderboardResponse {
+    /// Window this leaderboard was ranked over: `7d`, `30d`, or `all`.
+    pub window: String,
+    /// Ranked entries, best PnL first. Ties break by ascending account id.
+    pub entries: Vec<LeaderboardEntryResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LeaderboardEntryResponse {
+    /// 1-based rank within the returned window.
+    pub rank: u32,
+    /// Account identifier. Clients render this anonymously as `Trader #<id>`;
+    /// display-name opt-in awaits profiles (SYB-60).
+    pub account_id: u64,
+    /// Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
+    pub pnl_nanos: i64,
+    /// Return on invested capital over the window, in basis points (100 = 1%).
+    pub roi_bps: i64,
+    /// Distinct markets with a currently open position.
+    pub markets_traded: u32,
+    /// Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 = $1.
+    pub equity_nanos: i64,
+}
+
 // --- Account Fills ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

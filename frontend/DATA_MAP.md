@@ -86,6 +86,16 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 
 ---
 
+## Leaderboard (`/leaderboard`)
+
+| Sybil page | Frontend data (displayed) | Backend data (source) |
+|---|---|---|
+| Leaderboard | Ranked trader rows (rank, anonymous `Trader #<id>`, PnL, ROI, markets traded, equity) over a 7d/30d/all window | `GET /v1/leaderboard?window=&limit=` → `LeaderboardResponse.entries[]`; server ranks by windowed PnL (tie-break account id). Anonymous-only until profiles (SYB-60). |
+| Leaderboard | Window filter tabs (7d/30d/all) | FE state → `window` query param |
+| Leaderboard | Own-row highlight | Local session `accountId` (no fetch) matched against `entries[].account_id` |
+
+---
+
 ## Bot Arena (`/arena`)
 
 | Sybil page | Frontend data (displayed) | Backend data (source) |

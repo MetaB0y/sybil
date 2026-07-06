@@ -77,6 +77,7 @@ use crate::util::now_ms;
         routes::events::put_event_raw,
         routes::bots::get_bot_decisions,
         routes::bots::get_bot_equity_series,
+        routes::leaderboard::get_leaderboard,
     ),
     components(schemas(
         CreateAccountRequest,
@@ -142,6 +143,8 @@ use crate::util::now_ms;
         AccountFillResponse,
         EquityPointResponse,
         EquitySeriesResponse,
+        LeaderboardResponse,
+        LeaderboardEntryResponse,
         PendingOrderResponse,
         PositionDeltaResponse,
         BlockMarketStats,
@@ -409,6 +412,10 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
+        path: "/v1/leaderboard",
+    },
+    RouteMount {
+        method: "GET",
         path: "/v1/health",
     },
     RouteMount {
@@ -645,6 +652,11 @@ fn public_routes() -> Router<AppState> {
         .route(
             "/v1/bots/equity-series",
             axum::routing::get(routes::bots::get_bot_equity_series),
+        )
+        // Trader leaderboard (SYB-59)
+        .route(
+            "/v1/leaderboard",
+            axum::routing::get(routes::leaderboard::get_leaderboard),
         )
         // System
         .route("/v1/health", axum::routing::get(routes::system::health))

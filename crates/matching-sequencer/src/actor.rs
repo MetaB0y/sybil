@@ -34,7 +34,8 @@ use crate::market_info::{
 };
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
-    BlockSequencer, OrderSubmission, PendingOrderInfo, PreparedBlock, SequencerConfig,
+    BlockSequencer, LeaderboardRow, OrderSubmission, PendingOrderInfo, PreparedBlock,
+    SequencerConfig,
 };
 use crate::store::{ControlPlaneCommand, HistoryRetentionPolicy};
 use crate::{
@@ -268,6 +269,11 @@ pub enum SequencerMsg {
         u64,
         RpcReplyPort<Vec<crate::aggregates::EquityPoint>>,
     ),
+    /// Ranked leaderboard over a window (SYB-59). `since_ms == 0` is all-time
+    /// (fully in-memory); a non-zero `since_ms` reads per-account windowed
+    /// baselines from the durable equity store. Returns at most `limit` rows,
+    /// already sorted (PnL desc, then account id asc).
+    Leaderboard(u64, usize, RpcReplyPort<Vec<LeaderboardRow>>),
     GetAccountEvents(
         AccountId,
         usize,
@@ -2238,6 +2244,62 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
+            SequencerMsg::Leaderboard(since_ms, limit, reply) => {
+                // All-time inputs come from live in-memory state in one pass.
+                let bases = state.sequencer.leaderboard_bases();
+                let mut rows: Vec<LeaderboardRow> = bases
+                    .into_iter()
+                    .map(|base| {
+                        // For a windowed request, the baseline is the earliest
+                        // equity sample at/after the window start (durable store;
+                        // in-memory retention is 0 in prod). `net = value −
+                        // deposited` at a point is that point's cumulative PnL,
+                        // so windowed PnL = net(now) − net(window_start).
+                        let (pnl_nanos, basis_nanos) = if since_ms == 0 {
+                            (base.pnl_nanos, base.deposited_nanos)
+                        } else {
+                            let baseline = state
+                                .store
+                                .as_ref()
+                                .and_then(|store| {
+                                    store.equity_series(base.account_id, since_ms).ok()
+                                })
+                                .and_then(|points| points.into_iter().next());
+                            match baseline {
+                                Some(point) => (
+                                    base.pnl_nanos
+                                        - (point.portfolio_value_nanos - point.deposited_nanos),
+                                    point.portfolio_value_nanos,
+                                ),
+                                // No sample inside the window (account started
+                                // within it, or no durable series): credit the
+                                // full all-time PnL against deposited capital.
+                                None => (base.pnl_nanos, base.deposited_nanos),
+                            }
+                        };
+                        let roi_bps = if basis_nanos > 0 {
+                            ((pnl_nanos as i128 * 10_000) / basis_nanos as i128) as i64
+                        } else {
+                            0
+                        };
+                        LeaderboardRow {
+                            account_id: base.account_id,
+                            pnl_nanos,
+                            roi_bps,
+                            markets_traded: base.markets_traded,
+                            equity_nanos: base.equity_nanos,
+                        }
+                    })
+                    .collect();
+                // Deterministic ranking: PnL descending, account id ascending.
+                rows.sort_by(|a, b| {
+                    b.pnl_nanos
+                        .cmp(&a.pnl_nanos)
+                        .then(a.account_id.0.cmp(&b.account_id.0))
+                });
+                rows.truncate(limit);
+                let _ = reply.send(rows);
+            }
             SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply) => {
                 let result = match &state.store {
                     Some(store) => {
@@ -3186,6 +3248,19 @@ impl SequencerHandle {
         since_ms: u64,
     ) -> Result<Vec<crate::aggregates::EquityPoint>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetEquitySeries(account_id, since_ms, reply))
+            .await
+    }
+
+    /// Ranked leaderboard (SYB-59) over a window. `since_ms == 0` is all-time;
+    /// a non-zero `since_ms` computes per-account windowed PnL from the durable
+    /// equity store. Returns at most `limit` rows, PnL-descending with an
+    /// account-id tie-break.
+    pub async fn leaderboard(
+        &self,
+        since_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<LeaderboardRow>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::Leaderboard(since_ms, limit, reply))
             .await
     }
 

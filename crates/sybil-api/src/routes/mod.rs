@@ -5,6 +5,7 @@ pub mod bots;
 pub mod bridge;
 pub mod events;
 pub mod feeds;
+pub mod leaderboard;
 pub mod markets;
 pub mod orders;
 pub mod proofs;

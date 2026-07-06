@@ -478,6 +478,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/leaderboard?window&limit */
+        get: operations["get_leaderboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/markets": {
         parameters: {
             query?: never;
@@ -1359,6 +1376,45 @@ export interface components {
             /** Format: int64 */
             timestamp_ms: number;
             type: string;
+        };
+        LeaderboardEntryResponse: {
+            /**
+             * Format: int64
+             * @description Account identifier. Clients render this anonymously as `Trader #<id>`;
+             *     display-name opt-in awaits profiles (SYB-60).
+             */
+            account_id: number;
+            /**
+             * Format: int64
+             * @description Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 = $1.
+             */
+            equity_nanos: string;
+            /**
+             * Format: int32
+             * @description Distinct markets with a currently open position.
+             */
+            markets_traded: number;
+            /**
+             * Format: int64
+             * @description Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
+             */
+            pnl_nanos: string;
+            /**
+             * Format: int32
+             * @description 1-based rank within the returned window.
+             */
+            rank: number;
+            /**
+             * Format: int64
+             * @description Return on invested capital over the window, in basis points (100 = 1%).
+             */
+            roi_bps: number;
+        };
+        LeaderboardResponse: {
+            /** @description Ranked entries, best PnL first. Ties break by ascending account id. */
+            entries: components["schemas"]["LeaderboardEntryResponse"][];
+            /** @description Window this leaderboard was ranked over: `7d`, `30d`, or `all`. */
+            window: string;
         };
         MarketGroupResponse: {
             market_ids: number[];
@@ -3082,6 +3138,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_leaderboard: {
+        parameters: {
+            query?: {
+                /** @description Ranking window: 7d | 30d | all (default all) */
+                window?: string;
+                /** @description Result limit (default 50, cap 100) */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ranked trader leaderboard, best PnL first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaderboardResponse"];
                 };
             };
         };

@@ -15,6 +15,11 @@ const TABS: readonly NavTab[] = [
   { href: "/", label: "Markets", match: (p) => p === "/" || p.startsWith("/m/") },
   { href: "/activity", label: "Activity", match: (p) => p.startsWith("/activity") },
   { href: "/arena", label: "Arena", match: (p) => p.startsWith("/arena") },
+  {
+    href: "/leaderboard",
+    label: "Leaderboard",
+    match: (p) => p.startsWith("/leaderboard"),
+  },
   { href: "/portfolio", label: "Portfolio", match: (p) => p.startsWith("/portfolio") },
 ];
 

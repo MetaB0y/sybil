@@ -744,6 +744,37 @@ impl GroupCoverageTracker {
     }
 }
 
+/// Per-account all-time leaderboard inputs (SYB-59), computed from live
+/// in-memory state. The actor applies windowing on top using the durable
+/// equity store to produce the wire-facing [`LeaderboardRow`].
+#[derive(Clone, Copy, Debug)]
+pub struct LeaderboardBase {
+    pub account_id: AccountId,
+    /// All-time net PnL (portfolio value − total deposited), nanos.
+    pub pnl_nanos: i64,
+    /// Current portfolio equity (balance + marked positions), nanos.
+    pub equity_nanos: i64,
+    /// Total deposited capital, nanos — the all-time ROI basis.
+    pub deposited_nanos: i64,
+    /// Distinct markets with a currently open position.
+    pub markets_traded: u32,
+}
+
+/// One ranked leaderboard entry over a window (SYB-59). `pnl_nanos` and
+/// `roi_bps` are already windowed; the actor assigns the final ordering.
+#[derive(Clone, Copy, Debug)]
+pub struct LeaderboardRow {
+    pub account_id: AccountId,
+    /// Windowed net PnL, nanos.
+    pub pnl_nanos: i64,
+    /// Windowed return on capital, basis points (100 = 1%).
+    pub roi_bps: i64,
+    /// Distinct markets with a currently open position.
+    pub markets_traded: u32,
+    /// Current portfolio equity, nanos.
+    pub equity_nanos: i64,
+}
+
 /// Block-producing sequencer. Core sync layer.
 ///
 /// Manages accounts, assigns order IDs, validates, solves, settles, and
@@ -1538,6 +1569,43 @@ impl BlockSequencer {
             self.analytics.total_fills(account_id),
             self.analytics.cost_basis_tracker(),
         ))
+    }
+
+    /// All-time leaderboard inputs for every ranked account, computed from
+    /// live in-memory state in a single pass. Windowing (7d/30d) is layered on
+    /// top in the actor using the durable equity store; this method always
+    /// returns the all-time PnL/equity plus the deposited basis and the
+    /// distinct-market count.
+    ///
+    /// The system MINT account and never-funded accounts are excluded. Bot and
+    /// user accounts are indistinguishable server-side, so both are included.
+    /// `markets_traded` counts distinct markets with a currently open position
+    /// (exact lifetime distinct-markets-traded would require a per-account fill
+    /// history scan, which is not retained cheaply — see SYB-59).
+    pub fn leaderboard_bases(&self) -> Vec<LeaderboardBase> {
+        self.accounts
+            .iter()
+            .filter(|(id, _)| **id != AccountId::MINT)
+            .filter_map(|(id, account)| {
+                if account.total_deposited <= 0 {
+                    return None;
+                }
+                let summary = self.portfolio_summary(*id).ok()?;
+                let markets: HashSet<MarketId> = account
+                    .positions
+                    .iter()
+                    .filter(|(_, &qty)| qty != 0)
+                    .map(|(&(market_id, _), _)| market_id)
+                    .collect();
+                Some(LeaderboardBase {
+                    account_id: *id,
+                    pnl_nanos: summary.pnl_nanos,
+                    equity_nanos: summary.portfolio_value_nanos,
+                    deposited_nanos: summary.total_deposited_nanos,
+                    markets_traded: markets.len() as u32,
+                })
+            })
+            .collect()
     }
 
     pub fn bridge_state(&self) -> &BridgeState {
