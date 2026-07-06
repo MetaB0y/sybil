@@ -59,6 +59,11 @@ Common checks, fail closed:
    `genesis_hash` per SYB-224's domain discipline).
 2. `X = max(0, balance − open_cash_reservations)` recomputed in-guest with
    the same overflow-checked integer arithmetic conventions as the main guest.
+   NOTE: verifying the claimant's P256 signature (§3.1) is in-guest crypto —
+   use OpenVM's accelerated ECC extension configured for secp256r1/P-256, NOT a
+   soft `p256`. Same ECC integration as the SYB-225 key-op verification; both
+   move `app_vm_commit` (a new VM extension), so land them on one fresh-genesis
+   window. See `design/account-keys-digest.md` § "In-guest P256 verification".
 3. Public inputs out: `{R, H, A, D, X, escape_nullifier}` hashed under domain
    `"sybil/openvm/escape-claim/v1"` (parallel to the withdrawal input hash).
 

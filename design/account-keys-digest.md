@@ -232,6 +232,34 @@ Guest/verifier checks for each key op:
 10. After all system events, the derived account `keys_digest` and `events_digest` match `post_system_state`; after fills, `post_state.keys_digest` remains unchanged from `post_system_state` unless later key ops are ever allowed after fills.
 11. The post key sidecar matches the derived working key registry and every post account's `keys_digest`.
 
+### In-guest P256 verification — OpenVM ECC extension (Valery, 2026-07-06)
+
+Check 5 is **new crypto in the proving path**. Today the guest verifies **no
+signatures at all** — order/cancel/withdrawal/key-op auth all happens at the
+API/actor boundary, and the guest only proves the state transition
+(`sha2` is the sole crypto extension: `zk/openvm-guest/openvm.toml` enables
+`rv32i`, `rv32m`, `io`, `sha2` and nothing else). Proving a P256 ECDSA
+verification with a **pure-Rust `p256` crate inside the zkVM would be
+enormously expensive** (field arithmetic unrolled into RISC-V cycles).
+
+**Requirement: use OpenVM's accelerated P256.** Enable OpenVM's ECC extension
+configured for **secp256r1 / P-256** (short-Weierstrass) plus the modular-
+arithmetic extension it depends on, and verify key-op signatures through the
+OpenVM ECDSA guest path (the patched/accelerated `p256`), NOT a soft
+implementation. This is the same primitive the SYB-32 escape-claim guest needs
+(it verifies the claimant's P256 signature in-guest) — do them on one ECC
+integration.
+
+**Consequence — this moves `app_vm_commit`, not just `app_exe_commit`.**
+Enabling a new VM extension changes the VM configuration, so this is the first
+`app_vm_commit` change since `0x0026ab66…`. That is fine — it's a deliberate
+consensus change riding the fresh-genesis window (§ Migration) — but it is a
+*deeper* commitment move than the source-only exe repins we have been doing,
+and SYB-228's reproducibility caveats (untracked `agg_prefix.pk`, build-path
+dependence) apply to the repin. Budget proving-cost measurement for the ECDSA
+verification: it is per-key-op, so batches of key registrations in one block
+multiply it.
+
 ### First key and account creation
 
 Today account creation is service/operator driven and key registration is a separate public unsigned call. The witness-visible account creation event has only account id and initial balance: `crates/matching-sequencer/src/sequencer.rs:1720-1730`, converted to `SystemEventWitness::CreateAccount { account_id, initial_balance }` at `crates/matching-sequencer/src/sequencer.rs:573-581`.
