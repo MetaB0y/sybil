@@ -75,6 +75,7 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 | Sybil page | Frontend data (displayed) | Backend data (source) |
 |---|---|---|
 | Activity | Hero all-time: matched volume, welfare, active traders, orders placed/matched | `GET /v1/activity/overview` → `all_time.*` (unmatched = FE-derived) |
+| Activity | Hero all-time: bots/agents count | `GET /v1/bots/decisions?limit=1` → `stats.traders`, shown only when `db_available=true` |
 | Activity | Hero last-24h: same metrics | `GET /v1/activity/overview` → `last_24h.*` |
 | Activity | Total batches count | store `latestBlock.height` (WS / `GET /v1/blocks/latest`) |
 | Activity | Live markets count | `GET /v1/markets/summary` → count `status="active"` |
@@ -161,6 +162,7 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 | Portfolio › Trades | Realized-PnL panel: cumulative realized-PnL curve + total (SYB-55) | FE-derived from `GET /v1/accounts/{id}/events` — `cumulativeRealizedPnl`/`totalRealizedPnl` (`src/lib/account/realized-pnl.ts`), no new endpoint |
 | Portfolio › Trades | "Export CSV" of full fill history (SYB-55) | FE-derived, client-side download — `fillsToCsv`/`downloadCsv` (`src/lib/account/fills-csv.ts`) over `GET /v1/accounts/{id}/events` + `GET /v1/markets` names; no server round-trip |
 | Portfolio › History | Full event timeline (created/placed/fill/cancel/expire/reject/deposit/withdraw/resolved + cash impact, block height); filters | `GET /v1/accounts/{id}/events` → `HistoryEventResponse[]`, **full history** walked via the `before` cursor (500/page, newest-first, `MAX_PAGES` safety cap); self-contained. The History/Trades **counts** are derived from this list, so loading the whole history (not one page) is what keeps History from saturating and Trades from shrinking as you bet. |
+| Portfolio › Pending withdrawals | Withdrawal amount/id, L1 queue status, live ETA to execution, absolute executable time | `GET /v1/accounts/{id}/events` withdrawal rows provide block heights; FE fetches those blocks with `GET /v1/blocks/{height}` and filters `bridge.withdrawal_leaves[]` by account id. `l1_executable_at_unix` drives the countdown; `l1_status` / finalized / cancelled timestamps drive the cancel-window state. |
 | Portfolio (all tabs) | Live refresh as blocks land | WS `/v1/blocks/ws` invalidates the React Query caches above |
 
 **Mutations on this page:** `POST /v1/orders/signed` (place), `POST /v1/orders/cancel/signed` (cancel). Both are P-256-signed; the place path (shared with the market-rail order modal, `src/lib/account/orders.ts`) carries a **time-in-force** — GTC / IOC / GTD, where IOC & GTD sign an `expires_at_block` and GTC signs `None` — and a strictly-increasing per-account **replay nonce** (SYB-54/191).

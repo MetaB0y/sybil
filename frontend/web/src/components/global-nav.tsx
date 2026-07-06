@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Suspense } from "react";
+import { Menu, X } from "lucide-react";
+import { Suspense, useState } from "react";
 import { AccountChip } from "./auth/account-chip";
 import { BatchPill } from "./batch-pill";
 import { DevZoneNav } from "./dev/dev-zone-nav";
 import { NavSearch, NavSearchSkeleton } from "./nav-search";
 import { ThemeToggle } from "./theme-toggle";
+import { shouldCloseNavSheetOnPathChange } from "@/lib/responsive/nav";
 
 type NavTab = { href: string; label: string; match: (path: string) => boolean };
 
@@ -26,26 +28,16 @@ const TABS: readonly NavTab[] = [
 
 export function GlobalNav() {
   const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [lastPathname, setLastPathname] = useState(pathname);
+
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    if (shouldCloseNavSheetOnPathChange(menuOpen)) setMenuOpen(false);
+  }
 
   return (
-    <header
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: "var(--nav-height)",
-        zIndex: 50,
-        background: "var(--nav-bg)",
-        backdropFilter: "var(--blur-nav)",
-        WebkitBackdropFilter: "var(--blur-nav)",
-        borderBottom: "1px solid var(--border-1)",
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--space-5)",
-        padding: "0 var(--space-5)",
-      }}
-    >
+    <header className="global-nav">
       {/* Wordmark + status pill */}
       <Link
         href="/"
@@ -89,52 +81,71 @@ export function GlobalNav() {
       </Link>
 
       {/* Route tabs */}
-      <nav style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-        {TABS.map((tab) => {
-          const active = tab.match(pathname);
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              style={{
-                position: "relative",
-                padding: "0 var(--space-3)",
-                height: 32,
-                display: "inline-flex",
-                alignItems: "center",
-                color: active ? "var(--fg-1)" : "var(--fg-3)",
-                fontFamily: "var(--font-sans)",
-                fontSize: "var(--fs-13)",
-                fontWeight: 500,
-                textDecoration: "none",
-                borderRadius: "var(--radius-md)",
-                background: active ? "var(--surface-2)" : "transparent",
-                transition: "color var(--dur-fast) var(--ease-standard)",
-              }}
-            >
-              {tab.label}
-            </Link>
-          );
-        })}
+      <nav className="global-nav-tabs" aria-label="Primary">
+        {TABS.map((tab) => (
+          <NavTabLink key={tab.href} tab={tab} pathname={pathname} />
+        ))}
         <DevZoneNav />
       </nav>
 
       {/* Right side — search + batch pill + (placeholder) account chip */}
-      <div
-        style={{
-          marginLeft: "auto",
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--space-3)",
-        }}
-      >
-        <Suspense fallback={<NavSearchSkeleton />}>
-          <NavSearch />
-        </Suspense>
+      <div className="global-nav-right">
+        <div className="global-nav-search-desktop">
+          <Suspense fallback={<NavSearchSkeleton />}>
+            <NavSearch />
+          </Suspense>
+        </div>
         <ThemeToggle />
         <BatchPill />
         <AccountChip />
+        <button
+          type="button"
+          className="global-nav-menu-button"
+          aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+          aria-expanded={menuOpen}
+          aria-controls="global-nav-sheet"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          {menuOpen ? <X size={18} aria-hidden /> : <Menu size={18} aria-hidden />}
+        </button>
       </div>
+      {menuOpen && (
+        <>
+          <div
+            className="global-nav-sheet-backdrop"
+            aria-hidden
+            onClick={() => setMenuOpen(false)}
+          />
+          <div id="global-nav-sheet" className="global-nav-sheet">
+            <div className="global-nav-sheet-search">
+              <Suspense fallback={<NavSearchSkeleton />}>
+                <NavSearch />
+              </Suspense>
+            </div>
+            <nav className="global-nav-sheet-tabs" aria-label="Primary mobile">
+              {TABS.map((tab) => (
+                <NavTabLink key={tab.href} tab={tab} pathname={pathname} />
+              ))}
+              <DevZoneNav />
+            </nav>
+          </div>
+        </>
+      )}
     </header>
+  );
+}
+
+function NavTabLink({
+  tab,
+  pathname,
+}: {
+  tab: NavTab;
+  pathname: string;
+}) {
+  const active = tab.match(pathname);
+  return (
+    <Link className="global-nav-tab" data-active={active} href={tab.href}>
+      {tab.label}
+    </Link>
   );
 }

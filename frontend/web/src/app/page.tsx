@@ -119,9 +119,11 @@ function MarketsPageInner() {
     <>
       {openById && <ClearingTicker marketsById={openById} />}
       <main
+        className="sybil-page-pad"
         style={{
           width: "100%",
-          padding: "var(--space-6) var(--space-5) var(--space-9)",
+          paddingTop: "var(--space-6)",
+          paddingBottom: "var(--space-9)",
           display: "flex",
           flexDirection: "column",
           gap: "var(--space-5)",
@@ -170,13 +172,7 @@ function MarketsPageInner() {
 
         {paged && paged.length > 0 && (
           <>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                gap: "var(--space-4)",
-              }}
-            >
+            <div className="markets-grid">
               {paged.map((it) =>
                 it.kind === "multi" ? (
                   <MultiCard
@@ -310,6 +306,7 @@ function PageButton({
       onClick={onClick}
       className="text-mono"
       style={{
+        minHeight: 40,
         padding: "var(--space-2) var(--space-3)",
         fontSize: "11px",
         textTransform: "uppercase",

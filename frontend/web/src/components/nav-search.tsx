@@ -171,7 +171,7 @@ export function NavSearch() {
 
   return (
     <div ref={shellRef} style={{ position: "relative" }}>
-      <div style={searchShellStyle}>
+      <div className="nav-search-shell" style={searchShellStyle}>
         <span aria-hidden className="text-mono" style={searchSlashStyle}>
           /
         </span>
@@ -194,7 +194,12 @@ export function NavSearch() {
       </div>
 
       {showDropdown && (
-        <div id="nav-search-results" role="listbox" style={dropdownStyle}>
+        <div
+          id="nav-search-results"
+          role="listbox"
+          className="nav-search-dropdown"
+          style={dropdownStyle}
+        >
           {top.length === 0 ? (
             <div style={emptyStyle}>no events or markets match “{q.trim()}”</div>
           ) : (
@@ -229,7 +234,7 @@ export function NavSearch() {
 }
 
 export function NavSearchSkeleton() {
-  return <div style={searchShellStyle} aria-hidden />;
+  return <div className="nav-search-shell" style={searchShellStyle} aria-hidden />;
 }
 
 function ResultRow({
@@ -346,14 +351,6 @@ function resultKey(item: CardItem): string {
 }
 
 const searchShellStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  height: 32,
-  width: 280,
-  padding: "0 var(--space-3)",
-  background: "var(--surface-1)",
-  border: "1px solid var(--border-2)",
-  borderRadius: "var(--radius-md)",
 };
 
 const searchSlashStyle: React.CSSProperties = {
@@ -375,21 +372,6 @@ const searchInputStyle: React.CSSProperties = {
 };
 
 const dropdownStyle: React.CSSProperties = {
-  position: "absolute",
-  top: "calc(100% + var(--space-2))",
-  right: 0,
-  width: 340,
-  maxHeight: "min(70vh, 480px)",
-  overflowY: "auto",
-  padding: "var(--space-2)",
-  background: "var(--surface-1)",
-  border: "1px solid var(--border-2)",
-  borderRadius: "var(--radius-md)",
-  boxShadow: "var(--shadow-pop, 0 12px 32px rgba(0,0,0,0.45))",
-  zIndex: 60,
-  display: "flex",
-  flexDirection: "column",
-  gap: 2,
 };
 
 const rowStyle: React.CSSProperties = {
@@ -398,6 +380,7 @@ const rowStyle: React.CSSProperties = {
   alignItems: "center",
   gap: "var(--space-3)",
   width: "100%",
+  minHeight: 40,
   padding: "var(--space-2) var(--space-2)",
   background: "transparent",
   border: 0,
@@ -444,6 +427,7 @@ const footerStyle: React.CSSProperties = {
   justifyContent: "space-between",
   width: "100%",
   marginTop: 2,
+  minHeight: 40,
   padding: "var(--space-2) var(--space-2)",
   background: "transparent",
   border: 0,

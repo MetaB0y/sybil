@@ -130,6 +130,7 @@ export function DegenAmount({
             type="button"
             onClick={() => add(c)}
             style={{
+              minHeight: 40,
               padding: "8px 0",
               background: "var(--bg-2)",
               border: "1px solid var(--border-1)",
@@ -155,6 +156,7 @@ export function DegenAmount({
               : "Bet your full available balance"
           }
           style={{
+            minHeight: 40,
             padding: "8px 0",
             background: "var(--bg-2)",
             border: "1px solid var(--border-1)",

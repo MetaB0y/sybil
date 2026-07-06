@@ -416,11 +416,12 @@ export function TradesList({ tabs, events, marketsById }: Props) {
         <Empty>No trades match these filters.</Empty>
       ) : (
         <div
+          className="portfolio-grid-table"
           style={{
             background: "var(--surface-1)",
             border: "1px solid var(--border-1)",
             borderRadius: 6,
-            overflow: "hidden",
+            overflowY: "hidden",
           }}
         >
           <div style={rowGrid("var(--fg-4)")}>

@@ -365,6 +365,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
               disabled={disabledInputs}
               style={{
                 flex: 1,
+                minHeight: 40,
                 padding: "7px 0",
                 border: 0,
                 borderRadius: 3,
@@ -441,6 +442,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
+                  minHeight: 44,
                   padding: "8px 10px",
                   borderRadius: 4,
                   border: active
@@ -511,6 +513,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
                 disabled={disabledInputs}
                 style={{
                   flex: 1,
+                  minHeight: 40,
                   padding: "6px 0",
                   borderRadius: 3,
                   cursor: disabledInputs ? "not-allowed" : "pointer",
@@ -580,6 +583,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
                 onClick={c.apply}
                 style={{
                   flex: 1,
+                  minHeight: 40,
                   padding: "6px 0",
                   borderRadius: 3,
                   background: "var(--bg-2)",
@@ -616,7 +620,8 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             style={{
               background: "transparent",
               border: 0,
-              padding: 0,
+              minHeight: 40,
+              padding: "0 var(--space-1)",
               cursor: disabledInputs ? "not-allowed" : "pointer",
               color:
                 limit === indicativeCents ? "var(--fg-3)" : "var(--accent)",
@@ -681,6 +686,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           onChange={(e) => setLimit(Number(e.target.value))}
           style={{
             width: "100%",
+            minHeight: 40,
             cursor: disabledInputs ? "not-allowed" : "pointer",
           }}
         />
@@ -730,6 +736,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
                 disabled={disabledInputs}
                 style={{
                   flex: 1,
+                  minHeight: 40,
                   padding: "6px 0",
                   borderRadius: 3,
                   cursor: disabledInputs ? "not-allowed" : "pointer",
@@ -883,6 +890,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         disabled={ctaOff}
         style={{
           marginTop: 2,
+          minHeight: 48,
           padding: "12px 0",
           border: 0,
           borderRadius: 4,
@@ -894,6 +902,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           fontWeight: 600,
           letterSpacing: "0.01em",
           opacity: ctaOff ? 0.55 : 1,
+          transform: submitting ? "translateY(1px)" : "none",
         }}
       >
         {ctaLabel}
@@ -924,6 +933,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
             display: "flex",
             flexDirection: "column",
             gap: 4,
+            minHeight: 40,
             padding: "8px 10px",
             background: "color-mix(in srgb, var(--yes) 12%, transparent)",
             border:
@@ -993,8 +1003,8 @@ function StepButton({
       disabled={disabled}
       aria-label={label === "+" ? "increase batches" : "decrease batches"}
       style={{
-        width: 22,
-        height: 22,
+        width: 40,
+        height: 40,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

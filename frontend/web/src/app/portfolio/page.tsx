@@ -24,6 +24,7 @@ import {
 import { PositionsList } from "@/components/portfolio/positions-list";
 import { RealizedPnlPanel } from "@/components/portfolio/realized-pnl-panel";
 import { RangeTabs } from "@/components/portfolio/range-tabs";
+import { WithdrawalEtas } from "@/components/portfolio/withdrawal-etas";
 import {
   useAccountHydrated,
   useAccountSession,
@@ -155,13 +156,8 @@ function Connected({
       <IdentityHeader publicKeyHex={publicKeyHex} />
 
       <section
+        className="portfolio-hero-grid"
         style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 0.85fr) minmax(0, 1.15fr)",
-          gap: 48,
-          alignItems: "stretch",
-          paddingBottom: "var(--space-5)",
-          borderBottom: "1px solid var(--border-1)",
         }}
       >
         {/* Left: portfolio hero. */}
@@ -181,6 +177,8 @@ function Connected({
           headerRight={<RangeTabs value={range} onChange={setRange} />}
         />
       </section>
+
+      <WithdrawalEtas accountId={accountId} events={history.events} />
 
       {tab === "positions" && (
         <PositionsList
@@ -284,11 +282,13 @@ function Disconnected() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main
+      className="sybil-page-pad"
       style={{
         width: "100%",
         // +36px = markets ClearingTicker height, so the title aligns
         // with /'s "All markets" across pages
-        padding: "calc(var(--space-6) + 36px) var(--space-5) var(--space-9)",
+        paddingTop: "calc(var(--space-6) + 36px)",
+        paddingBottom: "var(--space-9)",
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-4)",

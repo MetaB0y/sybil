@@ -86,16 +86,7 @@ export default function MarketDetailPage({
   return (
     <SelectOutcomeProvider value={selectOutcome}>
       <main
-        style={{
-          width: "100%",
-          // App-shell: fill the viewport below the nav and never scroll as a
-          // whole. The header is fixed; the chart column and the trading rail
-          // each scroll on their own (see the two columns below).
-          height: "calc(100dvh - var(--nav-height))",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
+        className="market-detail-main"
       >
         {marketQ.isPending && <Placeholder>loading market…</Placeholder>}
         {marketQ.isError && (
@@ -108,10 +99,7 @@ export default function MarketDetailPage({
                 state shows in the status pill + the rail's read-only notice, not
                 a separate banner row (which shifted the page). */}
             <div
-              style={{
-                flex: "0 0 auto",
-                padding: "var(--space-6) var(--space-5) 0",
-              }}
+              className="market-detail-header-pad"
             >
               <Header
                 marketId={marketId}
@@ -123,27 +111,10 @@ export default function MarketDetailPage({
             </div>
 
             <div
-              style={{
-                flex: "1 1 auto",
-                minHeight: 0,
-                display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) 420px",
-                gap: "var(--space-6)",
-                padding: "var(--space-6) var(--space-5) 0",
-                overflow: "hidden",
-              }}
+              className="market-detail-grid"
             >
               <div
-                className="no-scrollbar"
-                style={{
-                  minHeight: 0,
-                  overflowY: "auto",
-                  overscrollBehavior: "contain",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-5)",
-                  paddingBottom: "var(--space-5)",
-                }}
+                className="no-scrollbar market-detail-content"
               >
                 <ChartSection marketId={marketId} />
                 <EventHoldings marketId={marketId} />
@@ -207,21 +178,7 @@ function Header({
 
   return (
     <header
-      style={{
-        display: "grid",
-        gridTemplateColumns: "56px 1fr",
-        gap: "var(--space-4)",
-        alignItems: "start",
-        // Full-bleed divider separating the header from the chart/rail split,
-        // mirroring `MarketHeader` in `fed-primitives.jsx:248`. Negative side
-        // margins cancel `<main>`'s padding so the rule spans edge-to-edge.
-        marginLeft: "calc(-1 * var(--space-5))",
-        marginRight: "calc(-1 * var(--space-5))",
-        paddingLeft: "var(--space-5)",
-        paddingRight: "var(--space-5)",
-        paddingBottom: "var(--space-5)",
-        borderBottom: "1px solid var(--border-1)",
-      }}
+      className="market-detail-header"
     >
       <MarketThumb
         marketId={market.market_id}
@@ -280,23 +237,12 @@ function Header({
 
         {/* Title + status pill */}
         <div
+          className="market-detail-title-row"
           style={{
-            display: "flex",
-            alignItems: "baseline",
-            flexWrap: "wrap",
-            gap: "var(--space-3)",
           }}
         >
           <h1
-            style={{
-              fontFamily: "var(--font-display)",
-              fontWeight: 600,
-              fontSize: "var(--fs-32)",
-              lineHeight: "var(--lh-32)",
-              letterSpacing: "var(--track-tight)",
-              margin: 0,
-              color: "var(--fg-1)",
-            }}
+            className="market-detail-title"
           >
             {market.name}
           </h1>
@@ -308,6 +254,7 @@ function Header({
               style={{
                 marginLeft: "auto",
                 flexShrink: 0,
+                minHeight: 40,
                 padding: "8px 16px",
                 borderRadius: "var(--radius-md)",
                 border: 0,
@@ -567,15 +514,8 @@ function ChartSection({ marketId }: { marketId: number }) {
       }}
     >
       <div
+        className="market-detail-chart-head"
         style={{
-          display: "flex",
-          // Top-align + never wrap: the legend chips wrap INSIDE their own
-          // flex:1 column while the range bar stays pinned top-right, so adding
-          // outcomes can't push the 1H/6H/…/ALL bar onto a second row.
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: "var(--space-3)",
-          flexWrap: "nowrap",
         }}
       >
         {outcomes.length > 0 ? (

@@ -29,11 +29,12 @@ export function LeaderboardTable({
   return (
     <section style={{ padding: "26px 24px 40px" }}>
       <div
+        className="leaderboard-grid-table"
         style={{
           background: "var(--surface-1)",
           border: "1px solid var(--border-1)",
           borderRadius: 6,
-          overflow: "hidden",
+          overflowY: "hidden",
         }}
       >
         <Header />

@@ -28,6 +28,7 @@ export function YesNoToggle({
             type="button"
             onClick={() => onChange(s.id)}
             style={{
+              minHeight: 48,
               padding: "14px 0",
               borderRadius: 6,
               cursor: "pointer",

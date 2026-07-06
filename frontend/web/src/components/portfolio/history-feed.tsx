@@ -276,11 +276,12 @@ export function HistoryFeed({ tabs, events, marketsById, isMock }: Props) {
         </Empty>
       ) : (
         <div
+          className="portfolio-grid-table"
           style={{
             background: "var(--surface-1)",
             border: "1px solid var(--border-1)",
             borderRadius: 6,
-            overflow: "hidden",
+            overflowY: "hidden",
           }}
         >
           <div style={rowGrid("var(--fg-4)")}>

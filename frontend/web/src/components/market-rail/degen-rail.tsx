@@ -320,6 +320,7 @@ export function DegenRail({
             disabled={ctaDisabled}
             style={{
               marginTop: 4,
+              minHeight: 52,
               padding: "16px 0",
               borderRadius: 6,
               border: 0,
@@ -331,6 +332,7 @@ export function DegenRail({
               fontWeight: 700,
               letterSpacing: "-0.005em",
               opacity: ctaDisabled ? 0.65 : 1,
+              transform: signing ? "translateY(1px)" : "none",
             }}
           >
             {ctaLabel}

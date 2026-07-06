@@ -83,6 +83,7 @@ function Disconnected() {
         type="button"
         onClick={() => openModal(true)}
         style={{
+          minHeight: 40,
           padding: "10px 18px",
           background: "var(--accent)",
           border: 0,
@@ -103,9 +104,11 @@ function Disconnected() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main
+      className="sybil-page-pad"
       style={{
         width: "100%",
-        padding: "calc(var(--space-6) + 36px) var(--space-5) var(--space-9)",
+        paddingTop: "calc(var(--space-6) + 36px)",
+        paddingBottom: "var(--space-9)",
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-4)",

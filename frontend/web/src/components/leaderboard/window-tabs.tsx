@@ -31,6 +31,7 @@ export function WindowTabs({
             onClick={() => onChange(w)}
             style={{
               padding: "4px 12px",
+              minHeight: 40,
               border: 0,
               borderRadius: 3,
               background: active ? "var(--surface-2)" : "transparent",

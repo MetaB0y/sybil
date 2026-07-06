@@ -212,11 +212,12 @@ export function OpenOrdersList({
         <Empty>No open orders match “{query}”.</Empty>
       ) : (
         <div
+          className="portfolio-grid-table"
           style={{
             background: "var(--surface-1)",
             border: "1px solid var(--border-1)",
             borderRadius: 6,
-            overflow: "hidden",
+            overflowY: "hidden",
           }}
         >
           <div style={rowGrid("var(--fg-4)")}>

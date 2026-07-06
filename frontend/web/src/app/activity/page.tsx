@@ -15,10 +15,14 @@ import { BatchDetail } from "@/components/activity/batch-detail";
 import { ActivityBatchChip } from "@/components/activity/batch-chip";
 import { PageHeader } from "@/components/page-header";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
+import { useArenaFeed } from "@/lib/arena/use-arena-feed";
 
 export default function ActivityPage() {
   const overview = useActivityOverview();
+  const bots = useArenaFeed({ limit: 1 });
   const { rows, isBackfilling } = useBatches(60);
+  const botCount =
+    bots.data?.db_available === true ? (bots.data.stats?.traders ?? null) : null;
 
   return (
     <main
@@ -32,10 +36,11 @@ export default function ActivityPage() {
       }}
     >
       <div
+        className="sybil-page-pad"
         style={{
           // +36px = markets ClearingTicker height, so the title aligns
           // with /'s "All markets" across pages
-          padding: "calc(var(--space-6) + 36px) var(--space-5) 0",
+          paddingTop: "calc(var(--space-6) + 36px)",
         }}
       >
         <PageHeader
@@ -45,7 +50,7 @@ export default function ActivityPage() {
         />
       </div>
 
-      <HeroAllTime allTime={overview.allTime} />
+      <HeroAllTime allTime={overview.allTime} botCount={botCount} />
       <PulseStrip last24h={overview.last24h} />
       <BatchesTable
         rows={rows}

@@ -94,11 +94,12 @@ export function BatchesTable({
       </div>
 
       <div
+        className="activity-grid-table"
         style={{
           background: "var(--surface-1)",
           border: "1px solid var(--border-1)",
           borderRadius: 6,
-          overflow: "hidden",
+          overflowY: "hidden",
         }}
       >
         <Header />

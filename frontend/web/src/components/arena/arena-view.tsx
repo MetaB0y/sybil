@@ -2,11 +2,6 @@
 
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { BlockBarChart } from "@/components/dev/block-bar-chart";
-import type { Tone } from "@/components/dev/primitives/color-text";
-import { DataTable, Td, Th } from "@/components/dev/primitives/data-table";
-import { Panel, PanelBody, PanelHead } from "@/components/dev/primitives/panel";
-import { Pill } from "@/components/dev/primitives/pill";
-import { Stat, StatGrid } from "@/components/dev/primitives/stat";
 import { PageHeader } from "@/components/page-header";
 import {
   articleLabel,
@@ -42,6 +37,7 @@ const controlStyle: CSSProperties = {
   background: "var(--surface-1)",
   color: "var(--fg-1)",
   borderRadius: 6,
+  minHeight: 40,
   padding: "7px 9px",
   fontFamily: "inherit",
   fontSize: 12,
@@ -70,6 +66,255 @@ const emptyMsg: CSSProperties = {
 const EMPTY_SUMMARIES: ArenaBotSummary[] = [];
 const EMPTY_DECISIONS: ArenaDecision[] = [];
 const EMPTY_TOKEN_USAGE: ArenaTokenUsage[] = [];
+
+type Tone = "yes" | "no" | "warn" | "accent" | "dim";
+
+function toneColor(tone: Tone): string {
+  if (tone === "yes") return "var(--yes)";
+  if (tone === "no") return "var(--no)";
+  if (tone === "warn") return "var(--warn)";
+  if (tone === "accent") return "var(--accent)";
+  return "var(--fg-3)";
+}
+
+function Panel({
+  children,
+  style,
+}: {
+  children?: ReactNode;
+  style?: CSSProperties;
+}) {
+  return (
+    <section
+      style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "var(--shadow-inset-top)",
+        overflow: "hidden",
+        ...style,
+      }}
+    >
+      {children}
+    </section>
+  );
+}
+
+function PanelHead({
+  title,
+  actions,
+}: {
+  title: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        padding: "14px 16px",
+        borderBottom: "1px solid var(--border-1)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap",
+      }}
+    >
+      <span className="eyebrow">{title}</span>
+      {actions ? <div>{actions}</div> : null}
+    </div>
+  );
+}
+
+function PanelBody({
+  children,
+  style,
+}: {
+  children?: ReactNode;
+  style?: CSSProperties;
+}) {
+  return <div style={{ padding: 16, ...style }}>{children}</div>;
+}
+
+function Pill({
+  children,
+  tone,
+}: {
+  children?: ReactNode;
+  tone?: Tone;
+}) {
+  const color = tone ? toneColor(tone) : "var(--fg-3)";
+  const bg = tone
+    ? `color-mix(in srgb, ${color} 14%, transparent)`
+    : "var(--fill-subtle)";
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 24,
+        padding: "3px 8px",
+        borderRadius: "var(--radius-pill)",
+        background: bg,
+        color,
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        letterSpacing: "var(--track-wide)",
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function StatGrid({
+  children,
+  style,
+}: {
+  children?: ReactNode;
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))",
+        gap: 10,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: Tone;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border-1)",
+        borderRadius: "var(--radius-lg)",
+        background: "var(--surface-1)",
+        padding: "12px 14px",
+        boxShadow: "var(--shadow-inset-top)",
+      }}
+    >
+      <div className="eyebrow">{label}</div>
+      <div
+        style={{
+          marginTop: 8,
+          fontFamily: "var(--font-mono)",
+          fontSize: 20,
+          color: tone ? toneColor(tone) : "var(--fg-1)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </div>
+      {sub ? <div style={{ ...muted, marginTop: 4 }}>{sub}</div> : null}
+    </div>
+  );
+}
+
+function DataTable({
+  children,
+  maxHeight,
+  minWidth = 760,
+}: {
+  children?: ReactNode;
+  maxHeight?: number | string;
+  minWidth?: number;
+}) {
+  return (
+    <div
+      style={{
+        overflow: "auto",
+        border: "1px solid var(--border-1)",
+        borderRadius: "var(--radius-md)",
+        ...(maxHeight !== undefined ? { maxHeight } : {}),
+      }}
+    >
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          minWidth,
+        }}
+      >
+        {children}
+      </table>
+    </div>
+  );
+}
+
+function Th({
+  children,
+  align = "left",
+}: {
+  children?: ReactNode;
+  align?: "left" | "right";
+}) {
+  return (
+    <th
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 1,
+        background: "var(--surface-2)",
+        color: "var(--fg-3)",
+        fontWeight: 600,
+        fontSize: 10,
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+        padding: "9px 10px",
+        borderBottom: "1px solid var(--border-1)",
+        textAlign: align,
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  tone,
+  align = "left",
+  mono = false,
+}: {
+  children?: ReactNode;
+  tone?: Tone;
+  align?: "left" | "right";
+  mono?: boolean;
+}) {
+  return (
+    <td
+      style={{
+        padding: "9px 10px",
+        borderBottom: "1px solid var(--border-1)",
+        verticalAlign: "top",
+        textAlign: align,
+        color: tone ? toneColor(tone) : undefined,
+        fontFamily: mono ? "var(--font-mono)" : undefined,
+        fontVariantNumeric: mono ? "tabular-nums" : undefined,
+        whiteSpace: mono ? "nowrap" : undefined,
+      }}
+    >
+      {children}
+    </td>
+  );
+}
 
 export function ArenaView() {
   const [selectedTrader, setSelectedTrader] = useState("");
@@ -126,12 +371,8 @@ export function ArenaView() {
 
   return (
     <main
+      className="arena-main"
       style={{
-        minHeight: "100vh",
-        background: "var(--bg-1)",
-        color: "var(--fg-1)",
-        fontFamily: "var(--font-sans)",
-        padding: "var(--space-6) var(--space-5) var(--space-9)",
       }}
     >
       <PageHeader
@@ -157,10 +398,8 @@ export function ArenaView() {
       ) : null}
 
       <StatGrid
-        columns={6}
         style={{
           marginTop: 18,
-          gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))",
         }}
       >
         <Stat
@@ -199,11 +438,8 @@ export function ArenaView() {
       </StatGrid>
 
       <div
+        className="arena-panel-grid"
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-          gap: 12,
-          marginTop: 12,
         }}
       >
         <StrategyPanel rows={strategies} />
@@ -211,11 +447,8 @@ export function ArenaView() {
       </div>
 
       <div
+        className="arena-panel-grid"
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-          gap: 12,
-          marginTop: 12,
         }}
       >
         <EquityCurvePanel
@@ -568,90 +801,97 @@ function BotRosterPanel({
     <Panel style={{ marginTop: 12 }}>
       <PanelHead
         title="Bot Roster"
-        actions={<span style={muted}>click a row to inspect bot history</span>}
+        actions={<span style={muted}>tap a bot to inspect history</span>}
       />
       <PanelBody>
-        <DataTable maxHeight={430} minWidth={1120}>
-          <thead>
-            <tr>
-              <Th>Bot</Th>
-              <Th>Strategy</Th>
-              <Th align="right">Decisions</Th>
-              <Th align="right">Portfolio</Th>
-              <Th align="right">PnL</Th>
-              <Th>Equity Snapshot</Th>
-              <Th>Latest Market</Th>
-              <Th align="right">FV</Th>
-              <Th align="right">Mkt</Th>
-              <Th align="right">Edge</Th>
-              <Th align="right">Orders/Fills</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {summaries.map((bot) => {
-              const active = selectedTrader === bot.trader_name;
-              return (
-                <tr
-                  key={bot.trader_name}
-                  onClick={() =>
-                    onSelectTrader(active ? "" : bot.trader_name)
-                  }
+        <div className="arena-bot-card-grid">
+          {summaries.map((bot) => {
+            const active = selectedTrader === bot.trader_name;
+            const strategy = extractStrategy(bot.trader_name);
+            const edge = edgeTone(bot.latest_edge);
+            return (
+              <button
+                key={bot.trader_name}
+                type="button"
+                onClick={() => onSelectTrader(active ? "" : bot.trader_name)}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  minHeight: 40,
+                  padding: 14,
+                  textAlign: "left",
+                  borderRadius: "var(--radius-lg)",
+                  border: `1px solid ${active ? "var(--accent)" : "var(--border-1)"}`,
+                  background: active
+                    ? "color-mix(in srgb, var(--accent) 9%, var(--surface-1))"
+                    : "var(--surface-1)",
+                  color: "var(--fg-1)",
+                  cursor: "pointer",
+                  boxShadow: "var(--shadow-inset-top)",
+                }}
+              >
+                <div
                   style={{
-                    cursor: "pointer",
-                    background: active ? "var(--surface-2)" : "transparent",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 10,
                   }}
                 >
-                  <td style={truncCell} title={bot.trader_name}>
-                    {bot.trader_name}
-                  </td>
-                  <Td>
-                    <TonePill tone={strategyTone(extractStrategy(bot.trader_name))}>
-                      {extractStrategy(bot.trader_name)}
-                    </TonePill>
-                  </Td>
-                  <Td mono align="right">
-                    {fmtInt(bot.decision_count)}
-                  </Td>
-                  <Td mono align="right">
-                    {money(bot.portfolio_value)}
-                  </Td>
-                  <Td
-                    mono
-                    align="right"
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontFamily: "var(--font-sans)",
+                        fontSize: 14,
+                        fontWeight: 650,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={bot.trader_name}
+                    >
+                      {bot.trader_name}
+                    </div>
+                    <div style={{ ...muted, marginTop: 4 }}>
+                      {bot.latest_market_name ?? "No recent market"}
+                    </div>
+                  </div>
+                  <TonePill tone={strategyTone(strategy)}>{strategy}</TonePill>
+                </div>
+                <EquitySnapshot bot={bot} />
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 8,
+                  }}
+                >
+                  <MiniStat label="Portfolio" value={money(bot.portfolio_value)} />
+                  <MiniStat
+                    label="PnL"
+                    value={money(bot.pnl, true)}
                     tone={(bot.pnl ?? 0) >= 0 ? "yes" : "no"}
-                  >
-                    {money(bot.pnl, true)}
-                  </Td>
-                  <td style={{ ...truncCell, minWidth: 136 }}>
-                    <EquitySnapshot bot={bot} />
-                  </td>
-                  <td style={truncCell} title={bot.latest_market_name ?? ""}>
-                    {bot.latest_market_name ?? "-"}
-                  </td>
-                  <Td mono align="right" tone="yes">
-                    {pct(bot.latest_fair_value)}
-                  </Td>
-                  <Td mono align="right" tone="accent">
-                    {pct(bot.latest_market_price)}
-                  </Td>
-                  <ToneTd mono align="right" tone={edgeTone(bot.latest_edge)}>
-                    {pct(bot.latest_edge)}
-                  </ToneTd>
-                  <Td mono align="right">
-                    {fmtInt(bot.total_orders) + " / " + fmtInt(bot.total_fills)}
-                  </Td>
-                </tr>
-              );
-            })}
-            {summaries.length === 0 ? (
-              <tr>
-                <td colSpan={11} style={emptyMsg}>
-                  No bot roster rows yet.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </DataTable>
+                  />
+                  <MiniStat label="Decisions" value={fmtInt(bot.decision_count)} />
+                  <MiniStat
+                    label="Orders / Fills"
+                    value={fmtInt(bot.total_orders) + " / " + fmtInt(bot.total_fills)}
+                  />
+                  <MiniStat label="FV" value={pct(bot.latest_fair_value)} tone="yes" />
+                  <MiniStat
+                    label="Edge"
+                    value={pct(bot.latest_edge)}
+                    {...(edge ? { tone: edge } : {})}
+                  />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {summaries.length === 0 ? (
+          <div style={emptyMsg}>No bot roster rows yet.</div>
+        ) : null}
       </PanelBody>
     </Panel>
   );
@@ -743,13 +983,7 @@ function ActivityPanel({
           <MiniStat label="24h Volume" value={last24hVolume} />
           <MiniStat label="24h Welfare" value={last24hWelfare} tone="yes" />
         </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-            gap: 12,
-          }}
-        >
+        <div className="arena-panel-grid">
           <Panel>
             <PanelHead title="Recent Volume" />
             <BlockBarChart blocks={blocks} metric="volume" height={220} />
@@ -812,7 +1046,7 @@ function MiniStat({
 }: {
   label: string;
   value: string;
-  tone?: "yes" | "no" | "accent" | "warn";
+  tone?: Tone;
 }) {
   const color =
     tone === "yes"
@@ -1193,10 +1427,8 @@ function DecisionsPanel({
       />
       <PanelBody>
         <div
+          className="arena-decision-grid"
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-            gap: 10,
           }}
         >
           {decisions.map((decision) => (
@@ -1423,25 +1655,6 @@ function TonePill({
   children: ReactNode;
 }) {
   return tone ? <Pill tone={tone}>{children}</Pill> : <Pill>{children}</Pill>;
-}
-
-function ToneTd({
-  tone,
-  children,
-  mono,
-  align,
-}: {
-  tone: Tone | undefined;
-  children: ReactNode;
-  mono?: boolean;
-  align?: "left" | "right";
-}) {
-  const props = {
-    ...(tone ? { tone } : {}),
-    ...(mono == null ? {} : { mono }),
-    ...(align == null ? {} : { align }),
-  };
-  return <Td {...props}>{children}</Td>;
 }
 
 function strategyTone(strategy: ReturnType<typeof extractStrategy>): Tone | undefined {

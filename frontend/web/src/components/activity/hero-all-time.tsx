@@ -17,7 +17,13 @@ import { formatCompactInt, formatInt } from "@/lib/format/nanos";
 import type { AllTimeStats } from "@/lib/activity/types";
 import { Glossary } from "@/components/glossary";
 
-export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
+export function HeroAllTime({
+  allTime,
+  botCount,
+}: {
+  allTime: AllTimeStats;
+  botCount: number | null;
+}) {
   return (
     <section
       style={{
@@ -27,12 +33,7 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
       }}
     >
       <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1fr)",
-          gap: 48,
-          alignItems: "start",
-        }}
+        className="activity-hero-grid"
       >
         {/* Left: two hero numbers — matched volume + welfare, same size */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -79,14 +80,7 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
 
         {/* Right: 2x2 stat grid */}
         <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            columnGap: 36,
-            rowGap: 22,
-            alignSelf: "start",
-            paddingTop: 24,
-          }}
+          className="activity-hero-stats"
         >
           <BigKv
             label="Active traders"
@@ -105,6 +99,12 @@ export function HeroAllTime({ allTime }: { allTime: AllTimeStats }) {
                 : formatCompactInt(allTime.ordersPlacedDistinct)
             }
             sub="distinct, all-time"
+          />
+          <BigKv
+            label="Bots"
+            value={botCount == null ? "—" : formatCompactInt(botCount)}
+            sub="arena agents"
+            accent="var(--accent)"
           />
           <BigKv
             label="Matched orders"

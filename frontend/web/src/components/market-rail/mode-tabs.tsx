@@ -43,6 +43,7 @@ export function ModeTabs({
               alignItems: "center",
               justifyContent: "center",
               gap: 1,
+              minHeight: 48,
               padding: "8px 6px",
               borderRadius: 4,
               border: 0,

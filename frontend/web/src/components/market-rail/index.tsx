@@ -32,7 +32,7 @@ export function MarketRail({ marketId }: { marketId: number }) {
 
   return (
     <aside
-      className="no-scrollbar"
+      className="no-scrollbar market-rail-responsive"
       style={{
         display: "flex",
         flexDirection: "column",
