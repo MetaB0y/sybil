@@ -1827,6 +1827,44 @@ impl Store {
             .map_err(StoreError::from)
     }
 
+    /// Load a newest-first page of historical API replay blocks. When
+    /// `before_height` is present, only blocks with height strictly below that
+    /// cursor are returned.
+    pub async fn load_block_page(
+        &self,
+        before_height: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<SealedBlock>, StoreError> {
+        if limit == 0 || before_height == Some(0) {
+            return Ok(Vec::new());
+        }
+
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(BLOCKS_FULL)?;
+        let mut blocks = Vec::new();
+        match before_height {
+            Some(before) => {
+                for entry in table.range(0..before)?.rev() {
+                    let (_, value) = entry?;
+                    blocks.push(rmp_serde::from_slice(value.value())?);
+                    if blocks.len() >= limit {
+                        break;
+                    }
+                }
+            }
+            None => {
+                for entry in table.iter()?.rev() {
+                    let (_, value) = entry?;
+                    blocks.push(rmp_serde::from_slice(value.value())?);
+                    if blocks.len() >= limit {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(blocks)
+    }
+
     pub fn history_retention_meta(&self) -> Result<HistoryRetentionMeta, StoreError> {
         read_history_retention_meta(&self.db)
     }
@@ -2607,6 +2645,10 @@ impl Store {
         before: Option<(u64, u64)>,
         category: Option<String>,
     ) -> Result<Vec<crate::aggregates::HistoryEvent>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let txn = self.db.begin_read()?;
         let table = txn.open_table(HISTORY_EVENTS)?;
         let lo = history_event_key(account_id, 0, 0);
@@ -2652,6 +2694,10 @@ impl Store {
         limit: usize,
         offset: usize,
     ) -> Result<Vec<AccountFillRecord>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let txn = self.db.begin_read()?;
         let table = txn.open_table(FILL_HISTORY)?;
         let (lo, hi) = fill_history_account_bounds(account_id);
@@ -2686,6 +2732,10 @@ impl Store {
         after: Option<AccountFillCursor>,
         limit: usize,
     ) -> Result<Vec<AccountFillRecord>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let txn = self.db.begin_read()?;
         let table = txn.open_table(FILL_HISTORY)?;
         let (lo, hi) = fill_history_account_bounds(account_id);
@@ -4386,6 +4436,7 @@ mod tests {
         // Reads straight from the durable store, independent of any in-memory recorder.
         let fills = store.account_fills(buyer, None, 10, 0).unwrap();
         assert_eq!(fills.len(), 2, "both persisted fills should be served");
+        assert!(store.account_fills(buyer, None, 0, 0).unwrap().is_empty());
         // Newest-first: block 2 ahead of block 1.
         assert_eq!(fills[0].block_height, 2);
         assert_eq!(fills[1].block_height, 1);
@@ -4394,6 +4445,10 @@ mod tests {
             .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
             .unwrap();
         assert_eq!(forward.len(), 2);
+        assert!(store
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 0)
+            .unwrap()
+            .is_empty());
         assert_eq!(forward[0].block_height, 1);
         assert_eq!(forward[1].block_height, 2);
         let cursor = AccountFillCursor::from_record(&forward[0]);
@@ -4930,6 +4985,7 @@ mod tests {
         let all = store.account_events(aid, 10, None, None).unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].kind, HistoryKind::Filled); // newest first
+        assert!(store.account_events(aid, 0, None, None).unwrap().is_empty());
 
         let trades = store
             .account_events(aid, 10, None, Some("trades".into()))

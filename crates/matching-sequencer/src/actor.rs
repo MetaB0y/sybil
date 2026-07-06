@@ -40,6 +40,7 @@ use crate::{
 };
 
 const SEQUENCER_ACTOR_METRIC_NAME: &str = "sequencer";
+pub const MAX_BLOCK_HISTORY_QUERY_BLOCKS: usize = 500;
 pub const DEFAULT_PRICE_HISTORY_QUERY_POINTS: usize = 500;
 pub const MAX_PRICE_HISTORY_QUERY_POINTS: usize = 5_000;
 
@@ -202,6 +203,11 @@ pub enum SequencerMsg {
     InstallTemplate(
         sybil_oracle::ResolutionTemplate,
         RpcReplyPort<Result<(), SequencerError>>,
+    ),
+    GetBlockPage(
+        Option<u64>,
+        usize,
+        RpcReplyPort<Result<Vec<SealedBlock>, SequencerError>>,
     ),
     GetBlock(u64, RpcReplyPort<Result<SealedBlock, SequencerError>>),
     CreateMarketWithMetadata(
@@ -1938,6 +1944,27 @@ impl Actor for SequencerActor {
             SequencerMsg::InstallTemplate(template, reply) => {
                 let _ = reply.send(state.handle_install_template(template).await);
             }
+            SequencerMsg::GetBlockPage(before_height, limit, reply) => {
+                let limit = limit.min(MAX_BLOCK_HISTORY_QUERY_BLOCKS);
+                let result = match &state.store {
+                    Some(store) => store
+                        .load_block_page(before_height, limit)
+                        .await
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(state
+                        .block_history
+                        .iter()
+                        .rev()
+                        .filter(|block| {
+                            before_height
+                                .is_none_or(|before| block.canonical.header.height < before)
+                        })
+                        .take(limit)
+                        .cloned()
+                        .collect()),
+                };
+                let _ = reply.send(result);
+            }
             SequencerMsg::GetBlock(height, reply) => {
                 let block = state
                     .block_history
@@ -2633,7 +2660,14 @@ impl SequencerHandle {
     }
 
     pub async fn get_latest_block(&self) -> Result<Option<SealedBlock>, SequencerError> {
-        self.read_query(|state| state.latest_block.clone()).await
+        if let Some(block) = self.read_query(|state| state.latest_block.clone()).await? {
+            return Ok(Some(block));
+        }
+
+        let Some(height) = self.get_committed_height().await? else {
+            return Ok(None);
+        };
+        self.get_block(height).await.map(Some)
     }
 
     pub async fn get_committed_height(&self) -> Result<Option<u64>, SequencerError> {
@@ -2882,6 +2916,15 @@ impl SequencerHandle {
                 .collect()
         })
         .await
+    }
+
+    pub async fn get_block_page(
+        &self,
+        before_height: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<SealedBlock>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetBlockPage(before_height, limit, reply))
+            .await?
     }
 
     pub async fn subscribe_blocks(
@@ -4479,6 +4522,19 @@ mod tests {
         assert_eq!(recent.len(), 1, "hot ring should evict block 1");
         assert_eq!(recent[0].canonical.header.height, 2);
 
+        let block_page = handle.get_block_page(None, 10).await.unwrap();
+        assert_eq!(
+            block_page
+                .iter()
+                .map(|block| block.canonical.header.height)
+                .collect::<Vec<_>>(),
+            vec![2, 1],
+            "store-backed page should include blocks outside the hot ring"
+        );
+        let older_page = handle.get_block_page(Some(2), 10).await.unwrap();
+        assert_eq!(older_page.len(), 1);
+        assert_eq!(older_page[0].canonical.header.height, 1);
+
         let evicted = handle.get_block(1).await.unwrap();
         assert_eq!(evicted.canonical.header.height, 1);
         assert_eq!(
@@ -4494,6 +4550,13 @@ mod tests {
             BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
         let reader = SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
 
+        let restored_latest = reader
+            .get_latest_block()
+            .await
+            .unwrap()
+            .expect("latest block should load from durable store after restore");
+        assert_eq!(restored_latest.canonical.header.height, 2);
+
         let stored_block1 = reader.get_block(1).await.unwrap();
         assert_eq!(stored_block1.canonical.header.height, 1);
         assert_eq!(
@@ -4505,6 +4568,14 @@ mod tests {
         assert_eq!(
             stored_block2.canonical.header.state_root,
             block2.canonical.header.state_root
+        );
+        let restored_page = reader.get_block_page(None, 10).await.unwrap();
+        assert_eq!(
+            restored_page
+                .iter()
+                .map(|block| block.canonical.header.height)
+                .collect::<Vec<_>>(),
+            vec![2, 1]
         );
     }
 

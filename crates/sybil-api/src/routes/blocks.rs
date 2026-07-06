@@ -4,29 +4,43 @@ use axum::response::sse::{Event, Sse};
 use axum::response::Response;
 use axum::Json;
 
+use matching_sequencer::MAX_BLOCK_HISTORY_QUERY_BLOCKS;
+
 use crate::convert::block_to_response;
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::BlockResponse;
 
+const DEFAULT_BLOCK_HISTORY_QUERY_BLOCKS: usize = 20;
+
 #[derive(serde::Deserialize)]
 pub struct RecentBlocksQuery {
     limit: Option<usize>,
+    before_height: Option<u64>,
 }
 
-/// GET /v1/blocks?limit=N — last N blocks, newest-first, from in-memory history.
+/// GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 #[utoipa::path(
     get,
     path = "/v1/blocks",
-    params(("limit" = Option<usize>, Query, description = "Recent blocks, newest-first; clamped to history capacity (default 20)")),
-    responses((status = 200, description = "Recent blocks, newest-first", body = [BlockResponse]))
+    params(
+        ("limit" = Option<usize>, Query, description = "Recent blocks, newest-first; default 20, cap 500"),
+        ("before_height" = Option<u64>, Query, description = "Return blocks with height strictly below this cursor")
+    ),
+    responses((status = 200, description = "Blocks newest-first", body = [BlockResponse]))
 )]
 pub async fn get_recent_blocks(
     State(state): State<AppState>,
     Query(q): Query<RecentBlocksQuery>,
 ) -> Result<Json<Vec<BlockResponse>>, AppError> {
-    let limit = q.limit.unwrap_or(20);
-    let blocks = state.sequencer.get_recent_blocks(limit).await?;
+    let limit = q
+        .limit
+        .unwrap_or(DEFAULT_BLOCK_HISTORY_QUERY_BLOCKS)
+        .min(MAX_BLOCK_HISTORY_QUERY_BLOCKS);
+    let blocks = state
+        .sequencer
+        .get_block_page(q.before_height, limit)
+        .await?;
     Ok(Json(blocks.iter().map(block_to_response).collect()))
 }
 

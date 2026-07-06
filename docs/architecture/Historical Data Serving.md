@@ -59,6 +59,11 @@ Implemented so far:
   actor commit path.
 - `GetBlock(height)` checks the hot in-memory ring first, then falls back to
   `blocks_full`.
+- `GET /v1/blocks?before_height=&limit=` pages newest-first from
+  `blocks_full` when a store is configured, and falls back to the bounded hot
+  ring for in-memory dev sequencers. The response shape remains
+  `Vec<BlockResponse>`; clients use the last returned height as the next
+  `before_height` cursor.
 - WebSocket replay with `from_block` uses durable block rows when the requested
   replay starts before the hot ring.
 - `price_points` persists raw mark-price rows by `(market_id, height)` from the
@@ -72,8 +77,8 @@ Implemented so far:
 
 Still planned in this phase:
 
-- `block_summaries` and paginated `GET /v1/blocks`.
-- Retention metadata, pruning, and downsampled candles.
+- Compact `block_summaries` so `GET /v1/blocks` can avoid deserializing full
+  block replay payloads for list pages.
 
 ## Schema Sketch
 
@@ -155,8 +160,8 @@ available; correctness does not depend on pruning catching up immediately.
 Historical reads must be bounded before they allocate:
 
 - `GetBlock(height)` can check the hot ring first, then read `blocks_full`.
-- `GetRecentBlocks(limit)` should become a store-backed page, not a full
-  in-memory ring dump.
+- `GetRecentBlocks(limit, before_height)` is store-backed when redb is
+  configured and falls back to the bounded hot ring in memory-only mode.
 - `GetPriceHistory(market_id, range, limit)` is a range scan over
   `price_points` with a hard cap and `before_height` cursoring.
 - WebSocket replay should page durable blocks in small chunks before switching
@@ -171,14 +176,15 @@ owned by API state while keeping writes sequencer-owned.
 
 Historical APIs should be explicit and bounded:
 
-- `GET /v1/blocks?before_height=&after_height=&limit=`
+- `GET /v1/blocks?before_height=&limit=`
 - `GET /v1/blocks/{height}`
 - `GET /v1/markets/{id}/prices/history?from_ms=&to_ms=&before_height=&limit=`
 - `GET /v1/markets/{id}/prices/candles?resolution=&from_ms=&to_ms=&before_ms=&limit=`
 
 Defaults should be small. Maximum limits should be enforced server-side.
-Responses should include pagination cursors so clients do not ask for "all
-history".
+Responses should include pagination cursors where their shape supports it; the
+legacy `/v1/blocks` array page uses the last returned height as the next
+`before_height` cursor.
 
 Suggested caps:
 

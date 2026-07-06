@@ -13,6 +13,9 @@ use crate::types::request::{CreateAccountRequest, FundAccountRequest, RegisterKe
 use crate::types::response::*;
 use crate::util::now_ms;
 
+const DEFAULT_ACCOUNT_FILL_QUERY_LIMIT: usize = 100;
+const MAX_ACCOUNT_FILL_QUERY_LIMIT: usize = 500;
+
 /// POST /v1/accounts
 #[utoipa::path(
     post,
@@ -180,7 +183,7 @@ pub async fn get_portfolio(
         ("id" = u64, Path, description = "Account ID"),
         ("market_id" = Option<u32>, Query, description = "Filter by market ID"),
         ("after" = Option<String>, Query, description = "Stable cursor returned as `cursor` on each fill. When present, returns fills strictly after this cursor in ascending order. Use `0.0` to start from the beginning."),
-        ("limit" = Option<usize>, Query, description = "Result limit"),
+        ("limit" = Option<usize>, Query, description = "Result limit (default 100, cap 500)"),
         ("offset" = Option<usize>, Query, deprecated, description = "Deprecated offset-from-newest pagination. Ignored when `after` is present."),
     ),
     responses(
@@ -193,7 +196,7 @@ pub async fn get_account_fills(
     Query(params): Query<AccountFillParams>,
 ) -> Result<Json<Vec<AccountFillResponse>>, AppError> {
     let market_id = params.market_id.map(MarketId::new);
-    let limit = params.limit.unwrap_or(100);
+    let limit = account_fill_query_limit(params.limit);
     let fills = if let Some(after) = params.after.as_deref() {
         let cursor = AccountFillCursor::parse(after)
             .ok_or_else(|| AppError::bad_request("Invalid fill cursor"))?;
@@ -310,6 +313,12 @@ pub struct AccountFillParams {
     pub offset: Option<usize>,
 }
 
+fn account_fill_query_limit(limit: Option<usize>) -> usize {
+    limit
+        .unwrap_or(DEFAULT_ACCOUNT_FILL_QUERY_LIMIT)
+        .min(MAX_ACCOUNT_FILL_QUERY_LIMIT)
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct EquityRangeParams {
     /// "24h" | "7d" | "30d" | "all" (default "all").
@@ -357,4 +366,23 @@ pub async fn get_equity(
         account_id: id,
         points,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_fill_query_limit_defaults_and_clamps() {
+        assert_eq!(
+            account_fill_query_limit(None),
+            DEFAULT_ACCOUNT_FILL_QUERY_LIMIT
+        );
+        assert_eq!(account_fill_query_limit(Some(0)), 0);
+        assert_eq!(account_fill_query_limit(Some(42)), 42);
+        assert_eq!(
+            account_fill_query_limit(Some(MAX_ACCOUNT_FILL_QUERY_LIMIT + 1)),
+            MAX_ACCOUNT_FILL_QUERY_LIMIT
+        );
+    }
 }

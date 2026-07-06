@@ -1585,6 +1585,9 @@ async fn fills_paginated_correctly() {
     assert_eq!(page1.as_array().unwrap().len(), 1);
     assert!(page1.as_array().unwrap()[0]["cursor"].as_str().is_some());
 
+    let (_, body) = get(app.clone(), "/v1/accounts/0/fills?limit=0").await;
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
+
     // Paginate: offset=1, limit=1
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills?offset=1&limit=1").await;
     let page2 = parse_json(&body);
@@ -1671,6 +1674,67 @@ async fn recent_blocks_returns_newest_first() {
 
     // limit=0 → empty
     let (status, body) = get(app, "/v1/blocks?limit=0").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn blocks_endpoint_pages_durable_history_beyond_hot_ring() {
+    let (app, handle) = test_app_with_store_config(
+        true,
+        SequencerConfig {
+            block_history_capacity: 1,
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        },
+    )
+    .await;
+
+    let b0 = handle.produce_block().await.unwrap();
+    let b1 = handle.produce_block().await.unwrap();
+    let b2 = handle.produce_block().await.unwrap();
+
+    let (status, body) = get(app.clone(), "/v1/blocks?limit=3").await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = parse_json(&body);
+    let arr = arr.as_array().unwrap();
+    assert_eq!(
+        arr.iter()
+            .map(|block| block["height"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            b2.canonical.header.height,
+            b1.canonical.header.height,
+            b0.canonical.header.height
+        ],
+        "store-backed page should include blocks evicted from the one-block hot ring"
+    );
+
+    let (status, body) = get(
+        app.clone(),
+        &format!(
+            "/v1/blocks?limit=1&before_height={}",
+            b2.canonical.header.height
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let page = parse_json(&body);
+    let page = page.as_array().unwrap();
+    assert_eq!(page.len(), 1);
+    assert_eq!(
+        page[0]["height"].as_u64().unwrap(),
+        b1.canonical.header.height
+    );
+
+    let (status, body) = get(
+        app,
+        &format!(
+            "/v1/blocks?limit=10&before_height={}",
+            b0.canonical.header.height
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(parse_json(&body).as_array().unwrap().is_empty());
 }
