@@ -86,6 +86,23 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 
 ---
 
+## Bot Arena (`/arena`)
+
+| Sybil page | Frontend data (displayed) | Backend data (source) |
+|---|---|---|
+| Bot Arena | Header database status | `GET /v1/bots/decisions?limit=140` → `db_available`, `error`; read-through of `SYBIL_ARENA_DB_PATH` SQLite mounted by `sybil-api` |
+| Bot Arena | Top stats: decision count, bot count, snapshot count, latest decision time | `GET /v1/bots/decisions?limit=140` → `stats.{decisions,traders,snapshots,latest_decision_timestamp}` |
+| Bot Arena | Top stats: arena portfolio value, total PnL, orders/fills | `GET /v1/bots/decisions?limit=140` → `summaries[].{portfolio_value,pnl,total_orders,total_fills}` summed FE-side |
+| Bot Arena | Top stats + LLM usage table: calls, tokens, avg latency, model, estimated cost | `GET /v1/bots/decisions?limit=140` → `token_usage[]`; token totals and estimated cost (`$0.70 / 1M tokens`, matching Streamlit's estimate) are FE-derived. Per-bot USD budget / true provider cost is not exposed. |
+| Bot Arena | Strategy snapshot table (Kelly / Flat / Legacy / Noise) | `GET /v1/bots/decisions?limit=140` → `summaries[]`; strategy classification is FE-derived from `trader_name` (`(Kelly)`, `(Flat)`, `Noise*`) |
+| Bot Arena | Bot roster: name, strategy, decisions, portfolio, PnL, latest market, FV, market price, edge, orders/fills | `GET /v1/bots/decisions?limit=140` → `summaries[]` |
+| Bot Arena | Bot roster "equity snapshot" mini-line | `GET /v1/bots/decisions?limit=140` → `summaries[].{portfolio_value,pnl}`; baseline is FE-derived as `portfolio_value - pnl`. Historical per-bot equity curves from Streamlit's `portfolio_snapshots` table are **not exposed** by the browser API. |
+| Bot Arena | Market activity / welfare mini-stats | `GET /v1/activity/overview` → `all_time` / `last_24h`; `GET /v1/markets/summary` inside `useActivityOverview` for live-market count parity with Activity hook |
+| Bot Arena | Recent volume/fills charts + recent-batch table | `GET /v1/blocks/latest` + `GET /v1/blocks/{height}` backfill via `useDevRecentBlocks`, merged with live store blocks from WS `/v1/blocks/ws`; uses `BlockResponse.{total_volume_nanos,total_welfare_nanos,order_count,fill_count,by_market}` |
+| Bot Arena | Recent decisions reasoning cards (analysis, motivation, orders, source links, FV/market/edge, balance/position, LLM latency) | `GET /v1/bots/decisions?limit=140&trader=` → `decisions[]`; `orders` and `article_urls` are parsed FE-side from JSON values returned by the API |
+
+---
+
 ## Market detail — public (`/m/[id]`)
 
 | Sybil page | Frontend data (displayed) | Backend data (source) |
@@ -169,6 +186,11 @@ Legend: ⚠️ = mocked / not real backend yet · FE-derived = computed client-s
 - **Mocked (no real backend yet):** Activity batch-detail TX hash / sequencer /
   clearing-duration; the `/m-dev` open-batch panel (a real
   `/v1/markets/{id}/open-batch` *is* used on Dev › Aggregates).
+- **Bot Arena gaps inherited from Streamlit:** raw news-feed rows, fair-value
+  drift history, strategy PnL time series, per-trader portfolio snapshot series,
+  and bot-account ids exist in `arena/live/decisions.db` but are not exposed by
+  `/v1/bots/decisions`. The `/arena` page therefore shows current bot snapshots
+  and recent reasoning only; historical equity curves need a backend read model.
 - **In schema but unused by the FE (reads):** `/v1/markets/search`,
   `/v1/markets/{id}/orderbook`, `/v1/markets/{id}/resolution`,
   `/v1/markets/prices/reference`, `/v1/state-root`, `/v1/proofs/state/*`,
