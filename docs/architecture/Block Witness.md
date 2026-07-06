@@ -1,295 +1,369 @@
 ---
-tags: [zk, spec]
+tags: [zk, serialization, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-03
+last_verified: 2026-07-06
 ---
 
-# Block Witness
+# Block Witness Format
 
-The Block Witness is the self-contained input to block verification. The
-sequencer produces one per block and persists the qMDB proof material needed
-for the post-state commitment. The [[Four-Layer Verification]] logic consumes
-the witness today; `sybil-prover` combines it with retained qMDB proofs into
-a portable `StateTransitionProofJob`, then builds OpenVM guest input from
-that job. Everything else in this doc follows from two invariants:
+`BlockWitness` v3 is the canonical private audit package for a Sybil block. The
+sequencer persists it, native verification replays it, and the OpenVM guest
+receives it inside `StateTransitionGuestInput`. The proof binds the witness by
+recomputing `witness_root` from canonical witness bytes and including that root
+in the state-transition public inputs.
 
-1. **Self-contained.** Given a witness and its parent header (or nothing, for
-   genesis), any third party can re-run settlement and verify every claim the
-   block makes — without access to sequencer state, mempool, or history
-   beyond the parent.
-2. **Reproducible.** `apply_fills(pre_state, system_events, fills) == post_state`,
-   and `compute_state_root_with_sidecar(post_state, state_sidecar) ==
-   header.state_root`, and `compute_events_root(system_events, orders,
-   rejections, fills) == header.events_root`. If any equation fails, the
-   witness is invalid.
+The witness proves value-relevant state: order validity, fills, settlement,
+post-state qMDB membership, event-root reconstruction, sidecar transition, and
+L1 deposit checkpoint binding. It does not prove analytics/read-model
+convenience data. `DerivedViewSidecar` is explicitly outside
+`canonical_witness_bytes`, outside `witness_root`, outside `da_commitment`, and
+outside the guest input; it rides beside sealed blocks for API and analytics
+consumers only.
 
-## Rust type
+The SYB-216 design that produced this format is ratified in
+`design/witness-schema-v2.md`. The design name was "v2", but the on-wire format
+version is `3`.
 
-`crates/sybil-verifier/src/types.rs::BlockWitness` holds 17 fields:
+## Encoding
 
-| Field | Purpose |
+`canonical_witness_bytes(witness)` is not Borsh, MessagePack, bincode, or
+OpenVM serde. It is the hand-specified byte vector returned by
+`crates/sybil-verifier/src/witness_schema.rs`, using fixed-width
+little-endian integers, verbatim byte arrays, ASCII domain strings, and
+deterministic sort rules. MessagePack is a storage/transport codec for persisted
+`BlockWitness` records and prepared guest-input files; it is not the commitment
+encoding. `sybil-signing` separately uses Borsh for client signable payloads;
+those signing bytes are not witness commitment bytes.
+
+Primitive encodings:
+
+| Type | Bytes |
 |---|---|
-| `header` | block header being verified |
-| `previous_header` | parent header (or `None` for genesis) |
-| `orders` | orders accepted into this batch, with account mapping |
-| `rejections` | orders rejected, with reasons |
-| `system_events` | state changes applied between blocks (create account, dev deposit, L1 deposit, withdrawal creation, resolution) |
-| `l1_deposits` | private L1 deposit-log prefix through `state_sidecar.bridge.deposit_cursor`, used by the guest to reconstruct the vault checkpoint root |
-| `fills` | real accepted-order fills produced by the solver; synthetic minting fills are not allowed |
-| `clearing_prices` | per-market clearing prices produced by the solver |
-| `total_welfare` | net welfare: gross order-value objective minus settlement-derived `minting_cost` |
-| `minting_cost` | settlement-derived reporting cost from real-fill cash flow and `derive_minting` adjustments |
-| `mm_constraints` | MM budget constraints active this batch |
-| `market_groups` | market group definitions (for complete-set logic) |
-| `pre_state` | account snapshots at block start |
-| `post_system_state` | after system events, before fills |
-| `post_state` | after fills — what the header's `state_root` commits to |
-| `state_sidecar` | non-account state committed by the header's `state_root`: bridge, markets, market groups, resting orders, and reservations |
-| `resolved_markets` | markets resolved/voided; orders/fills must not reference |
+| `u8` | one byte |
+| `u32` | 4-byte little-endian |
+| `u64` | 8-byte little-endian |
+| `i64` | 8-byte little-endian two's complement |
+| `[u8; 20]`, `[u8; 32]` | verbatim |
+| `MarketId` | inner `u32` little-endian |
+| `Nanos`, `Qty` | inner `u64` little-endian |
 
-The sequencer builds this in `matching-sequencer::sequencer` at the end of
-each block. Sequencer tests run the 4-layer verifier over it; `matching-sim`
-builds a witness and runs the match layer.
-`sybil-prover` is the prover-input boundary; its `sequencer-store` feature
-consumes a committed witness plus qMDB proofs from storage and emits
-`StateTransitionProofJob`, while the default builder consumes only that
-portable job and produces `StateTransitionGuestInput` for `sybil-zk`.
+## Layout
 
-Minting/burning is not encoded as synthetic orders or synthetic fills. The
-solver may use minting variables internally to discover welfare-maximizing
-fills and clearing prices, but the witness records only real participant
-orders/fills. Settlement verification independently replays those fills, derives
-the required protocol counterparty adjustment, checks the reserved MINT account
-in `post_state`, and checks that `minting_cost` equals the shared
-settlement-derived reporting cost. Layer 1 welfare verification then checks
-`total_welfare = gross_order_value - minting_cost`.
+The first byte is the format version. For v3 it is `0x03`.
 
-## ZK public/private partition
-
-In a SNARK, witness fields split into **public inputs** (available to every
-verifier, checked against on-chain commitments) and **private inputs** (only
-seen inside the circuit, never exposed).
-
-| Field | Public or private |
-|---|---|
-| `header` | public |
-| `previous_header` | public (just its hash, really) |
-| `clearing_prices` | public |
-| `resolved_markets` | public |
-| `total_welfare`, `minting_cost` | public |
-| `header.order_count`, `header.fill_count` | public |
-| `orders` (individual, including expiry) | private |
-| `rejections` | private |
-| `system_events` (individual) | private (shape is public via events_root; bridge public inputs carry deposit/withdrawal commitments separately) |
-| `l1_deposits` | private (the guest proves the prefix root equals public `depositRoot`/`depositCount` and that credited L1 deposit events match included leaves) |
-| `fills` (individual) | private (shape is public via events_root) |
-| `mm_constraints`, `market_groups` | private |
-| `pre_state`, `post_system_state`, `post_state` | private |
-| `state_sidecar` | private (deposit root/count, withdrawal commitments, market status, and selected market/order/reservation claims can be exposed through dedicated proof public inputs where needed) |
-
-Rationale: the public side is "what was the market's observable outcome" —
-clearing prices, how many orders, welfare. The private side is "which
-specific users did what" — individual orders, fills, balances. Selective-reveal
-ZK proofs (see [[Proof Architecture]] and future "Selective Reveal ZK" doc)
-let an account-holder reveal their own slice without exposing anyone else's.
-
-The `events_root` is a public qMDB commitment over the private event list,
-which is how external verifiers can prove "fill F happened in block N" without
-seeing the whole witness.
-
-## Canonical witness bytes
-
-Under [[Canonical Serialization]], the witness encodes as a fixed outer layout
-with variable-length sections, each prefixed with `count:u64`.
-
-```
-witness_bytes =
-    version:u8 = 0x02
- || header_bytes                                              (120 bytes, see Canonical Serialization)
- || previous_header_tag:u8                                    (0x00 = none, 0x01 = present)
- || previous_header_bytes?                                    (120 bytes if present)
- || section[orders]
- || section[rejections]
- || section[system_events]
- || section[l1_deposits]
- || section[fills]
- || section[clearing_prices]                                  (see below)
+```text
+canonical_witness_bytes =
+    version:u8 = 0x03
+ || header
+ || previous_header_tag:u8                     // 0 = none, 1 = present
+ || previous_header?                           // if tag == 1
+ || orders_section
+ || rejections_section
+ || system_events_section
+ || deposit_accumulator
+ || fills_section
+ || clearing_prices_section
  || total_welfare:i64
  || minting_cost:i64
- || section[mm_constraints]
- || section[market_groups]
- || section[pre_state]
- || section[post_system_state]
- || section[post_state]
- || state_sidecar_section
- || section[resolved_markets]
+ || mm_constraints_section
+ || market_groups_section
+ || pre_state_section
+ || post_system_state_section
+ || post_state_section
+ || state_sidecar                              // post non-account state
+ || pre_state_sidecar                          // pre non-account state
+ || resolved_markets_section
 ```
 
-Where `section[T]` = `count:u64 || item_bytes<T> * count`, items in canonical
-sort order (specified below). `section[clearing_prices]` is the only irregular
-one because it's a map:
+`header` and `previous_header` have the same 120-byte layout:
 
-```
-clearing_prices_section =
-    market_count:u64
- || (market_id:u32 || outcome_count:u32 || price:u64 * outcome_count) * market_count
-```
-
-with markets sorted by `market_id` ascending and prices in outcome order.
-
-**Item encodings** are defined by [[Canonical Serialization]] and the
-executable schema in `crates/sybil-verifier/src/witness_schema.rs`:
-
-| Section | Item encoding | Sort order |
-|---|---|---|
-| `orders` | accepted-order event leaf bytes | by `order.order_id` ascending |
-| `rejections` | rejected-order event leaf bytes | by `order.order_id` ascending |
-| `system_events` | `SystemEventWitness` (tag-dispatched like events registry) | by emission order |
-| `l1_deposits` | L1 deposit leaf inputs plus cumulative post-deposit root | by append order, with `deposit_id == index + 1` |
-| `fills` | `Fill` (see Canonical Serialization) | solver output order (stable) |
-| `mm_constraints` | `MmConstraint` canonical bytes | by `mm_id` ascending |
-| `market_groups` | `MarketGroup` canonical bytes | by first market_id, then name |
-| `pre_state`, `post_system_state`, `post_state` | `AccountSnapshot` (see Canonical Serialization) | by `id` ascending |
-| `state_sidecar` | `StateSidecarSnapshot` (see Canonical Serialization) | market, market-group, withdrawal, order, and reservation leaves by id ascending |
-| `resolved_markets` | `market_id:u32` | by `market_id` ascending |
-
-`witness_root = BLAKE3("sybil/witness" || witness_bytes)`. The implemented
-schema lives in `crates/sybil-verifier/src/witness_schema.rs` and is exposed
-through `sybil_verifier::commitments::witness_schema`.
-
-## `witness_root` in the block header
-
-Today the block header commits to `state_root`, `events_root`, and
-`parent_hash`. It does **not** commit to the full witness. That means the
-sequencer could produce an internally consistent block while feeding a
-different non-event witness section to downstream verifiers. The verifier
-would catch state/event mismatches, but the full witness package itself is not
-cryptographically anchored.
-
-The OpenVM state-transition public inputs now include `witness_root`, and the
-guest recomputes it from the private `BlockWitness`. This binds the proof to a
-canonical full witness package, but the root is still not part of the block
-header hash chain until the header extension below lands.
-
-**Proposal - witness root.** Add `witness_root` to the header:
-
-```
-BlockHeader =
+```text
+header =
     height:u64
- || parent_hash:[u8; 32]
- || state_root:[u8; 32]
- || events_root:[u8; 32]
- || witness_root:[u8; 32]
+ || parent_hash:[u8;32]
+ || state_root:[u8;32]
+ || events_root:[u8;32]
  || order_count:u32
  || fill_count:u32
  || timestamp_ms:u64
 ```
 
-Chaining hash uses a domain-separation prefix `"sybil/block-header"` so the
-extended header has explicit bytes.
+Sections are `count:u64 || item_bytes * count`, except where noted:
 
-This would make the full witness a first-class part of the commitment chain.
-Anyone who trusts the header transitively trusts the witness, and the
-sequencer can no longer equivocate about non-event witness data without
-changing the header.
-
-## Format Changes
-
-- The witness bytes begin with a format byte. The shape in this doc uses
-  `0x02`; implementations MUST reject unknown format bytes. `0x02` adds the
-  private `l1_deposits` prefix section after `system_events`.
-- Before launch, changing the witness layout updates the format byte, hash
-  domain, and verifier together.
-- Adding a purely observational field that the verifier ignores must be an
-  explicitly skipped trailing section.
-
-## Size budget
-
-Order-of-magnitude estimate for a mid-sized block (1k orders, 2k fills, 500
-accounts touched with ~5 positions each):
-
-| Section | ~Bytes |
-|---|---|
-| Header + prev_header | 176 |
-| 1k orders (est. 64B each) | 64,000 |
-| 2k fills (52B each) | 104,000 |
-| 3× account snapshots × 500 × ~80B | 120,000 |
-| Other | ~10,000 |
-| **Total** | **~300 KB** |
-
-At 1 block per 2s, that's ~13 GB/day of witness data. Most of it is highly
-compressible (canonical bytes are regular). Whether to post the full witness
-to DA or only a recovery-oriented subset is part of [[Data Availability]] and
-future operator-replacement design. The current proof binds the canonical
-witness payload into `da_commitment` but does not yet require a specific DA
-provider.
-
-## Relation to events and state roots
-
-Three hash roots in play, each with a different scope:
-
-| Root | Scope | Primary consumer |
+| Section | Item bytes | Order |
 |---|---|---|
-| `state_root` | complete typed validium state | ZK settlement, bridge claims, recovery checks |
-| `events_root` | qMDB event log for everything that happened in this block | external verifiers asking "did F happen" |
-| `witness_root` | the full audit package | prover; anyone reconstructing the block |
+| `orders` | `order_accepted_leaf_value` | sort by `order.id` |
+| `rejections` | `order_rejected_leaf_value` | sort by `order.id` |
+| `system_events` | `system_event_leaf_value` | witness emission order |
+| `fills` | `fill_leaf_value` | solver/witness order |
+| `mm_constraints` | `mm_id:u64`, `max_capital:u64`, sorted `order_ids`, sorted `(order_id, side)` | sort by `mm_id` |
+| `market_groups` | `name`, sorted `markets` | sort by first market id, then name |
+| `pre_state`, `post_system_state`, `post_state` | `"sybil/witness/account"` plus account fields | sort by account id |
+| `resolved_markets` | `market_id:u32` | sort by market id |
 
-They're complementary. A minimal on-chain commitment would include only
-`state_root` (chain-valid) + `witness_root` (auditable) and use `events_root`
-as a caller-supplied input to prove derived claims. Exact layout is decided
-in [[Proof Architecture]], [[L1 Settlement and Vault]], and the Data
-Availability RFC (sibling, M3).
+`clearing_prices_section` is:
 
-Order expiry lives in the private `orders` section. The verifier can check
-that an order included in a batch is eligible for `header.height`. [[State Root Schema]]
-also commits post-block active resting orders, so presence or absence of an
-order is provable against `state_root` instead of being only an implementation
-and witness property.
+```text
+market_count:u64
+|| (market_id:u32 || outcome_count:u32 || price:u64 * outcome_count) * market_count
+```
 
-## Test vectors
+Markets are sorted by `market_id`; prices are in outcome order.
 
-Minimal genesis witness: zero accounts, zero orders, zero fills. Expected
-`state_root` is the native qMDB root over the default typed state leaves.
-With the genesis header in [[Canonical Serialization]] test vector 3,
-expected `witness_root = BLAKE3("sybil/witness" || witness_bytes)`. The
-current executable vectors live in `sybil-zk`'s public-input golden test and
-`sybil-verifier`'s `witness_schema` tests.
+`state_sidecar` starts with the ASCII domain
+`"sybil/witness/state-sidecar"`. `pre_state_sidecar` uses the same field
+encoding with the distinct domain `"sybil/witness/pre-state-sidecar"`. Each
+sidecar carries bridge state, markets sorted by `market_id`, market groups
+sorted by `group_id`, resting orders sorted by `order.id`, and account
+reservations sorted by `account_id`. Bridge state is:
 
-## Open questions
+```text
+deposit_cursor:u64
+|| deposit_root:[u8;32]
+|| next_withdrawal_id:u64
+|| withdrawal_count:u64
+|| withdrawal_bytes * withdrawal_count          // sorted by withdrawal_id
+```
 
-1. **Full witness on DA or just root?** Posting 13 GB/day to Celestia is
-   viable; posting it to Arweave is not. Two tiers of DA (root on L1, full
-   witness on a cheaper layer) is probably the answer but needs the Data
-   Availability RFC (sibling, M3) to close.
-2. **Should the witness be split into public/private Rust structs?** The
-   partition table in §3 lives only in prose today. Enforcing it at the type
-   level (a `WitnessPublic` + `WitnessPrivate` pair, combined into
-   `BlockWitness` for the sequencer's convenience) would make ZK compilation
-   mechanical. Good idea; worth a dedicated follow-up.
-3. **`post_system_state` redundancy.** It's recoverable from `pre_state +
-   system_events`. Keeping it in the witness is convenient for the verifier
-   but inflates bytes and proof-generation time. Could be dropped once the
-   verifier is robust.
-## Where this lives
+## Deposit Accumulator
 
-> `crates/sybil-verifier/src/types.rs` — `BlockWitness`, `WitnessBlockHeader`, `AccountSnapshot`
-> `crates/matching-sequencer/src/block.rs` — `produce_block` builds the witness and imports the shared header hash
-> `crates/sybil-verifier/src/block.rs` — `verify_block` runs Layer 3 checks against the witness
-> `crates/sybil-verifier/src/event_schema.rs` — canonical event leaves
-> `crates/sybil-verifier/src/event_commitment.rs` — native keyless-qMDB `events_root`
-> `crates/sybil-verifier/src/witness_schema.rs` — canonical full witness bytes
-> `crates/sybil-zk/src/header_hash_impl.rs` — shared header hash source
-> `crates/sybil-zk/src/lib.rs` — `witness_root` computation and public input binding
+v3 replaces the old cumulative `l1_deposits` prefix with a block-start frontier
+plus this-block delta:
 
-## See also
+```text
+deposit_accumulator =
+    "sybil/witness/deposit-accumulator"
+ || pre_frontier:[u8;32] * 32
+ || pre_count:u64
+ || new_deposits_count:u64
+ || l1_deposit_witness * new_deposits_count
 
-- [[Canonical Serialization]] — the byte spec this doc builds on
-- [[State Root Schema]] — normative spec for the `state_root` field
-- [[State Root and Parent Hash]] — concept intro for state root and chaining
-- [[Proof Architecture]] — events_root + authenticated data layer
-- [[L1 Settlement and Vault]] — how witness-backed roots drive bridge custody
-- [[Four-Layer Verification]] — current consumer of the witness
-- [[ZK Integration Path]] — future consumer (the prover)
-- [[Block Lifecycle]] — where in block production the witness is built
+l1_deposit_witness =
+    "sybil/witness/l1-deposit"
+ || deposit_id:u64
+ || chain_id:u64
+ || vault_address:[u8;20]
+ || token_address:[u8;20]
+ || sender:[u8;20]
+ || sybil_account_key:[u8;32]
+ || amount_token_units:u64
+ || deposit_root:[u8;32]
+```
+
+Semantics:
+
+- `pre_frontier` is the 32-level filled-subtree frontier at block start.
+- `pre_count` must equal `pre_state_sidecar.bridge.deposit_cursor`.
+- `deposit_root_from_frontier(pre_frontier, pre_count)` must equal
+  `pre_state_sidecar.bridge.deposit_root`.
+- `new_deposits[i].deposit_id` must equal `pre_count + i + 1`.
+- Folding `new_deposits` onto `pre_frontier` with
+  `deposit_frontier_prefix_roots` must produce every claimed per-deposit
+  `deposit_root`; the last folded root, or the pre root for an empty delta, must
+  equal `state_sidecar.bridge.deposit_root` and public `deposit_root`.
+- The number of new deposits must advance the post cursor:
+  `pre_count + new_deposits.len() == state_sidecar.bridge.deposit_cursor`.
+- Credited `SystemEventWitness::L1Deposit` events must match the delta by id,
+  cumulative root, bridge account key, and token-unit-to-nanos amount.
+
+The recurrence is intentionally equivalent to `SybilVault._appendDepositLeaf`.
+Solidity hashes deposit leaves as
+`keccak256(abi.encode("sybil/l1-deposit/v1", chainid, vault, depositId, token, sender, key, amount))`,
+wraps tree leaves as `keccak256(0x00 || leaf)`, hashes internal nodes as
+`keccak256(0x01 || left || right)`, and appends through `filledSubtrees` for
+depth 32. The Rust mirror in `sybil-l1-protocol` uses the same leaf, node, and
+frontier fold.
+
+## Hashing
+
+`hash_header` has one source home:
+`crates/sybil-zk/src/header_hash_impl.rs`. It is included by `sybil-zk` and
+`sybil-verifier` so the guest, host, and verifier share one byte layout.
+
+`witness_root`:
+
+```text
+witness_bytes = canonical_witness_bytes(witness)
+witness_root = BLAKE3("sybil/witness" || witness_bytes)
+```
+
+`public_input_hash`:
+
+```text
+state_transition_public_input_hash =
+    keccak256(abi.encode(
+        "sybil/openvm/state-transition/v1",
+        previous_height,
+        new_height,
+        previous_state_root,
+        new_state_root,
+        block_hash,
+        events_root,
+        witness_root,
+        da_commitment,
+        deposit_root,
+        deposit_count
+    ))
+```
+
+`da_commitment`:
+
+```text
+witness_bytes = canonical_witness_bytes(witness)
+witness_root = BLAKE3("sybil/witness" || witness_bytes)
+payload_root = BLAKE3(
+    "sybil/da/witness-payload/v1"
+ || payload_len:u64_le
+ || witness_bytes
+)
+provider_refs_hash =
+    BLAKE3("sybil/da/provider-refs/empty/v1")             // empty refs
+    or
+    BLAKE3(
+        "sybil/da/provider-refs/v1"
+     || ref_count:u64_le
+     || (ref_len:u64_le || ref_bytes) * ref_count
+    )                                                     // non-empty refs
+da_commitment = BLAKE3(
+    "sybil/da-commitment/v1"
+ || block_height:u64_le
+ || state_root
+ || witness_root
+ || payload_root
+ || payload_len:u64_le
+ || provider_refs_hash
+)
+```
+
+The `StateTransitionPublicInputs` copied from the witness are:
+`previous_height`, `new_height`, `previous_state_root`, `new_state_root`,
+`block_hash`, `events_root`, `witness_root`, `da_commitment`, `deposit_root`,
+and `deposit_count`. The guest verifies this binding before returning the
+public-input hash.
+
+## Pre-State Authentication
+
+For non-genesis blocks, the verifier authenticates the full pre-state snapshot:
+
+```text
+compute_state_root_with_sidecar(pre_state, pre_state_sidecar)
+    == previous_header.state_root
+```
+
+Then it checks parent hash chaining:
+
+```text
+hash_header(previous_header) == header.parent_hash
+```
+
+For genesis, `previous_header` is absent; the genesis header must have zero
+`parent_hash` and height `1`.
+
+The post-state sidecar is authenticated separately by:
+
+```text
+compute_state_root_with_sidecar(post_state, state_sidecar)
+    == header.state_root
+```
+
+## Versioning And Compatibility
+
+The version byte is the first byte of `canonical_witness_bytes`. v3 is `0x03`.
+Unknown versions must fail closed. This repo does not maintain dual witness
+decoders for devnet schema changes; the ratified SYB-216 design rejects v2/v3
+coexistence because it doubles consensus-critical encoder surface.
+
+Any change to `canonical_witness_bytes`, verifier logic compiled by the guest,
+deposit binding, public-input marshalling, or the guest's path-dependency
+closure changes the OpenVM guest commitment. The required procedure is:
+
+1. Land the schema/guest change as a deliberate batch.
+2. Regenerate golden vectors.
+3. Rebuild the guest commitment with `just openvm-commit`.
+4. Commit the regenerated `zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json`
+   and baseline artifact.
+5. Run `scripts/zk-guest-fingerprint.sh --write`, then
+   `scripts/zk-guest-fingerprint.sh --check`.
+6. Repin or redeploy `OpenVmVerifierAdapter` with the new commitments.
+7. Fresh-genesis the devnet. Do not attempt in-place state migration.
+
+For a mid-testnet witness change, the compatibility strategy is the same:
+batch the breaking witness and guest changes deliberately, repin commitments,
+regenerate goldens, redeploy, and start a fresh genesis. Old witness bytes are
+not accepted by a new guest, and a new guest is not accepted by an old adapter
+pin.
+
+## Golden Pins
+
+| Pin | Current value | Test or artifact |
+|---|---:|---|
+| Witness format byte | `3` | `witness_schema::WITNESS_FORMAT_VERSION` |
+| Empty canonical witness length | `1533` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
+| Byte-identity canonical witness length | `3665` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
+| Byte-identity witness SHA-256 length-prefixed digest | `58ee8b130fe44b652bbc5e0839b4b62b083073b27008862f1cc65d021c528f6f` | same byte-identity test |
+| Empty public-input hash | `7f5c4e2b71f3a647ce5311054b4a3d731be05b4d949d9fb6ec0201e37aeea074` | `public_input_hash_golden` |
+| OL-4 Solidity/Rust public-input hash vector | `42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` | Rust test plus `contracts/test/SybilGoldenVectors.t.sol` |
+| Current `app_exe_commit` | `0x007d494ee05284a028069d5eacdeed7c4da134c4838cc6daffcfe5ed0703e0bf` | committed OpenVM `commit.json` and lock |
+| Current `app_vm_commit` | `0x0026ab66d716f85bcf60b89ee1d7ce192253a7452935f2ee0e4b6880b6154e3b` | committed OpenVM `commit.json` and lock |
+
+The L1 deposit leaf/root vectors live in both
+`crates/sybil-l1-protocol/src/lib.rs` and
+`contracts/test/SybilGoldenVectors.t.sol`. They pin the Solidity/Rust
+equivalence for deposit leaves, tree leaves, prefix roots, and selected
+frontier slots.
+
+## Sources Appendix
+
+Concrete claims above were cross-checked against these source ranges:
+
+| Claim area | Source |
+|---|---|
+| `BlockWitness` field set and v3 `deposit_accumulator`/`pre_state_sidecar` fields | `crates/sybil-verifier/src/types.rs:16-60` |
+| `DepositAccumulatorWitness` field semantics and default depth | `crates/sybil-verifier/src/types.rs:176-194` |
+| Format version byte `3` and first-byte placement | `crates/sybil-verifier/src/witness_schema.rs:16-21` |
+| Exact top-level field order | `crates/sybil-verifier/src/witness_schema.rs:18-74` |
+| Header byte order | `crates/sybil-verifier/src/witness_schema.rs:77-85`; `crates/sybil-zk/src/header_hash_impl.rs:1-10` |
+| Clearing-price map encoding | `crates/sybil-verifier/src/witness_schema.rs:87-98` |
+| MM constraint encoding and sort | `crates/sybil-verifier/src/witness_schema.rs:100-132` |
+| Market-group encoding and sort | `crates/sybil-verifier/src/witness_schema.rs:134-163` |
+| Account sections sorted by id | `crates/sybil-verifier/src/witness_schema.rs:165-172` |
+| Deposit-accumulator byte layout | `crates/sybil-verifier/src/witness_schema.rs:174-192` |
+| Empty witness length `1533` | `crates/sybil-verifier/src/witness_schema.rs:199-233` |
+| Snapshot sidecar domains and sort rules | `crates/sybil-verifier/src/snapshot_schema.rs:244-300` |
+| Primitive LE append helpers | `crates/sybil-verifier/src/snapshot_schema.rs:302-340` |
+| Event section order and leaf encodings | `crates/sybil-verifier/src/event_schema.rs:8-21`, `29-151` |
+| Native event root is keyless qMDB over section-order event bytes | `crates/sybil-verifier/src/event_commitment.rs:1-5`, `43-67`, `86-105` |
+| Pre-state sidecar authentication | `crates/sybil-verifier/src/block.rs:90-117` |
+| Post-state root authentication | `crates/sybil-verifier/src/block.rs:63-75` |
+| Genesis parent/height rule | `crates/sybil-verifier/src/block.rs:129-146` |
+| Native deposit accumulator verification | `crates/sybil-verifier/src/sidecar.rs:370-483` |
+| Guest public input binding and deposit checkpoint checks | `crates/sybil-zk/src/lib.rs:496-580`, `585-758` |
+| `witness_root`, DA payload root, provider-ref hash, and `da_commitment` formulas | `crates/sybil-zk/src/lib.rs:346-466` |
+| Public-input hash formula and field order | `crates/sybil-zk/src/lib.rs:328-344` |
+| Public inputs derived from witness | `crates/sybil-zk/src/lib.rs:468-493` |
+| OpenVM guest consumes `StateTransitionGuestInput` and reveals public-input hash | `zk/openvm-guest/src/main.rs:4-26` |
+| MessagePack/OpenVM transport distinction | `zk/openvm-tools/src/main.rs:22-30`, `92-113`; `crates/matching-sequencer/src/store.rs:112-115`, `874-875` |
+| `sybil-signing` Borsh signable payloads | `crates/sybil-signing/src/lib.rs:1-4`, `75-94` |
+| `DerivedViewSidecar` outside witness/root/DA/guest | `crates/matching-sequencer/src/block.rs:78-88`, `147-163` |
+| L1 deposit domain, tree depth, frontier alias, leaf/node hashing, and frontier fold | `crates/sybil-l1-protocol/src/lib.rs:11-22`, `133-153`, `156-260` |
+| Solidity vault deposit append recurrence | `contracts/src/SybilVault.sol:43-52`, `140-158`, `298-328`, `348-363` |
+| Solidity/Rust deposit and public-input golden vectors | `contracts/test/SybilGoldenVectors.t.sol:82-109`, `122-179`; `crates/sybil-l1-protocol/src/lib.rs:481-659`; `crates/sybil-zk/src/lib.rs:1450-1477` |
+| Public-input and DA tests | `crates/sybil-zk/src/lib.rs:1439-1545` |
+| Byte-identity witness length and digest | `crates/sybil-verifier/src/byte_identity.rs:20-50` |
+| Current OpenVM commitment values | `zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json:1-4`; `zk/openvm-guest/guest.commitment.lock.json:1-7` |
+| Guest source fingerprint and repin workflow | `scripts/zk-guest-fingerprint.sh:1-43`, `123-168`, `171-229`; `zk/openvm-guest/README.md:16-35`, `63-83` |
+| Fresh-genesis policy | `docs/runbooks/devnet-redeploy.md:31-38`, `76-93`, `116-134` |
+| SYB-216 rationale: derived-view outside witness, frontier not MMR, no dual decoders | `design/witness-schema-v2.md:73-103`, `300-327`, `340-376`, `422-443`, `462-476` |
+
+## See Also
+
+- [[Canonical Serialization]]
+- [[State Root Schema]]
+- [[State Root and Parent Hash]]
+- [[Four-Layer Verification]]
+- [[ZK Integration Path]]
+- [[L1 Settlement and Vault]]
+- [[Data Availability]]
+- [[Block Lifecycle]]
