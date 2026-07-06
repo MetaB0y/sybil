@@ -767,7 +767,6 @@ pub async fn revoke_key(
     let target = parse_signer(&req.target_pubkey_hex)?;
     let target_bytes = target.compressed_bytes();
     let signer = parse_signer(&req.signer_pubkey_hex)?;
-    let canonical = canonical_key_revocation_bytes(account_id, &target_bytes, req.nonce);
 
     match req.auth_scheme {
         AuthScheme::RawP256 => {
@@ -781,6 +780,16 @@ pub async fn revoke_key(
             state.sequencer.revoke_signing_key_signed(signed).await?;
         }
         AuthScheme::WebAuthn => {
+            // Revocation canonical bytes are domain-separated by genesis_hash
+            // (SYB-231); the signed (raw P256) path checks this in the actor,
+            // the WebAuthn path binds it here at the API edge.
+            let genesis_hash = state
+                .sequencer
+                .get_genesis_hash()
+                .await?
+                .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
+            let canonical =
+                canonical_key_revocation_bytes(account_id, &target_bytes, req.nonce, genesis_hash);
             verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
                 .await?;
             state

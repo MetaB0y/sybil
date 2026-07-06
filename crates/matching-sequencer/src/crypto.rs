@@ -372,12 +372,16 @@ pub fn canonical_profile_update_bytes(
 }
 
 /// Canonical bytes for a signed signing-key revocation (SYB-60).
+///
+/// Domain-separated by `genesis_hash` (SYB-231), mirroring orders/cancels
+/// (SYB-224) and key registrations (SYB-229).
 pub fn canonical_key_revocation_bytes(
     account_id: crate::account::AccountId,
     target_pubkey: &[u8],
     nonce: u64,
+    genesis_hash: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_key_revocation_bytes(account_id.0, target_pubkey, nonce)
+    sybil_signing::canonical_key_revocation_bytes(genesis_hash, account_id.0, target_pubkey, nonce)
 }
 
 /// Canonical bytes for a signed read API-key creation (SYB-60).
@@ -435,9 +439,19 @@ pub fn verify_signed_profile_update(signed: &SignedProfileUpdate) -> Result<(), 
 }
 
 /// Verify a signed signing-key revocation's P256 ECDSA signature (SYB-60).
-pub fn verify_signed_key_revocation(signed: &SignedKeyRevocation) -> Result<(), SequencerError> {
-    let msg =
-        canonical_key_revocation_bytes(signed.account_id, &signed.target_pubkey, signed.nonce);
+///
+/// Domain-separated by `genesis_hash` (SYB-231) so a captured revocation cannot
+/// replay against a fresh-genesis redeploy.
+pub fn verify_signed_key_revocation(
+    signed: &SignedKeyRevocation,
+    genesis_hash: [u8; 32],
+) -> Result<(), SequencerError> {
+    let msg = canonical_key_revocation_bytes(
+        signed.account_id,
+        &signed.target_pubkey,
+        signed.nonce,
+        genesis_hash,
+    );
     signed
         .signer
         .0
@@ -662,9 +676,10 @@ pub fn sign_key_revocation(
     account_id: crate::account::AccountId,
     target_pubkey: Vec<u8>,
     nonce: u64,
+    genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> SignedKeyRevocation {
-    let msg = canonical_key_revocation_bytes(account_id, &target_pubkey, nonce);
+    let msg = canonical_key_revocation_bytes(account_id, &target_pubkey, nonce, genesis_hash);
     let signature: Signature = key.sign(&msg);
     SignedKeyRevocation {
         account_id,
@@ -1010,6 +1025,32 @@ mod tests {
 
         assert!(matches!(
             verify_signed_cancel(&signed, OTHER_GENESIS_HASH),
+            Err(SequencerError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn test_sign_verify_key_revocation_roundtrip() {
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let target = vec![0x02u8; 33];
+        let signed =
+            sign_key_revocation(crate::account::AccountId(7), target, 3, GENESIS_HASH, &key);
+        assert!(verify_signed_key_revocation(&signed, GENESIS_HASH).is_ok());
+    }
+
+    #[test]
+    fn test_key_revocation_genesis_hash_is_signature_covered() {
+        // SYB-231: a revocation signed under one genesis must not verify under
+        // another, so a captured revocation cannot replay across a redeploy.
+        let key =
+            <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
+        let target = vec![0x02u8; 33];
+        let signed =
+            sign_key_revocation(crate::account::AccountId(7), target, 3, GENESIS_HASH, &key);
+
+        assert!(matches!(
+            verify_signed_key_revocation(&signed, OTHER_GENESIS_HASH),
             Err(SequencerError::InvalidSignature)
         ));
     }

@@ -72,9 +72,13 @@ struct ProfileUpdate {
 ///
 /// `target_pubkey` is the 33-byte compressed SEC1 point of the key being
 /// revoked. Covering it by signature prevents a relay from redirecting the
-/// revocation at a different key.
+/// revocation at a different key. Like orders/cancels (SYB-224) and key
+/// registrations (SYB-229), the payload is domain-separated by `genesis_hash`
+/// (SYB-231) so a revocation signature cannot be replayed onto a different
+/// chain/genesis after a fresh-genesis redeploy.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct KeyRevocation {
+    genesis_hash: GenesisHash,
     account_id: u64,
     target_pubkey: Vec<u8>,
     nonce: u64,
@@ -196,13 +200,16 @@ pub fn canonical_profile_update_bytes(
 /// Canonical bytes for a signed signing-key revocation (SYB-60).
 ///
 /// `target_pubkey` must be the 33-byte compressed SEC1 encoding of the key
-/// being revoked.
+/// being revoked. Domain-separated by `genesis_hash` (SYB-231), mirroring
+/// orders/cancels (SYB-224) and key registrations (SYB-229).
 pub fn canonical_key_revocation_bytes(
+    genesis_hash: GenesisHash,
     account_id: u64,
     target_pubkey: &[u8],
     nonce: u64,
 ) -> Vec<u8> {
     borsh::to_vec(&KeyRevocation {
+        genesis_hash,
         account_id,
         target_pubkey: target_pubkey.to_vec(),
         nonce,
@@ -450,12 +457,42 @@ mod tests {
     }
 
     #[test]
-    fn key_revocation_bytes_cover_target_and_nonce() {
-        let a = canonical_key_revocation_bytes(3, &[0x02; 33], 5);
-        assert_eq!(a, canonical_key_revocation_bytes(3, &[0x02; 33], 5));
-        assert_ne!(a, canonical_key_revocation_bytes(3, &[0x03; 33], 5));
-        assert_ne!(a, canonical_key_revocation_bytes(3, &[0x02; 33], 6));
-        assert_ne!(a, canonical_key_revocation_bytes(4, &[0x02; 33], 5));
+    fn key_revocation_snapshot() {
+        // Stable vector mirrored by the TS canonical encoder parity fixtures
+        // (frontend/web/src/lib/auth/__tests__/canonical-settings.test.ts).
+        let target = vec![0x02u8; 33];
+        insta::assert_snapshot!(
+            "key_revocation",
+            hex::encode(canonical_key_revocation_bytes(GENESIS_HASH, 7, &target, 42))
+        );
+    }
+
+    #[test]
+    fn key_revocation_bytes_cover_genesis_target_and_nonce() {
+        let a = canonical_key_revocation_bytes(GENESIS_HASH, 3, &[0x02; 33], 5);
+        assert_eq!(
+            a,
+            canonical_key_revocation_bytes(GENESIS_HASH, 3, &[0x02; 33], 5)
+        );
+        // genesis_hash is signature-covered (SYB-231) so a captured revocation
+        // cannot replay against a fresh-genesis redeploy.
+        assert_ne!(
+            a,
+            canonical_key_revocation_bytes([0xcd; 32], 3, &[0x02; 33], 5),
+            "genesis_hash must be covered"
+        );
+        assert_ne!(
+            a,
+            canonical_key_revocation_bytes(GENESIS_HASH, 3, &[0x03; 33], 5)
+        );
+        assert_ne!(
+            a,
+            canonical_key_revocation_bytes(GENESIS_HASH, 3, &[0x02; 33], 6)
+        );
+        assert_ne!(
+            a,
+            canonical_key_revocation_bytes(GENESIS_HASH, 4, &[0x02; 33], 5)
+        );
     }
 
     #[test]

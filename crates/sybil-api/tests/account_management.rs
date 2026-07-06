@@ -267,6 +267,7 @@ async fn revoke_last_key_is_refused_but_second_key_can_be_revoked() {
         AccountId(account_id),
         &hex::decode(&target).unwrap(),
         nonce,
+        genesis,
     ));
     let (status, body) = post_json(
         app.clone(),
@@ -296,6 +297,7 @@ async fn revoke_last_key_is_refused_but_second_key_can_be_revoked() {
         AccountId(account_id),
         &hex::decode(&agent_hex).unwrap(),
         nonce,
+        genesis,
     ));
     let (status, _) = post_json(
         app.clone(),

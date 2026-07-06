@@ -170,8 +170,12 @@ const PROFILE_UPDATE_SCHEMA = {
   },
 };
 
+// SYB-231: signing-key revocation. Domain-separated by genesis_hash like
+// orders/cancels (SYB-224) and key registration (SYB-229). Field ORDER matches
+// `KeyRevocation` in the Rust signing crate.
 const KEY_REVOCATION_SCHEMA = {
   struct: {
+    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
     account_id: "u64",
     target_pubkey: { array: { type: "u8" } },
     nonce: "u64",
@@ -238,15 +242,19 @@ export function canonicalProfileUpdateBytes(
 /**
  * Canonical bytes for a signed signing-key revocation (SYB-60). Mirrors
  * `KeyRevocation`. `targetPubkey` must be the 33 raw compressed SEC1 bytes of
- * the key being revoked (use `fromHex` on the target hex).
+ * the key being revoked (use `fromHex` on the target hex). Domain-separated by
+ * `genesisHash` (SYB-231), mirroring orders/cancels (SYB-224) and key
+ * registration (SYB-229).
  */
 export function canonicalKeyRevocationBytes(
   accountId: bigint,
   targetPubkey: Uint8Array,
   nonce: bigint,
+  genesisHash: Uint8Array,
 ): Uint8Array {
   return new Uint8Array(
     serialize(KEY_REVOCATION_SCHEMA as never, {
+      genesis_hash: encodeGenesisHash(genesisHash),
       account_id: accountId,
       target_pubkey: targetPubkey,
       nonce,

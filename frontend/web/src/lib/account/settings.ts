@@ -176,10 +176,12 @@ export async function revokeSigningKey(
   args: RevokeSigningKeyArgs,
 ): Promise<void> {
   const nonce = args.nonce ?? nextReplayNonce(args.accountId);
+  const genesisHash = await getGenesisHashBytes();
   const canonical = canonicalKeyRevocationBytes(
     BigInt(args.accountId),
     fromHex(args.targetPubkeyHex),
     nonce,
+    genesisHash,
   );
 
   const body = {

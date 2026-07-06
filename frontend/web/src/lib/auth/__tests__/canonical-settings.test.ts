@@ -73,22 +73,42 @@ describe("canonicalProfileUpdateBytes", () => {
   });
 });
 
-describe("canonicalKeyRevocationBytes", () => {
-  const target = fromHex("02" + "ab".repeat(32)); // 33-byte compressed pubkey
+describe("canonicalKeyRevocationBytes (SYB-231)", () => {
+  const genesis = fromHex("ab".repeat(32));
+  const target = fromHex("02".repeat(33)); // 33-byte compressed pubkey
 
-  it("encodes account_id, Vec<u8> (len prefix + bytes), nonce", () => {
-    const got = toHex(canonicalKeyRevocationBytes(7n, target, 42n));
-    // Vec<u8> = u32 LE length (33 = 0x21) + the 33 raw bytes.
-    const expected = u64le(7n) + "21000000" + toHex(target) + u64le(42n);
+  it("matches the Rust insta snapshot (key_revocation.snap)", () => {
+    // Verbatim from
+    // crates/sybil-signing/src/snapshots/sybil_signing__tests__key_revocation.snap
+    // Inputs: genesis=[0xab;32], account_id=7, target=[0x02;33], nonce=42.
+    const expected =
+      "ab".repeat(32) +
+      u64le(7n) +
+      "21000000" +
+      "02".repeat(33) +
+      u64le(42n);
+    const got = toHex(canonicalKeyRevocationBytes(7n, target, 42n, genesis));
     expect(got).toBe(expected);
   });
 
-  it("is deterministic and covers the target bytes", () => {
-    const a = toHex(canonicalKeyRevocationBytes(7n, target, 42n));
-    const b = toHex(canonicalKeyRevocationBytes(7n, target, 42n));
+  it("encodes genesis, account_id, Vec<u8> (len prefix + bytes), nonce", () => {
+    const got = toHex(canonicalKeyRevocationBytes(7n, target, 42n, genesis));
+    // 32-byte genesis, then account_id, then Vec<u8> len (33 = 0x21) + bytes.
+    const expected =
+      "ab".repeat(32) + u64le(7n) + "21000000" + toHex(target) + u64le(42n);
+    expect(got).toBe(expected);
+  });
+
+  it("is deterministic and covers genesis and the target bytes", () => {
+    const a = toHex(canonicalKeyRevocationBytes(7n, target, 42n, genesis));
+    const b = toHex(canonicalKeyRevocationBytes(7n, target, 42n, genesis));
     expect(a).toBe(b);
+    const otherGenesis = fromHex("cd".repeat(32));
+    expect(a).not.toBe(
+      toHex(canonicalKeyRevocationBytes(7n, target, 42n, otherGenesis)),
+    );
     const other = fromHex("03" + "cd".repeat(32));
-    expect(a).not.toBe(toHex(canonicalKeyRevocationBytes(7n, other, 42n)));
+    expect(a).not.toBe(toHex(canonicalKeyRevocationBytes(7n, other, 42n, genesis)));
   });
 });
 

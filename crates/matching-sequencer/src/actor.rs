@@ -2001,7 +2001,14 @@ impl SequencerActorState {
         &mut self,
         signed: SignedKeyRevocation,
     ) -> Result<(), SequencerError> {
-        verify_signed_key_revocation(&signed)?;
+        // Domain-separate the revocation signature by the chain genesis (SYB-231),
+        // exactly like the signed key-registration path, so a captured revocation
+        // cannot replay against a fresh-genesis redeploy.
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        verify_signed_key_revocation(&signed, genesis_hash)?;
         self.handle_authenticated_key_revocation(AuthenticatedKeyRevocation {
             account_id: signed.account_id,
             target_pubkey: signed.target_pubkey,
@@ -5099,6 +5106,38 @@ mod tests {
                 genesis_a,
                 &signing_key,
             ))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SequencerError::InvalidSignature));
+    }
+
+    #[tokio::test]
+    async fn test_signed_key_revocation_replay_across_fresh_genesis_rejected() {
+        // SYB-231: a revocation signed under genesis A must be rejected by a
+        // fresh store with genesis B, mirroring the order-replay guard.
+        let (mut seq_a, _) = make_test_sequencer();
+        let (mut seq_b, aid_b) = make_test_sequencer();
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        let target_bytes = pubkey.compressed_bytes();
+        seq_b.register_pubkey(aid_b, pubkey).unwrap();
+
+        seq_a.produce_block(Vec::new(), 1_000);
+        seq_b.produce_block(Vec::new(), 2_000);
+        let genesis_a = seq_a.genesis_hash().unwrap();
+        let genesis_b = seq_b.genesis_hash().unwrap();
+        assert_ne!(genesis_a, genesis_b);
+
+        let handle_b = SequencerHandle::spawn(seq_b);
+        // Revocation signed under genesis A replayed against genesis-B store.
+        let signed =
+            crate::crypto::sign_key_revocation(aid_b, target_bytes, 1, genesis_a, &signing_key);
+        let err = handle_b
+            .revoke_signing_key_signed(signed)
             .await
             .unwrap_err();
         assert!(matches!(err, SequencerError::InvalidSignature));
