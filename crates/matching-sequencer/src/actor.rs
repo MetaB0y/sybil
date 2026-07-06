@@ -19,7 +19,9 @@ use sybil_oracle::{
 
 use crate::account::{Account, AccountId};
 use crate::block::{BlockProduction, SealedBlock};
-use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf};
+use crate::bridge::{
+    BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf,
+};
 use crate::crypto::{
     verify_signed_bridge_withdrawal, verify_signed_cancel, verify_signed_order, AccountAuthScheme,
     AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedOrder, PublicKey,
@@ -177,6 +179,10 @@ pub enum SequencerMsg {
     ),
     CreateAuthenticatedBridgeWithdrawal(
         AuthenticatedBridgeWithdrawal,
+        RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,
+    ),
+    ApplyBridgeWithdrawalL1Event(
+        BridgeWithdrawalL1Event,
         RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,
     ),
     RegisterPubkey(
@@ -1697,6 +1703,13 @@ impl SequencerActorState {
         self.sequencer.request_bridge_withdrawal(request)
     }
 
+    async fn handle_bridge_withdrawal_l1_event(
+        &mut self,
+        event: BridgeWithdrawalL1Event,
+    ) -> Result<WithdrawalLeaf, SequencerError> {
+        self.sequencer.apply_bridge_withdrawal_l1_event(event)
+    }
+
     async fn handle_signed_bridge_withdrawal(
         &mut self,
         signed: SignedBridgeWithdrawal,
@@ -1997,6 +2010,9 @@ impl Actor for SequencerActor {
                         .handle_authenticated_bridge_withdrawal(authenticated)
                         .await,
                 );
+            }
+            SequencerMsg::ApplyBridgeWithdrawalL1Event(event, reply) => {
+                let _ = reply.send(state.handle_bridge_withdrawal_l1_event(event).await);
             }
             SequencerMsg::RegisterPubkey(account_id, pubkey, auth_scheme, reply) => {
                 let _ = reply.send(
@@ -2854,6 +2870,14 @@ impl SequencerHandle {
         authenticated: AuthenticatedBridgeWithdrawal,
     ) -> Result<WithdrawalLeaf, SequencerError> {
         self.rpc(|reply| SequencerMsg::CreateAuthenticatedBridgeWithdrawal(authenticated, reply))
+            .await?
+    }
+
+    pub async fn apply_bridge_withdrawal_l1_event(
+        &self,
+        event: BridgeWithdrawalL1Event,
+    ) -> Result<WithdrawalLeaf, SequencerError> {
+        self.rpc(|reply| SequencerMsg::ApplyBridgeWithdrawalL1Event(event, reply))
             .await?
     }
 

@@ -181,6 +181,18 @@ impl SybilClient {
         self.decode(resp).await
     }
 
+    pub async fn submit_l1_withdrawal_event(
+        &self,
+        req: &SubmitL1WithdrawalEventRequest,
+    ) -> Result<BridgeWithdrawalResponse, Error> {
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/bridge/withdrawals/l1-events")))
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
     pub async fn create_bridge_withdrawal(
         &self,
         req: &CreateBridgeWithdrawalRequest,

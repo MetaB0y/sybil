@@ -8,13 +8,13 @@ import {ISybilVaultDepositRoots} from "./interfaces/ISybilVaultDepositRoots.sol"
 import {SybilTypes} from "./SybilTypes.sol";
 
 contract SybilSettlement is SybilAccessControl, ISybilSettlement {
-    bytes32 public constant PAUSER_ROLE = keccak256("SYBIL_PAUSER_ROLE");
-    bytes32 public constant VERIFIER_ADMIN_ROLE = keccak256("SYBIL_VERIFIER_ADMIN_ROLE");
+    bytes32 public constant OP_SET_VERIFIER = keccak256("sybil/settlement/set-verifier/v1");
+    bytes32 public constant OP_SET_VAULT = keccak256("sybil/settlement/set-vault/v1");
 
     IOpenVmVerifierAdapter public verifier;
     ISybilVaultDepositRoots public vault;
     uint32 public verifierVersion;
-    bool public rootSubmissionsPaused;
+    bool public paused;
 
     uint64 public latestHeight;
     bytes32 public latestStateRoot;
@@ -36,7 +36,8 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
     );
     event VerifierUpgraded(uint32 indexed version, address verifier);
     event VaultSet(address indexed vault);
-    event RootSubmissionsPaused(bool paused);
+    event Paused(address indexed admin);
+    event Unpaused(address indexed admin);
 
     error InvalidProof();
     error UnknownStateRoot(bytes32 stateRoot);
@@ -45,40 +46,60 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
     error NonMonotonicDepositCount(uint64 latestCount, uint64 providedCount);
     error DepositRootMismatch(bytes32 expectedRoot, bytes32 providedRoot);
     error RootAlreadyAccepted(bytes32 stateRoot, uint64 height);
-    error RootSubmissionPaused();
+    error ContractPaused();
     error VaultNotSet();
 
     constructor(
         address admin,
-        IOpenVmVerifierAdapter initialVerifier
-    ) SybilAccessControl(admin) {
+        IOpenVmVerifierAdapter initialVerifier,
+        uint64 initialAdminActionDelay
+    ) SybilAccessControl(admin, initialAdminActionDelay) {
         if (address(initialVerifier) == address(0)) revert ZeroAddress();
         verifier = initialVerifier;
         verifierVersion = 1;
-        _grantRole(PAUSER_ROLE, admin);
-        _grantRole(VERIFIER_ADMIN_ROLE, admin);
         emit VerifierUpgraded(verifierVersion, address(initialVerifier));
     }
 
     function setVault(
         ISybilVaultDepositRoots newVault
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    ) external onlyAdmin {
         if (address(newVault) == address(0)) revert ZeroAddress();
+        if (address(vault) != address(0)) {
+            _consumeTimelock(OP_SET_VAULT, abi.encode(newVault));
+        }
         vault = newVault;
         emit VaultSet(address(newVault));
     }
 
-    function setRootSubmissionsPaused(
-        bool paused
-    ) external onlyRole(PAUSER_ROLE) {
-        rootSubmissionsPaused = paused;
-        emit RootSubmissionsPaused(paused);
+    function proposeVault(
+        ISybilVaultDepositRoots newVault
+    ) external onlyAdmin returns (bytes32 id) {
+        if (address(newVault) == address(0)) revert ZeroAddress();
+        return _proposeTimelock(OP_SET_VAULT, abi.encode(newVault));
+    }
+
+    function pause() external onlyAdmin {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function unpause() external onlyAdmin {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
+    function proposeVerifier(
+        IOpenVmVerifierAdapter newVerifier
+    ) external onlyAdmin returns (bytes32 id) {
+        if (address(newVerifier) == address(0)) revert ZeroAddress();
+        return _proposeTimelock(OP_SET_VERIFIER, abi.encode(newVerifier));
     }
 
     function setVerifier(
         IOpenVmVerifierAdapter newVerifier
-    ) external onlyRole(VERIFIER_ADMIN_ROLE) {
+    ) external onlyAdmin {
         if (address(newVerifier) == address(0)) revert ZeroAddress();
+        _consumeTimelock(OP_SET_VERIFIER, abi.encode(newVerifier));
         verifier = newVerifier;
         verifierVersion += 1;
         emit VerifierUpgraded(verifierVersion, address(newVerifier));
@@ -88,7 +109,7 @@ contract SybilSettlement is SybilAccessControl, ISybilSettlement {
         SybilTypes.StateTransitionPublicInputs calldata inputs,
         bytes calldata proof
     ) external {
-        if (rootSubmissionsPaused) revert RootSubmissionPaused();
+        if (paused) revert ContractPaused();
         if (address(vault) == address(0)) revert VaultNotSet();
 
         if (inputs.previousHeight != latestHeight) {

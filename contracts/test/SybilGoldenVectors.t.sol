@@ -28,7 +28,8 @@ contract SybilVaultDepositHarness is SybilVault {
             ISybilSettlement(SETTLEMENT_ADDRESS),
             IOpenVmVerifierAdapter(VERIFIER_ADDRESS),
             1 days,
-            7 days
+            7 days,
+            2 days
         )
     {}
 
@@ -116,7 +117,7 @@ contract SybilGoldenVectorsTest {
         vm.etch(VAULT_ADDRESS, address(template).code);
         vault = SybilVaultDepositHarness(VAULT_ADDRESS);
         vault.initializeDepositTreeForTest();
-        settlement = new SybilSettlement(address(this), IOpenVmVerifierAdapter(VERIFIER_ADDRESS));
+        settlement = new SybilSettlement(address(this), IOpenVmVerifierAdapter(VERIFIER_ADDRESS), 2 days);
     }
 
     function testDepositLeafAndPrefixRootsMatchRustGoldenVectors() public {

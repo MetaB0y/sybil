@@ -41,6 +41,36 @@ pub struct BridgeWithdrawalRequest {
     pub expiry_height: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum L1WithdrawalStatus {
+    #[default]
+    NotRequested,
+    Queued,
+    Finalized,
+    Cancelled,
+}
+
+impl L1WithdrawalStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRequested => "not_requested",
+            Self::Queued => "queued",
+            Self::Finalized => "finalized",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BridgeWithdrawalL1Event {
+    pub nullifier: Bytes32,
+    pub status: L1WithdrawalStatus,
+    pub event_at_unix: u64,
+    pub executable_at_unix: Option<u64>,
+    pub tx_hash: Option<Bytes32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WithdrawalLeaf {
     pub withdrawal_id: u64,
@@ -52,6 +82,18 @@ pub struct WithdrawalLeaf {
     pub expiry_height: u64,
     pub nullifier: Bytes32,
     pub created_at_height: u64,
+    #[serde(default)]
+    pub l1_status: L1WithdrawalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_requested_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_executable_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_finalized_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_cancelled_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_tx_hash: Option<Bytes32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -106,6 +148,8 @@ pub enum BridgeError {
         expiry_height: u64,
         next_height: u64,
     },
+    #[error("unknown withdrawal nullifier {0:?}")]
+    UnknownWithdrawalNullifier(Bytes32),
 }
 
 pub fn account_key(account_id: AccountId) -> Bytes32 {

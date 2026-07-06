@@ -40,6 +40,7 @@ use crate::util::now_ms;
         routes::bridge::submit_l1_deposit,
         routes::bridge::create_withdrawal,
         routes::bridge::create_signed_withdrawal,
+        routes::bridge::submit_l1_withdrawal_event,
         routes::bridge::get_withdrawal,
         routes::markets::list_markets,
         routes::markets::list_markets_summary,
@@ -81,6 +82,7 @@ use crate::util::now_ms;
         CreateAccountRequest,
         FundAccountRequest,
         SubmitL1DepositRequest,
+        SubmitL1WithdrawalEventRequest,
         CreateBridgeWithdrawalRequest,
         CreateSignedBridgeWithdrawalRequest,
         RegisterKeyRequest,
@@ -96,6 +98,7 @@ use crate::util::now_ms;
         SubmitSignedOrderRequest,
         CancelSignedOrderRequest,
         AuthScheme,
+        BridgeWithdrawalL1Status,
         WebAuthnAssertion,
         WebAuthnRegistration,
         SetReferencePricesRequest,
@@ -573,6 +576,10 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "POST",
+        path: "/v1/bridge/withdrawals/l1-events",
+    },
+    RouteMount {
+        method: "POST",
         path: "/v1/markets",
     },
     RouteMount {
@@ -807,6 +814,10 @@ fn service_routes() -> Router<AppState> {
         .route(
             "/v1/bridge/withdrawals/signed",
             axum::routing::post(routes::bridge::create_signed_withdrawal),
+        )
+        .route(
+            "/v1/bridge/withdrawals/l1-events",
+            axum::routing::post(routes::bridge::submit_l1_withdrawal_event),
         )
         .route(
             "/v1/markets",

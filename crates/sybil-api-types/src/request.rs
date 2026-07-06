@@ -87,6 +87,34 @@ pub struct CreateSignedBridgeWithdrawalRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
+pub enum BridgeWithdrawalL1Status {
+    #[default]
+    NotRequested,
+    Queued,
+    Finalized,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SubmitL1WithdrawalEventRequest {
+    /// Withdrawal nullifier emitted by SybilVault.
+    pub nullifier_hex: String,
+    /// Queue state observed from the vault event.
+    pub status: BridgeWithdrawalL1Status,
+    /// Event timestamp from the vault event, in Unix seconds.
+    pub event_at_unix: u64,
+    /// Finalization ETA emitted by the vault, in Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_at_unix: Option<u64>,
+    /// L1 transaction hash carrying the event, if indexed from logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tx_hash_hex: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
 pub enum AuthScheme {
     /// Raw P256 ECDSA over Sybil canonical bytes.
     #[default]

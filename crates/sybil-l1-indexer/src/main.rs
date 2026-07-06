@@ -5,14 +5,17 @@ use clap::Parser;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sybil_api_types::request::SubmitL1DepositRequest;
+use sybil_api_types::request::{
+    BridgeWithdrawalL1Status, SubmitL1DepositRequest, SubmitL1WithdrawalEventRequest,
+};
 use sybil_api_types::response::{
-    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse,
+    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse, BridgeWithdrawalResponse,
 };
 use sybil_client::SybilClient;
 use sybil_l1_protocol::{
-    deposit_received_topic0, deposit_root_by_count_calldata, parse_deposit_received_log, Bytes32,
-    EthAddress, L1Log, L1ProtocolError,
+    deposit_received_topic0, deposit_root_by_count_calldata, parse_deposit_received_log,
+    parse_withdrawal_event_log, withdrawal_cancelled_topic0, withdrawal_finalized_topic0,
+    withdrawal_queued_topic0, Bytes32, EthAddress, L1Log, L1ProtocolError, WithdrawalEvent,
 };
 use tokio::time::sleep;
 
@@ -179,6 +182,12 @@ struct IndexedDeposit {
     event: sybil_l1_protocol::DepositReceived,
 }
 
+#[derive(Clone, Debug)]
+struct IndexedWithdrawalEvent {
+    log: EthLog,
+    event: WithdrawalEvent,
+}
+
 /// Persisted scan cursor. Stored alongside the targeted vault/chain so a cursor
 /// left over from a different deployment is rejected rather than silently reused.
 #[derive(Debug, Serialize, Deserialize)]
@@ -193,6 +202,12 @@ struct CursorState {
 trait L1Rpc {
     async fn block_number(&self) -> Result<u64>;
     async fn deposit_logs(
+        &self,
+        vault: EthAddress,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Vec<EthLog>>;
+    async fn withdrawal_logs(
         &self,
         vault: EthAddress,
         from_block: u64,
@@ -216,6 +231,10 @@ trait DepositSink {
         &self,
         req: &SubmitL1DepositRequest,
     ) -> Result<BridgeDepositResponse>;
+    async fn submit_l1_withdrawal_event(
+        &self,
+        req: &SubmitL1WithdrawalEventRequest,
+    ) -> Result<BridgeWithdrawalResponse>;
 }
 
 struct HttpL1Rpc {
@@ -242,6 +261,27 @@ impl L1Rpc for HttpL1Rpc {
             "toBlock": quantity_hex(to_block),
             "address": format!("0x{}", hex::encode(vault)),
             "topics": [topic0],
+        });
+        rpc_call(&self.client, &self.rpc_url, "eth_getLogs", json!([filter])).await
+    }
+
+    async fn withdrawal_logs(
+        &self,
+        vault: EthAddress,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Vec<EthLog>> {
+        let topics = [
+            withdrawal_queued_topic0(),
+            withdrawal_finalized_topic0(),
+            withdrawal_cancelled_topic0(),
+        ]
+        .map(|topic| format!("0x{}", hex::encode(topic)));
+        let filter = json!({
+            "fromBlock": quantity_hex(from_block),
+            "toBlock": quantity_hex(to_block),
+            "address": format!("0x{}", hex::encode(vault)),
+            "topics": [topics],
         });
         rpc_call(&self.client, &self.rpc_url, "eth_getLogs", json!([filter])).await
     }
@@ -282,6 +322,13 @@ impl DepositSink for SybilClient {
         req: &SubmitL1DepositRequest,
     ) -> Result<BridgeDepositResponse> {
         Ok(SybilClient::submit_l1_deposit(self, req).await?)
+    }
+
+    async fn submit_l1_withdrawal_event(
+        &self,
+        req: &SubmitL1WithdrawalEventRequest,
+    ) -> Result<BridgeWithdrawalResponse> {
+        Ok(SybilClient::submit_l1_withdrawal_event(self, req).await?)
     }
 }
 
@@ -364,7 +411,14 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
         .into_iter()
         .map(indexed_deposit_from_log)
         .collect::<Result<Vec<_>>>()?;
+    let mut withdrawal_events = l1
+        .withdrawal_logs(vault_address, next_from, to)
+        .await?
+        .into_iter()
+        .map(indexed_withdrawal_event_from_log)
+        .collect::<Result<Vec<_>>>()?;
     sort_deposits(&mut deposits);
+    sort_withdrawal_events(&mut withdrawal_events);
 
     let status = sink.bridge_status().await?;
     let mut cursor = status.deposit_cursor;
@@ -420,6 +474,31 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
             "l1.indexer.deposit_ingested"
         );
         cursor = deposit.event.deposit_id;
+    }
+
+    for event in withdrawal_events {
+        let request = withdrawal_event_request(&event);
+        match sink.submit_l1_withdrawal_event(&request).await {
+            Ok(response) => {
+                tracing::info!(
+                    withdrawal_id = response.withdrawal_id,
+                    nullifier = response.nullifier_hex,
+                    l1_status = ?request.status,
+                    executable_at_unix = request.executable_at_unix,
+                    tx = event.log.transaction_hash.as_deref().unwrap_or_default(),
+                    "l1.indexer.withdrawal_status_ingested"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    nullifier = request.nullifier_hex,
+                    l1_status = ?request.status,
+                    tx = event.log.transaction_hash.as_deref().unwrap_or_default(),
+                    "l1.indexer.withdrawal_status_ignored"
+                );
+            }
+        }
     }
 
     Ok(Some(to.saturating_add(1)))
@@ -500,6 +579,20 @@ fn indexed_deposit_from_log(log: EthLog) -> Result<IndexedDeposit> {
     Ok(IndexedDeposit { log, event })
 }
 
+fn indexed_withdrawal_event_from_log(log: EthLog) -> Result<IndexedWithdrawalEvent> {
+    let l1_log = L1Log {
+        address: parse_hex_array(&log.address, "log.address")?,
+        topics: log
+            .topics
+            .iter()
+            .map(|topic| parse_hex_array(topic, "log.topic"))
+            .collect::<Result<Vec<Bytes32>>>()?,
+        data: parse_hex_bytes(&log.data, "log.data")?,
+    };
+    let event = parse_withdrawal_event_log(&l1_log)?;
+    Ok(IndexedWithdrawalEvent { log, event })
+}
+
 fn sort_deposits(deposits: &mut [IndexedDeposit]) {
     deposits.sort_by_key(|deposit| {
         (
@@ -517,6 +610,65 @@ fn sort_deposits(deposits: &mut [IndexedDeposit]) {
                 .unwrap_or(u64::MAX),
         )
     });
+}
+
+fn sort_withdrawal_events(events: &mut [IndexedWithdrawalEvent]) {
+    events.sort_by_key(|event| {
+        (
+            event
+                .log
+                .block_number
+                .as_deref()
+                .and_then(|value| parse_quantity(value, "blockNumber").ok())
+                .unwrap_or(u64::MAX),
+            event
+                .log
+                .log_index
+                .as_deref()
+                .and_then(|value| parse_quantity(value, "logIndex").ok())
+                .unwrap_or(u64::MAX),
+        )
+    });
+}
+
+fn withdrawal_event_request(event: &IndexedWithdrawalEvent) -> SubmitL1WithdrawalEventRequest {
+    let (nullifier, status, event_at_unix, executable_at_unix) = match &event.event {
+        WithdrawalEvent::Queued(queued) => (
+            queued.nullifier,
+            BridgeWithdrawalL1Status::Queued,
+            queued.requested_at_unix,
+            Some(queued.executable_at_unix),
+        ),
+        WithdrawalEvent::Finalized(finalized) => (
+            finalized.nullifier,
+            BridgeWithdrawalL1Status::Finalized,
+            finalized.finalized_at_unix,
+            Some(finalized.executable_at_unix),
+        ),
+        WithdrawalEvent::Cancelled(cancelled) => (
+            cancelled.nullifier,
+            BridgeWithdrawalL1Status::Cancelled,
+            cancelled.cancelled_at_unix,
+            Some(cancelled.executable_at_unix),
+        ),
+    };
+    SubmitL1WithdrawalEventRequest {
+        nullifier_hex: hex::encode(nullifier),
+        status,
+        event_at_unix,
+        executable_at_unix,
+        tx_hash_hex: event.transaction_hash_hex(),
+    }
+}
+
+impl IndexedWithdrawalEvent {
+    fn transaction_hash_hex(&self) -> Option<String> {
+        self.log
+            .transaction_hash
+            .as_deref()
+            .map(strip_hex_prefix)
+            .map(ToOwned::to_owned)
+    }
 }
 
 /// Load the persisted scan cursor, or `None` if no file exists. Fails closed if
@@ -631,10 +783,35 @@ mod tests {
         }
     }
 
+    fn withdrawal_queued_log(nullifier: Bytes32, block: u64, log_index: u64) -> EthLog {
+        let token = [0x20; 20];
+        let recipient = [0x30; 20];
+        let mut data = Vec::new();
+        data.extend_from_slice(&abi_address_word(token));
+        data.extend_from_slice(&abi_u64_word(1_000_000));
+        data.extend_from_slice(&[0x55; 32]);
+        data.extend_from_slice(&abi_u64_word(42));
+        data.extend_from_slice(&abi_u64_word(1_700_000_000));
+        data.extend_from_slice(&abi_u64_word(1_700_086_400));
+        EthLog {
+            address: format!("0x{}", hex::encode([0x10; 20])),
+            topics: vec![
+                format!("0x{}", hex::encode(withdrawal_queued_topic0())),
+                format!("0x{}", hex::encode(nullifier)),
+                format!("0x{}", hex::encode(abi_address_word(recipient))),
+            ],
+            data: format!("0x{}", hex::encode(data)),
+            block_number: Some(quantity_hex(block)),
+            transaction_hash: Some(format!("0x{}", hex::encode([0xbb; 32]))),
+            log_index: Some(quantity_hex(log_index)),
+        }
+    }
+
     #[derive(Default)]
     struct FakeL1 {
         latest: u64,
         logs: Vec<EthLog>,
+        withdrawal_logs: Vec<EthLog>,
         /// deposit_id -> canonical on-chain root returned by depositRootByCount.
         onchain_roots: std::collections::HashMap<u64, Bytes32>,
         /// Records (count, block) each reconciliation queried.
@@ -667,6 +844,27 @@ mod tests {
                 .collect())
         }
 
+        async fn withdrawal_logs(
+            &self,
+            _vault: EthAddress,
+            from_block: u64,
+            to_block: u64,
+        ) -> Result<Vec<EthLog>> {
+            Ok(self
+                .withdrawal_logs
+                .iter()
+                .filter(|log| {
+                    let block = log
+                        .block_number
+                        .as_deref()
+                        .and_then(|value| parse_quantity(value, "blockNumber").ok())
+                        .unwrap_or(u64::MAX);
+                    block >= from_block && block <= to_block
+                })
+                .cloned()
+                .collect())
+        }
+
         async fn deposit_root_by_count(
             &self,
             _vault: EthAddress,
@@ -682,6 +880,7 @@ mod tests {
     struct FakeSink {
         cursor: u64,
         submitted: Mutex<Vec<u64>>,
+        withdrawal_statuses: Mutex<Vec<(String, BridgeWithdrawalL1Status)>>,
     }
 
     impl DepositSink for FakeSink {
@@ -691,6 +890,9 @@ mod tests {
                 deposit_root_hex: String::new(),
                 next_withdrawal_id: 0,
                 withdrawal_count: 0,
+                queued_withdrawal_count: 0,
+                finalized_withdrawal_count: 0,
+                cancelled_withdrawal_count: 0,
             })
         }
 
@@ -711,6 +913,35 @@ mod tests {
                 balance_nanos: 0,
                 deposit_id: req.deposit_id,
                 deposit_root_hex: req.deposit_root_hex.clone(),
+            })
+        }
+
+        async fn submit_l1_withdrawal_event(
+            &self,
+            req: &SubmitL1WithdrawalEventRequest,
+        ) -> Result<BridgeWithdrawalResponse> {
+            self.withdrawal_statuses
+                .lock()
+                .unwrap()
+                .push((req.nullifier_hex.clone(), req.status));
+            Ok(BridgeWithdrawalResponse {
+                withdrawal_id: 7,
+                account_id: 42,
+                recipient_hex: String::new(),
+                token_hex: String::new(),
+                amount_token_units: 1_000_000,
+                amount_nanos: 1_000_000_000,
+                expiry_height: 100,
+                nullifier_hex: req.nullifier_hex.clone(),
+                withdrawal_leaf_hex: String::new(),
+                withdrawal_leaf_digest_hex: String::new(),
+                created_at_height: 1,
+                l1_status: req.status,
+                l1_requested_at_unix: Some(req.event_at_unix),
+                l1_executable_at_unix: req.executable_at_unix,
+                l1_finalized_at_unix: None,
+                l1_cancelled_at_unix: None,
+                l1_tx_hash_hex: req.tx_hash_hex.clone(),
             })
         }
     }
@@ -767,6 +998,27 @@ mod tests {
         assert_eq!(sink.submitted.lock().unwrap().as_slice(), &[1]);
         // Reconciliation happened at the confirmed height (latest - confirmations = 8).
         assert_eq!(l1.reconciled.lock().unwrap().as_slice(), &[(1, 8)]);
+        assert_eq!(next, Some(9));
+    }
+
+    #[tokio::test]
+    async fn indexes_withdrawal_queue_event() {
+        let vault = [0x10; 20];
+        let nullifier = [0xab; 32];
+        let l1 = FakeL1 {
+            latest: 10,
+            withdrawal_logs: vec![withdrawal_queued_log(nullifier, 2, 3)],
+            ..Default::default()
+        };
+        let sink = FakeSink::default();
+        let args = test_args(2);
+
+        let next = run_once(&l1, &sink, &args, vault, 0).await.unwrap();
+
+        assert_eq!(
+            sink.withdrawal_statuses.lock().unwrap().as_slice(),
+            &[(hex::encode(nullifier), BridgeWithdrawalL1Status::Queued)]
+        );
         assert_eq!(next, Some(9));
     }
 

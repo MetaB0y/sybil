@@ -27,6 +27,7 @@ contract UnsafeAnvilSmoke {
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     uint64 private constant WITHDRAWAL_DELAY = 0;
+    uint64 private constant ADMIN_TIMELOCK = 2 days;
     uint64 private constant ESCAPE_TIMEOUT = 7 days;
     bytes32 private constant ACCOUNT_KEY = keccak256("sybil/anvil-smoke/account-key");
     bytes32 private constant BLOCK_HASH = keccak256("sybil/anvil-smoke/block");
@@ -52,9 +53,10 @@ contract UnsafeAnvilSmoke {
 
         MockUSDC token = new MockUSDC();
         UnsafeAcceptAllVerifierAdapter verifier = new UnsafeAcceptAllVerifierAdapter();
-        SybilSettlement settlement = new SybilSettlement(admin, verifier);
-        SybilVault vault =
-            new SybilVault(admin, token, settlement, verifier, WITHDRAWAL_DELAY, ESCAPE_TIMEOUT);
+        SybilSettlement settlement = new SybilSettlement(admin, verifier, ADMIN_TIMELOCK);
+        SybilVault vault = new SybilVault(
+            admin, token, settlement, verifier, WITHDRAWAL_DELAY, ESCAPE_TIMEOUT, ADMIN_TIMELOCK
+        );
         settlement.setVault(vault);
 
         token.mint(admin, 1_000_000_000);

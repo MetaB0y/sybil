@@ -14,6 +14,10 @@ interface Vm {
         uint256 newTimestamp
     ) external;
 
+    function prank(
+        address msgSender
+    ) external;
+
     function expectCall(
         address callee,
         bytes calldata data
@@ -29,6 +33,7 @@ contract SybilBridgeTest {
     SybilVault private vault;
 
     uint64 private constant WITHDRAWAL_DELAY = 1 days;
+    uint64 private constant ADMIN_TIMELOCK = 2 days;
     uint64 private constant ESCAPE_TIMEOUT = 7 days;
     bytes32 private constant ACCOUNT_KEY = keccak256("account-key");
     bytes32 private constant BLOCK_HASH = keccak256("block");
@@ -39,9 +44,15 @@ contract SybilBridgeTest {
     function setUp() public {
         token = new MockUSDC();
         verifier = new MockOpenVmVerifierAdapter();
-        settlement = new SybilSettlement(address(this), verifier);
+        settlement = new SybilSettlement(address(this), verifier, ADMIN_TIMELOCK);
         vault = new SybilVault(
-            address(this), token, settlement, verifier, WITHDRAWAL_DELAY, ESCAPE_TIMEOUT
+            address(this),
+            token,
+            settlement,
+            verifier,
+            WITHDRAWAL_DELAY,
+            ESCAPE_TIMEOUT,
+            ADMIN_TIMELOCK
         );
         settlement.setVault(vault);
 
@@ -86,9 +97,16 @@ contract SybilBridgeTest {
 
     function testUnsafeAcceptAllVerifierAcceptsAnyProofThroughSettlement() public {
         UnsafeAcceptAllVerifierAdapter unsafeVerifier = new UnsafeAcceptAllVerifierAdapter();
-        SybilSettlement unsafeSettlement = new SybilSettlement(address(this), unsafeVerifier);
+        SybilSettlement unsafeSettlement =
+            new SybilSettlement(address(this), unsafeVerifier, ADMIN_TIMELOCK);
         SybilVault unsafeVault = new SybilVault(
-            address(this), token, unsafeSettlement, unsafeVerifier, WITHDRAWAL_DELAY, ESCAPE_TIMEOUT
+            address(this),
+            token,
+            unsafeSettlement,
+            unsafeVerifier,
+            WITHDRAWAL_DELAY,
+            ESCAPE_TIMEOUT,
+            ADMIN_TIMELOCK
         );
         unsafeSettlement.setVault(unsafeVault);
 
@@ -265,15 +283,90 @@ contract SybilBridgeTest {
         require(!ok, "replay accepted");
     }
 
+    function testWithdrawalCancelDuringWindowAllowsReRequest() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        SybilTypes.WithdrawalPublicInputs memory inputs = SybilTypes.WithdrawalPublicInputs({
+            stateRoot: stateRoot,
+            height: settlement.latestHeight(),
+            nullifier: keccak256("cancel-requeue-nullifier"),
+            recipient: address(this),
+            token: address(token),
+            amount: 100_000,
+            claimKind: vault.CLAIM_KIND_NORMAL()
+        });
+
+        vault.requestWithdrawal(inputs, "withdrawal-proof");
+        vault.cancelWithdrawal(inputs.nullifier, "fraud response");
+
+        require(!vault.nullifierUsed(inputs.nullifier), "cancelled nullifier stayed burned");
+        vault.requestWithdrawal(inputs, "withdrawal-proof-2");
+        require(vault.nullifierUsed(inputs.nullifier), "requeued nullifier not burned");
+    }
+
+    function testWithdrawalCancelRejectedAfterDelay() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        bytes32 nullifier = keccak256("late-cancel-nullifier");
+        SybilTypes.WithdrawalPublicInputs memory inputs = SybilTypes.WithdrawalPublicInputs({
+            stateRoot: stateRoot,
+            height: settlement.latestHeight(),
+            nullifier: nullifier,
+            recipient: address(this),
+            token: address(token),
+            amount: 100_000,
+            claimKind: vault.CLAIM_KIND_NORMAL()
+        });
+
+        vault.requestWithdrawal(inputs, "withdrawal-proof");
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY);
+
+        (bool ok,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.cancelWithdrawal.selector, nullifier, "late"));
+        require(!ok, "late cancel accepted");
+    }
+
     function testPauseBlocksDeposits() public {
-        vault.setDepositsPaused(true);
+        vault.pause();
         (bool ok,) = address(vault)
             .call(abi.encodeWithSelector(SybilVault.deposit.selector, 1_000_000, ACCOUNT_KEY));
         require(!ok, "paused deposit accepted");
     }
 
+    function testPauseBlocksWithdrawalRequestAndFinalization() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        bytes32 nullifier = keccak256("paused-finalization-nullifier");
+        SybilTypes.WithdrawalPublicInputs memory inputs = SybilTypes.WithdrawalPublicInputs({
+            stateRoot: stateRoot,
+            height: settlement.latestHeight(),
+            nullifier: nullifier,
+            recipient: address(this),
+            token: address(token),
+            amount: 100_000,
+            claimKind: vault.CLAIM_KIND_NORMAL()
+        });
+
+        vault.requestWithdrawal(inputs, "withdrawal-proof");
+        vault.pause();
+
+        inputs.nullifier = keccak256("paused-request-nullifier");
+        (bool requestOk,) = address(vault)
+            .call(
+                abi.encodeWithSelector(
+                    SybilVault.requestWithdrawal.selector, inputs, bytes("withdrawal-proof")
+                )
+            );
+        require(!requestOk, "paused request accepted");
+
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY);
+        (bool finalizeOk,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.finalizeWithdrawal.selector, nullifier));
+        require(!finalizeOk, "paused finalize accepted");
+
+        vault.unpause();
+        vault.finalizeWithdrawal(nullifier);
+    }
+
     function testPauseBlocksRootSubmission() public {
-        settlement.setRootSubmissionsPaused(true);
+        settlement.pause();
         SybilTypes.StateTransitionPublicInputs memory inputs =
             _nextRootInputs(bytes32(0), 0, keccak256("state-1"));
         (bool ok,) = address(settlement)
@@ -281,8 +374,68 @@ contract SybilBridgeTest {
                 abi.encodeWithSelector(
                     SybilSettlement.submitStateRoot.selector, inputs, bytes("proof")
                 )
-            );
+        );
         require(!ok, "paused root accepted");
+    }
+
+    function testSettlementVerifierChangeRequiresTimelock() public {
+        MockOpenVmVerifierAdapter newVerifier = new MockOpenVmVerifierAdapter();
+
+        settlement.proposeVerifier(newVerifier);
+        (bool earlyOk,) = address(settlement)
+            .call(abi.encodeWithSelector(SybilSettlement.setVerifier.selector, newVerifier));
+        require(!earlyOk, "early verifier update accepted");
+
+        vm.warp(block.timestamp + ADMIN_TIMELOCK);
+        settlement.setVerifier(newVerifier);
+
+        require(address(settlement.verifier()) == address(newVerifier), "verifier not updated");
+        require(settlement.verifierVersion() == 2, "verifier version");
+    }
+
+    function testTimelockProposalCanBeCancelled() public {
+        bytes32 proposal = vault.proposeWithdrawalDelay(2 days);
+        vault.cancelProposal(proposal);
+        vm.warp(block.timestamp + ADMIN_TIMELOCK);
+
+        (bool ok,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.setWithdrawalDelay.selector, uint64(2 days)));
+        require(!ok, "cancelled proposal executed");
+        require(vault.withdrawalDelay() == WITHDRAWAL_DELAY, "delay changed");
+    }
+
+    function testVaultWithdrawalDelayChangeRequiresTimelock() public {
+        uint64 newDelay = 2 days;
+
+        vault.proposeWithdrawalDelay(newDelay);
+        (bool earlyOk,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.setWithdrawalDelay.selector, newDelay));
+        require(!earlyOk, "early delay update accepted");
+
+        vm.warp(block.timestamp + ADMIN_TIMELOCK);
+        vault.setWithdrawalDelay(newDelay);
+
+        require(vault.withdrawalDelay() == newDelay, "delay not updated");
+    }
+
+    function testAdminTransferRequiresTimelock() public {
+        address newAdmin = address(0xBEEF);
+
+        vault.proposeAdminTransfer(newAdmin);
+        (bool earlyOk,) = address(vault)
+            .call(abi.encodeWithSelector(bytes4(keccak256("executeAdminTransfer(address)")), newAdmin));
+        require(!earlyOk, "early admin transfer accepted");
+
+        vm.warp(block.timestamp + ADMIN_TIMELOCK);
+        vault.executeAdminTransfer(newAdmin);
+
+        require(vault.admin() == newAdmin, "admin not transferred");
+        (bool oldAdminOk,) = address(vault).call(abi.encodeWithSelector(SybilVault.pause.selector));
+        require(!oldAdminOk, "old admin still controls vault");
+
+        vm.prank(newAdmin);
+        vault.pause();
+        require(vault.paused(), "new admin cannot pause");
     }
 
     function testEscapeModeActivatesAfterTimeout() public {

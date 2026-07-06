@@ -22,8 +22,8 @@ use crate::block::{
 };
 use crate::bridge::{
     account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
-    BridgeError, BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf,
-    DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
+    BridgeError, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, L1Deposit,
+    L1WithdrawalStatus, WithdrawalLeaf, DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
 };
 use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{
@@ -1574,6 +1574,42 @@ impl BlockSequencer {
         self.bridge.withdrawals.get(&withdrawal_id)
     }
 
+    pub fn apply_bridge_withdrawal_l1_event(
+        &mut self,
+        event: BridgeWithdrawalL1Event,
+    ) -> Result<WithdrawalLeaf, SequencerError> {
+        let withdrawal = self
+            .bridge
+            .withdrawals
+            .values_mut()
+            .find(|withdrawal| withdrawal.nullifier == event.nullifier)
+            .ok_or_else(|| {
+                SequencerError::Bridge(
+                    BridgeError::UnknownWithdrawalNullifier(event.nullifier).to_string(),
+                )
+            })?;
+
+        withdrawal.l1_status = event.status;
+        withdrawal.l1_executable_at_unix = event
+            .executable_at_unix
+            .or(withdrawal.l1_executable_at_unix);
+        withdrawal.l1_tx_hash = event.tx_hash.or(withdrawal.l1_tx_hash);
+        match event.status {
+            L1WithdrawalStatus::NotRequested => {}
+            L1WithdrawalStatus::Queued => {
+                withdrawal.l1_requested_at_unix = Some(event.event_at_unix);
+            }
+            L1WithdrawalStatus::Finalized => {
+                withdrawal.l1_finalized_at_unix = Some(event.event_at_unix);
+            }
+            L1WithdrawalStatus::Cancelled => {
+                withdrawal.l1_cancelled_at_unix = Some(event.event_at_unix);
+            }
+        }
+
+        Ok(withdrawal.clone())
+    }
+
     pub fn validate_l1_deposit(&self, deposit: &L1Deposit) -> Result<i64, SequencerError> {
         if self.accounts.get(deposit.account_id).is_none() {
             return Err(SequencerError::Rejected(Rejection {
@@ -1716,6 +1752,12 @@ impl BlockSequencer {
             expiry_height: request.expiry_height,
             nullifier,
             created_at_height: self.height.saturating_add(1),
+            l1_status: L1WithdrawalStatus::NotRequested,
+            l1_requested_at_unix: None,
+            l1_executable_at_unix: None,
+            l1_finalized_at_unix: None,
+            l1_cancelled_at_unix: None,
+            l1_tx_hash: None,
         };
 
         self.capture_system_account_baseline(request.account_id);

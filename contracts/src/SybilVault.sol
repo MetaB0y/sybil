@@ -12,9 +12,10 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     uint256 public constant NANOS_PER_TOKEN_UNIT = 1000;
     uint8 public constant DEPOSIT_TREE_DEPTH = 32;
 
-    bytes32 public constant PAUSER_ROLE = keccak256("SYBIL_PAUSER_ROLE");
-    bytes32 public constant PARAMETER_ADMIN_ROLE = keccak256("SYBIL_PARAMETER_ADMIN_ROLE");
-    bytes32 public constant GUARDIAN_ROLE = keccak256("SYBIL_GUARDIAN_ROLE");
+    bytes32 public constant OP_SET_VERIFIER = keccak256("sybil/vault/set-verifier/v1");
+    bytes32 public constant OP_SET_WITHDRAWAL_DELAY =
+        keccak256("sybil/vault/set-withdrawal-delay/v1");
+    bytes32 public constant OP_SET_ESCAPE_TIMEOUT = keccak256("sybil/vault/set-escape-timeout/v1");
     bytes32 public constant CLAIM_KIND_NORMAL = keccak256("sybil/claim-kind/normal-withdrawal/v1");
     // NOTE: The emergency escape-cash claim is unimplemented. It requires a
     // distinct ZK guest program (proving `acct`/`acct_resv` membership against
@@ -34,9 +35,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
 
     uint64 public withdrawalDelay;
     uint64 public escapeTimeout;
-    bool public depositsPaused;
-    bool public withdrawalRequestsPaused;
-    bool public withdrawalFinalizationPaused;
+    bool public paused;
     bool public escapeModeActive;
     uint64 public escapeModeActivatedAt;
 
@@ -71,22 +70,36 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         uint256 amount,
         bytes32 depositRoot
     );
-    event WithdrawalRequested(
+    event WithdrawalQueued(
         bytes32 indexed nullifier,
         address indexed recipient,
         address token,
         uint256 amount,
         bytes32 stateRoot,
         uint64 height,
+        uint64 requestedAt,
         uint64 executableAt
     );
-    event WithdrawalFinalized(bytes32 indexed nullifier, address indexed recipient, uint256 amount);
-    event WithdrawalCanceled(bytes32 indexed nullifier, string reason);
+    event WithdrawalFinalized(
+        bytes32 indexed nullifier,
+        address indexed recipient,
+        uint256 amount,
+        uint64 finalizedAt,
+        uint64 executableAt
+    );
+    event WithdrawalCancelled(
+        bytes32 indexed nullifier,
+        address indexed recipient,
+        uint256 amount,
+        uint64 cancelledAt,
+        uint64 executableAt,
+        string reason
+    );
     event EscapeModeActivated(uint64 indexed height, bytes32 indexed stateRoot, uint64 activatedAt);
     event ParameterUpdated(bytes32 indexed key, uint256 oldValue, uint256 newValue);
-    event DepositsPaused(bool paused);
-    event WithdrawalRequestsPaused(bool paused);
-    event WithdrawalFinalizationPaused(bool paused);
+    event VerifierUpdated(address indexed verifier);
+    event Paused(address indexed admin);
+    event Unpaused(address indexed admin);
 
     error InvalidProof();
     error UnsupportedClaimKind(bytes32 claimKind);
@@ -99,12 +112,10 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     error EscapeModeAlreadyActive();
     error AmountZero();
     error TokenUnsupported(address token);
-    error DepositsPausedError();
-    error WithdrawalRequestsPausedError();
-    error WithdrawalFinalizationPausedError();
+    error ContractPaused();
     error TransferFailed();
     error UnknownWithdrawal(bytes32 nullifier);
-    error NotPaused();
+    error WithdrawalCancelWindowElapsed(bytes32 nullifier, uint64 executableAt);
 
     constructor(
         address admin,
@@ -112,8 +123,9 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         ISybilSettlement settlementContract,
         IOpenVmVerifierAdapter verifierAdapter,
         uint64 initialWithdrawalDelay,
-        uint64 initialEscapeTimeout
-    ) SybilAccessControl(admin) {
+        uint64 initialEscapeTimeout,
+        uint64 initialAdminActionDelay
+    ) SybilAccessControl(admin, initialAdminActionDelay) {
         if (address(collateralToken) == address(0)) revert ZeroAddress();
         if (address(settlementContract) == address(0)) revert ZeroAddress();
         if (address(verifierAdapter) == address(0)) revert ZeroAddress();
@@ -132,16 +144,14 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         currentDepositRoot = zeroHashes[DEPOSIT_TREE_DEPTH];
         depositRootByCount[0] = currentDepositRoot;
 
-        _grantRole(PAUSER_ROLE, admin);
-        _grantRole(PARAMETER_ADMIN_ROLE, admin);
-        _grantRole(GUARDIAN_ROLE, admin);
+        emit VerifierUpdated(address(verifierAdapter));
     }
 
     function deposit(
         uint256 amount,
         bytes32 sybilAccountKey
     ) external {
-        if (depositsPaused) revert DepositsPausedError();
+        if (paused) revert ContractPaused();
         if (amount == 0) revert AmountZero();
 
         if (!token.transferFrom(msg.sender, address(this), amount)) revert TransferFailed();
@@ -162,7 +172,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         SybilTypes.WithdrawalPublicInputs calldata inputs,
         bytes calldata proof
     ) external returns (bytes32 nullifier) {
-        if (withdrawalRequestsPaused) revert WithdrawalRequestsPausedError();
+        if (paused) revert ContractPaused();
         // OL-3: this entrypoint serves normal withdrawal-leaf claims only. The
         // claimKind is bound into the proof public-input hash, so accepting a
         // non-normal kind here would advertise the unimplemented escape-cash
@@ -195,13 +205,14 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
             canceled: false
         });
 
-        emit WithdrawalRequested(
+        emit WithdrawalQueued(
             inputs.nullifier,
             inputs.recipient,
             inputs.token,
             inputs.amount,
             inputs.stateRoot,
             inputs.height,
+            requestedAt,
             executableAt
         );
         return inputs.nullifier;
@@ -210,7 +221,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     function finalizeWithdrawal(
         bytes32 nullifier
     ) external {
-        if (withdrawalFinalizationPaused) revert WithdrawalFinalizationPausedError();
+        if (paused) revert ContractPaused();
 
         QueuedWithdrawal storage queued = withdrawals[nullifier];
         if (queued.nullifier == bytes32(0)) revert UnknownWithdrawal(nullifier);
@@ -222,19 +233,32 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
 
         queued.finalized = true;
         if (!token.transfer(queued.recipient, queued.amount)) revert TransferFailed();
-        emit WithdrawalFinalized(nullifier, queued.recipient, queued.amount);
+        emit WithdrawalFinalized(
+            nullifier, queued.recipient, queued.amount, uint64(block.timestamp), queued.executableAt
+        );
     }
 
     function cancelWithdrawal(
         bytes32 nullifier,
         string calldata reason
-    ) external onlyRole(GUARDIAN_ROLE) {
-        if (!withdrawalRequestsPaused && !withdrawalFinalizationPaused) revert NotPaused();
+    ) external onlyAdmin {
         QueuedWithdrawal storage queued = withdrawals[nullifier];
         if (queued.nullifier == bytes32(0)) revert UnknownWithdrawal(nullifier);
         if (queued.finalized) revert WithdrawalFinalizedError(nullifier);
+        if (queued.canceled) revert WithdrawalCanceledError(nullifier);
+        if (block.timestamp >= queued.executableAt) {
+            revert WithdrawalCancelWindowElapsed(nullifier, queued.executableAt);
+        }
         queued.canceled = true;
-        emit WithdrawalCanceled(nullifier, reason);
+        nullifierUsed[nullifier] = false;
+        emit WithdrawalCancelled(
+            nullifier,
+            queued.recipient,
+            queued.amount,
+            uint64(block.timestamp),
+            queued.executableAt,
+            reason
+        );
     }
 
     function activateEscapeMode() external {
@@ -258,38 +282,57 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         );
     }
 
-    function setDepositsPaused(
-        bool paused
-    ) external onlyRole(PAUSER_ROLE) {
-        depositsPaused = paused;
-        emit DepositsPaused(paused);
+    function pause() external onlyAdmin {
+        paused = true;
+        emit Paused(msg.sender);
     }
 
-    function setWithdrawalRequestsPaused(
-        bool paused
-    ) external onlyRole(PAUSER_ROLE) {
-        withdrawalRequestsPaused = paused;
-        emit WithdrawalRequestsPaused(paused);
+    function unpause() external onlyAdmin {
+        paused = false;
+        emit Unpaused(msg.sender);
     }
 
-    function setWithdrawalFinalizationPaused(
-        bool paused
-    ) external onlyRole(PAUSER_ROLE) {
-        withdrawalFinalizationPaused = paused;
-        emit WithdrawalFinalizationPaused(paused);
+    function proposeVerifier(
+        IOpenVmVerifierAdapter newVerifier
+    ) external onlyAdmin returns (bytes32 id) {
+        if (address(newVerifier) == address(0)) revert ZeroAddress();
+        return _proposeTimelock(OP_SET_VERIFIER, abi.encode(newVerifier));
+    }
+
+    function setVerifier(
+        IOpenVmVerifierAdapter newVerifier
+    ) external onlyAdmin {
+        if (address(newVerifier) == address(0)) revert ZeroAddress();
+        _consumeTimelock(OP_SET_VERIFIER, abi.encode(newVerifier));
+        verifier = newVerifier;
+        emit VerifierUpdated(address(newVerifier));
+    }
+
+    function proposeWithdrawalDelay(
+        uint64 newDelay
+    ) external onlyAdmin returns (bytes32 id) {
+        return _proposeTimelock(OP_SET_WITHDRAWAL_DELAY, abi.encode(newDelay));
     }
 
     function setWithdrawalDelay(
         uint64 newDelay
-    ) external onlyRole(PARAMETER_ADMIN_ROLE) {
+    ) external onlyAdmin {
+        _consumeTimelock(OP_SET_WITHDRAWAL_DELAY, abi.encode(newDelay));
         uint64 oldDelay = withdrawalDelay;
         withdrawalDelay = newDelay;
         emit ParameterUpdated("withdrawalDelay", oldDelay, newDelay);
     }
 
+    function proposeEscapeTimeout(
+        uint64 newTimeout
+    ) external onlyAdmin returns (bytes32 id) {
+        return _proposeTimelock(OP_SET_ESCAPE_TIMEOUT, abi.encode(newTimeout));
+    }
+
     function setEscapeTimeout(
         uint64 newTimeout
-    ) external onlyRole(PARAMETER_ADMIN_ROLE) {
+    ) external onlyAdmin {
+        _consumeTimelock(OP_SET_ESCAPE_TIMEOUT, abi.encode(newTimeout));
         uint64 oldTimeout = escapeTimeout;
         escapeTimeout = newTimeout;
         emit ParameterUpdated("escapeTimeout", oldTimeout, newTimeout);

@@ -7,7 +7,10 @@ use matching_sequencer::block::SealedBlock;
 use matching_sequencer::error::Rejection;
 use matching_sequencer::Account;
 
-use crate::types::request::{OrderSpec, SignedOrderData, TimeInForce as ApiTimeInForce};
+use crate::types::request::{
+    BridgeWithdrawalL1Status as ApiBridgeWithdrawalL1Status, OrderSpec, SignedOrderData,
+    TimeInForce as ApiTimeInForce,
+};
 use crate::types::response::*;
 
 fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEventResponse {
@@ -121,6 +124,25 @@ pub fn bridge_withdrawal_to_response(
             matching_sequencer::bridge::withdrawal_leaf_digest(withdrawal),
         ),
         created_at_height: withdrawal.created_at_height,
+        l1_status: l1_withdrawal_status_to_response(withdrawal.l1_status),
+        l1_requested_at_unix: withdrawal.l1_requested_at_unix,
+        l1_executable_at_unix: withdrawal.l1_executable_at_unix,
+        l1_finalized_at_unix: withdrawal.l1_finalized_at_unix,
+        l1_cancelled_at_unix: withdrawal.l1_cancelled_at_unix,
+        l1_tx_hash_hex: withdrawal.l1_tx_hash.map(hex::encode),
+    }
+}
+
+fn l1_withdrawal_status_to_response(
+    status: matching_sequencer::L1WithdrawalStatus,
+) -> ApiBridgeWithdrawalL1Status {
+    match status {
+        matching_sequencer::L1WithdrawalStatus::NotRequested => {
+            ApiBridgeWithdrawalL1Status::NotRequested
+        }
+        matching_sequencer::L1WithdrawalStatus::Queued => ApiBridgeWithdrawalL1Status::Queued,
+        matching_sequencer::L1WithdrawalStatus::Finalized => ApiBridgeWithdrawalL1Status::Finalized,
+        matching_sequencer::L1WithdrawalStatus::Cancelled => ApiBridgeWithdrawalL1Status::Cancelled,
     }
 }
 

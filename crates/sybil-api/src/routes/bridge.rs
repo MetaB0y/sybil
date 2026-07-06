@@ -6,8 +6,9 @@ use matching_sequencer::crypto::{
     SignedBridgeWithdrawal,
 };
 use matching_sequencer::{
-    AccountId, BridgeWithdrawalRequest as SequencerBridgeWithdrawalRequest,
-    L1Deposit as SequencerL1Deposit,
+    AccountId, BridgeWithdrawalL1Event,
+    BridgeWithdrawalRequest as SequencerBridgeWithdrawalRequest, L1Deposit as SequencerL1Deposit,
+    L1WithdrawalStatus,
 };
 use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
@@ -16,8 +17,9 @@ use crate::convert::bridge_withdrawal_to_response;
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
-    AuthScheme, CreateBridgeWithdrawalRequest, CreateSignedBridgeWithdrawalRequest,
-    SubmitL1DepositRequest,
+    AuthScheme, BridgeWithdrawalL1Status as ApiBridgeWithdrawalL1Status,
+    CreateBridgeWithdrawalRequest, CreateSignedBridgeWithdrawalRequest, SubmitL1DepositRequest,
+    SubmitL1WithdrawalEventRequest,
 };
 use crate::types::response::{
     BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse, BridgeWithdrawalResponse,
@@ -72,6 +74,15 @@ fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
     }
 }
 
+fn sequencer_l1_withdrawal_status(status: ApiBridgeWithdrawalL1Status) -> L1WithdrawalStatus {
+    match status {
+        ApiBridgeWithdrawalL1Status::NotRequested => L1WithdrawalStatus::NotRequested,
+        ApiBridgeWithdrawalL1Status::Queued => L1WithdrawalStatus::Queued,
+        ApiBridgeWithdrawalL1Status::Finalized => L1WithdrawalStatus::Finalized,
+        ApiBridgeWithdrawalL1Status::Cancelled => L1WithdrawalStatus::Cancelled,
+    }
+}
+
 async fn ensure_registered_scheme(
     state: &AppState,
     signer: &PublicKey,
@@ -113,11 +124,29 @@ fn withdrawal_request_from_api(
 )]
 pub async fn status(State(state): State<AppState>) -> Result<Json<BridgeStatusResponse>, AppError> {
     let bridge = state.sequencer.get_bridge_state().await?;
+    let queued_withdrawal_count = bridge
+        .withdrawals
+        .values()
+        .filter(|withdrawal| withdrawal.l1_status == L1WithdrawalStatus::Queued)
+        .count();
+    let finalized_withdrawal_count = bridge
+        .withdrawals
+        .values()
+        .filter(|withdrawal| withdrawal.l1_status == L1WithdrawalStatus::Finalized)
+        .count();
+    let cancelled_withdrawal_count = bridge
+        .withdrawals
+        .values()
+        .filter(|withdrawal| withdrawal.l1_status == L1WithdrawalStatus::Cancelled)
+        .count();
     Ok(Json(BridgeStatusResponse {
         deposit_cursor: bridge.deposit_cursor,
         deposit_root_hex: hex::encode(bridge.deposit_root),
         next_withdrawal_id: bridge.next_withdrawal_id,
         withdrawal_count: bridge.withdrawals.len(),
+        queued_withdrawal_count,
+        finalized_withdrawal_count,
+        cancelled_withdrawal_count,
     }))
 }
 
@@ -313,6 +342,39 @@ pub async fn create_signed_withdrawal(
                 .await?
         }
     };
+    Ok(Json(bridge_withdrawal_to_response(&withdrawal)))
+}
+
+/// POST /v1/bridge/withdrawals/l1-events
+#[utoipa::path(
+    post,
+    path = "/v1/bridge/withdrawals/l1-events",
+    request_body = SubmitL1WithdrawalEventRequest,
+    responses(
+        (status = 200, description = "L1 withdrawal queue status applied", body = BridgeWithdrawalResponse),
+        (status = 400, description = "Invalid L1 withdrawal event"),
+        (status = 404, description = "Withdrawal not found")
+    )
+)]
+pub async fn submit_l1_withdrawal_event(
+    State(state): State<AppState>,
+    Json(req): Json<SubmitL1WithdrawalEventRequest>,
+) -> Result<Json<BridgeWithdrawalResponse>, AppError> {
+    let event = BridgeWithdrawalL1Event {
+        nullifier: parse_hex_array::<32>(&req.nullifier_hex, "nullifier_hex")?,
+        status: sequencer_l1_withdrawal_status(req.status),
+        event_at_unix: req.event_at_unix,
+        executable_at_unix: req.executable_at_unix,
+        tx_hash: req
+            .tx_hash_hex
+            .as_deref()
+            .map(|value| parse_hex_array::<32>(value, "tx_hash_hex"))
+            .transpose()?,
+    };
+    let withdrawal = state
+        .sequencer
+        .apply_bridge_withdrawal_l1_event(event)
+        .await?;
     Ok(Json(bridge_withdrawal_to_response(&withdrawal)))
 }
 

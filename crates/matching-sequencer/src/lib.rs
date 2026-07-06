@@ -44,7 +44,8 @@ pub use block::{
     RemovedOrderView, SealedBlock,
 };
 pub use bridge::{
-    BridgeBlockData, BridgeState, BridgeWithdrawalRequest, EthAddress, L1Deposit, WithdrawalLeaf,
+    BridgeBlockData, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, EthAddress,
+    L1Deposit, L1WithdrawalStatus, WithdrawalLeaf,
 };
 pub use crypto::{
     AccountAuthScheme, AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedOrder,

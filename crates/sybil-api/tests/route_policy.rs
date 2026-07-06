@@ -210,6 +210,10 @@ fn exact_service_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "POST",
+            path: "/v1/bridge/withdrawals/l1-events",
+        },
+        RouteMount {
+            method: "POST",
             path: "/v1/markets",
         },
         RouteMount {

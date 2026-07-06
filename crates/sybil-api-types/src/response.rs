@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::request::BridgeWithdrawalL1Status;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountResponse {
@@ -520,6 +522,12 @@ pub struct BridgeStatusResponse {
     pub deposit_root_hex: String,
     pub next_withdrawal_id: u64,
     pub withdrawal_count: usize,
+    #[serde(default)]
+    pub queued_withdrawal_count: usize,
+    #[serde(default)]
+    pub finalized_withdrawal_count: usize,
+    #[serde(default)]
+    pub cancelled_withdrawal_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -556,6 +564,18 @@ pub struct BridgeWithdrawalResponse {
     pub withdrawal_leaf_hex: String,
     pub withdrawal_leaf_digest_hex: String,
     pub created_at_height: u64,
+    #[serde(default)]
+    pub l1_status: BridgeWithdrawalL1Status,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_requested_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_executable_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_finalized_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_cancelled_at_unix: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l1_tx_hash_hex: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

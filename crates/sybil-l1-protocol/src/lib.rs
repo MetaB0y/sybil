@@ -14,6 +14,12 @@ pub const DEPOSIT_DOMAIN: &[u8] = b"sybil/l1-deposit/v1";
 pub const WITHDRAWAL_NULLIFIER_DOMAIN: &[u8] = b"sybil/withdrawal-nullifier/v1";
 pub const DEPOSIT_RECEIVED_SIGNATURE: &str =
     "DepositReceived(uint64,address,bytes32,address,uint256,bytes32)";
+pub const WITHDRAWAL_QUEUED_SIGNATURE: &str =
+    "WithdrawalQueued(bytes32,address,address,uint256,bytes32,uint64,uint64,uint64)";
+pub const WITHDRAWAL_FINALIZED_SIGNATURE: &str =
+    "WithdrawalFinalized(bytes32,address,uint256,uint64,uint64)";
+pub const WITHDRAWAL_CANCELLED_SIGNATURE: &str =
+    "WithdrawalCancelled(bytes32,address,uint256,uint64,uint64,string)";
 /// Solidity signature of the auto-generated getter for
 /// `mapping(uint64 count => bytes32 root) public depositRootByCount` on
 /// `SybilVault`. Used by the indexer to reconcile a log's cumulative deposit
@@ -29,6 +35,22 @@ pub enum L1ProtocolError {
     UnexpectedTopic0,
     #[error("unexpected DepositReceived data length: expected 96 bytes, got {0}")]
     UnexpectedDataLength(usize),
+    #[error("unexpected {event} topic count: expected {expected}, got {actual}")]
+    UnexpectedEventTopicCount {
+        event: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("unexpected vault event topic0")]
+    UnexpectedVaultEventTopic0,
+    #[error(
+        "unexpected {event} data length: expected at least {expected_min} bytes, got {actual}"
+    )]
+    UnexpectedEventDataLength {
+        event: &'static str,
+        expected_min: usize,
+        actual: usize,
+    },
     #[error("ABI word for {field} has non-zero high bytes")]
     NonZeroHighBytes { field: &'static str },
 }
@@ -61,6 +83,43 @@ pub struct DepositLeaf {
     pub amount_token_units: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WithdrawalQueued {
+    pub nullifier: Bytes32,
+    pub recipient: EthAddress,
+    pub token_address: EthAddress,
+    pub amount_token_units: u64,
+    pub state_root: Bytes32,
+    pub height: u64,
+    pub requested_at_unix: u64,
+    pub executable_at_unix: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WithdrawalFinalized {
+    pub nullifier: Bytes32,
+    pub recipient: EthAddress,
+    pub amount_token_units: u64,
+    pub finalized_at_unix: u64,
+    pub executable_at_unix: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WithdrawalCancelled {
+    pub nullifier: Bytes32,
+    pub recipient: EthAddress,
+    pub amount_token_units: u64,
+    pub cancelled_at_unix: u64,
+    pub executable_at_unix: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum WithdrawalEvent {
+    Queued(WithdrawalQueued),
+    Finalized(WithdrawalFinalized),
+    Cancelled(WithdrawalCancelled),
+}
+
 impl DepositReceived {
     pub fn into_deposit_leaf(self, chain_id: u64, vault_address: EthAddress) -> DepositLeaf {
         DepositLeaf {
@@ -77,6 +136,18 @@ impl DepositReceived {
 
 pub fn deposit_received_topic0() -> Bytes32 {
     keccak256(DEPOSIT_RECEIVED_SIGNATURE.as_bytes())
+}
+
+pub fn withdrawal_queued_topic0() -> Bytes32 {
+    keccak256(WITHDRAWAL_QUEUED_SIGNATURE.as_bytes())
+}
+
+pub fn withdrawal_finalized_topic0() -> Bytes32 {
+    keccak256(WITHDRAWAL_FINALIZED_SIGNATURE.as_bytes())
+}
+
+pub fn withdrawal_cancelled_topic0() -> Bytes32 {
+    keccak256(WITHDRAWAL_CANCELLED_SIGNATURE.as_bytes())
 }
 
 /// ABI-encoded `eth_call` calldata for `depositRootByCount(count)`.
@@ -96,6 +167,22 @@ pub fn deposit_root_by_count_calldata(count: u64) -> Vec<u8> {
 
 pub fn parse_deposit_received_log(log: &L1Log) -> Result<DepositReceived, L1ProtocolError> {
     parse_deposit_received(&log.topics, &log.data)
+}
+
+pub fn parse_withdrawal_event_log(log: &L1Log) -> Result<WithdrawalEvent, L1ProtocolError> {
+    let Some(topic0) = log.topics.first() else {
+        return Err(L1ProtocolError::UnexpectedVaultEventTopic0);
+    };
+    if *topic0 == withdrawal_queued_topic0() {
+        return parse_withdrawal_queued(&log.topics, &log.data).map(WithdrawalEvent::Queued);
+    }
+    if *topic0 == withdrawal_finalized_topic0() {
+        return parse_withdrawal_finalized(&log.topics, &log.data).map(WithdrawalEvent::Finalized);
+    }
+    if *topic0 == withdrawal_cancelled_topic0() {
+        return parse_withdrawal_cancelled(&log.topics, &log.data).map(WithdrawalEvent::Cancelled);
+    }
+    Err(L1ProtocolError::UnexpectedVaultEventTopic0)
 }
 
 pub fn parse_deposit_received(
@@ -119,6 +206,72 @@ pub fn parse_deposit_received(
         token_address: decode_address_word(data_word(data, 0), "token")?,
         amount_token_units: decode_u64_word(data_word(data, 1), "amount")?,
         deposit_root: *data_word(data, 2),
+    })
+}
+
+pub fn parse_withdrawal_queued(
+    topics: &[Bytes32],
+    data: &[u8],
+) -> Result<WithdrawalQueued, L1ProtocolError> {
+    ensure_event_shape(
+        "WithdrawalQueued",
+        topics,
+        data,
+        withdrawal_queued_topic0(),
+        3,
+        192,
+    )?;
+    Ok(WithdrawalQueued {
+        nullifier: topics[1],
+        recipient: decode_address_word(&topics[2], "recipient")?,
+        token_address: decode_address_word(data_word(data, 0), "token")?,
+        amount_token_units: decode_u64_word(data_word(data, 1), "amount")?,
+        state_root: *data_word(data, 2),
+        height: decode_u64_word(data_word(data, 3), "height")?,
+        requested_at_unix: decode_u64_word(data_word(data, 4), "requestedAt")?,
+        executable_at_unix: decode_u64_word(data_word(data, 5), "executableAt")?,
+    })
+}
+
+pub fn parse_withdrawal_finalized(
+    topics: &[Bytes32],
+    data: &[u8],
+) -> Result<WithdrawalFinalized, L1ProtocolError> {
+    ensure_event_shape(
+        "WithdrawalFinalized",
+        topics,
+        data,
+        withdrawal_finalized_topic0(),
+        3,
+        96,
+    )?;
+    Ok(WithdrawalFinalized {
+        nullifier: topics[1],
+        recipient: decode_address_word(&topics[2], "recipient")?,
+        amount_token_units: decode_u64_word(data_word(data, 0), "amount")?,
+        finalized_at_unix: decode_u64_word(data_word(data, 1), "finalizedAt")?,
+        executable_at_unix: decode_u64_word(data_word(data, 2), "executableAt")?,
+    })
+}
+
+pub fn parse_withdrawal_cancelled(
+    topics: &[Bytes32],
+    data: &[u8],
+) -> Result<WithdrawalCancelled, L1ProtocolError> {
+    ensure_event_shape(
+        "WithdrawalCancelled",
+        topics,
+        data,
+        withdrawal_cancelled_topic0(),
+        3,
+        128,
+    )?;
+    Ok(WithdrawalCancelled {
+        nullifier: topics[1],
+        recipient: decode_address_word(&topics[2], "recipient")?,
+        amount_token_units: decode_u64_word(data_word(data, 0), "amount")?,
+        cancelled_at_unix: decode_u64_word(data_word(data, 1), "cancelledAt")?,
+        executable_at_unix: decode_u64_word(data_word(data, 2), "executableAt")?,
     })
 }
 
@@ -289,6 +442,34 @@ fn data_word(data: &[u8], idx: usize) -> &Bytes32 {
         .expect("data length checked before word access")
 }
 
+fn ensure_event_shape(
+    event: &'static str,
+    topics: &[Bytes32],
+    data: &[u8],
+    topic0: Bytes32,
+    expected_topics: usize,
+    expected_min_data_len: usize,
+) -> Result<(), L1ProtocolError> {
+    if topics.len() != expected_topics {
+        return Err(L1ProtocolError::UnexpectedEventTopicCount {
+            event,
+            expected: expected_topics,
+            actual: topics.len(),
+        });
+    }
+    if topics[0] != topic0 {
+        return Err(L1ProtocolError::UnexpectedVaultEventTopic0);
+    }
+    if data.len() < expected_min_data_len {
+        return Err(L1ProtocolError::UnexpectedEventDataLength {
+            event,
+            expected_min: expected_min_data_len,
+            actual: data.len(),
+        });
+    }
+    Ok(())
+}
+
 fn decode_u64_word(word: &Bytes32, field: &'static str) -> Result<u64, L1ProtocolError> {
     if word[..24].iter().any(|byte| *byte != 0) {
         return Err(L1ProtocolError::NonZeroHighBytes { field });
@@ -416,6 +597,114 @@ mod tests {
                 amount_token_units: 1_000_000,
                 deposit_root: bytes32(0x99),
             }
+        );
+    }
+
+    #[test]
+    fn parses_withdrawal_queued_log() {
+        let nullifier = bytes32(0xab);
+        let recipient = address(0x33);
+        let token = address(0x22);
+        let state_root = bytes32(0x99);
+        let mut data = Vec::new();
+        data.extend_from_slice(&topic_address(token));
+        data.extend_from_slice(&abi_u64_word(1_000_000));
+        data.extend_from_slice(&state_root);
+        data.extend_from_slice(&abi_u64_word(42));
+        data.extend_from_slice(&abi_u64_word(1_700_000_000));
+        data.extend_from_slice(&abi_u64_word(1_700_086_400));
+        let log = L1Log {
+            address: address(0x11),
+            topics: vec![
+                withdrawal_queued_topic0(),
+                nullifier,
+                topic_address(recipient),
+            ],
+            data,
+        };
+
+        let parsed = parse_withdrawal_event_log(&log).unwrap();
+
+        assert_eq!(
+            parsed,
+            WithdrawalEvent::Queued(WithdrawalQueued {
+                nullifier,
+                recipient,
+                token_address: token,
+                amount_token_units: 1_000_000,
+                state_root,
+                height: 42,
+                requested_at_unix: 1_700_000_000,
+                executable_at_unix: 1_700_086_400,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_withdrawal_finalized_log() {
+        let nullifier = bytes32(0xab);
+        let recipient = address(0x33);
+        let mut data = Vec::new();
+        data.extend_from_slice(&abi_u64_word(1_000_000));
+        data.extend_from_slice(&abi_u64_word(1_700_086_500));
+        data.extend_from_slice(&abi_u64_word(1_700_086_400));
+        let log = L1Log {
+            address: address(0x11),
+            topics: vec![
+                withdrawal_finalized_topic0(),
+                nullifier,
+                topic_address(recipient),
+            ],
+            data,
+        };
+
+        let parsed = parse_withdrawal_event_log(&log).unwrap();
+
+        assert_eq!(
+            parsed,
+            WithdrawalEvent::Finalized(WithdrawalFinalized {
+                nullifier,
+                recipient,
+                amount_token_units: 1_000_000,
+                finalized_at_unix: 1_700_086_500,
+                executable_at_unix: 1_700_086_400,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_withdrawal_cancelled_log_without_decoding_reason() {
+        let nullifier = bytes32(0xab);
+        let recipient = address(0x33);
+        let mut data = Vec::new();
+        data.extend_from_slice(&abi_u64_word(1_000_000));
+        data.extend_from_slice(&abi_u64_word(1_700_000_100));
+        data.extend_from_slice(&abi_u64_word(1_700_086_400));
+        data.extend_from_slice(&abi_u64_word(128));
+        data.extend_from_slice(&abi_u64_word(5));
+        data.extend_from_slice(b"fraud");
+        data.resize(192, 0);
+        let log = L1Log {
+            address: address(0x11),
+            topics: vec![
+                withdrawal_cancelled_topic0(),
+                nullifier,
+                topic_address(recipient),
+            ],
+            data,
+        };
+
+        let parsed = parse_withdrawal_event_log(&log).unwrap();
+
+        assert_eq!(
+            parsed,
+            WithdrawalEvent::Cancelled(WithdrawalCancelled {
+                nullifier,
+                recipient,
+                amount_token_units: 1_000_000,
+                cancelled_at_unix: 1_700_000_100,
+                executable_at_unix: 1_700_086_400,
+            })
         );
     }
 
