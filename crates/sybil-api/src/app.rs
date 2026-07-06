@@ -26,6 +26,8 @@ use crate::util::now_ms;
         routes::system::pause,
         routes::system::resume,
         routes::proofs::get_state_proof,
+        routes::da::get_da_manifest,
+        routes::da::get_da_payload,
         routes::accounts::create_account,
         routes::accounts::fund_account,
         routes::accounts::get_account,
@@ -148,6 +150,8 @@ use crate::util::now_ms;
         BlockResponse,
         HealthResponse,
         StateRootResponse,
+        DaManifestResponse,
+        DaProviderRefResponse,
         StateProofResponse,
         QmdbStateInclusionProofResponse,
         QmdbStateExclusionProofResponse,
@@ -478,6 +482,14 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
+        path: "/v1/da/{height}/manifest",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/da/{height}/payload",
+    },
+    RouteMount {
+        method: "GET",
         path: "/v1/accounts/{id}",
     },
     RouteMount {
@@ -761,6 +773,14 @@ fn public_routes() -> Router<AppState> {
         .route(
             "/v1/proofs/state/{leaf_key_hex}",
             axum::routing::get(routes::proofs::get_state_proof),
+        )
+        .route(
+            "/v1/da/{height}/manifest",
+            axum::routing::get(routes::da::get_da_manifest),
+        )
+        .route(
+            "/v1/da/{height}/payload",
+            axum::routing::get(routes::da::get_da_payload),
         )
         // Accounts
         .route(

@@ -24,7 +24,7 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
     "/metrics",
 ];
 
-const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 110;
+const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 121;
 
 /// Unique path templates across all three mount tables, minus the non-API
 /// exemptions. `MatchedPath`/utoipa both key on the path template (not the
@@ -68,6 +68,17 @@ fn expected_unit_phrase(field: &str) -> Option<&'static str> {
         )
     {
         Some("Integer nanodollars")
+    } else if matches!(
+        field,
+        "block_hash"
+            | "state_root"
+            | "witness_root"
+            | "payload_root"
+            | "provider_refs_hash"
+            | "da_commitment"
+            | "public_input_hash"
+    ) {
+        Some("Hex-encoded 32-byte")
     } else {
         None
     }

@@ -57,6 +57,14 @@ fn exact_public_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
+            path: "/v1/da/{height}/manifest",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/da/{height}/payload",
+        },
+        RouteMount {
+            method: "GET",
             path: "/v1/accounts/{id}",
         },
         RouteMount {

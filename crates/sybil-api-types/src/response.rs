@@ -529,6 +529,7 @@ pub struct RejectedOrderViewResponse {
 pub struct BlockResponse {
     pub height: u64,
     pub parent_hash: String,
+    /// Post-block state root. Hex-encoded 32-byte qMDB root.
     pub state_root: String,
     pub events_root: String,
     pub order_count: u32,
@@ -664,13 +665,64 @@ pub struct HealthResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StateRootResponse {
+    /// Current state root. Hex-encoded 32-byte qMDB root.
     pub state_root: String,
+}
+
+/// Typed DA manifest for retained witness payloads. SYB-120 will add encrypted
+/// DA fields such as ciphertext hashes and key-custody metadata here, so this
+/// must stay a structured DTO rather than ad-hoc JSON.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DaManifestResponse {
+    pub version: u8,
+    pub payload_kind: String,
+    pub payload_encoding: String,
+    pub provider_refs_encoding: String,
+    pub height: u64,
+    /// Block hash bound into the state-transition public input. Hex-encoded 32-byte digest.
+    pub block_hash: String,
+    /// State root bound by the DA commitment. Hex-encoded 32-byte qMDB root.
+    pub state_root: String,
+    /// Witness root = BLAKE3("sybil/witness" || payload bytes). Hex-encoded 32-byte digest.
+    pub witness_root: String,
+    /// Payload root = BLAKE3("sybil/da/witness-payload/v1" || len || bytes).
+    /// Hex-encoded 32-byte digest.
+    pub payload_root: String,
+    pub payload_len: u64,
+    /// Hash of the canonical provider-reference byte list. Hex-encoded 32-byte digest.
+    pub provider_refs_hash: String,
+    #[serde(default)]
+    pub provider_refs: Vec<DaProviderRefResponse>,
+    /// DA commitment bound into the ZK public inputs and L1 RootRecord.
+    /// Hex-encoded 32-byte digest.
+    pub da_commitment: String,
+    /// State-transition public input hash. Hex-encoded 32-byte digest.
+    pub public_input_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DaProviderRefResponse {
+    pub kind: String,
+    pub encoding: String,
+    /// Hex-encoded canonical provider-reference bytes, 0x-prefixed.
+    pub bytes: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    /// Payload root repeated when the provider ref is content-addressed.
+    /// Hex-encoded 32-byte digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_len: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StateProofResponse {
     pub block_height: u64,
+    /// State root this proof is anchored to. Hex-encoded 32-byte qMDB root.
     pub state_root: String,
     pub state_slot: String,
     pub leaf_key_hex: String,

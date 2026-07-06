@@ -80,6 +80,7 @@ Preserved across API/container restarts:
 - accounts, balances, positions, and account event digests
 - markets, market metadata, statuses, and groups
 - block headers and latest block witness
+- retained DA manifests and canonical witness payload bytes (`/v1/da/{height}/*`)
 - resting orders and recovery logs for acknowledged-but-not-yet-committed orders
 - clearing prices, market volumes, and fill history rows
 

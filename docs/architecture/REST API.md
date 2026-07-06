@@ -3,12 +3,12 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-03
+last_verified: 2026-07-06
 ---
 
 The REST API is the external interface to the exchange. Built with Axum (a Rust async web framework), it exposes endpoints for account management, market operations, order submission, and block retrieval. An OpenAPI schema is auto-generated for client code generation. The API communicates with the sequencer via message passing through a `SequencerHandle` — no shared mutable state.
 
-The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, first-party [[WebSocket Block Stream|WebSocket stream]] with `?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). Operator/service writes and bridge operations (account creation/funding, market creation/grouping/resolution, mirror metadata and reference prices, raw event snapshots, feed registration, bridge reverse-key lookup, L1 deposit ingestion, and withdrawal creation) are mounted in production but require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts only simulation pause/resume plus diagnostic all-pending/orderbook listings.
+The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, first-party [[WebSocket Block Stream|WebSocket stream]] with `?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). Operator/service writes and bridge operations (account creation/funding, market creation/grouping/resolution, mirror metadata and reference prices, raw event snapshots, feed registration, bridge reverse-key lookup, L1 deposit ingestion, and withdrawal creation) are mounted in production but require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts only simulation pause/resume plus diagnostic all-pending/orderbook listings.
 
 Bridge deposit ingestion is scaffolding for [[L1 Settlement and Vault]] rather than a completed trust boundary. `POST /v1/bridge/deposits` is service-only and credits the sequencer through the existing `pending_l1_deposits` WAL, but today it trusts the operator/indexer-supplied L1 event fields. `POST /v1/bridge/withdrawals/signed` verifies a P256 signature over the canonical withdrawal payload against the account key registry before using the existing `pending_bridge_withdrawals` WAL; `POST /v1/bridge/withdrawals` remains a service-only operator path. SYB-178/SYB-188 still need proof-backed L1 deposit inclusion/finality and vault withdrawal authorization before these paths are production trust-complete.
 
@@ -58,6 +58,17 @@ canonical leaf value or a qMDB exclusion proof for absent keys. This endpoint
 requires a persistent store-backed sequencer; in-memory dev sequencers return
 `503 Service Unavailable`.
 
+`GET /v1/da/{height}/manifest` and `GET /v1/da/{height}/payload` expose the
+retained canonical witness payload and its typed DA manifest. These routes are
+public, read-only custody/reconstruction surfaces. They require store-backed
+DA artifact rows written after block commit; in-memory sequencers and artifact
+gaps return `404 Not Found`, including the oldest retained block-history
+height when the store knows it. Before either route serves data, the API
+recomputes `payload_root` over the bytes and fails closed with `500` on a
+mismatch. Clients must still verify the SYB-80 binding chain themselves:
+`payload_root -> witness_root -> da_commitment -> L1 RootRecord`. Retention is
+the existing block-history retention behavior, not a new DA policy.
+
 ## Key Properties
 - Axum-based, async, with OpenAPI auto-generation
 - Actor model: API → message channel → `SequencerActor`
@@ -65,6 +76,7 @@ requires a persistent store-backed sequencer; in-memory dev sequencers return
 - Service bearer auth gates operator writes in production; dev mode is limited to local conveniences and diagnostics
 - Order-write endpoints return `429 Too Many Requests` with `Retry-After` under abnormal load
 - State proof endpoint returns inclusion or exclusion proofs for the latest committed qMDB root
+- DA endpoints expose retained witness payload bytes and typed manifests for client-side custody verification
 - Order submissions support GTC, IOC, and GTD time-in-force
 - Stateless API layer — all state in sequencer
 - CORS is permissive only in dev mode; production uses `SYBIL_CORS_ORIGINS` and defaults to same-origin only

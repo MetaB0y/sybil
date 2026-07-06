@@ -3,7 +3,7 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-03
+last_verified: 2026-07-06
 ---
 
 Sybil runs the same `sybil-api` binary in three very different postures. The
@@ -122,6 +122,16 @@ At boot, before opening the store or binding the socket,
 - Consequence: `GET /v1/blocks/{height}` replay works from `blocks_full`, but
   independent re-proving is only possible for the latest block. This is a known
   design limitation, not a config knob.
+- DA/custody artifacts are separate from `block_witnesses`: when a store is
+  configured, each committed block schedules a best-effort write to
+  `da_artifacts` containing the canonical witness payload bytes and typed
+  manifest served by `GET /v1/da/{height}/manifest` and
+  `/v1/da/{height}/payload`. These rows are retained with the existing
+  `blocks_full` history policy (`SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` and
+  `SYBIL_HISTORY_PRUNE_MAX_ROWS`). With `SYBIL_DATA_DIR` unset, no DA artifacts
+  are retained. With block-history pruning disabled, rows remain until the
+  store is reset. DA writes happen after block commit and log on failure; they
+  do not roll back block production.
 
 ## Account fill / price history serving policy (today's reality)
 

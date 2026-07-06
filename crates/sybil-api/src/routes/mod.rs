@@ -4,6 +4,7 @@ pub mod auto_resolution;
 pub mod blocks;
 pub mod bots;
 pub mod bridge;
+pub mod da;
 pub mod events;
 pub mod feeds;
 pub mod leaderboard;

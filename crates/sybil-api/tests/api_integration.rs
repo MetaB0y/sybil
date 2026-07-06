@@ -5,10 +5,13 @@
 
 mod common;
 
-use axum::http::{header, StatusCode};
+use axum::body::Body;
+use axum::http::{header, HeaderMap, StatusCode};
+use http_body_util::BodyExt;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
+use tower::ServiceExt;
 
 use common::{
     get, post_json, post_json_with_headers, put_json, test_app, test_app_with_config,
@@ -34,6 +37,61 @@ fn to_hex(bytes: &[u8]) -> String {
 
 fn hex_bytes(byte: u8, len: usize) -> String {
     hex::encode(vec![byte; len])
+}
+
+async fn get_with_headers(app: axum::Router, uri: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let req = axum::http::Request::builder()
+        .uri(uri)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let body = resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec();
+    (status, headers, body)
+}
+
+fn parse_hex32(input: &str) -> [u8; 32] {
+    let bytes = hex::decode(input.strip_prefix("0x").unwrap_or(input)).expect("valid hex");
+    bytes.try_into().expect("32-byte hex field")
+}
+
+fn decode_provider_refs(manifest: &Value) -> Vec<Vec<u8>> {
+    manifest["provider_refs"]
+        .as_array()
+        .expect("provider_refs array")
+        .iter()
+        .map(|provider_ref| {
+            let bytes = provider_ref["bytes"]
+                .as_str()
+                .expect("provider ref bytes string");
+            hex::decode(bytes.strip_prefix("0x").unwrap_or(bytes)).expect("provider ref hex")
+        })
+        .collect()
+}
+
+async fn wait_for_da_manifest(app: axum::Router, height: u64) -> Value {
+    let path = format!("/v1/da/{height}/manifest");
+    for _ in 0..50 {
+        let (status, body) = get(app.clone(), &path).await;
+        if status == StatusCode::OK {
+            return parse_json(&body);
+        }
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "unexpected DA manifest status: {status}, body={}",
+            String::from_utf8_lossy(&body)
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("DA manifest was not persisted for height {height}");
 }
 
 fn expected_deposit_root(
@@ -301,6 +359,107 @@ async fn state_proof_rejects_invalid_leaf_key_hex() {
     let (app, _) = test_app_with_store(true).await;
     let (status, _) = get(app, "/v1/proofs/state/not-hex").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn da_manifest_404s_when_no_artifact_is_retained() {
+    let (app, _) = test_app(true).await;
+    let (status, body) = get(app, "/v1/da/1/manifest").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let error = parse_json(&body);
+    assert_eq!(error["code"], json!("NOT_FOUND"));
+    assert!(error["error"]
+        .as_str()
+        .expect("error string")
+        .contains("DA artifact not retained for height 1"));
+}
+
+#[tokio::test]
+async fn da_manifest_and_payload_verify_binding_chain() {
+    let (app, handle) = test_app_with_store(true).await;
+    handle.produce_block().await.unwrap();
+    let block = handle.produce_block().await.unwrap();
+    let height = block.canonical.header.height;
+
+    let manifest = wait_for_da_manifest(app.clone(), height).await;
+    let (status, headers, payload) =
+        get_with_headers(app, &format!("/v1/da/{height}/payload")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/octet-stream")
+    );
+    let expected_content_length = payload.len().to_string();
+    assert_eq!(
+        headers
+            .get(header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected_content_length.as_str())
+    );
+
+    assert_eq!(manifest["height"], json!(height));
+    assert_eq!(
+        manifest["state_root"],
+        json!(hex::encode(block.canonical.header.state_root))
+    );
+    assert_eq!(
+        manifest["block_hash"],
+        json!(hex::encode(sybil_zk::hash_header(
+            &block.canonical.header.to_witness_header()
+        )))
+    );
+    assert_eq!(
+        manifest["payload_encoding"],
+        json!("sybil-canonical-witness-v3")
+    );
+
+    let payload_root = sybil_zk::da_witness_payload_root(&payload);
+    assert_eq!(
+        parse_hex32(manifest["payload_root"].as_str().unwrap()),
+        payload_root
+    );
+    assert_eq!(manifest["payload_len"], json!(payload.len() as u64));
+
+    let mut witness_hasher = blake3::Hasher::new();
+    witness_hasher.update(sybil_zk::WITNESS_ROOT_DOMAIN);
+    witness_hasher.update(&payload);
+    let witness_root = *witness_hasher.finalize().as_bytes();
+    assert_eq!(
+        parse_hex32(manifest["witness_root"].as_str().unwrap()),
+        witness_root
+    );
+
+    let provider_refs = decode_provider_refs(&manifest);
+    assert_eq!(provider_refs.len(), 1);
+    let provider_refs_hash = sybil_zk::da_provider_refs_hash(&provider_refs);
+    assert_eq!(
+        parse_hex32(manifest["provider_refs_hash"].as_str().unwrap()),
+        provider_refs_hash
+    );
+
+    let da_commitment = sybil_zk::da_commitment_from_parts(
+        height,
+        parse_hex32(manifest["state_root"].as_str().unwrap()),
+        witness_root,
+        payload_root,
+        payload.len() as u64,
+        provider_refs_hash,
+    );
+    assert_eq!(
+        parse_hex32(manifest["da_commitment"].as_str().unwrap()),
+        da_commitment
+    );
+
+    let provider_ref = &manifest["provider_refs"][0];
+    assert_eq!(provider_ref["kind"], json!("file"));
+    assert_eq!(provider_ref["encoding"], json!("sybil-da-file-ref-v1"));
+    assert_eq!(
+        provider_ref["payload_root"],
+        json!(manifest["payload_root"].as_str().unwrap())
+    );
+    assert_eq!(provider_ref["payload_len"], json!(payload.len() as u64));
 }
 
 // ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ use crate::sequencer::{
     BlockSequencer, LeaderboardRow, OrderSubmission, PendingOrderInfo, PreparedBlock,
     SequencerConfig,
 };
-use crate::store::{ControlPlaneCommand, HistoryRetentionPolicy};
+use crate::store::{ControlPlaneCommand, DaArtifact, DaArtifactLookup, HistoryRetentionPolicy};
 use crate::{
     AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
     QMDB_STATE_MAX_KEY_BYTES,
@@ -267,6 +267,7 @@ pub enum SequencerMsg {
         RpcReplyPort<Result<Vec<SealedBlock>, SequencerError>>,
     ),
     GetBlock(u64, RpcReplyPort<Result<SealedBlock, SequencerError>>),
+    GetDaArtifact(u64, RpcReplyPort<Result<DaArtifactLookup, SequencerError>>),
     CreateMarketWithMetadata(
         String,
         MarketMetadata,
@@ -951,6 +952,30 @@ impl SequencerActorState {
                 .await
                 .map_err(|error| SequencerError::Persistence(error.to_string()))?;
 
+            let da_store = Arc::clone(store);
+            let da_witness = prepared.production().witness.clone();
+            tokio::spawn(async move {
+                let artifact = DaArtifact::from_witness(&da_witness);
+                let height = artifact.manifest.height;
+                match da_store.save_da_artifact(artifact).await {
+                    Ok(true) => {
+                        metrics::counter!("sybil_da_artifacts_persisted_total").increment(1);
+                    }
+                    Ok(false) => {
+                        metrics::counter!("sybil_da_artifacts_skipped_total", "reason" => "below_retention_floor")
+                            .increment(1);
+                        tracing::warn!(
+                            height,
+                            "skipped DA artifact write below retained block-history floor"
+                        );
+                    }
+                    Err(error) => {
+                        metrics::counter!("sybil_da_artifact_persist_failures_total").increment(1);
+                        tracing::warn!(height, %error, "DA artifact persistence failed after block commit");
+                    }
+                }
+            });
+
             let policy = HistoryRetentionPolicy {
                 block_history_retention_blocks: self
                     .sequencer
@@ -978,6 +1003,11 @@ impl SequencerActorState {
                             "stream" => "blocks_full"
                         )
                         .increment(report.blocks_full_pruned as u64);
+                        metrics::counter!(
+                            "sybil_history_pruned_rows_total",
+                            "stream" => "da_artifacts"
+                        )
+                        .increment(report.da_artifacts_pruned as u64);
                         metrics::counter!(
                             "sybil_history_pruned_rows_total",
                             "stream" => "price_points"
@@ -2400,6 +2430,32 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
+            SequencerMsg::GetDaArtifact(height, reply) => {
+                let result = match &state.store {
+                    Some(store) => {
+                        let oldest_retained_height = store
+                            .history_retention_meta()
+                            .map_err(|error| SequencerError::Persistence(error.to_string()))
+                            .map(|meta| meta.blocks_full_min_height);
+                        match oldest_retained_height {
+                            Ok(oldest_retained_height) => store
+                                .load_da_artifact(height)
+                                .await
+                                .map(|artifact| DaArtifactLookup {
+                                    artifact,
+                                    oldest_retained_height,
+                                })
+                                .map_err(|error| SequencerError::Persistence(error.to_string())),
+                            Err(error) => Err(error),
+                        }
+                    }
+                    None => Ok(DaArtifactLookup {
+                        artifact: None,
+                        oldest_retained_height: None,
+                    }),
+                };
+                let _ = reply.send(result);
+            }
             SequencerMsg::CreateMarketWithMetadata(name, metadata, reply) => {
                 let _ = reply.send(
                     state
@@ -3516,6 +3572,11 @@ impl SequencerHandle {
 
     pub async fn get_block(&self, height: u64) -> Result<SealedBlock, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetBlock(height, reply))
+            .await?
+    }
+
+    pub async fn get_da_artifact(&self, height: u64) -> Result<DaArtifactLookup, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetDaArtifact(height, reply))
             .await?
     }
 

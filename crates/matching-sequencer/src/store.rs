@@ -482,6 +482,12 @@ fn prune_historical_block_rows(db: &Database) -> Result<bool, StoreError> {
 /// this is historical serving data and is not pruned to latest-only.
 const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks_full");
 
+/// Canonical witness payload bytes plus typed DA manifest by block height.
+///
+/// This is a serving/availability artifact, not a recovery commit fence. Rows
+/// are best-effort and pruned with the existing `blocks_full` retention floor.
+const DA_ARTIFACTS: TableDefinition<u64, &[u8]> = TableDefinition::new("da_artifacts");
+
 // TODO: Tier 3 tables (remaining)
 // const PRICE_HISTORY: TableDefinition<u64, &[u8]> = TableDefinition::new("price_history");
 
@@ -606,9 +612,161 @@ pub struct HistoryRetentionMeta {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HistoryPruneReport {
     pub blocks_full_pruned: usize,
+    pub da_artifacts_pruned: usize,
     pub price_points_pruned: usize,
     pub price_candles_pruned: usize,
     pub meta: HistoryRetentionMeta,
+}
+
+pub const DA_PAYLOAD_KIND: &str = "block_witness";
+pub const DA_PAYLOAD_ENCODING: &str = "sybil-canonical-witness-v3";
+pub const DA_PROVIDER_REFS_ENCODING_BYTES: &str = "bytes-v1";
+pub const DA_FILE_PROVIDER_REF_KIND: &str = "file";
+pub const DA_FILE_PROVIDER_REF_ENCODING: &str = "sybil-da-file-ref-v1";
+
+const FILE_DA_PROVIDER_REF_DOMAIN: &[u8] = b"sybil/da/provider-ref/file/v1";
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct DaProviderRef {
+    pub kind: String,
+    pub encoding: String,
+    pub bytes: Vec<u8>,
+    pub uri: Option<String>,
+    pub payload_root: Option<[u8; 32]>,
+    pub payload_len: Option<u64>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct DaArtifactManifest {
+    pub version: u8,
+    pub payload_kind: String,
+    pub payload_encoding: String,
+    pub provider_refs_encoding: String,
+    pub height: u64,
+    pub block_hash: [u8; 32],
+    pub state_root: [u8; 32],
+    pub witness_root: [u8; 32],
+    pub payload_root: [u8; 32],
+    pub payload_len: u64,
+    pub provider_refs_hash: [u8; 32],
+    pub provider_refs: Vec<DaProviderRef>,
+    pub da_commitment: [u8; 32],
+    pub public_input_hash: [u8; 32],
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+pub struct DaArtifact {
+    pub manifest: DaArtifactManifest,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DaArtifactLookup {
+    pub artifact: Option<DaArtifact>,
+    pub oldest_retained_height: Option<u64>,
+}
+
+#[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
+pub enum DaArtifactIntegrityError {
+    #[error("DA artifact payload length mismatch at height {height}: manifest={expected}, bytes={actual}")]
+    PayloadLenMismatch {
+        height: u64,
+        expected: u64,
+        actual: u64,
+    },
+    #[error("DA artifact payload_root mismatch at height {height}")]
+    PayloadRootMismatch {
+        height: u64,
+        expected: [u8; 32],
+        actual: [u8; 32],
+    },
+}
+
+impl DaArtifact {
+    pub fn from_witness(witness: &BlockWitness) -> Self {
+        let payload = sybil_zk::da_witness_payload_bytes(witness);
+        let payload_root = sybil_zk::da_witness_payload_root(&payload);
+        let payload_len = payload.len() as u64;
+        let provider_ref = file_da_provider_ref(payload_root, payload_len);
+        let provider_refs = vec![provider_ref.bytes.clone()];
+        let components = sybil_zk::da_commitment_components_from_payload_and_provider_refs(
+            witness,
+            &payload,
+            &provider_refs,
+        );
+        let public_inputs =
+            sybil_zk::public_inputs_from_witness_and_provider_refs(witness, &provider_refs);
+        let public_input_hash = sybil_zk::state_transition_public_input_hash(&public_inputs);
+
+        Self {
+            manifest: DaArtifactManifest {
+                version: 1,
+                payload_kind: DA_PAYLOAD_KIND.to_string(),
+                payload_encoding: DA_PAYLOAD_ENCODING.to_string(),
+                provider_refs_encoding: DA_PROVIDER_REFS_ENCODING_BYTES.to_string(),
+                height: components.block_height,
+                block_hash: sybil_zk::hash_header(&witness.header),
+                state_root: components.state_root,
+                witness_root: components.witness_root,
+                payload_root: components.payload_root,
+                payload_len: components.payload_len,
+                provider_refs_hash: components.provider_refs_hash,
+                provider_refs: vec![provider_ref],
+                da_commitment: components.da_commitment,
+                public_input_hash,
+            },
+            payload,
+        }
+    }
+
+    pub fn verify_payload_integrity(&self) -> Result<(), DaArtifactIntegrityError> {
+        let actual_len = self.payload.len() as u64;
+        if actual_len != self.manifest.payload_len {
+            return Err(DaArtifactIntegrityError::PayloadLenMismatch {
+                height: self.manifest.height,
+                expected: self.manifest.payload_len,
+                actual: actual_len,
+            });
+        }
+
+        let actual_root = sybil_zk::da_witness_payload_root(&self.payload);
+        if actual_root != self.manifest.payload_root {
+            return Err(DaArtifactIntegrityError::PayloadRootMismatch {
+                height: self.manifest.height,
+                expected: self.manifest.payload_root,
+                actual: actual_root,
+            });
+        }
+        Ok(())
+    }
+}
+
+fn file_da_provider_ref(payload_root: [u8; 32], payload_len: u64) -> DaProviderRef {
+    let uri = format!(
+        "sybil-file://witness/{}.witness.bin",
+        hex::encode(payload_root)
+    );
+    let bytes = file_da_provider_ref_bytes(&uri, payload_root, payload_len);
+    DaProviderRef {
+        kind: DA_FILE_PROVIDER_REF_KIND.to_string(),
+        encoding: DA_FILE_PROVIDER_REF_ENCODING.to_string(),
+        bytes,
+        uri: Some(uri),
+        payload_root: Some(payload_root),
+        payload_len: Some(payload_len),
+    }
+}
+
+fn file_da_provider_ref_bytes(uri: &str, payload_root: [u8; 32], payload_len: u64) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(
+        FILE_DA_PROVIDER_REF_DOMAIN.len() + 8 + uri.len() + payload_root.len() + 8,
+    );
+    bytes.extend_from_slice(FILE_DA_PROVIDER_REF_DOMAIN);
+    bytes.extend_from_slice(&(uri.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(uri.as_bytes());
+    bytes.extend_from_slice(&payload_root);
+    bytes.extend_from_slice(&payload_len.to_le_bytes());
+    bytes
 }
 
 fn read_history_retention_meta(db: &Database) -> Result<HistoryRetentionMeta, StoreError> {
@@ -1388,6 +1546,7 @@ fn prune_history_redb(
     let txn = db.begin_write()?;
     let mut remaining = policy.prune_max_rows;
     let mut blocks_full_pruned = 0usize;
+    let mut da_artifacts_pruned = 0usize;
     let mut price_points_pruned = 0usize;
     let mut price_candles_pruned = 0usize;
 
@@ -1400,6 +1559,17 @@ fn prune_history_redb(
                     break;
                 };
                 blocks_full_pruned += 1;
+                remaining -= 1;
+            }
+        }
+        if remaining > 0 {
+            let mut table = txn.open_table(DA_ARTIFACTS)?;
+            let mut iter = table.extract_from_if(0..floor, |_, _| true)?;
+            while remaining > 0 {
+                let Some(_) = iter.next().transpose()? else {
+                    break;
+                };
+                da_artifacts_pruned += 1;
                 remaining -= 1;
             }
         }
@@ -1549,6 +1719,7 @@ fn prune_history_redb(
     txn.commit()?;
     Ok(HistoryPruneReport {
         blocks_full_pruned,
+        da_artifacts_pruned,
         price_points_pruned,
         price_candles_pruned,
         meta: read_history_retention_meta(db)?,
@@ -1659,6 +1830,7 @@ impl Store {
         txn.open_table(BLOCK_HEADERS)?;
         txn.open_table(BLOCKS_FULL)?;
         txn.open_table(BLOCK_WITNESSES)?;
+        txn.open_table(DA_ARTIFACTS)?;
         txn.open_table(PUBKEY_REGISTRY)?;
         txn.open_table(PUBKEY_AUTH_SCHEMES)?;
         txn.open_table(COUNTERS)?;
@@ -1931,6 +2103,48 @@ impl Store {
     pub async fn load_block(&self, height: u64) -> Result<Option<SealedBlock>, StoreError> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(BLOCKS_FULL)?;
+        table
+            .get(height)?
+            .map(|value| rmp_serde::from_slice(value.value()))
+            .transpose()
+            .map_err(StoreError::from)
+    }
+
+    /// Persist a DA serving artifact after the block commit has succeeded.
+    ///
+    /// This is intentionally separate from `save_block_inner`: DA availability
+    /// gaps should be observable and alertable, but they must not roll back an
+    /// otherwise committed block.
+    pub async fn save_da_artifact(&self, artifact: DaArtifact) -> Result<bool, StoreError> {
+        self.redb_write(move |db| {
+            let txn = db.begin_write()?;
+            let retained_floor = {
+                let meta = txn.open_table(HISTORY_META)?;
+                let retained_floor = meta
+                    .get(KEY_BLOCKS_FULL_MIN_HEIGHT)?
+                    .map(|value| value.value());
+                retained_floor
+            };
+            if retained_floor.is_some_and(|floor| artifact.manifest.height < floor) {
+                txn.commit()?;
+                return Ok(false);
+            }
+
+            let bytes = rmp_serde::to_vec(&artifact)?;
+            {
+                let mut table = txn.open_table(DA_ARTIFACTS)?;
+                table.insert(artifact.manifest.height, bytes.as_slice())?;
+            }
+            txn.commit()?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Load a retained DA artifact by block height.
+    pub async fn load_da_artifact(&self, height: u64) -> Result<Option<DaArtifact>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(DA_ARTIFACTS)?;
         table
             .get(height)?
             .map(|value| rmp_serde::from_slice(value.value()))
@@ -3505,6 +3719,10 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            store
+                .save_da_artifact(DaArtifact::from_witness(&witness))
+                .await
+                .unwrap();
         }
 
         let report = store
@@ -3524,12 +3742,25 @@ mod tests {
             .unwrap();
 
         assert_eq!(report.blocks_full_pruned, 2);
+        assert_eq!(report.da_artifacts_pruned, 2);
         assert_eq!(report.price_points_pruned, 2);
         assert_eq!(report.meta.blocks_full_min_height, Some(3));
         assert_eq!(report.meta.price_points_min_height, Some(3));
         assert_eq!(report.meta.last_history_prune_height, Some(5));
         assert!(store.load_block(1).await.unwrap().is_none());
         assert!(store.load_block(2).await.unwrap().is_none());
+        assert!(store.load_da_artifact(1).await.unwrap().is_none());
+        assert!(store.load_da_artifact(2).await.unwrap().is_none());
+        assert_eq!(
+            store
+                .load_da_artifact(3)
+                .await
+                .unwrap()
+                .unwrap()
+                .manifest
+                .height,
+            3
+        );
         assert_eq!(
             store
                 .load_block(3)
@@ -4125,6 +4356,58 @@ mod tests {
         assert_eq!(latest.header.height, header.height);
         assert_eq!(latest.header.state_root, header.state_root);
         assert_eq!(by_height.header.height, header.height);
+    }
+
+    #[tokio::test]
+    async fn da_artifact_from_witness_matches_commitment_chain() {
+        let oracle = Arc::new(AdminOracle::new());
+        let lifecycle = MarketLifecycle::new(oracle);
+        let markets = MarketSet::new();
+        let env = TestEnv::new();
+        let mut accounts = AccountStore::new();
+        accounts.create_account(100);
+        let (header, witness) =
+            coherent_header_and_witness(1, &accounts, &markets, &lifecycle, &env.bridge_state);
+
+        let artifact = DaArtifact::from_witness(&witness);
+        artifact.verify_payload_integrity().unwrap();
+        assert_eq!(artifact.manifest.height, header.height);
+        assert_eq!(artifact.manifest.state_root, header.state_root);
+        assert_eq!(artifact.manifest.payload_len, artifact.payload.len() as u64);
+        assert_eq!(
+            artifact.manifest.payload_root,
+            sybil_zk::da_witness_payload_root(&artifact.payload)
+        );
+
+        let provider_refs: Vec<_> = artifact
+            .manifest
+            .provider_refs
+            .iter()
+            .map(|provider_ref| provider_ref.bytes.clone())
+            .collect();
+        assert_eq!(
+            artifact.manifest.provider_refs_hash,
+            sybil_zk::da_provider_refs_hash(&provider_refs)
+        );
+        assert_eq!(
+            artifact.manifest.da_commitment,
+            sybil_zk::da_commitment_from_parts(
+                artifact.manifest.height,
+                artifact.manifest.state_root,
+                artifact.manifest.witness_root,
+                artifact.manifest.payload_root,
+                artifact.manifest.payload_len,
+                artifact.manifest.provider_refs_hash,
+            )
+        );
+        let provider_ref = artifact.manifest.provider_refs.first().unwrap();
+        assert_eq!(provider_ref.kind, DA_FILE_PROVIDER_REF_KIND);
+        assert_eq!(provider_ref.encoding, DA_FILE_PROVIDER_REF_ENCODING);
+        let expected_uri = format!(
+            "sybil-file://witness/{}.witness.bin",
+            hex::encode(artifact.manifest.payload_root)
+        );
+        assert_eq!(provider_ref.uri.as_deref(), Some(expected_uri.as_str()));
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@
 tags: [zk, validium, data-availability]
 layer: verification
 status: current
-last_verified: 2026-05-05
+last_verified: 2026-07-06
 ---
 
 # Data Availability
@@ -125,6 +125,37 @@ The first useful engineering target is file-backed publication: persist the
 canonical witness payload and manifest locally, then prove the block with the
 matching file provider reference. This gives prover workers an unambiguous
 artifact handle without forcing an early choice of DA network.
+
+R0 API exposure (`SYB-222`) also persists a typed DA artifact in the
+sequencer's redb store when `SYBIL_DATA_DIR` is configured. For each committed
+block, the actor schedules a best-effort post-commit write of:
+
+- the canonical `sybil-canonical-witness-v3` payload bytes
+- a typed manifest with height, block hash, state root, witness root, payload
+  root, payload length, provider refs hash, provider refs, DA commitment, and
+  public-input hash
+
+The provider ref uses the same deterministic file-ref preimage as
+`prepare-file-da`: `sybil-file://witness/{payload_root}.witness.bin` plus the
+payload root and byte length. The API routes are:
+
+- `GET /v1/da/{height}/manifest` - JSON typed manifest
+- `GET /v1/da/{height}/payload` - `application/octet-stream` canonical witness
+  bytes with `Content-Length`
+
+Before serving either route, the API recomputes `payload_root` over the stored
+bytes and fails closed on mismatch. This check protects against local store
+corruption only; clients still must verify the full SYB-80 binding chain:
+`payload_root -> witness_root -> da_commitment -> L1 RootRecord`.
+
+Retention is not a new policy. DA rows share the existing store-backed
+`blocks_full` retention window: with `SYBIL_DATA_DIR` unset no DA artifacts are
+retained; with block-history pruning disabled, rows remain until the store is
+reset; with pruning enabled, rows are pruned under the same floor and row
+budget as retained block-history rows. DA artifact writes are deliberately
+best-effort after block commit, so an availability gap can exist without
+rolling back block production; alerting for those gaps belongs to the ops
+monitoring layer.
 
 This is not an escape hatch by itself. If the operator disappears, users need
 access to the latest enough validium state to reconstruct balances, positions,
