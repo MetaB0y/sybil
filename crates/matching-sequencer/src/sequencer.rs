@@ -762,7 +762,7 @@ pub struct BlockSequencer {
     /// Market lifecycle: statuses, oracle, metadata.
     pub lifecycle: crate::market_lifecycle::MarketLifecycle,
     /// P256 public key to account mapping.
-    pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
+    pubkey_registry: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     /// L1 bridge sidecar state: consumed deposits and normal withdrawal leaves.
     bridge: BridgeState,
     /// Administrative state changes that should be included in the next block.
@@ -1004,6 +1004,7 @@ impl BlockSequencer {
             ControlPlaneCommand::RegisterPubkey {
                 account_id,
                 compressed_pubkey,
+                auth_scheme,
             } => {
                 let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&compressed_pubkey)
                     .ok_or_else(|| {
@@ -1011,7 +1012,7 @@ impl BlockSequencer {
                             "invalid pubkey in control-plane WAL".to_string(),
                         )
                     })?;
-                self.register_pubkey(account_id, pubkey)
+                self.register_pubkey_with_scheme(account_id, pubkey, auth_scheme)
             }
             ControlPlaneCommand::AdvanceReplayNonce { account_id, nonce } => {
                 self.advance_replay_nonce(account_id, nonce)
@@ -1230,7 +1231,9 @@ impl BlockSequencer {
         self.next_order_id
     }
 
-    pub fn pubkey_registry(&self) -> &HashMap<crate::crypto::PublicKey, AccountId> {
+    pub fn pubkey_registry(
+        &self,
+    ) -> &HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey> {
         &self.pubkey_registry
     }
 
@@ -1298,6 +1301,19 @@ impl BlockSequencer {
         account_id: AccountId,
         pubkey: crate::crypto::PublicKey,
     ) -> Result<(), SequencerError> {
+        self.register_pubkey_with_scheme(
+            account_id,
+            pubkey,
+            crate::crypto::AccountAuthScheme::RawP256,
+        )
+    }
+
+    pub fn register_pubkey_with_scheme(
+        &mut self,
+        account_id: AccountId,
+        pubkey: crate::crypto::PublicKey,
+        auth_scheme: crate::crypto::AccountAuthScheme,
+    ) -> Result<(), SequencerError> {
         if self.accounts.get(account_id).is_none() {
             return Err(SequencerError::Rejected(Rejection {
                 order_id: 0,
@@ -1308,11 +1324,26 @@ impl BlockSequencer {
         if self.pubkey_registry.contains_key(&pubkey) {
             return Err(SequencerError::AccountAlreadyRegistered);
         }
-        self.pubkey_registry.insert(pubkey, account_id);
+        self.pubkey_registry.insert(
+            pubkey,
+            crate::crypto::RegisteredPubkey {
+                account_id,
+                auth_scheme,
+            },
+        );
         Ok(())
     }
 
     pub fn lookup_pubkey(&self, pubkey: &crate::crypto::PublicKey) -> Option<AccountId> {
+        self.pubkey_registry
+            .get(pubkey)
+            .map(|registered| registered.account_id)
+    }
+
+    pub fn lookup_registered_pubkey(
+        &self,
+        pubkey: &crate::crypto::PublicKey,
+    ) -> Option<crate::crypto::RegisteredPubkey> {
         self.pubkey_registry.get(pubkey).copied()
     }
 

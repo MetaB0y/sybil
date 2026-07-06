@@ -2,19 +2,31 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 
 use matching_engine::MarketId;
-use matching_sequencer::{AccountFillCursor, AccountFillRecord, AccountId, PublicKey};
+use matching_sequencer::{
+    AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId, PublicKey,
+};
 use p256::ecdsa::VerifyingKey;
 use p256::Sec1Point;
 
 use crate::convert::account_to_response;
 use crate::state::AppState;
 use crate::types::error::AppError;
-use crate::types::request::{CreateAccountRequest, FundAccountRequest, RegisterKeyRequest};
+use crate::types::request::{
+    AuthScheme, CreateAccountRequest, FundAccountRequest, RegisterKeyRequest,
+};
 use crate::types::response::*;
 use crate::util::now_ms;
+use crate::webauthn;
 
 const DEFAULT_ACCOUNT_FILL_QUERY_LIMIT: usize = 100;
 const MAX_ACCOUNT_FILL_QUERY_LIMIT: usize = 500;
+
+fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
+    match scheme {
+        AuthScheme::RawP256 => AccountAuthScheme::RawP256,
+        AuthScheme::WebAuthn => AccountAuthScheme::WebAuthn,
+    }
+}
 
 /// POST /v1/accounts
 #[utoipa::path(
@@ -119,9 +131,28 @@ pub async fn register_key(
         .map_err(|_| AppError::bad_request("Invalid P256 public key"))?;
 
     let pubkey = PublicKey(verifying_key);
+    if req.auth_scheme == AuthScheme::WebAuthn {
+        let registration = req.webauthn_registration.as_ref().ok_or_else(|| {
+            AppError::bad_request("webauthn_registration is required for webauthn keys")
+        })?;
+        let extracted = webauthn::public_key_from_registration(&state.webauthn, registration)
+            .map_err(|err| {
+                AppError::bad_request(format!("Invalid WebAuthn registration: {err}"))
+            })?;
+        if extracted != pubkey.compressed_bytes() {
+            return Err(AppError::bad_request(
+                "WebAuthn registration public key does not match public_key_hex",
+            ));
+        }
+    }
+
     state
         .sequencer
-        .register_pubkey(AccountId(id), pubkey)
+        .register_pubkey_with_scheme(
+            AccountId(id),
+            pubkey,
+            sequencer_auth_scheme(req.auth_scheme),
+        )
         .await?;
 
     Ok(Json(serde_json::json!({ "success": true })))

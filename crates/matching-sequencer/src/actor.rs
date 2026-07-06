@@ -21,8 +21,9 @@ use crate::account::{Account, AccountId};
 use crate::block::{BlockProduction, SealedBlock};
 use crate::bridge::{BridgeState, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf};
 use crate::crypto::{
-    verify_signed_bridge_withdrawal, verify_signed_cancel, verify_signed_order, PublicKey,
-    SignedBridgeWithdrawal, SignedCancel, SignedOrder,
+    verify_signed_bridge_withdrawal, verify_signed_cancel, verify_signed_order, AccountAuthScheme,
+    AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedOrder, PublicKey,
+    RegisteredPubkey, SignedBridgeWithdrawal, SignedCancel, SignedOrder,
 };
 use crate::error::{Rejection, RejectionReason, SequencerError};
 use crate::market_info::{
@@ -148,7 +149,12 @@ pub enum SequencerMsg {
     TestHoldNextTick(SequencerTestTickHold, RpcReplyPort<()>),
     SubmitOrder(OrderSubmission, RpcReplyPort<Result<(), SequencerError>>),
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
+    SubmitAuthenticatedOrder(AuthenticatedOrder, RpcReplyPort<Result<(), SequencerError>>),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
+    CancelAuthenticatedOrder(
+        AuthenticatedCancel,
+        RpcReplyPort<Result<(), SequencerError>>,
+    ),
     GetStateProof(
         Vec<u8>,
         RpcReplyPort<Result<SequencerStateProof, SequencerError>>,
@@ -169,9 +175,14 @@ pub enum SequencerMsg {
         SignedBridgeWithdrawal,
         RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,
     ),
+    CreateAuthenticatedBridgeWithdrawal(
+        AuthenticatedBridgeWithdrawal,
+        RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,
+    ),
     RegisterPubkey(
         AccountId,
         PublicKey,
+        AccountAuthScheme,
         RpcReplyPort<Result<(), SequencerError>>,
     ),
     CreateMarket(String, RpcReplyPort<Result<MarketId, SequencerError>>),
@@ -1094,16 +1105,28 @@ impl SequencerActorState {
 
     async fn handle_signed_order(&mut self, signed: SignedOrder) -> Result<(), SequencerError> {
         verify_signed_order(&signed)?;
+        self.handle_authenticated_order(AuthenticatedOrder {
+            order: signed.order,
+            nonce: signed.nonce,
+            signer: signed.signer,
+        })
+        .await
+    }
 
+    async fn handle_authenticated_order(
+        &mut self,
+        authenticated: AuthenticatedOrder,
+    ) -> Result<(), SequencerError> {
         let account_id = self
             .sequencer
-            .lookup_pubkey(&signed.signer)
+            .lookup_pubkey(&authenticated.signer)
             .ok_or(SequencerError::UnknownSigner)?;
-        self.accept_replay_nonce(account_id, signed.nonce).await?;
+        self.accept_replay_nonce(account_id, authenticated.nonce)
+            .await?;
 
         let submission = OrderSubmission {
             account_id,
-            orders: vec![signed.order],
+            orders: vec![authenticated.order],
             mm_constraint: None,
         };
 
@@ -1112,28 +1135,48 @@ impl SequencerActorState {
 
     async fn handle_signed_cancel(&mut self, signed: SignedCancel) -> Result<(), SequencerError> {
         verify_signed_cancel(&signed)?;
+        self.handle_authenticated_cancel(AuthenticatedCancel {
+            account_id: signed.account_id,
+            order_id: signed.order_id,
+            nonce: signed.nonce,
+            signer: signed.signer,
+        })
+        .await
+    }
 
+    async fn handle_authenticated_cancel(
+        &mut self,
+        authenticated: AuthenticatedCancel,
+    ) -> Result<(), SequencerError> {
         let account_id = self
             .sequencer
-            .lookup_pubkey(&signed.signer)
+            .lookup_pubkey(&authenticated.signer)
             .ok_or(SequencerError::UnknownSigner)?;
 
-        if account_id != signed.account_id {
+        if account_id != authenticated.account_id {
             return Err(SequencerError::SignerAccountMismatch);
         }
-        self.accept_replay_nonce(account_id, signed.nonce).await?;
+        self.accept_replay_nonce(account_id, authenticated.nonce)
+            .await?;
 
         let timestamp_ms = current_timestamp_ms();
         let mut validation = self.sequencer.clone();
-        validation.cancel_pending_order_at(signed.account_id, signed.order_id, timestamp_ms)?;
+        validation.cancel_pending_order_at(
+            authenticated.account_id,
+            authenticated.order_id,
+            timestamp_ms,
+        )?;
         self.persist_control_plane(&ControlPlaneCommand::CancelPendingOrder {
-            account_id: signed.account_id,
-            order_id: signed.order_id,
+            account_id: authenticated.account_id,
+            order_id: authenticated.order_id,
             timestamp_ms,
         })
         .await?;
-        self.sequencer
-            .cancel_pending_order_at(signed.account_id, signed.order_id, timestamp_ms)
+        self.sequencer.cancel_pending_order_at(
+            authenticated.account_id,
+            authenticated.order_id,
+            timestamp_ms,
+        )
     }
 
     fn handle_search_markets(&self, query: MarketSearchQuery) -> Vec<MarketSearchResult> {
@@ -1484,6 +1527,7 @@ impl SequencerActorState {
         &mut self,
         account_id: AccountId,
         pubkey: PublicKey,
+        auth_scheme: AccountAuthScheme,
     ) -> Result<(), SequencerError> {
         if self.sequencer.accounts.get(account_id).is_none() {
             return Err(SequencerError::Rejected(Rejection {
@@ -1498,9 +1542,11 @@ impl SequencerActorState {
         self.persist_control_plane(&ControlPlaneCommand::RegisterPubkey {
             account_id,
             compressed_pubkey: pubkey.compressed_bytes(),
+            auth_scheme,
         })
         .await?;
-        self.sequencer.register_pubkey(account_id, pubkey)
+        self.sequencer
+            .register_pubkey_with_scheme(account_id, pubkey, auth_scheme)
     }
 
     async fn handle_create_market(&mut self, name: String) -> Result<MarketId, SequencerError> {
@@ -1656,15 +1702,28 @@ impl SequencerActorState {
         signed: SignedBridgeWithdrawal,
     ) -> Result<WithdrawalLeaf, SequencerError> {
         verify_signed_bridge_withdrawal(&signed)?;
+        self.handle_authenticated_bridge_withdrawal(AuthenticatedBridgeWithdrawal {
+            request: signed.request,
+            nonce: signed.nonce,
+            signer: signed.signer,
+        })
+        .await
+    }
+
+    async fn handle_authenticated_bridge_withdrawal(
+        &mut self,
+        authenticated: AuthenticatedBridgeWithdrawal,
+    ) -> Result<WithdrawalLeaf, SequencerError> {
         let account_id = self
             .sequencer
-            .lookup_pubkey(&signed.signer)
+            .lookup_pubkey(&authenticated.signer)
             .ok_or(SequencerError::UnknownSigner)?;
-        if account_id != signed.request.account_id {
+        if account_id != authenticated.request.account_id {
             return Err(SequencerError::SignerAccountMismatch);
         }
-        self.accept_replay_nonce(account_id, signed.nonce).await?;
-        self.handle_bridge_withdrawal(signed.request).await
+        self.accept_replay_nonce(account_id, authenticated.nonce)
+            .await?;
+        self.handle_bridge_withdrawal(authenticated.request).await
     }
 
     async fn handle_state_proof(
@@ -1880,9 +1939,25 @@ impl Actor for SequencerActor {
                 state.record_submission_metrics("signed", 1, &result);
                 let _ = reply.send(result);
             }
+            SequencerMsg::SubmitAuthenticatedOrder(authenticated, reply) => {
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_authenticated_order(authenticated).await,
+                    Err(err) => Err(err),
+                };
+                state.record_submission_metrics("signed", 1, &result);
+                let _ = reply.send(result);
+            }
             SequencerMsg::CancelSignedOrder(signed, reply) => {
                 let result = match state.check_global_submission_rate() {
                     Ok(()) => state.handle_signed_cancel(signed).await,
+                    Err(err) => Err(err),
+                };
+                state.record_cancel_metrics("signed", &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CancelAuthenticatedOrder(authenticated, reply) => {
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_authenticated_cancel(authenticated).await,
                     Err(err) => Err(err),
                 };
                 state.record_cancel_metrics("signed", &result);
@@ -1916,8 +1991,19 @@ impl Actor for SequencerActor {
             SequencerMsg::CreateSignedBridgeWithdrawal(signed, reply) => {
                 let _ = reply.send(state.handle_signed_bridge_withdrawal(signed).await);
             }
-            SequencerMsg::RegisterPubkey(account_id, pubkey, reply) => {
-                let _ = reply.send(state.handle_register_pubkey(account_id, pubkey).await);
+            SequencerMsg::CreateAuthenticatedBridgeWithdrawal(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_bridge_withdrawal(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::RegisterPubkey(account_id, pubkey, auth_scheme, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_register_pubkey(account_id, pubkey, auth_scheme)
+                        .await,
+                );
             }
             SequencerMsg::CreateMarket(name, reply) => {
                 let _ = reply.send(state.handle_create_market(name).await);
@@ -2654,8 +2740,24 @@ impl SequencerHandle {
             .await?
     }
 
+    pub async fn submit_authenticated_order(
+        &self,
+        authenticated: AuthenticatedOrder,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::SubmitAuthenticatedOrder(authenticated, reply))
+            .await?
+    }
+
     pub async fn cancel_signed_order(&self, signed: SignedCancel) -> Result<(), SequencerError> {
         self.rpc(|reply| SequencerMsg::CancelSignedOrder(signed, reply))
+            .await?
+    }
+
+    pub async fn cancel_authenticated_order(
+        &self,
+        authenticated: AuthenticatedCancel,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::CancelAuthenticatedOrder(authenticated, reply))
             .await?
     }
 
@@ -2747,6 +2849,14 @@ impl SequencerHandle {
             .await?
     }
 
+    pub async fn create_authenticated_bridge_withdrawal(
+        &self,
+        authenticated: AuthenticatedBridgeWithdrawal,
+    ) -> Result<WithdrawalLeaf, SequencerError> {
+        self.rpc(|reply| SequencerMsg::CreateAuthenticatedBridgeWithdrawal(authenticated, reply))
+            .await?
+    }
+
     pub async fn get_bridge_state(&self) -> Result<BridgeState, SequencerError> {
         self.read_query(|state| state.sequencer.bridge_state().clone())
             .await
@@ -2786,8 +2896,26 @@ impl SequencerHandle {
         account_id: AccountId,
         pubkey: PublicKey,
     ) -> Result<(), SequencerError> {
-        self.rpc(|reply| SequencerMsg::RegisterPubkey(account_id, pubkey, reply))
+        self.register_pubkey_with_scheme(account_id, pubkey, AccountAuthScheme::RawP256)
+            .await
+    }
+
+    pub async fn register_pubkey_with_scheme(
+        &self,
+        account_id: AccountId,
+        pubkey: PublicKey,
+        auth_scheme: AccountAuthScheme,
+    ) -> Result<(), SequencerError> {
+        self.rpc(|reply| SequencerMsg::RegisterPubkey(account_id, pubkey, auth_scheme, reply))
             .await?
+    }
+
+    pub async fn lookup_registered_pubkey(
+        &self,
+        pubkey: PublicKey,
+    ) -> Result<Option<RegisteredPubkey>, SequencerError> {
+        self.read_query(move |state| state.sequencer.lookup_registered_pubkey(&pubkey))
+            .await
     }
 
     #[tracing::instrument(skip_all)]

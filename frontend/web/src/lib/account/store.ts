@@ -12,10 +12,13 @@
  */
 
 import { create } from "zustand";
+import type { AccountAuthScheme } from "./storage";
 
 export interface AccountSession {
   accountId: number;
   publicKeyHex: string;
+  authScheme: AccountAuthScheme;
+  credentialIdB64url?: string;
 }
 
 interface AccountStore {

@@ -847,6 +847,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @enum {string} */
+        AuthScheme: "raw_p256" | "webauthn";
+        WebAuthnAssertion: {
+            /** @description Base64url credential id returned by the authenticator. */
+            credential_id_b64url: string;
+            /** @description Base64url authenticatorData bytes from `navigator.credentials.get`. */
+            authenticator_data_b64url: string;
+            /** @description Base64url clientDataJSON bytes from `navigator.credentials.get`. */
+            client_data_json_b64url: string;
+            /** @description Base64url DER-encoded ECDSA signature from `navigator.credentials.get`. */
+            signature_b64url: string;
+            /** @description Optional base64url userHandle returned by the authenticator. */
+            user_handle_b64url?: string | null;
+        };
+        WebAuthnRegistration: {
+            /** @description Base64url-encoded WebAuthn attestationObject from `navigator.credentials.create`. */
+            attestation_object_b64url: string;
+            /** @description Base64url-encoded WebAuthn clientDataJSON from `navigator.credentials.create`. */
+            client_data_json_b64url: string;
+        };
         AccountFillResponse: {
             /** Format: int64 */
             block_height: number;
@@ -1109,6 +1129,8 @@ export interface components {
              * @description Account ID claiming ownership of the order being cancelled.
              */
             account_id: number;
+            /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
+            auth_scheme?: components["schemas"]["AuthScheme"];
             /**
              * Format: int64
              * @description The pending order to cancel.
@@ -1119,10 +1141,12 @@ export interface components {
              * @description Per-account replay nonce covered by the P256 signature.
              */
             nonce: number;
-            /** @description Hex-encoded P256 ECDSA signature over the canonical cancel payload. */
-            signature_hex: string;
+            /** @description Hex-encoded raw P256 ECDSA signature over the canonical cancel payload. Required when `auth_scheme` is `raw_p256`. */
+            signature_hex?: string | null;
             /** @description Hex-encoded compressed P256 public key of the signer. */
             signer_pubkey_hex: string;
+            /** @description WebAuthn assertion envelope. Required when `auth_scheme` is `webauthn`. */
+            webauthn_assertion?: components["schemas"]["WebAuthnAssertion"] | null;
         };
         CreateAccountRequest: {
             /**
@@ -1848,11 +1872,17 @@ export interface components {
             pubkey_hex: string;
         };
         RegisterKeyRequest: {
+            /** @description Authentication scheme associated with this account key. Defaults to `raw_p256`. */
+            auth_scheme?: components["schemas"]["AuthScheme"];
+            /** @description Base64url credential id for WebAuthn keys. */
+            credential_id_b64url?: string | null;
             /**
              * @description Hex-encoded compressed P256 public key (33 bytes).
              * @example 02a1b2c3...
              */
             public_key_hex: string;
+            /** @description Optional WebAuthn registration payload. */
+            webauthn_registration?: components["schemas"]["WebAuthnRegistration"] | null;
         };
         /** @description Registered data feed view, returned by GET/POST /v1/feeds. */
         RegisteredFeedResponse: {
@@ -2085,6 +2115,8 @@ export interface components {
             time_in_force?: components["schemas"]["TimeInForce"];
         };
         SubmitSignedOrderRequest: {
+            /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
+            auth_scheme?: components["schemas"]["AuthScheme"];
             /**
              * Format: int64
              * @description Last eligible block height, covered by the P256 signature. Required for signed IOC/GTD.
@@ -2097,12 +2129,14 @@ export interface components {
              * @description Per-account replay nonce covered by the P256 signature.
              */
             nonce: number;
-            /** @description Hex-encoded P256 ECDSA signature. */
-            signature_hex: string;
+            /** @description Hex-encoded raw P256 ECDSA signature over the canonical order payload. Required when `auth_scheme` is `raw_p256`. */
+            signature_hex?: string | null;
             /** @description Hex-encoded compressed P256 public key of the signer. */
             signer_pubkey_hex: string;
             /** @description API time-in-force policy. Signed IOC/GTD orders commit to `expires_at_block`. */
             time_in_force?: components["schemas"]["TimeInForce"];
+            /** @description WebAuthn assertion envelope. Required when `auth_scheme` is `webauthn`. */
+            webauthn_assertion?: components["schemas"]["WebAuthnAssertion"] | null;
         };
         SystemEventResponse: {
             /** Format: int64 */

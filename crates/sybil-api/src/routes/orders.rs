@@ -4,7 +4,10 @@ use axum::Json;
 use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
 use matching_engine::MarketId;
 use matching_engine::Nanos;
-use matching_sequencer::crypto::{PublicKey, SignedCancel, SignedOrder};
+use matching_sequencer::crypto::{
+    canonical_cancel_bytes, canonical_order_bytes, AccountAuthScheme, AuthenticatedCancel,
+    AuthenticatedOrder, PublicKey, SignedCancel, SignedOrder,
+};
 use matching_sequencer::{AccountId, OrderSubmission, PendingOrderInfo};
 use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
@@ -13,9 +16,10 @@ use crate::convert::{apply_time_in_force, order_spec_to_order, signed_order_data
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
-    CancelSignedOrderRequest, OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest,
+    AuthScheme, CancelSignedOrderRequest, OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest,
 };
 use crate::types::response::{CancelOrderResponse, OrderAcceptedResponse, PendingOrderResponse};
+use crate::webauthn;
 
 /// Derive the MmSide from an OrderSpec for capital calculation.
 fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
@@ -42,6 +46,37 @@ fn parse_signature(signature_hex: &str) -> Result<Signature, AppError> {
         .map_err(|_| AppError::bad_request("Invalid hex encoding for signature"))?;
     Signature::from_slice(&sig_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))
+}
+
+fn parse_required_signature(signature_hex: Option<&str>) -> Result<Signature, AppError> {
+    parse_signature(signature_hex.ok_or_else(|| {
+        AppError::bad_request("signature_hex is required for raw_p256 signed requests")
+    })?)
+}
+
+fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
+    match scheme {
+        AuthScheme::RawP256 => AccountAuthScheme::RawP256,
+        AuthScheme::WebAuthn => AccountAuthScheme::WebAuthn,
+    }
+}
+
+async fn ensure_registered_scheme(
+    state: &AppState,
+    signer: &PublicKey,
+    expected: AccountAuthScheme,
+) -> Result<(), AppError> {
+    let registered = state
+        .sequencer
+        .lookup_registered_pubkey(signer.clone())
+        .await?
+        .ok_or_else(|| AppError::not_found("No account registered for this public key"))?;
+    if registered.auth_scheme != expected {
+        return Err(AppError::forbidden(
+            "Signer key is not registered for this auth scheme",
+        ));
+    }
+    Ok(())
 }
 
 async fn next_block_height(state: &AppState) -> Result<u64, AppError> {
@@ -123,18 +158,40 @@ pub async fn submit_signed_order(
     Json(req): Json<SubmitSignedOrderRequest>,
 ) -> Result<Json<OrderAcceptedResponse>, AppError> {
     let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
-    let signature = parse_signature(&req.signature_hex)?;
     let mut order = signed_order_data_to_order(&req.order).map_err(AppError::bad_request)?;
     apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block, None)
         .map_err(AppError::bad_request)?;
-    let signed = SignedOrder {
-        order,
-        nonce: req.nonce,
-        signer,
-        signature,
-    };
-
-    state.sequencer.submit_signed_order(signed).await?;
+    match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            let signature = parse_required_signature(req.signature_hex.as_deref())?;
+            let signed = SignedOrder {
+                order,
+                nonce: req.nonce,
+                signer,
+                signature,
+            };
+            state.sequencer.submit_signed_order(signed).await?;
+        }
+        AuthScheme::WebAuthn => {
+            ensure_registered_scheme(&state, &signer, sequencer_auth_scheme(req.auth_scheme))
+                .await?;
+            let assertion = req.webauthn_assertion.as_ref().ok_or_else(|| {
+                AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
+            })?;
+            let canonical = canonical_order_bytes(&order, req.nonce);
+            webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
+                |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
+            )?;
+            state
+                .sequencer
+                .submit_authenticated_order(AuthenticatedOrder {
+                    order,
+                    nonce: req.nonce,
+                    signer,
+                })
+                .await?;
+        }
+    }
 
     Ok(Json(OrderAcceptedResponse { accepted: true }))
 }
@@ -157,16 +214,40 @@ pub async fn cancel_signed_order(
     Json(req): Json<CancelSignedOrderRequest>,
 ) -> Result<Json<CancelOrderResponse>, AppError> {
     let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
-    let signature = parse_signature(&req.signature_hex)?;
-    let signed = SignedCancel {
-        account_id: AccountId(req.account_id),
-        order_id: req.order_id,
-        nonce: req.nonce,
-        signer,
-        signature,
-    };
-
-    state.sequencer.cancel_signed_order(signed).await?;
+    match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            let signature = parse_required_signature(req.signature_hex.as_deref())?;
+            let signed = SignedCancel {
+                account_id: AccountId(req.account_id),
+                order_id: req.order_id,
+                nonce: req.nonce,
+                signer,
+                signature,
+            };
+            state.sequencer.cancel_signed_order(signed).await?;
+        }
+        AuthScheme::WebAuthn => {
+            ensure_registered_scheme(&state, &signer, sequencer_auth_scheme(req.auth_scheme))
+                .await?;
+            let assertion = req.webauthn_assertion.as_ref().ok_or_else(|| {
+                AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
+            })?;
+            let canonical =
+                canonical_cancel_bytes(AccountId(req.account_id), req.order_id, req.nonce);
+            webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
+                |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
+            )?;
+            state
+                .sequencer
+                .cancel_authenticated_order(AuthenticatedCancel {
+                    account_id: AccountId(req.account_id),
+                    order_id: req.order_id,
+                    nonce: req.nonce,
+                    signer,
+                })
+                .await?;
+        }
+    }
 
     Ok(Json(CancelOrderResponse { cancelled: true }))
 }

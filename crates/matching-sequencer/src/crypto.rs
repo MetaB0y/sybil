@@ -17,6 +17,24 @@ use sybil_signing::{
     PriceCondition as CanonicalPriceCondition, ResolutionAttestation as CanonicalAttestation,
 };
 
+/// Registered authentication scheme for an account public key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AccountAuthScheme {
+    /// Raw P256 ECDSA over Sybil canonical bytes.
+    #[default]
+    RawP256,
+    /// WebAuthn assertion whose challenge is the hash of Sybil canonical bytes.
+    WebAuthn,
+}
+
+/// Account registration metadata attached to a public key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RegisteredPubkey {
+    pub account_id: crate::account::AccountId,
+    #[serde(default)]
+    pub auth_scheme: AccountAuthScheme,
+}
+
 /// A P256 public key (secp256r1 / passkey-compatible).
 #[derive(Clone, Debug)]
 pub struct PublicKey(pub VerifyingKey);
@@ -70,6 +88,28 @@ pub struct SignedBridgeWithdrawal {
     pub nonce: u64,
     pub signer: PublicKey,
     pub signature: Signature,
+}
+
+/// An order whose account signature was verified before entering the sequencer.
+pub struct AuthenticatedOrder {
+    pub order: Order,
+    pub nonce: u64,
+    pub signer: PublicKey,
+}
+
+/// A cancellation whose account signature was verified before entering the sequencer.
+pub struct AuthenticatedCancel {
+    pub account_id: crate::account::AccountId,
+    pub order_id: u64,
+    pub nonce: u64,
+    pub signer: PublicKey,
+}
+
+/// A bridge withdrawal whose account signature was verified before entering the sequencer.
+pub struct AuthenticatedBridgeWithdrawal {
+    pub request: crate::bridge::BridgeWithdrawalRequest,
+    pub nonce: u64,
+    pub signer: PublicKey,
 }
 
 fn to_canonical_order(order: &Order, nonce: u64) -> CanonicalOrder {

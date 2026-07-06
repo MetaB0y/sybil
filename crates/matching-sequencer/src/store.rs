@@ -117,6 +117,9 @@ const BLOCK_WITNESSES: TableDefinition<u64, &[u8]> = TableDefinition::new("block
 /// Pubkey registry: compressed_point (33 bytes) → account_id (u64)
 const PUBKEY_REGISTRY: TableDefinition<&[u8], u64> = TableDefinition::new("pubkey_registry");
 
+/// Pubkey auth scheme: compressed_point (33 bytes) → scheme tag.
+const PUBKEY_AUTH_SCHEMES: TableDefinition<&[u8], u8> = TableDefinition::new("pubkey_auth_schemes");
+
 /// Last clearing prices: market_id (u32) → msgpack(Vec<Nanos>)
 const CLEARING_PRICES: TableDefinition<u32, &[u8]> = TableDefinition::new("clearing_prices");
 
@@ -644,6 +647,8 @@ pub enum ControlPlaneCommand {
     RegisterPubkey {
         account_id: AccountId,
         compressed_pubkey: Vec<u8>,
+        #[serde(default)]
+        auth_scheme: crate::crypto::AccountAuthScheme,
     },
     AdvanceReplayNonce {
         account_id: AccountId,
@@ -689,6 +694,20 @@ pub enum ControlPlaneCommand {
     },
 }
 
+fn account_auth_scheme_to_store(scheme: crate::crypto::AccountAuthScheme) -> u8 {
+    match scheme {
+        crate::crypto::AccountAuthScheme::RawP256 => 0,
+        crate::crypto::AccountAuthScheme::WebAuthn => 1,
+    }
+}
+
+fn account_auth_scheme_from_store(value: u8) -> crate::crypto::AccountAuthScheme {
+    match value {
+        1 => crate::crypto::AccountAuthScheme::WebAuthn,
+        _ => crate::crypto::AccountAuthScheme::RawP256,
+    }
+}
+
 /// Store-restored analytics projections. These are grouped separately from
 /// core sequencer state, but still loaded from the existing redb tables.
 pub struct AnalyticsRestoredState {
@@ -717,7 +736,7 @@ pub struct RestoredState {
     pub height: u64,
     pub last_header: Option<BlockHeader>,
     pub next_order_id: u64,
-    pub pubkey_registry: HashMap<crate::crypto::PublicKey, AccountId>,
+    pub pubkey_registry: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     pub resting_orders: Vec<RestingOrder>,
     /// All registered data feeds.
     pub data_feeds: Vec<DataFeed>,
@@ -775,7 +794,7 @@ pub struct SequencerSnapshot<'a> {
     pub lifecycle: &'a MarketLifecycle,
     pub header: &'a BlockHeader,
     pub next_order_id: u64,
-    pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, AccountId>,
+    pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     pub analytics: AnalyticsSnapshot<'a>,
     pub price_candle_resolutions_secs: &'a [u32],
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
@@ -792,7 +811,7 @@ struct RedbBlockCommit {
     header_bytes: Vec<u8>,
     history_block_bytes: Option<Vec<u8>>,
     witness_bytes: Option<Vec<u8>>,
-    pubkey_rows: Vec<(Vec<u8>, u64)>,
+    pubkey_rows: Vec<(Vec<u8>, crate::crypto::RegisteredPubkey)>,
     clearing_price_rows: Vec<(u32, Vec<u8>)>,
     market_volume_rows: Vec<(u32, u64)>,
     resting_orders_bytes: Vec<u8>,
@@ -858,7 +877,7 @@ fn build_redb_block_commit(
     let pubkey_rows = snapshot
         .pubkey_registry
         .iter()
-        .map(|(pubkey, account_id)| (pubkey.compressed_bytes().to_vec(), account_id.0))
+        .map(|(pubkey, registered)| (pubkey.compressed_bytes().to_vec(), *registered))
         .collect();
 
     let mut clearing_price_rows = Vec::new();
@@ -1057,8 +1076,13 @@ where
 
     {
         let mut table = txn.open_table(PUBKEY_REGISTRY)?;
-        for (pubkey, account_id) in &commit.pubkey_rows {
-            table.insert(pubkey.as_slice(), *account_id)?;
+        let mut scheme_table = txn.open_table(PUBKEY_AUTH_SCHEMES)?;
+        for (pubkey, registered) in &commit.pubkey_rows {
+            table.insert(pubkey.as_slice(), registered.account_id.0)?;
+            scheme_table.insert(
+                pubkey.as_slice(),
+                account_auth_scheme_to_store(registered.auth_scheme),
+            )?;
         }
     }
 
@@ -1550,6 +1574,7 @@ impl Store {
         txn.open_table(BLOCKS_FULL)?;
         txn.open_table(BLOCK_WITNESSES)?;
         txn.open_table(PUBKEY_REGISTRY)?;
+        txn.open_table(PUBKEY_AUTH_SCHEMES)?;
         txn.open_table(COUNTERS)?;
         txn.open_table(HISTORY_META)?;
         txn.open_table(CLEARING_PRICES)?;
@@ -2123,12 +2148,23 @@ impl Store {
         // Pubkey registry
         let pubkey_registry = {
             let table = txn.open_table(PUBKEY_REGISTRY)?;
+            let scheme_table = txn.open_table(PUBKEY_AUTH_SCHEMES)?;
             let mut registry = HashMap::new();
             for entry in table.iter()? {
                 let (key, value) = entry?;
                 let bytes = key.value();
                 if let Some(pubkey) = crate::crypto::PublicKey::from_compressed_bytes(bytes) {
-                    registry.insert(pubkey, AccountId(value.value()));
+                    let auth_scheme = scheme_table
+                        .get(bytes)?
+                        .map(|stored| account_auth_scheme_from_store(stored.value()))
+                        .unwrap_or_default();
+                    registry.insert(
+                        pubkey,
+                        crate::crypto::RegisteredPubkey {
+                            account_id: AccountId(value.value()),
+                            auth_scheme,
+                        },
+                    );
                 } else {
                     warn!("invalid pubkey in store, skipping");
                 }
@@ -3091,7 +3127,7 @@ mod tests {
     /// Owns the empty defaults for `SequencerSnapshot` references so test code
     /// doesn't have to repeat the ceremony on every call site.
     struct TestEnv {
-        empty_pk: HashMap<crate::crypto::PublicKey, AccountId>,
+        empty_pk: HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
         empty_prices: HashMap<MarketId, Vec<Nanos>>,
         empty_volumes: HashMap<MarketId, u64>,
         bridge_state: BridgeState,

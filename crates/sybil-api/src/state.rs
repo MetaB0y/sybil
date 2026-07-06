@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::config::ApiConfig;
+use crate::webauthn::WebAuthnVerifierConfig;
 
 const MAX_HTTP_RATE_LIMIT_CLIENTS: usize = 10_000;
 const OVERFLOW_CLIENT_KEY: &str = "__overflow__";
@@ -218,6 +219,8 @@ pub struct AppState {
     /// Cheap pre-handler limiter for order endpoints. Sequencer admission has
     /// authoritative account/global limits; this bounds parsing/signature work.
     pub http_order_limiter: Arc<Mutex<HttpOrderRateLimiter>>,
+    /// WebAuthn verifier policy for passkey account actions.
+    pub webauthn: WebAuthnVerifierConfig,
 }
 
 impl AppState {
@@ -277,6 +280,7 @@ impl AppState {
             event_snapshot_dir,
             arena_db_path: config.arena_db_path.clone(),
             http_order_limiter: Arc::new(Mutex::new(HttpOrderRateLimiter::new(config))),
+            webauthn: WebAuthnVerifierConfig::from_api_config(config),
         }
     }
 }

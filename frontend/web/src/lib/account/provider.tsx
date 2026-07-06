@@ -28,7 +28,9 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     const interesting = new Set<string>([
       STORAGE_KEYS.ACCOUNT_ID,
       STORAGE_KEYS.PUBKEY,
+      STORAGE_KEYS.AUTH_SCHEME,
       STORAGE_KEYS.JWK,
+      STORAGE_KEYS.CREDENTIAL_ID,
     ]);
     function onStorage(e: StorageEvent) {
       if (e.key !== null && !interesting.has(e.key)) return;

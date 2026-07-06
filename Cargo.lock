@@ -4184,6 +4184,8 @@ name = "sybil-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
+ "ciborium",
  "clap",
  "futures-util",
  "getrandom 0.4.2",
@@ -4202,6 +4204,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2 0.10.9",
  "sybil-api-types",
  "sybil-client",
  "sybil-l1-protocol",

@@ -14,13 +14,17 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AccountError,
+  type CreateAccountKeyMode,
   createDemoAccount,
   importExistingAccount,
+  signInWithStoredPasskey,
 } from "@/lib/account/actions";
+import { readStoredAccount } from "@/lib/account/storage";
 import {
   useConnectModalOpen,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
+import { isWebAuthnAvailable } from "@/lib/auth/webauthn";
 
 const BALANCE_OPTIONS: Array<{ label: string; nanos: bigint }> = [
   { label: "$100", nanos: 100_000_000_000n },
@@ -29,7 +33,7 @@ const BALANCE_OPTIONS: Array<{ label: string; nanos: bigint }> = [
   { label: "$5,000", nanos: 5_000_000_000_000n },
 ];
 
-type Tab = "create" | "import";
+type Tab = "create" | "passkey" | "import";
 
 export function ConnectModal() {
   const open = useConnectModalOpen();
@@ -142,13 +146,22 @@ function ConnectModalBody({ onClose }: { onClose: () => void }) {
         <TabButton active={tab === "create"} onClick={() => setTab("create")}>
           Create demo
         </TabButton>
+        <TabButton active={tab === "passkey"} onClick={() => setTab("passkey")}>
+          Passkey
+        </TabButton>
         <TabButton active={tab === "import"} onClick={() => setTab("import")}>
           Import existing
         </TabButton>
       </div>
 
       <div style={{ padding: "16px 18px 18px" }}>
-        {tab === "create" ? <CreateTab /> : <ImportTab />}
+        {tab === "create" ? (
+          <CreateTab />
+        ) : tab === "passkey" ? (
+          <PasskeyTab />
+        ) : (
+          <ImportTab />
+        )}
       </div>
     </div>
   );
@@ -191,6 +204,9 @@ function CreateTab() {
   const [balanceNanos, setBalanceNanos] = useState<bigint>(
     BALANCE_OPTIONS[2]!.nanos,
   );
+  const [mode, setMode] = useState<CreateAccountKeyMode>(
+    isWebAuthnAvailable() ? "passkey" : "local_key",
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -198,11 +214,13 @@ function CreateTab() {
     setError(null);
     setBusy(true);
     try {
-      await createDemoAccount(balanceNanos);
+      await createDemoAccount(balanceNanos, mode);
     } catch (e) {
       const msg =
         e instanceof AccountError && e.kind === "dev_mode_off"
           ? "Demo accounts are disabled on this server. Bridge deposits coming soon."
+          : e instanceof AccountError && e.kind === "webauthn_unavailable"
+            ? "Passkeys are not available in this browser."
           : e instanceof Error
             ? e.message
             : "Failed to create account";
@@ -215,10 +233,30 @@ function CreateTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
-        Generates a key in your browser and creates a demo account with the
-        selected starting balance. The private key is stored in this browser
-        only — preview &middot; wallet auth coming soon.
+        Creates a demo account with the selected starting balance. Passkeys use
+        your device authenticator; local dev keys keep the preview JWK path.
       </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <Label>Key</Label>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => setMode("passkey")}
+            disabled={!isWebAuthnAvailable()}
+            style={chipStyle(mode === "passkey")}
+          >
+            Passkey
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("local_key")}
+            style={chipStyle(mode === "local_key")}
+          >
+            Local dev key
+          </button>
+        </div>
+      </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <Label>Starting balance</Label>
@@ -247,7 +285,46 @@ function CreateTab() {
         disabled={busy}
         style={primaryButtonStyle(busy)}
       >
-        {busy ? "Creating…" : "Create demo account"}
+        {busy ? "Creating…" : mode === "passkey" ? "Create with passkey" : "Create local account"}
+      </button>
+    </div>
+  );
+}
+
+function PasskeyTab() {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const saved = typeof window === "undefined" ? null : readStoredAccount();
+  const hasSavedPasskey = saved?.authScheme === "webauthn";
+
+  async function onSubmit() {
+    setError(null);
+    setBusy(true);
+    try {
+      await signInWithStoredPasskey();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Passkey sign-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <p style={{ ...bodyText, margin: 0 }}>
+        Use the saved passkey account on this browser. The device will ask for
+        a passkey check before reconnecting.
+      </p>
+
+      {error && <ErrorRow>{error}</ErrorRow>}
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={busy || !hasSavedPasskey}
+        style={primaryButtonStyle(busy || !hasSavedPasskey)}
+      >
+        {busy ? "Checking…" : hasSavedPasskey ? "Sign in with passkey" : "No saved passkey"}
       </button>
     </div>
   );

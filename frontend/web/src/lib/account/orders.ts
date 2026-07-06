@@ -12,7 +12,9 @@
 import { api } from "@/lib/api/client";
 import { canonicalCancelBytes, canonicalOrderBytes } from "@/lib/auth/canonical";
 import { signBytes } from "@/lib/auth/p256";
-import { getKeyHandle } from "./store";
+import { signWebAuthnBytes } from "@/lib/auth/webauthn";
+import { getKeyHandle, useAccountStore } from "./store";
+import type { AccountAuthScheme } from "./storage";
 import { recordCancel } from "./use-cancelled-orders";
 
 export type OrderSide = "BuyYes" | "BuyNo" | "SellYes" | "SellNo";
@@ -55,18 +57,13 @@ export interface SubmitSignedOrderArgs {
    * compatibility: GTD if `expiresAtBlock` is set, otherwise GTC.
    */
   timeInForce?: SubmitTimeInForce;
+  authScheme?: AccountAuthScheme;
+  credentialIdB64url?: string;
 }
 
 export async function submitSignedOrder(
   args: SubmitSignedOrderArgs,
 ): Promise<{ accepted: boolean }> {
-  const key = getKeyHandle(args.accountId);
-  if (!key) {
-    throw new Error(
-      `No private key for account ${args.accountId} in this browser — reconnect`,
-    );
-  }
-
   // Resolve the effective TIF. IOC/GTD sign `expires_at_block`; GTC signs None.
   const tif: SubmitTimeInForce =
     args.timeInForce ?? (args.expiresAtBlock !== undefined ? "GTD" : "GTC");
@@ -85,10 +82,9 @@ export async function submitSignedOrder(
     nonce,
     ...(expiresAtBlock !== undefined ? { expiresAtBlock } : {}),
   });
-  const signature_hex = await signBytes(key, canonical);
+  const auth = resolveAuthContext(args);
 
-  const res = await api.POST("/v1/orders/signed", {
-    body: {
+  const body = {
       signer_pubkey_hex: args.publicKeyHex,
       order: {
         market_ids: [args.marketId],
@@ -98,14 +94,31 @@ export async function submitSignedOrder(
         max_fill: Number(args.maxFill),
       },
       nonce: u64JsonNumber(nonce),
-      signature_hex,
       ...(expiresAtBlock !== undefined
         ? {
             expires_at_block: Number(expiresAtBlock),
             time_in_force: tif,
           }
         : {}),
-    },
+  };
+
+  const signedBody =
+    auth.authScheme === "webauthn"
+      ? {
+          ...body,
+          auth_scheme: "webauthn" as const,
+          webauthn_assertion: await signWebAuthnBytes(
+            auth.credentialIdB64url,
+            canonical,
+          ),
+        }
+      : {
+          ...body,
+          signature_hex: await signRawBytes(args.accountId, canonical),
+        };
+
+  const res = await api.POST("/v1/orders/signed", {
+    body: signedBody,
   });
 
   if (res.error) {
@@ -129,34 +142,45 @@ export interface CancelSignedOrderArgs {
     qty: number;
     limitPriceNanos: string;
   };
+  authScheme?: AccountAuthScheme;
+  credentialIdB64url?: string;
 }
 
 export async function cancelSignedOrder(
   args: CancelSignedOrderArgs,
 ): Promise<{ cancelled: boolean }> {
-  const key = getKeyHandle(args.accountId);
-  if (!key) {
-    throw new Error(
-      `No private key for account ${args.accountId} in this browser — reconnect`,
-    );
-  }
-
   const nonce = args.nonce ?? nextReplayNonce(args.accountId);
   const canonical = canonicalCancelBytes(
     BigInt(args.accountId),
     BigInt(args.orderId),
     nonce,
   );
-  const signature_hex = await signBytes(key, canonical);
+  const auth = resolveAuthContext(args);
 
-  const res = await api.POST("/v1/orders/cancel/signed", {
-    body: {
+  const body = {
       account_id: args.accountId,
       order_id: args.orderId,
       signer_pubkey_hex: args.publicKeyHex,
       nonce: u64JsonNumber(nonce),
-      signature_hex,
-    },
+  };
+
+  const signedBody =
+    auth.authScheme === "webauthn"
+      ? {
+          ...body,
+          auth_scheme: "webauthn" as const,
+          webauthn_assertion: await signWebAuthnBytes(
+            auth.credentialIdB64url,
+            canonical,
+          ),
+        }
+      : {
+          ...body,
+          signature_hex: await signRawBytes(args.accountId, canonical),
+        };
+
+  const res = await api.POST("/v1/orders/cancel/signed", {
+    body: signedBody,
   });
 
   if (res.error) {
@@ -177,6 +201,36 @@ export async function cancelSignedOrder(
     });
   }
   return { cancelled };
+}
+
+function resolveAuthContext(args: {
+  accountId: number;
+  authScheme?: AccountAuthScheme;
+  credentialIdB64url?: string;
+}): { authScheme: "raw_p256" } | { authScheme: "webauthn"; credentialIdB64url: string } {
+  const session = useAccountStore.getState().session;
+  const authScheme =
+    args.authScheme ??
+    (session?.accountId === args.accountId ? session.authScheme : undefined) ??
+    "raw_p256";
+  if (authScheme === "webauthn") {
+    const credentialIdB64url =
+      args.credentialIdB64url ??
+      (session?.accountId === args.accountId ? session.credentialIdB64url : undefined);
+    if (!credentialIdB64url) {
+      throw new Error(`No passkey credential for account ${args.accountId} in this browser`);
+    }
+    return { authScheme, credentialIdB64url };
+  }
+  return { authScheme: "raw_p256" };
+}
+
+async function signRawBytes(accountId: number, canonical: Uint8Array): Promise<string> {
+  const key = getKeyHandle(accountId);
+  if (!key) {
+    throw new Error(`No private key for account ${accountId} in this browser — reconnect`);
+  }
+  return signBytes(key, canonical);
 }
 
 function nextReplayNonce(accountId: number): bigint {

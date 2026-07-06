@@ -1,7 +1,10 @@
 use axum::extract::{Path, State};
 use axum::Json;
 
-use matching_sequencer::crypto::{PublicKey, SignedBridgeWithdrawal};
+use matching_sequencer::crypto::{
+    canonical_bridge_withdrawal_bytes, AccountAuthScheme, AuthenticatedBridgeWithdrawal, PublicKey,
+    SignedBridgeWithdrawal,
+};
 use matching_sequencer::{
     AccountId, BridgeWithdrawalRequest as SequencerBridgeWithdrawalRequest,
     L1Deposit as SequencerL1Deposit,
@@ -13,11 +16,13 @@ use crate::convert::bridge_withdrawal_to_response;
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
-    CreateBridgeWithdrawalRequest, CreateSignedBridgeWithdrawalRequest, SubmitL1DepositRequest,
+    AuthScheme, CreateBridgeWithdrawalRequest, CreateSignedBridgeWithdrawalRequest,
+    SubmitL1DepositRequest,
 };
 use crate::types::response::{
     BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse, BridgeWithdrawalResponse,
 };
+use crate::webauthn;
 
 fn strip_hex_prefix(value: &str) -> &str {
     value
@@ -52,6 +57,37 @@ fn parse_signature(signature_hex: &str) -> Result<Signature, AppError> {
         .map_err(|_| AppError::bad_request("Invalid hex encoding for signature"))?;
     Signature::from_slice(&sig_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))
+}
+
+fn parse_required_signature(signature_hex: Option<&str>) -> Result<Signature, AppError> {
+    parse_signature(signature_hex.ok_or_else(|| {
+        AppError::bad_request("signature_hex is required for raw_p256 signed requests")
+    })?)
+}
+
+fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
+    match scheme {
+        AuthScheme::RawP256 => AccountAuthScheme::RawP256,
+        AuthScheme::WebAuthn => AccountAuthScheme::WebAuthn,
+    }
+}
+
+async fn ensure_registered_scheme(
+    state: &AppState,
+    signer: &PublicKey,
+    expected: AccountAuthScheme,
+) -> Result<(), AppError> {
+    let registered = state
+        .sequencer
+        .lookup_registered_pubkey(signer.clone())
+        .await?
+        .ok_or_else(|| AppError::not_found("No account registered for this public key"))?;
+    if registered.auth_scheme != expected {
+        return Err(AppError::forbidden(
+            "Signer key is not registered for this auth scheme",
+        ));
+    }
+    Ok(())
 }
 
 fn withdrawal_request_from_api(
@@ -239,20 +275,44 @@ pub async fn create_signed_withdrawal(
         .nonce
         .ok_or_else(|| AppError::bad_request("nonce is required for signed bridge withdrawals"))?;
     let request = withdrawal_request_from_api(&req.withdrawal, expiry_height)?;
-    let signed = SignedBridgeWithdrawal {
-        request,
-        nonce,
-        signer: parse_signer_public_key(&req.signer_pubkey_hex)?,
-        signature: parse_signature(&req.signature_hex)?,
-    };
+    let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
 
     // TODO(SYB-188/SYB-178): this authenticates the Sybil account intent and
     // burns off-chain balance, but L1 release still needs proof-backed vault
     // authorization before this is production-complete.
-    let withdrawal = state
-        .sequencer
-        .create_signed_bridge_withdrawal(signed)
-        .await?;
+    let withdrawal = match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            let signed = SignedBridgeWithdrawal {
+                request,
+                nonce,
+                signer,
+                signature: parse_required_signature(req.signature_hex.as_deref())?,
+            };
+            state
+                .sequencer
+                .create_signed_bridge_withdrawal(signed)
+                .await?
+        }
+        AuthScheme::WebAuthn => {
+            ensure_registered_scheme(&state, &signer, sequencer_auth_scheme(req.auth_scheme))
+                .await?;
+            let assertion = req.webauthn_assertion.as_ref().ok_or_else(|| {
+                AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
+            })?;
+            let canonical = canonical_bridge_withdrawal_bytes(&request, nonce);
+            webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
+                |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
+            )?;
+            state
+                .sequencer
+                .create_authenticated_bridge_withdrawal(AuthenticatedBridgeWithdrawal {
+                    request,
+                    nonce,
+                    signer,
+                })
+                .await?
+        }
+    };
     Ok(Json(bridge_withdrawal_to_response(&withdrawal)))
 }
 

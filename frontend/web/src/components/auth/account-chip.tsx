@@ -130,13 +130,15 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           <MenuItem
             onClick={() => {
               const stored = readStoredAccount();
-              if (stored) {
+              if (stored?.authScheme === "raw_p256" && stored.jwk) {
                 void navigator.clipboard?.writeText(JSON.stringify(stored.jwk));
+              } else if (stored?.credentialIdB64url) {
+                void navigator.clipboard?.writeText(stored.credentialIdB64url);
               }
               setOpen(false);
             }}
           >
-            Copy JWK (private key)
+            Copy key handle
           </MenuItem>
           <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
           <MenuItem

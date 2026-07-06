@@ -46,7 +46,10 @@ pub use block::{
 pub use bridge::{
     BridgeBlockData, BridgeState, BridgeWithdrawalRequest, EthAddress, L1Deposit, WithdrawalLeaf,
 };
-pub use crypto::{PublicKey, SignedBridgeWithdrawal, SignedCancel, SignedOrder};
+pub use crypto::{
+    AccountAuthScheme, AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedOrder,
+    PublicKey, RegisteredPubkey, SignedBridgeWithdrawal, SignedCancel, SignedOrder,
+};
 pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{
     AccountFillCursor, AccountFillRecord, MarketMetadata, MarketSearchQuery, MarketSortField,

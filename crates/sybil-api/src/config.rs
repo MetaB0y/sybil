@@ -116,6 +116,22 @@ pub struct ApiConfig {
     #[arg(long, default_value = "1000", env = "SYBIL_HTTP_ORDER_CLIENT_BURST")]
     pub http_order_client_burst: u32,
 
+    /// WebAuthn relying-party id. For local frontend dev this is `localhost`.
+    #[arg(long, default_value = "localhost", env = "SYBIL_WEBAUTHN_RP_ID")]
+    pub webauthn_rp_id: String,
+
+    /// Browser origin allowed in WebAuthn clientDataJSON.
+    #[arg(
+        long,
+        default_value = "http://localhost:3000",
+        env = "SYBIL_WEBAUTHN_ORIGIN"
+    )]
+    pub webauthn_origin: String,
+
+    /// Require the authenticator's user-verification flag on WebAuthn assertions.
+    #[arg(long, default_value = "true", env = "SYBIL_WEBAUTHN_REQUIRE_UV")]
+    pub webauthn_require_uv: bool,
+
     /// In-memory ring-buffer size for recent blocks served by history endpoints.
     #[arg(long, default_value = "100", env = "SYBIL_BLOCK_HISTORY_CAPACITY")]
     pub block_history_capacity: usize,
@@ -272,6 +288,9 @@ impl Default for ApiConfig {
             http_order_global_burst: 2_000,
             http_order_client_rps: 250,
             http_order_client_burst: 1_000,
+            webauthn_rp_id: "localhost".to_string(),
+            webauthn_origin: "http://localhost:3000".to_string(),
+            webauthn_require_uv: true,
             block_history_capacity: 100,
             max_price_history_points_per_market: 2_000,
             block_history_retention_blocks: 0,

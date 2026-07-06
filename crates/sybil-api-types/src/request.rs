@@ -72,8 +72,27 @@ pub struct CreateSignedBridgeWithdrawalRequest {
     pub withdrawal: CreateBridgeWithdrawalRequest,
     /// Hex-encoded compressed P256 public key of the signer.
     pub signer_pubkey_hex: String,
-    /// Hex-encoded P256 ECDSA signature over the canonical withdrawal payload.
-    pub signature_hex: String,
+    /// Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots.
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    /// Hex-encoded raw P256 ECDSA signature over the canonical withdrawal payload.
+    /// Required when `auth_scheme` is `raw_p256`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    /// WebAuthn assertion envelope. Required when `auth_scheme` is `webauthn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AuthScheme {
+    /// Raw P256 ECDSA over Sybil canonical bytes.
+    #[default]
+    RawP256,
+    /// WebAuthn assertion with challenge `base64url(sha256(canonical_bytes))`.
+    WebAuthn,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +101,44 @@ pub struct RegisterKeyRequest {
     /// Hex-encoded compressed P256 public key (33 bytes).
     #[cfg_attr(feature = "openapi", schema(example = "02a1b2c3..."))]
     pub public_key_hex: String,
+    /// Authentication scheme associated with this account key. Defaults to
+    /// `raw_p256` so existing bots, SDKs, and arena clients are unchanged.
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    /// Base64url credential id for WebAuthn keys. Stored client-side today and
+    /// documented here so passkey clients can round-trip the registration payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_id_b64url: Option<String>,
+    /// Optional WebAuthn registration payload. When present, the server parses
+    /// the attestation object's COSE EC2 public key and requires it to match
+    /// `public_key_hex`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_registration: Option<WebAuthnRegistration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WebAuthnRegistration {
+    /// Base64url-encoded WebAuthn attestationObject from `navigator.credentials.create`.
+    pub attestation_object_b64url: String,
+    /// Base64url-encoded WebAuthn clientDataJSON from `navigator.credentials.create`.
+    pub client_data_json_b64url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WebAuthnAssertion {
+    /// Base64url credential id returned by the authenticator.
+    pub credential_id_b64url: String,
+    /// Base64url authenticatorData bytes from `navigator.credentials.get`.
+    pub authenticator_data_b64url: String,
+    /// Base64url clientDataJSON bytes from `navigator.credentials.get`.
+    pub client_data_json_b64url: String,
+    /// Base64url DER-encoded ECDSA signature from `navigator.credentials.get`.
+    pub signature_b64url: String,
+    /// Optional base64url userHandle returned by the authenticator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_handle_b64url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -294,8 +351,16 @@ pub struct SubmitSignedOrderRequest {
     pub expires_at_block: Option<u64>,
     /// Per-account replay nonce covered by the P256 signature.
     pub nonce: u64,
-    /// Hex-encoded P256 ECDSA signature.
-    pub signature_hex: String,
+    /// Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots.
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    /// Hex-encoded raw P256 ECDSA signature over the canonical order payload.
+    /// Required when `auth_scheme` is `raw_p256`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    /// WebAuthn assertion envelope. Required when `auth_scheme` is `webauthn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,8 +374,16 @@ pub struct CancelSignedOrderRequest {
     pub signer_pubkey_hex: String,
     /// Per-account replay nonce covered by the P256 signature.
     pub nonce: u64,
-    /// Hex-encoded P256 ECDSA signature over the canonical cancel payload.
-    pub signature_hex: String,
+    /// Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots.
+    #[serde(default)]
+    pub auth_scheme: AuthScheme,
+    /// Hex-encoded raw P256 ECDSA signature over the canonical cancel payload.
+    /// Required when `auth_scheme` is `raw_p256`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_hex: Option<String>,
+    /// WebAuthn assertion envelope. Required when `auth_scheme` is `webauthn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webauthn_assertion: Option<WebAuthnAssertion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,12 +3,36 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-05
+last_verified: 2026-07-06
 ---
 
 Sybil uses P256 (NIST secp256r1) ECDSA signatures for authenticated account actions. This is the same elliptic curve used by hardware security modules (HSMs), secure enclaves (Apple's Secure Enclave, Android's StrongBox), and WebAuthn/FIDO2 keys. The choice of P256 over secp256k1 (Bitcoin/Ethereum's curve) is deliberate: it enables direct hardware key integration without software key management.
 
-The authentication flow has two steps. First, the user registers a P256 public key via `POST /v1/accounts/{id}/keys`. This associates the key with their account — multiple keys can be registered for operational flexibility. Second, when submitting a signed action, the user signs the canonical payload with their private key. Signed orders go to `POST /v1/orders/signed`; signed cancellations go to `POST /v1/orders/cancel/signed`; signed bridge withdrawals go to `POST /v1/bridge/withdrawals/signed`. The API verifies the signature against the registered keys before forwarding the order to the [[Mempool]], applying the cancellation, or writing the withdrawal request to the bridge WAL.
+The authentication flow has two schemes. Raw P256 keys register a compressed
+P256 public key via `POST /v1/accounts/{id}/keys` with `auth_scheme =
+raw_p256` (the default for bots, SDKs, and arena clients). Passkey accounts use
+the same endpoint with `auth_scheme = webauthn`; the client sends the WebAuthn
+registration payload, the API extracts the COSE EC2 P256 public key, and the
+registered public key is tagged as WebAuthn. Multiple keys can be registered
+for operational flexibility and backup passkeys.
+
+For raw P256, clients sign the canonical payload directly. For WebAuthn, the
+assertion challenge is `base64url(SHA-256(canonical_payload_bytes))`, where the
+canonical payload is the same order, cancel, or withdrawal byte string used by
+raw P256, including the replay nonce. The authenticator signs
+`authenticatorData || SHA-256(clientDataJSON)`. The API verifies the P256
+signature, `clientDataJSON.type`, challenge, origin, `rpIdHash`, user presence,
+user verification, and the registered auth scheme before forwarding an
+already-authenticated action into the sequencer.
+
+Signed orders go to `POST /v1/orders/signed`; signed cancellations go to `POST
+/v1/orders/cancel/signed`; signed bridge withdrawals go to
+`POST /v1/bridge/withdrawals/signed`. The raw signed path still verifies inside
+the sequencer exactly as before. The WebAuthn path verifies the envelope at the
+API boundary, then uses the same registered-key lookup, durable nonce advance,
+admission, cancellation, or bridge WAL machinery. The block witness and OpenVM
+guest do not contain WebAuthn envelopes or raw signatures; they continue to
+verify accepted orders, rejections, fills, events, and state transitions.
 
 Every signed order, signed cancellation, and signed bridge withdrawal carries a per-account `nonce: u64` covered by the canonical P256 payload. The sequencer stores each account's highest accepted signed-action nonce and requires strict increase; gaps are allowed. Stale or duplicate nonces are rejected at the API boundary as `409 REPLAY_NONCE_STALE`. The nonce advance is durably logged before the signed action becomes live, so a process restart cannot reopen the replay window for an already acknowledged signed payload.
 
@@ -22,14 +46,17 @@ Signed bridge withdrawals are scaffolding for [[L1 Settlement and Vault]] rather
 - Signed order submission: `POST /orders/signed` — signature verified against registered keys
 - Signed cancellation: `POST /orders/cancel/signed` — signature verified against registered keys
 - Signed withdrawal scaffold: `POST /bridge/withdrawals/signed` — signature verified against registered keys and service-gated
+- Passkey support: WebAuthn assertions over the hash of the same canonical bytes
 - Replay protection: per-account strictly increasing signed-action nonce, persisted through restart
 - Unsigned path available for dev mode
 - Hardware-compatible: Secure Enclave, StrongBox, FIDO2 keys
 - ZK-friendly: efficient P256 verification circuits exist
+- Recovery: register a second passkey while one existing account key still works; see `docs/passkey-recovery.md`
 
 ## Where This Lives
 > `crates/sybil-api/src/routes/` — signed order and bridge-withdrawal endpoints
-> `crates/matching-sequencer/src/crypto.rs` — canonical payload conversion and P256 verification
+> `crates/sybil-api/src/webauthn.rs` — WebAuthn assertion and COSE EC2 registration checks
+> `crates/matching-sequencer/src/crypto.rs` — canonical payload conversion, raw P256 verification, and auth-scheme tags
 
 ## See Also
 - [[REST API]] — the endpoints for key registration and order submission

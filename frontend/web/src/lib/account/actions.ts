@@ -15,6 +15,11 @@ import {
   importPrivateKey,
 } from "@/lib/auth/p256";
 import {
+  createPasskeyForAccount,
+  isWebAuthnAvailable,
+  verifyStoredPasskey,
+} from "@/lib/auth/webauthn";
+import {
   clearKeyHandle,
   setKeyHandle,
   useAccountStore,
@@ -34,12 +39,15 @@ export class AccountError extends Error {
       | "invalid_jwk"
       | "account_not_found"
       | "key_register_failed"
+      | "webauthn_unavailable"
       | "unknown",
   ) {
     super(message);
     this.name = "AccountError";
   }
 }
+
+export type CreateAccountKeyMode = "passkey" | "local_key";
 
 /**
  * 1. POST /v1/accounts (dev-mode) with chosen initial balance.
@@ -52,9 +60,14 @@ export class AccountError extends Error {
  */
 export async function createDemoAccount(
   initialBalanceNanos: bigint,
+  mode: CreateAccountKeyMode = isWebAuthnAvailable() ? "passkey" : "local_key",
 ): Promise<void> {
-  const kp = await generateKeyPair();
-  const publicKeyHex = await exportPublicKeyCompressedHex(kp.publicKey);
+  if (mode === "passkey" && !isWebAuthnAvailable()) {
+    throw new AccountError(
+      "Passkeys are not available in this browser",
+      "webauthn_unavailable",
+    );
+  }
 
   const created = await api.POST("/v1/accounts", {
     // Schema marks *_nanos as `string` (patch-bigints) but wire wants a
@@ -80,9 +93,48 @@ export async function createDemoAccount(
   }
   const accountId = created.data.account_id;
 
+  if (mode === "passkey") {
+    const passkey = await createPasskeyForAccount(accountId);
+    const registered = await api.POST("/v1/accounts/{id}/keys", {
+      params: { path: { id: accountId } },
+      body: {
+        public_key_hex: passkey.publicKeyHex,
+        auth_scheme: "webauthn",
+        credential_id_b64url: passkey.credentialIdB64url,
+        webauthn_registration: {
+          attestation_object_b64url: passkey.attestationObjectB64url,
+          client_data_json_b64url: passkey.clientDataJSONB64url,
+        },
+      },
+    });
+    if (registered.error) {
+      throw new AccountError(
+        `register_key failed (HTTP ${registered.response?.status ?? "?"})`,
+        "key_register_failed",
+      );
+    }
+
+    writeStoredAccount({
+      accountId,
+      publicKeyHex: passkey.publicKeyHex,
+      authScheme: "webauthn",
+      credentialIdB64url: passkey.credentialIdB64url,
+    });
+    useAccountStore.getState().setSession({
+      accountId,
+      publicKeyHex: passkey.publicKeyHex,
+      authScheme: "webauthn",
+      credentialIdB64url: passkey.credentialIdB64url,
+    });
+    useAccountStore.getState().setConnectModalOpen(false);
+    return;
+  }
+
+  const kp = await generateKeyPair();
+  const publicKeyHex = await exportPublicKeyCompressedHex(kp.publicKey);
   const registered = await api.POST("/v1/accounts/{id}/keys", {
     params: { path: { id: accountId } },
-    body: { public_key_hex: publicKeyHex },
+    body: { public_key_hex: publicKeyHex, auth_scheme: "raw_p256" },
   });
   if (registered.error) {
     throw new AccountError(
@@ -92,9 +144,11 @@ export async function createDemoAccount(
   }
 
   const jwk = await exportPrivateJwk(kp.privateKey);
-  writeStoredAccount({ accountId, publicKeyHex, jwk });
+  writeStoredAccount({ accountId, publicKeyHex, authScheme: "raw_p256", jwk });
   setKeyHandle(accountId, kp.privateKey);
-  useAccountStore.getState().setSession({ accountId, publicKeyHex });
+  useAccountStore
+    .getState()
+    .setSession({ accountId, publicKeyHex, authScheme: "raw_p256" });
   useAccountStore.getState().setConnectModalOpen(false);
 }
 
@@ -132,9 +186,26 @@ export async function importExistingAccount(
     );
   }
 
-  writeStoredAccount({ accountId, publicKeyHex, jwk });
+  writeStoredAccount({ accountId, publicKeyHex, authScheme: "raw_p256", jwk });
   setKeyHandle(accountId, privateKey);
-  useAccountStore.getState().setSession({ accountId, publicKeyHex });
+  useAccountStore
+    .getState()
+    .setSession({ accountId, publicKeyHex, authScheme: "raw_p256" });
+  useAccountStore.getState().setConnectModalOpen(false);
+}
+
+export async function signInWithStoredPasskey(): Promise<void> {
+  const stored = readStoredAccount();
+  if (stored?.authScheme !== "webauthn" || !stored.credentialIdB64url) {
+    throw new AccountError("No saved passkey account", "account_not_found");
+  }
+  await verifyStoredPasskey(stored.credentialIdB64url);
+  useAccountStore.getState().setSession({
+    accountId: stored.accountId,
+    publicKeyHex: stored.publicKeyHex,
+    authScheme: "webauthn",
+    credentialIdB64url: stored.credentialIdB64url,
+  });
   useAccountStore.getState().setConnectModalOpen(false);
 }
 
@@ -156,14 +227,26 @@ export async function rehydrateFromStorage(): Promise<void> {
   const current = useAccountStore.getState().session;
   if (current && current.accountId === stored.accountId) return;
   try {
-    const privateKey = await importPrivateKey(stored.jwk);
-    setKeyHandle(stored.accountId, privateKey);
-    useAccountStore.getState().setSession({
-      accountId: stored.accountId,
-      publicKeyHex: stored.publicKeyHex,
-    });
+    if (stored.authScheme === "webauthn") {
+      if (!stored.credentialIdB64url) throw new Error("missing WebAuthn credential id");
+      useAccountStore.getState().setSession({
+        accountId: stored.accountId,
+        publicKeyHex: stored.publicKeyHex,
+        authScheme: "webauthn",
+        credentialIdB64url: stored.credentialIdB64url,
+      });
+    } else {
+      if (!stored.jwk) throw new Error("missing raw P256 private key");
+      const privateKey = await importPrivateKey(stored.jwk);
+      setKeyHandle(stored.accountId, privateKey);
+      useAccountStore.getState().setSession({
+        accountId: stored.accountId,
+        publicKeyHex: stored.publicKeyHex,
+        authScheme: "raw_p256",
+      });
+    }
   } catch (e) {
-    console.warn("[account] stored JWK corrupt; clearing", e);
+    console.warn("[account] stored account corrupt; clearing", e);
     clearStoredAccount();
     useAccountStore.getState().setSession(null);
   }
