@@ -90,6 +90,19 @@ pub fn verify_block(witness: &BlockWitness) -> VerificationResult {
     // 3. Parent hash
     match &witness.previous_header {
         Some(prev) => {
+            let computed_pre_root =
+                compute_state_root_with_sidecar(&witness.pre_state, &witness.pre_state_sidecar);
+            if computed_pre_root != prev.state_root {
+                violations.push(Violation {
+                    kind: ViolationKind::PreStateRootMismatch,
+                    details: format!(
+                        "Computed pre-state root {:?} != previous header state root {:?}",
+                        hex(&computed_pre_root),
+                        hex(&prev.state_root),
+                    ),
+                });
+            }
+
             let computed_parent = hash_header(prev);
             if computed_parent != witness.header.parent_hash {
                 violations.push(Violation {
@@ -686,17 +699,19 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state: vec![],
+            pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -721,17 +736,19 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state: vec![],
+            pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -762,7 +779,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -773,6 +790,7 @@ mod tests {
             post_system_state: vec![],
             post_state,
             state_sidecar: Default::default(),
+            pre_state_sidecar: Default::default(),
             resolved_markets: vec![],
         };
 
@@ -814,23 +832,93 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
             minting_cost: 0,
             mm_constraints: vec![],
             market_groups: vec![],
-            pre_state: vec![],
+            pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
 
         let result = verify_block(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn test_pre_state_sidecar_authenticated_against_previous_header() {
+        let pre_state = vec![AccountSnapshot {
+            id: 9,
+            balance: 500,
+            total_deposited: 500,
+            positions: vec![],
+            events_digest: [9u8; 32],
+        }];
+        let pre_state_sidecar = StateSidecarSnapshot {
+            markets: vec![MarketSnapshot {
+                market_id: MarketId::new(7),
+                name: "Authenticated".to_string(),
+                num_outcomes: 2,
+                status: MarketStatusSnapshot::Active,
+                metadata_digest: [7u8; 32],
+                resolution_template: "admin".to_string(),
+            }],
+            ..StateSidecarSnapshot::default()
+        };
+        let post_state = pre_state.clone();
+        let state_sidecar = pre_state_sidecar.clone();
+        let prev_header = genesis_header(compute_state_root_with_sidecar(
+            &pre_state,
+            &pre_state_sidecar,
+        ));
+        let header = WitnessBlockHeader {
+            height: 2,
+            parent_hash: hash_header(&prev_header),
+            state_root: compute_state_root_with_sidecar(&post_state, &state_sidecar),
+            events_root: empty_events_root(),
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: 2000,
+        };
+        let mut witness = BlockWitness {
+            header,
+            previous_header: Some(prev_header),
+            orders: vec![],
+            rejections: vec![],
+            system_events: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
+            fills: vec![],
+            clearing_prices: HashMap::new(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state,
+            post_system_state: post_state.clone(),
+            post_state,
+            state_sidecar,
+            pre_state_sidecar,
+            resolved_markets: vec![],
+        };
+
+        let result = verify_block(&witness);
+        assert!(result.valid, "Violations: {:?}", result.violations);
+
+        witness.pre_state_sidecar.markets.clear();
+        let result = verify_block(&witness);
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::PreStateRootMismatch));
     }
 
     #[test]
@@ -857,7 +945,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -868,6 +956,8 @@ mod tests {
             post_system_state: vec![],
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };

@@ -317,6 +317,10 @@ pub enum SystemEventResponse {
         /// 1000 units = 1 share.
         remaining_quantity: u64,
     },
+    MarketGroupExtended {
+        group_id: u64,
+        market_id: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

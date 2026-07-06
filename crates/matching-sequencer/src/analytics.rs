@@ -616,7 +616,7 @@ impl AnalyticsState {
                         self.record_history(event);
                     }
                 }
-                SystemEvent::OrderCancelled { .. } => {}
+                SystemEvent::OrderCancelled { .. } | SystemEvent::MarketGroupExtended { .. } => {}
             }
         }
     }

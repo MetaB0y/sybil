@@ -111,6 +111,14 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
             value.push(side.to_byte());
             value.extend_from_slice(&remaining_quantity.to_le_bytes());
         }
+        SystemEventWitness::MarketGroupExtended {
+            group_id,
+            market_id,
+        } => {
+            value.push(6);
+            value.extend_from_slice(&group_id.to_le_bytes());
+            value.extend_from_slice(&market_id.0.to_le_bytes());
+        }
     }
     value
 }

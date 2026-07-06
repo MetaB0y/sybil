@@ -135,7 +135,7 @@ mod tests {
             orders: Vec::new(),
             rejections: Vec::new(),
             system_events: Vec::new(),
-            l1_deposits: vec![],
+            deposit_accumulator: sybil_verifier::DepositAccumulatorWitness::default(),
             fills: Vec::new(),
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -146,6 +146,7 @@ mod tests {
             post_system_state: Vec::new(),
             post_state: Vec::new(),
             state_sidecar: StateSidecarSnapshot::default(),
+            pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: Vec::new(),
         };
         StateTransitionGuestInput {

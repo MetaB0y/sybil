@@ -568,7 +568,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
@@ -579,6 +579,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -654,7 +656,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
@@ -665,6 +667,7 @@ mod tests {
             post_system_state,
             post_state,
             state_sidecar: Default::default(),
+            pre_state_sidecar: Default::default(),
             resolved_markets: vec![],
         };
 
@@ -703,7 +706,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -714,6 +717,7 @@ mod tests {
             post_system_state: pre_state.clone(),
             post_state: pre_state,
             state_sidecar: Default::default(),
+            pre_state_sidecar: Default::default(),
             resolved_markets: vec![],
         };
 
@@ -773,7 +777,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
@@ -784,6 +788,8 @@ mod tests {
             post_system_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -842,7 +848,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
@@ -853,6 +859,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -899,7 +907,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -910,6 +918,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -939,7 +949,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -950,6 +960,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -998,7 +1010,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -1009,6 +1021,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -1060,7 +1074,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -1071,6 +1085,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -1145,7 +1161,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
@@ -1156,6 +1172,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -1215,7 +1233,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
@@ -1226,6 +1244,8 @@ mod tests {
             post_system_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -1295,7 +1315,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
@@ -1306,6 +1326,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };
@@ -1377,7 +1399,7 @@ mod tests {
             }],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills: vec![fill],
             clearing_prices: HashMap::new(), // empty!
             total_welfare: 0,
@@ -1388,6 +1410,8 @@ mod tests {
             post_system_state: pre_state,
             post_state,
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         };

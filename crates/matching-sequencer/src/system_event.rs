@@ -42,6 +42,11 @@ pub enum SystemEvent {
         side: OrderDirection,
         remaining_quantity: u64,
     },
+    /// A market was added to an existing mutually-exclusive group (SYB-212).
+    MarketGroupExtended {
+        group_id: u64,
+        market_id: MarketId,
+    },
 }
 
 #[cfg(test)]

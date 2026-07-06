@@ -763,7 +763,7 @@ mod conformance {
             orders,
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: sybil_verifier::DepositAccumulatorWitness::default(),
             fills: pipeline.result.fills.clone(),
             clearing_prices,
             total_welfare: pipeline.result.total_welfare(),
@@ -774,6 +774,7 @@ mod conformance {
             post_system_state: pre_state,
             post_state,
             state_sidecar: StateSidecarSnapshot::default(),
+            pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: vec![],
         }
     }

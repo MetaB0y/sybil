@@ -60,10 +60,11 @@ pub mod commitments {
 
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
-    OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
-    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
-    WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    ChallengeSnapshot, DepositAccumulatorWitness, L1DepositWitness, MarketGroupSnapshot,
+    MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason,
+    ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
+    StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
+    WitnessRejection,
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 

@@ -610,7 +610,7 @@ mod tests {
             orders,
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: crate::DepositAccumulatorWitness::default(),
             fills,
             clearing_prices: HashMap::new(),
             total_welfare,
@@ -621,6 +621,8 @@ mod tests {
             post_system_state: vec![],
             post_state: vec![],
             state_sidecar: Default::default(),
+
+            pre_state_sidecar: Default::default(),
 
             resolved_markets: vec![],
         }

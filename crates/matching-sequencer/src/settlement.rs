@@ -354,7 +354,7 @@ mod tests {
                 orders: vec![witness_order],
                 rejections: vec![],
                 system_events: vec![],
-                l1_deposits: vec![],
+                deposit_accumulator: sybil_verifier::DepositAccumulatorWitness::default(),
                 fills: vec![fill],
                 clearing_prices,
                 total_welfare: 0,
@@ -362,12 +362,13 @@ mod tests {
                 mm_constraints: vec![],
                 market_groups: vec![],
                 pre_state: post_system_state.clone(),
-                post_system_state,
-                post_state,
-                state_sidecar: Default::default(),
+                    post_system_state,
+                    post_state,
+                    state_sidecar: Default::default(),
+                    pre_state_sidecar: Default::default(),
 
-                resolved_markets: vec![],
-            };
+                    resolved_markets: vec![],
+                };
 
             let result = sybil_verifier::verify_settlement(&witness);
             prop_assert!(result.valid, "violations: {:?}", result.violations);

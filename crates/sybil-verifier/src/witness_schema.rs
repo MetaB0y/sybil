@@ -9,12 +9,11 @@ use crate::event_schema::{
 };
 use crate::snapshot_schema::{
     append_i64, append_market_id, append_string, append_u32, append_u64, append_witness_account,
-    append_witness_state_sidecar,
+    append_witness_pre_state_sidecar, append_witness_state_sidecar,
 };
-use crate::types::{AccountSnapshot, BlockWitness, WitnessBlockHeader};
-use crate::L1DepositWitness;
+use crate::types::{AccountSnapshot, BlockWitness, DepositAccumulatorWitness, WitnessBlockHeader};
 
-pub const WITNESS_FORMAT_VERSION: u8 = 2;
+pub const WITNESS_FORMAT_VERSION: u8 = 3;
 
 pub fn canonical_witness_bytes(witness: &BlockWitness) -> Vec<u8> {
     let mut out = Vec::new();
@@ -47,7 +46,7 @@ pub fn canonical_witness_bytes(witness: &BlockWitness) -> Vec<u8> {
         out.extend_from_slice(&system_event_leaf_value(event));
     }
 
-    append_l1_deposits(&mut out, &witness.l1_deposits);
+    append_deposit_accumulator(&mut out, &witness.deposit_accumulator);
 
     append_u64(&mut out, witness.fills.len() as u64);
     for fill in &witness.fills {
@@ -63,6 +62,7 @@ pub fn canonical_witness_bytes(witness: &BlockWitness) -> Vec<u8> {
     append_account_section(&mut out, &witness.post_system_state);
     append_account_section(&mut out, &witness.post_state);
     append_witness_state_sidecar(&mut out, &witness.state_sidecar);
+    append_witness_pre_state_sidecar(&mut out, &witness.pre_state_sidecar);
 
     let mut resolved_markets = witness.resolved_markets.clone();
     resolved_markets.sort_by_key(|market| market.0);
@@ -171,9 +171,14 @@ fn append_account_section(out: &mut Vec<u8>, accounts: &[AccountSnapshot]) {
     }
 }
 
-fn append_l1_deposits(out: &mut Vec<u8>, deposits: &[L1DepositWitness]) {
-    append_u64(out, deposits.len() as u64);
-    for deposit in deposits {
+fn append_deposit_accumulator(out: &mut Vec<u8>, accumulator: &DepositAccumulatorWitness) {
+    out.extend_from_slice(b"sybil/witness/deposit-accumulator");
+    for hash in accumulator.pre_frontier {
+        out.extend_from_slice(&hash);
+    }
+    append_u64(out, accumulator.pre_count);
+    append_u64(out, accumulator.new_deposits.len() as u64);
+    for deposit in &accumulator.new_deposits {
         out.extend_from_slice(b"sybil/witness/l1-deposit");
         append_u64(out, deposit.deposit_id);
         append_u64(out, deposit.chain_id);
@@ -189,7 +194,7 @@ fn append_l1_deposits(out: &mut Vec<u8>, deposits: &[L1DepositWitness]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StateSidecarSnapshot, WitnessBlockHeader};
+    use crate::{DepositAccumulatorWitness, StateSidecarSnapshot, WitnessBlockHeader};
 
     #[test]
     fn canonical_witness_bytes_are_stable_for_empty_witness() {
@@ -207,7 +212,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: DepositAccumulatorWitness::default(),
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -218,11 +223,12 @@ mod tests {
             post_system_state: vec![],
             post_state: vec![],
             state_sidecar: StateSidecarSnapshot::default(),
+            pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: vec![],
         };
 
         let bytes = canonical_witness_bytes(&witness);
         assert_eq!(bytes[0], WITNESS_FORMAT_VERSION);
-        assert_eq!(bytes.len(), 349);
+        assert_eq!(bytes.len(), 1533);
     }
 }

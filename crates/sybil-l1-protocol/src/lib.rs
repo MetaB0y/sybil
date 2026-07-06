@@ -8,6 +8,7 @@ use sha3::{Digest, Keccak256};
 
 pub type Bytes32 = [u8; 32];
 pub type EthAddress = [u8; 20];
+pub type DepositFrontier = [[u8; 32]; DEPOSIT_TREE_DEPTH];
 
 pub const DEPOSIT_DOMAIN: &[u8] = b"sybil/l1-deposit/v1";
 pub const WITHDRAWAL_NULLIFIER_DOMAIN: &[u8] = b"sybil/withdrawal-nullifier/v1";
@@ -125,6 +126,10 @@ pub fn empty_deposit_root() -> Bytes32 {
     deposit_zero_hashes()[DEPOSIT_TREE_DEPTH]
 }
 
+pub fn empty_deposit_frontier() -> DepositFrontier {
+    [[0u8; 32]; DEPOSIT_TREE_DEPTH]
+}
+
 pub fn deposit_leaf(deposit: &DepositLeaf) -> Bytes32 {
     keccak256(&abi_encode_domain_and_words(
         DEPOSIT_DOMAIN,
@@ -155,26 +160,8 @@ pub fn deposit_tree_leaf(deposit: &DepositLeaf) -> Bytes32 {
 /// explicit `deposit_id`s must verify those ids are exactly `1..=n` before
 /// treating the returned final root as a checkpoint for count `n`.
 pub fn deposit_prefix_roots(deposits: &[DepositLeaf]) -> Vec<Bytes32> {
-    let zero_hashes = deposit_zero_hashes();
-    let mut filled_subtrees = [[0u8; 32]; DEPOSIT_TREE_DEPTH];
-    let mut roots = Vec::with_capacity(deposits.len());
-
-    for (deposit_index, deposit) in deposits.iter().enumerate() {
-        let mut index = deposit_index as u64;
-        let mut root = deposit_tree_leaf(deposit);
-        for level in 0..DEPOSIT_TREE_DEPTH {
-            if index & 1 == 0 {
-                filled_subtrees[level] = root;
-                root = hash_node(root, zero_hashes[level]);
-            } else {
-                root = hash_node(filled_subtrees[level], root);
-            }
-            index >>= 1;
-        }
-        roots.push(root);
-    }
-
-    roots
+    deposit_frontier_prefix_roots(&empty_deposit_frontier(), 0, deposits)
+        .expect("empty-prefix deposit count is within tree capacity")
 }
 
 pub fn deposit_root_from_prefix(deposits: &[DepositLeaf]) -> Bytes32 {
@@ -182,6 +169,87 @@ pub fn deposit_root_from_prefix(deposits: &[DepositLeaf]) -> Bytes32 {
         .last()
         .copied()
         .unwrap_or_else(empty_deposit_root)
+}
+
+pub fn deposit_root_from_frontier(frontier: &DepositFrontier, count: u64) -> Option<Bytes32> {
+    if count > deposit_tree_capacity() {
+        return None;
+    }
+
+    let zero_hashes = deposit_zero_hashes();
+    let mut root = zero_hashes[0];
+    for level in 0..DEPOSIT_TREE_DEPTH {
+        if (count >> level) & 1 == 1 {
+            root = hash_node(frontier[level], root);
+        } else {
+            root = hash_node(root, zero_hashes[level]);
+        }
+    }
+    Some(root)
+}
+
+pub fn append_deposit_frontier(
+    frontier: &mut DepositFrontier,
+    pre_count: u64,
+    deposit: &DepositLeaf,
+) -> Option<Bytes32> {
+    if pre_count >= deposit_tree_capacity() {
+        return None;
+    }
+
+    let zero_hashes = deposit_zero_hashes();
+    let mut index = pre_count;
+    let mut root = deposit_tree_leaf(deposit);
+    for level in 0..DEPOSIT_TREE_DEPTH {
+        if index & 1 == 0 {
+            frontier[level] = root;
+            root = hash_node(root, zero_hashes[level]);
+        } else {
+            root = hash_node(frontier[level], root);
+        }
+        index >>= 1;
+    }
+    Some(root)
+}
+
+pub fn deposit_frontier_prefix_roots(
+    pre_frontier: &DepositFrontier,
+    pre_count: u64,
+    deposits: &[DepositLeaf],
+) -> Option<Vec<Bytes32>> {
+    let post_count = pre_count.checked_add(deposits.len() as u64)?;
+    if post_count > deposit_tree_capacity() {
+        return None;
+    }
+
+    let mut frontier = *pre_frontier;
+    let mut roots = Vec::with_capacity(deposits.len());
+    for (offset, deposit) in deposits.iter().enumerate() {
+        let root = append_deposit_frontier(&mut frontier, pre_count + offset as u64, deposit)?;
+        roots.push(root);
+    }
+    Some(roots)
+}
+
+pub fn deposit_frontier_after_prefix(
+    pre_frontier: &DepositFrontier,
+    pre_count: u64,
+    deposits: &[DepositLeaf],
+) -> Option<DepositFrontier> {
+    let post_count = pre_count.checked_add(deposits.len() as u64)?;
+    if post_count > deposit_tree_capacity() {
+        return None;
+    }
+
+    let mut frontier = *pre_frontier;
+    for (offset, deposit) in deposits.iter().enumerate() {
+        append_deposit_frontier(&mut frontier, pre_count + offset as u64, deposit)?;
+    }
+    Some(frontier)
+}
+
+pub const fn deposit_tree_capacity() -> u64 {
+    1u64 << DEPOSIT_TREE_DEPTH
 }
 
 pub fn hash_node(left: Bytes32, right: Bytes32) -> Bytes32 {
@@ -492,6 +560,32 @@ mod tests {
                 .map(hex::encode)
                 .collect::<Vec<_>>()
         );
+        let mut frontier = empty_deposit_frontier();
+        let root_after_one =
+            append_deposit_frontier(&mut frontier, 0, &deposits[0]).expect("deposit 1 fits");
+        let frontier_after_one = frontier;
+        let root_after_two =
+            append_deposit_frontier(&mut frontier, 1, &deposits[1]).expect("deposit 2 fits");
+        let frontier_after_two = frontier;
+        let root_after_three =
+            append_deposit_frontier(&mut frontier, 2, &deposits[2]).expect("deposit 3 fits");
+        let frontier_after_three = frontier;
+        println!(
+            "deposit_frontier_after_1_level_0=0x{}",
+            hex::encode(frontier_after_one[0])
+        );
+        println!(
+            "deposit_frontier_after_2_level_1=0x{}",
+            hex::encode(frontier_after_two[1])
+        );
+        println!(
+            "deposit_frontier_after_3_level_0=0x{}",
+            hex::encode(frontier_after_three[0])
+        );
+        println!(
+            "deposit_frontier_after_3_level_1=0x{}",
+            hex::encode(frontier_after_three[1])
+        );
 
         assert_eq!(
             hex::encode(deposit_leaf(&deposits[0])),
@@ -515,6 +609,43 @@ mod tests {
                 "bf00beb7a033f95b583dfb040f9f962db5f538c56e11cb9b3fa303b69d820b1f",
                 "5d9b49419ded14b47faf0f943198c33647c016bd37f998b1d9196b103acfecda",
             ]
+        );
+        assert_eq!(
+            deposit_frontier_prefix_roots(&empty_deposit_frontier(), 0, &deposits)
+                .expect("frontier fold fits"),
+            deposit_prefix_roots(&deposits)
+        );
+        assert_eq!(root_after_one, deposit_prefix_roots(&deposits)[0]);
+        assert_eq!(root_after_two, deposit_prefix_roots(&deposits)[1]);
+        assert_eq!(root_after_three, deposit_prefix_roots(&deposits)[2]);
+        assert_eq!(
+            deposit_root_from_frontier(&frontier_after_one, 1),
+            Some(deposit_prefix_roots(&deposits)[0])
+        );
+        assert_eq!(
+            deposit_frontier_prefix_roots(&frontier_after_one, 1, &deposits[1..])
+                .expect("split frontier fold fits"),
+            deposit_prefix_roots(&deposits)[1..].to_vec()
+        );
+        assert_eq!(
+            deposit_root_from_frontier(&frontier_after_three, 3),
+            Some(deposit_prefix_roots(&deposits)[2])
+        );
+        assert_eq!(
+            hex::encode(frontier_after_one[0]),
+            "cab93c3c5e862aa9e8fc0cff679d4d6febdf3305c81f65207871cea439975d5f"
+        );
+        assert_eq!(
+            hex::encode(frontier_after_two[1]),
+            "e167afbeb71311d09d4353dca2b4d7cd1c44431e6bbee2305720c27a9a8059e0"
+        );
+        assert_eq!(
+            hex::encode(frontier_after_three[0]),
+            "4ddbf4504459403a113a894bd821e6e0ad9ee8ac9cca1ddba7a91ff9413bab75"
+        );
+        assert_eq!(
+            hex::encode(frontier_after_three[1]),
+            "e167afbeb71311d09d4353dca2b4d7cd1c44431e6bbee2305720c27a9a8059e0"
         );
         assert_eq!(
             hex::encode(deposit_root_from_prefix(&deposits)),

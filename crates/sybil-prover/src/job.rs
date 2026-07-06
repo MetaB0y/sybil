@@ -157,7 +157,7 @@ mod tests {
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
-            l1_deposits: vec![],
+            deposit_accumulator: sybil_verifier::DepositAccumulatorWitness::default(),
             fills: vec![],
             clearing_prices: HashMap::new(),
             total_welfare: 0,
@@ -168,6 +168,7 @@ mod tests {
             post_system_state: vec![],
             post_state: vec![],
             state_sidecar: StateSidecarSnapshot::default(),
+            pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: vec![],
         };
         StateTransitionProofJob::new(witness, vec![])

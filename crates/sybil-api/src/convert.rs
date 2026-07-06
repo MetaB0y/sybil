@@ -68,6 +68,13 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
             side: side.to_string(),
             remaining_quantity: *remaining_quantity,
         },
+        matching_sequencer::SystemEvent::MarketGroupExtended {
+            group_id,
+            market_id,
+        } => SystemEventResponse::MarketGroupExtended {
+            group_id: *group_id,
+            market_id: market_id.0,
+        },
     }
 }
 

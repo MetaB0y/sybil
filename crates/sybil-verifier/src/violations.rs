@@ -105,6 +105,8 @@ pub enum ViolationKind {
     // === Layer 5: Sidecar transition verification ===
     /// Resting order leaves and account reservation leaves disagree.
     SidecarReservationMismatch,
+    /// Resting order sidecar leaves do not follow the authenticated pre->post transition.
+    SidecarRestingOrderMismatch,
     /// A withdrawal event is not represented by the committed withdrawal sidecar.
     SidecarWithdrawalMismatch,
     /// The bridge deposit cursor does not match the witnessed L1 deposit prefix.
@@ -113,6 +115,10 @@ pub enum ViolationKind {
     SidecarDepositRootMismatch,
     /// A market resolution event/list entry is not reflected in committed market status.
     SidecarMarketStatusMismatch,
+    /// Market-group sidecar leaves do not follow resolution or extension events.
+    SidecarMarketGroupMismatch,
+    /// The pre-state witness does not authenticate to the previous header's state root.
+    PreStateRootMismatch,
 }
 
 /// Result of running one or more verification layers.

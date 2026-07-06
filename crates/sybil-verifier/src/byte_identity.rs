@@ -25,7 +25,7 @@ fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     let witness_bytes = witness_schema::canonical_witness_bytes(&witness);
 
     assert_eq!(state_leaves.len(), 11);
-    assert_eq!(witness_bytes.len(), 2481);
+    assert_eq!(witness_bytes.len(), 3665);
     assert_eq!(
         hash_header(&witness.header),
         [
@@ -43,8 +43,8 @@ fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     assert_eq!(
         digest_bytes(&witness_bytes),
         [
-            154, 119, 163, 69, 110, 95, 96, 53, 76, 179, 40, 37, 190, 166, 230, 218, 82, 105, 84,
-            32, 37, 204, 235, 84, 194, 64, 87, 28, 4, 214, 9, 148,
+            88, 238, 139, 19, 15, 228, 75, 101, 43, 188, 94, 8, 57, 180, 182, 43, 8, 48, 115, 178,
+            112, 8, 134, 47, 28, 198, 93, 2, 28, 82, 143, 111,
         ],
     );
 }
@@ -103,7 +103,7 @@ fn byte_identity_witness() -> BlockWitness {
             side: OrderDirection::SellNo,
             remaining_quantity: 321,
         }],
-        l1_deposits: vec![],
+        deposit_accumulator: crate::DepositAccumulatorWitness::default(),
         fills: vec![Fill {
             order_id: 42,
             fill_qty: Qty(250),
@@ -124,6 +124,7 @@ fn byte_identity_witness() -> BlockWitness {
         post_system_state: vec![account_snapshot(1001), account_snapshot(1002)],
         post_state: vec![account_snapshot(1002), account_snapshot(1001)],
         state_sidecar: state_sidecar(accepted_order),
+        pre_state_sidecar: Default::default(),
         resolved_markets: vec![market_b, market_a],
     }
 }

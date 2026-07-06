@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use matching_engine::{Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order, OrderDirection};
+use sybil_l1_protocol::{DepositFrontier, DEPOSIT_TREE_DEPTH};
 
 /// Everything the verifier needs to check a single block.
 ///
@@ -25,12 +26,9 @@ pub struct BlockWitness {
     pub rejections: Vec<WitnessRejection>,
     /// System state changes applied between blocks.
     pub system_events: Vec<SystemEventWitness>,
-    /// L1 deposit log prefix up to `state_sidecar.bridge.deposit_cursor`.
-    ///
-    /// This private witness section lets the ZK guest reconstruct the L1
-    /// deposit checkpoint root and prove credited deposits are included. It is
-    /// not a typed state leaf.
-    pub l1_deposits: Vec<L1DepositWitness>,
+    /// L1 deposit accumulator frontier at block start plus deposits credited
+    /// in this block. This replaces the v2 cumulative deposit-log prefix.
+    pub deposit_accumulator: DepositAccumulatorWitness,
 
     // -- Solver output --
     pub fills: Vec<Fill>,
@@ -53,6 +51,9 @@ pub struct BlockWitness {
     pub post_state: Vec<AccountSnapshot>,
     /// Non-account state committed by the header's `state_root`.
     pub state_sidecar: StateSidecarSnapshot,
+    /// Non-account state at block start, authenticated against the previous
+    /// header's `state_root`.
+    pub pre_state_sidecar: StateSidecarSnapshot,
 
     /// Markets that are resolved/voided — orders/fills must not reference these.
     pub resolved_markets: Vec<MarketId>,
@@ -153,6 +154,11 @@ pub enum SystemEventWitness {
         side: OrderDirection,
         remaining_quantity: u64,
     },
+    /// A market was added to an existing mutually-exclusive market group.
+    MarketGroupExtended {
+        group_id: u64,
+        market_id: MarketId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -165,6 +171,26 @@ pub struct L1DepositWitness {
     pub sybil_account_key: [u8; 32],
     pub amount_token_units: u64,
     pub deposit_root: [u8; 32],
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DepositAccumulatorWitness {
+    /// Filled-subtree frontier at block start. Mirrors `SybilVault.filledSubtrees`.
+    pub pre_frontier: DepositFrontier,
+    /// Deposits before this block. Must equal `pre_state_sidecar.bridge.deposit_cursor`.
+    pub pre_count: u64,
+    /// Deposit leaves credited in this block only, in id order.
+    pub new_deposits: Vec<L1DepositWitness>,
+}
+
+impl Default for DepositAccumulatorWitness {
+    fn default() -> Self {
+        Self {
+            pre_frontier: [[0u8; 32]; DEPOSIT_TREE_DEPTH],
+            pre_count: 0,
+            new_deposits: Vec::new(),
+        }
+    }
 }
 
 /// Snapshot of a single account's state at a point in time.
@@ -261,12 +287,23 @@ pub enum OracleSourceSnapshot {
     AutomatedL0,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BridgeStateSnapshot {
     pub deposit_cursor: u64,
     pub deposit_root: [u8; 32],
     pub next_withdrawal_id: u64,
     pub withdrawals: Vec<WithdrawalSnapshot>,
+}
+
+impl Default for BridgeStateSnapshot {
+    fn default() -> Self {
+        Self {
+            deposit_cursor: 0,
+            deposit_root: sybil_l1_protocol::empty_deposit_root(),
+            next_withdrawal_id: 0,
+            withdrawals: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

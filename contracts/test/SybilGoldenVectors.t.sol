@@ -97,10 +97,12 @@ contract SybilGoldenVectorsTest {
         0x2c380522f079cfb922808acb18d9677576ad3bf4c0dc61de79a88edb0840b939;
     bytes32 private constant DEPOSIT_3_TREE_LEAF =
         0x4ddbf4504459403a113a894bd821e6e0ad9ee8ac9cca1ddba7a91ff9413bab75;
-    bytes32 private constant DEPOSIT_3_ROOT =
-        0x5d9b49419ded14b47faf0f943198c33647c016bd37f998b1d9196b103acfecda;
-    bytes32 private constant HIGH_DEPOSIT_LEAF =
-        0x0e0fe498f14aa8310467572c634bc13d6617573ca1fe7587c1fd642fbad168a1;
+	    bytes32 private constant DEPOSIT_3_ROOT =
+	        0x5d9b49419ded14b47faf0f943198c33647c016bd37f998b1d9196b103acfecda;
+	    bytes32 private constant DEPOSIT_FRONTIER_AFTER_2_LEVEL_1 =
+	        0xe167afbeb71311d09d4353dca2b4d7cd1c44431e6bbee2305720c27a9a8059e0;
+	    bytes32 private constant HIGH_DEPOSIT_LEAF =
+	        0x0e0fe498f14aa8310467572c634bc13d6617573ca1fe7587c1fd642fbad168a1;
     bytes32 private constant HIGH_DEPOSIT_TREE_LEAF =
         0xf7f3a6aeef19f4464f11bdfe4358124d745de1295dd03a116cccb1ab7ff2e90f;
     bytes32 private constant STATE_TRANSITION_PUBLIC_INPUT_HASH =
@@ -126,23 +128,27 @@ contract SybilGoldenVectorsTest {
         (bytes32 leaf1, bytes32 treeLeaf1, bytes32 root1) =
             vault.appendDepositForTest(1, SENDER_1, KEY_1, 1_000_000);
         require(leaf1 == DEPOSIT_1_LEAF, "deposit 1 leaf");
-        require(treeLeaf1 == DEPOSIT_1_TREE_LEAF, "deposit 1 tree leaf");
-        require(root1 == DEPOSIT_1_ROOT, "deposit 1 root");
-        require(vault.depositRootByCount(1) == DEPOSIT_1_ROOT, "depositRootByCount 1");
+	        require(treeLeaf1 == DEPOSIT_1_TREE_LEAF, "deposit 1 tree leaf");
+	        require(root1 == DEPOSIT_1_ROOT, "deposit 1 root");
+	        require(vault.depositRootByCount(1) == DEPOSIT_1_ROOT, "depositRootByCount 1");
+	        require(vault.filledSubtrees(0) == DEPOSIT_1_TREE_LEAF, "frontier 1 level 0");
 
         (bytes32 leaf2, bytes32 treeLeaf2, bytes32 root2) =
             vault.appendDepositForTest(2, SENDER_2, KEY_2, 2_500_000);
         require(leaf2 == DEPOSIT_2_LEAF, "deposit 2 leaf");
-        require(treeLeaf2 == DEPOSIT_2_TREE_LEAF, "deposit 2 tree leaf");
-        require(root2 == DEPOSIT_2_ROOT, "deposit 2 root");
-        require(vault.depositRootByCount(2) == DEPOSIT_2_ROOT, "depositRootByCount 2");
+	        require(treeLeaf2 == DEPOSIT_2_TREE_LEAF, "deposit 2 tree leaf");
+	        require(root2 == DEPOSIT_2_ROOT, "deposit 2 root");
+	        require(vault.depositRootByCount(2) == DEPOSIT_2_ROOT, "depositRootByCount 2");
+	        require(vault.filledSubtrees(1) == DEPOSIT_FRONTIER_AFTER_2_LEVEL_1, "frontier 2 level 1");
 
         (bytes32 leaf3, bytes32 treeLeaf3, bytes32 root3) =
             vault.appendDepositForTest(3, SENDER_3, KEY_3, 42_000_001);
         require(leaf3 == DEPOSIT_3_LEAF, "deposit 3 leaf");
-        require(treeLeaf3 == DEPOSIT_3_TREE_LEAF, "deposit 3 tree leaf");
-        require(root3 == DEPOSIT_3_ROOT, "deposit 3 root");
-        require(vault.depositRootByCount(3) == DEPOSIT_3_ROOT, "depositRootByCount 3");
+	        require(treeLeaf3 == DEPOSIT_3_TREE_LEAF, "deposit 3 tree leaf");
+	        require(root3 == DEPOSIT_3_ROOT, "deposit 3 root");
+	        require(vault.depositRootByCount(3) == DEPOSIT_3_ROOT, "depositRootByCount 3");
+	        require(vault.filledSubtrees(0) == DEPOSIT_3_TREE_LEAF, "frontier 3 level 0");
+	        require(vault.filledSubtrees(1) == DEPOSIT_FRONTIER_AFTER_2_LEVEL_1, "frontier 3 level 1");
 
         bytes32 highLeaf = vault.depositLeaf(HIGH_DEPOSIT_ID, SENDER_HIGH, KEY_HIGH, MAX_U64_AMOUNT);
         bytes32 highTreeLeaf = vault.hashDepositLeaf(highLeaf);

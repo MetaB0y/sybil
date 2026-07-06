@@ -242,7 +242,19 @@ pub(crate) fn append_witness_account_reservation(
 }
 
 pub(crate) fn append_witness_state_sidecar(out: &mut Vec<u8>, sidecar: &StateSidecarSnapshot) {
-    out.extend_from_slice(b"sybil/witness/state-sidecar");
+    append_witness_state_sidecar_with_domain(out, b"sybil/witness/state-sidecar", sidecar);
+}
+
+pub(crate) fn append_witness_pre_state_sidecar(out: &mut Vec<u8>, sidecar: &StateSidecarSnapshot) {
+    append_witness_state_sidecar_with_domain(out, b"sybil/witness/pre-state-sidecar", sidecar);
+}
+
+fn append_witness_state_sidecar_with_domain(
+    out: &mut Vec<u8>,
+    domain: &[u8],
+    sidecar: &StateSidecarSnapshot,
+) {
+    out.extend_from_slice(domain);
     append_witness_bridge(out, &sidecar.bridge);
 
     let mut markets: Vec<_> = sidecar.markets.iter().collect();

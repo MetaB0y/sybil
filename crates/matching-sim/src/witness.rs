@@ -51,7 +51,7 @@ pub fn build_witness(
         orders: witness_orders,
         rejections: vec![],
         system_events: vec![],
-        l1_deposits: vec![],
+        deposit_accumulator: sybil_verifier::DepositAccumulatorWitness::default(),
         fills: result.fills.clone(),
         clearing_prices,
         total_welfare: result.total_welfare(),
@@ -62,6 +62,7 @@ pub fn build_witness(
         post_system_state: vec![],
         post_state: vec![],
         state_sidecar: Default::default(),
+        pre_state_sidecar: Default::default(),
         resolved_markets: vec![],
     };
     witness.header.events_root = sybil_verifier::event_commitment::compute_events_root(&witness);

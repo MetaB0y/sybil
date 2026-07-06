@@ -7,6 +7,7 @@ use crate::account::AccountId;
 
 pub type Bytes32 = [u8; 32];
 pub type EthAddress = [u8; 20];
+pub type DepositFrontier = sybil_l1_protocol::DepositFrontier;
 
 pub const NANOS_PER_TOKEN_UNIT: u64 = 1_000;
 /// Withdrawal challenge window, in blocks. 14 days of wall-clock at the 10s
@@ -57,6 +58,8 @@ pub struct WithdrawalLeaf {
 pub struct BridgeState {
     pub deposit_cursor: u64,
     pub deposit_root: Bytes32,
+    #[serde(default = "sybil_l1_protocol::empty_deposit_frontier")]
+    pub deposit_frontier: DepositFrontier,
     #[serde(default)]
     pub deposit_log: Vec<L1Deposit>,
     pub next_withdrawal_id: u64,
@@ -68,6 +71,7 @@ impl Default for BridgeState {
         Self {
             deposit_cursor: 0,
             deposit_root: empty_deposit_root(),
+            deposit_frontier: sybil_l1_protocol::empty_deposit_frontier(),
             deposit_log: Vec::new(),
             next_withdrawal_id: 1,
             withdrawals: BTreeMap::new(),
@@ -163,6 +167,22 @@ pub fn deposit_log_root(deposits: &[L1Deposit]) -> Bytes32 {
         .map(deposit_leaf_for_protocol)
         .collect::<Vec<_>>();
     sybil_l1_protocol::deposit_root_from_prefix(&leaves)
+}
+
+pub fn deposit_frontier_root(frontier: &DepositFrontier, count: u64) -> Option<Bytes32> {
+    sybil_l1_protocol::deposit_root_from_frontier(frontier, count)
+}
+
+pub fn append_deposit_frontier(
+    frontier: &mut DepositFrontier,
+    pre_count: u64,
+    deposit: &L1Deposit,
+) -> Option<Bytes32> {
+    sybil_l1_protocol::append_deposit_frontier(
+        frontier,
+        pre_count,
+        &deposit_leaf_for_protocol(deposit),
+    )
 }
 
 pub fn withdrawal_nullifier(

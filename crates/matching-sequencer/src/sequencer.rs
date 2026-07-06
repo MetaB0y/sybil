@@ -292,6 +292,8 @@ struct WitnessAssemblyInput<'a> {
     minting_cost: i64,
     problem: &'a Problem,
     pre_state: Vec<AccountSnapshot>,
+    pre_state_sidecar: sybil_verifier::StateSidecarSnapshot,
+    pre_deposit_frontier: sybil_l1_protocol::DepositFrontier,
     post_system_state: Vec<AccountSnapshot>,
     resolved_markets: Vec<MarketId>,
 }
@@ -308,7 +310,8 @@ fn bridge_block_data(system_events: &[SystemEvent], bridge_state: &BridgeState) 
             SystemEvent::CreateAccount { .. }
             | SystemEvent::Deposit { .. }
             | SystemEvent::MarketResolved { .. }
-            | SystemEvent::OrderCancelled { .. } => {}
+            | SystemEvent::OrderCancelled { .. }
+            | SystemEvent::MarketGroupExtended { .. } => {}
         }
     }
     BridgeBlockData {
@@ -627,6 +630,13 @@ fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
             side: *side,
             remaining_quantity: *remaining_quantity,
         },
+        SystemEvent::MarketGroupExtended {
+            group_id,
+            market_id,
+        } => SystemEventWitness::MarketGroupExtended {
+            group_id: *group_id,
+            market_id: *market_id,
+        },
     }
 }
 
@@ -755,6 +765,11 @@ pub struct BlockSequencer {
     market_groups: Vec<MarketGroup>,
     /// Last block header for hash chaining.
     last_header: Option<BlockHeader>,
+    /// Non-account sidecar at the last committed header. Live state may include
+    /// acknowledged writes for the next block; v3 pre-sidecar must not.
+    committed_state_sidecar: sybil_verifier::StateSidecarSnapshot,
+    /// Deposit frontier at the last committed header.
+    committed_deposit_frontier: sybil_l1_protocol::DepositFrontier,
     /// In-process derived projections for API/UI surfaces. Updated
     /// synchronously by the sequencer, but kept separate from core matching,
     /// settlement, and witness state.
@@ -790,6 +805,11 @@ impl BlockSequencer {
         config: SequencerConfig,
     ) -> Self {
         let order_book = OrderBook::new(config.order_ttl_blocks);
+        let bridge = BridgeState::default();
+        let lifecycle = crate::market_lifecycle::MarketLifecycle::new(oracle);
+        let committed_state_sidecar =
+            state_sidecar_snapshot(&bridge, &order_book, &markets, &market_groups, &lifecycle);
+        let committed_deposit_frontier = bridge.deposit_frontier;
         Self {
             accounts,
             solver,
@@ -799,10 +819,12 @@ impl BlockSequencer {
             markets,
             market_groups,
             last_header: None,
+            committed_state_sidecar,
+            committed_deposit_frontier,
             analytics: AnalyticsState::new(&config),
-            lifecycle: crate::market_lifecycle::MarketLifecycle::new(oracle),
+            lifecycle,
             pubkey_registry: HashMap::new(),
-            bridge: BridgeState::default(),
+            bridge,
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
             pending_bundles: Vec::new(),
@@ -870,6 +892,16 @@ impl BlockSequencer {
         for template in state.resolution_templates {
             lifecycle.install_template(template);
         }
+        let committed_order_book =
+            OrderBook::restore(state.resting_orders.clone(), config.order_ttl_blocks);
+        let committed_state_sidecar = state_sidecar_snapshot(
+            &state.bridge_state,
+            &committed_order_book,
+            &state.markets,
+            &state.market_groups,
+            &lifecycle,
+        );
+        let committed_deposit_frontier = state.bridge_state.deposit_frontier;
         let mut order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
         // Replay the admit-log WAL on top of the snapshot: every non-MM
         // admit since the last committed block is durable on its own row
@@ -892,6 +924,8 @@ impl BlockSequencer {
             markets: state.markets,
             market_groups: state.market_groups,
             last_header: state.last_header,
+            committed_state_sidecar,
+            committed_deposit_frontier,
             analytics: AnalyticsState::restore(state.analytics, &config),
             lifecycle,
             pubkey_registry: state.pubkey_registry,
@@ -1220,7 +1254,12 @@ impl BlockSequencer {
             .get_mut(group_index)
             .expect("group exists: checked above");
         group.add_market(market_id);
-        Ok((group.clone(), true))
+        let updated = group.clone();
+        self.record_system_event(SystemEvent::MarketGroupExtended {
+            group_id,
+            market_id,
+        });
+        Ok((updated, true))
     }
 
     pub fn last_header(&self) -> Option<&BlockHeader> {
@@ -1558,9 +1597,13 @@ impl BlockSequencer {
                 BridgeError::AccountKeyMismatch.to_string(),
             ));
         }
-        let mut prefix = self.bridge.deposit_log.clone();
-        prefix.push(deposit.clone());
-        let expected_root = crate::bridge::deposit_log_root(&prefix);
+        let mut frontier = self.bridge.deposit_frontier;
+        let expected_root = crate::bridge::append_deposit_frontier(
+            &mut frontier,
+            self.bridge.deposit_cursor,
+            deposit,
+        )
+        .ok_or_else(|| SequencerError::Bridge("deposit frontier is at capacity".to_string()))?;
         if deposit.deposit_root != expected_root {
             return Err(SequencerError::Bridge(
                 BridgeError::DepositRootMismatch {
@@ -1589,8 +1632,17 @@ impl BlockSequencer {
         account.balance += amount;
         account.total_deposited += amount;
         let updated = account.clone();
+        let mut frontier = self.bridge.deposit_frontier;
+        let expected_root = crate::bridge::append_deposit_frontier(
+            &mut frontier,
+            self.bridge.deposit_cursor,
+            &deposit,
+        )
+        .ok_or_else(|| SequencerError::Bridge("deposit frontier is at capacity".to_string()))?;
+        debug_assert_eq!(expected_root, deposit.deposit_root);
         self.bridge.deposit_cursor = deposit.deposit_id;
         self.bridge.deposit_root = deposit.deposit_root;
+        self.bridge.deposit_frontier = frontier;
         self.bridge.deposit_log.push(deposit.clone());
         self.record_system_event(SystemEvent::L1Deposit {
             account_id,
@@ -1886,6 +1938,7 @@ impl BlockSequencer {
     ) -> Result<(), SequencerError> {
         match self.order_book.cancel(account_id, order_id) {
             Ok(ro) => {
+                self.capture_system_account_baseline(account_id);
                 let market_ids: Vec<MarketId> = ro.order.active_markets().collect();
                 let primary_market = market_ids.first().copied().unwrap_or(MarketId::NONE);
                 let side = derive_order_direction(&ro.order, primary_market);
@@ -2439,6 +2492,8 @@ impl BlockSequencer {
             minting_cost,
             problem,
             pre_state,
+            pre_state_sidecar,
+            pre_deposit_frontier,
             post_system_state,
             resolved_markets,
         } = input;
@@ -2452,6 +2507,18 @@ impl BlockSequencer {
         );
         let system_event_witnesses: Vec<SystemEventWitness> =
             system_events.iter().map(convert_system_event).collect();
+        let new_deposits = system_events
+            .iter()
+            .filter_map(|event| match event {
+                SystemEvent::L1Deposit { deposit, .. } => Some(l1_deposit_witness(deposit)),
+                SystemEvent::CreateAccount { .. }
+                | SystemEvent::Deposit { .. }
+                | SystemEvent::WithdrawalCreated { .. }
+                | SystemEvent::MarketResolved { .. }
+                | SystemEvent::OrderCancelled { .. }
+                | SystemEvent::MarketGroupExtended { .. } => None,
+            })
+            .collect();
         let events_root = sybil_verifier::event_commitment::events_root_from_event_bytes(
             &sybil_verifier::event_commitment::event_leaf_values(
                 &system_event_witnesses,
@@ -2483,12 +2550,11 @@ impl BlockSequencer {
             orders: witness_orders,
             rejections: witness_rejections,
             system_events: system_event_witnesses,
-            l1_deposits: self
-                .bridge
-                .deposit_log
-                .iter()
-                .map(l1_deposit_witness)
-                .collect(),
+            deposit_accumulator: sybil_verifier::DepositAccumulatorWitness {
+                pre_frontier: pre_deposit_frontier,
+                pre_count: pre_state_sidecar.bridge.deposit_cursor,
+                new_deposits,
+            },
             fills: fills.to_vec(),
             clearing_prices: clearing_prices.clone(),
             total_welfare,
@@ -2499,6 +2565,7 @@ impl BlockSequencer {
             post_system_state,
             post_state: post_state.into_snapshots(),
             state_sidecar,
+            pre_state_sidecar,
             resolved_markets,
         };
 
@@ -2512,6 +2579,8 @@ impl BlockSequencer {
     ) -> Result<BlockProduction, SequencerError> {
         self.height += 1;
         tracing::Span::current().record("height", self.height);
+        let pre_state_sidecar = self.committed_state_sidecar.clone();
+        let pre_deposit_frontier = self.committed_deposit_frontier;
         let system_events = std::mem::take(&mut self.pending_system_events);
         let system_account_baselines = std::mem::take(&mut self.pending_system_account_baselines);
 
@@ -2605,6 +2674,7 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
+                SystemEvent::MarketGroupExtended { .. } => {}
             }
         }
         let bridge = bridge_block_data(&system_events, &self.bridge);
@@ -3165,11 +3235,15 @@ impl BlockSequencer {
                 minting_cost,
                 problem: &problem,
                 pre_state,
+                pre_state_sidecar,
+                pre_deposit_frontier,
                 post_system_state,
                 resolved_markets,
             });
 
         self.last_header = Some(header.clone());
+        self.committed_state_sidecar = witness.state_sidecar.clone();
+        self.committed_deposit_frontier = self.bridge.deposit_frontier;
 
         debug!(
             orders_submitted,
@@ -3684,6 +3758,32 @@ mod tests {
         deposit
     }
 
+    fn next_l1_deposit(
+        seq: &BlockSequencer,
+        account_id: AccountId,
+        amount_token_units: u64,
+    ) -> L1Deposit {
+        let mut deposit = L1Deposit {
+            deposit_id: seq.bridge_state().deposit_cursor + 1,
+            account_id,
+            chain_id: 1,
+            vault_address: eth_address(0x10),
+            token_address: eth_address(0x20),
+            sender: eth_address(0x30),
+            sybil_account_key: account_key(account_id),
+            amount_token_units,
+            deposit_root: [0u8; 32],
+        };
+        let mut frontier = seq.bridge_state().deposit_frontier;
+        deposit.deposit_root = crate::bridge::append_deposit_frontier(
+            &mut frontier,
+            seq.bridge_state().deposit_cursor,
+            &deposit,
+        )
+        .expect("test deposit fits in frontier");
+        deposit
+    }
+
     #[test]
     fn bridge_deposit_and_withdrawal_emit_block_sidecar() {
         let (mut seq, aid) = make_sequencer(0);
@@ -3725,6 +3825,60 @@ mod tests {
                 other.map(|account| account.id)
             ),
         }
+    }
+
+    #[test]
+    fn restore_resumes_deposit_frontier_fold_for_next_block() {
+        let (mut seq, aid) = make_sequencer(0);
+        let first = next_l1_deposit(&seq, aid, 10_000);
+        seq.ingest_l1_deposit(first).unwrap();
+        let first_block = seq.produce_block(vec![], 1_000);
+        assert_eq!(first_block.witness.deposit_accumulator.pre_count, 0);
+        assert_eq!(
+            first_block.witness.deposit_accumulator.new_deposits.len(),
+            1
+        );
+        let committed_frontier = seq.bridge_state().deposit_frontier;
+        let committed_root = seq.bridge_state().deposit_root;
+
+        let state = restored_state_with_resting_orders(&seq, MarketSet::new(), vec![]);
+        let oracle = Arc::new(AdminOracle::new());
+        let mut restored = BlockSequencer::restore(state, oracle, SequencerConfig::default());
+        assert_eq!(restored.bridge_state().deposit_cursor, 1);
+        assert_eq!(restored.bridge_state().deposit_root, committed_root);
+        assert_eq!(restored.bridge_state().deposit_frontier, committed_frontier);
+        assert_eq!(
+            crate::bridge::deposit_frontier_root(
+                &restored.bridge_state().deposit_frontier,
+                restored.bridge_state().deposit_cursor,
+            ),
+            Some(committed_root)
+        );
+
+        let second = next_l1_deposit(&restored, aid, 20_000);
+        restored.ingest_l1_deposit(second.clone()).unwrap();
+        let second_block = restored.produce_block(vec![], 2_000);
+
+        assert_eq!(second_block.witness.deposit_accumulator.pre_count, 1);
+        assert_eq!(
+            second_block.witness.deposit_accumulator.pre_frontier,
+            committed_frontier
+        );
+        assert_eq!(
+            second_block.witness.deposit_accumulator.new_deposits,
+            vec![l1_deposit_witness(&second)]
+        );
+        assert_eq!(second_block.witness.state_sidecar.bridge.deposit_cursor, 2);
+        assert_eq!(
+            second_block.witness.state_sidecar.bridge.deposit_root,
+            second.deposit_root
+        );
+        let verification = sybil_verifier::verify_full(&second_block.witness, false);
+        assert!(
+            verification.valid,
+            "violations: {:?}",
+            verification.violations
+        );
     }
 
     #[test]
@@ -4855,6 +5009,10 @@ mod tests {
         let m1 = markets.add_binary("Market B");
 
         let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        // This legacy helper swaps the market registry out of band to isolate
+        // order-book revalidation behavior; that is not a valid v3 witness
+        // transition because market deletion must be event-authenticated.
+        seq.config.debug_verify_full = false;
 
         let sub = OrderSubmission {
             account_id: aid,
@@ -4878,6 +5036,10 @@ mod tests {
     fn test_bankrupt_account_orders_removed() {
         let (markets, m0) = setup();
         let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        // This test mutates the account store directly to isolate order-book
+        // revalidation; direct balance edits are intentionally not a valid v3
+        // authenticated state transition.
+        seq.config.debug_verify_full = false;
 
         let sub = OrderSubmission {
             account_id: aid,
