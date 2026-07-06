@@ -37,7 +37,11 @@ pub use actor::{
     DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_PRICE_HISTORY_QUERY_POINTS,
 };
 pub use analytics::AnalyticsState;
-pub use block::{Block, BlockAnalytics, BlockProduction, SealedBlock};
+pub use block::{
+    AdmitTimingView, Block, BlockAnalytics, BlockProduction, DerivedViewProvenance,
+    DerivedViewSidecar, RejectedOrderView, RemovedOrderExitReason, RemovedOrderPhase,
+    RemovedOrderView, SealedBlock,
+};
 pub use bridge::{
     BridgeBlockData, BridgeState, BridgeWithdrawalRequest, EthAddress, L1Deposit, WithdrawalLeaf,
 };

@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use matching_engine::{Fill, MarketId, Nanos, Order};
+use sybil_verifier::BlockWitness;
 
 use crate::account::{AccountId, AccountStore};
 use crate::aggregates::{
@@ -15,6 +16,10 @@ use crate::aggregates::{
     OrderStatsTrackerSnapshot, TraderTracker, TraderTrackerSnapshot, WelfareTracker,
     WelfareTrackerSnapshot,
 };
+use crate::block::{
+    DerivedViewSidecar, RejectedOrderView, RemovedOrderExitReason, RemovedOrderPhase, SealedBlock,
+};
+use crate::error::RejectionReason;
 use crate::fill_recorder::FillRecorder;
 use crate::market_info::{AccountFillCursor, AccountFillRecord, PricePoint};
 use crate::order_book::{OrderBook, RestingOrder};
@@ -36,6 +41,33 @@ pub struct AnalyticsState {
     first_deposit_ms: HashMap<AccountId, u64>,
     equity_tracker: EquityTracker,
     account_event_log: AccountEventLog,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct OrderHistoryOptions {
+    include_price: bool,
+    reason: Option<&'static str>,
+    required_nanos: Option<i64>,
+    available_nanos: Option<i64>,
+}
+
+impl OrderHistoryOptions {
+    pub(crate) fn with_price() -> Self {
+        Self {
+            include_price: true,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn rejection(reason: &RejectionReason) -> Self {
+        let (required_nanos, available_nanos) = reason.amounts();
+        Self {
+            include_price: true,
+            reason: Some(reason.code()),
+            required_nanos,
+            available_nanos,
+        }
+    }
 }
 
 impl AnalyticsState {
@@ -370,6 +402,223 @@ impl AnalyticsState {
     ) {
         self.order_stats_tracker
             .record_outcome(markets, matched, timestamp_ms);
+    }
+
+    pub(crate) fn record_order_history(
+        &mut self,
+        account_id: AccountId,
+        kind: crate::aggregates::HistoryKind,
+        block_height: u64,
+        timestamp_ms: u64,
+        order: &Order,
+        options: OrderHistoryOptions,
+    ) {
+        let mut event = HistoryEvent::new(account_id, kind, block_height, timestamp_ms);
+        event.order_id = Some(order.id);
+        event.market_id = order.active_markets().next();
+        event.qty = Some(order.max_fill.0);
+        if options.include_price {
+            event.price_nanos = Some(order.limit_price.0);
+        }
+        let (side, outcome) = crate::aggregates::side_outcome_from_order(order);
+        event.side = side;
+        event.outcome = outcome;
+        event.reason = options.reason;
+        event.required_nanos = options.required_nanos;
+        event.available_nanos = options.available_nanos;
+        self.record_history(event);
+    }
+
+    pub fn observe_block(
+        &mut self,
+        block: &SealedBlock,
+        sidecar: &DerivedViewSidecar,
+        witness: &BlockWitness,
+    ) {
+        let height = block.canonical.header.height;
+        let timestamp_ms = block.canonical.header.timestamp_ms;
+
+        self.observe_system_event_history(&block.canonical.system_events, height, timestamp_ms);
+
+        for witness_order in &witness.orders {
+            self.record_order_placed(witness_order.order.active_markets(), timestamp_ms);
+        }
+
+        let mut witness_orders: HashMap<u64, (&Order, AccountId, bool)> = HashMap::new();
+        for witness_order in &witness.orders {
+            witness_orders.insert(
+                witness_order.order.id,
+                (
+                    &witness_order.order,
+                    AccountId(witness_order.account_id),
+                    witness_order.is_mm,
+                ),
+            );
+        }
+
+        for admit in &sidecar.admits {
+            if !admit.is_new {
+                continue;
+            }
+            self.record_order_admitted(timestamp_ms);
+            let Some((order, account_id, is_mm)) = witness_orders.get(&admit.order_id) else {
+                continue;
+            };
+            let markets: Vec<MarketId> = order.active_markets().collect();
+            self.record_trader_placement(*account_id, markets, timestamp_ms, *is_mm);
+            if !*is_mm {
+                self.record_order_history(
+                    *account_id,
+                    crate::aggregates::HistoryKind::Placed,
+                    height,
+                    timestamp_ms,
+                    order,
+                    OrderHistoryOptions::with_price(),
+                );
+            }
+        }
+
+        for rejected in &sidecar.rejection_history {
+            self.observe_rejection_history(rejected, height, timestamp_ms);
+        }
+
+        for removed in &sidecar.removed_orders {
+            self.order_stats_tracker.record_outcome(
+                removed.active_markets.iter().copied(),
+                removed.has_been_matched,
+                timestamp_ms,
+            );
+
+            match removed.exit_reason {
+                RemovedOrderExitReason::Expired => self.record_order_history(
+                    AccountId(removed.account_id),
+                    crate::aggregates::HistoryKind::Expired,
+                    height,
+                    timestamp_ms,
+                    &removed.order,
+                    OrderHistoryOptions::default(),
+                ),
+                RemovedOrderExitReason::RevalidateInsufficientBalance
+                | RemovedOrderExitReason::RevalidateInsufficientPosition
+                | RemovedOrderExitReason::RevalidateRejected => {
+                    if removed.phase == RemovedOrderPhase::BlockStartRevalidate {
+                        if let Some(reason) = &removed.rejection_reason {
+                            self.record_order_history(
+                                AccountId(removed.account_id),
+                                crate::aggregates::HistoryKind::Rejected,
+                                height,
+                                timestamp_ms,
+                                &removed.order,
+                                OrderHistoryOptions::rejection(reason),
+                            );
+                        }
+                    }
+                }
+                RemovedOrderExitReason::RevalidateMarketInactive
+                | RemovedOrderExitReason::RevalidateAccountGone
+                | RemovedOrderExitReason::RevalidateAccountInsolvent
+                | RemovedOrderExitReason::Filled
+                | RemovedOrderExitReason::Settled => {}
+            }
+        }
+
+        let mm_filled_qty: HashMap<u64, u64> = block
+            .canonical
+            .fills
+            .iter()
+            .filter(|fill| fill.fill_qty.0 > 0)
+            .fold(HashMap::new(), |mut acc, fill| {
+                *acc.entry(fill.order_id).or_insert(0) += fill.fill_qty.0;
+                acc
+            });
+        for witness_order in &witness.orders {
+            if !witness_order.is_mm {
+                continue;
+            }
+            let matched = mm_filled_qty
+                .get(&witness_order.order.id)
+                .copied()
+                .unwrap_or(0)
+                > 0;
+            self.record_order_outcome(witness_order.order.active_markets(), matched, timestamp_ms);
+        }
+    }
+
+    fn observe_rejection_history(
+        &mut self,
+        rejected: &RejectedOrderView,
+        height: u64,
+        timestamp_ms: u64,
+    ) {
+        self.record_order_history(
+            AccountId(rejected.account_id),
+            crate::aggregates::HistoryKind::Rejected,
+            height,
+            timestamp_ms,
+            &rejected.order,
+            OrderHistoryOptions::rejection(&rejected.reason),
+        );
+    }
+
+    fn observe_system_event_history(
+        &mut self,
+        system_events: &[crate::system_event::SystemEvent],
+        height: u64,
+        timestamp_ms: u64,
+    ) {
+        use crate::aggregates::HistoryKind;
+        use crate::system_event::SystemEvent;
+
+        for event in system_events {
+            match event {
+                SystemEvent::CreateAccount { .. } | SystemEvent::Deposit { .. } => {}
+                SystemEvent::L1Deposit {
+                    account_id, amount, ..
+                } => {
+                    let mut event =
+                        HistoryEvent::new(*account_id, HistoryKind::Deposit, height, timestamp_ms);
+                    event.amount_nanos = Some(*amount);
+                    self.record_history(event);
+                }
+                SystemEvent::WithdrawalCreated {
+                    account_id, amount, ..
+                } => {
+                    let mut event = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Withdrawal,
+                        height,
+                        timestamp_ms,
+                    );
+                    event.amount_nanos = Some(-*amount);
+                    self.record_history(event);
+                }
+                SystemEvent::MarketResolved {
+                    market_id,
+                    payout_nanos,
+                    affected_accounts,
+                } => {
+                    let payout_outcome = if payout_nanos.0 >= matching_engine::NANOS_PER_DOLLAR {
+                        Some("YES")
+                    } else if payout_nanos.0 == 0 {
+                        Some("NO")
+                    } else {
+                        None
+                    };
+                    for account_id in affected_accounts {
+                        let mut event = HistoryEvent::new(
+                            *account_id,
+                            HistoryKind::Resolved,
+                            height,
+                            timestamp_ms,
+                        );
+                        event.market_id = Some(*market_id);
+                        event.payout_outcome = payout_outcome;
+                        self.record_history(event);
+                    }
+                }
+                SystemEvent::OrderCancelled { .. } => {}
+            }
+        }
     }
 
     pub fn record_liquidity(

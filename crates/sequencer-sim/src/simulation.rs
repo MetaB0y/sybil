@@ -159,13 +159,12 @@ impl SimulationRunner {
         }
 
         let oracle = Arc::new(AdminOracle::new());
-        let sequencer = BlockSequencer::with_default_solver(
-            accounts,
-            markets,
-            market_groups,
-            oracle,
-            SequencerConfig::default(),
-        );
+        let config = SequencerConfig {
+            debug_verify_full: true,
+            ..SequencerConfig::default()
+        };
+        let sequencer =
+            BlockSequencer::with_default_solver(accounts, markets, market_groups, oracle, config);
 
         Self {
             sequencer,

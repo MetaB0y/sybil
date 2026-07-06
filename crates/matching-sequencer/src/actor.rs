@@ -1277,38 +1277,6 @@ impl SequencerActorState {
                         return Err(SequencerError::Persistence(err.to_string()));
                     }
                 }
-                // Trader tracker hook for the try_admit_direct path. Fires
-                // only after durability succeeds so the rolling counts only
-                // reflect orders that durably landed (cancellation on store
-                // failure walks back the in-memory admit but not the
-                // tracker — acceptable: we still served the place).
-                // try_admit_direct only accepts non-MM single-market
-                // submissions, so `is_mm = false`.
-                let markets: Vec<MarketId> = resting_order.order.active_markets().collect();
-                self.sequencer.record_trader_placement_analytics(
-                    resting_order.account_id,
-                    markets.clone(),
-                    now_ms,
-                    false,
-                );
-                {
-                    use crate::aggregates::{HistoryEvent, HistoryKind};
-                    let o = &resting_order.order;
-                    let mut e = HistoryEvent::new(
-                        resting_order.account_id,
-                        HistoryKind::Placed,
-                        self.sequencer.height(),
-                        now_ms,
-                    );
-                    e.order_id = Some(order_id);
-                    e.market_id = o.active_markets().next();
-                    e.qty = Some(o.max_fill.0);
-                    e.price_nanos = Some(o.limit_price.0);
-                    let (side, outcome) = crate::aggregates::side_outcome_from_order(o);
-                    e.side = side;
-                    e.outcome = outcome;
-                    self.sequencer.record_history(e);
-                }
                 Ok(())
             }
             crate::sequencer::AdmitOutcome::Deferred(sub) => {

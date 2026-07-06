@@ -143,6 +143,99 @@ fn bridge_block_to_response(block: &SealedBlock) -> BridgeBlockResponse {
     }
 }
 
+fn derived_view_sidecar_to_response(
+    sidecar: &matching_sequencer::DerivedViewSidecar,
+) -> DerivedViewSidecarResponse {
+    DerivedViewSidecarResponse {
+        provenance: "derived_unproven".to_string(),
+        removed_orders: sidecar
+            .removed_orders
+            .iter()
+            .map(|removed| RemovedOrderViewResponse {
+                order_id: removed.order_id,
+                account_id: removed.account_id,
+                phase: removed_order_phase(removed.phase).to_string(),
+                exit_reason: removed_order_exit_reason(removed.exit_reason).to_string(),
+                has_been_matched: removed.has_been_matched,
+                reserved_balance_released: removed.reserved_balance_released,
+                reserved_positions_released: removed
+                    .reserved_positions_released
+                    .iter()
+                    .map(
+                        |(market_id, outcome, quantity)| ReservedPositionReleaseResponse {
+                            market_id: market_id.0,
+                            outcome: *outcome,
+                            quantity: *quantity,
+                        },
+                    )
+                    .collect(),
+                active_markets: removed
+                    .active_markets
+                    .iter()
+                    .map(|market_id| market_id.0)
+                    .collect(),
+                rejection_reason: removed
+                    .rejection_reason
+                    .as_ref()
+                    .map(|reason| reason.code().to_string()),
+            })
+            .collect(),
+        admits: sidecar
+            .admits
+            .iter()
+            .map(|admit| AdmitTimingViewResponse {
+                order_id: admit.order_id,
+                account_id: admit.account_id,
+                admit_height: admit.admit_height,
+                admit_timestamp_ms: admit.admit_timestamp_ms,
+                is_new: admit.is_new,
+                is_mm: admit.is_mm,
+            })
+            .collect(),
+        rejection_history: sidecar
+            .rejection_history
+            .iter()
+            .map(|rejection| RejectedOrderViewResponse {
+                order_id: rejection.order_id,
+                account_id: rejection.account_id,
+                reason: rejection.reason.code().to_string(),
+            })
+            .collect(),
+    }
+}
+
+fn removed_order_phase(phase: matching_sequencer::RemovedOrderPhase) -> &'static str {
+    match phase {
+        matching_sequencer::RemovedOrderPhase::BlockStartExpire => "block_start_expire",
+        matching_sequencer::RemovedOrderPhase::BlockStartRevalidate => "block_start_revalidate",
+        matching_sequencer::RemovedOrderPhase::PostSolve => "post_solve",
+    }
+}
+
+fn removed_order_exit_reason(reason: matching_sequencer::RemovedOrderExitReason) -> &'static str {
+    match reason {
+        matching_sequencer::RemovedOrderExitReason::Expired => "expired",
+        matching_sequencer::RemovedOrderExitReason::RevalidateInsufficientBalance => {
+            "revalidate_insufficient_balance"
+        }
+        matching_sequencer::RemovedOrderExitReason::RevalidateInsufficientPosition => {
+            "revalidate_insufficient_position"
+        }
+        matching_sequencer::RemovedOrderExitReason::RevalidateMarketInactive => {
+            "revalidate_market_inactive"
+        }
+        matching_sequencer::RemovedOrderExitReason::RevalidateAccountGone => {
+            "revalidate_account_gone"
+        }
+        matching_sequencer::RemovedOrderExitReason::RevalidateAccountInsolvent => {
+            "revalidate_account_insolvent"
+        }
+        matching_sequencer::RemovedOrderExitReason::RevalidateRejected => "revalidate_rejected",
+        matching_sequencer::RemovedOrderExitReason::Filled => "filled",
+        matching_sequencer::RemovedOrderExitReason::Settled => "settled",
+    }
+}
+
 /// Convert a sealed block to a BlockResponse.
 pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
     let fills = block
@@ -220,6 +313,7 @@ pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
         orders_filled: block.analytics.orders_filled,
         unique_placers: block.analytics.unique_placers,
         by_market,
+        derived_view_sidecar: derived_view_sidecar_to_response(&block.derived_view_sidecar),
     }
 }
 

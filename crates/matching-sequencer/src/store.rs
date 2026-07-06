@@ -3005,6 +3005,7 @@ mod tests {
                 rejections: Vec::new(),
             },
             analytics: crate::block::BlockAnalytics::default(),
+            derived_view_sidecar: crate::block::DerivedViewSidecar::default(),
         }
     }
 

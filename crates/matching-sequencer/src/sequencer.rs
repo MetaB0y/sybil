@@ -14,10 +14,11 @@ use sybil_verifier::{
 use tracing::{debug, error};
 
 use crate::account::{Account, AccountId, AccountStore};
-use crate::analytics::AnalyticsState;
+use crate::analytics::{AnalyticsState, OrderHistoryOptions};
 use crate::block::{
-    hash_header, state_sidecar_snapshot, Block, BlockAnalytics, BlockFlowMetrics, BlockHeader,
-    BlockProduction,
+    hash_header, state_sidecar_snapshot, AdmitTimingView, Block, BlockAnalytics, BlockFlowMetrics,
+    BlockHeader, BlockProduction, DerivedViewSidecar, RejectedOrderView, RemovedOrderExitReason,
+    RemovedOrderPhase, RemovedOrderView,
 };
 use crate::bridge::{
     account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
@@ -30,7 +31,7 @@ use crate::error::{
 };
 use crate::market_info::MarketMetadata;
 use crate::market_lifecycle::MarketLifecycle;
-use crate::order_book::OrderBook;
+use crate::order_book::{OrderBook, RestingExit, RestingRevalidationExit};
 use crate::settlement;
 use crate::store::{ControlPlaneCommand, RestoredState, SequencerSnapshot};
 use crate::system_event::SystemEvent;
@@ -137,6 +138,10 @@ pub struct SequencerConfig {
     /// Explicit devnet escape hatch for old log-and-commit behavior when
     /// hard block verification fails. Production defaults to fail-closed.
     pub verification_fail_open: bool,
+    /// Run the native full verifier inline as a debug/prover-adjacent check.
+    /// Production keeps this off; unit tests and scenario simulations enable
+    /// it so verifier drift is caught outside the hot block path.
+    pub debug_verify_full: bool,
 }
 
 impl Default for SequencerConfig {
@@ -169,6 +174,7 @@ impl Default for SequencerConfig {
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,
             verification_fail_open: false,
+            debug_verify_full: cfg!(test),
         }
     }
 }
@@ -265,67 +271,6 @@ struct FinalizedBlockState {
     mark_prices: HashMap<MarketId, Vec<Nanos>>,
     minting_cost: i64,
     invariant_failures: Vec<BlockInvariantFailure>,
-}
-
-#[derive(Clone, Copy, Default)]
-struct OrderHistoryOptions {
-    include_price: bool,
-    reason: Option<&'static str>,
-    required_nanos: Option<i64>,
-    available_nanos: Option<i64>,
-}
-
-impl OrderHistoryOptions {
-    fn with_price() -> Self {
-        Self {
-            include_price: true,
-            ..Self::default()
-        }
-    }
-
-    fn rejection(reason: &RejectionReason) -> Self {
-        let (required_nanos, available_nanos) = reason.amounts();
-        Self {
-            include_price: true,
-            reason: Some(reason.code()),
-            required_nanos,
-            available_nanos,
-        }
-    }
-
-    fn complete_set_rejection() -> Self {
-        Self {
-            include_price: true,
-            reason: Some("complete_set"),
-            ..Self::default()
-        }
-    }
-}
-
-fn record_order_history(
-    analytics: &mut AnalyticsState,
-    account_id: AccountId,
-    kind: crate::aggregates::HistoryKind,
-    block_height: u64,
-    timestamp_ms: u64,
-    order: &Order,
-    options: OrderHistoryOptions,
-) {
-    let mut event =
-        crate::aggregates::HistoryEvent::new(account_id, kind, block_height, timestamp_ms);
-    event.order_id = Some(order.id);
-    event.market_id = order.active_markets().next();
-    event.qty = Some(order.max_fill.0);
-    if options.include_price {
-        event.price_nanos = Some(order.limit_price.0);
-    }
-    let (side, outcome) = crate::aggregates::side_outcome_from_order(order);
-    event.side = side;
-    event.outcome = outcome;
-    event.reason = options.reason;
-    event.required_nanos = options.required_nanos;
-    event.available_nanos = options.available_nanos;
-    analytics.record_history(event);
 }
 
 struct WitnessArtifacts {
@@ -587,6 +532,38 @@ fn convert_rejection_reason(r: &RejectionReason) -> sybil_verifier::RejectionRea
             current_block: *current_block,
             expires_at_block: *expires_at_block,
         },
+    }
+}
+
+fn revalidation_removed_order_reason(exit: &RestingRevalidationExit) -> RemovedOrderExitReason {
+    match exit {
+        RestingRevalidationExit::MarketInactive => RemovedOrderExitReason::RevalidateMarketInactive,
+        RestingRevalidationExit::AccountGone => RemovedOrderExitReason::RevalidateAccountGone,
+        RestingRevalidationExit::AccountInsolvent => {
+            RemovedOrderExitReason::RevalidateAccountInsolvent
+        }
+        RestingRevalidationExit::Rejected(RejectionReason::InsufficientBalance { .. }) => {
+            RemovedOrderExitReason::RevalidateInsufficientBalance
+        }
+        RestingRevalidationExit::Rejected(RejectionReason::InsufficientPosition { .. }) => {
+            RemovedOrderExitReason::RevalidateInsufficientPosition
+        }
+        RestingRevalidationExit::Rejected(_) => RemovedOrderExitReason::RevalidateRejected,
+    }
+}
+
+fn resting_order_is_new_direct_admit(
+    resting: &crate::order_book::RestingOrder,
+    block_height: u64,
+    previous_header: Option<&BlockHeader>,
+) -> bool {
+    match previous_header {
+        Some(header) => {
+            resting.created_at == header.height
+                && block_height == header.height.saturating_add(1)
+                && resting.created_at_ms != header.timestamp_ms
+        }
+        None => block_height == 1 && resting.created_at == 0,
     }
 }
 
@@ -1314,21 +1291,6 @@ impl BlockSequencer {
             .sum()
     }
 
-    pub fn record_history(&mut self, event: crate::aggregates::HistoryEvent) {
-        self.analytics.record_history(event);
-    }
-
-    pub fn record_trader_placement_analytics(
-        &mut self,
-        account_id: AccountId,
-        markets: Vec<MarketId>,
-        timestamp_ms: u64,
-        is_mm: bool,
-    ) {
-        self.analytics
-            .record_trader_placement(account_id, markets, timestamp_ms, is_mm);
-    }
-
     // --- Public key registry ---
 
     pub fn register_pubkey(
@@ -1904,8 +1866,7 @@ impl BlockSequencer {
                         side,
                         remaining_quantity: ro.order.max_fill.0,
                     });
-                record_order_history(
-                    &mut self.analytics,
+                self.analytics.record_order_history(
                     account_id,
                     crate::aggregates::HistoryKind::Cancelled,
                     self.height,
@@ -2231,12 +2192,16 @@ impl BlockSequencer {
             });
         }
 
-        let verification =
-            sybil_verifier::verify_full(&prepared.production.witness, /* diagnostics */ false);
-        if !verification.valid {
-            failures.push(BlockInvariantFailure::FullVerificationFailed {
-                violations: verifier_failures(&verification),
-            });
+        if self.config.debug_verify_full {
+            let verification = sybil_verifier::verify_full(
+                &prepared.production.witness,
+                /* diagnostics */ false,
+            );
+            if !verification.valid {
+                failures.push(BlockInvariantFailure::FullVerificationFailed {
+                    violations: verifier_failures(&verification),
+                });
+            }
         }
 
         if failures.is_empty() {
@@ -2613,62 +2578,6 @@ impl BlockSequencer {
         }
         let bridge = bridge_block_data(&system_events, &self.bridge);
 
-        for event in &system_events {
-            use crate::aggregates::{HistoryEvent, HistoryKind};
-            match event {
-                SystemEvent::CreateAccount { .. } | SystemEvent::Deposit { .. } => {}
-                SystemEvent::L1Deposit {
-                    account_id, amount, ..
-                } => {
-                    let mut e = HistoryEvent::new(
-                        *account_id,
-                        HistoryKind::Deposit,
-                        self.height,
-                        timestamp_ms,
-                    );
-                    e.amount_nanos = Some(*amount);
-                    self.analytics.record_history(e);
-                }
-                SystemEvent::WithdrawalCreated {
-                    account_id, amount, ..
-                } => {
-                    let mut e = HistoryEvent::new(
-                        *account_id,
-                        HistoryKind::Withdrawal,
-                        self.height,
-                        timestamp_ms,
-                    );
-                    e.amount_nanos = Some(-*amount);
-                    self.analytics.record_history(e);
-                }
-                SystemEvent::MarketResolved {
-                    market_id,
-                    payout_nanos,
-                    affected_accounts,
-                } => {
-                    let payout_outcome = if payout_nanos.0 >= matching_engine::NANOS_PER_DOLLAR {
-                        Some("YES")
-                    } else if payout_nanos.0 == 0 {
-                        Some("NO")
-                    } else {
-                        None
-                    };
-                    for aid in affected_accounts {
-                        let mut e = HistoryEvent::new(
-                            *aid,
-                            HistoryKind::Resolved,
-                            self.height,
-                            timestamp_ms,
-                        );
-                        e.market_id = Some(*market_id);
-                        e.payout_outcome = payout_outcome;
-                        self.analytics.record_history(e);
-                    }
-                }
-                SystemEvent::OrderCancelled { .. } => {} // recorded at cancel_pending_order (3c)
-            }
-        }
-
         let fresh_submissions = submissions.len();
         let fresh_orders_received: usize = submissions
             .iter()
@@ -2706,12 +2615,20 @@ impl BlockSequencer {
         // Block at the end of this function. Cancels are NOT counted here.
         let mut block_orders_by_market: HashMap<MarketId, crate::aggregates::OrderStats> =
             HashMap::new();
+        let mut derived_view_sidecar = DerivedViewSidecar::default();
 
         // ── Order Book: expire stale, remove orders for resolved markets ──
         let expired = self.order_book.expire(self.height);
         let revalidated = self.order_book.revalidate(&self.accounts, &active_markets);
-        for ro in expired.iter().chain(revalidated.iter().map(|(ro, _)| ro)) {
-            self.analytics.record_order_exit(ro, timestamp_ms);
+        for ro in &expired {
+            derived_view_sidecar
+                .removed_orders
+                .push(RemovedOrderView::from_resting_order(
+                    ro,
+                    RemovedOrderPhase::BlockStartExpire,
+                    RemovedOrderExitReason::Expired,
+                    None,
+                ));
             for m in ro.order.active_markets() {
                 let slot = block_orders_by_market.entry(m).or_default();
                 if ro.has_been_matched {
@@ -2721,36 +2638,34 @@ impl BlockSequencer {
                 }
             }
         }
-        for ro in &expired {
-            record_order_history(
-                &mut self.analytics,
-                ro.account_id,
-                crate::aggregates::HistoryKind::Expired,
-                self.height,
-                timestamp_ms,
-                &ro.order,
-                OrderHistoryOptions::default(),
-            );
-        }
         // Resting orders evicted by revalidation for a genuine per-order reason
         // (insufficient balance/position) surface as Rejected history events.
-        // Market-inactive / account-gone / insolvent removals carry `None`.
-        for (ro, reason) in &revalidated {
-            let Some(reason) = reason else { continue };
-            record_order_history(
-                &mut self.analytics,
-                ro.account_id,
-                crate::aggregates::HistoryKind::Rejected,
-                self.height,
-                timestamp_ms,
-                &ro.order,
-                OrderHistoryOptions::rejection(reason),
-            );
+        // Market-inactive / account-gone / insolvent removals are sidecar-only.
+        for (ro, exit) in &revalidated {
+            derived_view_sidecar
+                .removed_orders
+                .push(RemovedOrderView::from_resting_order(
+                    ro,
+                    RemovedOrderPhase::BlockStartRevalidate,
+                    revalidation_removed_order_reason(exit),
+                    exit.rejection_reason().cloned(),
+                ));
+            for m in ro.order.active_markets() {
+                let slot = block_orders_by_market.entry(m).or_default();
+                if ro.has_been_matched {
+                    slot.matched += 1;
+                } else {
+                    slot.unmatched += 1;
+                }
+            }
         }
 
         // Build batch-local account map from resting orders
         let mut order_account_map: HashMap<u64, AccountId> = HashMap::new();
-        for (order, account_id) in self.order_book.resting_orders() {
+        let resting_snapshot = self.order_book.snapshot();
+        for ro in &resting_snapshot {
+            let order = &ro.order;
+            let account_id = ro.account_id;
             order_account_map.insert(order.id, account_id);
             witness_orders.push(WitnessOrder {
                 order: order.clone(),
@@ -2758,6 +2673,18 @@ impl BlockSequencer {
                 is_mm: false,
             });
             all_orders.push(order.clone());
+            derived_view_sidecar.admits.push(AdmitTimingView {
+                order_id: order.id,
+                account_id: account_id.0,
+                admit_height: ro.created_at,
+                admit_timestamp_ms: ro.created_at_ms,
+                is_new: resting_order_is_new_direct_admit(
+                    ro,
+                    self.height,
+                    self.last_header.as_ref(),
+                ),
+                is_mm: false,
+            });
         }
         let carried_resting_orders = all_orders.len();
 
@@ -2866,24 +2793,20 @@ impl BlockSequencer {
                     submission_idx_to_order_id.insert(sub_idx, order_id);
                     order_account_map.insert(order_id, account_id);
                     mm_order_ids_set.insert(order_id);
-                    let tracker_markets: Vec<MarketId> = order.active_markets().collect();
                     witness_orders.push(WitnessOrder {
                         order: order.clone(),
                         account_id: account_id.0,
                         is_mm: true,
                     });
+                    derived_view_sidecar.admits.push(AdmitTimingView {
+                        order_id,
+                        account_id: account_id.0,
+                        admit_height: self.height,
+                        admit_timestamp_ms: timestamp_ms,
+                        is_new: true,
+                        is_mm: true,
+                    });
                     accepted_orders.push(order);
-                    // Count this MM flash order as one distinct admission
-                    // (once per order at intake).
-                    self.analytics.record_order_admitted(timestamp_ms);
-                    // Trader counts exclude MM but calling through the same
-                    // hook keeps the admission paths symmetric.
-                    self.analytics.record_trader_placement(
-                        account_id,
-                        tracker_markets,
-                        timestamp_ms,
-                        true,
-                    );
                 } else {
                     // Non-MM orders: validate + reserve via OrderBook
                     match self.order_book.accept(
@@ -2909,15 +2832,14 @@ impl BlockSequencer {
                                     account_id: account_id.0,
                                     reason: sybil_verifier::RejectionReason::CompleteSetFormation,
                                 });
-                                record_order_history(
-                                    &mut self.analytics,
-                                    account_id,
-                                    crate::aggregates::HistoryKind::Rejected,
-                                    self.height,
-                                    timestamp_ms,
-                                    &accepted.order,
-                                    OrderHistoryOptions::complete_set_rejection(),
-                                );
+                                derived_view_sidecar
+                                    .rejection_history
+                                    .push(RejectedOrderView {
+                                        order_id: accepted.order.id,
+                                        order: accepted.order.clone(),
+                                        account_id: account_id.0,
+                                        reason: RejectionReason::CompleteSetFormation,
+                                    });
                                 rejections.push(Rejection {
                                     order_id: accepted.order.id,
                                     account_id,
@@ -2927,33 +2849,20 @@ impl BlockSequencer {
                             }
                             stp.record(account_id, &accepted.order);
                             order_account_map.insert(accepted.order.id, account_id);
-                            let tracker_markets: Vec<MarketId> =
-                                accepted.order.active_markets().collect();
                             witness_orders.push(WitnessOrder {
                                 order: accepted.order.clone(),
                                 account_id: account_id.0,
                                 is_mm: false,
                             });
-                            record_order_history(
-                                &mut self.analytics,
-                                account_id,
-                                crate::aggregates::HistoryKind::Placed,
-                                self.height,
-                                timestamp_ms,
-                                &accepted.order,
-                                OrderHistoryOptions::with_price(),
-                            );
+                            derived_view_sidecar.admits.push(AdmitTimingView {
+                                order_id: accepted.order.id,
+                                account_id: account_id.0,
+                                admit_height: accepted.resting_order.created_at,
+                                admit_timestamp_ms: accepted.resting_order.created_at_ms,
+                                is_new: true,
+                                is_mm: false,
+                            });
                             accepted_orders.push(accepted.order);
-                            // Count this order as one distinct admission — once,
-                            // at intake. Carried resting orders never re-enter
-                            // this loop, so they are not recounted next batch.
-                            self.analytics.record_order_admitted(timestamp_ms);
-                            self.analytics.record_trader_placement(
-                                account_id,
-                                tracker_markets.clone(),
-                                timestamp_ms,
-                                false,
-                            );
                         }
                         Err(reason) => {
                             witness_rejections.push(WitnessRejection {
@@ -2961,15 +2870,14 @@ impl BlockSequencer {
                                 account_id: account_id.0,
                                 reason: convert_rejection_reason(&reason),
                             });
-                            record_order_history(
-                                &mut self.analytics,
-                                account_id,
-                                crate::aggregates::HistoryKind::Rejected,
-                                self.height,
-                                timestamp_ms,
-                                &order,
-                                OrderHistoryOptions::rejection(&reason),
-                            );
+                            derived_view_sidecar
+                                .rejection_history
+                                .push(RejectedOrderView {
+                                    order_id,
+                                    order: order.clone(),
+                                    account_id: account_id.0,
+                                    reason: reason.clone(),
+                                });
                             rejections.push(Rejection {
                                 order_id,
                                 account_id,
@@ -3015,8 +2923,6 @@ impl BlockSequencer {
         // here, after all rejections/evictions have been filtered out.
         for order in &all_orders {
             let markets: Vec<MarketId> = order.active_markets().collect();
-            self.analytics
-                .record_order_placed(markets.iter().copied(), timestamp_ms);
             for market in markets {
                 block_orders_by_market.entry(market).or_default().placed += 1;
             }
@@ -3127,7 +3033,20 @@ impl BlockSequencer {
             .order_book
             .settle(&fills, &mm_order_ids_set, self.height);
         for (ro, exit) in &post_solve_removed {
-            self.analytics.record_order_exit(ro, timestamp_ms);
+            derived_view_sidecar
+                .removed_orders
+                .push(RemovedOrderView::from_resting_order(
+                    ro,
+                    RemovedOrderPhase::PostSolve,
+                    match exit {
+                        RestingExit::Expired => RemovedOrderExitReason::Expired,
+                        RestingExit::Settled if ro.has_been_matched => {
+                            RemovedOrderExitReason::Filled
+                        }
+                        RestingExit::Settled => RemovedOrderExitReason::Settled,
+                    },
+                    None,
+                ));
             for m in ro.order.active_markets() {
                 let slot = block_orders_by_market.entry(m).or_default();
                 if ro.has_been_matched {
@@ -3135,21 +3054,6 @@ impl BlockSequencer {
                 } else {
                     slot.unmatched += 1;
                 }
-            }
-            // Orders swept for time-in-force during settle (`current >= expires`)
-            // surface as Expired history events. settle removes them one block
-            // before expire()'s `>` check would, so this is the path that fires
-            // for every normally-resting order that reaches expiry.
-            if *exit == crate::order_book::RestingExit::Expired {
-                record_order_history(
-                    &mut self.analytics,
-                    ro.account_id,
-                    crate::aggregates::HistoryKind::Expired,
-                    self.height,
-                    timestamp_ms,
-                    &ro.order,
-                    OrderHistoryOptions::default(),
-                );
             }
         }
         let pending_orders_after = self.order_book.len();
@@ -3186,8 +3090,6 @@ impl BlockSequencer {
                 });
         for o in &mm_orders {
             let matched = mm_filled_qty.get(&o.id).copied().unwrap_or(0) > 0;
-            self.analytics
-                .record_order_outcome(o.active_markets(), matched, timestamp_ms);
             for m in o.active_markets() {
                 let slot = block_orders_by_market.entry(m).or_default();
                 if matched {
@@ -3268,19 +3170,23 @@ impl BlockSequencer {
             orders_by_market: block_orders_by_market,
             welfare_by_market,
         };
+        let sealed_for_observe = crate::block::SealedBlock {
+            canonical: block.clone(),
+            analytics: analytics.clone(),
+            derived_view_sidecar: derived_view_sidecar.clone(),
+        };
+        self.analytics
+            .observe_block(&sealed_for_observe, &derived_view_sidecar, &witness);
 
-        // Verify the block using all 4 verification layers before this
-        // prepared clone is allowed to cross the commit boundary. A violation
-        // means the solver or state transition is untrustworthy, so the
-        // default semantics are fail-stop rather than retrying as if this were
-        // a transient persistence failure.
-        // TODO: Eventually a separate prover node will consume the
-        // BlockWitness and generate ZK proofs asynchronously.
-        let verification = sybil_verifier::verify_full(&witness, /* diagnostics */ false);
-        if !verification.valid {
-            invariant_failures.push(BlockInvariantFailure::FullVerificationFailed {
-                violations: verifier_failures(&verification),
-            });
+        // Debug/prover-adjacent native full verification. Production keeps
+        // this off; a separate prover node owns the full verifier path.
+        if self.config.debug_verify_full {
+            let verification = sybil_verifier::verify_full(&witness, /* diagnostics */ false);
+            if !verification.valid {
+                invariant_failures.push(BlockInvariantFailure::FullVerificationFailed {
+                    violations: verifier_failures(&verification),
+                });
+            }
         }
 
         if !invariant_failures.is_empty() {
@@ -3301,6 +3207,7 @@ impl BlockSequencer {
         Ok(BlockProduction {
             block,
             analytics,
+            derived_view_sidecar,
             pipeline: pipeline_result,
             witness,
             flow_metrics: BlockFlowMetrics {
@@ -3347,8 +3254,9 @@ mod tests {
     use crate::validation::{validate_order, validate_order_with_reservation};
     use matching_engine::{
         notional_nanos, outcome_buy, outcome_sell, shares_to_qty, MarketId, MarketSet, MmId, Nanos,
-        Qty, NANOS_PER_DOLLAR,
+        Order, Problem, Qty, NANOS_PER_DOLLAR,
     };
+    use matching_scenarios::{generate_scenario, ScenarioConfig};
     use proptest::prelude::*;
     use sybil_oracle::{
         AdminOracle, ResolutionAttestation, ResolutionPolicy, ResolutionTemplate, TemplateId,
@@ -3383,6 +3291,142 @@ mod tests {
 
     fn qi(shares: u64) -> i64 {
         q(shares) as i64
+    }
+
+    type LifecycleHistoryRow = (
+        u64,
+        u64,
+        u8,
+        Option<u32>,
+        Option<u64>,
+        Option<&'static str>,
+        Option<&'static str>,
+        Option<u64>,
+        Option<u64>,
+        Option<&'static str>,
+        Option<i64>,
+        Option<i64>,
+    );
+
+    fn lifecycle_history_rows(
+        analytics: &AnalyticsState,
+        account_ids: &[AccountId],
+    ) -> Vec<LifecycleHistoryRow> {
+        let mut rows = Vec::new();
+        for account_id in account_ids {
+            for event in analytics.account_history(*account_id, usize::MAX, None, None) {
+                if !matches!(
+                    event.kind,
+                    crate::aggregates::HistoryKind::Placed
+                        | crate::aggregates::HistoryKind::Rejected
+                        | crate::aggregates::HistoryKind::Expired
+                ) {
+                    continue;
+                }
+                rows.push((
+                    event.account_id.0,
+                    event.block_height,
+                    event.kind as u8,
+                    event.market_id.map(|market| market.0),
+                    event.order_id,
+                    event.side,
+                    event.outcome,
+                    event.qty,
+                    event.price_nanos,
+                    event.reason,
+                    event.required_nanos,
+                    event.available_nanos,
+                ));
+            }
+        }
+        rows.sort();
+        rows
+    }
+
+    fn fund_scenario_account(accounts: &mut AccountStore, markets: &MarketSet) -> AccountId {
+        let account_id = accounts.create_account(1_000_000_000_000_000);
+        let account = accounts.get_mut(account_id).expect("account exists");
+        for market in markets.iter() {
+            account.positions.insert((market.id, 0), 1_000_000_000);
+            account.positions.insert((market.id, 1), 1_000_000_000);
+        }
+        account_id
+    }
+
+    fn sequencer_from_scenario_problem(
+        problem: Problem,
+        direct_admits: usize,
+    ) -> (BlockSequencer, Vec<OrderSubmission>, Vec<AccountId>) {
+        let config = SequencerConfig {
+            order_ttl_blocks: 2,
+            debug_verify_full: true,
+            ..SequencerConfig::default()
+        };
+        let mut accounts = AccountStore::new();
+        let mut account_ids = Vec::new();
+        let mut submissions = Vec::new();
+        let mut mm_order_ids = HashSet::new();
+        for constraint in &problem.mm_constraints {
+            mm_order_ids.extend(constraint.order_ids.iter().copied());
+        }
+        let orders_by_id: HashMap<u64, Order> = problem
+            .orders
+            .iter()
+            .map(|order| (order.id, order.clone()))
+            .collect();
+
+        for constraint in &problem.mm_constraints {
+            let account_id = fund_scenario_account(&mut accounts, &problem.markets);
+            account_ids.push(account_id);
+            let orders = constraint
+                .order_ids
+                .iter()
+                .filter_map(|order_id| orders_by_id.get(order_id).cloned())
+                .collect();
+            submissions.push(OrderSubmission {
+                account_id,
+                orders,
+                mm_constraint: Some(constraint.clone()),
+            });
+        }
+
+        for order in problem.orders {
+            if mm_order_ids.contains(&order.id) {
+                continue;
+            }
+            let account_id = fund_scenario_account(&mut accounts, &problem.markets);
+            account_ids.push(account_id);
+            submissions.push(OrderSubmission {
+                account_id,
+                orders: vec![order],
+                mm_constraint: None,
+            });
+        }
+
+        let mut sequencer = BlockSequencer::with_default_solver(
+            accounts,
+            problem.markets,
+            problem.market_groups,
+            Arc::new(AdminOracle::new()),
+            config,
+        );
+
+        let mut remaining = Vec::new();
+        let mut direct_count = 0usize;
+        for submission in submissions {
+            if direct_count < direct_admits && submission.mm_constraint.is_none() {
+                match sequencer.try_admit_direct(submission, 10 + direct_count as u64) {
+                    AdmitOutcome::Admitted { .. } => {
+                        direct_count += 1;
+                    }
+                    other => panic!("scenario direct admit should succeed, got {other:?}"),
+                }
+            } else {
+                remaining.push(submission);
+            }
+        }
+
+        (sequencer, remaining, account_ids)
     }
 
     fn restored_analytics_from(seq: &BlockSequencer) -> crate::store::AnalyticsRestoredState {
@@ -3961,6 +4005,52 @@ mod tests {
             1,
             "per-market MM outcome counted in its block"
         );
+    }
+
+    #[test]
+    fn derived_view_stream_rebuilds_order_stats_and_lifecycle_history_over_scenarios() {
+        let scenarios = [
+            ScenarioConfig::quick().with_seed(216),
+            ScenarioConfig::small().with_seed(166),
+        ];
+
+        for config in scenarios {
+            let problem = generate_scenario(config);
+            let (mut sequencer, submissions, account_ids) =
+                sequencer_from_scenario_problem(problem, 5);
+            let replay_config = sequencer.config.clone();
+
+            let productions = vec![
+                sequencer.produce_block(submissions, 1_000),
+                sequencer.produce_block(Vec::new(), 2_000),
+                sequencer.produce_block(Vec::new(), 3_000),
+            ];
+
+            let live_order_stats =
+                rmp_serde::to_vec(&sequencer.analytics().order_stats_snapshot()).unwrap();
+            let live_history = lifecycle_history_rows(sequencer.analytics(), &account_ids);
+
+            let mut replay = AnalyticsState::new(&replay_config);
+            for production in &productions {
+                let sealed = production.sealed_block();
+                replay.observe_block(
+                    &sealed,
+                    &production.derived_view_sidecar,
+                    &production.witness,
+                );
+            }
+
+            let replay_order_stats = rmp_serde::to_vec(&replay.order_stats_snapshot()).unwrap();
+            assert_eq!(
+                replay_order_stats, live_order_stats,
+                "stream-rebuilt order stats must match live analytics"
+            );
+            assert_eq!(
+                lifecycle_history_rows(&replay, &account_ids),
+                live_history,
+                "stream-rebuilt lifecycle history must match live analytics"
+            );
+        }
     }
 
     /// Helper: run a batch through the block sequencer, returning BatchResult.

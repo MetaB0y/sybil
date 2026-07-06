@@ -2452,6 +2452,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.2",
  "matching-engine",
+ "matching-scenarios",
  "matching-solver",
  "metrics",
  "p256 0.14.0-rc.8",

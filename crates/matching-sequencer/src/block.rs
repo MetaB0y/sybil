@@ -7,7 +7,7 @@ use sybil_verifier::{BlockWitness, WitnessBlockHeader};
 use crate::account::AccountStore;
 use crate::bridge::{bridge_state_snapshot, BridgeBlockData, BridgeState};
 use crate::canonical_state::CanonicalState;
-use crate::error::Rejection;
+use crate::error::{Rejection, RejectionReason};
 use crate::market_info::MarketMetadata;
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::{
@@ -19,6 +19,7 @@ use crate::system_event::SystemEvent;
 pub struct BlockProduction {
     pub block: Block,
     pub analytics: BlockAnalytics,
+    pub derived_view_sidecar: DerivedViewSidecar,
     pub pipeline: PipelineResult,
     pub witness: BlockWitness,
     pub flow_metrics: BlockFlowMetrics,
@@ -29,6 +30,7 @@ impl BlockProduction {
         SealedBlock {
             canonical: self.block.clone(),
             analytics: self.analytics.clone(),
+            derived_view_sidecar: self.derived_view_sidecar.clone(),
         }
     }
 }
@@ -78,6 +80,11 @@ impl BlockHeader {
 pub struct SealedBlock {
     pub canonical: Block,
     pub analytics: BlockAnalytics,
+    /// Unproven derived-view lifecycle stream. This is not part of
+    /// `canonical_witness_bytes`, `witness_root`, `da_commitment`, or the
+    /// guest input; it rides with the block record for analytics consumers.
+    #[serde(default)]
+    pub derived_view_sidecar: DerivedViewSidecar,
 }
 
 /// A sequencer block produced each tick.
@@ -127,6 +134,116 @@ pub struct BlockAnalytics {
     /// sum-of-per-market over-counts for spreads/bundles. Signed because
     /// solver rounding can yield small negatives.
     pub welfare_by_market: HashMap<MarketId, i64>,
+}
+
+/// Provenance marker for fields derived by the sequencer read model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DerivedViewProvenance {
+    #[default]
+    DerivedUnproven,
+}
+
+/// Unproven lifecycle stream for read-model reconstruction.
+///
+/// This sidecar deliberately stays outside the verifier and canonical witness
+/// bytes. It carries data the analytics views need but the proof system does
+/// not currently bind: removed resting-order identity, `has_been_matched`,
+/// view-level exit reasons, and direct-admit timing.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct DerivedViewSidecar {
+    #[serde(default)]
+    pub provenance: DerivedViewProvenance,
+    #[serde(default)]
+    pub removed_orders: Vec<RemovedOrderView>,
+    #[serde(default)]
+    pub admits: Vec<AdmitTimingView>,
+    #[serde(default)]
+    pub rejection_history: Vec<RejectedOrderView>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemovedOrderPhase {
+    BlockStartExpire,
+    BlockStartRevalidate,
+    PostSolve,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemovedOrderExitReason {
+    Expired,
+    RevalidateInsufficientBalance,
+    RevalidateInsufficientPosition,
+    RevalidateMarketInactive,
+    RevalidateAccountGone,
+    RevalidateAccountInsolvent,
+    RevalidateRejected,
+    Filled,
+    Settled,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RemovedOrderView {
+    pub order: matching_engine::Order,
+    pub order_id: u64,
+    pub account_id: u64,
+    pub phase: RemovedOrderPhase,
+    pub exit_reason: RemovedOrderExitReason,
+    pub has_been_matched: bool,
+    pub reserved_balance_released: i64,
+    pub reserved_positions_released: Vec<(MarketId, u8, i64)>,
+    pub active_markets: Vec<MarketId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejection_reason: Option<RejectionReason>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AdmitTimingView {
+    pub order_id: u64,
+    pub account_id: u64,
+    pub admit_height: u64,
+    pub admit_timestamp_ms: u64,
+    pub is_new: bool,
+    pub is_mm: bool,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RejectedOrderView {
+    pub order: matching_engine::Order,
+    pub order_id: u64,
+    pub account_id: u64,
+    pub reason: RejectionReason,
+}
+
+impl RemovedOrderView {
+    pub(crate) fn from_resting_order(
+        resting: &RestingOrder,
+        phase: RemovedOrderPhase,
+        exit_reason: RemovedOrderExitReason,
+        rejection_reason: Option<RejectionReason>,
+    ) -> Self {
+        let mut reserved_positions_released: Vec<_> = resting
+            .reserved_positions
+            .iter()
+            .map(|&((market, outcome), qty)| (market, outcome, qty))
+            .collect();
+        reserved_positions_released.sort_by_key(|&(market, outcome, _)| (market.0, outcome));
+        let active_markets: Vec<_> = resting.order.active_markets().collect();
+        Self {
+            order: resting.order.clone(),
+            order_id: resting.order.id,
+            account_id: resting.account_id.0,
+            phase,
+            exit_reason,
+            has_been_matched: resting.has_been_matched,
+            reserved_balance_released: resting.reserved_balance,
+            reserved_positions_released,
+            active_markets,
+            rejection_reason,
+        }
+    }
 }
 
 /// Compute a deterministic account-only state root with the verifier's

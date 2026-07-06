@@ -365,6 +365,86 @@ pub struct BlockMarketStats {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DerivedViewSidecarResponse {
+    /// Always `derived_unproven`: this sidecar is sequencer-derived read-model
+    /// data and is not part of the witness, state root, events root, witness
+    /// root, DA commitment, or ZK guest input.
+    pub provenance: String,
+    /// Resting orders removed during block production. Derived/unproven view
+    /// rows used for analytics and lifecycle displays.
+    #[serde(default)]
+    pub removed_orders: Vec<RemovedOrderViewResponse>,
+    /// Admission timing rows. `is_new=false` means the order was carried from
+    /// a prior block's resting book; `is_new=true` means a distinct admission
+    /// first became visible to this block's view.
+    #[serde(default)]
+    pub admits: Vec<AdmitTimingViewResponse>,
+    /// Rejection rows that were intentionally mirrored into account history.
+    /// Canonical rejections remain in `BlockResponse.rejections`.
+    #[serde(default)]
+    pub rejection_history: Vec<RejectedOrderViewResponse>,
+}
+
+impl Default for DerivedViewSidecarResponse {
+    fn default() -> Self {
+        Self {
+            provenance: "derived_unproven".to_string(),
+            removed_orders: Vec::new(),
+            admits: Vec::new(),
+            rejection_history: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RemovedOrderViewResponse {
+    pub order_id: u64,
+    pub account_id: u64,
+    pub phase: String,
+    pub exit_reason: String,
+    pub has_been_matched: bool,
+    /// Released reserved cash. Integer nanodollars; 1_000_000_000 = $1.
+    pub reserved_balance_released: i64,
+    #[serde(default)]
+    pub reserved_positions_released: Vec<ReservedPositionReleaseResponse>,
+    #[serde(default)]
+    pub active_markets: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejection_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ReservedPositionReleaseResponse {
+    pub market_id: u32,
+    pub outcome: u8,
+    /// Released reserved position quantity. Integer share-units; 1000 units = 1 share.
+    pub quantity: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AdmitTimingViewResponse {
+    pub order_id: u64,
+    pub account_id: u64,
+    pub admit_height: u64,
+    /// Admission timestamp in Unix epoch milliseconds.
+    pub admit_timestamp_ms: u64,
+    pub is_new: bool,
+    pub is_mm: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RejectedOrderViewResponse {
+    pub order_id: u64,
+    pub account_id: u64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BlockResponse {
     pub height: u64,
     pub parent_hash: String,
@@ -401,6 +481,11 @@ pub struct BlockResponse {
     /// clients ignore it; new clients consume what they recognise.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub by_market: HashMap<String, BlockMarketStats>,
+    /// Unproven derived-view lifecycle sidecar. The field is exposed on the
+    /// same block surface as canonical data, but its `provenance` marks it as
+    /// derived read-model data rather than consensus-proven data.
+    #[serde(default)]
+    pub derived_view_sidecar: DerivedViewSidecarResponse,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -953,12 +1038,12 @@ mod tests {
             orders_filled: 0,
             unique_placers: 0,
             by_market: HashMap::new(),
+            derived_view_sidecar: DerivedViewSidecarResponse::default(),
         }
     }
 
-    /// `by_market` is `skip_serializing_if = HashMap::is_empty` so an empty
-    /// map produces JSON byte-identical to pre-A1 BlockResponse. Old clients
-    /// that don't know the field see no change.
+    /// `by_market` is omitted when empty, while `derived_view_sidecar` remains
+    /// present so clients can see the derived/unproven provenance marker.
     #[test]
     fn block_response_serde_roundtrip() {
         let blk = empty_block_response();
@@ -967,11 +1052,28 @@ mod tests {
             !json.contains("by_market"),
             "empty by_market must not serialize: {json}"
         );
+        assert!(
+            json.contains("derived_unproven"),
+            "derived sidecar provenance must serialize: {json}"
+        );
 
-        // Deserialize an "old shape" payload that has no by_market key at all.
-        let old_shape = serde_json::to_string(&blk).expect("serialize");
-        let parsed: BlockResponse = serde_json::from_str(&old_shape).expect("deserialize");
+        // Deserialize an old payload with no by_market or derived_view_sidecar keys.
+        let old_shape = serde_json::json!({
+            "height": 1,
+            "parent_hash": "00",
+            "state_root": "11",
+            "events_root": "22",
+            "order_count": 0,
+            "fill_count": 0,
+            "timestamp_ms": 0,
+            "total_welfare_nanos": 0,
+            "total_volume_nanos": 0,
+            "orders_filled": 0
+        });
+        let parsed: BlockResponse =
+            serde_json::from_value(old_shape).expect("deserialize old shape");
         assert!(parsed.by_market.is_empty());
+        assert_eq!(parsed.derived_view_sidecar.provenance, "derived_unproven");
 
         // Round-trip with a populated map.
         let mut blk2 = empty_block_response();

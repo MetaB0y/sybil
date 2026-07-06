@@ -43,6 +43,26 @@ pub enum RestingExit {
     Expired,
 }
 
+/// Why a resting order left the book during [`OrderBook::revalidate`].
+#[derive(Debug, Clone)]
+pub enum RestingRevalidationExit {
+    MarketInactive,
+    AccountGone,
+    AccountInsolvent,
+    Rejected(RejectionReason),
+}
+
+impl RestingRevalidationExit {
+    pub fn rejection_reason(&self) -> Option<&RejectionReason> {
+        match self {
+            RestingRevalidationExit::Rejected(reason) => Some(reason),
+            RestingRevalidationExit::MarketInactive
+            | RestingRevalidationExit::AccountGone
+            | RestingRevalidationExit::AccountInsolvent => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RestingOrder {
     pub(crate) order: Order,
@@ -313,7 +333,7 @@ impl OrderBook {
         &mut self,
         accounts: &AccountStore,
         active_markets: &HashSet<MarketId>,
-    ) -> Vec<(RestingOrder, Option<RejectionReason>)> {
+    ) -> Vec<(RestingOrder, RestingRevalidationExit)> {
         // We must re-validate carefully: removing one order releases its reservations,
         // which may make subsequent orders valid again. But for simplicity and safety,
         // we validate conservatively: remove anything that's invalid given current
@@ -321,11 +341,11 @@ impl OrderBook {
         // prior order's reservation is released), but that's safe — the trader can
         // resubmit.
         //
-        // Each removal carries an optional reason: `Some(reason)` is a genuine
-        // per-order validation failure we surface to the account as a Rejected
-        // history event; `None` (market inactive / account gone / insolvent) is
-        // not a per-order rejection and is left unsurfaced.
-        let mut to_remove: Vec<(usize, Option<RejectionReason>)> = Vec::new();
+        // Each removal carries a view-level reason. Genuine per-order
+        // validation failures surface to account history as `Rejected`; market
+        // inactive, account gone, and account insolvent removals are lifecycle
+        // evictions and are left unsurfaced in the account feed.
+        let mut to_remove: Vec<(usize, RestingRevalidationExit)> = Vec::new();
 
         for (i, ro) in self.orders.iter().enumerate() {
             // Market still active?
@@ -334,17 +354,17 @@ impl OrderBook {
                 .active_markets()
                 .all(|m| active_markets.contains(&m));
             if !markets_active {
-                to_remove.push((i, None));
+                to_remove.push((i, RestingRevalidationExit::MarketInactive));
                 continue;
             }
 
             // Account still exists and solvent?
             let Some(account) = accounts.get(ro.account_id) else {
-                to_remove.push((i, None));
+                to_remove.push((i, RestingRevalidationExit::AccountGone));
                 continue;
             };
             if account.balance <= 0 {
-                to_remove.push((i, None));
+                to_remove.push((i, RestingRevalidationExit::AccountInsolvent));
                 continue;
             }
 
@@ -368,7 +388,7 @@ impl OrderBook {
                 reserved_without_self,
                 &positions_without_self,
             ) {
-                to_remove.push((i, Some(reason)));
+                to_remove.push((i, RestingRevalidationExit::Rejected(reason)));
             }
         }
 
