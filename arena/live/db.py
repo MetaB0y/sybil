@@ -27,6 +27,12 @@ class DecisionDB:
                 # SYB-64: per-call USD cost + its source (provider vs price table).
                 ("token_usage", "usd_cost", "REAL DEFAULT 0"),
                 ("token_usage", "cost_source", "TEXT"),
+                # SYB-114: sizer-side calibration/freshness metadata.
+                ("decisions", "raw_fair_value", "REAL"),
+                ("decisions", "effective_fair_value", "REAL"),
+                ("decisions", "fair_value_age_s", "REAL"),
+                ("decisions", "confidence", "REAL"),
+                ("decisions", "countercase", "TEXT"),
             ]:
                 try:
                     self.conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
@@ -66,7 +72,12 @@ class DecisionDB:
                     llm_duration_s REAL,
                     balance REAL,
                     yes_pos INTEGER,
-                    no_pos INTEGER
+                    no_pos INTEGER,
+                    raw_fair_value REAL,
+                    effective_fair_value REAL,
+                    fair_value_age_s REAL,
+                    confidence REAL,
+                    countercase TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
@@ -151,6 +162,11 @@ class DecisionDB:
         no_pos: int,
         article_ids: list[int] | None = None,
         article_urls: list[dict] | None = None,
+        raw_fair_value: float | None = None,
+        effective_fair_value: float | None = None,
+        fair_value_age_s: float | None = None,
+        confidence: float | None = None,
+        countercase: str = "",
     ) -> int:
         with self._lock:
             cur = self.conn.execute(
@@ -158,8 +174,9 @@ class DecisionDB:
                    (trader_name, market_id, market_name, timestamp, article_ids,
                     article_urls, analysis, fair_value, market_price, orders,
                     motivation, raw_llm_response, llm_duration_s, balance,
-                    yes_pos, no_pos)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    yes_pos, no_pos, raw_fair_value, effective_fair_value,
+                    fair_value_age_s, confidence, countercase)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     market_id,
@@ -177,6 +194,11 @@ class DecisionDB:
                     balance,
                     yes_pos,
                     no_pos,
+                    raw_fair_value,
+                    effective_fair_value,
+                    fair_value_age_s,
+                    confidence,
+                    countercase,
                 ),
             )
             self.conn.commit()

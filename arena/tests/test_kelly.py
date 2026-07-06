@@ -1,7 +1,13 @@
 """Tests for sizing strategies (live/strategy.py)."""
 
-from live.strategy import KellyStrategy, FlatStrategy, position_orders
-from sybil_client import BuyYes, BuyNo, SellYes, SellNo
+from live.strategy import (
+    FairValueFreshnessConfig,
+    FlatStrategy,
+    KellyStrategy,
+    effective_fair_value,
+    position_orders,
+)
+from sybil_client import BuyNo, BuyYes, SellNo, SellYes
 
 
 class TestKellyStrategy:
@@ -37,6 +43,40 @@ class TestKellyStrategy:
         expected = int(0.40 * (1/3) * 500.0 / 0.50)
         assert yes == expected
 
+    def test_confidence_and_freshness_only_shrink_kelly(self):
+        baseline_yes, _ = self.s.target(0.70, 0.50, 500.0, 0, 0)
+        shrunk_yes, _ = self.s.target(
+            0.70,
+            0.50,
+            500.0,
+            0,
+            0,
+            confidence=0.5,
+            freshness_factor=0.5,
+        )
+        clamped_yes, _ = self.s.target(
+            0.70,
+            0.50,
+            500.0,
+            0,
+            0,
+            confidence=2.0,
+            freshness_factor=2.0,
+        )
+        zero_yes, zero_no = self.s.target(
+            0.70,
+            0.50,
+            500.0,
+            0,
+            0,
+            confidence=-1.0,
+            freshness_factor=1.0,
+        )
+
+        assert 0 < shrunk_yes < baseline_yes
+        assert clamped_yes == baseline_yes
+        assert (zero_yes, zero_no) == (0, 0)
+
     def test_max_position_cap(self):
         # Market at 0.10, FV=0.95 → full_kelly=0.944, *1/3=0.315 > cap 0.30
         yes, _ = self.s.target(0.94, 0.10, 1000.0, 0, 0)
@@ -69,6 +109,22 @@ class TestKellyStrategy:
 
     def test_name(self):
         assert self.s.name == "kelly"
+
+
+class TestFairValueFreshness:
+    def test_effective_fair_value_decays_after_ttl_and_expires(self):
+        config = FairValueFreshnessConfig(ttl_s=10.0, half_life_s=20.0, hard_expiry_s=100.0)
+
+        fresh = effective_fair_value(0.80, 0.50, age_s=10.0, config=config)
+        decayed = effective_fair_value(0.80, 0.50, age_s=30.0, config=config)
+        expired = effective_fair_value(0.80, 0.50, age_s=100.0, config=config)
+
+        assert fresh.effective_fair_value == 0.80
+        assert fresh.freshness_factor == 1.0
+        assert decayed.effective_fair_value == 0.65
+        assert decayed.freshness_factor == 0.5
+        assert expired.effective_fair_value is None
+        assert expired.expired
 
 
 class TestFlatStrategy:

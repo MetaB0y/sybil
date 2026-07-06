@@ -17,8 +17,9 @@ from __future__ import annotations
 import logging
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import openai
 
@@ -38,6 +39,10 @@ if TYPE_CHECKING:
     from .metrics import ArenaMetrics
 
 log = logging.getLogger(__name__)
+
+DEFAULT_PARSE_CONFIDENCE = 0.5
+DEFAULT_COUNTERCASE = "No countercase supplied; treat this estimate cautiously."
+DEDUP_SIMILARITY_THRESHOLD = 0.82
 
 
 # System prompt: unchanged probability-analysis framing from the pre-split
@@ -67,6 +72,104 @@ Key principles:
 Always respond in English regardless of article language."""
 
 
+@dataclass(frozen=True)
+class ParsedFairValue:
+    fair_value: float
+    motivation: str
+    analysis: str
+    countercase: str
+    confidence: float
+
+
+@dataclass(frozen=True)
+class ArticleCluster:
+    representative: LiveArticle
+    articles: list[LiveArticle]
+
+
+_ARTICLE_STOPWORDS = {
+    "about",
+    "after",
+    "against",
+    "also",
+    "and",
+    "are",
+    "but",
+    "for",
+    "from",
+    "has",
+    "have",
+    "into",
+    "its",
+    "not",
+    "over",
+    "said",
+    "says",
+    "that",
+    "the",
+    "their",
+    "this",
+    "was",
+    "with",
+    "will",
+}
+
+
+def _article_tokens(article: LiveArticle) -> set[str]:
+    text = f"{article.title} {article.full_text or ''}"
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]{3,}", text.lower())
+        if token not in _ARTICLE_STOPWORDS
+    }
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _representative_article(articles: list[LiveArticle]) -> LiveArticle:
+    return max(
+        articles,
+        key=lambda article: (
+            len(article.full_text or ""),
+            len(article.title),
+            article.published,
+        ),
+    )
+
+
+def cluster_near_duplicate_articles(
+    articles: list[LiveArticle],
+    similarity_threshold: float = DEDUP_SIMILARITY_THRESHOLD,
+) -> list[ArticleCluster]:
+    """Cluster near-duplicate articles with cheap token Jaccard similarity."""
+    clusters: list[tuple[list[LiveArticle], list[set[str]]]] = []
+    for article in articles:
+        tokens = _article_tokens(article)
+        matched = None
+        for cluster_articles, cluster_tokens in clusters:
+            if article.url and any(article.url == existing.url for existing in cluster_articles):
+                matched = (cluster_articles, cluster_tokens)
+                break
+            if any(_jaccard(tokens, existing_tokens) >= similarity_threshold
+                   for existing_tokens in cluster_tokens):
+                matched = (cluster_articles, cluster_tokens)
+                break
+        if matched is None:
+            clusters.append(([article], [tokens]))
+        else:
+            matched[0].append(article)
+            matched[1].append(tokens)
+
+    return [
+        ArticleCluster(representative=_representative_article(cluster), articles=cluster)
+        for cluster, _tokens in clusters
+    ]
+
+
 class PersonaAnalyst:
     """LLM analyst for one persona: news in, FairValueUpdate out.
 
@@ -91,6 +194,8 @@ class PersonaAnalyst:
         name: str | None = None,
         metrics: "ArenaMetrics | None" = None,
         llm_budget_usd: float | None = None,
+        now_fn: Callable[[], datetime] | None = None,
+        monotonic_fn: Callable[[], float] | None = None,
     ):
         self.client = client
         self.news_feed = news_feed
@@ -105,6 +210,8 @@ class PersonaAnalyst:
         self.min_llm_interval_s = min_llm_interval_s
         self.name = name or "PersonaAnalyst"
         self.metrics = metrics
+        self._now = now_fn or (lambda: datetime.now(timezone.utc))
+        self._monotonic = monotonic_fn or time.monotonic
 
         # SYB-64: per-agent LLM budget. The analyst is the persona's sole LLM
         # caller (SYB-210), so this budget is a separate pool from the sizers'
@@ -138,6 +245,7 @@ class PersonaAnalyst:
         self._observed_first_block = False
         self._running = False
         self.on_block_error_count = 0
+        self.parse_fallback_counts: dict[str, int] = {}
 
         # Per-market state (analyst-local; no portfolio).
         self.fair_values: dict[int, float] = {}
@@ -275,7 +383,7 @@ class PersonaAnalyst:
         if market.description:
             context += f"\n{market.description[:500]}"
         if market.resolution_criteria:
-            context += f"\nResolution: {market.resolution_criteria[:200]}"
+            context += f"\nResolution: {market.resolution_criteria}"
 
         if len(articles) == 1:
             art = articles[0]
@@ -306,13 +414,68 @@ Recent estimates:
 Analyze and respond in this EXACT format:
 
 FAIR_VALUE: [Your probability estimate, 0.01-0.99]
+COUNTERCASE: [1 sentence — strongest reason this estimate could be wrong]
+CONFIDENCE: [0.0-1.0 confidence in this fair value; lower for indirect, stale, duplicated, or conflicting evidence]
 MOTIVATION: [1 sentence — why this fair value]
 ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
     # -- LLM output parsing --
 
-    def _parse_fair_value(self, text: str) -> tuple[float, str, str] | None:
-        fv_match = re.search(r"FAIR_VALUE:\s*([\d.]+)", text)
+    def _record_parse_fallback(self, field: str) -> None:
+        self.parse_fallback_counts[field] = self.parse_fallback_counts.get(field, 0) + 1
+        if self.metrics is not None:
+            self.metrics.record_analyst_parse_fallback(self.name, field)
+
+    def _extract_section(self, text: str, label: str) -> str | None:
+        labels = (
+            "ANALYSIS",
+            "COUNTERCASE",
+            "CONFIDENCE",
+            "EDGE",
+            "FAIR_VALUE",
+            "MOTIVATION",
+            "ORDERS",
+        )
+        keyword_pattern = "|".join(labels)
+        match = re.search(
+            rf"(?:^|\n){label}:\s*(.*?)(?=\n(?:{keyword_pattern}):|\Z)",
+            text,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if not match:
+            return None
+        return match.group(1).strip()
+
+    def _parse_confidence(self, text: str) -> float:
+        raw = self._extract_section(text, "CONFIDENCE")
+        if not raw:
+            self._record_parse_fallback("confidence_missing")
+            return DEFAULT_PARSE_CONFIDENCE
+        match = re.search(r"[-+]?\d+(?:\.\d+)?", raw)
+        if not match:
+            self._record_parse_fallback("confidence_garbled")
+            return DEFAULT_PARSE_CONFIDENCE
+        try:
+            confidence = float(match.group(0))
+        except ValueError:
+            self._record_parse_fallback("confidence_garbled")
+            return DEFAULT_PARSE_CONFIDENCE
+        if "%" in raw and 1 < confidence <= 100:
+            confidence /= 100
+        if not 0.0 <= confidence <= 1.0:
+            self._record_parse_fallback("confidence_out_of_range")
+            return DEFAULT_PARSE_CONFIDENCE
+        return confidence
+
+    def _parse_countercase(self, text: str) -> str:
+        countercase = self._extract_section(text, "COUNTERCASE")
+        if not countercase:
+            self._record_parse_fallback("countercase_missing")
+            return DEFAULT_COUNTERCASE
+        return countercase
+
+    def _parse_fair_value(self, text: str) -> ParsedFairValue | None:
+        fv_match = re.search(r"FAIR_VALUE:\s*([\d.]+)", text, re.IGNORECASE)
         if not fv_match:
             log.warning("Failed to parse FAIR_VALUE from LLM output")
             return None
@@ -326,19 +489,24 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             log.warning("FAIR_VALUE out of range: %s", fair_value)
             return None
 
-        KEYWORDS = r"\nANALYSIS:|\nFAIR_VALUE:|\nEDGE:|\nORDERS:|\nMOTIVATION:|\Z"
-        motiv_match = re.search(rf"MOTIVATION:\s*(.*?)(?={KEYWORDS})", text, re.DOTALL)
-        motivation = motiv_match.group(1).strip() if motiv_match else ""
-        analysis_match = re.search(rf"ANALYSIS:\s*(.*?)(?={KEYWORDS})", text, re.DOTALL)
-        analysis = analysis_match.group(1).strip() if analysis_match else ""
+        motivation = self._extract_section(text, "MOTIVATION") or ""
+        analysis = self._extract_section(text, "ANALYSIS") or ""
+        countercase = self._parse_countercase(text)
+        confidence = self._parse_confidence(text)
 
-        return (fair_value, motivation, analysis)
+        return ParsedFairValue(
+            fair_value=fair_value,
+            motivation=motivation,
+            analysis=analysis,
+            countercase=countercase,
+            confidence=confidence,
+        )
 
     # -- Main loop --
 
     async def on_block(self, block: Block) -> None:
         """Drain news, run the analysis LLM (budget-gated), publish updates."""
-        now = datetime.now(timezone.utc)
+        now = self._now()
 
         if not self._observed_first_block:
             # Skip the warm-start block (the feed marks pre-existing candidates
@@ -359,13 +527,24 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
         # block. Now that the analyst is the only LLM caller, this budget governs
         # total analysis-LLM cost.
         for market_id in list(self.market_ids or []):
-            elapsed_llm = time.monotonic() - self._last_llm_call
+            elapsed_llm = self._monotonic() - self._last_llm_call
             if self._last_llm_call != 0 and elapsed_llm < self.min_llm_interval_s:
                 break
 
             articles = await self.news_sub.drain(market_id) if self.news_sub else []
             if not articles:
                 continue
+            clusters = cluster_near_duplicate_articles(articles)
+            deduped_articles = [cluster.representative for cluster in clusters]
+            if len(deduped_articles) < len(articles):
+                log.info(
+                    "[%s] deduped %d article(s) for market %d into %d evidence cluster(s)",
+                    self.name,
+                    len(articles),
+                    market_id,
+                    len(deduped_articles),
+                )
+            articles = deduped_articles
 
             market = self.markets_info.get(market_id)
             if not market:
@@ -393,7 +572,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
             try:
                 raw_text, llm_duration_s = await self._call_llm(prompt)
-                self._last_llm_call = time.monotonic()
+                self._last_llm_call = self._monotonic()
                 if self.metrics is not None:
                     self.metrics.record_llm_call(self.name)
                 log.info("[%s] LLM response (%.1fs):\n%s", self.name, llm_duration_s, raw_text)
@@ -406,7 +585,9 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
                 log.warning("[%s] Failed to parse LLM output", self.name)
                 continue
 
-            fair_value, motivation, analysis = parsed
+            fair_value = parsed.fair_value
+            motivation = parsed.motivation
+            analysis = parsed.analysis
             old_fv = self.fair_values.get(market_id)
             self.fair_values[market_id] = fair_value
             records = self.fv_log.setdefault(market_id, [])
@@ -414,10 +595,10 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             if len(records) > 200:
                 self.fv_log[market_id] = records[-200:]
 
-            log.info("[%s] %s: FV %.2f->%.2f (market=%.2f, edge=%.2f) | %s",
+            log.info("[%s] %s: FV %.2f->%.2f (market=%.2f, edge=%.2f, conf=%.2f) | %s",
                      self.name, market.name[:30],
                      old_fv or 0, fair_value, ref_price,
-                     fair_value - ref_price, motivation)
+                     fair_value - ref_price, parsed.confidence, motivation)
 
             # Broadcast to both sizing arms of this persona. Both receive the
             # SAME update object, guaranteeing identical A/B inputs (SYB-210).
@@ -427,6 +608,8 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
                 fair_value=fair_value,
                 motivation=motivation,
                 analysis=analysis,
+                countercase=parsed.countercase,
+                confidence=parsed.confidence,
                 articles=articles,
                 block_height=block.height,
                 ts=now,

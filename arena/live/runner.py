@@ -23,7 +23,7 @@ from .market_selection import MarketProfile, select_markets
 from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed
 from .personas import PERSONAS
-from .strategy import FlatStrategy, KellyStrategy
+from .strategy import FairValueFreshnessConfig, FlatStrategy, KellyStrategy
 from .synthetic import FastReferenceTrader, NativeNoiseTrader, SyntheticStrategyConfig
 from .trader import LiveLlmTrader
 
@@ -47,6 +47,9 @@ class LiveConfig:
     order_time_in_force: TimeInForce = "IOC"
     news_poll_interval: int = 300
     min_llm_interval: float = 60.0
+    fair_value_ttl_s: float = FairValueFreshnessConfig.ttl_s
+    fair_value_half_life_s: float = FairValueFreshnessConfig.half_life_s
+    fair_value_hard_expiry_s: float = FairValueFreshnessConfig.hard_expiry_s
     # SYB-64: per-analyst LLM budget (USD). The analyst is a persona's sole LLM
     # caller and holds no trading account, so this is a separate pool from the
     # sizers' trading bankroll. Exhausting it pauses the persona's analyst.
@@ -378,6 +381,9 @@ async def run_live(config: LiveConfig):
                     db=db,
                     name=bot_name,
                     fair_value_bus=bus,
+                    fair_value_ttl_s=config.fair_value_ttl_s,
+                    fair_value_half_life_s=config.fair_value_half_life_s,
+                    fair_value_hard_expiry_s=config.fair_value_hard_expiry_s,
                 )
                 trader.time_in_force = config.order_time_in_force
                 traders.append(trader)
@@ -618,6 +624,33 @@ def main():
         help="Min seconds between LLM calls",
     )
     parser.add_argument(
+        "--fair-value-ttl-s",
+        type=float,
+        default=None,
+        help=(
+            "Seconds before an analyst fair value starts decaying toward market price. "
+            "Defaults to ARENA_FAIR_VALUE_TTL_S or 600."
+        ),
+    )
+    parser.add_argument(
+        "--fair-value-half-life-s",
+        type=float,
+        default=None,
+        help=(
+            "Half-life in seconds for stale fair-value edge decay. Defaults to "
+            "ARENA_FAIR_VALUE_HALF_LIFE_S or 1800."
+        ),
+    )
+    parser.add_argument(
+        "--fair-value-hard-expiry-s",
+        type=float,
+        default=None,
+        help=(
+            "Seconds after which an analyst fair value is treated as missing. "
+            "Defaults to ARENA_FAIR_VALUE_HARD_EXPIRY_S or 7200."
+        ),
+    )
+    parser.add_argument(
         "--llm-budget-usd",
         type=float,
         default=5.0,
@@ -680,6 +713,32 @@ def main():
             if args.synthetic_randomization_range is not None
             else _env_float("ARENA_SYNTHETIC_RANDOMIZATION_RANGE", 0.02)
         )
+        fair_value_ttl_s = (
+            args.fair_value_ttl_s
+            if args.fair_value_ttl_s is not None
+            else _env_float("ARENA_FAIR_VALUE_TTL_S", FairValueFreshnessConfig.ttl_s)
+        )
+        fair_value_half_life_s = (
+            args.fair_value_half_life_s
+            if args.fair_value_half_life_s is not None
+            else _env_float(
+                "ARENA_FAIR_VALUE_HALF_LIFE_S",
+                FairValueFreshnessConfig.half_life_s,
+            )
+        )
+        fair_value_hard_expiry_s = (
+            args.fair_value_hard_expiry_s
+            if args.fair_value_hard_expiry_s is not None
+            else _env_float(
+                "ARENA_FAIR_VALUE_HARD_EXPIRY_S",
+                FairValueFreshnessConfig.hard_expiry_s,
+            )
+        )
+        FairValueFreshnessConfig(
+            ttl_s=fair_value_ttl_s,
+            half_life_s=fair_value_half_life_s,
+            hard_expiry_s=fair_value_hard_expiry_s,
+        )
     except ValueError as e:
         parser.error(str(e))
 
@@ -721,6 +780,9 @@ def main():
         ),
         news_poll_interval=args.news_interval,
         min_llm_interval=args.min_llm_interval,
+        fair_value_ttl_s=fair_value_ttl_s,
+        fair_value_half_life_s=fair_value_half_life_s,
+        fair_value_hard_expiry_s=fair_value_hard_expiry_s,
         llm_budget_usd=args.llm_budget_usd if args.llm_budget_usd > 0 else None,
         db_path=args.db_path,
         metrics_host=args.metrics_host,

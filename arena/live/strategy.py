@@ -10,7 +10,9 @@ Both take a fair_value + market_price and return target positions.
 from __future__ import annotations
 
 import logging
+import math
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from sybil_client import BuyNo, BuyYes, OrderSpec, SellNo, SellYes
 
@@ -19,6 +21,71 @@ log = logging.getLogger(__name__)
 # Markets at or beyond these prices are effectively resolved — exit all positions.
 RESOLVED_HIGH = 0.95
 RESOLVED_LOW = 0.05
+
+
+@dataclass(frozen=True)
+class FairValueFreshnessConfig:
+    """Controls how stale analyst fair values are dampened by the sizer."""
+
+    ttl_s: float = 10 * 60
+    half_life_s: float = 30 * 60
+    hard_expiry_s: float = 2 * 60 * 60
+
+    def __post_init__(self) -> None:
+        if self.ttl_s < 0:
+            raise ValueError("ttl_s must be non-negative")
+        if self.half_life_s <= 0:
+            raise ValueError("half_life_s must be positive")
+        if self.hard_expiry_s < self.ttl_s:
+            raise ValueError("hard_expiry_s must be >= ttl_s")
+
+
+@dataclass(frozen=True)
+class FreshFairValue:
+    """A raw FV after freshness decay has been applied."""
+
+    raw_fair_value: float
+    effective_fair_value: float | None
+    age_s: float
+    freshness_factor: float
+
+    @property
+    def expired(self) -> bool:
+        return self.effective_fair_value is None
+
+
+def _clamp01(value: float) -> float:
+    if math.isnan(value):
+        return 0.0
+    return min(1.0, max(0.0, value))
+
+
+def effective_fair_value(
+    raw_fair_value: float,
+    market_price: float,
+    age_s: float,
+    config: FairValueFreshnessConfig | None = None,
+) -> FreshFairValue:
+    """Decay stale FV toward market price, or expire it entirely.
+
+    Fresh estimates are used as-is until ``ttl_s``. After that, the raw edge
+    decays exponentially toward zero with the configured half-life. Once the
+    hard expiry is reached the caller should behave as though no FV exists.
+    """
+    cfg = config or FairValueFreshnessConfig()
+    age = max(0.0, age_s)
+    raw = _clamp01(raw_fair_value)
+    market = _clamp01(market_price)
+
+    if age >= cfg.hard_expiry_s:
+        return FreshFairValue(raw, None, age, 0.0)
+    if age <= cfg.ttl_s:
+        return FreshFairValue(raw, raw, age, 1.0)
+
+    decay_elapsed = age - cfg.ttl_s
+    freshness = 0.5 ** (decay_elapsed / cfg.half_life_s)
+    effective = market + (raw - market) * freshness
+    return FreshFairValue(raw, _clamp01(effective), age, freshness)
 
 
 # --------------------------------------------------------------------------- #
@@ -36,6 +103,8 @@ class SizingStrategy(ABC):
         current_yes: int,
         current_no: int,
         market_id: int | None = None,
+        confidence: float | None = None,
+        freshness_factor: float = 1.0,
     ) -> tuple[int, int]:
         """Return (target_yes, target_no). Exactly one should be > 0, or both 0.
 
@@ -88,6 +157,8 @@ class KellyStrategy(SizingStrategy):
         current_yes: int,
         current_no: int,
         market_id: int | None = None,
+        confidence: float | None = None,
+        freshness_factor: float = 1.0,
     ) -> tuple[int, int]:
         # Resolved market → exit everything
         if market_price >= RESOLVED_HIGH or market_price <= RESOLVED_LOW:
@@ -103,15 +174,20 @@ class KellyStrategy(SizingStrategy):
         if abs(edge) < self.min_edge:
             return (current_yes, current_no)
 
+        shrink = _clamp01(freshness_factor)
+        if confidence is not None:
+            shrink *= _clamp01(confidence)
+        shrink = min(1.0, shrink)
+
         if edge > 0:
             full_kelly = edge / (1 - market_price)
-            bet_value = full_kelly * self.kelly_fraction * portfolio_value
+            bet_value = full_kelly * self.kelly_fraction * shrink * portfolio_value
             bet_value = min(bet_value, self.max_position_frac * portfolio_value)
             target_yes = int(bet_value / market_price)
             return (max(target_yes, 0), 0)
         else:
             full_kelly = abs(edge) / market_price
-            bet_value = full_kelly * self.kelly_fraction * portfolio_value
+            bet_value = full_kelly * self.kelly_fraction * shrink * portfolio_value
             bet_value = min(bet_value, self.max_position_frac * portfolio_value)
             no_price = 1 - market_price
             target_no = int(bet_value / no_price)
@@ -183,7 +259,10 @@ class FlatStrategy(SizingStrategy):
         current_yes: int,
         current_no: int,
         market_id: int | None = None,
+        confidence: float | None = None,
+        freshness_factor: float = 1.0,
     ) -> tuple[int, int]:
+        del confidence, freshness_factor
         # Resolved market → exit everything
         if market_price >= RESOLVED_HIGH or market_price <= RESOLVED_LOW:
             self._forget_entry(market_id)

@@ -119,6 +119,12 @@ class ArenaMetrics:
             ["trader"],
             registry=self.registry,
         )
+        self.analyst_parse_fallbacks = Counter(
+            "sybil_arena_analyst_parse_fallbacks",
+            "Structured analyst response fields that fell back to conservative defaults.",
+            ["trader", "field"],
+            registry=self.registry,
+        )
 
     # -- Hooks (all fail-open) -------------------------------------------- #
 
@@ -179,6 +185,12 @@ class ArenaMetrics:
             self.llm_paused.labels(trader=trader_name).set(1 if paused else 0)
         except Exception:  # pragma: no cover - defensive
             log.debug("set_llm_paused metrics update failed", exc_info=True)
+
+    def record_analyst_parse_fallback(self, trader_name: str, field: str) -> None:
+        try:
+            self.analyst_parse_fallbacks.labels(trader=trader_name, field=field).inc()
+        except Exception:  # pragma: no cover - defensive
+            log.debug("record_analyst_parse_fallback metrics update failed", exc_info=True)
 
 
 def start_metrics_server(

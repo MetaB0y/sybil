@@ -11,8 +11,14 @@ Covers:
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
-from live.analyst import PersonaAnalyst
+from live.analyst import (
+    DEFAULT_COUNTERCASE,
+    DEFAULT_PARSE_CONFIDENCE,
+    PersonaAnalyst,
+    cluster_near_duplicate_articles,
+)
 from live.fair_value_bus import FairValueBus, FairValueUpdate
+from live.metrics import ArenaMetrics
 from live.news_feed import LiveArticle
 from live.trader import LiveLlmTrader
 from sybil_client.types import Block
@@ -41,7 +47,8 @@ def _article():
     )
 
 
-def _make_analyst(bus, market_ids, min_llm_interval_s=1000.0):
+def _make_analyst(bus, market_ids, min_llm_interval_s=1000.0, metrics=None):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     news_feed = MagicMock()
     news_feed.polymarket_prices.get_price.return_value = 0.55
     news_feed.subscribe.return_value.drain = AsyncMock(return_value=[_article()])
@@ -68,10 +75,14 @@ def _make_analyst(bus, market_ids, min_llm_interval_s=1000.0):
         markets_info=markets_info,
         min_llm_interval_s=min_llm_interval_s,
         name="Test (Analyst)",
+        metrics=metrics,
+        now_fn=lambda: now,
+        monotonic_fn=lambda: 1000.0,
     )
 
 
 def _make_sizer(bus, name, market_ids=(7,)):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     news_feed = MagicMock()
     news_feed.polymarket_prices.get_price.return_value = 0.55
     markets_info = {}
@@ -89,6 +100,8 @@ def _make_sizer(bus, name, market_ids=(7,)):
         markets_info=markets_info,
         name=name,
         fair_value_bus=bus,
+        now_fn=lambda: now,
+        monotonic_fn=lambda: 1000.0,
     )
     sizer.balance_history = [500.0]
     sizer._observed_first_block = True
@@ -101,19 +114,86 @@ def test_parse_fair_value_tolerates_trailing_dot():
     analyst = _make_analyst(FairValueBus(), [7])
     parsed = analyst._parse_fair_value(
         "FAIR_VALUE: 0.85.\n"
+        "COUNTERCASE: The source could be overstating the event.\n"
+        "CONFIDENCE: 0.70\n"
         "MOTIVATION: Strong new evidence.\n"
         "ANALYSIS: The article directly updates the market."
     )
-    assert parsed == (
-        0.85,
-        "Strong new evidence.",
-        "The article directly updates the market.",
-    )
+    assert parsed is not None
+    assert parsed.fair_value == 0.85
+    assert parsed.motivation == "Strong new evidence."
+    assert parsed.analysis == "The article directly updates the market."
+    assert parsed.countercase == "The source could be overstating the event."
+    assert parsed.confidence == 0.70
 
 
 def test_parse_fair_value_invalid_number_returns_none():
     analyst = _make_analyst(FairValueBus(), [7])
     assert analyst._parse_fair_value("FAIR_VALUE: 0.8.5\nMOTIVATION: bad") is None
+
+
+def test_parse_fair_value_fallbacks_are_conservative_and_counted():
+    metrics = ArenaMetrics()
+    analyst = _make_analyst(FairValueBus(), [7], metrics=metrics)
+
+    parsed = analyst._parse_fair_value(
+        "FAIR_VALUE: 0.61\n"
+        "CONFIDENCE: very sure\n"
+        "MOTIVATION: m\n"
+        "ANALYSIS: a"
+    )
+
+    assert parsed is not None
+    assert parsed.confidence == DEFAULT_PARSE_CONFIDENCE
+    assert parsed.countercase == DEFAULT_COUNTERCASE
+    assert analyst.parse_fallback_counts == {
+        "countercase_missing": 1,
+        "confidence_garbled": 1,
+    }
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_analyst_parse_fallbacks_total",
+        {"trader": "Test (Analyst)", "field": "countercase_missing"},
+    ) == 1
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_analyst_parse_fallbacks_total",
+        {"trader": "Test (Analyst)", "field": "confidence_garbled"},
+    ) == 1
+
+
+def test_cluster_near_duplicate_articles_keeps_one_representative_per_cluster():
+    first = _article()
+    duplicate = LiveArticle(
+        url="http://x/b",
+        title="Something happened in the same event",
+        source="src2",
+        published=datetime(2026, 1, 1, 1, tzinfo=timezone.utc),
+        full_text="Body text. Body text. Additional details.",
+    )
+    distinct = LiveArticle(
+        url="http://x/c",
+        title="Unrelated market update",
+        source="src3",
+        published=datetime(2026, 1, 1, 2, tzinfo=timezone.utc),
+        full_text="A separate topic with different evidence.",
+    )
+
+    clusters = cluster_near_duplicate_articles([first, duplicate, distinct], 0.25)
+
+    assert len(clusters) == 2
+    assert sorted(len(cluster.articles) for cluster in clusters) == [1, 2]
+    assert any(cluster.representative is duplicate for cluster in clusters)
+
+
+def test_prompt_includes_full_resolution_criteria():
+    analyst = _make_analyst(FairValueBus(), [7])
+    market = analyst.markets_info[7]
+    market.description = "Short description."
+    market.resolution_criteria = "R" * 350
+
+    prompt = analyst._build_prompt([_article()], market, _block())
+
+    assert f"Resolution: {market.resolution_criteria}" in prompt
+    assert f"Resolution: {market.resolution_criteria[:200]}" in prompt
 
 
 # -- AR-6: per-call LLM budget enforced on the analyst -------------------- #

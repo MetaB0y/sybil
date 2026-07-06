@@ -5,14 +5,14 @@ persona bus and rebalances mechanically. The analysis-LLM tests moved to
 test_analyst.py; the sizer/bus integration tests live in test_analyst.py too.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from live.trader import LiveLlmTrader, _order_to_log_dict
-from sybil_client import BuyYes
+from sybil_client import BuyYes, SellYes
 
 
-def _make_trader(db=None):
+def _make_trader(db=None, **kwargs):
     news_feed = MagicMock()
     news_feed.polymarket_prices.get_price.return_value = 0.55
     market = MagicMock()
@@ -27,6 +27,7 @@ def _make_trader(db=None):
         markets_info={7: market},
         db=db,
         name="Test Trader",
+        **kwargs,
     )
 
 
@@ -153,3 +154,30 @@ def test_db_persists_and_reattaches_bot_account(tmp_path):
         assert db.get_bot_account_id("news_trader", "Kelly") == 201
     finally:
         db.close()
+
+
+def test_hard_expired_fv_exits_existing_position_and_logs_context():
+    now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+    trader = _make_trader(
+        fair_value_ttl_s=10.0,
+        fair_value_half_life_s=20.0,
+        fair_value_hard_expiry_s=100.0,
+        now_fn=lambda: now,
+        monotonic_fn=lambda: 1000.0,
+    )
+    trader.balance_history = [500.0]
+    trader.positions = {(7, "YES"): 10}
+    trader.fair_values[7] = 0.80
+    trader.fair_value_timestamps[7] = now - timedelta(seconds=100)
+    trader.fair_value_confidences[7] = 0.9
+
+    orders = trader._rebalance_all(_price_block(), now)
+
+    assert len(orders) == 1
+    assert isinstance(orders[0], SellYes)
+    assert orders[0].quantity == 10
+    context = trader._latest_rebalance_context[7]
+    assert context.raw_fair_value == 0.80
+    assert context.effective_fair_value is None
+    assert context.age_s == 100
+    assert context.confidence == 0.9
