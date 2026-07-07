@@ -175,6 +175,7 @@ impl MarketLifecycle {
                 sybil_oracle::evaluate_immediate(
                     feed_id,
                     signer_feed,
+                    market_id,
                     signed,
                     &current_status,
                     timestamp_ms,

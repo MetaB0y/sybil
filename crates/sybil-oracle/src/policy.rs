@@ -33,11 +33,13 @@ pub enum PolicyOutcome {
 ///
 /// The caller is responsible for verifying the signature against `feed`'s
 /// pubkey before calling this — by the time we land here, identity is already
-/// proven. The policy's job is purely to construct the `ResolutionRecord`
-/// and apply the state-machine checks (payout range, not-already-resolved).
+/// proven. `market_id` is the market actually being resolved; the policy's job
+/// is to bind the attestation to it, construct the `ResolutionRecord`, and
+/// apply the state-machine checks (payout range, not-already-resolved).
 pub fn evaluate_immediate(
     policy_feed_id: FeedId,
     feed: &DataFeed,
+    market_id: MarketId,
     signed: &SignedAttestation,
     current_status: &MarketStatus,
     timestamp_ms: u64,
@@ -50,6 +52,16 @@ pub fn evaluate_immediate(
     }
 
     let att = &signed.attestation;
+
+    // Bind the signed attestation to the market being resolved. Without this,
+    // an otherwise-valid signature for one market could settle another — the
+    // caller's target `market_id` must match what the signer attested to.
+    if att.market_id != market_id {
+        return Err(OracleError::InvalidAttestation(format!(
+            "attestation targets market {:?}, but resolving market {:?}",
+            att.market_id, market_id
+        )));
+    }
 
     if att.payout_nanos.0 > NANOS_PER_DOLLAR {
         return Err(OracleError::InvalidPayout(att.payout_nanos.0));
@@ -133,8 +145,15 @@ mod tests {
     fn immediate_happy_path_yields_settle() {
         let feed = sample_feed(7);
         let signed = sample_signed(MarketId::new(5), Nanos(NANOS_PER_DOLLAR));
-        let outcome =
-            evaluate_immediate(FeedId(7), &feed, &signed, &MarketStatus::Active, 1_000).unwrap();
+        let outcome = evaluate_immediate(
+            FeedId(7),
+            &feed,
+            MarketId::new(5),
+            &signed,
+            &MarketStatus::Active,
+            1_000,
+        )
+        .unwrap();
         match outcome {
             PolicyOutcome::Settle { record } => {
                 assert_eq!(record.market_id, MarketId::new(5));
@@ -150,8 +169,34 @@ mod tests {
     fn immediate_rejects_wrong_feed() {
         let feed = sample_feed(7);
         let signed = sample_signed(MarketId::new(5), Nanos(NANOS_PER_DOLLAR));
-        let err = evaluate_immediate(FeedId(8), &feed, &signed, &MarketStatus::Active, 1_000)
-            .unwrap_err();
+        let err = evaluate_immediate(
+            FeedId(8),
+            &feed,
+            MarketId::new(5),
+            &signed,
+            &MarketStatus::Active,
+            1_000,
+        )
+        .unwrap_err();
+        assert!(matches!(err, OracleError::InvalidAttestation(_)));
+    }
+
+    #[test]
+    fn immediate_rejects_market_id_mismatch() {
+        // Valid signer and feed, but the attestation was signed for market 5
+        // while the caller is resolving market 6. This must be rejected so a
+        // valid signature can never settle a market it did not authorize.
+        let feed = sample_feed(7);
+        let signed = sample_signed(MarketId::new(5), Nanos(NANOS_PER_DOLLAR));
+        let err = evaluate_immediate(
+            FeedId(7),
+            &feed,
+            MarketId::new(6),
+            &signed,
+            &MarketStatus::Active,
+            1_000,
+        )
+        .unwrap_err();
         assert!(matches!(err, OracleError::InvalidAttestation(_)));
     }
 
@@ -159,8 +204,15 @@ mod tests {
     fn immediate_rejects_invalid_payout() {
         let feed = sample_feed(7);
         let signed = sample_signed(MarketId::new(5), Nanos(NANOS_PER_DOLLAR + 1));
-        let err = evaluate_immediate(FeedId(7), &feed, &signed, &MarketStatus::Active, 1_000)
-            .unwrap_err();
+        let err = evaluate_immediate(
+            FeedId(7),
+            &feed,
+            MarketId::new(5),
+            &signed,
+            &MarketStatus::Active,
+            1_000,
+        )
+        .unwrap_err();
         assert!(matches!(err, OracleError::InvalidPayout(_)));
     }
 
@@ -179,6 +231,7 @@ mod tests {
         let err = evaluate_immediate(
             FeedId(7),
             &feed,
+            MarketId::new(5),
             &signed,
             &MarketStatus::Resolved { record },
             1_000,
