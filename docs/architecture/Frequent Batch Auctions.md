@@ -5,11 +5,11 @@ status: current
 last_verified: 2026-03-15
 ---
 
-A Frequent Batch Auction (FBA) collects all incoming orders over a short time window — typically one second — and then matches them simultaneously at uniform clearing prices. Every participant in the batch gets the same deal. This stands in contrast to continuous limit order books, where the first order to arrive gets priority, creating an arms race for speed that benefits high-frequency traders at the expense of everyone else.
+A Frequent Batch Auction (FBA) collects all incoming orders over a short time window — a second or several — and then matches them simultaneously at uniform clearing prices. Every participant in the batch gets the same deal. This stands in contrast to continuous limit order books, where the first order to arrive gets priority, creating an arms race for speed that benefits high-frequency traders at the expense of everyone else.
 
 The intellectual foundation comes from Budish, Cramton, and Shim (2015), who proposed FBAs for equity markets as a solution to the HFT arms race. In prediction markets, FBAs are even more natural: the information environment changes discretely (news events, data releases), so there's no fundamental reason to match continuously. Batching also makes the clearing problem well-defined — you have a fixed set of orders and can solve for the welfare-maximizing allocation.
 
-Sybil runs 1-second batches. Orders accumulate in a [[Mempool]], then at each tick the sequencer drains the mempool, merges in any [[Pending Orders and TTL|pending orders]] from prior batches, assembles a [[The LP Core|Problem]], runs a solver, settles fills, and seals a block. The entire [[Block Lifecycle]] completes within the batch interval. Because all orders in a batch see the same clearing price, there is no advantage to submitting a millisecond earlier — only the price you're willing to pay matters.
+The batch cadence is a single configurable knob — `SYBIL_BLOCK_INTERVAL_MS` (default 500ms; production deployments run 10s). At each tick the sequencer drains the [[Mempool]], merges in any [[Pending Orders and TTL|pending orders]] from prior batches, assembles a [[The LP Core|Problem]], runs a solver, settles fills, and seals a block. The entire [[Block Lifecycle]] completes within the batch interval. Because all orders in a batch see the same clearing price, there is no advantage to submitting a millisecond earlier — only the price you're willing to pay matters.
 
 ```mermaid
 flowchart LR
@@ -27,7 +27,7 @@ flowchart LR
         SETTLE2["Settle + seal"]
         ACC2 --> SOLVE2 --> SETTLE2
     end
-    SETTLE1 -->|"1 second"| ACC2
+    SETTLE1 -->|"one block interval"| ACC2
 ```
 
 ## Key Properties
@@ -37,7 +37,8 @@ flowchart LR
 - Natural fit for prediction markets where information arrives discretely
 
 ## Where This Lives
-> `crates/matching-sequencer/src/actor.rs` — 1-second timer triggers batch production via `BlockSequencer::produce_block()`
+> `crates/matching-sequencer/src/actor.rs` — the block-interval timer triggers batch production via `BlockSequencer::produce_block()`
+> `crates/sybil-api/src/config.rs` — `SYBIL_BLOCK_INTERVAL_MS` (default 500ms); `docker-compose.yml` sets 10s in production
 
 ## See Also
 - [[Block Lifecycle]] — the full flow from order submission to sealed block

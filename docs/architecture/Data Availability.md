@@ -67,6 +67,22 @@ This makes the public root record provider-neutral. A future publisher can add
 provider references without changing the state root, witness root, or payload
 root semantics.
 
+The commitment is a **binding chain**: the on-chain `daCommitment` reduces, hash
+by hash, to the exact witness bytes and provider references the operator claims
+to have published. The guest recomputes the whole chain and rejects any mismatch,
+so L1 stores one `bytes32` that pins *which* payload — without judging whether it
+is actually retrievable.
+
+```mermaid
+flowchart LR
+    WIT["canonical BlockWitness bytes<br/>sybil-canonical-witness-v3"] --> PR["payload_root<br/>BLAKE3(domain · len · bytes)"]
+    REFS["provider refs<br/>file · blob · archive"] --> PRH["provider_refs_hash"]
+    PR --> DAC["da_commitment<br/>BLAKE3(height · state_root · witness_root<br/>· payload_root · len · provider_refs_hash)"]
+    PRH --> DAC
+    DAC --> PIH["OpenVM public-input hash<br/>guest recomputes + rejects on mismatch"]
+    PIH --> L1["L1 RootRecord.daCommitment<br/>stores value; does not judge availability"]
+```
+
 ## Provider References
 
 Provider references are private guest input bytes. The proof hashes them into

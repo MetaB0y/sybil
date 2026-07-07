@@ -11,6 +11,8 @@ last_verified: 2026-05-02
 Normative spec for `BlockHeader.state_root`: what it commits to, how typed
 state bytes are produced, and how proofs are expected to work.
 
+**The idea in plain words:** `state_root` is a single hash over *all* active trading state — every account, reservation, resting order, market, group, and withdrawal — encoded as canonical byte leaves and folded into one ordered qMDB root. Because the header commits to that root, anyone can prove a fact about any single leaf ("account 42 has balance B", "order 99 is absent") against the header alone, without trusting the operator or replaying the block.
+
 [[State Root and Parent Hash]] is the concept introduction. This note is the
 byte-level commitment contract.
 
@@ -52,6 +54,24 @@ bridge withdrawals, markets, groups, resting orders, and reservations. This is
 what lets a verifier check order presence/absence, market tradeability, and
 withdrawal claims from the header commitment rather than trusting witness-only
 context.
+
+```mermaid
+flowchart LR
+    subgraph leaves["Typed state leaves — canonical bytes"]
+        direction TB
+        A["acct/{id}"]
+        R["acct_resv/{id}"]
+        O["order/{id}"]
+        M["market/{id}"]
+        G["market_group/{id}"]
+        W["withdrawal/{id}"]
+        S["sys/* — deposit cursor · deposit root · next withdrawal id"]
+    end
+    leaves -->|"insert in bytewise key order"| QMDB["ordered current qMDB<br/>SHA-256"]
+    QMDB --> ROOT["state_root"]
+    ROOT --> HDR["BlockHeader.state_root"]
+    HDR -.->|"GET /v1/proofs/state/{key_hex}<br/>inclusion / exclusion"| VER["external verifier<br/>proves any leaf against the header"]
+```
 
 ## Leaf Encoding
 

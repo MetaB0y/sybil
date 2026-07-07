@@ -9,6 +9,8 @@ last_verified: 2026-07-01
 
 Sybil persists exchange state to survive crashes without losing accounts, markets, or positions.
 
+**The idea in plain words:** two databases, but only *one* of them decides what is real. `qmdb` holds the big authenticated state; `redb` holds a single **commit fence** that names which `qmdb` snapshot is committed. Everything hinges on flipping that fence last — a crash before the flip leaves the old state authoritative, a crash after leaves the new one. No cross-database transaction, no journal, no ambiguity about "latest."
+
 ## Philosophy
 
 **Block-boundary snapshots, not event sourcing.** Each block is the transactional unit. After a block is prepared and accepted for commit, we persist the committed state and resume from that point on restart. Anything in-flight at crash time (mempool contents, current solve, transient actor state) is discarded and rebuilt by normal client behavior.
@@ -30,6 +32,25 @@ This is intentionally not "one transaction across two databases". There is no jo
 3. Recover strictly from the fence recorded in redb.
 
 Anything written to qmdb without a corresponding redb fence flip is treated as uncommitted and ignored.
+
+```mermaid
+flowchart TB
+    subgraph commit["Block commit — strict order"]
+        direction TB
+        S1["1 · Write account snapshot +<br/>typed-state tree into the INACTIVE qmdb slot"]
+        S2["2 · Commit redb txn:<br/>store block metadata + flip fence → that slot"]
+        S1 --> S2
+    end
+    S2 --> FENCE{{"redb fence<br/>the ONE commit point"}}
+    subgraph slots["qmdb A / B slots"]
+        direction LR
+        A["slot A"]
+        B["slot B"]
+    end
+    FENCE -->|"names the committed slot"| slots
+    FENCE -.->|"recovery reads ONLY the fenced slot,<br/>never scans for 'newest'"| RESTORE["restore()<br/>rebuild in-memory state"]
+    ORPHAN["qmdb slot written but fence not flipped"] -.->|"uncommitted → ignored"| X(("discarded"))
+```
 
 ### Why This Split Makes Sense Today
 

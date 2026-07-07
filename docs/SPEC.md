@@ -421,4 +421,4 @@ The things that must always hold, and who enforces them:
 
 Documentation that currently disagrees with the code — kept here so readers aren't misled; fixes proposed in `design/architecture-review-2026-07.md`:
 
-- Vault/AGENTS "five solvers" vs six in code; violation count "37" vs "38".
+- AGENTS.md files may still say "five solvers" — code has six (`lp`, `eg`, `iterative_lp`, `decomposed`, `conic`, `milp`); the vault is now consistent. Verification: four core layers plus a sidecar-transition pass; the authoritative failure list is `ViolationKind` in `crates/sybil-verifier/src/violations.rs` (avoid hardcoded totals).

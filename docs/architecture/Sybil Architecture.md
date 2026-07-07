@@ -5,7 +5,7 @@ status: current
 last_verified: 2026-06-30
 ---
 
-Sybil is a prediction market matching engine built on Frequent Batch Auctions. Traders place orders on binary-outcome markets — "Will X happen? YES or NO" — and every second, all pending orders are batched together and cleared simultaneously by a welfare-maximizing solver. This is fundamentally different from continuous limit order books: instead of a race to be first, every participant in a batch gets the same price. The architecture is designed from the ground up for verifiability, with a ZK proof pipeline that can attest to the correctness of every batch on-chain.
+Sybil is a prediction market matching engine built on Frequent Batch Auctions. Traders place orders on binary-outcome markets — "Will X happen? YES or NO" — and on each block interval all pending orders are batched together and cleared simultaneously by a welfare-maximizing solver. This is fundamentally different from continuous limit order books: instead of a race to be first, every participant in a batch gets the same price. The architecture is designed from the ground up for verifiability, with a ZK proof pipeline that can attest to the correctness of every batch on-chain.
 
 The system is organized into three layers. The **core exchange** handles order collection, batch solving, settlement, and block production. It's built in Rust with all-integer arithmetic (no floating point) to ensure deterministic, ZK-friendly computation. The **AI arena** is a Python layer where trading bots compete against each other, connected via the HTTP API. The first-party realtime transport is the WebSocket block stream with `?from_block=` resume; SSE remains a third-party convenience stream. The **ZK layer** verifies blocks across four independent checks and is designed to compile into SNARK circuits for on-chain proof posting.
 
@@ -55,7 +55,7 @@ graph TB
 The matching problem itself has an elegant mathematical structure: without market maker budget constraints, it's a simple linear program solvable in milliseconds. The sole source of NP-hardness is the bilinear coupling between clearing prices (dual variables) and fill quantities (primal variables) in MM budget constraints — but since there are only 2-10 market makers, this is tractable via specialized decomposition methods.
 
 ## Core Concepts
-- [[Frequent Batch Auctions]] — simultaneous clearing every second, no speed advantage
+- [[Frequent Batch Auctions]] — simultaneous clearing once per block interval, no speed advantage
 - [[Payoff Vectors]] — unified order representation as vectors over world states
 - [[Welfare Maximization]] — maximizing total consumer surplus, not volume
 - [[Nanos and Integer Arithmetic]] — the numeric foundation
@@ -70,12 +70,13 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Welfare vs Volume]] — why we maximize welfare, not trades
 
 ## Solvers
-- [[Solver Landscape]] — overview of all five solvers
+- [[Solver Landscape]] — overview of all six solvers
 - [[LP Solver]] — production default (HiGHS)
 - [[EG Solver]] — Fisher market formulation
 - [[Conic Solver]] — interior-point via Clarabel
 - [[MILP Solver]] — exact optimal via SCIP
 - [[Decomposed Solver]] — parallel per-group solving
+- Iterative LP Solver (`IterLpSolver`) — EG μ-boosted fixed-point LP; conic-level welfare at LP robustness (see [[Solver Landscape]])
 
 ## Block Production and Verification
 - [[Block Lifecycle]] — from order submission to sealed block
@@ -88,7 +89,7 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Testing Strategy]] — layered fixtures, restart tests, and property tests
 - [[State Root and Parent Hash]] — cryptographic chaining
 - [[Block Witness]] — the ZK audit trail
-- [[Four-Layer Verification]] — 37 independent correctness checks across 4 layers
+- [[Four-Layer Verification]] — four independent verification layers (plus a sidecar-transition pass)
 - [[Proof Architecture]] — authenticated data for arbitrary account-level proofs
 - [[ZK Integration Path]] — the road to on-chain proofs
 - [[Data Availability]] — provider-neutral validium payload commitments

@@ -3,10 +3,10 @@ tags: [zk]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-04-30
+last_verified: 2026-07-07
 ---
 
-The verifier validates every aspect of a block across four independent layers, each checking a different class of invariant. The input is a [[Block Witness]] — a self-contained audit trail — and the output is a `VerificationResult` with a pass/fail verdict and a list of specific violations. There are 38 distinct violation types across the four layers.
+The verifier validates every aspect of a block across four independent layers, each checking a different class of invariant. The input is a [[Block Witness]] — a self-contained audit trail — and the output is a `VerificationResult` with a pass/fail verdict and a list of specific violations. A fifth pass, **sidecar transition verification**, checks derivable non-account facts (reservations, resting orders, withdrawals, deposit cursor, market status/groups) and is merged into `verify_full` alongside the four core layers. Every failure mode is a variant of the `ViolationKind` enum — the single source of truth for what can go wrong; consult `crates/sybil-verifier/src/violations.rs` for the current enumeration rather than a hardcoded count here.
 
 **Layer 1: Match Verification** checks that the solver's output is economically valid. Per-fill checks confirm that each filled order exists, the fill quantity doesn't exceed the order's maximum, and the fill price respects the order's limit. System-wide checks enforce the Uniform Clearing Price (UCP), price complementarity (YES + NO = $1 for binary markets), [[Binary Markets and Market Groups|market group]] price constraints (YES prices sum to at most $1), [[MM Budget Constraint|MM budget]] compliance, and welfare consistency (reported welfare matches recomputed welfare).
 
@@ -27,8 +27,8 @@ graph TB
 ```
 
 ## Key Properties
-- 4 independent layers: Match → Settlement → Block Integrity → Order Validation
-- 38 distinct violation types across all layers
+- 4 independent layers: Match → Settlement → Block Integrity → Order Validation, plus a sidecar-transition pass
+- Every failure is a `ViolationKind` variant (see `crates/sybil-verifier/src/violations.rs`) — no hardcoded total lives in prose
 - Input: [[Block Witness]] (self-contained audit trail)
 - Strict mode (for ZK): zero tolerance, no zero fills allowed
 - Lenient mode (default): 1000-nano welfare tolerance, zero fills allowed
@@ -40,6 +40,8 @@ graph TB
 > `crates/sybil-verifier/src/block.rs` — Layer 3 header checks
 > `crates/sybil-verifier/src/event_commitment.rs` — Layer 3 events-root commitment
 > `crates/sybil-verifier/src/orders.rs` — Layer 4
+> `crates/sybil-verifier/src/sidecar.rs` — sidecar transition pass
+> `crates/sybil-verifier/src/violations.rs` — `ViolationKind`, the canonical list of failure modes
 
 ## See Also
 - [[Block Witness]] — the input to verification

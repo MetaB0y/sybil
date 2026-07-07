@@ -17,6 +17,21 @@ The sequencer's job: produce blocks, authenticate every piece of data in them, c
 
 Analogy: we build the database with authenticated indexes. We don't pre-define the queries.
 
+```mermaid
+flowchart TB
+    subgraph header["Block Header — root of trust"]
+        direction LR
+        SR["state_root"]
+        ER["events_root"]
+        PH["parent_hash"]
+    end
+    SR --> ST["State tree<br/>balances · positions · orders · markets<br/>inclusion / exclusion proofs"]
+    ER --> EV["Events log<br/>fills · deposits · resolutions<br/>range proofs"]
+    PH --> CH["Block chain<br/>ordering · no insert/remove"]
+    ST & EV & CH --> PROVER["External prover<br/>ZK circuit · agent · script"]
+    PROVER --> CLAIM["Arbitrary claim<br/>'PnL &gt; $500 across blocks 1000–2000'"]
+```
+
 ## Trust Anchors
 
 The **block header** is the root of trust. If a verifier trusts a block header (via the on-chain state root chain or a validity proof), they transitively trust anything provable from its commitments.

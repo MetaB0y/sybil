@@ -11,13 +11,13 @@
 
 Block production is single-threaded: the sequencer runs the matching solver once
 per block and must finish inside the block interval (`SYBIL_BLOCK_INTERVAL_MS` —
-500ms in prod, 10000ms in the dev compose) or blocks slip.
+default 500ms; the prod/dev compose set 10000ms) or blocks slip.
 
 - **SLA:** p99 solve latency `< 100ms`, sustained (5m window).
 - **Warning** — `BlockProductionP99LatencyHigh`: p99 > 100ms for 5m. The tail is
   eating into the block budget; still producing, but headroom is shrinking.
 - **Critical** — `BlockProductionP99LatencyCritical`: p99 > 250ms for 5m. Solve
-  now consumes half the 500ms prod block budget; cadence and the redb commit
+  now eats a large share of the solve budget; cadence and the redb commit
   backlog are at risk.
 - **Critical / top signal** — `BlockProductionStalled`: no blocks produced for 2m
   while the API is up. Production has fully stopped — page immediately.

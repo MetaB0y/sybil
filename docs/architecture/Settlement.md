@@ -22,6 +22,18 @@ event-root leaf.
 
 Market resolution is also handled through settlement. When a market resolves via the [[Oracle Lifecycle|oracle]] (see [[Market Resolution]]), YES shares pay out `yes_payout_nanos` per share and NO shares pay out `NANOS_PER_DOLLAR - yes_payout_nanos`. Fractional resolution is supported — a market can resolve 70/30 instead of binary 100/0 — which allows for nuanced outcomes. Resolution is irreversible: once settled, positions are converted to balance and the market is marked as resolved. Resolutions are also emitted as `system_events` in the next block so the witness explains why pre-state changed between blocks. The [[Four-Layer Verification|settlement verification layer]] independently re-derives the post-state from pre-state plus fills to confirm correctness.
 
+```mermaid
+flowchart TB
+    FILLS["Fills + clearing prices<br/>(solver output)"] --> ROUTE{"order shape?"}
+    ROUTE -->|"single-market binary"| SIMPLE["Simple path<br/>debit price·qty / SHARE_SCALE<br/>credit qty to position"]
+    ROUTE -->|"bundle / spread"| GENERIC["Generic path<br/>payoff-vector marginals<br/>per-state cost decomposition"]
+    SIMPLE --> ACCT["Mutate account<br/>balance + positions<br/>update events_digest"]
+    GENERIC --> ACCT
+    ACCT --> MINT["Derive MINT adjustments<br/>complete-set create / burn<br/>→ AccountId::MINT"]
+    RESOLVE["Market resolution<br/>YES → payout_nanos<br/>NO → NANOS_PER_DOLLAR − payout_nanos"] --> ACCT
+    MINT --> VERIFY["Layer 2 verifier<br/>re-derives post-state<br/>from pre-state + fills"]
+```
+
 ## Key Properties
 - i128/u128 intermediates for overflow-safe `price * qty / SHARE_SCALE` calculations
 - Simple path: single-market binary orders (most common)
