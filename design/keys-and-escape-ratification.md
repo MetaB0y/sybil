@@ -82,9 +82,12 @@ so the two docs stay consistent.
   discipline (key-op + escape canonical bytes both lead with `genesis_hash[32]`).
 - **In-guest P-256** via OpenVM's **accelerated ECC extension** (secp256**r1**/P-256),
   not soft `p256`. **Moves `app_vm_commit`** — first VM-commit move since
-  `0x0026ab66`. (Feasibility/wiring under active investigation — see the OpenVM
-  ECC note; if OpenVM turns out not to support P-256, D0 and the whole ECC plan
-  reopen, so this is the gating technical unknown.)
+  `0x0026ab66`. **Feasibility CONFIRMED** (2026-07-07): OpenVM v2.0.0-beta.2 — the
+  tag we already pin — ships P-256 as a first-class accelerated curve with a
+  drop-in `p256` guest crate and a copy-paste ECDSA example. Concrete `openvm.toml`
+  + guest-macro + `verify_prehash` recipe in
+  [`openvm-p256-integration.md`](../design/openvm-p256-integration.md). The gating
+  unknown is now closed.
 - **Rollout**: fresh genesis (pre-redeploy). Recreate genesis with full active
   key-sets; every funded account initialized with ≥1 key; repin guest.
 
