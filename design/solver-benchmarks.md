@@ -107,6 +107,11 @@ verified directly: welfare stays flat while sweeping MM budget $0→$1000 on a h
 book. No coordination rule, right or wrong, moves welfare much here; the residual ±1–2 pt
 differences are trim/rounding artifacts.
 
+Reproduce: `cargo run --release -p matching-solver --features conic --example asym_bench -- [ITERS]`
+(env: `SEED`, `MMSCALE` to grow the MM welfare share, `RAW=1` for the plain symmetric book,
+`LP=1` to also run monolithic LP). The `$0→$1000` budget-flatness sweep is the same book with
+the MM budget scaled.
+
 The corrected rule is therefore justified on **fixed-point correctness** (the old
 equal-utility target is a provable welfare *minimizer*;
 `decomposed::tests::test_asymmetric_equal_scarcity_coordination` exercises where the two

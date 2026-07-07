@@ -39,6 +39,10 @@ sybil-verifier = { path = "../sybil-verifier", default-features = false }
 name = "solver_bench"
 harness = false
 
+[[example]]
+name = "asym_bench"
+required-features = ["conic"]
+
 [features]
 default = []
 milp = ["dep:russcip"]  # MIQCQP solver via SCIP
