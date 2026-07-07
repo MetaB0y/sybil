@@ -271,6 +271,16 @@ groups:
           summary: "Typed qMDB root repair failed"
           description: "The sequencer failed to repair the fenced typed-state qMDB root from redb. The API should refuse startup or block commit."
 
+      - alert: PersistenceFailing
+        expr: increase(sybil_persistence_failures[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Block persistence is failing"
+          description: "The sequencer failed to persist at least one prepared block in the last 5m (e.g. a wedged redb). Blocks keep producing in memory while durable state stalls, so a restart would lose the unpersisted tail."
+
       - alert: SybilApiMemoryHigh
         expr: sybil_process_resident_memory_bytes > 650 * 1024 * 1024
         for: 5m
