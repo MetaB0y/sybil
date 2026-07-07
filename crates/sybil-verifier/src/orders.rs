@@ -362,6 +362,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         }];
 
         let witness = make_witness_with_orders(
@@ -391,6 +392,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         };
 
         let witness = make_witness_with_orders(
@@ -422,6 +424,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         };
 
         let valid = make_witness_with_orders(
@@ -471,6 +474,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         }];
 
         let witness = make_witness_with_orders(
@@ -508,6 +512,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         }];
 
         let witness = make_witness_with_orders(
@@ -550,6 +555,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         }];
 
         let witness = make_witness_with_orders(
@@ -579,6 +585,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         }];
 
         let witness = make_witness_with_orders(
@@ -634,6 +641,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![(m0, 0, 5)],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         }];
 
         let witness = make_witness_with_orders(
@@ -667,6 +675,7 @@ mod tests {
             total_deposited: 0,
             positions: vec![],
             events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
         }];
 
         let witness = make_witness_with_orders(
@@ -706,6 +715,7 @@ mod tests {
                 total_deposited: 0,
                 positions: vec![],
                 events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
             }];
             let high_state = vec![AccountSnapshot {
                 id: 0,
@@ -713,6 +723,7 @@ mod tests {
                 total_deposited: 0,
                 positions: vec![],
                 events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
             }];
 
             let low_result = verify_orders(&make_witness_with_orders(
@@ -747,6 +758,7 @@ mod tests {
                 total_deposited: 0,
                 positions: vec![(m0, 0, position)],
                 events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
             }];
             let high_state = vec![AccountSnapshot {
                 id: 0,
@@ -754,6 +766,7 @@ mod tests {
                 total_deposited: 0,
                 positions: vec![(m0, 0, position + extra_position + 1)],
                 events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
             }];
 
             let low_result = verify_orders(&make_witness_with_orders(
@@ -792,6 +805,7 @@ mod tests {
                 total_deposited: 0,
                 positions: vec![],
                 events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
             }];
 
             let combined_result = verify_orders(&make_witness_with_orders(
@@ -828,6 +842,7 @@ mod tests {
                 total_deposited: 0,
                 positions: vec![(m0, 0, available)],
                 events_digest: [0u8; 32],
+            keys_digest: crate::empty_account_keys_digest(0),
             }];
 
             let result = verify_orders(&make_witness_with_orders(

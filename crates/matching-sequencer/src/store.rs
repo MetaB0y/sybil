@@ -2577,7 +2577,7 @@ impl Store {
             .recover(recovery_metadata.account_state)
             .await?;
         let num_accounts = accounts_map.len();
-        let accounts = AccountStore::restore(accounts_map, recovery_metadata.next_account_id);
+        let mut accounts = AccountStore::restore(accounts_map, recovery_metadata.next_account_id);
 
         // Markets
         let markets = {
@@ -2698,6 +2698,7 @@ impl Store {
             }
             registry
         };
+        crate::digest::refresh_all_account_keys_digests(&mut accounts, &pubkey_registry);
 
         // Clearing prices
         let last_clearing_prices = {
@@ -3605,6 +3606,7 @@ fn account_store_from_witness(accounts: &[AccountSnapshot]) -> Result<AccountSto
             // fresh nonce space (SYB-224).
             last_nonce: 0,
             events_digest: snapshot.events_digest,
+            keys_digest: snapshot.keys_digest,
             profile: Default::default(),
             api_keys: Vec::new(),
             next_api_key_id: 0,

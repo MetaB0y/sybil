@@ -104,6 +104,7 @@ account_bytes =
    || total_deposited:i64
    || positions_bytes
    || events_digest:[u8; 32]
+   || keys_digest:[u8; 32]
 ```
 
 `positions_bytes` is the concatenation of position triples, each:
@@ -120,6 +121,22 @@ Rules:
 
 When a list of accounts is hashed (state root), accounts are sorted ascending
 by `id` and concatenated.
+
+`keys_digest` commits to the active account signing-key set:
+
+```text
+keys_digest =
+  SHA256(
+      "sybil/state/account-keys-digest/v1"
+   || account_id:u64_le
+   || key_count:u64_le
+   || (auth_scheme:u8 || pubkey_sec1[33]) * key_count
+  )
+```
+
+Key records are sorted by `(auth_scheme, pubkey_sec1)`. `auth_scheme` is
+`0 = raw_p256`, `1 = webauthn`. The empty key set is the domain/count hash
+above with `key_count = 0`, not `[0; 32]`.
 
 ### `BlockHeader`
 
@@ -216,6 +233,7 @@ account_leaf_value =
  || position_count:u64_le
  || (market_id:u32_le || outcome:u8 || qty:i64_le) * position_count
  || events_digest:[u8;32]
+ || keys_digest:[u8;32]
 ```
 
 Positions with `qty == 0` MUST be omitted. Remaining positions are sorted by
@@ -446,6 +464,7 @@ account:
   total_deposited  = 100
   positions        = []
   events_digest    = [0; 32]
+  keys_digest      = SHA256("sybil/state/account-keys-digest/v1" || 1u64_le || 0u64_le)
 
 key:
   acct/00 00 00 00 00 00 00 01
@@ -460,6 +479,10 @@ value (hex):
   00 00 00 00 00 00 00 00    # events_digest[8..16]
   00 00 00 00 00 00 00 00    # events_digest[16..24]
   00 00 00 00 00 00 00 00    # events_digest[24..32]
+  37 31 d8 ad b5 73 c8 4b    # keys_digest[0..8]
+  20 44 4c 02 03 b7 29 8d    # keys_digest[8..16]
+  14 8e 07 ce 90 30 77 bd    # keys_digest[16..24]
+  b3 6b 59 5d 3e f3 93 99    # keys_digest[24..32]
 ```
 
 ### Vector 2: fill event digest

@@ -1,10 +1,55 @@
 use matching_engine::{MarketId, MintAdjustment, Nanos, OrderDirection, Qty};
+use std::collections::HashMap;
+
+use crate::account::{AccountId, AccountStore};
+use crate::crypto::{PublicKey, RegisteredPubkey};
 
 pub fn update_digest(current: &[u8; 32], event_bytes: &[u8]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(current);
     hasher.update(event_bytes);
     *hasher.finalize().as_bytes()
+}
+
+pub fn account_keys_digest(
+    account_id: AccountId,
+    pubkey_registry: &HashMap<PublicKey, RegisteredPubkey>,
+) -> [u8; 32] {
+    let keys = pubkey_registry
+        .iter()
+        .filter(|(_, registered)| registered.account_id == account_id)
+        .map(|(pubkey, registered)| {
+            let compressed = pubkey.compressed_bytes();
+            let mut pubkey_sec1 = [0u8; 33];
+            pubkey_sec1.copy_from_slice(&compressed);
+            sybil_verifier::AccountKeyDigestRecord {
+                auth_scheme: registered.auth_scheme.canonical_byte(),
+                pubkey_sec1,
+            }
+        });
+
+    sybil_verifier::account_keys_digest(account_id.0, keys)
+}
+
+pub fn refresh_account_keys_digest(
+    accounts: &mut AccountStore,
+    account_id: AccountId,
+    pubkey_registry: &HashMap<PublicKey, RegisteredPubkey>,
+) {
+    let keys_digest = account_keys_digest(account_id, pubkey_registry);
+    if let Some(account) = accounts.get_mut(account_id) {
+        account.keys_digest = keys_digest;
+    }
+}
+
+pub fn refresh_all_account_keys_digests(
+    accounts: &mut AccountStore,
+    pubkey_registry: &HashMap<PublicKey, RegisteredPubkey>,
+) {
+    let account_ids: Vec<AccountId> = accounts.iter().map(|(account_id, _)| *account_id).collect();
+    for account_id in account_ids {
+        refresh_account_keys_digest(accounts, account_id, pubkey_registry);
+    }
 }
 
 pub fn encode_fill_event(

@@ -11,8 +11,8 @@ mod conformance {
     use proptest::prelude::*;
     use proptest::test_runner::{Config as ProptestConfig, RngSeed, TestCaseError, TestRunner};
     use sybil_verifier::{
-        verify_match, verify_orders, verify_settlement, AccountSnapshot, BlockWitness,
-        StateSidecarSnapshot, WitnessBlockHeader, WitnessOrder,
+        empty_account_keys_digest, verify_match, verify_orders, verify_settlement, AccountSnapshot,
+        BlockWitness, StateSidecarSnapshot, WitnessBlockHeader, WitnessOrder,
     };
 
     const DEFAULT_CASES: u32 = 64;
@@ -721,6 +721,7 @@ mod conformance {
                     })
                     .collect(),
                 events_digest: [0; 32],
+                keys_digest: empty_account_keys_digest(id),
             })
             .collect()
     }

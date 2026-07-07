@@ -31,6 +31,7 @@ impl<'a> SnapshotByteVisitor<'a> {
         append_i64(self.out, account.total_deposited);
         self.append_positions(&account.positions, positions);
         self.out.extend_from_slice(&account.events_digest);
+        self.out.extend_from_slice(&account.keys_digest);
     }
 
     fn append_positions(&mut self, positions: &[(MarketId, u8, i64)], encoding: PositionEncoding) {

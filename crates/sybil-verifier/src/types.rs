@@ -204,6 +204,7 @@ pub struct AccountSnapshot {
     pub positions: Vec<(MarketId, u8, i64)>,
     #[serde(default)]
     pub events_digest: [u8; 32],
+    pub keys_digest: [u8; 32],
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]

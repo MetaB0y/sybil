@@ -8,7 +8,7 @@ last_verified: 2026-07-06
 
 # Block Witness Format
 
-`BlockWitness` v3 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v4 is the canonical private audit package for a Sybil block. The
 sequencer persists it, native verification replays it, and the OpenVM guest
 receives it inside `StateTransitionGuestInput`. The proof binds the witness by
 recomputing `witness_root` from canonical witness bytes and including that root
@@ -22,9 +22,10 @@ convenience data. `DerivedViewSidecar` is explicitly outside
 outside the guest input; it rides beside sealed blocks for API and analytics
 consumers only.
 
-The SYB-216 design that produced this format is ratified in
+The SYB-216 design produced v3, and SYB-225 moved the on-wire format to v4 by
+adding `keys_digest` to account snapshots. The base design is ratified in
 `design/witness-schema-v2.md`. The design name was "v2", but the on-wire format
-version is `3`.
+version is now `4`.
 
 ## Encoding
 
@@ -51,11 +52,11 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v3 it is `0x03`.
+The first byte is the format version. For v4 it is `0x04`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x03
+    version:u8 = 0x04
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
@@ -270,10 +271,10 @@ compute_state_root_with_sidecar(post_state, state_sidecar)
 
 ## Versioning And Compatibility
 
-The version byte is the first byte of `canonical_witness_bytes`. v3 is `0x03`.
+The version byte is the first byte of `canonical_witness_bytes`. v4 is `0x04`.
 Unknown versions must fail closed. This repo does not maintain dual witness
-decoders for devnet schema changes; the ratified SYB-216 design rejects v2/v3
-coexistence because it doubles consensus-critical encoder surface.
+decoders for devnet schema changes; ADR-0011 rejects compatibility wrappers
+before launch because they double validity-critical encoder surface.
 
 Any change to `canonical_witness_bytes`, verifier logic compiled by the guest,
 deposit binding, public-input marshalling, or the guest's path-dependency
@@ -299,11 +300,11 @@ pin.
 
 | Pin | Current value | Test or artifact |
 |---|---:|---|
-| Witness format byte | `3` | `witness_schema::WITNESS_FORMAT_VERSION` |
+| Witness format byte | `4` | `witness_schema::WITNESS_FORMAT_VERSION` |
 | Empty canonical witness length | `1533` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
-| Byte-identity canonical witness length | `3665` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
-| Byte-identity witness SHA-256 length-prefixed digest | `58ee8b130fe44b652bbc5e0839b4b62b083073b27008862f1cc65d021c528f6f` | same byte-identity test |
-| Empty public-input hash | `7f5c4e2b71f3a647ce5311054b4a3d731be05b4d949d9fb6ec0201e37aeea074` | `public_input_hash_golden` |
+| Byte-identity canonical witness length | `3857` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
+| Byte-identity witness SHA-256 length-prefixed digest | `d02f89bc1704e2516c7ac411362800476ee8b3d19fc0027ce9d2f6c58c961076` | same byte-identity test |
+| Empty public-input hash | `40397b1cb111e0d426e59b425acee185a6153fa6eab4bef5ec73248de0bf3f50` | `public_input_hash_golden` |
 | OL-4 Solidity/Rust public-input hash vector | `42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` | Rust test plus `contracts/test/SybilGoldenVectors.t.sol` |
 | Current `app_exe_commit` | `0x007d494ee05284a028069d5eacdeed7c4da134c4838cc6daffcfe5ed0703e0bf` | committed OpenVM `commit.json` and lock |
 | Current `app_vm_commit` | `0x0026ab66d716f85bcf60b89ee1d7ce192253a7452935f2ee0e4b6880b6154e3b` | committed OpenVM `commit.json` and lock |
@@ -320,9 +321,9 @@ Concrete claims above were cross-checked against these source ranges:
 
 | Claim area | Source |
 |---|---|
-| `BlockWitness` field set and v3 `deposit_accumulator`/`pre_state_sidecar` fields | `crates/sybil-verifier/src/types.rs:16-60` |
+| `BlockWitness` field set and v4 `deposit_accumulator`/`pre_state_sidecar` fields | `crates/sybil-verifier/src/types.rs:16-60` |
 | `DepositAccumulatorWitness` field semantics and default depth | `crates/sybil-verifier/src/types.rs:176-194` |
-| Format version byte `3` and first-byte placement | `crates/sybil-verifier/src/witness_schema.rs:16-21` |
+| Format version byte `4` and first-byte placement | `crates/sybil-verifier/src/witness_schema.rs:16-21` |
 | Exact top-level field order | `crates/sybil-verifier/src/witness_schema.rs:18-74` |
 | Header byte order | `crates/sybil-verifier/src/witness_schema.rs:77-85`; `crates/sybil-zk/src/header_hash_impl.rs:1-10` |
 | Clearing-price map encoding | `crates/sybil-verifier/src/witness_schema.rs:87-98` |

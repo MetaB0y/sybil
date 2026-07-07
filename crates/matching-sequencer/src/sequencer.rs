@@ -1504,6 +1504,11 @@ impl BlockSequencer {
         }
         meta.account_id = account_id;
         self.pubkey_registry.insert(pubkey, meta);
+        crate::digest::refresh_account_keys_digest(
+            &mut self.accounts,
+            account_id,
+            &self.pubkey_registry,
+        );
         Ok(())
     }
 
@@ -1537,6 +1542,11 @@ impl BlockSequencer {
             return Err(SequencerError::LastSigningKey);
         }
         self.pubkey_registry.remove(target);
+        crate::digest::refresh_account_keys_digest(
+            &mut self.accounts,
+            account_id,
+            &self.pubkey_registry,
+        );
         Ok(())
     }
 
@@ -3758,6 +3768,14 @@ mod tests {
         )
     }
 
+    fn fresh_public_key() -> crate::crypto::PublicKey {
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        crate::crypto::PublicKey(*signing_key.verifying_key())
+    }
+
     fn q(shares: u64) -> u64 {
         shares_to_qty(shares).0
     }
@@ -5539,6 +5557,44 @@ mod tests {
             seq.accounts.get(untouched_id).unwrap().events_digest,
             [0u8; 32]
         );
+    }
+
+    #[test]
+    fn key_registry_mutations_refresh_account_keys_digest() {
+        let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
+        let empty_digest = sybil_verifier::empty_account_keys_digest(aid.0);
+
+        assert_eq!(seq.accounts.get(aid).unwrap().keys_digest, empty_digest);
+
+        let raw_key = fresh_public_key();
+        seq.register_pubkey_with_scheme(
+            aid,
+            raw_key.clone(),
+            crate::crypto::AccountAuthScheme::RawP256,
+        )
+        .unwrap();
+        let one_key_digest = crate::digest::account_keys_digest(aid, seq.pubkey_registry());
+        assert_eq!(seq.accounts.get(aid).unwrap().keys_digest, one_key_digest);
+        assert_ne!(one_key_digest, empty_digest);
+
+        let webauthn_key = fresh_public_key();
+        seq.register_pubkey_with_scheme(
+            aid,
+            webauthn_key.clone(),
+            crate::crypto::AccountAuthScheme::WebAuthn,
+        )
+        .unwrap();
+        let two_key_digest = crate::digest::account_keys_digest(aid, seq.pubkey_registry());
+        assert_eq!(seq.accounts.get(aid).unwrap().keys_digest, two_key_digest);
+        assert_ne!(two_key_digest, one_key_digest);
+
+        seq.revoke_signing_key(aid, &raw_key).unwrap();
+        let remaining_key_digest = crate::digest::account_keys_digest(aid, seq.pubkey_registry());
+        assert_eq!(
+            seq.accounts.get(aid).unwrap().keys_digest,
+            remaining_key_digest
+        );
+        assert_ne!(remaining_key_digest, two_key_digest);
     }
 
     /// Wiring + accumulation: the live block path feeds each block's

@@ -24,7 +24,7 @@ use crate::types::{
     WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 3;
+pub const WITNESS_FORMAT_VERSION: u8 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -36,7 +36,7 @@ pub enum WitnessDecodeError {
     },
     #[error("trailing bytes after canonical witness at offset {offset}: {trailing} bytes")]
     TrailingBytes { offset: usize, trailing: usize },
-    #[error("unknown witness format version {0}; only v3 is supported")]
+    #[error("unknown witness format version {0}; only v4 is supported")]
     UnknownVersion(u8),
     #[error("invalid tag for {field} at offset {offset}: {tag}")]
     InvalidTag {
@@ -619,6 +619,7 @@ impl<'a> WitnessReader<'a> {
             total_deposited: self.read_i64()?,
             positions: self.read_positions("account.positions")?,
             events_digest: self.read_hash32()?,
+            keys_digest: self.read_hash32()?,
         })
     }
 
@@ -1363,6 +1364,7 @@ mod tests {
             total_deposited: if id == 1001 { 10_000_000 } else { 8_000_000 },
             positions: vec![(MarketId::new(3), 0, 25), (MarketId::new(9), 0, -7)],
             events_digest: [id as u8; 32],
+            keys_digest: crate::empty_account_keys_digest(id),
         }
     }
 

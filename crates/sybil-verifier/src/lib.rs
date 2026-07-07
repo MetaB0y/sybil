@@ -19,6 +19,7 @@
 //! assert!(result.valid, "Violations: {:?}", result.violations);
 //! ```
 
+mod account_keys;
 pub mod arithmetic;
 #[cfg(feature = "qmdb")]
 pub mod block;
@@ -58,6 +59,10 @@ pub mod commitments {
     pub use crate::{event_schema, state_schema, witness_schema};
 }
 
+pub use account_keys::{
+    account_keys_digest, empty_account_keys_digest, AccountKeyDigestRecord,
+    ACCOUNT_KEYS_DIGEST_DOMAIN,
+};
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
     ChallengeSnapshot, DepositAccumulatorWitness, L1DepositWitness, MarketGroupSnapshot,

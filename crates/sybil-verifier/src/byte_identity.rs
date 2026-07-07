@@ -16,6 +16,7 @@ use crate::types::{
     WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 use crate::witness_schema;
+use crate::{account_keys_digest, empty_account_keys_digest, AccountKeyDigestRecord};
 
 #[test]
 fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
@@ -25,7 +26,7 @@ fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     let witness_bytes = witness_schema::canonical_witness_bytes(&witness);
 
     assert_eq!(state_leaves.len(), 11);
-    assert_eq!(witness_bytes.len(), 3665);
+    assert_eq!(witness_bytes.len(), 3857);
     assert_eq!(
         hash_header(&witness.header),
         [
@@ -36,15 +37,58 @@ fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     assert_eq!(
         digest_state_leaves(&state_leaves),
         [
-            3, 221, 2, 210, 252, 116, 56, 205, 62, 46, 2, 37, 205, 136, 95, 193, 118, 78, 134, 62,
-            191, 71, 3, 104, 213, 75, 134, 21, 107, 164, 245, 78,
+            154, 146, 55, 187, 52, 65, 220, 208, 80, 111, 54, 63, 77, 138, 244, 103, 10, 41, 235,
+            108, 210, 176, 0, 197, 39, 31, 143, 244, 142, 143, 13, 246,
         ],
     );
     assert_eq!(
         digest_bytes(&witness_bytes),
         [
-            88, 238, 139, 19, 15, 228, 75, 101, 43, 188, 94, 8, 57, 180, 182, 43, 8, 48, 115, 178,
-            112, 8, 134, 47, 28, 198, 93, 2, 28, 82, 143, 111,
+            208, 47, 137, 188, 23, 4, 226, 81, 108, 122, 196, 17, 54, 40, 0, 71, 110, 232, 179,
+            209, 159, 192, 2, 124, 233, 210, 246, 197, 140, 150, 16, 118,
+        ],
+    );
+}
+
+#[test]
+fn golden_vectors_pin_account_keys_digest() {
+    let raw_key = [
+        0x02, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+        0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+        0x11, 0x11, 0x11,
+    ];
+    let webauthn_key = [
+        0x03, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
+        0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
+        0x22, 0x22, 0x22,
+    ];
+
+    assert_eq!(
+        empty_account_keys_digest(1001),
+        [
+            158, 95, 26, 40, 217, 135, 219, 244, 188, 77, 52, 176, 97, 248, 153, 190, 136, 74, 30,
+            183, 235, 43, 231, 27, 12, 133, 47, 142, 109, 106, 12, 21,
+        ],
+    );
+    assert_ne!(empty_account_keys_digest(1001), [0u8; 32]);
+
+    assert_eq!(
+        account_keys_digest(
+            1001,
+            [
+                AccountKeyDigestRecord {
+                    auth_scheme: 1,
+                    pubkey_sec1: webauthn_key,
+                },
+                AccountKeyDigestRecord {
+                    auth_scheme: 0,
+                    pubkey_sec1: raw_key,
+                },
+            ],
+        ),
+        [
+            180, 137, 49, 57, 103, 177, 109, 208, 143, 89, 122, 131, 248, 68, 234, 231, 149, 7, 66,
+            31, 174, 246, 247, 190, 222, 155, 78, 108, 81, 196, 126, 3,
         ],
     );
 }
@@ -167,6 +211,7 @@ fn account_snapshot(id: u64) -> AccountSnapshot {
             (MarketId::new(9), 0, -7),
         ],
         events_digest: [id as u8; 32],
+        keys_digest: empty_account_keys_digest(id),
     }
 }
 

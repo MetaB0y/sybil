@@ -85,6 +85,7 @@ pub struct Account {
     pub last_nonce: u64,
     #[serde(default)]
     pub events_digest: [u8; 32],
+    pub keys_digest: [u8; 32],
     /// Optional, signed opt-in profile metadata (SYB-60).
     #[serde(default)]
     pub profile: AccountProfile,
@@ -106,6 +107,7 @@ impl Account {
             total_deposited: balance,
             last_nonce: 0,
             events_digest: [0u8; 32],
+            keys_digest: sybil_verifier::empty_account_keys_digest(id.0),
             profile: AccountProfile::default(),
             api_keys: Vec::new(),
             next_api_key_id: 0,
@@ -179,5 +181,15 @@ mod tests {
     fn test_new_account_has_zero_events_digest() {
         let account = Account::new(AccountId(7), 100);
         assert_eq!(account.events_digest, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_new_account_has_empty_key_set_digest() {
+        let account = Account::new(AccountId(7), 100);
+        assert_eq!(
+            account.keys_digest,
+            sybil_verifier::empty_account_keys_digest(7)
+        );
+        assert_ne!(account.keys_digest, [0u8; 32]);
     }
 }

@@ -1024,6 +1024,7 @@ mod tests {
             total_deposited: 3_000_000_000,
             positions: vec![(MarketId::new(3), 0, 11), (MarketId::new(3), 1, 11)],
             events_digest: [9u8; 32],
+            keys_digest: sybil_verifier::empty_account_keys_digest(7),
         };
         let market = MarketSnapshot {
             market_id: MarketId::new(3),
@@ -1136,6 +1137,7 @@ mod tests {
                 total_deposited: 1_000_000_000 + id as i64,
                 positions: vec![],
                 events_digest: [id as u8; 32],
+                keys_digest: sybil_verifier::empty_account_keys_digest(id),
             })
             .collect::<Vec<_>>();
         let leaves = state_schema::state_root_leaves(&post_state, &state_sidecar);
@@ -1441,8 +1443,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                127, 92, 78, 43, 113, 243, 166, 71, 206, 83, 17, 5, 75, 74, 61, 115, 27, 224, 91,
-                77, 148, 157, 159, 182, 236, 2, 1, 227, 122, 238, 160, 116,
+                64, 57, 123, 28, 177, 17, 224, 212, 38, 229, 155, 66, 90, 206, 225, 133, 166, 21,
+                63, 166, 234, 180, 190, 245, 236, 115, 36, 141, 224, 191, 63, 80,
             ]
         );
     }

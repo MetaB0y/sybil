@@ -513,6 +513,18 @@ mod tests {
     }
 
     #[test]
+    fn test_state_root_changes_on_keys_digest_only() {
+        let mut accounts = AccountStore::new();
+        let a0 = accounts.create_account(100);
+
+        let root1 = compute_state_root(&accounts);
+        accounts.get_mut(a0).unwrap().keys_digest = [7u8; 32];
+        let root2 = compute_state_root(&accounts);
+
+        assert_ne!(root1, root2);
+    }
+
+    #[test]
     fn test_state_root_changes_on_total_deposited_only() {
         let mut accounts = AccountStore::new();
         let a0 = accounts.create_account(100);
@@ -580,6 +592,7 @@ mod tests {
                     total_deposited: account.total_deposited,
                     positions,
                     events_digest: account.events_digest,
+                    keys_digest: account.keys_digest,
                 }
             })
             .collect();
