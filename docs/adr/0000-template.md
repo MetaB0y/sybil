@@ -3,7 +3,7 @@ adr: NNNN
 title: <short imperative phrase>
 status: Proposed
 date: YYYY-MM-DD
-consensus_critical: false
+validity_critical: false
 supersedes: []
 superseded_by: []
 ---
@@ -13,7 +13,7 @@ superseded_by: []
 ## Context
 
 What forces are in play? What problem are we solving, and what constraints
-bound the solution (performance, consensus, security, effort, the shape of the
+bound the solution (performance, validity, security, effort, the shape of the
 existing system)? State the facts a reader needs to judge the decision, not the
 decision itself. If this touches the guest commitment / state root / L1
 contracts, say so here.

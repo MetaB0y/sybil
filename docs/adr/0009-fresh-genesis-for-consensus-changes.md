@@ -3,7 +3,7 @@ adr: 0009
 title: Fresh genesis for consensus-schema changes in devnet
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---
@@ -29,14 +29,14 @@ lopsided.
 
 ## Decision
 
-For consensus-schema changes in devnet, **recreate genesis** rather than migrate
+For validity-schema changes in devnet, **recreate genesis** rather than migrate
 in place. The procedure: implement the new commitments/guest, recreate genesis
 from an operator-controlled snapshot (including, for SYB-225, full active
 key-sets so every funded account has ≥1 key), **repin the OpenVM guest
 commitment**, and deploy against the new genesis/root series. All fingerprint
 work runs in `~/sybil` per the SYB-228 repin discipline (`just openvm-commit`,
 refresh the `OpenVmVerifierAdapter.sol` pin, `zk-guest-fingerprint.sh --write`,
-no fmt between write and check). Batch multiple consensus changes into one
+no fmt between write and check). Batch multiple validity changes into one
 fresh-genesis window (SYB-224 + SYB-225 + the P-256 extension together).
 
 Precedent: `design/witness-schema-v2.md` (canonical-witness changes force a
@@ -50,17 +50,17 @@ guest repin + fresh genesis in devnet); runbook
   fallback for mainnet**, where re-genesis would destroy real state — but
   rejected for devnet as unnecessary complexity now.
 - **Backward-compatible schema (serde defaults, optional fields).** Rejected as
-  the general strategy: it accretes transitional cruft in the *consensus*
+  the general strategy: it accretes transitional cruft in the *validity*
   encoders, and a "defaulted" field still changes the bytes and the root. Fine
   for host-side DTOs, not for the state leaf.
 
 ## Consequences
 
-**Good:** consensus changes stay clean — no migration machinery, no transitional
+**Good:** validity changes stay clean — no migration machinery, no transitional
 compatibility shims in the byte encoders, one hard version boundary; batching
 amortizes the redeploy cost.
 
-**Costs / constraints:** every consensus change is gated on a redeploy, so they
+**Costs / constraints:** every validity change is gated on a redeploy, so they
 **must be batched and scheduled**, not shipped piecemeal; devnet state is
 **not preserved** across the boundary (acceptable now, not forever); the mainnet
 migration path is *documented but unexercised* — it will need a real drill before

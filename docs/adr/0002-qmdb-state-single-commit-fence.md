@@ -3,7 +3,7 @@ adr: 0002
 title: QMDB authenticated state behind a single redb commit fence
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---

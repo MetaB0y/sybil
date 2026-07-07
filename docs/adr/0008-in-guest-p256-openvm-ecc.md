@@ -3,7 +3,7 @@ adr: 0008
 title: In-guest P-256 verification via OpenVM accelerated ECC
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---
@@ -54,7 +54,7 @@ accelerated chip rows, not soft-crypto cycles.
 the first VM-commit move since `0x0026ab66` — a *deeper* commitment change than
 the source-only `app_exe_commit` repins we've done, and it drags in the SYB-228
 reproducibility caveats (untracked `agg_prefix.pk`, build-path dependence; repin
-in `~/sybil`). New crypto crosses into the guest-safe consensus core
+in `~/sybil`). New crypto crosses into the guest-safe proven core
 ([ADR-0003](0003-guest-host-crate-split.md)), enlarging the in-proof attack
 surface. WebAuthn-in-guest is a further step (envelope parsing) and is deferred
 (ratification D0: raw-P256-only v1). Rides the fresh-genesis window

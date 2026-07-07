@@ -8,12 +8,12 @@ date: 2026-07-07
 # Bulletproof Testing — strategy
 
 Companion to the descriptive vault note [[Testing Strategy]]. That note says what
-exists; this says **how testing becomes bulletproof for a consensus system** and
+exists; this says **how testing becomes bulletproof for a validity-critical system** and
 what to fix, in priority order. Grounded in an inventory of the current suite
 (667 `#[test]`s, proptest, the differential conformance harness, the crash
 harness, the byte-identity golden pins).
 
-## Why testing a consensus system is different
+## Why testing a validity-critical system is different
 
 In an ordinary service a bug is a crash or a wrong response — bad, but local and
 loud. In Sybil a bug is usually a **divergence**: the sequencer and the verifier,
@@ -26,7 +26,7 @@ make disagreement impossible to merge."** Three enemies:
 1. **Divergence** — two implementations of one truth drifting apart.
 2. **Non-determinism** — anything (float, hash-map order, platform) that makes
    the same input yield different bytes.
-3. **Silent regression** — a consensus encoding changing without the pin that
+3. **Silent regression** — a validity-critical encoding changing without the pin that
    should have screamed.
 
 Everything below is defense against those three.
@@ -96,16 +96,16 @@ test *read that file* (Foundry can `vm.readFile`/parse). Single source of truth,
 drift becomes impossible. Model it on the guest fingerprint's lock+cross-check.
 
 ### P1 — No coverage visibility
-No `llvm-cov`/tarpaulin anywhere — we don't know what fraction of *consensus*
+No `llvm-cov`/tarpaulin anywhere — we don't know what fraction of *validity-critical*
 code is exercised. **Fix:** add `cargo llvm-cov` in CI, report-only at first, then
-set a floor on the consensus crates (`matching-engine`, `sybil-verifier`,
+set a floor on the proven crates (`matching-engine`, `sybil-verifier`,
 `sybil-zk`, settlement). Coverage is a spotlight, not a target — use it to find
 untested branches in the money path, not to chase a number.
 
 ### P1 — The property catalog is incomplete and one test is disabled
 `iter_lp_solver_conformance` is `#[ignore]`d (the workspace's only ignore) —
 re-enable or delete it; a silently-skipped conformance test is worse than none.
-More broadly, adopt a **property-catalog discipline**: every consensus invariant
+More broadly, adopt a **property-catalog discipline**: every validity invariant
 gets a *named* property test, and the catalog is reviewed when the schema changes.
 Invariant classes to guarantee coverage of: conservation (Σ balances + minted =
 Σ deposits), monotonicity (more balance ⇒ ⊇ admissibility), order-independence

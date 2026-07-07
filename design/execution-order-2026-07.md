@@ -66,7 +66,7 @@ Low-risk, unblock everything else. Can run in parallel (codex).
 
 ## Phase 1 — the fresh-genesis redeploy batch
 
-All consensus/trust changes ride **one** fresh genesis
+All validity/trust changes ride **one** fresh genesis
 ([ADR-0009](../docs/adr/0009-fresh-genesis-for-consensus-changes.md)) — batch them.
 This is the phase that flips the big trust items.
 

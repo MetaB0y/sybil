@@ -3,7 +3,7 @@ adr: 0004
 title: Float-search, integer-truth
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---
@@ -14,7 +14,7 @@ superseded_by: []
 
 The batch clearing ([ADR-0001](0001-eg-fisher-market-matching.md)) is a convex
 program solved by numerical solvers (HiGHS LP, SLP, Clarabel) that work in
-**floating point**. But the state transition is **consensus** — balances,
+**floating point**. But the state transition is **validity-critical** — balances,
 positions, and the state root must be **exactly reproducible** on every node and
 inside the guest, where floating-point non-determinism is unacceptable and
 `f64` rounding would make two honest nodes disagree on the last ulp.
@@ -41,13 +41,13 @@ AGENTS.md all-integer convention.
   float-native; a rational LP would be orders of magnitude slower on the hot
   path for no gain, since we re-verify in integers anyway.
 - **Trust the solver's floats as state.** Rejected: non-deterministic across
-  platforms and the guest; a single differing rounding breaks consensus.
+  platforms and the guest; a single differing rounding breaks validity.
 - **Fixed-point *inside* the solver.** Rejected: fights the numerical libraries;
   the clean seam is "float proposes, integer disposes."
 
 ## Consequences
 
-**Good:** solvers stay fast and swappable; consensus stays exactly reproducible;
+**Good:** solvers stay fast and swappable; the proven core stays exactly reproducible;
 the verifier is a genuine independent check on the solver rather than a rubber
 stamp.
 

@@ -91,14 +91,14 @@ Nobody — not even the operator — can read early; no committee needed.
   guarantees than threshold (T must exceed the clearing horizon reliably).
 
 **Recommendation: A first, B later.** Commit–reveal with bonding ships the
-property for the single-operator devnet and proves the lifecycle + consensus
+property for the single-operator devnet and proves the lifecycle + validity
 plumbing. Threshold encryption is the endgame and rides the decentralization
 roadmap. C is a fallback if a committee is undesirable but single-operator
 hiding is wanted.
 
-## How it fits the block lifecycle & consensus
+## How it fits the block lifecycle & validity
 
-The load-bearing consensus property: **the proof must attest that the orders
+The load-bearing validity property: **the proof must attest that the orders
 cleared in the CLEAR block are exactly the set committed in the COMMIT block —
 no operator substitution, omission (beyond provable censorship rules), or
 insertion.**
@@ -109,7 +109,7 @@ insertion.**
 - **Witness additions**: the committed set for the batch and the
   commitment→reveal binding, so the guest can check each cleared order's
   commitment was present and its reveal matches. This is another witness-schema
-  version bump — **batch it with other consensus changes** (it's not free).
+  version bump — **batch it with other validity changes** (it's not free).
 - **The solver is unaffected** — it just runs at CLEAR time on the decrypted set;
   it already sits *outside* the trust boundary (the verifier re-derives).
 - **Fits the "one home for encodings"** goal: the commitment encoder belongs in

@@ -61,7 +61,7 @@ stateDiagram-v2
 
 ## The four missing pieces (the honest work)
 
-1. **Bonding / escrow — the key new consensus primitive.** There is no
+1. **Bonding / escrow — the key new validity-critical primitive.** There is no
    `BalanceLock` on `Account` today. Proposing and challenging must **lock
    collateral** as a bond (slashable), which means bonds are *account state* → in
    the guest commitment. This primitive is reusable (MM budget reservations, the
@@ -80,7 +80,7 @@ stateDiagram-v2
    Close this **before** opening a permissionless propose path — it's a latent
    wrong-market settlement bug. *(Worth a ticket now regardless.)*
 
-## Consensus & trust implications
+## Validity & trust implications
 
 - **Proven, not just operational.** Bonds (account state) and
   proposal/challenge records (witness-visible, like system events) enter the

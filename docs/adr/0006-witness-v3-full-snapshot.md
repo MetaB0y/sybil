@@ -3,7 +3,7 @@ adr: 0006
 title: Block witness = full-state snapshot per block
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---

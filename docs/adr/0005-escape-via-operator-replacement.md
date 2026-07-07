@@ -3,7 +3,7 @@ adr: 0005
 title: Escape via operator replacement; L1 recovers cash only
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---

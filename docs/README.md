@@ -136,13 +136,13 @@ Sybil's docs are five trees with five different jobs. Use the right one:
 | **[`architecture/`](architecture/Sybil%20Architecture.md)** (the MOC) | *How does it work today?* | Understanding a subsystem |
 | **[`adr/`](adr/)** | *Why is it this way?* | Before changing a load-bearing decision |
 | **[`../design/`](../design/)** | *Where is it going?* (specs, proofs, brainstorm) | Planning new work |
-| **[`review/`](review/00-executive-summary.md)** | *What's the honest state?* (bugs, debt, do-not-break) | Before touching consensus code |
+| **[`review/`](review/00-executive-summary.md)** | *What's the honest state?* (bugs, debt, do-not-break) | Before touching validity-critical code |
 | **[`runbooks/`](runbooks/)** | *How do I operate it?* | Deploying / on-call |
 
 **Reading paths:**
 - *New to Sybil* → the six ideas above → [[Frequent Batch Auctions]] →
   [[Block Lifecycle]] → [architecture MOC](architecture/Sybil%20Architecture.md).
-- *Changing consensus code* → [`review/40-do-not-break.md`](review/40-do-not-break.md)
+- *Changing validity-critical code* → [`review/40-do-not-break.md`](review/40-do-not-break.md)
   → the relevant ADR → [[Block Witness]] / [[State Root Schema]].
 - *Operating a deployment* → [[Deployment Profiles]] →
   [`runbooks/devnet-redeploy.md`](runbooks/devnet-redeploy.md).

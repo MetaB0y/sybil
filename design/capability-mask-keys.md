@@ -1,5 +1,5 @@
 ---
-tags: [design, keys, auth, consensus]
+tags: [design, keys, auth, validity]
 layer: core
 status: exploratory
 date: 2026-07-07
@@ -45,7 +45,7 @@ MANAGE_KEYS  = 1 << 3   // register / revoke keys
 
 ### It must be in the commitment
 
-The mask has to be **consensus-visible**, or a malicious operator could ignore
+The mask has to be **committed**, or a malicious operator could ignore
 it. So it's digested into `keys_digest` alongside the key: extend the
 `key_record` in [`account-keys-digest.md`](account-keys-digest.md) from
 `auth_scheme:u8 || pubkey_sec1[33]` to
@@ -55,7 +55,7 @@ operator-replacement recover the mask with the key, and the guest can enforce it
 ## The forward-compatibility recommendation (refines D1)
 
 D1 recommended keeping scope cosmetic in v1 and adding a real `capability_mask`
-*later*. But `keys_digest` is a **consensus encoding** — adding a field to it
+*later*. But `keys_digest` is a **validity-critical encoding** — adding a field to it
 later is a second schema move and a second fresh-genesis redeploy
 ([ADR-0009](../docs/adr/0009-fresh-genesis-for-consensus-changes.md)). That's
 expensive to pay twice.
@@ -64,11 +64,11 @@ expensive to pay twice.
 encoding now**, defaulting every key to the full mask (all bits set = today's
 behavior). This is nearly free — one `u32` in the key record — and it means
 *activating* scoped delegation later is a pure **application-layer** change (start
-issuing restricted masks; start enforcing them) with **no further consensus
-schema move**. Semantics stay deferred (D1's intent); only the *byte slot* is
+issuing restricted masks; start enforcing them) with **no further validity-schema
+move**. Semantics stay deferred (D1's intent); only the *byte slot* is
 claimed now, while we're already moving the schema for SYB-225.
 
-> The general principle: when you're already paying for a consensus schema change,
+> The general principle: when you're already paying for a validity-schema change,
 > reserve the fields you can foresee needing. A byte slot is cheap; a second
 > fresh-genesis is not.
 
@@ -95,6 +95,6 @@ claimed now, while we're already moving the schema for SYB-225.
 - **Session keys:** short-lived `TRADE` keys for a web session, revocable without
   touching the owner key.
 
-Small, bounded, and consensus-additive — but only if the byte slot is reserved in
+Small, bounded, and validity-additive — but only if the byte slot is reserved in
 the same schema move as `keys_digest`. That timing is the one decision to make
 now; everything else can wait.

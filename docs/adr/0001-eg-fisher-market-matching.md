@@ -3,7 +3,7 @@ adr: 0001
 title: Eisenberg–Gale / Fisher-market matching
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---
@@ -19,7 +19,7 @@ come out, and how those prices stay coherent when a single order touches
 multiple outcomes or multiple markets (bundles, spreads, conditionals on the
 roadmap).
 
-The clearing rule is **consensus-critical**: `Order`, `Fill`, and the settlement
+The clearing rule is **validity-critical**: `Order`, `Fill`, and the settlement
 math are serialized into the block witness and re-derived by `sybil-verifier` /
 the guest, so the clearing semantics are baked into the state-transition proof.
 
@@ -65,7 +65,7 @@ mathematical spec to verify against (the dual gives a checkable KKT witness).
 on the hot path and its cost bounds block cadence; the clearing is only as
 trustworthy as the solver↔verifier conformance harness; and because `Order` and
 the settlement math are in the guest commitment, **generalizing the instrument
-(payoff vectors, conditionals) is a consensus change**, not a local feature
+(payoff vectors, conditionals) is a validity change**, not a local feature
 (see [ADR-0006](0006-witness-v3-full-snapshot.md), and the payoff-vector
 generality deferred in `docs/review/30-roadmap.md`).
 

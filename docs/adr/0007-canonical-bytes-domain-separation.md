@@ -3,7 +3,7 @@ adr: 0007
 title: Domain-separated canonical bytes with genesis binding
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---
@@ -60,7 +60,7 @@ pattern; escape-claim and key-op canonical bytes inherit the same rule
 ([ADR-0005](0005-escape-via-operator-replacement.md),
 [ADR-0008](0008-in-guest-p256-openvm-ecc.md)).
 
-**Costs / constraints:** the canonical-bytes builders are **consensus surface**
+**Costs / constraints:** the canonical-bytes builders are **validity-critical surface**
 and today are **duplicated** in spots (the `hash_header`-×3 / divergent
 reservation-encoder problem, `docs/review/02-cross-cutting-themes.md` Theme 6) —
 divergent copies are a genuine bug class this ADR makes urgent to consolidate;

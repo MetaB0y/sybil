@@ -3,7 +3,7 @@ adr: 0003
 title: Guest-safe / host-only crate split
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---
@@ -22,11 +22,11 @@ targets (no platform-dependent hashing, ordering, or float behavior).
 
 ## Decision
 
-Partition the workspace into a **consensus core** that is guest-safe and a
+Partition the workspace into a **proven core** that is guest-safe and a
 **shell** that is host-only, and never let the shell's dependencies leak into the
 core:
 
-- **Consensus core (guest-safe, byte-identical native↔guest):**
+- **Proven core (guest-safe, byte-identical native↔guest):**
   `matching-engine` (the `Order`/`Fill`/`Problem` types + settlement math),
   `sybil-verifier` (canonical schemas, state-root/witness encodings,
   `commitments`), and `sybil-zk` (the guest-safe transition verifier + qMDB
@@ -45,7 +45,7 @@ Properties), `design/architecture-review-2026-07.md` P7/§1.
 - **One crate with `#[cfg]`-gated guest/host code.** Rejected: `cfg` soup is
   where byte-divergence bugs hide (a host-only branch subtly changing an
   encoding); a crate boundary makes "is this guest-safe?" a compile-time fact.
-- **Duplicate the consensus logic in a separate guest crate.** Rejected: two
+- **Duplicate the proven logic in a separate guest crate.** Rejected: two
   copies of the settlement math is the *worst* outcome for a system whose whole
   security rests on native and guest agreeing — they would drift.
 

@@ -1,5 +1,5 @@
 ---
-tags: [design, consensus, refactor, crispness]
+tags: [design, validity, refactor, crispness]
 layer: core
 status: proposed
 date: 2026-07-07
@@ -8,13 +8,13 @@ date: 2026-07-07
 # `sybil-commitments` — one home for every canonical encoding
 
 The concrete "crisp boundaries" deliverable: turn the diagnosed duplicated
-consensus encodings into a single owning module. This is not a re-diagnosis —
+validity-critical encodings into a single owning module. This is not a re-diagnosis —
 `design/architecture-review-2026-07.md` (P5) and `docs/review/02-cross-cutting-
 themes.md` (Theme 6) already found the problem; this says exactly what to build.
 
 ## The problem, in one sentence
 
-**The knowledge of "how a consensus value is turned into bytes" is spread across
+**The knowledge of "how a validity-critical value is turned into bytes" is spread across
 many modules, so getting it right requires changing all of them consistently —
 and today they've already drifted.** Concretely:
 
@@ -28,7 +28,7 @@ and today they've already drifted.** Concretely:
 
 This is textbook **information leakage** (Ousterhout): one design decision — the
 byte layout — leaks into many modules. For an *ordinary* system that's ugly. For
-a *consensus* system it's a live bug class: two encoders that were meant to be
+a *validity-critical* system it's a live bug class: two encoders that were meant to be
 identical but drift produce **different state roots or signatures**, i.e. a fork
 or a rejected proof. It is the same enemy the
 [testing strategy](testing-strategy-2026-07.md) calls "divergence," attacked at
@@ -59,7 +59,7 @@ One crate — `sybil-commitments` (or finish `sybil-verifier::commitments`, alre
 roadmapped 2.1) — is **the single definition** of every canonical encoding. It's
 a *deep module*: a small, typed, obvious interface hiding all the fussy
 byte-layout complexity. Callers pass typed values and get bytes/hashes; **no
-caller ever writes a `to_le_bytes` for a consensus value again.**
+caller ever writes a `to_le_bytes` for a validity-critical value again.**
 
 It owns:
 
@@ -75,7 +75,7 @@ It owns:
 **Hard constraints on the crate:**
 
 - **Guest-safe** ([ADR-0003](../docs/adr/0003-guest-host-crate-split.md)): it sits
-  *inside* the consensus core, so it must be dependency-austere (`no_std`-friendly,
+  *inside* the proven core, so it must be dependency-austere (`no_std`-friendly,
   no host crates) — the guest imports it directly.
 - **Byte-frozen**: every encoder is pinned by a golden vector before it moves
   (see migration). The crate's whole reason to exist is that its output must
@@ -94,7 +94,7 @@ one byte encoding per view, defined once.
 
 ## Migration — a byte-identical consolidation, gated
 
-This is a **SAFE-MOVE at the consensus layer**: the bytes must not change, only
+This is a **SAFE-MOVE at the validity layer**: the bytes must not change, only
 where the encoder lives. The discipline mirrors the god-module decomposition.
 
 1. **Net first (Phase 0).** Ensure a golden vector exists for *every* encoder
@@ -138,7 +138,7 @@ where the encoder lives. The discipline mirrors the god-module decomposition.
 
 ## Payoff
 
-One place to read (and review) every consensus encoding; the
+One place to read (and review) every validity-critical encoding; the
 divergent-encoder bug class **designed out of existence** rather than tested for;
 a single source that clients in every language derive from; and a natural home
 for the v4/keys_digest encoders. It is the encoder-level counterpart to the

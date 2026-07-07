@@ -33,7 +33,7 @@ The single most important fact: **`Order` is already a general payoff-vector
 instrument.** `matching-engine/src/order.rs` carries `payoffs: [i8; 32]` over up
 to 5 markets plus an optional `PriceCondition`. It is *deliberately disabled* —
 `validate_binary_one_hot()` is enforced at four layers (API ingress, sequencer,
-the consensus verifier, and solver ingress) so only simple binary orders pass
+the validity-critical verifier, and solver ingress) so only simple binary orders pass
 today ([[Payoff Vectors]]; the KEEP-DEFERRED entry in
 `docs/review/simplification-plan.md`; math in `design/decomposition.typ`,
 `design/bundle-clearing.typ`).
@@ -69,7 +69,7 @@ return. This is new [[Market Resolution]] logic: resolution must consume the
 payoff vector, not assume one-hot binary payout. The void-and-refund path is the
 subtle case (mirrors the scalar-market and Voided-status roadmap).
 
-### 3. Consensus impact (bounded but real)
+### 3. Validity impact (bounded but real)
 `Order`, `Fill`, and settlement are in the guest commitment
 ([ADR-0006](../docs/adr/0006-witness-v3-full-snapshot.md)) — so widening the gate
 and teaching settlement to honor payoff vectors **moves the commitment**. But the
@@ -97,7 +97,7 @@ vector.
 - **Bounded-generality first.** Enable `k=2` conditionals and two-outcome bundles
   with an explicit admissible-payoff set and full solver↔verifier conformance
   before widening. The four-layer one-hot enforcement is a *safety asset* — each
-  loosening is a consensus change gated by golden vectors and the differential
+  loosening is a validity change gated by golden vectors and the differential
   harness ([testing strategy](testing-strategy-2026-07.md)).
 - **The payoff is the moat.** Coherent conditional pricing is the clearest reason
   the Fisher-market architecture was chosen over a CLOB. When the trust story is

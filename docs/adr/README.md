@@ -8,7 +8,7 @@ away.
 
 ## Why we keep them
 
-Sybil is a consensus system: many of its choices are **load-bearing and
+Sybil is a single-operator validium: many of its choices are **load-bearing and
 expensive to reverse** (they're baked into the guest commitment, the state-root
 schema, or the L1 contracts). When a future change proposes to touch one of
 these, the first question is always *"why is it this way?"* — and today that
@@ -40,7 +40,7 @@ relevant, not replaced).
 
 ## Index
 
-| ADR | Title | Status | Consensus-critical? |
+| ADR | Title | Status | Validity-critical? |
 |---|---|---|---|
 | [0001](0001-eg-fisher-market-matching.md) | Eisenberg–Gale / Fisher-market matching (not LMSR or a CLOB) | Accepted | Yes |
 | [0002](0002-qmdb-state-single-commit-fence.md) | QMDB authenticated state behind a single redb commit fence | Accepted | Yes |

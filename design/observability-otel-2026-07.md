@@ -140,7 +140,7 @@ Two things make this work:
 - Don't rip out Prometheus for OTel metrics — no payoff, real churn.
 - Don't trace every span unsampled on the small host — head-sample + tail-keep
   errors/slow.
-- Don't instrument the consensus *core* crates (`matching-engine`,
+- Don't instrument the proven *core* crates (`matching-engine`,
   `sybil-verifier`, `sybil-zk`) with host tracing — they're guest-safe and must
   stay dependency-austere ([ADR-0003](../docs/adr/0003-guest-host-crate-split.md)).
   Observe them from the *caller's* spans in the sequencer, not from inside.

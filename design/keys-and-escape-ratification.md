@@ -1,5 +1,5 @@
 ---
-tags: [design, ratification, consensus, keys, escape]
+tags: [design, ratification, validity, keys, escape]
 layer: core
 status: awaiting-ratification
 last_verified: 2026-07-07
@@ -25,7 +25,7 @@ key-ops, SYB-32 escape claims). Both designs are otherwise complete:
 [`escape-claim-guest.md`](../design/escape-claim-guest.md). Every item below has a
 **recommendation** — you can ratify by exception (just flag the ones you'd change).
 
-These two features share one consensus batch: they both add the
+These two features share one validity batch: they both add the
 account-leaf `keys_digest`, both need in-guest P-256 verification (one OpenVM ECC
 integration, moves `app_vm_commit`), and both ride the **fresh-genesis redeploy**.
 Ratify them together.
@@ -58,8 +58,8 @@ This resolves **keys-digest Q2** and **escape-claim Q1(WebAuthn)** together.
 
 | # | Decision | Recommendation | Rationale / cost of the alternative |
 |---|---|---|---|
-| **D1** | `KeyScope` → consensus authorization, or stays cosmetic? | **Cosmetic in v1 semantics — BUT reserve the `capability_mask` byte slot in the v4 `keys_digest` now.** | Today every registered key can sign every mutation; `scope` is a UI label, and making it consensus without verifier behavior is fake rigor — so keep the *semantics* deferred. **However**, adding `capability_mask` to `keys_digest` *later* is a second consensus schema move + fresh-genesis, not a "clean additive move." Since we're already moving the schema for SYB-225, **reserve a `capability_mask:u32` in the `key_record` now, defaulting to full-authority** (all bits set = today's behavior). Activating scoped delegation later becomes a pure application-layer change with no further schema move. See [`capability-mask-keys.md`](capability-mask-keys.md). This is the one D1 sub-decision that must be made *now* while the byte layout is open. |
-| **D2** | Replay guard for key-ops: state-bound (`pre_keys_digest`+`pre_events_digest`) vs a new proven `auth_nonce` in the account leaf? | **State-bound signatures.** | Adds zero new account-leaf state. Because key-ops update `events_digest`, the same authorization can't replay after the first accepted mutation (unless BLAKE3 breaks). A per-account `auth_nonce` is more familiar but is *more* consensus state to carry and prove. |
+| **D1** | `KeyScope` → validity-critical authorization, or stays cosmetic? | **Cosmetic in v1 semantics — BUT reserve the `capability_mask` byte slot in the v4 `keys_digest` now.** | Today every registered key can sign every mutation; `scope` is a UI label, and making it validity-critical without verifier behavior is fake rigor — so keep the *semantics* deferred. **However**, adding `capability_mask` to `keys_digest` *later* is a second validity-schema move + fresh-genesis, not a "clean additive move." Since we're already moving the schema for SYB-225, **reserve a `capability_mask:u32` in the `key_record` now, defaulting to full-authority** (all bits set = today's behavior). Activating scoped delegation later becomes a pure application-layer change with no further schema move. See [`capability-mask-keys.md`](capability-mask-keys.md). This is the one D1 sub-decision that must be made *now* while the byte layout is open. |
+| **D2** | Replay guard for key-ops: state-bound (`pre_keys_digest`+`pre_events_digest`) vs a new proven `auth_nonce` in the account leaf? | **State-bound signatures.** | Adds zero new account-leaf state. Because key-ops update `events_digest`, the same authorization can't replay after the first accepted mutation (unless BLAKE3 breaks). A per-account `auth_nonce` is more familiar but is *more* proven state to carry and prove. |
 | **D3** | Key-op authorization: inline in `SystemEventWitness`, or split public event + private auth witness? | **Inline in the system event, v1.** | Key-ops are rare; auditability matters; a 1:1 canonical binding is simpler to get right. Split only if event-bloat ever bites. |
 | **D4** | Forbid zero-key user accounts once v4 is live? | **Yes for funded/trading accounts; MINT + internal/dev may keep the empty-key digest** (and are excluded from user escape claims). | Any account with user funds must be escapable → must have ≥1 key at creation. |
 | **D5** | Separate `acct_keys/{id}` typed leaf, or digest-in-`acct/` + witness sidecar only? | **Digest-only in `acct/`, no second leaf.** | The account-leaf `keys_digest` gives escape proofs; the witness key-set sidecar gives replacement-operator recoverability. A second typed leaf duplicates state and raises proof cost for zero gain. |
@@ -88,7 +88,7 @@ so the two docs stay consistent.
   account_id || key_count || sorted(auth_scheme:u8 || pubkey_sec1[33]))`, appended
   after `events_digest` in the account leaf. Empty set = the domain/count hash, not
   `[0;32]`.
-- **Consensus batch**: canonical witness **v3 → v4**; account-leaf bytes + every
+- **Validity batch**: canonical witness **v3 → v4**; account-leaf bytes + every
   state root change; `decode_canonical_witness_bytes` updated; new key-op system
   events (tags 7+); guest repin. Batched with SYB-224's `genesis_hash` domain
   discipline (key-op + escape canonical bytes both lead with `genesis_hash[32]`).

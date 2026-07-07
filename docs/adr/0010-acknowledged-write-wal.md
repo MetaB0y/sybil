@@ -3,7 +3,7 @@ adr: 0010
 title: Single-sequenced acknowledged-write WAL (durable-before-live)
 status: Accepted
 date: 2026-07-07
-consensus_critical: true
+validity_critical: true
 supersedes: []
 superseded_by: []
 ---
