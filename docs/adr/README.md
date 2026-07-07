@@ -52,8 +52,20 @@ relevant, not replaced).
 | [0008](0008-in-guest-p256-openvm-ecc.md) | In-guest P-256 verification via OpenVM accelerated ECC | Accepted | Yes |
 | [0009](0009-fresh-genesis-for-consensus-changes.md) | Fresh genesis for consensus-schema changes in devnet | Accepted | Yes |
 | [0010](0010-acknowledged-write-wal.md) | Single-sequenced acknowledged-write WAL (durable-before-live) | Accepted | Yes |
+| [0011](0011-validium-stance-no-backcompat.md) | Project stance: private validium, no backward-compat, simplicity-first | Accepted | — |
+| [0012](0012-privacy-and-data-availability.md) | Privacy & DA model — public root+proof, private contents | Accepted | Yes |
+| [0013](0013-exit-and-escape-model.md) | Exit & escape — sell-for-cash; escape values positions at last clearing price | Accepted | Yes |
+| [0014](0014-webauthn-first-auth.md) | WebAuthn / passkeys primary, verified in-guest | Accepted | Yes |
 
 > These first ten are **backfilled** from decisions already made and already in
 > production; their rationale was reconstructed from the design/review estate
 > (sources cited in each). New decisions from here forward should get an ADR
 > *at the time they're made*.
+>
+> **0011–0014 capture the 2026-07-07 founder reset** (private-validium framing,
+> no backward-compat, WebAuthn-first, escape at last-clearing-price). Where
+> 0001–0010 say **"consensus-critical," read "validity-critical"** — the correct
+> term for a single-operator validium ([ADR-0011](0011-validium-stance-no-backcompat.md));
+> a terminology pass over the older records is owed. Some older ADRs are refined
+> by these: 0005→0013 (escape valuation), 0006→0012 (private DA), 0009 is relaxed
+> by 0011 (fresh genesis is now free).
