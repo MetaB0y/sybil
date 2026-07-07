@@ -32,8 +32,12 @@ fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
 }
 
 fn parse_signer_public_key(public_key_hex: &str) -> Result<PublicKey, AppError> {
-    let key_bytes = hex::decode(public_key_hex.trim_start_matches("0x").trim_start_matches("0X"))
-        .map_err(|_| AppError::bad_request("Invalid hex encoding for public key"))?;
+    let key_bytes = hex::decode(
+        public_key_hex
+            .trim_start_matches("0x")
+            .trim_start_matches("0X"),
+    )
+    .map_err(|_| AppError::bad_request("Invalid hex encoding for public key"))?;
     let sec1_point = Sec1Point::from_bytes(&key_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
     let verifying_key = VerifyingKey::from_sec1_point(&sec1_point)
@@ -42,8 +46,12 @@ fn parse_signer_public_key(public_key_hex: &str) -> Result<PublicKey, AppError> 
 }
 
 fn parse_signature(signature_hex: &str) -> Result<Signature, AppError> {
-    let sig_bytes = hex::decode(signature_hex.trim_start_matches("0x").trim_start_matches("0X"))
-        .map_err(|_| AppError::bad_request("Invalid hex encoding for signature"))?;
+    let sig_bytes = hex::decode(
+        signature_hex
+            .trim_start_matches("0x")
+            .trim_start_matches("0X"),
+    )
+    .map_err(|_| AppError::bad_request("Invalid hex encoding for signature"))?;
     Signature::from_slice(&sig_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))
 }
@@ -359,8 +367,7 @@ mod tests {
         let bare = parse_signer_public_key(&pubkey_hex).expect("bare pubkey parses");
         let prefixed =
             parse_signer_public_key(&format!("0x{pubkey_hex}")).expect("0x pubkey parses");
-        let upper =
-            parse_signer_public_key(&format!("0X{pubkey_hex}")).expect("0X pubkey parses");
+        let upper = parse_signer_public_key(&format!("0X{pubkey_hex}")).expect("0X pubkey parses");
 
         assert_eq!(bare.0, prefixed.0);
         assert_eq!(bare.0, upper.0);

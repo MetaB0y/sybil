@@ -31,8 +31,12 @@ pub async fn register_feed(
     State(state): State<AppState>,
     Json(req): Json<RegisterFeedRequest>,
 ) -> Result<Json<RegisteredFeedResponse>, AppError> {
-    let pubkey_bytes = hex::decode(req.pubkey_hex.trim_start_matches("0x").trim_start_matches("0X"))
-        .map_err(|_| AppError::bad_request("Invalid pubkey_hex"))?;
+    let pubkey_bytes = hex::decode(
+        req.pubkey_hex
+            .trim_start_matches("0x")
+            .trim_start_matches("0X"),
+    )
+    .map_err(|_| AppError::bad_request("Invalid pubkey_hex"))?;
     if pubkey_bytes.len() != 33 {
         return Err(AppError::bad_request(
             "Pubkey must be 33 bytes (compressed SEC1)",
