@@ -1,0 +1,635 @@
+use super::super::*;
+
+#[ractor::async_trait]
+impl Actor for SequencerActor {
+    type Msg = SequencerMsg;
+    type State = SequencerActorState;
+    type Arguments = SequencerActorArgs;
+
+    async fn pre_start(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        args: Self::Arguments,
+    ) -> Result<Self::State, ActorProcessingErr> {
+        let now = Instant::now();
+        let global_submission_bucket = TokenBucket::new(
+            args.sequencer.config.max_global_submissions_per_second,
+            args.sequencer.config.global_submission_burst,
+            now,
+        );
+        Ok(SequencerActorState {
+            sequencer: args.sequencer,
+            latest_block: None,
+            block_history: VecDeque::new(),
+            block_broadcast: args.block_broadcast,
+            pause_count: 0,
+            halted_error: None,
+            store: args.store,
+            global_submission_bucket,
+            account_submission_buckets: HashMap::new(),
+            mailbox_monitor: args.mailbox_monitor,
+            indicative_cache: HashMap::new(),
+            indicative_solve_gate: IndicativeSolveGate::default(),
+            #[cfg(test)]
+            next_tick_hold: None,
+        })
+    }
+
+    async fn post_start(
+        &self,
+        myself: ActorRef<Self::Msg>,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        let actor = myself.clone();
+        let block_interval = state.sequencer.config.block_interval;
+        let mailbox_monitor = state.mailbox_monitor.clone();
+        tokio::spawn(async move {
+            let mut ticker = interval_at(Instant::now() + block_interval, block_interval);
+            loop {
+                ticker.tick().await;
+                mailbox_monitor.queued();
+                if actor.send_message(SequencerMsg::Tick).is_err() {
+                    mailbox_monitor.send_failed();
+                    break;
+                }
+            }
+        });
+
+        // Indicative scheduler (C2). Separate timer task, NOT an idle
+        // branch in on_tick — block production and indicative refresh are
+        // decoupled. Cadence chosen well under one block period so the
+        // open-batch snapshot refreshes mid-batch.
+        let actor_indicative = myself.clone();
+        let mailbox_indicative = state.mailbox_monitor.clone();
+        let indicative_interval = std::time::Duration::from_millis(750);
+        tokio::spawn(async move {
+            let mut ticker = interval_at(Instant::now() + indicative_interval, indicative_interval);
+            loop {
+                ticker.tick().await;
+                mailbox_indicative.queued();
+                if actor_indicative
+                    .send_message(SequencerMsg::IndicativeTick)
+                    .is_err()
+                {
+                    mailbox_indicative.send_failed();
+                    break;
+                }
+            }
+        });
+        Ok(())
+    }
+
+    async fn handle(
+        &self,
+        myself: ActorRef<Self::Msg>,
+        message: Self::Msg,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        state.mailbox_monitor.started();
+        match message {
+            SequencerMsg::Tick => {
+                let _ = state.on_tick().await?;
+            }
+            #[cfg(test)]
+            SequencerMsg::TestCrashOnNextBlock(crashpoint) => {
+                let _ = state.on_tick_inner(Some(crashpoint)).await?;
+            }
+            #[cfg(test)]
+            SequencerMsg::TestHoldNextTick(hold, reply) => {
+                state.next_tick_hold = Some(hold);
+                let _ = reply.send(());
+            }
+            SequencerMsg::IndicativeTick => {
+                state.on_indicative_tick(myself.clone());
+            }
+            SequencerMsg::IndicativeUpdate(snapshots) => {
+                state.indicative_cache = snapshots;
+                state.indicative_solve_gate.finish();
+            }
+            SequencerMsg::IndicativeSolveFailed { solver, error } => {
+                metrics::counter!(
+                    "sybil_indicative_solve_failures_total",
+                    "solver" => solver.clone(),
+                    "reason" => "panic"
+                )
+                .increment(1);
+                tracing::error!(
+                    solver = %solver,
+                    error = %error,
+                    "indicative shadow solve failed; releasing gate"
+                );
+                state.indicative_solve_gate.finish();
+            }
+            SequencerMsg::Query(query) => {
+                query.execute(state);
+            }
+            SequencerMsg::SubmitOrder(submission, reply) => {
+                let order_count = submission.orders.len();
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.admit_or_defer(submission).await,
+                    Err(err) => Err(err),
+                };
+                state.record_submission_metrics("unsigned", order_count, &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::SubmitSignedOrder(signed, reply) => {
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_signed_order(signed).await,
+                    Err(err) => Err(err),
+                };
+                state.record_submission_metrics("signed", 1, &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::SubmitAuthenticatedOrder(authenticated, reply) => {
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_authenticated_order(authenticated).await,
+                    Err(err) => Err(err),
+                };
+                state.record_submission_metrics("signed", 1, &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CancelSignedOrder(signed, reply) => {
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_signed_cancel(signed).await,
+                    Err(err) => Err(err),
+                };
+                state.record_cancel_metrics("signed", &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CancelAuthenticatedOrder(authenticated, reply) => {
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.handle_authenticated_cancel(authenticated).await,
+                    Err(err) => Err(err),
+                };
+                state.record_cancel_metrics("signed", &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::GetStateProof(leaf_key, reply) => {
+                let _ = reply.send(state.handle_state_proof(leaf_key).await);
+            }
+            SequencerMsg::ProduceBlock(reply) => {
+                let result = match state.on_tick().await? {
+                    BlockTickOutcome::Produced(block) => Ok(*block),
+                    BlockTickOutcome::Paused => Err(SequencerError::BlockProductionPaused),
+                    BlockTickOutcome::Halted(error) | BlockTickOutcome::PersistFailed(error) => {
+                        Err(error)
+                    }
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CreateAccount(initial_balance, reply) => {
+                let _ = reply.send(state.handle_create_account(initial_balance).await);
+            }
+            SequencerMsg::FundAccount(account_id, amount, reply) => {
+                let _ = reply.send(state.handle_fund_account(account_id, amount).await);
+            }
+            SequencerMsg::SubmitL1Deposit(deposit, reply) => {
+                let _ = reply.send(state.handle_l1_deposit(deposit).await);
+            }
+            SequencerMsg::CreateBridgeWithdrawal(request, reply) => {
+                let _ = reply.send(state.handle_bridge_withdrawal(request).await);
+            }
+            SequencerMsg::CreateSignedBridgeWithdrawal(signed, reply) => {
+                let _ = reply.send(state.handle_signed_bridge_withdrawal(signed).await);
+            }
+            SequencerMsg::CreateAuthenticatedBridgeWithdrawal(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_bridge_withdrawal(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::ApplyBridgeWithdrawalL1Event(event, reply) => {
+                let _ = reply.send(state.handle_bridge_withdrawal_l1_event(event).await);
+            }
+            SequencerMsg::RegisterPubkey(account_id, pubkey, auth_scheme, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_register_pubkey(account_id, pubkey, auth_scheme)
+                        .await,
+                );
+            }
+            SequencerMsg::RegisterPubkeyWithMeta(account_id, pubkey, meta, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_register_pubkey_with_meta(account_id, pubkey, meta)
+                        .await,
+                );
+            }
+            SequencerMsg::RegisterKeySigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_key_registration(signed).await);
+            }
+            SequencerMsg::RegisterKeyAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_key_registration(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::SetProfileSigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_profile_update(signed).await);
+            }
+            SequencerMsg::SetProfileAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_profile_update(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::RevokeSigningKeySigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_key_revocation(signed).await);
+            }
+            SequencerMsg::RevokeSigningKeyAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_key_revocation(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::CreateApiKeySigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_api_key_create(signed).await);
+            }
+            SequencerMsg::CreateApiKeyAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_api_key_create(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::RevokeApiKeySigned(signed, reply) => {
+                let _ = reply.send(state.handle_signed_api_key_revoke(signed).await);
+            }
+            SequencerMsg::RevokeApiKeyAuthenticated(authenticated, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_authenticated_api_key_revoke(authenticated)
+                        .await,
+                );
+            }
+            SequencerMsg::CreateMarket(name, reply) => {
+                let _ = reply.send(state.handle_create_market(name).await);
+            }
+            SequencerMsg::CreateMarketGroup(name, market_ids, reply) => {
+                let _ = reply.send(state.handle_create_market_group(name, market_ids).await);
+            }
+            SequencerMsg::ExtendMarketGroup(group_id, market_id, reply) => {
+                let _ = reply.send(state.handle_extend_market_group(group_id, market_id).await);
+            }
+            SequencerMsg::ResolveMarket(market_id, payout_nanos, reply) => {
+                let _ = reply.send(state.handle_resolve_market(market_id, payout_nanos).await);
+            }
+            SequencerMsg::ResolveMarketAttested(market_id, signed, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_resolve_market_attested(market_id, signed)
+                        .await,
+                );
+            }
+            SequencerMsg::RegisterFeed(pubkey, name, reply) => {
+                let _ = reply.send(state.handle_register_feed(pubkey, name).await);
+            }
+            SequencerMsg::InstallTemplate(template, reply) => {
+                let _ = reply.send(state.handle_install_template(template).await);
+            }
+            SequencerMsg::GetBlockPage(before_height, limit, reply) => {
+                let limit = limit.min(MAX_BLOCK_HISTORY_QUERY_BLOCKS);
+                let result = match &state.store {
+                    Some(store) => store
+                        .load_block_page(before_height, limit)
+                        .await
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(state
+                        .block_history
+                        .iter()
+                        .rev()
+                        .filter(|block| {
+                            before_height
+                                .is_none_or(|before| block.canonical.header.height < before)
+                        })
+                        .take(limit)
+                        .cloned()
+                        .collect()),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::GetBlock(height, reply) => {
+                let block = state
+                    .block_history
+                    .iter()
+                    .find(|b| b.canonical.header.height == height)
+                    .cloned();
+                let result = match block {
+                    Some(block) => Ok(block),
+                    None => match &state.store {
+                        Some(store) => match store.load_block(height).await {
+                            Ok(Some(block)) => Ok(block),
+                            Ok(None) => match store.history_retention_meta() {
+                                Ok(meta) => {
+                                    if let Some(retention_min_height) = meta.blocks_full_min_height
+                                    {
+                                        if height < retention_min_height {
+                                            Err(SequencerError::BlockPruned {
+                                                requested_height: height,
+                                                retention_min_height,
+                                            })
+                                        } else {
+                                            Err(SequencerError::BlockNotFound)
+                                        }
+                                    } else {
+                                        Err(SequencerError::BlockNotFound)
+                                    }
+                                }
+                                Err(error) => Err(SequencerError::Persistence(error.to_string())),
+                            },
+                            Err(error) => Err(SequencerError::Persistence(error.to_string())),
+                        },
+                        None => Err(SequencerError::BlockNotFound),
+                    },
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::GetDaArtifact(height, reply) => {
+                let result = match &state.store {
+                    Some(store) => {
+                        let oldest_retained_height = store
+                            .history_retention_meta()
+                            .map_err(|error| SequencerError::Persistence(error.to_string()))
+                            .map(|meta| meta.blocks_full_min_height);
+                        match oldest_retained_height {
+                            Ok(oldest_retained_height) => store
+                                .load_da_artifact(height)
+                                .await
+                                .map(|artifact| DaArtifactLookup {
+                                    artifact,
+                                    oldest_retained_height,
+                                })
+                                .map_err(|error| SequencerError::Persistence(error.to_string())),
+                            Err(error) => Err(error),
+                        }
+                    }
+                    None => Ok(DaArtifactLookup {
+                        artifact: None,
+                        oldest_retained_height: None,
+                    }),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::CreateMarketWithMetadata(name, metadata, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_create_market_with_metadata(name, metadata)
+                        .await,
+                );
+            }
+            SequencerMsg::GetPriceHistory(
+                market_id,
+                from_ms,
+                to_ms,
+                before_height,
+                limit,
+                reply,
+            ) => {
+                let limit = limit.min(MAX_PRICE_HISTORY_QUERY_POINTS);
+                let result = match &state.store {
+                    Some(store) => store
+                        .load_price_history(market_id, from_ms, to_ms, before_height, limit)
+                        .await
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(limit_price_point_page(
+                        state
+                            .sequencer
+                            .analytics()
+                            .price_history(market_id, from_ms, to_ms),
+                        before_height,
+                        limit,
+                    )),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::GetPriceCandles(
+                market_id,
+                resolution_secs,
+                from_ms,
+                to_ms,
+                before_ms,
+                limit,
+                reply,
+            ) => {
+                let limit = limit.min(MAX_PRICE_HISTORY_QUERY_POINTS);
+                let result = match &state.store {
+                    Some(store) => store
+                        .load_price_candles(
+                            market_id,
+                            resolution_secs,
+                            from_ms,
+                            to_ms,
+                            before_ms,
+                            limit,
+                        )
+                        .await
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(price_candle_page_from_points(
+                        state
+                            .sequencer
+                            .analytics()
+                            .price_history(market_id, from_ms, to_ms),
+                        resolution_secs,
+                        from_ms,
+                        to_ms,
+                        before_ms,
+                        limit,
+                    )),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply) => {
+                // Serve from the durable store (full persisted history); the
+                // in-memory recorder is a bounded window that's empty under prod
+                // retention caps. Fall back to memory on read error or when no
+                // store is configured. Mirrors GetEquitySeries / GetAccountEvents.
+                let result = match &state.store {
+                    Some(store) => store
+                        .account_fills(account_id, market_id, limit, offset)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, account_id = account_id.0, "account_fills read failed; falling back to memory");
+                            state
+                                .sequencer
+                                .analytics()
+                                .account_fills(account_id, market_id, limit, offset)
+                        }),
+                    None => state
+                        .sequencer
+                        .analytics()
+                        .account_fills(account_id, market_id, limit, offset),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::GetAccountFillsAfter(account_id, market_id, after, limit, reply) => {
+                let result = match &state.store {
+                    Some(store) => store
+                        .account_fills_after(account_id, market_id, after, limit)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, account_id = account_id.0, "account_fills_after read failed; falling back to memory");
+                            state
+                                .sequencer
+                                .analytics()
+                                .account_fills_after(account_id, market_id, after, limit)
+                        }),
+                    None => state
+                        .sequencer
+                        .analytics()
+                        .account_fills_after(account_id, market_id, after, limit),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::GetEquitySeries(account_id, since_ms, reply) => {
+                // NOTE: in prod the in-memory caps are 0, so this fallback returns
+                // an empty series. A persistent store read error therefore surfaces
+                // as an empty (200 OK) response plus the warn! below — not an error.
+                // The `since_ms` range is pushed into the store scan; the in-memory
+                // fallback re-applies it so both paths return the same window.
+                let result = match &state.store {
+                    Some(store) => store.equity_series(account_id, since_ms).unwrap_or_else(|e| {
+                        tracing::warn!(error = %e, account_id = account_id.0, "equity_series read failed; falling back to memory");
+                        state
+                            .sequencer
+                            .analytics()
+                            .equity_series(account_id)
+                            .into_iter()
+                            .filter(|point| point.timestamp_ms >= since_ms)
+                            .collect()
+                    }),
+                    None => state
+                        .sequencer
+                        .analytics()
+                        .equity_series(account_id)
+                        .into_iter()
+                        .filter(|point| point.timestamp_ms >= since_ms)
+                        .collect(),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::Leaderboard(since_ms, limit, reply) => {
+                // All-time inputs come from live in-memory state in one pass.
+                let bases = state.sequencer.leaderboard_bases();
+                let mut rows: Vec<LeaderboardRow> = bases
+                    .into_iter()
+                    .map(|base| {
+                        // For a windowed request, the baseline is the earliest
+                        // equity sample at/after the window start (durable store;
+                        // in-memory retention is 0 in prod). `net = value −
+                        // deposited` at a point is that point's cumulative PnL,
+                        // so windowed PnL = net(now) − net(window_start).
+                        let (pnl_nanos, basis_nanos) = if since_ms == 0 {
+                            (base.pnl_nanos, base.deposited_nanos)
+                        } else {
+                            let baseline = state
+                                .store
+                                .as_ref()
+                                .and_then(|store| {
+                                    store.equity_series(base.account_id, since_ms).ok()
+                                })
+                                .and_then(|points| points.into_iter().next());
+                            match baseline {
+                                Some(point) => (
+                                    base.pnl_nanos
+                                        - (point.portfolio_value_nanos - point.deposited_nanos),
+                                    point.portfolio_value_nanos,
+                                ),
+                                // No sample inside the window (account started
+                                // within it, or no durable series): credit the
+                                // full all-time PnL against deposited capital.
+                                None => (base.pnl_nanos, base.deposited_nanos),
+                            }
+                        };
+                        let roi_bps = if basis_nanos > 0 {
+                            ((pnl_nanos as i128 * 10_000) / basis_nanos as i128) as i64
+                        } else {
+                            0
+                        };
+                        LeaderboardRow {
+                            account_id: base.account_id,
+                            pnl_nanos,
+                            roi_bps,
+                            markets_traded: base.markets_traded,
+                            equity_nanos: base.equity_nanos,
+                        }
+                    })
+                    .collect();
+                // Deterministic ranking: PnL descending, account id ascending.
+                rows.sort_by(|a, b| {
+                    b.pnl_nanos
+                        .cmp(&a.pnl_nanos)
+                        .then(a.account_id.0.cmp(&b.account_id.0))
+                });
+                rows.truncate(limit);
+                let _ = reply.send(rows);
+            }
+            SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply) => {
+                let result = match &state.store {
+                    Some(store) => {
+                        match store.account_events(account_id, limit, before, category.clone()) {
+                            Ok(mut events) => {
+                                events.extend(state.sequencer.analytics().pending_account_history(
+                                    account_id,
+                                    before,
+                                    category.as_deref(),
+                                ));
+                                events.sort_by(|a, b| {
+                                    (b.block_height, b.seq).cmp(&(a.block_height, a.seq))
+                                });
+                                events.dedup_by_key(|e| (e.account_id.0, e.block_height, e.seq));
+                                events.truncate(limit);
+                                events
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, account_id = account_id.0, "account_events read failed; falling back to memory");
+                                state.sequencer.analytics().account_history(
+                                    account_id,
+                                    limit,
+                                    before,
+                                    category.as_deref(),
+                                )
+                            }
+                        }
+                    }
+                    None => state.sequencer.analytics().account_history(
+                        account_id,
+                        limit,
+                        before,
+                        category.as_deref(),
+                    ),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::ListAutoResolutionRecords(reply) => {
+                let result = match &state.store {
+                    Some(store) => store
+                        .auto_resolution_records()
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(Vec::new()),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::PutAutoResolutionRecord(record, reply) => {
+                let result = match &state.store {
+                    Some(store) => store
+                        .put_auto_resolution_record(record)
+                        .await
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(()),
+                };
+                let _ = reply.send(result);
+            }
+            SequencerMsg::PauseBlockProduction(reply) => {
+                state.pause_count = state.pause_count.saturating_add(1);
+                let _ = reply.send(());
+            }
+            SequencerMsg::ResumeBlockProduction(reply) => {
+                state.pause_count = state.pause_count.saturating_sub(1);
+                let _ = reply.send(());
+            }
+        }
+        Ok(())
+    }
+}
