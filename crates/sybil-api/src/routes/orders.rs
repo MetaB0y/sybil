@@ -32,7 +32,7 @@ fn mm_side_from_spec(spec: &OrderSpec) -> MmSide {
 }
 
 fn parse_signer_public_key(public_key_hex: &str) -> Result<PublicKey, AppError> {
-    let key_bytes = hex::decode(public_key_hex)
+    let key_bytes = hex::decode(public_key_hex.trim_start_matches("0x").trim_start_matches("0X"))
         .map_err(|_| AppError::bad_request("Invalid hex encoding for public key"))?;
     let sec1_point = Sec1Point::from_bytes(&key_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 encoded point"))?;
@@ -42,7 +42,7 @@ fn parse_signer_public_key(public_key_hex: &str) -> Result<PublicKey, AppError> 
 }
 
 fn parse_signature(signature_hex: &str) -> Result<Signature, AppError> {
-    let sig_bytes = hex::decode(signature_hex)
+    let sig_bytes = hex::decode(signature_hex.trim_start_matches("0x").trim_start_matches("0X"))
         .map_err(|_| AppError::bad_request("Invalid hex encoding for signature"))?;
     Signature::from_slice(&sig_bytes)
         .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))
@@ -341,4 +341,42 @@ pub async fn get_all_pending_orders(
     }
     let orders = state.sequencer.get_pending_orders(None).await?;
     Ok(Json(orders.iter().map(to_pending_response).collect()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p256::ecdsa::signature::Signer;
+    use p256::ecdsa::SigningKey;
+
+    /// A `0x`-prefixed pubkey must parse identically to the bare form, matching
+    /// the sibling bridge/proofs/accounts endpoints (client-footgun fix).
+    #[test]
+    fn parse_signer_public_key_accepts_0x_prefix() {
+        let key = SigningKey::from_slice(&[7u8; 32]).expect("fixed scalar");
+        let pubkey_hex = hex::encode(key.verifying_key().to_sec1_point(false).as_bytes());
+
+        let bare = parse_signer_public_key(&pubkey_hex).expect("bare pubkey parses");
+        let prefixed =
+            parse_signer_public_key(&format!("0x{pubkey_hex}")).expect("0x pubkey parses");
+        let upper =
+            parse_signer_public_key(&format!("0X{pubkey_hex}")).expect("0X pubkey parses");
+
+        assert_eq!(bare.0, prefixed.0);
+        assert_eq!(bare.0, upper.0);
+    }
+
+    /// Likewise for signatures — a `0x`-prefixed signature must decode to the
+    /// same signature bytes as the bare form.
+    #[test]
+    fn parse_signature_accepts_0x_prefix() {
+        let key = SigningKey::from_slice(&[9u8; 32]).expect("fixed scalar");
+        let signature: Signature = key.sign(b"canonical-order-bytes");
+        let sig_hex = hex::encode(signature.to_bytes());
+
+        let bare = parse_signature(&sig_hex).expect("bare signature parses");
+        let prefixed = parse_signature(&format!("0x{sig_hex}")).expect("0x signature parses");
+
+        assert_eq!(bare, prefixed);
+    }
 }
