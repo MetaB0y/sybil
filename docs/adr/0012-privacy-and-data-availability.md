@@ -14,6 +14,14 @@ superseded_by: []
 > The one place your steer most changes the shape is the **DA fork** in §Decision
 > point 4 (self-custody vs encrypted-DA) — that's the thing to veto if my read is
 > wrong. Everything else here is "stop leaking + keep it simple."
+>
+> **Resolved 2026-07-07 (founder confirmed encrypted-DA, no veto).** The concrete
+> construction — HPKE per-account blobs sealed to a passkey-PRF-derived *view
+> key*, stored at blinded slots in a mirrorable bucket, with a one-word-per-block
+> L1 DA-commitment + availability challenge, and self-custody demoted to an
+> optional robustness cache so **users need not self-custody anything** — is
+> specified in [`design/data-availability-design.md`](../../design/data-availability-design.md).
+> Cost: ~1 hash/block on-chain + ~300 MB static storage at 1 M accounts.
 
 ## Context
 
@@ -59,10 +67,16 @@ account's actual balance/positions) is secret.
      client silently caches the user's own leaf preimage + path each session.
      Simplest and fully private, but a user who loses their cache *and* the
      operator is gone is stuck.
-   - **Decision: design the foundation for encrypted-per-account DA** (it's what
-     "you can always exit" + "private" both demand), but it may be **phased** —
-     ship self-custody first if faster, upgrade later (no-backward-compat,
-     [ADR-0011](0011-validium-stance-no-backcompat.md), makes the upgrade free).
+   - **Decision (resolved 2026-07-07): encrypted-per-account DA**, concretely the
+     three-layer HPKE-to-view-key scheme in
+     [`design/data-availability-design.md`](../../design/data-availability-design.md).
+     Self-custody is retained only as **Layer 1** (an optional local cache), *not*
+     the exit requirement — the operator-hosted encrypted blobs let a user on a
+     fresh device re-fetch-and-decrypt with nothing kept. Phased:
+     Phase 1 = HPKE blobs + auth-gated reads (also fixes the live leak);
+     Phase 2 = the per-block L1 DA-commitment + availability challenge
+     (no-backward-compat, [ADR-0011](0011-validium-stance-no-backcompat.md), makes
+     the Phase-2 upgrade free).
 
 ## Alternatives considered
 

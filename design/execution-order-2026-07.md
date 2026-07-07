@@ -17,6 +17,23 @@ The organizing spine is the **trust-minimization sequence** from the
 [[Threat Model]] — each phase flips a 🟡/🔴 toward 🟢 — interleaved with the
 enabling cleanup.
 
+> **Updated by the 2026-07-07 founder reset (ADRs [0011](../docs/adr/0011-validium-stance-no-backcompat.md)–[0014](../docs/adr/0014-webauthn-first-auth.md)) — several specifics below shifted:**
+> - **D0–D10 are ratified.** D0 is **reversed**: WebAuthn/passkeys are the *primary*
+>   in-guest path ([ADR-0014](../docs/adr/0014-webauthn-first-auth.md)), raw-P256 for agents.
+> - **"Reserve the `capability_mask` byte slot" is moot.** No backward-compat until
+>   autumn → fresh genesis is free ([ADR-0011](../docs/adr/0011-validium-stance-no-backcompat.md));
+>   add `capability_mask` when built, don't pre-reserve. Drop all "batch into one
+>   fresh-genesis window" framing — batching is convenience, not necessity. Flatten
+>   version structs (no `V4{base:V3}`).
+> - **Escape values open positions at the last clearing price**, paid as cash
+>   ([ADR-0013](../docs/adr/0013-exit-and-escape-model.md)) — not cash-only. Requires
+>   committing `last_clearing_price` per market leaf.
+> - **Closing the privacy/DA leak is now a Phase-0/1 priority** (it's a *live* leak):
+>   auth-gate every per-account read + HPKE per-account encrypted DA
+>   ([ADR-0012](../docs/adr/0012-privacy-and-data-availability.md),
+>   [data-availability-design](data-availability-design.md); SYB-60 + SYB-120).
+> - Terminology: **validium** (single operator/prover), not "consensus".
+
 ```mermaid
 graph TB
     subgraph P0["Phase 0 — now (no redeploy)"]

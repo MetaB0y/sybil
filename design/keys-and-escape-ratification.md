@@ -17,7 +17,10 @@ last_verified: 2026-07-07
 > genesis is free. Escape now values positions at last clearing price
 > ([ADR-0013](../docs/adr/0013-exit-and-escape-model.md)); DA/privacy per
 > [ADR-0012](../docs/adr/0012-privacy-and-data-availability.md). The remaining
-> D2–D8 recommendations still stand.
+> **D2–D8 recommendations are RATIFIED** (founder "sounds good", 2026-07-07) — take
+> every one as its stated recommendation. The DA fork ([ADR-0012](../docs/adr/0012-privacy-and-data-availability.md)
+> §4) is also resolved: encrypted-per-account DA, concretely
+> [`data-availability-design.md`](data-availability-design.md).
 
 One decision pass to unblock the **D-cluster** implementation (SYB-225 proven
 key-ops, SYB-32 escape claims). Both designs are otherwise complete:
