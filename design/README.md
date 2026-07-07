@@ -39,6 +39,7 @@ The proven-key / escape / redeploy work that moves the guest commitment.
 - [`escape-claim-guest.md`](escape-claim-guest.md) — **spec** · the cash-escape guest (SYB-32).
 - [`escape-hatch-reconstruction.md`](escape-hatch-reconstruction.md) — state reconstruction for escape/replacement (SYB-80).
 - [`keys-and-escape-ratification.md`](keys-and-escape-ratification.md) — **spec** · the D0–D10 decisions consolidated for ratification.
+- [`capability-mask-keys.md`](capability-mask-keys.md) — **exploratory** · scoped delegated authority (trade-not-withdraw keys); refines D1 — reserve the byte slot in v4 now.
 - [`openvm-p256-integration.md`](openvm-p256-integration.md) — **spec** · in-guest P-256 ECDSA recipe ([ADR-0008](../docs/adr/0008-in-guest-p256-openvm-ecc.md)).
 - [`witness-schema-v2.md`](witness-schema-v2.md) — the canonical witness format design (v2→v3 precedent).
 
