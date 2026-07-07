@@ -95,6 +95,9 @@ The matching problem itself has an elegant mathematical structure: without marke
 - [[Data Availability]] — provider-neutral validium payload commitments
 - [[L1 Settlement and Vault]] — Ethereum custody, root acceptance, withdrawals, and escape boundaries
 
+## Security
+- [[Threat Model]] — adversary-framed trust boundaries: what's cryptographically prevented vs still trusted, and the sequenced path to trust-minimization
+
 ## API and Oracle
 - [[REST API]] — HTTP endpoints for trading
 - [[Order Types]] — from simple buys to custom payoff vectors
