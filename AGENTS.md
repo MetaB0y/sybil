@@ -125,7 +125,7 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 - **Payoff vectors**: Orders are represented as payoff vectors over market states, enabling unified handling of simple orders, spreads, and conditionals.
 - **Welfare maximization**: The objective is `Σ (limit_price - clearing_price) * fill_qty`, not volume.
-- **Fisher market structure**: MM budgets can be absorbed into the EG objective (no explicit budget constraints). See `lmsr-proof.typ`.
+- **Fisher market structure**: MM budgets can be absorbed into the EG objective (no explicit budget constraints). See `paper.typ` in `~/github/prediction-markets-are-fisher-markets/` (pointer: `design/math-papers.md`).
 - **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration.
 - **All integer arithmetic**: No floating point. Prices/quantities in nanos (1 dollar = 1,000,000,000 nanos).
 

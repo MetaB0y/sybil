@@ -20,7 +20,7 @@ The individual findings across thirteen subsystems are not independent. They are
 
 **The fix (one rule).** For each schism, decide in **one** direction and make the edge match the core:
 - *Honest minimalism:* delete the aspirational surface to the edge. Reject `num_markets != 1` and non-one-hot payoffs at admission; delete Spread/Bundle/Custom, the conditional-order machinery, the reserved oracle arms, and the escape scaffolding until a real design exists.
-- *Honest generality:* implement it. Per-state balance constraints in the LP (bundles/spreads price coherently out of joint EG, as `design/lmsr-proof.typ` intends); a real escape-claim path; deposit-inclusion in the guest.
+- *Honest generality:* implement it. Per-state balance constraints in the LP (bundles/spreads price coherently out of joint EG, as `paper.typ` in `~/github/prediction-markets-are-fisher-markets/` intends); a real escape-claim path; deposit-inclusion in the guest.
 
 The project's stated rule — *elegance over backward compatibility, early dev* — is precisely the license to do this. Pick minimalism where no near-term design exists (conditional orders, escape), generality where the thesis demands it (payoff vectors).
 

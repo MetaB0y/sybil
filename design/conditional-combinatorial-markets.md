@@ -35,8 +35,9 @@ to 5 markets plus an optional `PriceCondition`. It is *deliberately disabled* �
 `validate_binary_one_hot()` is enforced at four layers (API ingress, sequencer,
 the validity-critical verifier, and solver ingress) so only simple binary orders pass
 today ([[Payoff Vectors]]; the KEEP-DEFERRED entry in
-`docs/review/simplification-plan.md`; math in `design/decomposition.typ`,
-`design/bundle-clearing.typ`).
+`docs/review/simplification-plan.md`; math in canonical
+`~/github/prediction-markets-are-fisher-markets/decomposition.typ`,
+`bundle-clearing.typ` — see `design/math-papers.md`).
 
 So this feature is not "invent a new instrument." It is **"safely widen the
 one-hot gate to the payoff-vector generality the type already models, and teach
@@ -56,11 +57,23 @@ graph LR
 The LP core prices independent binaries in milliseconds. Payoff-vector orders
 couple markets, and the MM budget constraints add bilinear coupling
 ([[MM Budget Constraint]]) — the sole source of NP-hardness. The existing
-research solvers (`decomposed.rs` implements `design/decomposition.typ`) are the
+research solvers (`decomposed.rs` implements canonical `decomposition.typ` in
+`~/github/prediction-markets-are-fisher-markets/`) are the
 head-start: decompose per market-group, solve the coupled sub-blocks, reconcile.
 This is where the genuine effort is, and why it's deferred, not deleted. Scope it
 to a bounded generality first (small `k`-market conditionals), not the full
 32-dimensional space.
+
+Follow the **corrected** plan in the revised `bundle-clearing.typ`
+(July 2026, canonical repo — see `design/math-papers.md`): factor the clearing
+**exactly** across the connected components of the coupling graph, and within a
+component run a **junction tree** whose cost is exponential in the component's
+**treewidth** — so chains and stars of conditionals stay cheap while dense
+coupling is where the blow-up lives. Where even that is too expensive, fall back
+to a **price-taking injection** of the bundle against fixed prices, which carries
+a proven welfare bound. (The Feb draft's claim of cost "polynomial in the number
+of bundles regardless of coupling" was wrong: per-bundle minting-cost
+corrections do not simply add.)
 
 ### 2. Resolution semantics (new, must be exact)
 A conditional "A if B" must settle correctly across the *joint* outcome of A and

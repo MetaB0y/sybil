@@ -7,8 +7,8 @@
 Sybil is a **prediction market matching engine** built on **Frequent Batch Auctions (FBA)**. It solves the welfare-maximizing clearing problem — given orders with complex payoff structures across multiple markets and budget-constrained market makers, find fills and prices that maximize total surplus.
 
 The theoretical foundation is established in two companion papers:
-- **lmsr-proof.typ**: Prediction markets are Fisher markets. Risk-averse (quasi-linear EG) clearing is a convex program with unique prices and implicit budget constraints.
-- **decomposition.typ**: Budget decomposition across market groups via mirror descent.
+- **paper.typ** (canonical repo `~/github/prediction-markets-are-fisher-markets/`, was `lmsr-proof.typ`): Prediction markets are Fisher markets. Risk-averse (quasi-linear EG) clearing is a convex program with unique prices and implicit budget constraints.
+- **decomposition.typ** (same canonical repo): Budget decomposition across market groups via mirror descent.
 
 ---
 
@@ -43,7 +43,7 @@ The `temperature` parameter (LMSR smoothing, b > 0) is reserved for future work.
 2. Solves each component independently
 3. Coordinates MM budgets across components via multiplicative-weights (mirror descent)
 
-This is the computational payoff of the Fisher market structure — with log utility, budget allocation is smooth and concave. With linear welfare, it's combinatorial. See `decomposition.typ` §2-3.
+This is the computational payoff of the Fisher market structure — with log utility, budget allocation is smooth and concave. With linear welfare, it's combinatorial. See `decomposition.typ` §2-3 in `~/github/prediction-markets-are-fisher-markets/` (`design/math-papers.md`).
 
 ---
 
@@ -96,5 +96,5 @@ Designed for ZK proof integration — the verifier checks a `BlockWitness` that 
 1. **All integer arithmetic**: Prices/quantities in nanos (10^9 per dollar). No floating point in the engine.
 2. **Payoff vectors**: Orders are payoff vectors over market states, enabling unified handling of simple orders, bundles, spreads, and conditionals.
 3. **Welfare maximization**: Objective is `Σ (limit_price - clearing_price) × fill_qty`, not volume.
-4. **Fisher market structure**: MM budgets absorbed into the EG objective (no explicit budget constraints). See `lmsr-proof.typ` Theorem 5.
+4. **Fisher market structure**: MM budgets absorbed into the EG objective (no explicit budget constraints). See `paper.typ` Theorem 5 in `~/github/prediction-markets-are-fisher-markets/` (`design/math-papers.md`).
 5. **Verifiability**: All results verified by an independent checker (ZK-ready).

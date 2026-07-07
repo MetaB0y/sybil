@@ -37,7 +37,8 @@ validity move). The payoff: **conditional markets** — "Fed cuts *if* CPI < 3%"
 priced jointly with the unconditional markets so no arbitrage exists between
 them. This is the headline capability of a Fisher-market exchange and nobody in
 prediction markets does it well. Design exists in spirit
-(`design/decomposition.typ`, `design/bundle-clearing.typ`); the work is real
+(canonical `~/github/prediction-markets-are-fisher-markets/decomposition.typ`,
+`bundle-clearing.typ`; see `design/math-papers.md`); the work is real
 (validity-critical, `Order` generality + solver support). **Leverage: maximal.
 Validity: yes. Horizon: the flagship medium-term bet.**
 

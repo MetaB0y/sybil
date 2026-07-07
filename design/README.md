@@ -24,10 +24,11 @@ Status markers: **proof** (math) · **spec** (ratified/near-ratified) ·
 ## Foundations — the math
 The theoretical core: why the matching problem is what it is.
 - [`problem-statement.md`](problem-statement.md) — what Sybil is solving.
-- [`lmsr-proof.typ`](lmsr-proof.typ) — **proof** · prediction markets are Fisher markets; the theoretical spine ([ADR-0001](../docs/adr/0001-eg-fisher-market-matching.md)).
-- [`math-primer.typ`](math-primer.typ) — the arithmetic/convex-analysis background.
+- [`math-papers.md`](math-papers.md) — pointer to the canonical math papers, now in `~/github/prediction-markets-are-fisher-markets/` (the copies below moved there 2026-07-07):
+  - `paper.typ` (was `lmsr-proof.typ`) — **proof** · prediction markets are Fisher markets; the theoretical spine ([ADR-0001](../docs/adr/0001-eg-fisher-market-matching.md)).
+  - `primer.typ` (was `math-primer.typ`) — the arithmetic/convex-analysis background.
+  - `decomposition.typ` / `bundle-clearing.typ` — **proof** · combinatorial/bundle clearing (the substrate for conditional markets); corrected July 2026.
 - [`welfare-vs-volume.md`](welfare-vs-volume.md) — why we maximize welfare, not trades.
-- [`decomposition.typ`](decomposition.typ) / [`bundle-clearing.typ`](bundle-clearing.typ) — **proof** · combinatorial/bundle clearing (the substrate for conditional markets).
 - [`eg-conic.typ`](eg-conic.typ) — Eisenberg–Gale ↔ conic formulations.
 - [`mint-pnl.typ`](mint-pnl.typ) — minting and P&L accounting.
 - [`solver-benchmarks.md`](solver-benchmarks.md) — solver performance data.

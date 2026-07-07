@@ -74,8 +74,9 @@ solver appears only in `matching-sim`, `tests/solver_conformance.rs`, and
 | MILP (SCIP) | `milp.rs` | ~943 | no | no (`milp` off) | KEEP-GATED (oracle) |
 | viz | `viz.rs` | ~263 | no | yes (unconditional) | FEATURE-GATE |
 
-EG is the *theoretical* core (`design/lmsr-proof.typ`, "Prediction Markets Are
-Fisher Markets"), but the production clearer is the **LP** solver; EG/IterLP/
+EG is the *theoretical* core (canonical `paper.typ` in
+`~/github/prediction-markets-are-fisher-markets/`, "Prediction Markets Are
+Fisher Markets"; see `design/math-papers.md`), but the production clearer is the **LP** solver; EG/IterLP/
 Conic all build on LP utilities and serve as **differential-testing oracles** in
 the conformance harness (which checks solver output against `sybil-verifier`).
 Genuine correctness value — **gate, do not delete.**
@@ -85,8 +86,8 @@ Steps: add `research = ["lp"]` to `matching-solver/Cargo.toml`; switch
 `#[cfg(feature="lp")]`/unconditional to `#[cfg(feature="research")]`; give
 `matching-sim`/conformance/bench the `research` feature; sequencer keeps
 `["lp"]`. Removes ~1,731 lines from the prod compile with zero behavior change.
-`decomposed.rs` is KEEP-DEFERRED (implements `design/decomposition.typ`,
-combinatorial-markets roadmap).
+`decomposed.rs` is KEEP-DEFERRED (implements canonical `decomposition.typ` in
+`~/github/prediction-markets-are-fisher-markets/`, combinatorial-markets roadmap).
 
 ## 2 — Unused order generality
 
@@ -99,7 +100,8 @@ instrument: `payoffs:[i8;32]` over up to 5 markets plus optional
 
 **KEEP-DEFERRED, do not remove**, for two hard reasons: (1) multi-outcome/
 bundle/conditional is the stated combinatorial-markets direction
-(`design/bundle-clearing.typ`, `decomposition.typ`); (2) `Order` is serialized
+(canonical `bundle-clearing.typ`, `decomposition.typ` in
+`~/github/prediction-markets-are-fisher-markets/`); (2) `Order` is serialized
 into the block witness and re-derived by `sybil-verifier`/`sybil-zk` —
 `marginal_payoffs_i64` (`order.rs:227`) matches verifier semantics and
 `OrderDirection::to_byte` has a stability test (`order.rs:493`). Changing the

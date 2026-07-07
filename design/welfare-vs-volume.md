@@ -68,7 +68,7 @@ Total: 100 shares, $15 welfare
 
 Order C could trade at the clearing price but doesn't get filled because higher-welfare orders consume all liquidity. **This sacrifices 50 shares of potential volume to maximize welfare.**
 
-The Fisher market formulation (EgSolver, ConicSolver with QuasiFisher mode) has the same welfare-first bias but handles MM budget constraints more elegantly — budgets are absorbed into the log-utility objective rather than handled as explicit constraints. See `lmsr-proof.typ` for the theoretical foundation.
+The Fisher market formulation (EgSolver, ConicSolver with QuasiFisher mode) has the same welfare-first bias but handles MM budget constraints more elegantly — budgets are absorbed into the log-utility objective rather than handled as explicit constraints. See `paper.typ` in `~/github/prediction-markets-are-fisher-markets/` (pointer `design/math-papers.md`) for the theoretical foundation.
 
 ---
 

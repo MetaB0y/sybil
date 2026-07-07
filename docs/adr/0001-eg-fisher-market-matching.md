@@ -34,9 +34,10 @@ solving one joint program. The production clearer is the **LP solver**
 (`matching-solver`, `features=["lp"]`); EG/IterLP/Conic exist as
 differential-testing oracles.
 
-Rationale and the LMSR-equivalence proof: `design/lmsr-proof.typ`
-("Prediction Markets Are Fisher Markets"), `design/decomposition.typ`,
-`docs/architecture/Welfare Maximization.md`.
+Rationale and the LMSR-equivalence proof: the canonical math papers in
+`~/github/prediction-markets-are-fisher-markets/` — `paper.typ`
+("Prediction Markets Are Fisher Markets") and `decomposition.typ`
+(see `design/math-papers.md`), plus `docs/architecture/Welfare Maximization.md`.
 
 ## Alternatives considered
 
@@ -69,6 +70,7 @@ the settlement math are in the guest commitment, **generalizing the instrument
 (see [ADR-0006](0006-witness-v3-full-snapshot.md), and the payoff-vector
 generality deferred in `docs/review/30-roadmap.md`).
 
-**Follow-ups:** combinatorial-markets direction (`design/bundle-clearing.typ`,
-`design/decomposition.typ`); the float-search/integer-truth split this forces is
+**Follow-ups:** combinatorial-markets direction (canonical
+`~/github/prediction-markets-are-fisher-markets/bundle-clearing.typ`,
+`decomposition.typ`; see `design/math-papers.md`); the float-search/integer-truth split this forces is
 [ADR-0004](0004-float-search-integer-truth.md).
