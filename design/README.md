@@ -57,6 +57,7 @@ Where the product could go once the trust story is solid.
 - [`sealed-bid-batch-auctions.md`](sealed-bid-batch-auctions.md) — **exploratory** · MEV-resistance as a structural property.
 - [`conditional-combinatorial-markets.md`](conditional-combinatorial-markets.md) — **exploratory** · the Fisher-market headline capability.
 - [`proof-of-reserves.md`](proof-of-reserves.md) — **exploratory** · prove the vault covers every balance (solvent by construction; O(1) via a committed aggregate).
+- [`trust-minimized-resolution.md`](trust-minimized-resolution.md) — **exploratory** · optimistic propose/challenge resolution (fills the reserved oracle arms); closes the biggest trusted surface.
 
 ## Tooling
 - [`user-cli-plan.md`](user-cli-plan.md) — the custody/user CLI plan.
