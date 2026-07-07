@@ -90,14 +90,31 @@ same inner conic solver):
 | medium | 30 / 2        | $17.45 / 0.09s   | $17.01 / 1.1s    | 97.5%         |
 
 On these **near-symmetric** synthetic books the corrected rule tracks the monolithic
-optimum closely (≈98–100%). It also lands within noise of the old surrogate here
+optimum closely (≈98–100%) and lands within noise of the old surrogate
 (large: surrogate $56.55 vs $56.47; medium: surrogate $17.40 vs $17.01) — expected, since
-equal-scarcity ≈ equal-utility at symmetry, which is exactly why the surrogate "stuck"
-near 93–99% on symmetric instances despite being wrong. The correctness win shows up on
-**asymmetric** books, where equal-utility misallocates budget toward capacity-limited /
-low-ROI components; see `decomposed::tests::test_asymmetric_equal_scarcity_coordination`
-for a worked instance where the two targets diverge. The decomposed solver remains slower
-here because coordination overhead dominates the savings from smaller per-component solves.
+equal-scarcity ≈ equal-utility at symmetry, which is why the surrogate "stuck"
+near 93–99% despite being wrong.
+
+An empirical follow-up tested the natural hypothesis that the correction *pays off on
+asymmetric books* (heterogeneous depth/ROI with a spanning MM), comparing new vs old vs
+monolithic across seeds. **It does not.** The old surrogate ties or marginally beats the
+corrected rule on every seed (e.g. seed 42: monolithic $18.67, old $18.55, new $18.31);
+more iterations (20→50→100 plateaus ≈98%) and damping do not change it. Root cause: **MM
+budget coordination is ~welfare-neutral in this protocol.** MINT acts as a universal
+counterparty and the global `trim_mm_budget_overflows` caps the welfare cost of any
+split error, so total welfare is nearly invariant to a spanning MM's budget allocation —
+verified directly: welfare stays flat while sweeping MM budget $0→$1000 on a hand-built
+book. No coordination rule, right or wrong, moves welfare much here; the residual ±1–2 pt
+differences are trim/rounding artifacts.
+
+The corrected rule is therefore justified on **fixed-point correctness** (the old
+equal-utility target is a provable welfare *minimizer*;
+`decomposed::tests::test_asymmetric_equal_scarcity_coordination` exercises where the two
+targets diverge), **not** on measured welfare — and none should be claimed. The lever for
+actually improving decomposed-solver welfare is per-component solve quality + cross-group
+handling, not the coordination rule. The solver remains slower here (coordination overhead
+dominates the savings from smaller per-component solves) and off the production clearing
+path (production uses the monolithic LP).
 
 Convergence *rate* of proportional response in this setting (quasilinear utilities,
 endogenous supply, retail orders alongside MMs) is an open problem — the companion note
