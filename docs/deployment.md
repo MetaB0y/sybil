@@ -1,5 +1,9 @@
 # Live Deployment Runbook
 
+> The root [`DEPLOY.md`](../DEPLOY.md) is the primary, most-current deployment
+> quickstart (ports, Caddy vhosts, `.env`). This doc is the fuller reference;
+> where they differ, DEPLOY.md and the checked-in compose files are authoritative.
+
 ## Hosts and URLs
 
 Production demo host:
@@ -9,13 +13,15 @@ Production demo host:
 - Arena dashboard: `https://arena.172-104-31-54.nip.io`
 - Raw API: `http://172.104.31.54:3000`
 - Streamlit direct: `http://172.104.31.54:8501`
-- Grafana direct: `http://172.104.31.54:3001`
+- Grafana: `https://grafana.172-104-31-54.nip.io` (via Caddy — basic auth, then Grafana login)
 - VictoriaMetrics direct: `http://172.104.31.54:8428`
 - vmalert direct: `http://172.104.31.54:8880`
 
-Grafana is not currently routed through Caddy. It is exposed directly on port
-`3001`; anonymous Viewer access is enabled and the provisioned admin password
-is `admin`.
+Grafana is routed through Caddy (`reverse_proxy grafana:3000`) behind basic auth;
+it is **not** published directly on the host. Anonymous access is **disabled**
+(`GF_AUTH_ANONYMOUS_ENABLED: "false"` in both compose files) and the admin
+password is set via `GF_SECURITY_ADMIN_PASSWORD` in `/opt/sybil/.env` (not a
+default).
 
 ## Server Layout
 
