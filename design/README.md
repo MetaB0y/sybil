@@ -16,6 +16,11 @@ current state see [`../docs/review/`](../docs/review/00-executive-summary.md).
 Status markers: **proof** (math) · **spec** (ratified/near-ratified) ·
 **strategy** (how-to program) · **exploratory** (design sketch) · **review**.
 
+> **Start here for "what happens next":**
+> [`execution-order-2026-07.md`](execution-order-2026-07.md) — the dependency-ordered
+> spine tying every doc below into one prioritized program (trust first, features
+> second).
+
 ## Foundations — the math
 The theoretical core: why the matching problem is what it is.
 - [`problem-statement.md`](problem-statement.md) — what Sybil is solving.
