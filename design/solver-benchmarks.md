@@ -69,17 +69,40 @@ convergence. The LP solver confirms welfare is flat across all slack budget scal
 Decomposed solving partitions the problem by market group, solving each independently.
 With single-market orders, no orders span groups and the minting cost separates exactly:
 C_b = Σⱼ C_b^Gⱼ. The only coupling is MM budget allocation across components,
-coordinated by mirror descent on budget shares.
+coordinated by **proportional response on deployed value** `Vₖᵐ = Uₖᵐ + sₖᵐ` (weighted
+fill value plus retained cash). Fixed points are the *equal-scarcity* allocations
+(`Bₖᵐ / Vₖᵐ` equal across a MM's active components), which are exactly the componentwise
+restrictions of the monolithic optimum (decomposition companion note, Theorem 1).
 
-| Solver | Monolithic | Decomposed | Welfare ratio |
-|--------|-----------|------------|---------------|
-| Conic (quasi-Fisher) | $62.32K / 0.25s | $57.94K / 1.38s | 93.0% |
+> **Note (SYB-236).** Prior figures in this section used the *superseded* budget-update
+> rule — multiplicative-weights ascent on per-component EG utility (equalizing `Uₖᵐ`), the
+> February-2026 "surrogate". That surrogate converges to the wrong fixed point (EG optimal
+> values are convex in budget, so its interior stationary point is a welfare *minimizer*).
+> The rows below are re-measured with the corrected proportional-response rule and are
+> **not comparable** to the earlier numbers.
 
-The 7% welfare gap reflects imperfect MM budget allocation: mirror descent must split
-each MM's budget across 50 market groups and has not fully converged. In the limit of
-convergence, decomposition is exact for single-market order books. The decomposed solver
-is slower on this instance because coordination overhead dominates the savings from
-smaller per-component problems.
+Re-measured with the corrected rule (`matching-sim`, seed 42; monolithic vs decomposed,
+same inner conic solver):
+
+| Preset | Markets / MMs | Monolithic conic | Decomposed conic | Welfare ratio |
+|--------|---------------|------------------|------------------|---------------|
+| large  | 50 / 3        | $56.60 / 0.28s   | $56.47 / 3.6s    | 99.8%         |
+| medium | 30 / 2        | $17.45 / 0.09s   | $17.01 / 1.1s    | 97.5%         |
+
+On these **near-symmetric** synthetic books the corrected rule tracks the monolithic
+optimum closely (≈98–100%). It also lands within noise of the old surrogate here
+(large: surrogate $56.55 vs $56.47; medium: surrogate $17.40 vs $17.01) — expected, since
+equal-scarcity ≈ equal-utility at symmetry, which is exactly why the surrogate "stuck"
+near 93–99% on symmetric instances despite being wrong. The correctness win shows up on
+**asymmetric** books, where equal-utility misallocates budget toward capacity-limited /
+low-ROI components; see `decomposed::tests::test_asymmetric_equal_scarcity_coordination`
+for a worked instance where the two targets diverge. The decomposed solver remains slower
+here because coordination overhead dominates the savings from smaller per-component solves.
+
+Convergence *rate* of proportional response in this setting (quasilinear utilities,
+endogenous supply, retail orders alongside MMs) is an open problem — the companion note
+proves fixed-point correctness only. The iteration is capped at 20 rounds and returns the
+best-welfare round seen, so a not-fully-converged run is bounded, not catastrophic.
 
 Cross-group orders (spreads, bundles) would additionally break minting-cost separability,
 adding a structural welfare loss beyond the coordination gap.
