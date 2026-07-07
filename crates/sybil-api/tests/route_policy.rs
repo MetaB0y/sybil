@@ -53,15 +53,7 @@ fn exact_public_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
-            path: "/v1/proofs/state/{leaf_key_hex}",
-        },
-        RouteMount {
-            method: "GET",
             path: "/v1/da/{height}/manifest",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/da/{height}/payload",
         },
         RouteMount {
             method: "GET",
@@ -224,6 +216,14 @@ fn exact_public_routes() -> &'static [RouteMount] {
 
 fn exact_service_routes() -> &'static [RouteMount] {
     &[
+        RouteMount {
+            method: "GET",
+            path: "/v1/proofs/state/{leaf_key_hex}",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/da/{height}/payload",
+        },
         RouteMount {
             method: "POST",
             path: "/v1/accounts",
@@ -414,6 +414,12 @@ async fn request_empty_with_headers(
 
 fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
     vec![
+        (
+            Method::GET,
+            "/v1/proofs/state/616363742f6d697373696e67",
+            json!({}),
+        ),
+        (Method::GET, "/v1/da/1/payload", json!({})),
         (
             Method::POST,
             "/v1/accounts",

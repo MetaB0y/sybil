@@ -15,7 +15,8 @@ use tower::ServiceExt;
 
 use common::{
     get, post_json, post_json_with_headers, put_json, test_app, test_app_with_config,
-    test_app_with_store, test_app_with_store_config, test_app_with_store_zero_caps,
+    test_app_with_store, test_app_with_store_api_config, test_app_with_store_config,
+    test_app_with_store_zero_caps,
 };
 use matching_engine::{MarketSet, Nanos, Qty};
 use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
@@ -27,6 +28,8 @@ use sybil_api::config::ApiConfig;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const SERVICE_TOKEN: &str = "api-integration-service-token";
 
 fn parse_json(body: &[u8]) -> Value {
     serde_json::from_slice(body).expect("response body is valid JSON")
@@ -40,11 +43,38 @@ fn hex_bytes(byte: u8, len: usize) -> String {
     hex::encode(vec![byte; len])
 }
 
-async fn get_with_headers(app: axum::Router, uri: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
-    let req = axum::http::Request::builder()
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap();
+fn service_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        format!("Bearer {SERVICE_TOKEN}").parse().unwrap(),
+    );
+    headers
+}
+
+async fn test_service_app_with_store() -> (axum::Router, SequencerHandle) {
+    test_app_with_store_api_config(
+        ApiConfig {
+            dev_mode: false,
+            service_token: SERVICE_TOKEN.to_string(),
+            ..ApiConfig::default()
+        },
+        SequencerConfig::default(),
+    )
+    .await
+}
+
+async fn get_with_headers(
+    app: axum::Router,
+    uri: &str,
+    request_headers: HeaderMap,
+) -> (StatusCode, HeaderMap, Vec<u8>) {
+    let mut builder = axum::http::Request::builder().uri(uri);
+    for (name, value) in request_headers {
+        let Some(name) = name else { continue };
+        builder = builder.header(name, value);
+    }
+    let req = builder.body(Body::empty()).unwrap();
     let resp = app.oneshot(req).await.unwrap();
     let status = resp.status();
     let headers = resp.headers().clone();
@@ -345,12 +375,17 @@ async fn get_nonexistent_block_404() {
 
 #[tokio::test]
 async fn state_proof_returns_inclusion_for_committed_account_leaf() {
-    let (app, handle) = test_app_with_store(true).await;
+    let (app, handle) = test_service_app_with_store().await;
     let account = handle.create_account(1_000_000).await.unwrap();
     let block = handle.produce_block().await.unwrap();
     let leaf_key = account_state_leaf_key(account.id.0);
 
-    let (status, body) = get(app, &format!("/v1/proofs/state/{}", hex::encode(&leaf_key))).await;
+    let (status, _, body) = get_with_headers(
+        app,
+        &format!("/v1/proofs/state/{}", hex::encode(&leaf_key)),
+        service_headers(),
+    )
+    .await;
 
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let proof = parse_json(&body);
@@ -370,12 +405,17 @@ async fn state_proof_returns_inclusion_for_committed_account_leaf() {
 
 #[tokio::test]
 async fn state_proof_returns_exclusion_for_missing_leaf() {
-    let (app, handle) = test_app_with_store(true).await;
+    let (app, handle) = test_service_app_with_store().await;
     handle.create_account(1_000_000).await.unwrap();
     let block = handle.produce_block().await.unwrap();
     let leaf_key = b"acct/missing".to_vec();
 
-    let (status, body) = get(app, &format!("/v1/proofs/state/{}", hex::encode(&leaf_key))).await;
+    let (status, _, body) = get_with_headers(
+        app,
+        &format!("/v1/proofs/state/{}", hex::encode(&leaf_key)),
+        service_headers(),
+    )
+    .await;
 
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let proof = parse_json(&body);
@@ -395,8 +435,8 @@ async fn state_proof_returns_exclusion_for_missing_leaf() {
 
 #[tokio::test]
 async fn state_proof_rejects_invalid_leaf_key_hex() {
-    let (app, _) = test_app_with_store(true).await;
-    let (status, _) = get(app, "/v1/proofs/state/not-hex").await;
+    let (app, _) = test_service_app_with_store().await;
+    let (status, _, _) = get_with_headers(app, "/v1/proofs/state/not-hex", service_headers()).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
@@ -422,7 +462,7 @@ async fn da_manifest_and_payload_verify_binding_chain() {
 
     let manifest = wait_for_da_manifest(app.clone(), height).await;
     let (status, headers, payload) =
-        get_with_headers(app, &format!("/v1/da/{height}/payload")).await;
+        get_with_headers(app, &format!("/v1/da/{height}/payload"), service_headers()).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         headers

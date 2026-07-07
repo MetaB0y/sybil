@@ -480,15 +480,7 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
-        path: "/v1/proofs/state/{leaf_key_hex}",
-    },
-    RouteMount {
-        method: "GET",
         path: "/v1/da/{height}/manifest",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/da/{height}/payload",
     },
     RouteMount {
         method: "GET",
@@ -650,6 +642,14 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
 
 pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     RouteMount {
+        method: "GET",
+        path: "/v1/proofs/state/{leaf_key_hex}",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/da/{height}/payload",
+    },
+    RouteMount {
         method: "POST",
         path: "/v1/accounts",
     },
@@ -777,16 +777,8 @@ fn public_routes() -> Router<AppState> {
             axum::routing::get(routes::system::state_root),
         )
         .route(
-            "/v1/proofs/state/{leaf_key_hex}",
-            axum::routing::get(routes::proofs::get_state_proof),
-        )
-        .route(
             "/v1/da/{height}/manifest",
             axum::routing::get(routes::da::get_da_manifest),
-        )
-        .route(
-            "/v1/da/{height}/payload",
-            axum::routing::get(routes::da::get_da_payload),
         )
         // Accounts
         .route(
@@ -948,6 +940,14 @@ fn public_routes() -> Router<AppState> {
 
 fn service_routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/v1/proofs/state/{leaf_key_hex}",
+            axum::routing::get(routes::proofs::get_state_proof),
+        )
+        .route(
+            "/v1/da/{height}/payload",
+            axum::routing::get(routes::da::get_da_payload),
+        )
         .route(
             "/v1/accounts",
             axum::routing::post(routes::accounts::create_account),

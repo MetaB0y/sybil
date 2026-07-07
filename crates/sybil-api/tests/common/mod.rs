@@ -127,6 +127,22 @@ pub async fn test_app_with_store_config(
     dev_mode: bool,
     sequencer_config: SequencerConfig,
 ) -> (Router, SequencerHandle) {
+    test_app_with_store_api_config(
+        ApiConfig {
+            dev_mode,
+            ..ApiConfig::default()
+        },
+        sequencer_config,
+    )
+    .await
+}
+
+/// Create a store-backed test app with explicit API and sequencer config.
+#[allow(dead_code)]
+pub async fn test_app_with_store_api_config(
+    api_config: ApiConfig,
+    sequencer_config: SequencerConfig,
+) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
     let oracle = Arc::new(AdminOracle::new());
@@ -137,11 +153,7 @@ pub async fn test_app_with_store_config(
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
-    let config = ApiConfig {
-        dev_mode,
-        ..ApiConfig::default()
-    };
-    let state = AppState::new(handle.clone(), &config, prometheus);
+    let state = AppState::new(handle.clone(), &api_config, prometheus);
     (create_router(state), handle)
 }
 
