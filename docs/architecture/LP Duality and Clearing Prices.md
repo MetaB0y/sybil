@@ -2,14 +2,36 @@
 tags: [concept, economics]
 layer: solver
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-07-07
 ---
 
-Clearing prices in Sybil are not set by a pricing algorithm — they emerge naturally as dual variables of the [[The LP Core|LP's]] position balance constraints. This is one of the most elegant aspects of the formulation: the economics of price discovery are a free consequence of solving the welfare optimization problem.
+The idea in plain words: nobody in Sybil ever *chooses* a price. You hand the solver a pile of orders and ask one question — "which fills create the most welfare?" — and the prices fall out the side of the answer for free. Every "market cannot sell what it doesn't have" constraint has a shadow price attached: how much more welfare you'd get from one extra unit of supply. That shadow price *is* the clearing price. Price discovery isn't a separate step; it's the receipt the optimizer prints.
 
-Every LP has a dual. The dual variable associated with a constraint represents the marginal value of relaxing that constraint by one unit. For the position balance constraint on market m, outcome o — "total demand cannot exceed total supply plus minting" — the dual variable is exactly the clearing price for that outcome. If you could magically create one more unit of supply, the welfare would increase by exactly the clearing price. This is the textbook definition of a competitive market price.
+Formally: every LP has a dual, and the dual variable of a constraint is the marginal value of relaxing it by one unit. For the position balance constraint on market m, outcome o — "total demand cannot exceed total supply plus minting" — that marginal value is exactly the clearing price for the outcome. Conjure one more unit of supply and welfare rises by the clearing price. That is the textbook definition of a competitive market price.
 
-LP duality gives three economic properties for free. First, the Uniform Clearing Price (UCP) condition: complementary slackness says that if an order fills (`q_i > 0`), its surplus must be non-negative — buyers only fill if their limit is at or above the clearing price, sellers only fill if their limit is at or below. Second, price normalization: the stationarity condition on the per-market minting variable gives `YES_price + NO_price <= $1`, with equality when [[Minting]] is active (which it almost always is). Third, group consistency: the stationarity condition on group minting gives `sum(YES_prices) <= $1` across markets in a [[Binary Markets and Market Groups|group]], with equality when group minting is active. All three conditions are enforced automatically by the solver — no post-hoc price adjustment is needed.
+```mermaid
+flowchart LR
+    subgraph primal["PRIMAL — what the solver chooses"]
+        direction TB
+        P1["position balance<br/>demand ≤ supply + mint"]
+        P2["order fills q_i > 0"]
+        P3["per-market mint_m"]
+        P4["group gmint_g"]
+    end
+    subgraph dual["DUAL — what emerges for free"]
+        direction TB
+        D1["clearing price p_o<br/>(shadow price of supply)"]
+        D2["surplus ≥ 0<br/>= Uniform Clearing Price"]
+        D3["YES + NO ≤ $1<br/>price normalization"]
+        D4["Σ YES ≤ $1<br/>group consistency"]
+    end
+    P1 -. "shadow price" .-> D1
+    P2 -. "complementary slackness" .-> D2
+    P3 -. "stationarity" .-> D3
+    P4 -. "stationarity" .-> D4
+```
+
+LP duality hands you three economic properties, each an edge in the diagram above. First, the Uniform Clearing Price (UCP): complementary slackness says a filled order (`q_i > 0`) must have non-negative surplus — buyers fill only at or above the clearing price, sellers only at or below. Second, price normalization: stationarity on the per-market minting variable gives `YES_price + NO_price <= $1`, with equality when [[Minting]] is active (almost always). Third, group consistency: stationarity on group minting gives `sum(YES_prices) <= $1` across a [[Binary Markets and Market Groups|group]], with equality when group minting is active. All three are enforced automatically — no post-hoc price adjustment code exists, because none is needed.
 
 ## Key Properties
 - Clearing price = dual variable of position balance constraint
