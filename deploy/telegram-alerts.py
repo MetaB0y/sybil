@@ -61,8 +61,13 @@ def _should_send(alert: dict[str, Any]) -> bool:
     previous = _last_sent.get(key)
     if previous is not None and now - previous < REPEAT_SECONDS:
         return False
-    _last_sent[key] = now
     return True
+
+
+def _record_sent(alert: dict[str, Any]) -> None:
+    status = _alert_status(alert)
+    key = (_alert_key(alert), status)
+    _last_sent[key] = time.time()
 
 
 def _fmt_label(name: str, labels: dict[str, Any]) -> str:
@@ -158,6 +163,7 @@ class Handler(BaseHTTPRequestHandler):
 
             sent = 0
             skipped = 0
+            failed = 0
             for alert in alerts:
                 if not isinstance(alert, dict):
                     skipped += 1
@@ -165,11 +171,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not _should_send(alert):
                     skipped += 1
                     continue
-                _send_telegram(_format_alert(alert))
+                try:
+                    _send_telegram(_format_alert(alert))
+                except (urllib.error.URLError, RuntimeError) as exc:
+                    # A transient delivery failure must not suppress this alert
+                    # (don't record _last_sent) nor abort the rest of the batch.
+                    failed += 1
+                    print(f"telegram alert delivery failed: {exc}", flush=True)
+                    continue
+                _record_sent(alert)
                 sent += 1
-            self._write(200, f"sent={sent} skipped={skipped}\n")
-        except (urllib.error.URLError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
-            self._write(502, f"telegram alert delivery failed: {exc}\n")
+            self._write(200, f"sent={sent} skipped={skipped} failed={failed}\n")
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._write(400, f"invalid alert payload: {exc}\n")
 
 
 def main() -> None:
