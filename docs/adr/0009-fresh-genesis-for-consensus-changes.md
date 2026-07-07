@@ -10,6 +10,12 @@ superseded_by: []
 
 # ADR-0009 — Fresh genesis for consensus-schema changes in devnet
 
+> **Relaxed by [ADR-0011](0011-validium-stance-no-backcompat.md) (2026-07-07):**
+> fresh genesis has **zero cost** (not live; no backward-compat until autumn), so
+> drop the "batch changes into one redeploy window" framing — just change the
+> schema and restart. "consensus-schema" here means **validity-schema** (single-
+> operator validium).
+
 ## Context
 
 Changes to the account-leaf schema, the canonical witness format, or the guest

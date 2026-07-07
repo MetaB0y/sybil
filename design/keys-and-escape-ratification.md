@@ -7,6 +7,18 @@ last_verified: 2026-07-07
 
 # Keys-digest + Escape-claim — Ratification Packet
 
+> **UPDATED 2026-07-07 by the founder reset — read the ADRs, not just this
+> packet.** Several answers changed: **D0 is reversed** → WebAuthn/passkeys are
+> the *primary* in-guest path ([ADR-0014](../docs/adr/0014-webauthn-first-auth.md)),
+> raw-P256 for agents; the raw-backup-key requirement is dropped. **D1's "reserve
+> the byte slot now" is moot** — no backward-compat until autumn, so just add
+> `capability_mask` when built ([ADR-0011](../docs/adr/0011-validium-stance-no-backcompat.md)).
+> **All "fresh-genesis / batch into one window" framing is dropped** — fresh
+> genesis is free. Escape now values positions at last clearing price
+> ([ADR-0013](../docs/adr/0013-exit-and-escape-model.md)); DA/privacy per
+> [ADR-0012](../docs/adr/0012-privacy-and-data-availability.md). The remaining
+> D2–D8 recommendations still stand.
+
 One decision pass to unblock the **D-cluster** implementation (SYB-225 proven
 key-ops, SYB-32 escape claims). Both designs are otherwise complete:
 [`account-keys-digest.md`](../design/account-keys-digest.md),

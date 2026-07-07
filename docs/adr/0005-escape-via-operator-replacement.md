@@ -10,6 +10,11 @@ superseded_by: []
 
 # ADR-0005 — Escape via operator replacement; L1 recovers cash only
 
+> **Refined by [ADR-0013](0013-exit-and-escape-model.md) (2026-07-07):** escape
+> now *values open positions at the last batch clearing price* (paid as cash),
+> not cash-only. Operator replacement remains the path to *resume trading*.
+> Read "cash only" below as superseded on that point.
+
 ## Context
 
 Sybil is an off-chain sequencer with an on-chain vault holding user collateral.

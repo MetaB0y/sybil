@@ -10,6 +10,13 @@ superseded_by: []
 
 # ADR-0006 — Block witness = full-state snapshot per block
 
+> **Refined by [ADR-0012](0012-privacy-and-data-availability.md) (2026-07-07):**
+> the full snapshot is a **private prover input, NOT a public DA payload**. Only
+> the root + proof + opaque hashes are public; leaf contents stay private. Read
+> "published to DA" below as "consumed privately by the prover." Also, per
+> [ADR-0011](0011-validium-stance-no-backcompat.md) the version bump is *free*
+> (fresh genesis), and v-structs should be **flat**, not `V4{base:V3}`.
+
 ## Context
 
 Each block emits a **witness**: the data the verifier/guest consumes to check
