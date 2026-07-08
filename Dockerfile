@@ -45,6 +45,7 @@ RUN for crate in matching-engine matching-solver matching-scenarios matching-sim
     mkdir -p crates/matching-sim/src && echo "fn main() {}" > crates/matching-sim/src/main.rs && \
     mkdir -p crates/sequencer-sim/src/bin && echo "fn main() {}" > crates/sequencer-sim/src/bin/sybil_sim.rs && \
     mkdir -p crates/matching-solver/benches && echo "fn main() {}" > crates/matching-solver/benches/solver_bench.rs && \
+    mkdir -p crates/matching-solver/examples && echo "fn main() {}" > crates/matching-solver/examples/asym_bench.rs && \
     mkdir -p crates/sybil-polymarket/src && echo "fn main() {}" > crates/sybil-polymarket/src/main.rs
 
 # Build dependencies only (cached layer)
