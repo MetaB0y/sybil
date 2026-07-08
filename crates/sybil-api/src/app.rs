@@ -483,11 +483,19 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/da/{height}/manifest",
     },
     RouteMount {
+        method: "POST",
+        path: "/v1/accounts",
+    },
+    RouteMount {
         method: "GET",
         path: "/v1/accounts/{id}",
     },
     RouteMount {
         method: "GET",
+        path: "/v1/accounts/{id}/keys",
+    },
+    RouteMount {
+        method: "POST",
         path: "/v1/accounts/{id}/keys",
     },
     RouteMount {
@@ -651,15 +659,7 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "POST",
-        path: "/v1/accounts",
-    },
-    RouteMount {
-        method: "POST",
         path: "/v1/accounts/{id}/fund",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/keys",
     },
     RouteMount {
         method: "GET",
@@ -781,13 +781,23 @@ fn public_routes() -> Router<AppState> {
             axum::routing::get(routes::da::get_da_manifest),
         )
         // Accounts
+        // Self-service onboarding is PUBLIC: a fresh browser/passkey user creates
+        // a (demo-capped) account and bootstraps its FIRST signing key without a
+        // service token. `create_account` clamps the mint in non-dev mode and
+        // `register_key` is first-key-only (409 once a key exists, per SYB-229),
+        // so neither path can drain or hijack an established account.
+        .route(
+            "/v1/accounts",
+            axum::routing::post(routes::accounts::create_account),
+        )
         .route(
             "/v1/accounts/{id}",
             axum::routing::get(routes::accounts::get_account),
         )
         .route(
             "/v1/accounts/{id}/keys",
-            axum::routing::get(routes::accounts::list_account_keys),
+            axum::routing::get(routes::accounts::list_account_keys)
+                .post(routes::accounts::register_key),
         )
         .route(
             "/v1/accounts/{id}/keys/register",
@@ -949,18 +959,8 @@ fn service_routes() -> Router<AppState> {
             axum::routing::get(routes::da::get_da_payload),
         )
         .route(
-            "/v1/accounts",
-            axum::routing::post(routes::accounts::create_account),
-        )
-        .route(
             "/v1/accounts/{id}/fund",
             axum::routing::post(routes::accounts::fund_account),
-        )
-        // SYB-229: first-key bootstrap is service-token gated (unsigned, zero-key
-        // only). Additional keys use the public SIGNED path in `public_routes`.
-        .route(
-            "/v1/accounts/{id}/keys",
-            axum::routing::post(routes::accounts::register_key),
         )
         .route(
             "/v1/bridge/accounts/by-key/{key_hex}",

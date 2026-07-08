@@ -33,6 +33,14 @@ use crate::webauthn;
 const DEFAULT_ACCOUNT_FILL_QUERY_LIMIT: usize = 100;
 const MAX_ACCOUNT_FILL_QUERY_LIMIT: usize = 500;
 
+/// Ceiling on the play-money grant an unauthenticated caller may mint via the
+/// public onboarding path (POST /v1/accounts). Mirrors the largest demo option
+/// the web onboarding modal offers ($5,000). Real balances arrive through the
+/// service-gated `fund_account` / L1 bridge-deposit paths, so this cap only
+/// bounds self-service demo accounts; dev mode is unrestricted for tests and
+/// operator onboarding.
+const MAX_PUBLIC_DEMO_BALANCE_NANOS: i64 = 5_000_000_000_000;
+
 fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
     match scheme {
         AuthScheme::RawP256 => AccountAuthScheme::RawP256,
@@ -47,7 +55,7 @@ fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
     request_body = CreateAccountRequest,
     responses(
         (status = 200, description = "Account created", body = AccountResponse),
-        (status = 403, description = "Dev mode required")
+        (status = 400, description = "initial_balance_nanos exceeds the public demo limit")
     )
 )]
 pub async fn create_account(
@@ -60,6 +68,14 @@ pub async fn create_account(
             req.initial_balance_nanos
         ))
     })?;
+    // The onboarding route is public (unauthenticated) outside dev mode, so cap
+    // the play-money grant here to stop anyone minting an arbitrary balance.
+    if !state.dev_mode && balance_nanos > MAX_PUBLIC_DEMO_BALANCE_NANOS {
+        return Err(AppError::bad_request(format!(
+            "initial_balance_nanos {} exceeds the demo account limit of {}",
+            req.initial_balance_nanos, MAX_PUBLIC_DEMO_BALANCE_NANOS
+        )));
+    }
     let account = state.sequencer.create_account(balance_nanos).await?;
     Ok(Json(account_to_response(&account)))
 }

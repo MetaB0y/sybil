@@ -56,11 +56,19 @@ fn exact_public_routes() -> &'static [RouteMount] {
             path: "/v1/da/{height}/manifest",
         },
         RouteMount {
+            method: "POST",
+            path: "/v1/accounts",
+        },
+        RouteMount {
             method: "GET",
             path: "/v1/accounts/{id}",
         },
         RouteMount {
             method: "GET",
+            path: "/v1/accounts/{id}/keys",
+        },
+        RouteMount {
+            method: "POST",
             path: "/v1/accounts/{id}/keys",
         },
         RouteMount {
@@ -226,15 +234,7 @@ fn exact_service_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "POST",
-            path: "/v1/accounts",
-        },
-        RouteMount {
-            method: "POST",
             path: "/v1/accounts/{id}/fund",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/keys",
         },
         RouteMount {
             method: "GET",
@@ -422,18 +422,8 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
         (Method::GET, "/v1/da/1/payload", json!({})),
         (
             Method::POST,
-            "/v1/accounts",
-            json!({"initial_balance_nanos": 1000}),
-        ),
-        (
-            Method::POST,
             "/v1/accounts/1/fund",
             json!({"amount_nanos": 1000}),
-        ),
-        (
-            Method::POST,
-            "/v1/accounts/1/keys",
-            json!({"public_key_hex": "00"}),
         ),
         (Method::GET, "/v1/bridge/accounts/by-key/00", json!({})),
         (
@@ -571,12 +561,53 @@ async fn service_routes_fail_closed_when_token_is_unset_in_prod() {
     let (status, _) = request_json(
         app,
         Method::POST,
-        "/v1/accounts",
+        "/v1/accounts/1/fund",
         Some("anything"),
-        json!({"initial_balance_nanos": 1000}),
+        json!({"amount_nanos": 1000}),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn onboarding_is_public_and_demo_capped_in_prod() {
+    let app = prod_app().await;
+
+    // A fresh browser user creates a demo account and bootstraps its first key
+    // with NO service token — this is the passkey onboarding path.
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/accounts",
+        None,
+        json!({"initial_balance_nanos": 1_000_000_000_000u64}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let key = SigningKey::from_bytes((&[9u8; 32]).into()).expect("fixed signing key");
+    let pubkey_hex = hex::encode(PublicKey(*key.verifying_key()).compressed_bytes());
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        &format!("/v1/accounts/{account_id}/keys"),
+        None,
+        json!({"public_key_hex": pubkey_hex}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    // Minting above the public demo ceiling is rejected (no unbounded mint).
+    let (status, _) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/accounts",
+        None,
+        json!({"initial_balance_nanos": 5_000_000_000_001u64}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -649,7 +680,8 @@ async fn service_routes_succeed_with_token_in_prod() {
     let withdrawal_key = SigningKey::from_bytes((&[8u8; 32]).into()).expect("fixed signing key");
     let withdrawal_pubkey = PublicKey(*withdrawal_key.verifying_key());
     let withdrawal_pubkey_hex = hex::encode(withdrawal_pubkey.compressed_bytes());
-    // SYB-229: first-key bootstrap is now service-token gated.
+    // First-key bootstrap is public onboarding; supplying the service token is
+    // harmless (public routes ignore it) and keeps this end-to-end flow intact.
     let (status, body) = request_json(
         app.clone(),
         Method::POST,

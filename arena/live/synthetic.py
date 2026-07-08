@@ -35,6 +35,13 @@ class SyntheticStrategyConfig:
     random_seed: int = 42
     randomization_range: float = MAX_RANDOMIZATION_RANGE
     enabled_market_ids: frozenset[int] | None = None
+    # SYB "zero-fills" fix: aggressive two-sided crossing noise. When enabled,
+    # noise traders post BOTH a BuyYes and a BuyNo per market at prices whose
+    # sum exceeds $1, so they cross via complete-set minting (p+q>=1) against
+    # the resting book, against other noise accounts, or (with GTC) over time.
+    crossing_enabled: bool = True
+    crossing_edge: float = 0.03  # how far past mid each side crosses; sum = 1 + 2*edge
+    crossing_markets_per_block: int = 6  # 0 = every eligible market each block
 
     def __post_init__(self) -> None:
         if self.max_inventory < 0:
@@ -45,6 +52,10 @@ class SyntheticStrategyConfig:
             raise ValueError("notional_budget must be non-negative")
         if self.randomization_range < 0:
             raise ValueError("randomization_range must be non-negative")
+        if self.crossing_edge < 0:
+            raise ValueError("crossing_edge must be non-negative")
+        if self.crossing_markets_per_block < 0:
+            raise ValueError("crossing_markets_per_block must be non-negative")
         if self.enabled_market_ids is not None and not isinstance(
             self.enabled_market_ids, frozenset
         ):
@@ -300,6 +311,116 @@ class FastReferenceTrader(BaseAgent):
         super().__init__(client, account_id, name or "FastReferenceTrader", market_ids)
         self.markets_info = markets_info
         self.strategy = FastReferenceStrategy(config or SyntheticStrategyConfig())
+
+    async def on_block(self, block: Block) -> list[OrderSpec]:
+        markets = self.markets_info
+        if self.market_ids is not None:
+            markets = {
+                market_id: market
+                for market_id, market in markets.items()
+                if market_id in self.market_ids
+            }
+        return self.strategy.generate_orders(
+            block, markets, self.positions, self.current_balance
+        )
+
+
+class CrossingNoiseStrategy:
+    """Aggressive two-sided taker that reliably produces complete-set matches.
+
+    The zero-fills problem is order-flow density: LLM bots + MM post one-sided,
+    non-crossing IOC quotes, so nothing crosses in-batch and no durable book
+    forms. This strategy fixes that directly. Each block it picks up to
+    ``crossing_markets_per_block`` active markets (mirror OR native — full
+    coverage) and, on each, submits BOTH a BuyYes and a BuyNo at prices whose
+    sum exceeds $1. Because BuyYes@p + BuyNo@q with p+q>=1 mints a complete set,
+    these orders cross — against the resting book, against the opposite side of
+    other well-funded noise accounts, or (under GTC) accumulated over time.
+    Well-funded accounts absorb the small (~2*edge) per-set mint premium.
+    """
+
+    def __init__(self, config: SyntheticStrategyConfig):
+        self.config = config
+        self.rng = random.Random(config.random_seed)
+
+    def _eligible_markets(self, markets: dict[int, Market]) -> list[Market]:
+        return sorted(
+            (market for market in markets.values() if self.config.enabled(market.id)),
+            key=lambda market: market.id,
+        )
+
+    def generate_orders(
+        self,
+        block: Block,
+        markets: dict[int, Market],
+        positions: dict[tuple[int, str], float],
+        cash: float,
+    ) -> list[OrderSpec]:
+        candidates = self._eligible_markets(markets)
+        if not candidates:
+            return []
+
+        per_block = self.config.crossing_markets_per_block
+        if per_block and per_block < len(candidates):
+            chosen = self.rng.sample(candidates, per_block)
+        else:
+            chosen = candidates
+
+        edge = self.config.crossing_edge
+        budget = self.config.notional_budget
+        remaining_cash = cash
+        orders: list[OrderSpec] = []
+        for market in chosen:
+            if remaining_cash <= 0:
+                break
+            # Anchor on the previous Sybil price; fresh markets default to 0.5.
+            mid = _previous_sybil_price(block, market)
+            if mid is None:
+                mid = 0.5
+            # Small jitter so prices differ across accounts and over time.
+            jitter = self.rng.uniform(
+                -self.config.bounded_randomization_range,
+                self.config.bounded_randomization_range,
+            )
+            mid = _clamp_price(mid + jitter)
+
+            yes_pos, no_pos = _positions(positions, market.id)
+            yes_price = _clamp_price(mid + edge)
+            no_price = _clamp_price((1.0 - mid) + edge)
+
+            yes_qty = _buy_qty(
+                budget, yes_price, self.config.max_inventory - yes_pos, remaining_cash
+            )
+            if yes_qty > 0:
+                orders.append(BuyYes.at_price(market.id, yes_price, yes_qty))
+                remaining_cash -= yes_qty * yes_price
+
+            no_qty = _buy_qty(
+                budget, no_price, self.config.max_inventory - no_pos, remaining_cash
+            )
+            if no_qty > 0:
+                orders.append(BuyNo.at_price(market.id, no_price, no_qty))
+                remaining_cash -= no_qty * no_price
+
+        return orders
+
+
+class CrossingNoiseTrader(BaseAgent):
+    """BaseAgent adapter for :class:`CrossingNoiseStrategy`."""
+
+    def __init__(
+        self,
+        client,
+        account_id: int,
+        *,
+        markets_info: dict[int, Market],
+        config: SyntheticStrategyConfig | None = None,
+        name: str | None = None,
+        market_ids: list[int] | None = None,
+    ):
+        super().__init__(client, account_id, name or "CrossingNoiseTrader", market_ids)
+        self.markets_info = markets_info
+        self.strategy = CrossingNoiseStrategy(config or SyntheticStrategyConfig())
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         markets = self.markets_info

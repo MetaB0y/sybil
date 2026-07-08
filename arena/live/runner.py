@@ -24,7 +24,12 @@ from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed
 from .personas import PERSONAS
 from .strategy import FairValueFreshnessConfig, FlatStrategy, KellyStrategy
-from .synthetic import FastReferenceTrader, NativeNoiseTrader, SyntheticStrategyConfig
+from .synthetic import (
+    CrossingNoiseTrader,
+    FastReferenceTrader,
+    NativeNoiseTrader,
+    SyntheticStrategyConfig,
+)
 from .trader import LiveLlmTrader
 
 log = logging.getLogger(__name__)
@@ -58,6 +63,10 @@ class LiveConfig:
     fast_count: int = 5
     noise_count: int = 5
     noise_balance: float = 50.0
+    # Zero-fills fix: aggressive two-sided crossing noise on a durable (GTC) book.
+    # noise_time_in_force overrides order_time_in_force for the crossing noise
+    # traders so a resting book accumulates even while LLM/fast flow stays IOC.
+    noise_time_in_force: TimeInForce = "GTC"
     synthetic_strategy: SyntheticStrategyConfig = field(
         default_factory=SyntheticStrategyConfig
     )
@@ -81,6 +90,13 @@ def _env_float(name: str, default: float) -> float:
     if not raw:
         return default
     return float(raw)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
 
 
 def _env_market_profile(name: str, default: MarketProfile = "all") -> MarketProfile:
@@ -408,25 +424,45 @@ async def run_live(config: LiveConfig):
             fast.time_in_force = config.order_time_in_force
             fast_traders.append(fast)
 
+        # Noise traders. When crossing is enabled (default), they cover ALL
+        # active markets (mirror AND native — the same markets the LLM bots
+        # trade) and post aggressive two-sided crossing orders on a durable
+        # (GTC) book, which is the reliable path to fills. When disabled they
+        # fall back to the legacy inventory-aware native-only noise flow.
+        crossing = config.synthetic_strategy.crossing_enabled
         noise_traders = []
         for i in range(config.noise_count):
             account = await client.create_account(int(config.noise_balance * NANOS_PER_DOLLAR))
-            noise = NativeNoiseTrader(
-                client=client,
-                account_id=account.id,
-                name=f"Noise-{i}",
-                market_ids=synthetic_market_ids,
-                markets_info=synthetic_markets_info,
-                config=config.synthetic_strategy.with_seed(
-                    config.synthetic_strategy.random_seed + 10_000 + i
-                ),
+            noise_cfg = config.synthetic_strategy.with_seed(
+                config.synthetic_strategy.random_seed + 10_000 + i
             )
-            noise.time_in_force = config.order_time_in_force
+            if crossing:
+                noise = CrossingNoiseTrader(
+                    client=client,
+                    account_id=account.id,
+                    name=f"Noise-{i}",
+                    market_ids=synthetic_market_ids,
+                    markets_info=synthetic_markets_info,
+                    config=noise_cfg,
+                )
+                noise.time_in_force = config.noise_time_in_force
+            else:
+                noise = NativeNoiseTrader(
+                    client=client,
+                    account_id=account.id,
+                    name=f"Noise-{i}",
+                    market_ids=synthetic_market_ids,
+                    markets_info=synthetic_markets_info,
+                    config=noise_cfg,
+                )
+                noise.time_in_force = config.order_time_in_force
             noise_traders.append(noise)
         log.info(
-            "Created %d fast traders and %d native noise traders over %d active markets",
+            "Created %d fast traders and %d %s noise traders (TIF=%s) over %d active markets",
             len(fast_traders),
             len(noise_traders),
+            "crossing" if crossing else "native",
+            config.noise_time_in_force if crossing else config.order_time_in_force,
             len(synthetic_markets_info),
         )
 
@@ -576,7 +612,7 @@ def main():
     )
     parser.add_argument("--balance", type=float, default=500.0, help="Initial balance per trader")
     parser.add_argument("--fast-count", type=int, default=None)
-    parser.add_argument("--noise-count", type=int, default=5)
+    parser.add_argument("--noise-count", type=int, default=None)
     parser.add_argument(
         "--synthetic-max-inventory",
         type=int,
@@ -713,6 +749,20 @@ def main():
             if args.synthetic_randomization_range is not None
             else _env_float("ARENA_SYNTHETIC_RANDOMIZATION_RANGE", 0.02)
         )
+        # Zero-fills fix: well-funded, aggressive two-sided crossing noise.
+        noise_count = args.noise_count if args.noise_count is not None else _env_int(
+            "ARENA_NOISE_COUNT", 5
+        )
+        # Well-funded by default so crossing noise sustains a steady fill stream;
+        # each crossing pair pays a small (~2*crossing_edge) mint premium.
+        noise_balance = _env_float("ARENA_NOISE_BALANCE", 100_000.0)
+        crossing_enabled = _env_bool("ARENA_NOISE_CROSSING", True)
+        crossing_edge = _env_float("ARENA_NOISE_CROSSING_EDGE", 0.03)
+        crossing_markets_per_block = _env_int("ARENA_NOISE_MARKETS_PER_BLOCK", 6)
+        noise_tif_raw = os.environ.get("ARENA_NOISE_TIF", "GTC").strip().upper()
+        if noise_tif_raw not in ("GTC", "IOC", "GTD"):
+            raise ValueError("ARENA_NOISE_TIF must be one of: GTC, IOC, GTD")
+        noise_time_in_force: TimeInForce = noise_tif_raw  # type: ignore[assignment]
         fair_value_ttl_s = (
             args.fair_value_ttl_s
             if args.fair_value_ttl_s is not None
@@ -765,7 +815,9 @@ def main():
         require_reference_prices=args.require_reference_prices,
         order_time_in_force=args.order_time_in_force,
         fast_count=fast_count,
-        noise_count=args.noise_count,
+        noise_count=noise_count,
+        noise_balance=noise_balance,
+        noise_time_in_force=noise_time_in_force,
         synthetic_strategy=SyntheticStrategyConfig(
             max_inventory=synthetic_max_inventory,
             quote_width=synthetic_quote_width,
@@ -777,6 +829,9 @@ def main():
                 if args.synthetic_market_ids is not None
                 else None
             ),
+            crossing_enabled=crossing_enabled,
+            crossing_edge=crossing_edge,
+            crossing_markets_per_block=crossing_markets_per_block,
         ),
         news_poll_interval=args.news_interval,
         min_llm_interval=args.min_llm_interval,
