@@ -1060,12 +1060,36 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-fn bearer_token(req: &Request<axum::body::Body>) -> Option<&str> {
-    req.headers()
+fn bearer_token_from_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
+    headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|token| !token.is_empty())
+}
+
+fn bearer_token(req: &Request<axum::body::Body>) -> Option<&str> {
+    bearer_token_from_headers(req.headers())
+}
+
+/// Returns true iff `headers` carry a bearer token that matches the configured
+/// service token, using the SAME source of truth (`state.service_token`) and the
+/// SAME constant-time comparison the `service_auth` middleware applies. Public
+/// handlers on the public tier call this to grant trusted service infra an
+/// elevated privilege (e.g. skipping the demo-balance cap) without moving the
+/// whole route behind `service_auth`. A missing/garbage header, or an unset
+/// service token, simply returns false (never an error).
+pub(crate) fn request_has_valid_service_token(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> bool {
+    let Some(expected) = state.service_token.as_deref() else {
+        return false;
+    };
+    let Some(actual) = bearer_token_from_headers(headers) else {
+        return false;
+    };
+    constant_time_eq(actual.as_bytes(), expected.as_bytes())
 }
 
 async fn service_auth(

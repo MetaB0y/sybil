@@ -60,6 +60,7 @@ fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
 )]
 pub async fn create_account(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateAccountRequest>,
 ) -> Result<Json<AccountResponse>, AppError> {
     let balance_nanos = i64::try_from(req.initial_balance_nanos).map_err(|_| {
@@ -68,9 +69,16 @@ pub async fn create_account(
             req.initial_balance_nanos
         ))
     })?;
-    // The onboarding route is public (unauthenticated) outside dev mode, so cap
-    // the play-money grant here to stop anyone minting an arbitrary balance.
-    if !state.dev_mode && balance_nanos > MAX_PUBLIC_DEMO_BALANCE_NANOS {
+    // The onboarding route lives on the PUBLIC tier, so anonymous browser users
+    // could otherwise mint an arbitrary play-money balance — cap them here.
+    // Trusted service infra (e.g. the arena bots) hits this same endpoint while
+    // presenting a valid `Authorization: Bearer <SYBIL_SERVICE_TOKEN>`; such a
+    // caller is uncapped, exactly as it was before this route moved public. The
+    // token is validated against the same source of truth and constant-time
+    // comparison the `service_auth` middleware uses; a missing/invalid header
+    // just leaves the caller capped.
+    let service_authed = crate::app::request_has_valid_service_token(&state, &headers);
+    if !state.dev_mode && !service_authed && balance_nanos > MAX_PUBLIC_DEMO_BALANCE_NANOS {
         return Err(AppError::bad_request(format!(
             "initial_balance_nanos {} exceeds the demo account limit of {}",
             req.initial_balance_nanos, MAX_PUBLIC_DEMO_BALANCE_NANOS

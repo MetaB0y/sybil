@@ -308,10 +308,13 @@ fn signed_cancel_payload(
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn create_account_forbidden_without_dev_mode() {
+async fn create_account_is_public_onboarding_without_dev_mode() {
+    // Self-service onboarding is PUBLIC (SYB-245): a fresh browser/passkey user
+    // creates a demo-capped account with no service token, even in non-dev mode.
+    // (It used to 401 here, which was the production onboarding regression.)
     let (app, _) = test_app(false).await;
     let (status, _) = post_json(app, "/v1/accounts", json!({ "initial_balance_nanos": 100 })).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

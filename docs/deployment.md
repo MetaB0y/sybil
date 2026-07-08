@@ -310,3 +310,43 @@ ssh root@172.104.31.54 'curl -sS http://localhost:8428/api/v1/query?query=sybil_
 Do not treat a brief `SequencerDown` firing/resolved pair as evidence that
 block production or trading is down unless the API health, block-production,
 or no-fill alerts agree.
+
+## Post-deploy smoke gate (promotion gate — SYB-240)
+
+`scripts/post-deploy-smoke.sh` is the **last deploy step** and **blocks
+promotion**: it runs against the live stack and exits non-zero if any core flow
+is broken. It is fail-closed — core browser and trading flows are hard
+assertions, never silent skips. It guards specifically against the two
+regressions that shipped unnoticed: passkey account creation returning HTTP 401
+(service-token-gated in prod), and zero fills.
+
+Checks: per-container health for every compose service; CORS preflight from the
+app origin on `POST /v1/accounts`; unauthenticated passkey onboarding
+(create + demo-cap 400 + first-key bootstrap + 409 on the second key); order
+placement; a **deterministic fills gate** (a crossing `BuyYes`/`BuyNo` seed must
+increase `activity/overview.all_time.orders.matched`); the service-token gating
+matrix (gated routes 401 without the token / 2xx with it, public routes stay
+public); and a signed-order acceptance path. Only `curl` and `python3` are
+required (no `jq`); `python3-cryptography` enables the key-bootstrap check.
+
+Run it from the deploy box as the final step (local docker → container health):
+
+```bash
+SYBIL_SERVICE_TOKEN="$(grep -oP 'SYBIL_SERVICE_TOKEN=\K.*' /opt/sybil/.env)" \
+  scripts/post-deploy-smoke.sh --require-signer
+```
+
+Or from CI / a workstation, driving container health over SSH:
+
+```bash
+SYBIL_SERVICE_TOKEN=... SYBIL_SMOKE_DOCKER_SSH=root@172.104.31.54 \
+  scripts/post-deploy-smoke.sh
+```
+
+Config via env (flags override): `SYBIL_SMOKE_BASE`
+(default `https://172-104-31-54.nip.io`), `SYBIL_SMOKE_APP_ORIGIN`
+(default `https://app.172-104-31-54.nip.io`), `SYBIL_SERVICE_TOKEN`,
+`SYBIL_SMOKE_INTERVAL`, `SYBIL_SMOKE_DOCKER_SSH`, `SYBIL_COMPOSE_PROJECT`
+(default `sybil`), and `SYBIL_SMOKE_REQUIRE_SIGNER=1` / `--require-signer` to
+make the signed-order step a hard failure when the signer is missing (ship
+`smoke_sign` in the deploy image).
