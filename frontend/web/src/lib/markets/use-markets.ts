@@ -81,7 +81,7 @@ export function useMarketsList() {
     bundle = assemble(marketsQ.data);
   }
 
-  return { bundle, isPending, error };
+  return { bundle, isPending, error, refetch: marketsQ.refetch };
 }
 
 export function assemble(allMarkets: Market[]): MarketsListBundle {

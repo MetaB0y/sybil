@@ -4,13 +4,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
-import { selectLatestBlock, useStore } from "@/lib/store";
+import { selectLatestBlock, selectWsLive, useStore } from "@/lib/store";
+import { ACCOUNT_POLL_MS } from "@/lib/constants";
 
 export type AccountFill = components["schemas"]["AccountFillResponse"];
 
 /**
  * GET /v1/accounts/{id}/fills — fill history for one account. Optional
  * market filter + pagination. Invalidates per block so fresh fills appear.
+ * When the block WS is not live, falls back to interval polling so fills
+ * still surface while the socket reconnects.
  */
 export function useAccountFills(
   accountId: number | null,
@@ -18,6 +21,7 @@ export function useAccountFills(
 ) {
   const qc = useQueryClient();
   const latest = useStore(selectLatestBlock);
+  const wsLive = useStore(selectWsLive);
   const { marketId, limit = 50, offset = 0 } = opts;
 
   const key = [
@@ -52,5 +56,6 @@ export function useAccountFills(
     },
     staleTime: 0,
     refetchOnWindowFocus: false,
+    refetchInterval: wsLive ? false : ACCOUNT_POLL_MS,
   });
 }

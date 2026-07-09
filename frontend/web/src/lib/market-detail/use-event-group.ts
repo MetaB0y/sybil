@@ -69,8 +69,10 @@ export type EventGroup = {
 export function useEventGroup(marketId: number): {
   group: EventGroup | null;
   isPending: boolean;
+  error: unknown;
+  refetch: () => void;
 } {
-  const { bundle, isPending } = useMarketsList();
+  const { bundle, isPending, error, refetch } = useMarketsList();
   const prices = useStore(selectPricesByMarketId);
 
   const group = useMemo<EventGroup | null>(() => {
@@ -135,5 +137,5 @@ export function useEventGroup(marketId: number): {
     };
   }, [bundle, marketId, prices]);
 
-  return { group, isPending };
+  return { group, isPending, error, refetch };
 }

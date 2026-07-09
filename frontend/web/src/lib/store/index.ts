@@ -225,6 +225,11 @@ export const useStore = create<StoreState>((set) => ({
 // ── Selectors ───────────────────────────────────────────────────────────
 
 export const selectConnection = (s: StoreState) => s.connection;
+/** True while the block stream is caught up (or catching up) — i.e. block
+ *  invalidation is reliably driving per-batch refreshes. When false (idle /
+ *  connecting / reconnecting / failed) consumers should fall back to polling. */
+export const selectWsLive = (s: StoreState) =>
+  s.connection.state === "live" || s.connection.state === "replaying";
 export const selectHydration = (s: StoreState) => s.hydration;
 export const selectHydratedAtHeight = (s: StoreState) => s.hydratedAtHeight;
 export const selectLatestBlock = (s: StoreState) => s.latestBlock;

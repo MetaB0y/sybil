@@ -26,7 +26,7 @@ import {
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import { useOpenBatchLive } from "@/lib/market-detail/use-open-batch-live";
-import { selectRecentBlocks, useStore } from "@/lib/store";
+import { selectConnection, selectRecentBlocks, useStore } from "@/lib/store";
 import { useBatchCountdown } from "./use-batch-countdown";
 
 const HERO_BATCH_COUNT = 24;
@@ -35,6 +35,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
   const { progress01, secondsLeftPrecise, latestHeight } = useBatchCountdown();
   const live = useOpenBatchLive(outcome.marketId);
   const recent = useStore(selectRecentBlocks);
+  const connection = useStore(selectConnection);
 
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const placers = live?.uniquePlacers ?? null;
@@ -48,6 +49,18 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
       ? live.indicativeYesPriceNanos
       : null;
   const indicativeYesNanos = liveIndicativeYesNanos ?? outcome.yesPriceNanos;
+
+  // Honest connection pill: only claim a "live batch" when the block stream is
+  // actually connected. If it's reconnecting/failed the countdown freezes at
+  // 0.0s, so a hardcoded green "live" pill would read as a hang — surface the
+  // real state instead.
+  const wsState = connection.state;
+  const isStreamLive = wsState === "live" || wsState === "replaying";
+  const pill = isStreamLive
+    ? { label: "live batch", color: "var(--accent)" }
+    : wsState === "reconnecting" || wsState === "connecting"
+      ? { label: "reconnecting…", color: "var(--warn)" }
+      : { label: "stream offline", color: "var(--warn)" };
 
   return (
     <div
@@ -65,14 +78,31 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
           position: "absolute",
           top: 14,
           right: 16,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
           fontFamily: "var(--font-mono)",
           fontSize: 9.5,
-          color: "var(--accent)",
+          color: pill.color,
           textTransform: "uppercase",
           letterSpacing: "0.06em",
         }}
+        title={`block stream: ${wsState}`}
       >
-        ● live batch
+        <span
+          aria-hidden
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: pill.color,
+            boxShadow: isStreamLive ? `0 0 6px ${pill.color}` : "none",
+            animation: isStreamLive
+              ? "none"
+              : "sybil-pulse 1.6s ease-in-out infinite",
+          }}
+        />
+        {pill.label}
       </div>
 
       {/* Hero clock: large circular gauge + label block */}

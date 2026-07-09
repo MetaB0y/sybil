@@ -50,6 +50,16 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const portfolio = usePortfolio(accountId).data ?? null;
 
+  // Which auth scheme backs this account decides whether a real key backup is
+  // possible. raw_p256 stores an extractable JWK (copyable = a real backup);
+  // webauthn/passkey has NO exportable secret — the credential id is just a
+  // handle, not a restore key — so we must not offer it as "backup". Read
+  // lazily from localStorage; this menu only mounts post-hydration (AccountChip
+  // gates on `hydrated`), so there's no SSR/first-paint mismatch.
+  const [authScheme] = useState<"raw_p256" | "webauthn" | null>(
+    () => readStoredAccount()?.authScheme ?? null,
+  );
+
   const total =
     portfolio != null
       ? formatDollars(parseNanos(portfolio.portfolio_value_nanos), { decimals: 2 })
@@ -127,19 +137,23 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           >
             Copy account id
           </MenuItem>
-          <MenuItem
-            onClick={() => {
-              const stored = readStoredAccount();
-              if (stored?.authScheme === "raw_p256" && stored.jwk) {
-                void navigator.clipboard?.writeText(JSON.stringify(stored.jwk));
-              } else if (stored?.credentialIdB64url) {
-                void navigator.clipboard?.writeText(stored.credentialIdB64url);
-              }
-              setOpen(false);
-            }}
-          >
-            Copy key handle
-          </MenuItem>
+          {authScheme === "webauthn" ? (
+            <PasskeyNotice />
+          ) : (
+            <MenuItem
+              onClick={() => {
+                const stored = readStoredAccount();
+                if (stored?.authScheme === "raw_p256" && stored.jwk) {
+                  void navigator.clipboard?.writeText(
+                    JSON.stringify(stored.jwk),
+                  );
+                }
+                setOpen(false);
+              }}
+            >
+              Copy private key (backup)
+            </MenuItem>
+          )}
           <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
           <MenuItem
             onClick={() => {
@@ -196,6 +210,51 @@ function InfoRow({
         }}
       >
         {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Read-only warning shown in place of the "copy key" affordance for passkey
+ * (WebAuthn) accounts. A passkey has no exportable private key — the credential
+ * lives in this browser + authenticator only — so there is nothing to copy as a
+ * backup. Saying so plainly avoids false backup confidence (the old "copy key
+ * handle" copied the non-restorable credential id).
+ */
+function PasskeyNotice() {
+  return (
+    <div
+      role="note"
+      style={{
+        padding: "8px 10px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--warn)",
+        }}
+      >
+        Passkey account
+      </span>
+      <span
+        style={{
+          fontFamily: "var(--font-sans)",
+          fontSize: 12,
+          lineHeight: 1.4,
+          color: "var(--fg-3)",
+        }}
+      >
+        Lives in this browser + authenticator. There is no exportable key to
+        back up — clearing this browser or losing the authenticator loses
+        access.
       </span>
     </div>
   );
