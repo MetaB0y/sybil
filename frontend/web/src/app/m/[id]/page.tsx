@@ -10,7 +10,6 @@ import {
 } from "@/components/chart-range-bar";
 import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
-import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart } from "@/components/price-chart";
@@ -24,6 +23,7 @@ import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
 import { SelectOutcomeProvider } from "@/lib/market-detail/active-outcome";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
+import { useEventTraders } from "@/lib/markets/use-event-traders";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
 import { useEventRaw } from "@/lib/markets/use-event-raw";
@@ -41,6 +41,11 @@ const chartSelectionByEvent = new Map<string, number[]>();
 
 /** Max simultaneous chart lines — matches the legend's `maxSelected`. */
 const MAX_CHART_LINES = 8;
+
+/** Per-stat value-slot widths (px) for the header stat row — each just wide
+ *  enough for that stat's realistic max, so the columns hold position across an
+ *  outcome switch without padding short values ($0, 1d) with dead space. */
+const STAT_W = { vol: 38, h24: 38, traders: 24, liq: 34, age: 28 } as const;
 
 /** Wrap gap (px) between legend chip rows — mirrors OutcomeLegend's `gap`. */
 const LEGEND_ROW_GAP = 10;
@@ -78,10 +83,6 @@ export default function MarketDetailPage({
   const marketQ = useMarket(marketId);
   const market = marketQ.data;
 
-  // Place-order modal (SYB-54) — launched from the header CTA, renders the
-  // shared BuyBox for the currently-selected outcome.
-  const [orderOpen, setOrderOpen] = useState(false);
-
   return (
     <SelectOutcomeProvider value={selectOutcome}>
       <main
@@ -95,18 +96,13 @@ export default function MarketDetailPage({
         {market && (
           <>
             {/* Header band — fixed; the chart/rail split scrolls below it. Closed
-                state shows in the status pill + the rail's read-only notice, not
-                a separate banner row (which shifted the page). */}
+                state shows in a status pill + the rail's read-only notice, not a
+                separate banner row (which shifted the page). Ordering lives in
+                the rail, so the header carries no CTA. */}
             <div
               className="market-detail-header-pad"
             >
-              <Header
-                marketId={marketId}
-                market={market}
-                {...(market.closed === true
-                  ? {}
-                  : { onPlaceOrder: () => setOrderOpen(true) })}
-              />
+              <Header marketId={marketId} market={market} />
             </div>
 
             <div
@@ -123,12 +119,6 @@ export default function MarketDetailPage({
 
               <MarketRail marketId={marketId} />
             </div>
-
-            <PlaceOrderModal
-              marketId={marketId}
-              open={orderOpen}
-              onClose={() => setOrderOpen(false)}
-            />
           </>
         )}
       </main>
@@ -146,7 +136,6 @@ export default function MarketDetailPage({
 function Header({
   marketId,
   market,
-  onPlaceOrder,
 }: {
   marketId: number;
   market: {
@@ -163,10 +152,9 @@ function Header({
     market_icon_url?: string | null;
     event_image_url?: string | null;
     event_icon_url?: string | null;
+    event_id?: string | null;
     polymarket_condition_id?: string | null;
   };
-  /** Opens the place-order modal. Omitted (no button) when the market is closed. */
-  onPlaceOrder?: () => void;
 }) {
   const { stats } = useMarketStats(marketId);
   const { primary } = pickDisplayCategory(market.categories, market.category);
@@ -174,6 +162,16 @@ function Header({
   // Provenance (SYB-149): a `polymarket_condition_id` is the mirror linkage
   // (see `isMirror`); its absence means the market was created natively on Sybil.
   const origin = market.polymarket_condition_id != null ? "mirror" : "native";
+
+  // Title: the mirror's on-block `name` is the compact "{event}: {outcome}"
+  // form (block-hashed, so it can't be the full sentence). The real per-market
+  // question lives in the off-block Polymarket snapshot, keyed by condition id —
+  // prefer it, falling back to `name` for native/binary markets with no /raw.
+  const raw = useEventRaw(market.event_id ?? undefined, !!market.event_id).data;
+  const rawQuestion = market.polymarket_condition_id
+    ? raw?.get(market.polymarket_condition_id)?.question?.trim()
+    : undefined;
+  const title = rawQuestion || market.name;
 
   return (
     <header
@@ -234,46 +232,31 @@ function Header({
           <span>{origin}</span>
         </div>
 
-        {/* Title + status pill */}
-        <div
-          className="market-detail-title-row"
-          style={{
-          }}
-        >
+        {/* Title + status pill. The pill only appears once a market is closed;
+            an active market needs no "ACTIVE" badge. Ordering lives in the rail,
+            so there's no header CTA. */}
+        <div className="market-detail-title-row">
+          {/* Re-keyed per outcome so the new question eases in instead of
+              hard-cutting when you switch outcomes. */}
           <h1
+            key={marketId}
             className="market-detail-title"
+            style={{
+              animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
+            }}
           >
-            {market.name}
+            {title}
           </h1>
-          <StatusPill status={market.status} closed={market.closed === true} />
-          {onPlaceOrder && (
-            <button
-              type="button"
-              onClick={onPlaceOrder}
-              style={{
-                marginLeft: "auto",
-                flexShrink: 0,
-                minHeight: 40,
-                padding: "8px 16px",
-                borderRadius: "var(--radius-md)",
-                border: 0,
-                background: "var(--accent)",
-                color: "var(--fg-on-accent)",
-                fontFamily: "var(--font-sans)",
-                fontSize: "var(--fs-13)",
-                fontWeight: 600,
-                letterSpacing: "0.01em",
-                cursor: "pointer",
-              }}
-            >
-              Place order
-            </button>
+          {market.closed === true && (
+            <StatusPill status={market.status} closed />
           )}
         </div>
 
-        {/* 5-stat meta row, all scoped to this market. Only `batches` is an
-            approximation (OPEN_QUESTIONS #9); vol / 24h / traders / liq are real. */}
+        {/* 5-stat meta row, all scoped to this market. Fixed value-slot widths
+            keep the columns from sliding as digit counts change; the row eases
+            in on an outcome switch (re-keyed by marketId). */}
         <div
+          key={marketId}
           className="text-mono"
           style={{
             display: "flex",
@@ -281,29 +264,30 @@ function Header({
             gap: "var(--space-4)",
             fontSize: "var(--fs-12)",
             color: "var(--fg-3)",
+            animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
           }}
         >
-          <MetaStat label="vol">
+          <MetaStat label="vol" valueWidth={STAT_W.vol}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {market.volume_nanos ? formatCompactDollars(market.volume_nanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="24h">
+          <MetaStat label="24h" valueWidth={STAT_W.h24}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatCompactDollars(stats.volume24hNanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="traders">
+          <MetaStat label="traders" valueWidth={STAT_W.traders}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatInt(stats.traders) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="liq">
+          <MetaStat label="liq" valueWidth={STAT_W.liq}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatCompactDollars(stats.liquidityNanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="age">
+          <MetaStat label="age" valueWidth={STAT_W.age}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats?.marketAgeMs == null ? "—" : formatAge(stats.marketAgeMs)}
             </span>
@@ -317,14 +301,21 @@ function Header({
 function MetaStat({
   label,
   children,
+  valueWidth,
 }: {
   label: string;
   children: React.ReactNode;
+  /** Fixed min-width (px) for the value slot so the row's columns hold their
+   *  position instead of sliding left/right as digit counts change ($1 vs
+   *  $1000). Omitted where the values don't change in place (event footer). */
+  valueWidth?: number;
 }) {
   return (
     <span style={{ display: "inline-flex", gap: 6 }}>
       <span style={{ color: "var(--fg-4)" }}>{label}</span>
-      {children}
+      <span style={{ display: "inline-block", minWidth: valueWidth }}>
+        {children}
+      </span>
     </span>
   );
 }
@@ -487,6 +478,21 @@ function ChartSection({ marketId }: { marketId: number }) {
   // of blanking and rebuilding the whole chart.
   const loading = groupPending;
 
+  // Event-total footer: volume + 24h volume summed across the group's outcomes,
+  // and the event's union trader count (per-market counts aren't additive).
+  // Only meaningful for a real multi-outcome event.
+  const eventTraders = useEventTraders(
+    group?.isMultiOutcome ? (group.eventId ?? undefined) : undefined,
+  ).data;
+  const eventVolumeNanos = useMemo(
+    () => outcomes.reduce((sum, o) => sum + o.volumeNanos, 0n),
+    [outcomes],
+  );
+  const eventVolume24hNanos = useMemo(
+    () => outcomes.reduce((sum, o) => sum + o.volume24hNanos, 0n),
+    [outcomes],
+  );
+
   return (
     <section
       style={{
@@ -533,7 +539,7 @@ function ChartSection({ marketId }: { marketId: number }) {
             />
           </div>
         ) : (
-          <div className="eyebrow">{"// yes probability"}</div>
+          <div className="eyebrow">yes probability</div>
         )}
         <div style={{ flexShrink: 0 }}>
           <ChartRangeBar value={range} onChange={setRange} />
@@ -560,6 +566,37 @@ function ChartSection({ marketId }: { marketId: number }) {
           sinceMs={sinceMs}
           nowMs={nowMs}
         />
+      )}
+
+      {!loading && group?.isMultiOutcome && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "var(--space-4)",
+            paddingTop: "var(--space-3)",
+            borderTop: "1px solid var(--border-1)",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--fs-12)",
+            color: "var(--fg-3)",
+          }}
+        >
+          <MetaStat label="event vol">
+            <span className="tabular" style={{ color: "var(--fg-2)" }}>
+              {formatCompactDollars(eventVolumeNanos)}
+            </span>
+          </MetaStat>
+          <MetaStat label="24h vol">
+            <span className="tabular" style={{ color: "var(--fg-2)" }}>
+              {formatCompactDollars(eventVolume24hNanos)}
+            </span>
+          </MetaStat>
+          <MetaStat label="traders">
+            <span className="tabular" style={{ color: "var(--fg-2)" }}>
+              {eventTraders != null ? formatInt(eventTraders) : "—"}
+            </span>
+          </MetaStat>
+        </div>
       )}
     </section>
   );
@@ -616,7 +653,7 @@ function DescriptionBlock({
       {description && (
         <div>
           <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-            {"// description"}
+            description
           </div>
           <p
             style={{
@@ -634,7 +671,7 @@ function DescriptionBlock({
       {resolutionCriteria && (
         <div>
           <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-            {"// resolution"}
+            resolution
           </div>
           <p
             style={{
@@ -651,7 +688,7 @@ function DescriptionBlock({
       )}
       <div>
         <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-          {"// " + sourceLabel}
+          {sourceLabel}
         </div>
         {sourceUrl ? (
           <a

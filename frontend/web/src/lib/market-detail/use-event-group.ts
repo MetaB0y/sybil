@@ -46,6 +46,9 @@ export type EventOutcome = {
   delta24Cents: number;
   /** Rolling 24h trading volume in nanos ($). Used to rank chart lines. */
   volume24hNanos: bigint;
+  /** Total lifetime trading volume in nanos ($) for this outcome's market.
+   *  Summed across the group for the chart's event-total footer. */
+  volumeNanos: bigint;
   /** Real market creation time (epoch ms), or `null` if unknown. Bounds how
    *  far back the price chart holds the line flat — never before the market
    *  existed. See `build-chart-series`. */
@@ -112,6 +115,7 @@ export function useEventGroup(marketId: number): {
         yesCents,
         delta24Cents,
         volume24hNanos: m.volume_24h_nanos ? BigInt(m.volume_24h_nanos) : 0n,
+        volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
         createdAtMs: m.created_at_ms ?? null,
         endDateMs: m.market_end_date_ms ?? m.expiry_timestamp_ms ?? null,
       };

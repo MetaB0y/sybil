@@ -19,11 +19,27 @@ import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
 // Reuse the category palette for outcome accents. Binary YES/NO use the
 // semantic --yes / --no tokens.
+// Ten hue-separated accents for multi-outcome lines. The first eight — the set
+// normally on the chart — are spread across the wheel so no two read alike; the
+// old palette collapsed to near-identical blues/purples. Ordered so the busiest
+// (favourite-first) outcomes land on the most distinct colours.
+const OUTCOME_PALETTE = [
+  "#5FC98A", // green
+  "#E7B84A", // amber
+  "#5B8AF0", // blue
+  "#E86FB0", // pink
+  "#3FC6D6", // cyan
+  "#EE7A3C", // orange
+  "#9B6BEA", // purple
+  "#B9C94F", // lime
+  "#E85D6B", // coral
+  "#37B49E", // teal
+];
+
 export function colorForOutcome(o: EventOutcome, index: number): string {
   if (o.label.toLowerCase() === "yes") return "var(--yes)";
   if (o.label.toLowerCase() === "no") return "var(--no)";
-  const PALETTE = ["#6FCC8A", "#E8B447", "#E89D9F", "#7E9AE8", "#5BC4E0", "#9F8FE8"];
-  return PALETTE[index % PALETTE.length] ?? getCategoryColor(null);
+  return OUTCOME_PALETTE[index % OUTCOME_PALETTE.length] ?? getCategoryColor(null);
 }
 
 export function OutcomeLegend({
@@ -80,10 +96,16 @@ export function OutcomeLegend({
   }, [shown.length, interactive, onRowHeight]);
 
   const remove = (id: number) => {
-    // The pinned (chosen) outcome can't be removed.
-    if (id !== highlightId && shown.length > 1) {
+    if (shown.length <= 1) return;
+    if (id === highlightId) {
+      // Closing the outcome you're viewing: drop its line from the chart and
+      // switch the page to the first remaining outcome in the list.
+      const next = shown.find((o) => o.marketId !== id);
       onChange(selectedIds.filter((x) => x !== id));
+      if (next) selectOutcome(next.marketId);
+      return;
     }
+    onChange(selectedIds.filter((x) => x !== id));
   };
   const add = (id: number) => {
     if (!atCap) onChange([...selectedIds, id]);
@@ -105,9 +127,10 @@ export function OutcomeLegend({
         const color = colorOf(o);
         const isHighlight = o.marketId === highlightId;
         const isClosed = o.closed;
-        // The chosen outcome is pinned: shown but not removable. The "+N more"
-        // dropdown is the only way it could leave, and it's excluded there too.
-        const removable = interactive && shown.length > 1 && !isHighlight;
+        // Every shown outcome — including the chosen one — can be closed while
+        // more than one line remains. Closing the chosen one also switches the
+        // page to the next outcome (see `remove`).
+        const removable = interactive && shown.length > 1;
         return (
           // Chip = a styled container holding two sibling buttons (kept
           // separate so the ✕ isn't nested inside the navigate button):
@@ -122,12 +145,18 @@ export function OutcomeLegend({
               flexShrink: 0,
               overflow: "hidden",
               borderRadius: 4,
-              border: "1px solid var(--border-1)",
-              background: "var(--bg-2)",
+              // The chosen outcome gets a subtle tint + colour-matched border so
+              // you can see which one you're viewing, without shouting.
+              border: isHighlight
+                ? `1px solid color-mix(in srgb, ${color} 60%, var(--border-1))`
+                : "1px solid var(--border-1)",
+              background: isHighlight
+                ? `color-mix(in srgb, ${color} 12%, var(--bg-2))`
+                : "var(--bg-2)",
               fontFamily: "var(--font-sans)",
               fontSize: 12,
-              fontWeight: 400,
-              color: "var(--fg-2)",
+              fontWeight: isHighlight ? 500 : 400,
+              color: isHighlight ? "var(--fg-1)" : "var(--fg-2)",
               opacity: isClosed ? 0.5 : 1,
             }}
           >
@@ -187,8 +216,16 @@ export function OutcomeLegend({
               <button
                 type="button"
                 onClick={() => remove(o.marketId)}
-                aria-label={`Remove ${o.label} from chart`}
-                title={`${o.label} — remove from chart`}
+                aria-label={
+                  isHighlight
+                    ? `Remove ${o.label} and switch outcome`
+                    : `Remove ${o.label} from chart`
+                }
+                title={
+                  isHighlight
+                    ? `${o.label} — remove & switch to another outcome`
+                    : `${o.label} — remove from chart`
+                }
                 style={{
                   display: "inline-flex",
                   alignItems: "center",

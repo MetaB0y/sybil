@@ -73,6 +73,9 @@ export function DegenOutcomePicker({
     border: `1px solid ${accent}`,
     textAlign: "left",
     cursor: interactive ? "pointer" : "default",
+    // Focus-blur the selected box in when the outcome changes — same swap as the
+    // market-detail header. Keyed by marketId below so it replays per switch.
+    animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
   };
 
   const boxContent = (
@@ -152,6 +155,7 @@ export function DegenOutcomePicker({
     <div ref={ref} style={{ position: "relative" }}>
       {interactive ? (
         <button
+          key={selected.marketId}
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-haspopup="listbox"
@@ -170,7 +174,9 @@ export function DegenOutcomePicker({
           {boxContent}
         </button>
       ) : (
-        <div style={boxStyle}>{boxContent}</div>
+        <div key={selected.marketId} style={boxStyle}>
+          {boxContent}
+        </div>
       )}
 
       {interactive && (

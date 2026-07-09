@@ -1,16 +1,20 @@
 "use client";
 
 /**
- * Market thumbnail with two-step fallback chain:
+ * Market thumbnail with a two-step fallback chain:
  *
  *   imageUrl (404) → fallbackIconUrl (404) → deterministic colored tile
  *
- * Pure `<img>` (no next/image) — avoids registering remote domain config
- * for the Polymarket S3 bucket. Fallback tile uses the first glyph of
- * the market name on a palette-keyed background.
+ * The resolved image is painted as a CSS background and only advanced to a new
+ * URL once that URL has decoded. Switching markets (e.g. picking a sibling
+ * outcome) therefore holds the previous thumbnail until the next one is ready
+ * instead of flashing blank — a plain `<img>` blanks the moment its `src`
+ * changes. Pure CSS (no next/image) — avoids registering remote domain config
+ * for the Polymarket S3 bucket. The tile fallback uses the first glyph of the
+ * market name on a palette-keyed background.
  */
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Props = {
   marketId: number;
@@ -19,8 +23,6 @@ type Props = {
   fallbackIconUrl?: string | null;
   size?: number;
 };
-
-type Stage = "image" | "icon" | "tile";
 
 const PALETTE = [
   "var(--accent-soft)",
@@ -33,6 +35,22 @@ const PALETTE = [
   "var(--accent-faint)",
 ];
 
+/**
+ * Resolve to the first URL in `urls` that decodes, or `null` if none do.
+ * Sequential (recursive, no await-in-loop) so the fallback order is honoured:
+ * try the market image, then the icon, then give up to the tile.
+ */
+function firstLoadable(urls: string[]): Promise<string | null> {
+  if (urls.length === 0) return Promise.resolve(null);
+  const [head, ...rest] = urls;
+  return new Promise<boolean>((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = head!;
+  }).then((ok) => (ok ? head! : firstLoadable(rest)));
+}
+
 export function MarketThumb({
   marketId,
   name,
@@ -40,42 +58,62 @@ export function MarketThumb({
   fallbackIconUrl,
   size = 40,
 }: Props) {
-  const initialStage: Stage = imageUrl
-    ? "image"
-    : fallbackIconUrl
-      ? "icon"
-      : "tile";
-  const [stage, setStage] = useState<Stage>(initialStage);
+  const candidates = useMemo(
+    () => [imageUrl, fallbackIconUrl].filter((u): u is string => !!u),
+    [imageUrl, fallbackIconUrl],
+  );
 
-  // Reset stage when input URLs change (parent reuses this component for a
-  // different market). React's documented "reset state when prop changes"
-  // pattern: track prev props in state and reset during render rather than
-  // in an effect.
-  const [prevImage, setPrevImage] = useState(imageUrl);
-  const [prevIcon, setPrevIcon] = useState(fallbackIconUrl);
-  if (prevImage !== imageUrl || prevIcon !== fallbackIconUrl) {
-    setPrevImage(imageUrl);
-    setPrevIcon(fallbackIconUrl);
-    setStage(initialStage);
+  // The URL currently painted. Seeded with the best candidate for first paint,
+  // then only advanced once a candidate has decoded — so it holds across a
+  // market switch instead of flashing blank. `null` → deterministic tile.
+  const [painted, setPainted] = useState<string | null>(candidates[0] ?? null);
+
+  // The previously painted URL, kept one render behind so the new image can
+  // cross-fade in over the old one instead of hard-cutting. Render-safe
+  // "previous value" pattern (adjust state during render), not a ref.
+  const [prev, setPrev] = useState<string | null>(null);
+  const [seen, setSeen] = useState<string | null>(painted);
+  if (seen !== painted) {
+    setPrev(seen);
+    setSeen(painted);
   }
 
-  if (stage !== "tile") {
-    const src = stage === "image" ? imageUrl! : fallbackIconUrl!;
+  useEffect(() => {
+    let cancelled = false;
+    firstLoadable(candidates).then((url) => {
+      if (!cancelled) setPainted(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [candidates]);
+
+  if (painted) {
     return (
-      <div style={thumbStyles(size)} aria-hidden>
-        {/* eslint-disable-next-line @next/next/no-img-element -- pure CSS; remote-domain config out of scope */}
-        <img
-          src={src}
-          alt=""
+      <div
+        aria-hidden
+        style={{
+          ...thumbStyles(size),
+          position: "relative",
+          background: "var(--surface-2)",
+        }}
+      >
+        {prev && prev !== painted && (
+          <span
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `url("${prev}") center / cover no-repeat`,
+            }}
+          />
+        )}
+        <span
+          key={painted}
           style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
-          onError={() => {
-            if (stage === "image" && fallbackIconUrl) setStage("icon");
-            else setStage("tile");
+            position: "absolute",
+            inset: 0,
+            background: `url("${painted}") center / cover no-repeat`,
+            animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
           }}
         />
       </div>

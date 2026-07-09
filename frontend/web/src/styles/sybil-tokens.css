@@ -133,6 +133,7 @@
   --dur-fast:       120ms;   /* @kind other */
   --dur-base:       200ms;   /* @kind other */
   --dur-slow:       320ms;   /* @kind other */
+  --dur-swap:       460ms;   /* market-detail header focus-in swap @kind other */
 
   /* ── Backdrop ────────────────────────────────────────────────────────── */
   --blur-nav: blur(12px) saturate(140%);   /* @kind other */
@@ -435,4 +436,18 @@ hr {
 @keyframes sybil-tooltip-in {
   from { opacity: 0; transform: translate(-50%, calc(-100% + 3px)); }
   to   { opacity: 1; transform: translate(-50%, -100%); }
+}
+
+/* Content swap — used when the market-detail header re-keys to a new outcome so
+   the title / stats / thumbnail focus in (blur → sharp, never fully transparent)
+   rather than hard-cutting or sliding. */
+@keyframes sybil-fade-swap {
+  from { opacity: 0.5; filter: blur(5px); }
+  to   { opacity: 1; filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sybil-fade-swap {
+    from { opacity: 1; filter: blur(0); }
+    to   { opacity: 1; filter: blur(0); }
+  }
 }
