@@ -1114,6 +1114,19 @@ export interface components {
              */
             balance_nanos: string;
             /**
+             * Format: int64
+             * @description Spendable balance = total minus cash reserved by open/resting
+             *     orders. Optional: older API builds omit it — fall back to
+             *     `balance_nanos`.
+             */
+            available_balance_nanos?: string;
+            /**
+             * Format: int64
+             * @description Cash reserved by open/resting orders. Optional: older API
+             *     builds omit it.
+             */
+            reserved_balance_nanos?: string;
+            /**
              * @description Optional opt-in display name (SYB-60). Not yet used for leaderboard
              *     labels — that flip is a deliberate follow-up.
              */
@@ -2126,6 +2139,11 @@ export interface components {
         };
         OrderAcceptedResponse: {
             accepted: boolean;
+            /**
+             * @description Sequencer-assigned IDs for the admitted orders, in request
+             *     order. Optional: older API builds omit it.
+             */
+            order_ids?: number[];
         };
         /**
          * @description Tagged enum representing public order types.
@@ -2284,6 +2302,19 @@ export interface components {
              * @description Available account balance. Integer nanodollars; 1_000_000_000 = $1.
              */
             balance_nanos: string;
+            /**
+             * Format: int64
+             * @description Spendable balance = total minus cash reserved by open/resting
+             *     orders. Optional: older API builds omit it — fall back to
+             *     `balance_nanos`.
+             */
+            available_balance_nanos?: string;
+            /**
+             * Format: int64
+             * @description Cash reserved by open/resting orders. Optional: older API
+             *     builds omit it.
+             */
+            reserved_balance_nanos?: string;
             /**
              * Format: int64
              * @description First-deposit timestamp in ms since epoch (B8). `0` for accounts
@@ -2510,6 +2541,19 @@ export interface components {
              * @description Available account balance. Integer nanodollars; 1_000_000_000 = $1.
              */
             balance_nanos: string;
+            /**
+             * Format: int64
+             * @description Spendable balance = total minus cash reserved by open/resting
+             *     orders. Optional: older API builds omit it — fall back to
+             *     `balance_nanos`.
+             */
+            available_balance_nanos?: string;
+            /**
+             * Format: int64
+             * @description Cash reserved by open/resting orders. Optional: older API
+             *     builds omit it.
+             */
+            reserved_balance_nanos?: string;
             display_name?: string | null;
             /**
              * Format: int64

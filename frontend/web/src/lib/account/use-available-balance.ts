@@ -9,22 +9,24 @@
  *   - A BUY reserves `ceil(limit_price_nanos × remaining_quantity / 1000)` cash.
  *   - A SELL reserves position (shares), NOT cash.
  * The engine rejects a buy when `limit_price × max_fill > balance − reserved`,
- * surfacing `InsufficientBalance { required, available }`. The frontend only
- * has total `balance_nanos`, so without subtracting reservations the "MAX"
- * button and balance line can propose an amount the engine then rejects.
+ * surfacing `InsufficientBalance { required, available }`.
  *
- * `useAccountOrders` already returns every open order for the account across
- * all markets, which matches the engine's account-global reservation.
+ * The portfolio response now carries `available_balance_nanos` /
+ * `reserved_balance_nanos` computed authoritatively server-side, so we prefer
+ * those. Older API builds omit them — then we fall back to summing the account's
+ * open BUY reservations client-side (`useAccountOrders` returns every open order
+ * across all markets, matching the engine's account-global reservation).
  */
 
 import { useMemo } from "react";
 import { parseNanos } from "@/lib/format/nanos";
+import type { Portfolio } from "./use-portfolio";
 import { notionalNanosCeil } from "./quantity";
-import { useAccountOrders } from "./use-account-orders";
+import { useAccountOrders, type AccountOrder } from "./use-account-orders";
 import { usePortfolio } from "./use-portfolio";
 
 export type AvailableBalance = {
-  /** Total cash balance in nanos, or null until the portfolio loads. */
+  /** Total (gross) cash balance in nanos, or null until the portfolio loads. */
   balanceNanos: bigint | null;
   /** Cash locked by resting buy orders (nanos). 0 when none / not yet loaded. */
   reservedNanos: bigint;
@@ -33,32 +35,64 @@ export type AvailableBalance = {
   isPending: boolean;
 };
 
+/**
+ * Derive spendable / reserved cash from a loaded portfolio. Prefers the
+ * server-computed fields; when they're absent (older API) it optionally uses a
+ * client-side reservation sum (`fallbackReservedNanos`, from open orders), and
+ * otherwise reports the full balance as available.
+ */
+export function selectBalances(
+  portfolio: Portfolio | null | undefined,
+  fallbackReservedNanos = 0n,
+): { balanceNanos: bigint | null; reservedNanos: bigint; availableNanos: bigint | null } {
+  if (!portfolio) {
+    return { balanceNanos: null, reservedNanos: 0n, availableNanos: null };
+  }
+
+  const balanceNanos = parseNanos(portfolio.balance_nanos);
+
+  // Server-authoritative path: both fields present.
+  if (
+    portfolio.available_balance_nanos != null &&
+    portfolio.reserved_balance_nanos != null
+  ) {
+    return {
+      balanceNanos,
+      reservedNanos: parseNanos(portfolio.reserved_balance_nanos),
+      availableNanos: parseNanos(portfolio.available_balance_nanos),
+    };
+  }
+
+  // Fallback (older API): subtract the client-computed reservation.
+  const reservedNanos = fallbackReservedNanos;
+  const availableNanos =
+    balanceNanos > reservedNanos ? balanceNanos - reservedNanos : 0n;
+  return { balanceNanos, reservedNanos, availableNanos };
+}
+
+/** Sum cash reserved by an account's open BUY orders. Sells reserve shares. */
+function sumBuyReservations(orders: AccountOrder[] | undefined): bigint {
+  let reservedNanos = 0n;
+  for (const o of orders ?? []) {
+    if (!o.side?.toLowerCase().includes("buy")) continue;
+    reservedNanos += notionalNanosCeil(
+      parseNanos(o.limit_price_nanos),
+      o.remaining_quantity,
+    );
+  }
+  return reservedNanos;
+}
+
 export function useAvailableBalance(accountId: number | null): AvailableBalance {
   const portfolio = usePortfolio(accountId);
   const orders = useAccountOrders(accountId);
 
   return useMemo(() => {
-    const balanceNanos = portfolio.data
-      ? parseNanos(portfolio.data.balance_nanos)
-      : null;
-
-    // Sum buy-order cash reservations. Sells reserve shares, not cash.
-    let reservedNanos = 0n;
-    for (const o of orders.data ?? []) {
-      if (!o.side?.toLowerCase().includes("buy")) continue;
-      reservedNanos += notionalNanosCeil(
-        parseNanos(o.limit_price_nanos),
-        o.remaining_quantity,
-      );
-    }
-
-    const availableNanos =
-      balanceNanos == null
-        ? null
-        : balanceNanos > reservedNanos
-          ? balanceNanos - reservedNanos
-          : 0n;
-
+    const fallbackReserved = sumBuyReservations(orders.data);
+    const { balanceNanos, reservedNanos, availableNanos } = selectBalances(
+      portfolio.data,
+      fallbackReserved,
+    );
     return {
       balanceNanos,
       reservedNanos,

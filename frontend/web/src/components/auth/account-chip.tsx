@@ -15,6 +15,7 @@ import {
   useAccountSession,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
+import { selectBalances } from "@/lib/account/use-available-balance";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import { formatDollars, parseNanos } from "@/lib/format/nanos";
 
@@ -64,10 +65,16 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
     portfolio != null
       ? formatDollars(parseNanos(portfolio.portfolio_value_nanos), { decimals: 2 })
       : "—";
+  // "Cash" is the AVAILABLE (spendable) balance — total minus funds reserved by
+  // open orders — so the chip never implies more buying power than the engine
+  // will accept. Reserved is surfaced separately when non-zero.
+  const { availableNanos, reservedNanos } = selectBalances(portfolio);
   const cash =
-    portfolio != null
-      ? formatDollars(parseNanos(portfolio.balance_nanos), { decimals: 2 })
+    availableNanos != null
+      ? formatDollars(availableNanos, { decimals: 2 })
       : "—";
+  const reserved =
+    reservedNanos > 0n ? formatDollars(reservedNanos, { decimals: 2 }) : null;
 
   useEffect(() => {
     if (!open) return;
@@ -94,7 +101,7 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         aria-haspopup="menu"
         aria-expanded={open}
         style={chipButtonStyle(true)}
-        title={`Portfolio ${total} · Cash ${cash} · Account #${accountId}`}
+        title={`Portfolio ${total} · Available ${cash}${reserved ? ` · Reserved ${reserved}` : ""} · Account #${accountId}`}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
           <span style={{ color: "var(--fg-1)" }}>{total}</span>
@@ -125,7 +132,8 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         >
           <div style={{ padding: "6px 10px 8px" }}>
             <InfoRow label="Portfolio" value={total} strong />
-            <InfoRow label="Cash" value={cash} />
+            <InfoRow label="Available" value={cash} />
+            {reserved && <InfoRow label="Reserved" value={reserved} />}
             <InfoRow label="Account" value={`#${accountId}`} />
           </div>
           <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />

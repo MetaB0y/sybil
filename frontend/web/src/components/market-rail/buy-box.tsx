@@ -296,17 +296,20 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         });
         qc.invalidateQueries({ queryKey: ["orders", "pending"] });
 
-        // The signed endpoint returns only `{ accepted }`, so recover the
-        // order-id best-effort from the refreshed pending list (newest open
-        // order for this market). A filled IOC leaves nothing pending → null.
-        const orderId = latestOrderIdFor(
-          qc.getQueryData<AccountOrder[]>([
-            "account",
-            session.accountId,
-            "orders",
-          ]),
-          outcome.marketId,
-        );
+        // Prefer the sequencer's authoritative id from the submit response.
+        // Older API builds return no `order_ids`, so fall back to a best-effort
+        // recovery from the refreshed pending list (newest open order for this
+        // market). A filled IOC leaves nothing pending → null.
+        const orderId =
+          res.orderIds[0] ??
+          latestOrderIdFor(
+            qc.getQueryData<AccountOrder[]>([
+              "account",
+              session.accountId,
+              "orders",
+            ]),
+            outcome.marketId,
+          );
         setAccepted({
           orderId,
           block: batchNumber,
