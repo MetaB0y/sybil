@@ -368,7 +368,8 @@ print("OK", len(native), len(mirror), pick if pick is not None else "")
 
 # ── 5. Order placement + deterministic fills gate ────────────────────────────
 # Create two demo accounts, submit a crossing BuyYes/BuyNo pair on the same
-# market (unsigned public /v1/orders path), and assert matched orders INCREASE.
+# market (unsigned /v1/orders path, now service-token gated — seed as trusted infra),
+# and assert matched orders INCREASE.
 check_orders_and_fills() {
     section "5. Order placement + fills-after-seed gate"
     if [[ -z "$ORDER_MARKET" ]]; then
@@ -395,14 +396,14 @@ check_orders_and_fills() {
 
     # Crossing pair at 0.99 each: complementary demand that must clear.
     http POST /v1/orders \
-        "{\"account_id\":$a,\"orders\":[{\"type\":\"BuyYes\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" none
+        "{\"account_id\":$a,\"orders\":[{\"type\":\"BuyYes\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" token
     if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget accepted)" == "true" ]]; then
         pass "order placement: BuyYes accepted (acct $a)"
     else
         fail "order placement: BuyYes -> $HTTP_CODE: $HTTP_BODY"
     fi
     http POST /v1/orders \
-        "{\"account_id\":$c,\"orders\":[{\"type\":\"BuyNo\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" none
+        "{\"account_id\":$c,\"orders\":[{\"type\":\"BuyNo\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" token
     if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget accepted)" == "true" ]]; then
         pass "order placement: BuyNo accepted (acct $c)"
     else
