@@ -44,3 +44,53 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  e2e:
+    name: Playwright e2e (passkey journey)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/web
+    # NOTE: GitHub Actions is currently disabled for this repo (billing), so this
+    # job cannot actually run in CI yet — it is structured correctly for when it
+    # is re-enabled.
+    #
+    # This drives the full passkey (WebAuthn virtual-authenticator) journey and
+    # posts a real signed order to /v1/orders/signed — the test that would have
+    # caught the webauthn_rp_id/origin blocker. It needs a live backend.
+    #
+    # SYB-243: point this at an ephemeral compose stack spun up in the job
+    # instead of the shared live box. Until that exists, default to the live
+    # deployment; override with the `E2E_BASE_URL` repo/environment variable
+    # (and `E2E_API_BASE` if the API is not on the app host's parent domain).
+    env:
+      E2E_BASE_URL: ${{ vars.E2E_BASE_URL || 'https://app.172-104-31-54.nip.io' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/web/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run e2e
+        run: pnpm e2e
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/web/playwright-report
+          retention-days: 7
