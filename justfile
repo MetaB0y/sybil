@@ -427,7 +427,7 @@ deploy-openrouter-env-check:
 # Build and deploy sybil-api, polymarket mirror, and prover status/mock API.
 # The real filesystem prover worker is profile-gated until proof-job export is live.
 deploy-api: deploy-sync deploy-prod-env-check && deploy-verify
-    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-mock'
 
@@ -446,7 +446,7 @@ deploy-reset-state confirm: deploy-prod-env-check
 
 # Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.
 deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
-    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
 
@@ -465,7 +465,7 @@ deploy-telegram-alerts: deploy-sync deploy-prod-env-check
 #   NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange \
 #   NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange just deploy-web
 deploy-web: deploy-sync deploy-prod-env-check && deploy-verify
-    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
     docker save sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-web caddy'
 
@@ -475,7 +475,7 @@ deploy-caddy: deploy-sync deploy-prod-env-check
 
 # Deploy everything
 deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
-    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
     docker save sybil-api:latest sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
