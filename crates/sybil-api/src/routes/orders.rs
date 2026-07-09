@@ -144,9 +144,12 @@ pub async fn submit_orders(
         mm_constraint,
     };
 
-    state.sequencer.submit_order(submission).await?;
+    let order_ids = state.sequencer.submit_order(submission).await?;
 
-    Ok(Json(OrderAcceptedResponse { accepted: true }))
+    Ok(Json(OrderAcceptedResponse {
+        accepted: true,
+        order_ids,
+    }))
 }
 
 /// POST /v1/orders/signed
@@ -169,7 +172,7 @@ pub async fn submit_signed_order(
     let mut order = signed_order_data_to_order(&req.order).map_err(AppError::bad_request)?;
     apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block, None)
         .map_err(AppError::bad_request)?;
-    match req.auth_scheme {
+    let order_ids = match req.auth_scheme {
         AuthScheme::RawP256 => {
             let signature = parse_required_signature(req.signature_hex.as_deref())?;
             let signed = SignedOrder {
@@ -178,7 +181,7 @@ pub async fn submit_signed_order(
                 signer,
                 signature,
             };
-            state.sequencer.submit_signed_order(signed).await?;
+            state.sequencer.submit_signed_order(signed).await?
         }
         AuthScheme::WebAuthn => {
             ensure_registered_scheme(&state, &signer, sequencer_auth_scheme(req.auth_scheme))
@@ -202,11 +205,14 @@ pub async fn submit_signed_order(
                     nonce: req.nonce,
                     signer,
                 })
-                .await?;
+                .await?
         }
-    }
+    };
 
-    Ok(Json(OrderAcceptedResponse { accepted: true }))
+    Ok(Json(OrderAcceptedResponse {
+        accepted: true,
+        order_ids,
+    }))
 }
 
 /// POST /v1/orders/cancel/signed

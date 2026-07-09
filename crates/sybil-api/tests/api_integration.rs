@@ -801,10 +801,19 @@ async fn order_visible_immediately_after_submit() {
         "submit failed: {}",
         String::from_utf8_lossy(&body)
     );
+    let submit_response = parse_json(&body);
+    assert_eq!(submit_response["accepted"], json!(true));
+    let submitted_order_ids = submit_response["order_ids"]
+        .as_array()
+        .expect("submit response order_ids");
+    assert_eq!(submitted_order_ids.len(), 1);
+    let submitted_order_id = submitted_order_ids[0]
+        .as_u64()
+        .expect("numeric submitted order id");
 
     // No block has been produced — with the mempool-free admit path the order
     // must already be visible on the resting book.
-    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/orders")).await;
+    let (status, body) = get(app.clone(), &format!("/v1/accounts/{account_id}/orders")).await;
     assert_eq!(status, StatusCode::OK);
     let pending = parse_json(&body);
     let pending = pending.as_array().unwrap();
@@ -814,9 +823,80 @@ async fn order_visible_immediately_after_submit() {
         "expected order visible without waiting for a block, got {pending:?}"
     );
     assert_eq!(pending[0]["account_id"].as_u64().unwrap(), account_id);
+    assert_eq!(pending[0]["order_id"].as_u64().unwrap(), submitted_order_id);
     assert_eq!(pending[0]["market_id"].as_u64().unwrap(), market_id);
     assert_eq!(pending[0]["side"].as_str().unwrap(), "BuyYes");
     assert_eq!(pending[0]["remaining_quantity"].as_u64().unwrap(), 10);
+
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let account = parse_json(&body);
+    let total = account["balance_nanos"].as_i64().unwrap();
+    let reserved = account["reserved_balance_nanos"].as_i64().unwrap();
+    let available = account["available_balance_nanos"].as_i64().unwrap();
+    assert!(reserved > 0, "resting buy must reserve balance");
+    assert_eq!(available, total - reserved);
+}
+
+#[tokio::test]
+async fn multi_order_submit_returns_ids_preserved_when_orders_rest() {
+    let (app, handle) = test_app(true).await;
+
+    let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "Bundle IDs" })).await;
+    let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+    let (_, body) = post_json(
+        app.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000_000u64 }),
+    )
+    .await;
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/orders",
+        json!({
+            "account_id": account_id,
+            "orders": [
+                {
+                    "type": "BuyYes",
+                    "market_id": market_id,
+                    "limit_price_nanos": 400_000_000u64,
+                    "quantity": 10
+                },
+                {
+                    "type": "BuyYes",
+                    "market_id": market_id,
+                    "limit_price_nanos": 500_000_000u64,
+                    "quantity": 10
+                }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let response = parse_json(&body);
+    let order_ids: Vec<u64> = response["order_ids"]
+        .as_array()
+        .expect("submit response order_ids")
+        .iter()
+        .map(|value| value.as_u64().expect("numeric submitted order id"))
+        .collect();
+    assert_eq!(order_ids.len(), 2);
+    assert_ne!(order_ids[0], order_ids[1]);
+
+    handle.produce_block().await.unwrap();
+    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/orders")).await;
+    assert_eq!(status, StatusCode::OK);
+    let resting_ids: std::collections::HashSet<u64> = parse_json(&body)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|order| order["order_id"].as_u64().unwrap())
+        .collect();
+    assert!(order_ids
+        .iter()
+        .all(|order_id| resting_ids.contains(order_id)));
 }
 
 #[tokio::test]

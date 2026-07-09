@@ -6,7 +6,7 @@ impl SequencerActorState {
         &self,
         source: &'static str,
         order_count: usize,
-        result: &Result<(), SequencerError>,
+        result: &Result<Vec<u64>, SequencerError>,
     ) {
         let outcome = if result.is_ok() {
             "accepted"
@@ -36,7 +36,7 @@ impl SequencerActorState {
     pub(super) async fn handle_signed_order(
         &mut self,
         signed: SignedOrder,
-    ) -> Result<(), SequencerError> {
+    ) -> Result<Vec<u64>, SequencerError> {
         let genesis_hash = self
             .sequencer
             .genesis_hash()
@@ -53,7 +53,7 @@ impl SequencerActorState {
     pub(super) async fn handle_authenticated_order(
         &mut self,
         authenticated: AuthenticatedOrder,
-    ) -> Result<(), SequencerError> {
+    ) -> Result<Vec<u64>, SequencerError> {
         let account_id = self
             .sequencer
             .lookup_pubkey(&authenticated.signer)
@@ -133,7 +133,7 @@ impl SequencerActorState {
     pub(super) async fn admit_or_defer(
         &mut self,
         submission: OrderSubmission,
-    ) -> Result<(), SequencerError> {
+    ) -> Result<Vec<u64>, SequencerError> {
         self.check_account_submission_limits(&submission)?;
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -163,18 +163,21 @@ impl SequencerActorState {
                         return Err(SequencerError::Persistence(err.to_string()));
                     }
                 }
-                Ok(())
+                Ok(vec![order_id])
             }
-            crate::sequencer::AdmitOutcome::Deferred(sub) => {
-                self.check_deferred_submission_limits(&sub)?;
+            crate::sequencer::AdmitOutcome::Deferred {
+                order_ids,
+                submission,
+            } => {
+                self.check_deferred_submission_limits(&submission)?;
                 if let Some(store) = &self.store {
                     store
-                        .append_pending_bundle(&sub)
+                        .append_pending_bundle(&submission)
                         .await
                         .map_err(|err| SequencerError::Persistence(err.to_string()))?;
                 }
-                self.sequencer.push_pending_bundle(sub);
-                Ok(())
+                self.sequencer.push_pending_bundle(submission);
+                Ok(order_ids)
             }
             crate::sequencer::AdmitOutcome::Rejected(err) => Err(err),
         }

@@ -262,12 +262,18 @@ impl SequencerHandle {
         }
     }
 
-    pub async fn submit_order(&self, submission: OrderSubmission) -> Result<(), SequencerError> {
+    pub async fn submit_order(
+        &self,
+        submission: OrderSubmission,
+    ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitOrder(submission, reply))
             .await?
     }
 
-    pub async fn submit_signed_order(&self, signed: SignedOrder) -> Result<(), SequencerError> {
+    pub async fn submit_signed_order(
+        &self,
+        signed: SignedOrder,
+    ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitSignedOrder(signed, reply))
             .await?
     }
@@ -275,7 +281,7 @@ impl SequencerHandle {
     pub async fn submit_authenticated_order(
         &self,
         authenticated: AuthenticatedOrder,
-    ) -> Result<(), SequencerError> {
+    ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitAuthenticatedOrder(authenticated, reply))
             .await?
     }
@@ -317,6 +323,31 @@ impl SequencerHandle {
         account_id: AccountId,
     ) -> Result<Option<Account>, SequencerError> {
         self.read_query(move |state| state.sequencer.accounts.get(account_id).cloned())
+            .await
+    }
+
+    /// Read an account and its live resting-order balance reservation atomically.
+    pub async fn get_account_with_reserved_balance(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<(Account, i64)>, SequencerError> {
+        self.read_query(move |state| {
+            state
+                .sequencer
+                .accounts
+                .get(account_id)
+                .cloned()
+                .map(|account| {
+                    let reserved = state.sequencer.reserved_balance_nanos(account_id);
+                    (account, reserved)
+                })
+        })
+        .await
+    }
+
+    /// Read the balance committed to an account's live resting orders.
+    pub async fn get_reserved_balance(&self, account_id: AccountId) -> Result<i64, SequencerError> {
+        self.read_query(move |state| state.sequencer.reserved_balance_nanos(account_id))
             .await
     }
 
@@ -752,6 +783,33 @@ impl SequencerHandle {
     ) -> Result<PortfolioSummary, SequencerError> {
         self.read_query(move |state| state.sequencer.portfolio_summary(account_id))
             .await?
+    }
+
+    /// Read a portfolio and its resting-order balance reservation atomically.
+    pub async fn get_portfolio_with_reserved_balance(
+        &self,
+        account_id: AccountId,
+    ) -> Result<(PortfolioSummary, i64), SequencerError> {
+        self.read_query(move |state| {
+            let portfolio = state.sequencer.portfolio_summary(account_id)?;
+            let reserved = state.sequencer.reserved_balance_nanos(account_id);
+            Ok((portfolio, reserved))
+        })
+        .await?
+    }
+
+    /// Read the components of the private account summary from one actor state.
+    pub async fn get_account_summary_with_reserved_balance(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<(Account, PortfolioSummary, i64)>, SequencerError> {
+        self.read_query(move |state| {
+            let account = state.sequencer.accounts.get(account_id).cloned()?;
+            let portfolio = state.sequencer.portfolio_summary(account_id).ok()?;
+            let reserved = state.sequencer.reserved_balance_nanos(account_id);
+            Some((account, portfolio, reserved))
+        })
+        .await
     }
 
     pub async fn create_market_with_metadata(

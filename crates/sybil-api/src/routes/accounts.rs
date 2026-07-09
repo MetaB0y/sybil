@@ -18,7 +18,7 @@ use matching_sequencer::{
 use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
 
-use crate::convert::account_to_response;
+use crate::convert::{account_balance_breakdown, account_to_response};
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
@@ -85,7 +85,7 @@ pub async fn create_account(
         )));
     }
     let account = state.sequencer.create_account(balance_nanos).await?;
-    Ok(Json(account_to_response(&account)))
+    Ok(Json(account_to_response(&account, 0)))
 }
 
 /// POST /v1/accounts/{id}/fund
@@ -111,11 +111,16 @@ pub async fn fund_account(
             req.amount_nanos
         ))
     })?;
-    let account = state
+    state
         .sequencer
         .fund_account(AccountId(id), amount_nanos)
         .await?;
-    Ok(Json(account_to_response(&account)))
+    let (account, reserved_balance) = state
+        .sequencer
+        .get_account_with_reserved_balance(AccountId(id))
+        .await?
+        .ok_or_else(|| AppError::not_found(format!("Account {} not found", id)))?;
+    Ok(Json(account_to_response(&account, reserved_balance)))
 }
 
 /// GET /v1/accounts/{id}
@@ -132,12 +137,12 @@ pub async fn get_account(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<Json<AccountResponse>, AppError> {
-    let account = state
+    let (account, reserved_balance) = state
         .sequencer
-        .get_account(AccountId(id))
+        .get_account_with_reserved_balance(AccountId(id))
         .await?
         .ok_or_else(|| AppError::not_found(format!("Account {} not found", id)))?;
-    Ok(Json(account_to_response(&account)))
+    Ok(Json(account_to_response(&account, reserved_balance)))
 }
 
 /// Parse + validate the NEW key material shared by the first-key (service) and
@@ -449,7 +454,12 @@ pub async fn get_portfolio(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<Json<PortfolioResponse>, AppError> {
-    let portfolio = state.sequencer.get_portfolio(AccountId(id)).await?;
+    let (portfolio, reserved_balance) = state
+        .sequencer
+        .get_portfolio_with_reserved_balance(AccountId(id))
+        .await?;
+    let (available_balance_nanos, reserved_balance_nanos) =
+        account_balance_breakdown(portfolio.balance_nanos, reserved_balance);
 
     let positions: Vec<PositionValueResponse> = portfolio
         .positions
@@ -471,6 +481,8 @@ pub async fn get_portfolio(
     Ok(Json(PortfolioResponse {
         account_id: portfolio.account_id.0,
         balance_nanos: portfolio.balance_nanos,
+        available_balance_nanos,
+        reserved_balance_nanos,
         total_deposited_nanos: portfolio.total_deposited_nanos,
         positions,
         total_position_value_nanos: portfolio.total_position_value_nanos,
@@ -705,7 +717,7 @@ pub async fn set_profile(
         req.nonce,
     );
 
-    let account = match req.auth_scheme {
+    match req.auth_scheme {
         AuthScheme::RawP256 => {
             let signed = SignedProfileUpdate {
                 account_id,
@@ -732,7 +744,12 @@ pub async fn set_profile(
                 .await?
         }
     };
-    Ok(Json(account_to_response(&account)))
+    let (account, reserved_balance) = state
+        .sequencer
+        .get_account_with_reserved_balance(account_id)
+        .await?
+        .ok_or_else(|| AppError::not_found(format!("Account {} not found", id)))?;
+    Ok(Json(account_to_response(&account, reserved_balance)))
 }
 
 /// GET /v1/accounts/{id}/keys — list registered signing keys with metadata
@@ -1027,12 +1044,11 @@ pub async fn get_private_summary(
             "Bearer token does not grant access to this account",
         ));
     }
-    let account = state
+    let (account, portfolio, reserved_balance) = state
         .sequencer
-        .get_account(AccountId(id))
+        .get_account_summary_with_reserved_balance(AccountId(id))
         .await?
         .ok_or_else(|| AppError::not_found(format!("Account {id} not found")))?;
-    let portfolio = state.sequencer.get_portfolio(AccountId(id)).await?;
     let positions: Vec<PositionResponse> = account
         .positions
         .iter()
@@ -1043,9 +1059,13 @@ pub async fn get_private_summary(
             quantity: qty,
         })
         .collect();
+    let (available_balance_nanos, reserved_balance_nanos) =
+        account_balance_breakdown(account.balance, reserved_balance);
     Ok(Json(PrivateAccountSummaryResponse {
         account_id: id,
         balance_nanos: account.balance,
+        available_balance_nanos,
+        reserved_balance_nanos,
         total_deposited_nanos: portfolio.total_deposited_nanos,
         portfolio_value_nanos: portfolio.portfolio_value_nanos,
         pnl_nanos: portfolio.pnl_nanos,

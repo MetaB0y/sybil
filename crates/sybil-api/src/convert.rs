@@ -81,8 +81,15 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
     }
 }
 
+/// Split gross balance into reserved and spendable components defensively.
+pub fn account_balance_breakdown(balance_nanos: i64, reserved_balance_nanos: i64) -> (i64, i64) {
+    let reserved_balance_nanos = reserved_balance_nanos.max(0);
+    let available_balance_nanos = balance_nanos.saturating_sub(reserved_balance_nanos).max(0);
+    (available_balance_nanos, reserved_balance_nanos)
+}
+
 /// Convert an Account to an AccountResponse.
-pub fn account_to_response(account: &Account) -> AccountResponse {
+pub fn account_to_response(account: &Account, reserved_balance_nanos: i64) -> AccountResponse {
     let positions: Vec<PositionResponse> = account
         .positions
         .iter()
@@ -98,9 +105,14 @@ pub fn account_to_response(account: &Account) -> AccountResponse {
         })
         .collect();
 
+    let (available_balance_nanos, reserved_balance_nanos) =
+        account_balance_breakdown(account.balance, reserved_balance_nanos);
+
     AccountResponse {
         account_id: account.id.0,
         balance_nanos: account.balance,
+        available_balance_nanos,
+        reserved_balance_nanos,
         positions,
         display_name: account.profile.display_name.clone(),
         avatar_seed: account.profile.avatar_seed.clone(),
@@ -615,9 +627,16 @@ mod tests {
         let mut account = Account::new(AccountId(42), 100 * NANOS_PER_DOLLAR as i64);
         account.positions.insert((MarketId::new(0), 0), 10);
 
-        let resp = account_to_response(&account);
+        let resp = account_to_response(&account, 25 * NANOS_PER_DOLLAR as i64);
         assert_eq!(resp.account_id, 42);
         assert_eq!(resp.balance_nanos, 100 * NANOS_PER_DOLLAR as i64);
+        assert_eq!(resp.available_balance_nanos, 75 * NANOS_PER_DOLLAR as i64);
+        assert_eq!(resp.reserved_balance_nanos, 25 * NANOS_PER_DOLLAR as i64);
         assert_eq!(resp.positions.len(), 1);
+    }
+
+    #[test]
+    fn test_account_balance_breakdown_clamps_available_at_zero() {
+        assert_eq!(account_balance_breakdown(10, 12), (0, 12));
     }
 }

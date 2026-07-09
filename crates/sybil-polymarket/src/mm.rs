@@ -871,11 +871,11 @@ impl MmActor {
             mm_budget_nanos: Some(budget_nanos),
         };
         match self.sybil_client.submit_orders(&req).await {
-            Ok(accepted) => {
+            Ok(order_ids) => {
                 debug!(
                     block = block_height,
                     order_count = orders.len(),
-                    accepted,
+                    order_ids = ?order_ids,
                     budget_dollars = budget_nanos as f64 / NANOS_PER_DOLLAR as f64,
                     "submitted MM orders"
                 );

@@ -121,6 +121,13 @@ impl BlockSequencer {
         let next_order_id = order_book
             .resting_orders()
             .map(|(order, _)| order.id.saturating_add(1))
+            .chain(
+                state
+                    .pending_bundles
+                    .iter()
+                    .flat_map(|submission| submission.orders.iter())
+                    .map(|order| order.id.saturating_add(1)),
+            )
             .fold(state.next_order_id, u64::max);
         let mut restored = Self {
             accounts: state.accounts,

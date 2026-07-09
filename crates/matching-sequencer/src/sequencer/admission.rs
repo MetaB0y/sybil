@@ -105,7 +105,11 @@ impl GroupCoverageTracker {
 }
 
 impl BlockSequencer {
-    pub fn try_admit_direct(&mut self, submission: OrderSubmission, now_ms: u64) -> AdmitOutcome {
+    pub fn try_admit_direct(
+        &mut self,
+        mut submission: OrderSubmission,
+        now_ms: u64,
+    ) -> AdmitOutcome {
         for order in &submission.orders {
             if let Err(reason) = validate_order_shape(order) {
                 return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
@@ -132,8 +136,12 @@ impl BlockSequencer {
         let eligible = submission.mm_constraint.is_none()
             && submission.orders.len() == 1
             && submission.orders[0].num_markets == 1;
+        let order_ids = self.assign_submission_order_ids(&mut submission);
         if !eligible {
-            return AdmitOutcome::Deferred(submission);
+            return AdmitOutcome::Deferred {
+                order_ids,
+                submission,
+            };
         }
 
         let account_id = submission.account_id;
@@ -145,10 +153,8 @@ impl BlockSequencer {
             }));
         };
 
-        let mut order = submission.orders.into_iter().next().expect("len == 1");
-        let order_id = self.next_order_id;
-        self.next_order_id += 1;
-        order.id = order_id;
+        let order = submission.orders.into_iter().next().expect("len == 1");
+        let order_id = order.id;
         let next_batch_height = self.height.saturating_add(1);
         let expires_at_block = order.effective_expires_at_block(self.height, self.order_book.ttl());
         if next_batch_height > expires_at_block {
@@ -186,6 +192,36 @@ impl BlockSequencer {
                 reason,
             })),
         }
+    }
+
+    /// Assign durable, globally monotonic IDs before either direct admission or
+    /// deferred persistence so the submission acknowledgement can expose them.
+    fn assign_submission_order_ids(&mut self, submission: &mut OrderSubmission) -> Vec<u64> {
+        let order_ids: Vec<u64> = submission
+            .orders
+            .iter_mut()
+            .map(|order| {
+                let order_id = self.next_order_id;
+                self.next_order_id = self.next_order_id.saturating_add(1);
+                order.id = order_id;
+                order_id
+            })
+            .collect();
+
+        if let Some(mm_constraint) = submission.mm_constraint.take() {
+            let mut remapped = MmConstraint::new(mm_constraint.mm_id, mm_constraint.max_capital);
+            for (submission_index, old_id) in mm_constraint.order_ids.iter().enumerate() {
+                if let (Some(&order_id), Some(&side)) = (
+                    order_ids.get(submission_index),
+                    mm_constraint.order_sides.get(old_id),
+                ) {
+                    remapped.add_order(order_id, side);
+                }
+            }
+            submission.mm_constraint = Some(remapped);
+        }
+
+        order_ids
     }
 
     /// Seed an STP tracker with every resting/pending-bundle order belonging

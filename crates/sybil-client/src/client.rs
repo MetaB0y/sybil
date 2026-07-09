@@ -385,26 +385,29 @@ impl SybilClient {
 
     // === Orders ===
 
-    pub async fn submit_orders(&self, req: &SubmitOrderRequest) -> Result<bool, Error> {
+    pub async fn submit_orders(&self, req: &SubmitOrderRequest) -> Result<Vec<u64>, Error> {
         let resp = self
             .with_service_auth(self.http.post(self.url("/v1/orders")))
             .json(req)
             .send()
             .await?;
         let result: OrderAcceptedResponse = self.decode(resp).await?;
-        Ok(result.accepted)
+        Ok(result.order_ids)
     }
 
     /// Submit a signed order. The caller must supply and sign a strictly
     /// increasing per-account nonce in [`SubmitSignedOrderRequest::nonce`].
-    pub async fn submit_signed_order(&self, req: &SubmitSignedOrderRequest) -> Result<bool, Error> {
+    pub async fn submit_signed_order(
+        &self,
+        req: &SubmitSignedOrderRequest,
+    ) -> Result<Vec<u64>, Error> {
         let resp = self
             .with_service_auth(self.http.post(self.url("/v1/orders/signed")))
             .json(req)
             .send()
             .await?;
         let result: OrderAcceptedResponse = self.decode(resp).await?;
-        Ok(result.accepted)
+        Ok(result.order_ids)
     }
 
     /// Cancel a resting order with a signed payload. The caller must supply

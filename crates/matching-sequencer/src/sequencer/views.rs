@@ -134,6 +134,11 @@ impl BlockSequencer {
         self.order_book.orders_for_account(account_id)
     }
 
+    /// Balance committed to live resting orders for this account.
+    pub fn reserved_balance_nanos(&self, account_id: AccountId) -> i64 {
+        self.order_book.reserved_balance(account_id)
+    }
+
     pub fn pending_bundles_for_account(&self, account_id: AccountId) -> usize {
         self.pending_bundles
             .iter()

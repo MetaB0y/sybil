@@ -24,7 +24,7 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
     "/metrics",
 ];
 
-const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 122;
+const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 128;
 
 /// Unique path templates across all three mount tables, minus the non-API
 /// exemptions. `MatchedPath`/utoipa both key on the path template (not the

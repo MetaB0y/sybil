@@ -1341,7 +1341,7 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
         },
         1_002,
     ) {
-        AdmitOutcome::Deferred(submission) => submission,
+        AdmitOutcome::Deferred { submission, .. } => submission,
         other => panic!("expected pending bundle deferral, got {:?}", other),
     };
 
@@ -1385,8 +1385,8 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
     let mut restored = BlockSequencer::restore(state, oracle, SequencerConfig::default());
     assert_eq!(
         restored.next_order_id(),
-        2,
-        "restore must not reuse IDs consumed by admit-log replay"
+        4,
+        "restore must not reuse IDs acknowledged for admits or deferred bundles"
     );
     let bp = restored.produce_block(Vec::new(), 2_000);
     let ids: Vec<u64> = bp
@@ -1448,7 +1448,7 @@ fn restored_pending_bundle_revalidates_against_replayed_admit_reservations() {
         },
         1_002,
     ) {
-        AdmitOutcome::Deferred(submission) => submission,
+        AdmitOutcome::Deferred { submission, .. } => submission,
         other => panic!("expected pending bundle deferral, got {:?}", other),
     };
 
@@ -3245,7 +3245,7 @@ fn cross_block_stp_pending_bundle_contributes_to_admit_check() {
         mm_constraint: None,
     };
     match seq.try_admit_direct(bundle, 0) {
-        AdmitOutcome::Deferred(sub) => seq.push_pending_bundle(sub),
+        AdmitOutcome::Deferred { submission, .. } => seq.push_pending_bundle(submission),
         other => panic!("expected Deferred for multi-order bundle, got {:?}", other),
     }
 
