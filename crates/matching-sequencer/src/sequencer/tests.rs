@@ -474,6 +474,47 @@ fn bridge_deposit_and_withdrawal_emit_block_sidecar() {
 }
 
 #[test]
+fn bridge_withdrawal_l1_event_replay_is_idempotent() {
+    let (mut seq, aid) = make_sequencer(10_000_000);
+    let withdrawal = seq
+        .request_bridge_withdrawal(BridgeWithdrawalRequest {
+            account_id: aid,
+            chain_id: 1,
+            vault_address: eth_address(0x10),
+            recipient: eth_address(0x40),
+            token_address: eth_address(0x20),
+            amount_token_units: 4_000,
+            expiry_height: 10,
+        })
+        .unwrap();
+    let balance_after_request = seq.accounts.get(aid).unwrap().balance;
+    let total_balance_after_request = seq.accounts.total_balance();
+    let event = BridgeWithdrawalL1Event {
+        nullifier: withdrawal.nullifier,
+        status: L1WithdrawalStatus::Queued,
+        event_at_unix: 1_700_000_000,
+        executable_at_unix: Some(1_700_086_400),
+        tx_hash: Some([0xAB; 32]),
+    };
+
+    let first_leaf = seq.apply_bridge_withdrawal_l1_event(event.clone()).unwrap();
+    let balance_after_first_apply = seq.accounts.get(aid).unwrap().balance;
+    let second_leaf = seq.apply_bridge_withdrawal_l1_event(event).unwrap();
+
+    assert_eq!(first_leaf.l1_status, L1WithdrawalStatus::Queued);
+    assert_eq!(first_leaf.l1_requested_at_unix, Some(1_700_000_000));
+    assert_eq!(first_leaf.l1_executable_at_unix, Some(1_700_086_400));
+    assert_eq!(first_leaf.l1_tx_hash, Some([0xAB; 32]));
+    assert_eq!(second_leaf, first_leaf);
+    assert_eq!(balance_after_first_apply, balance_after_request);
+    assert_eq!(
+        seq.accounts.get(aid).unwrap().balance,
+        balance_after_request
+    );
+    assert_eq!(seq.accounts.total_balance(), total_balance_after_request);
+}
+
+#[test]
 fn bridge_deposit_requires_next_l1_cursor() {
     let (mut seq, aid) = make_sequencer(0);
     match seq.ingest_l1_deposit(l1_deposit(aid, 2, 10_000)) {
