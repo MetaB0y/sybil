@@ -20,6 +20,13 @@ services:
       SYBIL_DEV_MODE: "false"
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
       SYBIL_CORS_ORIGINS: "${SYBIL_CORS_ORIGINS:-}"
+      # WebAuthn (passkey) relying-party config MUST equal the public web origin
+      # the browser registers passkeys under. If these stay at the localhost
+      # defaults, every assertion fails RpIdHashMismatch/OriginMismatch and ALL
+      # passkey users are locked out (the default account-create mode is passkey).
+      # RP_ID = the app host (no scheme); ORIGIN = scheme + host.
+      SYBIL_WEBAUTHN_RP_ID: "${SYBIL_WEBAUTHN_RP_ID:?Set SYBIL_WEBAUTHN_RP_ID in /opt/sybil/.env (e.g. app.example.com)}"
+      SYBIL_WEBAUTHN_ORIGIN: "${SYBIL_WEBAUTHN_ORIGIN:?Set SYBIL_WEBAUTHN_ORIGIN in /opt/sybil/.env (e.g. https://app.example.com)}"
       # Public devnet runs persistent by default. To intentionally reset,
       # stop sybil-api and remove or replace the sybil-data volume.
       SYBIL_DATA_DIR: "/data"

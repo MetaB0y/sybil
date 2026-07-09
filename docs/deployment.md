@@ -311,7 +311,7 @@ Do not treat a brief `SequencerDown` firing/resolved pair as evidence that
 block production or trading is down unless the API health, block-production,
 or no-fill alerts agree.
 
-## Post-deploy smoke gate (promotion gate — SYB-240)
+## Post-deploy smoke gate (promotion gate — SYB-240, auto-wired SYB-248)
 
 `scripts/post-deploy-smoke.sh` is the **last deploy step** and **blocks
 promotion**: it runs against the live stack and exits non-zero if any core flow
@@ -319,6 +319,23 @@ is broken. It is fail-closed — core browser and trading flows are hard
 assertions, never silent skips. It guards specifically against the two
 regressions that shipped unnoticed: passkey account creation returning HTTP 401
 (service-token-gated in prod), and zero fills.
+
+**It now runs automatically.** As of SYB-248 the gate is wired into the deploy
+recipes: `just deploy-api`, `just deploy-web`, `just deploy-arena`, and
+`just deploy-all` each run `just deploy-verify` as their final step (a just
+`&&` post-dependency), so a broken core flow fails the deploy instead of
+sitting behind a copy-paste an operator can forget. `deploy-verify` reads
+`SYBIL_SERVICE_TOKEN` from `/opt/sybil/.env` on the server and probes
+per-container health over SSH (`SYBIL_SMOKE_DOCKER_SSH={{SERVER}}`). Run
+`just deploy-verify` on its own to re-check the live stack at any time.
+
+The signed-order step is currently advisory (SKIP, not FAIL) in `deploy-verify`
+via the `SMOKE_REQUIRE_SIGNER` justfile knob (default `"0"`). Flip it to `"1"`
+— or pass `--require-signer` manually as below — once the `smoke_sign` signing
+helper ships in the deploy image and the live `/v1/orders/signed` path is
+confirmed green; requiring it before then would red-fail every deploy while the
+signer is not guaranteed present. Every other core flow is a hard, fail-closed
+assertion regardless of that knob.
 
 Checks: per-container health for every compose service; CORS preflight from the
 app origin on `POST /v1/accounts`; unauthenticated passkey onboarding

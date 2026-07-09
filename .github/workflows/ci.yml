@@ -106,6 +106,39 @@ jobs:
       - name: Build Docker image
         run: docker build -t sybil-api:ci .
 
+  smoke:
+    name: API Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `just smoke` — build sybil-api, boot it in --dev-mode, and drive the full
+      # account -> market -> order -> fill -> resolution lifecycle over HTTP. The
+      # script (scripts/smoke-test.sh) builds the release binary itself, is
+      # fail-closed (set -euo pipefail; any failed assertion exits 1), and tears
+      # the server down on exit. Dev-mode produces blocks on a fast interval, so
+      # the fills/resolution waits (<=10s each) are comfortably in budget.
+      - name: E2E smoke test # just smoke
+        run: ./scripts/smoke-test.sh
+
+  compose-profile-smoke:
+    name: Compose Profile Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cheap, no containers: `docker compose config` only parses/merges the
+      # compose files and asserts the prover-worker profile boundary. Docker
+      # Compose v2 ships on ubuntu-latest, so no extra setup is needed.
+      - name: Compose profile boundary check # scripts/compose-profile-smoke.sh
+        run: ./scripts/compose-profile-smoke.sh
+
   contracts:
     name: Contracts
     runs-on: ubuntu-latest
