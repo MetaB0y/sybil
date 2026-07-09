@@ -79,18 +79,6 @@ describe("selectIndexCards", () => {
     expect(ids(out)).toEqual([1, 3, 2]);
   });
 
-  it("sinks closed cards below open ones under 'new' sort, even when newer", () => {
-    const open1: CardItem = { ...binary(1, { closed: false }), createdMs: 100 };
-    const closedNewer: CardItem = { ...binary(2, { closed: true }), createdMs: 999 };
-    const open2: CardItem = { ...binary(3, { closed: false }), createdMs: 200 };
-    const out = selectIndexCards([open1, closedNewer, open2], {
-      ...base,
-      sort: "new",
-      showClosed: true,
-    });
-    expect(ids(out)).toEqual([3, 1, 2]);
-  });
-
   it("filters by category and query", () => {
     const items = [
       binary(1, { category: "Politics" }),

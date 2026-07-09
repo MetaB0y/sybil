@@ -84,7 +84,7 @@ export function BinaryCard({ market, price }: Props) {
         cents={yesCents}
         delta24Cents={delta24Cents}
         points={points}
-        tone={deltaTone(delta24Cents, !!price)}
+        tone={oddsColor(!!price)}
       />
       <SideList
         market={market}
@@ -146,7 +146,6 @@ function EyebrowRow({ market }: { market: Market }) {
         style={{
           fontSize: "10px",
           letterSpacing: "var(--track-wide)",
-          textTransform: "uppercase",
           color: "var(--fg-3)",
         }}
       >
@@ -298,7 +297,7 @@ function SideList({
       <SideRow
         side="No"
         cents={noCents}
-        centsColor={deltaTone(noDelta, hasPrice)}
+        centsColor={oddsColor(hasPrice)}
         delta={noDelta}
         vol={vol}
         first
@@ -427,10 +426,13 @@ function FooterChip({
   );
 }
 
-function deltaTone(delta: number | null, hasPrice: boolean): string {
-  if (!hasPrice) return "var(--fg-4)";
-  if (delta == null) return "var(--fg-1)";
-  return delta >= 0 ? "var(--yes)" : "var(--no)";
+/**
+ * Odds (YES/NO %) are always neutral — never tinted green/red. Only the 24h
+ * delta token carries directional color (see `deltaValueColor`). Dim to fg-4
+ * when there's no price yet.
+ */
+function oddsColor(hasPrice: boolean): string {
+  return hasPrice ? "var(--fg-1)" : "var(--fg-4)";
 }
 
 /**

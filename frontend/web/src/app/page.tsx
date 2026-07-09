@@ -13,7 +13,6 @@ import {
 import { useMarketsList, type Market } from "@/lib/markets/use-markets";
 import { useEventTradersMap } from "@/lib/markets/use-event-traders";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
-import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 import { selectIndexCards } from "@/lib/markets/select-index-cards";
 import { buildIndexCards } from "@/lib/markets/build-index-cards";
 
@@ -149,10 +148,19 @@ function MarketsPageInner() {
           >
             All markets
           </h1>
-          <p className="text-annotation">
+          <p
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--fs-13)",
+              lineHeight: "var(--lh-18)",
+              color: "var(--fg-3)",
+              fontVariantNumeric: "tabular-nums",
+              margin: 0,
+            }}
+          >
             {bundle == null
               ? "loading…"
-              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
+              : `${shownMarkets} markets · ${shownEvents} events`}
           </p>
         </header>
 

@@ -9,6 +9,7 @@ import {
   parseNanos,
 } from "@/lib/format/nanos";
 import type { Market } from "@/lib/markets/use-markets";
+import { useEventQuestions } from "@/lib/markets/use-event-raw";
 import { selectLatestBlock, selectRecentBlocks, useStore } from "@/lib/store";
 
 type Props = {
@@ -26,6 +27,11 @@ type ClearEvent = {
   key: string;
   id: number;
   name: string;
+  /** Polymarket condition id (mirror markets only) — joins to the raw event's
+   *  per-outcome question so a grouped outcome shows its full question. */
+  condId: string | null;
+  /** Polymarket parent event id — which raw event to fetch the question from. */
+  eventId: string | null;
   /** Clearing YES price this batch (nanos). */
   yes: bigint;
   /** Matched volume this market contributed this batch (nanos, $). */
@@ -92,6 +98,8 @@ export function ClearingTicker({ marketsById }: Props) {
           key: `${b.height}-${id}`,
           id,
           name: m?.name ?? `#${id}`,
+          condId: m?.polymarket_condition_id ?? null,
+          eventId: m?.event_id ?? null,
           yes,
           volNanos,
           ppChange,
@@ -103,6 +111,18 @@ export function ClearingTicker({ marketsById }: Props) {
     all.reverse();
     return all.slice(0, MAX_TICKER_ITEMS);
   }, [recent, marketsById]);
+
+  // Distinct events among the current clears that could carry a fuller question
+  // (mirror outcomes with a condition id). Fetches are shared with the cards'
+  // raw-event cache, so this adds no duplicate network for on-screen events.
+  const eventIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of events) if (e.condId && e.eventId) set.add(e.eventId);
+    return [...set];
+  }, [events]);
+  const questionByCond = useEventQuestions(eventIds);
+  const labelFor = (e: ClearEvent): string =>
+    (e.condId ? questionByCond.get(e.condId) : undefined) ?? e.name;
 
   const animate = events.length >= MARQUEE_MIN_ITEMS;
   // ~one cell-width per ~6s keeps the scroll slow and readable as the list grows.
@@ -199,12 +219,18 @@ export function ClearingTicker({ marketsById }: Props) {
             }}
           >
             {events.map((e) => (
-              <TickerCell key={e.key} event={e} now={now} />
+              <TickerCell key={e.key} event={e} label={labelFor(e)} now={now} />
             ))}
             {/* Second copy makes the -50% loop seamless. */}
             {animate &&
               events.map((e) => (
-                <TickerCell key={`dup-${e.key}`} event={e} now={now} ariaHidden />
+                <TickerCell
+                  key={`dup-${e.key}`}
+                  event={e}
+                  label={labelFor(e)}
+                  now={now}
+                  ariaHidden
+                />
               ))}
           </div>
         </div>
@@ -215,14 +241,16 @@ export function ClearingTicker({ marketsById }: Props) {
 
 function TickerCell({
   event,
+  label,
   now,
   ariaHidden,
 }: {
   event: ClearEvent;
+  label: string;
   now: number;
   ariaHidden?: boolean;
 }) {
-  const { id, name, volNanos, ppChange, ts } = event;
+  const { id, volNanos, ppChange, ts } = event;
   return (
     <Link
       href={`/m/${id}`}
@@ -250,10 +278,12 @@ function TickerCell({
         e.currentTarget.style.background = "transparent";
       }}
     >
-      {/* Full market question, untruncated. For grouped (NegRisk) outcomes the
-          name is "{event}: {outcome}"; for binaries it's the bare question.
-          The marquee scrolls, so a wide cell is fine. */}
-      <span style={{ color: "var(--fg-2)", whiteSpace: "nowrap" }}>{name}</span>
+      {/* Full market question, untruncated. Grouped (NegRisk) outcomes resolve
+          to their Polymarket question ("Will xAI have the best AI model…?")
+          when available, falling back to the terse "{event}: {outcome}" name
+          (e.g. Sybil-native groups). The marquee scrolls, so a wide cell is
+          fine. */}
+      <span style={{ color: "var(--fg-2)", whiteSpace: "nowrap" }}>{label}</span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
         {formatCompactDollars(volNanos)} vol
       </span>
