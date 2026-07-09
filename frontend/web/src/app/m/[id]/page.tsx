@@ -23,7 +23,6 @@ import {
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
 import { SelectOutcomeProvider } from "@/lib/market-detail/active-outcome";
-import { detectStackable } from "@/lib/market-detail/build-chart-series";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
@@ -470,22 +469,10 @@ function ChartSection({ marketId }: { marketId: number }) {
     [outcomes, effectiveSelected],
   );
 
-  // Binary → area. Multi → stacked only for true NegRisk (mutually-exclusive)
-  // events, else overlaid independent lines. Use the real `negRisk` flag from
-  // the Polymarket event JSON (event-wide, so any market's value works); fall
-  // back to the price-sum heuristic only when the event has no /raw snapshot.
-  const rawMarkets = useEventRaw(
-    group?.eventId ?? undefined,
-    !!group?.eventId,
-  ).data;
-  const negRisk = rawMarkets
-    ? [...rawMarkets.values()][0]?.negRisk
-    : undefined;
-  const mode = !group?.isMultiOutcome
-    ? "area"
-    : (negRisk ?? detectStackable(outcomes))
-      ? "stacked"
-      : "lines";
+  // Binary → area; any multi-outcome event → overlaid independent lines.
+  // NegRisk events are drawn exactly like any other group — no stacked-band
+  // special case, so the event's `negRisk` flag no longer gates the chart.
+  const mode = group?.isMultiOutcome ? "lines" : "area";
 
   // Latest committed block is our "now" reference — ticks each batch, so the
   // sliding range window stays current without a Date.now() call in render.
@@ -572,7 +559,6 @@ function ChartSection({ marketId }: { marketId: number }) {
           mode={mode}
           sinceMs={sinceMs}
           nowMs={nowMs}
-          highlightId={highlightId}
         />
       )}
     </section>

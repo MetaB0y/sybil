@@ -3,14 +3,11 @@
 /**
  * PriceChart — hand-rolled SVG, no charting library.
  *
- * Three modes share one crosshair / tooltip / time-axis shell:
- *  - `area`    binary single market → one YES-probability area, 0–100% axis.
- *  - `stacked` NegRisk multi-outcome → 100%-stacked bands. Heights are
- *              normalized across the *shown* outcomes, so hiding some still
- *              fills 0–100% ("share among shown"); tooltip shows raw ¢.
- *  - `lines`   non-NegRisk grouped event → one independent YES line per
- *              outcome on a shared 0–100% axis, no fill — their prices are
- *              uncorrelated, so a stacked partition would be misleading.
+ * Two modes share one crosshair / hover / time-axis shell:
+ *  - `area`   binary single market → one YES-probability area, 0–100% axis.
+ *  - `lines`  any multi-outcome event → one independent YES line per outcome
+ *             on a shared 0–100% axis, no fill. NegRisk events render the same
+ *             way as any other group — no stacked-partition special-casing.
  *
  * The x-axis is proportional to wall-clock time: a point's x position is
  * `(t - t0) / span`, so a 4h gap is drawn wide and back-to-back batches
@@ -19,11 +16,13 @@
  * Only the outcomes passed in `drawn` are plotted (the legend caps this at
  * 8). Live ticks come from the recent-block ring buffer — the line advances
  * each batch on a normal render, no imperative chart lifecycle.
+ *
+ * On hover the crosshair drops one small pill per line, pinned at that line's
+ * value at the cursor time and de-collided — no single bulk readout box.
  */
 
 import { useMemo, useRef, useState } from "react";
 import { colorForOutcome } from "@/components/outcome-legend";
-import { formatAge } from "@/lib/format/nanos";
 import { buildChartSeries } from "@/lib/market-detail/build-chart-series";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import type { PricePoint } from "@/lib/markets/use-price-history";
@@ -35,8 +34,12 @@ const PLOT_H = 280;
 const AXIS_H = 24;
 const Y_TICKS = [1, 0.75, 0.5, 0.25, 0];
 const X_TICKS = 5;
+/** Min vertical spacing (px) between two hover pills, and the top/bottom inset
+ *  the de-collision keeps them within. */
+const PILL_GAP = 22;
+const PILL_PAD = 12;
 
-export type ChartMode = "area" | "stacked" | "lines";
+export type ChartMode = "area" | "lines";
 
 /** An outcome to plot, plus its stable color index in the full group. */
 export type DrawnOutcome = { outcome: EventOutcome; colorIndex: number };
@@ -49,9 +52,6 @@ type Props = {
   sinceMs: number | null;
   /** Reference "now" — latest committed block time; the axis right edge. */
   nowMs: number;
-  /** The chosen outcome (market in the URL). Its line is drawn bold and on
-   *  top; the others dim back. Omit (or single-line modes) for no emphasis. */
-  highlightId?: number | undefined;
 };
 
 export function PriceChart({
@@ -60,7 +60,6 @@ export function PriceChart({
   mode,
   sinceMs,
   nowMs,
-  highlightId,
 }: Props) {
   const recent = useStore(selectRecentBlocks);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -94,27 +93,12 @@ export function PriceChart({
   const xs = series.times.map((t) => ((t - t0) / span) * W);
   const yOf = (v: number) => (1 - v) * PLOT_H;
 
-  // Per-mode geometry. `stacked` re-normalizes across the shown outcomes;
-  // `lines` / `area` plot raw probabilities directly.
+  // Geometry. `area` (binary) draws one filled probability band; `lines`
+  // (every multi-outcome event, NegRisk or not) overlays independent YES lines
+  // with no fill — no stacked partition, no per-mode colour treatment.
   const layers = drawn.map((d, k) => {
     const color = colorForOutcome(d.outcome, d.colorIndex);
     const row = series.raw[k]!;
-    if (mode === "stacked") {
-      const top: number[] = [];
-      const bottom: number[] = [];
-      for (let i = 0; i < N; i++) {
-        let sum = 0;
-        for (let j = 0; j < drawn.length; j++) sum += series.raw[j]![i]!;
-        let below = 0;
-        for (let j = 0; j < k; j++) {
-          below += sum > 0 ? series.raw[j]![i]! / sum : 1 / drawn.length;
-        }
-        const self = sum > 0 ? row[i]! / sum : 1 / drawn.length;
-        bottom.push(below);
-        top.push(below + self);
-      }
-      return { color, fill: bandPath(top, bottom, xs, yOf), line: linePath(top, xs, yOf), filled: true };
-    }
     if (mode === "area") {
       return {
         color,
@@ -126,24 +110,6 @@ export function PriceChart({
     // lines — no fill
     return { color, fill: "", line: linePath(row, xs, yOf), filled: false };
   });
-
-  // Emphasis only kicks in when there's more than one line to distinguish the
-  // chosen outcome from, and it's actually among the drawn lines.
-  const highlightActive =
-    highlightId != null &&
-    drawn.length > 1 &&
-    drawn.some((d) => d.outcome.marketId === highlightId);
-  // Draw the chosen line last so its bold stroke sits on top of the dimmed
-  // ones. Pure z-order — doesn't touch the stacked-band geometry above (that's
-  // keyed to each layer's index `k`).
-  const renderOrder = layers.map((_, k) => k);
-  if (highlightActive) {
-    renderOrder.sort(
-      (a, b) =>
-        (drawn[a]!.outcome.marketId === highlightId ? 1 : 0) -
-        (drawn[b]!.outcome.marketId === highlightId ? 1 : 0),
-    );
-  }
 
   // Ticks at even time intervals across the window.
   const count = Math.max(2, Math.min(X_TICKS, N));
@@ -163,6 +129,28 @@ export function PriceChart({
   // at that exact time (flat-held between clearings), not snapped to a point.
   const hoverT = hover == null ? null : t0 + hover * span;
   const showHover = hoverT != null && hoverT >= series.times[0]!;
+
+  // One pill per line at the cursor time. `dotY` is the true value (where the
+  // marker sits on the line); `y` is the same to start, then spreadLabels nudges
+  // it so overlapping pills stay readable — the marker stays put, the pill moves.
+  const hoverPoints = showHover
+    ? drawn.map((d, k) => {
+        const v = valueAt(series.times, series.raw[k]!, hoverT!);
+        return {
+          marketId: d.outcome.marketId,
+          color: layers[k]!.color,
+          label: d.outcome.shortLabel,
+          closed: d.outcome.closed,
+          priceText: d.outcome.closed ? "closed" : `${Math.round(v * 100)}¢`,
+          dotY: yOf(v),
+          y: yOf(v),
+        };
+      })
+    : [];
+  spreadLabels(hoverPoints, PILL_GAP, PILL_PAD, PLOT_H - PILL_PAD);
+  // Pills sit to the right of the crosshair, flipping left past mid-chart so
+  // they never run off the plot.
+  const pillsLeft = hover != null && hover > 0.62;
 
   return (
     <div style={{ width: "100%" }}>
@@ -200,29 +188,26 @@ export function PriceChart({
               stroke="var(--chart-grid)"
             />
           ))}
-          {renderOrder.map((k) => {
-            const l = layers[k]!;
-            const isHi = highlightActive && drawn[k]!.outcome.marketId === highlightId;
+          {layers.map((l, k) => {
             const isClosed = drawn[k]!.outcome.closed;
-            // Closed outcomes always read back — faded line, faded fill —
-            // regardless of the highlight emphasis.
-            const dimmed = (highlightActive && !isHi) || isClosed;
-            const baseFill = mode === "stacked" ? 0.34 : 0.16;
+            // Every open line is drawn at one uniform weight — no "chosen
+            // outcome" emphasis. Closed/resolved outcomes still read back.
+            const baseFill = 0.16;
             return (
               <g key={drawn[k]!.outcome.marketId}>
                 {l.filled && (
                   <path
                     d={l.fill}
                     fill={l.color}
-                    fillOpacity={dimmed ? baseFill * 0.4 : baseFill}
+                    fillOpacity={isClosed ? baseFill * 0.4 : baseFill}
                   />
                 )}
                 <path
                   d={l.line}
                   fill="none"
                   stroke={l.color}
-                  strokeWidth={isClosed ? 1.25 : isHi ? 2.75 : dimmed ? 1.25 : 1.5}
-                  strokeOpacity={dimmed ? 0.38 : 1}
+                  strokeWidth={isClosed ? 1.25 : 1.75}
+                  strokeOpacity={isClosed ? 0.4 : 1}
                   strokeLinejoin="round"
                   vectorEffect="non-scaling-stroke"
                 />
@@ -241,12 +226,13 @@ export function PriceChart({
           )}
         </svg>
 
-        {/* y-axis labels, overlaid top-right of each gridline */}
+        {/* y-axis labels, overlaid top-left of each gridline — the right edge
+            is reserved for the per-line price tags. */}
         <div
           style={{
             position: "absolute",
             top: 0,
-            right: 0,
+            left: 0,
             height: PLOT_H,
             pointerEvents: "none",
             display: "flex",
@@ -264,82 +250,104 @@ export function PriceChart({
         </div>
 
         {showHover && (
-          <div
-            style={{
-              position: "absolute",
-              top: 8,
-              left: `${hover! * 100}%`,
-              transform: `translateX(${hover! > 0.6 ? "calc(-100% - 12px)" : "12px"})`,
-              background: "var(--surface-3, var(--surface-2))",
-              border: "1px solid var(--border-2)",
-              borderRadius: 4,
-              padding: "8px 10px",
-              minWidth: 168,
-              pointerEvents: "none",
-              boxShadow: "var(--shadow-popover, 0 8px 24px rgba(0,0,0,0.4))",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-            }}
-          >
-            <div
-              style={{
-                color: "var(--fg-3)",
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-                marginBottom: 6,
-                fontSize: 9,
-              }}
-            >
-              {tEnd - hoverT! < 1500
-                ? "now"
-                : `${formatAge(tEnd - hoverT!)} ago`}
-            </div>
-            {drawn.map((d, k) => {
-              const isHi =
-                highlightActive && d.outcome.marketId === highlightId;
-              return (
+          <>
+            {/* dot marker where each line meets the crosshair */}
+            {hoverPoints.map((p) => (
               <div
-                key={d.outcome.marketId}
+                key={`dot-${p.marketId}`}
                 style={{
+                  position: "absolute",
+                  left: `${hover! * 100}%`,
+                  top: p.dotY,
+                  transform: "translate(-50%, -50%)",
+                  width: 9,
+                  height: 9,
+                  borderRadius: "50%",
+                  background: p.closed ? "var(--fg-4)" : p.color,
+                  border: "1.5px solid var(--surface-1)",
+                  opacity: p.closed ? 0.6 : 1,
+                  pointerEvents: "none",
+                }}
+              />
+            ))}
+            {/* one pill per line, stacked to one side of the crosshair */}
+            {hoverPoints.map((p) => (
+              <div
+                key={`pill-${p.marketId}`}
+                style={{
+                  position: "absolute",
+                  left: `${hover! * 100}%`,
+                  top: p.y,
+                  transform: pillsLeft
+                    ? "translate(calc(-100% - 12px), -50%)"
+                    : "translate(12px, -50%)",
                   display: "flex",
-                  justifyContent: "space-between",
-                  gap: 14,
+                  alignItems: "center",
+                  gap: 6,
+                  maxWidth: 190,
+                  padding: "2px 8px",
+                  borderRadius: 5,
+                  background: p.closed
+                    ? "var(--surface-2)"
+                    : `color-mix(in srgb, ${p.color} 18%, var(--surface-2))`,
+                  border: `1px solid ${
+                    p.closed
+                      ? "var(--border-2)"
+                      : `color-mix(in srgb, ${p.color} 42%, transparent)`
+                  }`,
+                  boxShadow: "var(--shadow-popover, 0 4px 14px rgba(0,0,0,0.35))",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
                   lineHeight: "16px",
-                  fontWeight: isHi ? 700 : 400,
-                  opacity: highlightActive && !isHi ? 0.6 : 1,
+                  whiteSpace: "nowrap",
+                  opacity: p.closed ? 0.7 : 1,
+                  pointerEvents: "none",
                 }}
               >
                 <span
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    color: isHi ? "var(--fg-1)" : "var(--fg-2)",
-                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    color: "var(--fg-1)",
                   }}
                 >
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 1,
-                      background: colorForOutcome(d.outcome, d.colorIndex),
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {d.outcome.shortLabel}
-                  </span>
+                  {p.label}
                 </span>
-                <span style={{ color: "var(--fg-1)", flexShrink: 0 }}>
-                  {d.outcome.closed
-                    ? "closed"
-                    : `${Math.round(valueAt(series.times, series.raw[k]!, hoverT!) * 100)}¢`}
+                <span
+                  style={{
+                    flexShrink: 0,
+                    fontWeight: 600,
+                    color: p.closed ? "var(--fg-4)" : p.color,
+                  }}
+                >
+                  {p.priceText}
                 </span>
               </div>
-              );
-            })}
-          </div>
+            ))}
+            {/* timestamp header, tracking the crosshair along the top */}
+            <div
+              style={{
+                position: "absolute",
+                left: `${hover! * 100}%`,
+                top: 2,
+                transform: `translateX(${
+                  hover! < 0.12 ? "0" : hover! > 0.88 ? "-100%" : "-50%"
+                })`,
+                padding: "2px 7px",
+                borderRadius: 4,
+                background: "var(--surface-2)",
+                border: "1px solid var(--border-2)",
+                color: "var(--fg-2)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                letterSpacing: "0.04em",
+                whiteSpace: "nowrap",
+                pointerEvents: "none",
+              }}
+            >
+              {tEnd - hoverT! < 1500 ? "now" : formatHoverTime(hoverT!)}
+            </div>
+          </>
         )}
       </div>
 
@@ -376,6 +384,17 @@ export function PriceChart({
   );
 }
 
+/** Crosshair header timestamp — short date + clock time (e.g. "Jul 6, 4:21 AM"). */
+function formatHoverTime(ms: number): string {
+  const d = new Date(ms);
+  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${date}, ${time}`;
+}
+
 /** Axis label — resolution scales with the window: seconds for a couple of
  *  minutes, clock for intraday, date for longer spans. */
 function formatAxisTime(ms: number, spanMs: number): string {
@@ -406,6 +425,34 @@ function valueAt(times: number[], row: number[], t: number): number {
   const tb = times[i + 1]!;
   const f = tb > ta ? (t - ta) / (tb - ta) : 0;
   return row[i]! + f * (row[i + 1]! - row[i]!);
+}
+
+/**
+ * Nudge the right-edge price tags apart so close prices stay readable. Sorts by
+ * target y, pushes each down to clear the one above, then clamps the bottom and
+ * pushes back up — settling the stack within `[min, max]`. Mutates each label's
+ * `y` in place (they're shared with the render list, kept in original order).
+ */
+function spreadLabels(
+  labels: { y: number }[],
+  gap: number,
+  min: number,
+  max: number,
+): void {
+  if (labels.length === 0) return;
+  const order = [...labels].sort((a, b) => a.y - b.y);
+  // Forward: hold each at/below the top inset and at least `gap` under the one
+  // above it.
+  for (let i = 0; i < order.length; i++) {
+    const floor = i === 0 ? min : order[i - 1]!.y + gap;
+    if (order[i]!.y < floor) order[i]!.y = floor;
+  }
+  // Backward: pull any that overran the bottom inset back up, keeping the gap —
+  // so a top-heavy cluster settles evenly instead of piling on the first tag.
+  for (let i = order.length - 1; i >= 0; i--) {
+    const ceil = i === order.length - 1 ? max : order[i + 1]!.y - gap;
+    if (order[i]!.y > ceil) order[i]!.y = ceil;
+  }
 }
 
 /** Path of the top edge only — `M`/`L` along `(xs[i], yOf(vals[i]))`. */

@@ -14,7 +14,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getCategoryColor } from "@/lib/categorize";
-import { formatCentsPrecise } from "@/lib/format/nanos";
 import { useSelectOutcome } from "@/lib/market-detail/active-outcome";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
@@ -123,19 +122,12 @@ export function OutcomeLegend({
               flexShrink: 0,
               overflow: "hidden",
               borderRadius: 4,
-              border: isHighlight
-                ? `1px solid ${color}`
-                : "1px solid var(--border-1)",
-              background: isHighlight
-                ? `color-mix(in srgb, ${color} 16%, transparent)`
-                : "var(--bg-2)",
-              boxShadow: isHighlight
-                ? `0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`
-                : "none",
+              border: "1px solid var(--border-1)",
+              background: "var(--bg-2)",
               fontFamily: "var(--font-sans)",
               fontSize: 12,
-              fontWeight: isHighlight ? 600 : 400,
-              color: isHighlight ? "var(--fg-1)" : "var(--fg-2)",
+              fontWeight: 400,
+              color: "var(--fg-2)",
               opacity: isClosed ? 0.5 : 1,
             }}
           >
@@ -176,19 +168,20 @@ export function OutcomeLegend({
               >
                 {o.shortLabel}
               </span>
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  color: isClosed ? "var(--fg-4)" : color,
-                  flexShrink: 0,
-                }}
-              >
-                {isClosed
-                  ? "closed"
-                  : o.yesPriceNanos == null
-                    ? "—"
-                    : formatCentsPrecise(o.yesPriceNanos)}
-              </span>
+              {/* Price now reads off each line's right-edge tag on the chart;
+                  the chip only flags a resolved outcome. */}
+              {isClosed && (
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    color: "var(--fg-4)",
+                    flexShrink: 0,
+                  }}
+                >
+                  closed
+                </span>
+              )}
             </button>
             {removable && (
               <button
