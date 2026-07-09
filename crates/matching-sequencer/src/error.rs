@@ -72,9 +72,22 @@ pub struct VerifierFailure {
     pub details: String,
 }
 
+/// Why a non-zero fill could not be applied to host account state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsettleableFillReason {
+    MissingOrder,
+    MissingAccount,
+    SettlementOverflow,
+}
+
 /// Hard block-production invariant that must hold before a prepared block is committed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockInvariantFailure {
+    UnsettleableFill {
+        order_id: u64,
+        account_id: u64,
+        reason: UnsettleableFillReason,
+    },
     NegativeBalance {
         account_id: AccountId,
         balance: i64,

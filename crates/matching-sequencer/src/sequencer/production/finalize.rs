@@ -73,7 +73,8 @@ impl BlockSequencer {
         let pre_mint_adjustments =
             matching_engine::derive_minting(&pre_market_totals, clearing_prices);
 
-        settlement::settle_batch(&mut self.accounts, fills, &problem.orders, self.height);
+        let settle_failures =
+            settlement::settle_batch(&mut self.accounts, fills, &problem.orders, self.height);
 
         let market_totals = CanonicalState::from_accounts(&self.accounts)
             .market_position_totals()
@@ -114,7 +115,7 @@ impl BlockSequencer {
 
         let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
         let balance_delta = post_total_balance - pre_total_balance;
-        let mut invariant_failures = Vec::new();
+        let mut invariant_failures = settle_failures;
         if balance_delta != 0 {
             let expected_balance_delta =
                 expected_balance_delta_from_fills(fills, &order_map, &mint_adjustments);
