@@ -29,6 +29,17 @@ function money(n: number): string {
 }
 
 export function DegenProgress(props: DegenProgressProps) {
+  // Dollar value filled so far — the filled fraction of the intended stake,
+  // rounded to cents to avoid float dust. Drives both the live "placing"
+  // readout and the partial-fill result line below.
+  const filledUsd =
+    props.targetQty > 0n
+      ? Math.round(
+          ((props.betUsd * Number(props.filledQty)) / Number(props.targetQty)) *
+            100,
+        ) / 100
+      : 0;
+
   if (props.phase === "tracking") {
     return (
       <div style={cardStyle}>
@@ -47,7 +58,11 @@ export function DegenProgress(props: DegenProgressProps) {
           />
         </div>
         <div style={monoStyle}>
-          {formatShareUnits(props.filledQty)} / {formatShareUnits(props.targetQty)} shares bought
+          {money(filledUsd)} / {money(props.betUsd)}
+          <span style={{ color: "var(--fg-4)" }}>
+            {"  ·  "}
+            {formatShareUnits(props.filledQty)} / {formatShareUnits(props.targetQty)} shares
+          </span>
         </div>
         {props.onCancel && (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -83,15 +98,6 @@ export function DegenProgress(props: DegenProgressProps) {
     );
   }
 
-  // Partial fill: the filled portion of the intended stake, proportional to
-  // shares filled (rounded to cents to avoid float dust).
-  const filledUsd =
-    props.targetQty > 0n
-      ? Math.round(
-          ((props.betUsd * Number(props.filledQty)) / Number(props.targetQty)) *
-            100,
-        ) / 100
-      : 0;
   // Success (full or partial fill) always reads green; a miss always reads red
   // — independent of whether the user bet YES or NO, so the colour signals
   // outcome, not side. A user-initiated cancel is neither win nor loss, so it

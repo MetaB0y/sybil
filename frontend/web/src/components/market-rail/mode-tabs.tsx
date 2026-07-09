@@ -2,9 +2,9 @@
 
 import type { RailMode } from "./use-rail-mode";
 
-const MODES: { id: RailMode; label: string; sub: string }[] = [
-  { id: "degen", label: "Degen", sub: "tap & win" },
-  { id: "pro", label: "Pro", sub: "full depth" },
+const MODES: { id: RailMode; label: string }[] = [
+  { id: "degen", label: "Lite" },
+  { id: "pro", label: "Pro" },
 ];
 
 /** Segmented control at the top of the market detail right rail. */
@@ -39,11 +39,9 @@ export function ModeTabs({
             onClick={() => onChange(m.id)}
             style={{
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: 1,
-              minHeight: 48,
+              minHeight: 44,
               padding: "8px 6px",
               borderRadius: 4,
               border: 0,
@@ -51,23 +49,12 @@ export function ModeTabs({
               background: active ? "var(--surface-2)" : "transparent",
               boxShadow: active ? "inset 0 0 0 1px var(--border-3)" : "none",
               color: active ? "var(--fg-1)" : "var(--fg-3)",
-              transition: "background 120ms, color 120ms",
+              transition: "background 120ms, color 120ms, box-shadow 120ms",
               fontFamily: "var(--font-sans)",
             }}
           >
             <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1 }}>
               {m.label}
-            </span>
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                color: active ? "var(--fg-3)" : "var(--fg-4)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              {m.sub}
             </span>
           </button>
         );

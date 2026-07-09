@@ -11,7 +11,7 @@ const COPY: Record<Variant, { trigger: string; body: string }> = {
   },
   failed: {
     trigger: "why failed?",
-    body: "No one took the other side in time. Tap Bet again to retry.",
+    body: "No one took the other side. Tap Bet again to retry.",
   },
 };
 

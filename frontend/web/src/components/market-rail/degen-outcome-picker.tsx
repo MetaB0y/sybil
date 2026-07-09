@@ -26,6 +26,18 @@ export function DegenOutcomePicker({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
+  // Replay the focus-blur swap ONLY when the chosen outcome actually changes
+  // while the picker stays mounted (tapping a sibling). `prevId` seeds to the
+  // current outcome on mount, so first render — switching Pro→Lite, or the form
+  // returning after a bet, both of which remount this — stays still instead of
+  // blurring for no reason. Render-safe previous-value pattern (not a ref).
+  const [animKey, setAnimKey] = useState(0);
+  const [prevId, setPrevId] = useState(currentMarketId);
+  if (prevId !== currentMarketId) {
+    setPrevId(currentMarketId);
+    setAnimKey((n) => n + 1);
+  }
+
   useEffect(() => {
     function close(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
@@ -73,10 +85,15 @@ export function DegenOutcomePicker({
     border: `1px solid ${accent}`,
     textAlign: "left",
     cursor: interactive ? "pointer" : "default",
-    // Focus-blur the selected box in when the outcome changes — same swap as the
-    // market-detail header. Keyed by marketId below so it replays per switch.
-    animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
   };
+
+  // Blur focus-in only after an outcome change (animKey bumps above); on first
+  // mount it's absent, so the box appears without animating. Keyed by animKey so
+  // the CSS animation restarts on each change.
+  const swapStyle: React.CSSProperties =
+    animKey > 0
+      ? { animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)" }
+      : {};
 
   const boxContent = (
     <>
@@ -155,26 +172,20 @@ export function DegenOutcomePicker({
     <div ref={ref} style={{ position: "relative" }}>
       {interactive ? (
         <button
-          key={selected.marketId}
+          key={animKey}
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-haspopup="listbox"
           aria-expanded={open}
-          style={{
-            ...boxStyle,
-            outlineOffset: 2,
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.outline = `2px solid ${accent}`;
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.outline = "none";
-          }}
+          // No JS focus outline — it fired on mouse taps too, drawing a second
+          // ring over the box. The global `:focus-visible` rule still gives
+          // keyboard nav a focus ring, and mouse taps stay clean.
+          style={{ ...boxStyle, ...swapStyle }}
         >
           {boxContent}
         </button>
       ) : (
-        <div key={selected.marketId} style={boxStyle}>
+        <div key={animKey} style={{ ...boxStyle, ...swapStyle }}>
           {boxContent}
         </div>
       )}

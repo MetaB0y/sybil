@@ -287,7 +287,7 @@ export function EventHoldings({ marketId }: { marketId: number }) {
             flexWrap: "wrap",
           }}
         >
-          <div className="eyebrow">{"// your positions & orders"}</div>
+          <div className="eyebrow">{"your positions & orders"}</div>
           {outcomes.length > 1 && (
             <OutcomeFilter
               outcomes={outcomes}

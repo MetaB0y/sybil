@@ -95,7 +95,7 @@ export function WaitingAlert() {
           flexShrink: 0,
         }}
       >
-        ⓘ
+        ?
       </button>
       {open && (
         <div
@@ -117,8 +117,8 @@ export function WaitingAlert() {
             color: "var(--fg-2)",
           }}
         >
-          Bets settle together every few seconds at one fair price — you get the
-          best quote in the batch.
+          Every few seconds, all bets clear at one price. Same price for
+          everyone in the batch.
         </div>
       )}
     </div>

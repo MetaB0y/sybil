@@ -16,7 +16,8 @@
  *     event lacks one.
  *   - price = the terminal event's price, else the last fill price seen; the
  *     order's limit (requested) price from its `placed` event is shown
- *     struck-through before it when the two differ.
+ *     struck-through before it when the two differ. A cancelled/expired order
+ *     that never traded falls back to that limit price, rendered faded.
  *   - welfare = Σ (limit − fill) × qty over the order's fills, signed by side
  *     (buyer below limit / seller above = positive surplus). Mirrors the engine's
  *     `welfare_contribution`. Null when the limit price has aged out of the feed.
@@ -34,7 +35,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { notionalNanos } from "@/lib/account/quantity";
+import { formatShareUnits, notionalNanos } from "@/lib/account/quantity";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import { Pager, usePaged } from "@/components/event-list-pager";
@@ -77,6 +78,10 @@ interface ClosedOrder {
   requestedPriceNanos: bigint | null;
   /** qty × price (notional $), or null when either is unknown. */
   valueNanos: bigint | null;
+  /** True when the order never traded (cancelled/expired with no fill) and the
+   * Price/Value cells fall back to the order's limit price — rendered faded so
+   * it reads as "would have" rather than "did". */
+  unfilled: boolean;
   /** Realized PnL (nanos) summed over fill events — SELL orders only, else null. */
   realizedPnlNanos: bigint | null;
   /** Consumer surplus (nanos) = Σ (limit − fill) × qty over fills, signed by side
@@ -285,8 +290,18 @@ export function EventClosedOrders({
     for (const [orderId, slot] of byOrder) {
       const t = slot.terminal;
       if (t == null) continue; // only partial fills so far — still resting
+      const status = STATUS_OF[t.type as "filled" | "cancelled" | "expired" | "rejected"];
       const qty = t.qty ?? null;
-      const priceNanos = t.priceNanos ?? slot.lastFillPrice;
+      const settledNanos = t.priceNanos ?? slot.lastFillPrice;
+      // A cancelled/expired order that never filled has no settled price, but it
+      // still carries the limit price from its `placed` event. Surface that (and
+      // the notional it *would* have been) rather than a blank row, flagged
+      // `unfilled` so the Price/Value cells render faded — the trade didn't happen.
+      const unfilled =
+        settledNanos == null &&
+        (status === "CANCELLED" || status === "EXPIRED") &&
+        slot.requestedPrice != null;
+      const priceNanos = settledNanos ?? (unfilled ? slot.requestedPrice : null);
       // Welfare = Σ (limit − fill) × qty, signed by side: a buyer gains when it
       // fills below the limit, a seller when above. Needs a known limit, side,
       // and at least one fill; else null ("—").
@@ -299,12 +314,13 @@ export function EventClosedOrders({
         orderId,
         marketId: slot.marketId,
         label: labelByMarket.get(slot.marketId) ?? `#${slot.marketId}`,
-        status: STATUS_OF[t.type as "filled" | "cancelled" | "expired" | "rejected"],
+        status,
         closedAtMs: t.timestampMs,
         qty,
         priceNanos,
         requestedPriceNanos: slot.requestedPrice,
         valueNanos: qty != null && priceNanos != null ? notionalNanos(priceNanos, qty) : null,
+        unfilled,
         // PnL is realized on the closing trade — show it for sells only.
         realizedPnlNanos: slot.side === "SELL" ? slot.realizedPnl : null,
         welfareNanos,
@@ -382,8 +398,8 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
       <Right>
         <StatusBadge status={order.status} />
       </Right>
-      <Right mono>{order.qty ?? "—"}</Right>
-      <Right mono>
+      <Right mono>{order.qty != null ? formatShareUnits(order.qty) : "—"}</Right>
+      <Right mono dim={order.unfilled}>
         <PriceCell
           settledNanos={order.priceNanos}
           requestedNanos={order.requestedPriceNanos}
@@ -392,7 +408,7 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
       <Right>
         <WelfareCell welfareNanos={order.welfareNanos} />
       </Right>
-      <Right mono>
+      <Right mono dim={order.unfilled}>
         {order.valueNanos != null ? formatDollars(order.valueNanos, { decimals: 2 }) : "—"}
       </Right>
       <Right>
@@ -657,9 +673,13 @@ function Row({
 function Right({
   children,
   mono,
+  dim,
 }: {
   children: React.ReactNode;
   mono?: boolean;
+  /** Fade the value to fg-4 — used for the limit price/value of orders that
+   *  never traded, so they read as "would have" rather than settled. */
+  dim?: boolean;
 }) {
   return (
     <span
@@ -668,7 +688,7 @@ function Right({
         whiteSpace: "nowrap",
         fontFamily: mono ? "var(--font-mono)" : "inherit",
         fontSize: mono ? 12 : undefined,
-        color: mono ? "var(--fg-1)" : undefined,
+        color: dim ? "var(--fg-4)" : mono ? "var(--fg-1)" : undefined,
       }}
     >
       {children}

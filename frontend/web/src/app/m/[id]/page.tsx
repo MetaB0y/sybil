@@ -836,8 +836,7 @@ function DiscussionPlaceholder() {
           color: "var(--fg-3)",
         }}
       >
-        Comments are coming with the next backend cycle. This card reserves
-        the spot so the layout stays stable.
+        Comments are coming.
       </p>
     </section>
   );

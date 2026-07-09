@@ -451,3 +451,34 @@ hr {
     to   { opacity: 1; filter: blur(0); }
   }
 }
+
+/* Rail mode swap (Lite ↔ Pro) — a plain opacity fade so the panel body eases in
+   instead of hard-cutting. Deliberately NO blur: the blur focus-in is reserved
+   for the outcome swap, so switching modes stays calm. */
+@keyframes sybil-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sybil-fade-in {
+    from { opacity: 1; }
+    to   { opacity: 1; }
+  }
+}
+
+/* Rotating text (research nudge) — the outgoing word slides up out of the clip
+   box while the incoming word rises into place; the box's overflow:hidden clips
+   both so it reads like a vertical odometer. Percentages are of the word's own
+   height, so 105% clears the line fully. */
+@keyframes sybil-rot-in {
+  from { transform: translateY(105%); }
+  to   { transform: translateY(0); }
+}
+@keyframes sybil-rot-out {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-105%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sybil-rot-in  { from { transform: none; } to { transform: none; } }
+  @keyframes sybil-rot-out { from { transform: none; } to { transform: none; } }
+}

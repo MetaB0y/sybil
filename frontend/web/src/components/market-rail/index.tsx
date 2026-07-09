@@ -61,14 +61,24 @@ export function MarketRail({ marketId }: { marketId: number }) {
         </div>
       )}
       {group && closed && <ClosedRail />}
-      {group && !closed && mode === "degen" && (
-        <DegenRail
-          group={group}
-          active={degenActive}
-          setActive={setDegenActive}
-        />
+      {group && !closed && (
+        // Keyed by mode so the body remounts and eases in on each Lite↔Pro
+        // switch — a plain opacity fade (no blur) to smooth the swap.
+        <div
+          key={mode}
+          style={{ animation: "sybil-fade-in var(--dur-base) var(--ease-standard)" }}
+        >
+          {mode === "degen" ? (
+            <DegenRail
+              group={group}
+              active={degenActive}
+              setActive={setDegenActive}
+            />
+          ) : (
+            <ProRail group={group} />
+          )}
+        </div>
       )}
-      {group && !closed && mode === "pro" && <ProRail group={group} />}
     </aside>
   );
 }
