@@ -33,8 +33,8 @@ export function AccountChip() {
     return (
       <button
         type="button"
+        className="nav-chip"
         onClick={() => setOpen(true)}
-        style={chipButtonStyle(false)}
         title="Create or import an account"
       >
         connect
@@ -80,18 +80,24 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
     <div ref={rootRef} style={{ position: "relative" }}>
       <button
         type="button"
+        className="nav-chip"
+        data-connected="true"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        style={chipButtonStyle(true)}
         title={`Portfolio ${total} · Cash ${cash} · Account #${accountId}`}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
           <span style={{ color: "var(--fg-1)" }}>{total}</span>
-          <span aria-hidden style={{ color: "var(--fg-4)" }}>
-            /
+          <span
+            className="account-chip-cash"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+          >
+            <span aria-hidden style={{ color: "var(--fg-4)" }}>
+              /
+            </span>
+            <span style={{ color: "var(--fg-3)" }}>{cash}</span>
           </span>
-          <span style={{ color: "var(--fg-3)" }}>{cash}</span>
         </span>
         <span aria-hidden style={{ marginLeft: 6, color: "var(--fg-4)" }}>
           ▾
@@ -244,8 +250,8 @@ function ChipShell({ label, disabled }: { label: string; disabled?: boolean }) {
   return (
     <button
       type="button"
+      className="nav-chip"
       disabled={disabled}
-      style={chipButtonStyle(false)}
       aria-hidden={disabled}
     >
       {label}
@@ -253,22 +259,3 @@ function ChipShell({ label, disabled }: { label: string; disabled?: boolean }) {
   );
 }
 
-function chipButtonStyle(connected: boolean): React.CSSProperties {
-  return {
-    height: 32,
-    padding: "0 var(--space-3)",
-    background: connected ? "var(--accent-soft, var(--surface-2))" : "var(--surface-2)",
-    border: connected
-      ? "1px solid color-mix(in srgb, var(--accent) 40%, transparent)"
-      : "1px solid var(--border-2)",
-    borderRadius: "var(--radius-md)",
-    color: connected ? "var(--fg-1)" : "var(--fg-2)",
-    fontFamily: "var(--font-mono)",
-    fontSize: "var(--fs-12)",
-    letterSpacing: "var(--track-wide)",
-    textTransform: "uppercase",
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-  };
-}

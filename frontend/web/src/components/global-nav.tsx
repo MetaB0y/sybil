@@ -38,13 +38,13 @@ export function GlobalNav() {
 
   return (
     <header className="global-nav">
-      {/* Wordmark + status pill */}
+      {/* Wordmark */}
       <Link
         href="/"
         style={{
           display: "inline-flex",
           alignItems: "baseline",
-          gap: "var(--space-2)",
+          flexShrink: 0,
           textDecoration: "none",
           color: "var(--fg-1)",
         }}
@@ -60,24 +60,6 @@ export function GlobalNav() {
         >
           Sybil
         </span>
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            height: 18,
-            padding: "0 var(--space-2)",
-            background: "var(--warn-soft)",
-            color: "var(--warn)",
-            border: "1px solid color-mix(in srgb, var(--warn) 24%, transparent)",
-            borderRadius: "var(--radius-pill)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "10px",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-          }}
-        >
-          testnet
-        </span>
       </Link>
 
       {/* Route tabs */}
@@ -88,13 +70,15 @@ export function GlobalNav() {
         <DevZoneNav />
       </nav>
 
-      {/* Right side — search + batch pill + (placeholder) account chip */}
+      {/* Global search — grows to fill the middle of the bar */}
+      <div className="global-nav-search-desktop">
+        <Suspense fallback={<NavSearchSkeleton />}>
+          <NavSearch />
+        </Suspense>
+      </div>
+
+      {/* Right side — theme + batch pill + (placeholder) account chip */}
       <div className="global-nav-right">
-        <div className="global-nav-search-desktop">
-          <Suspense fallback={<NavSearchSkeleton />}>
-            <NavSearch />
-          </Suspense>
-        </div>
         <ThemeToggle />
         <BatchPill />
         <AccountChip />

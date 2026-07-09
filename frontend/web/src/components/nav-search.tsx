@@ -142,8 +142,8 @@ export function NavSearch() {
     [top, highlight, q, open, goToItem, goToGrid, close]
   );
 
-  // `/` focuses search from anywhere — the leading glyph promises it. Ignore
-  // when the user is already typing somewhere (input/textarea/contentEditable).
+  // `/` focuses search from anywhere (a common shortcut). Ignore when the user
+  // is already typing somewhere (input/textarea/contentEditable).
   useEffect(() => {
     const onSlash = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -172,9 +172,6 @@ export function NavSearch() {
   return (
     <div ref={shellRef} style={{ position: "relative" }}>
       <div className="nav-search-shell" style={searchShellStyle}>
-        <span aria-hidden className="text-mono" style={searchSlashStyle}>
-          /
-        </span>
         <input
           ref={inputRef}
           value={q}
@@ -353,13 +350,6 @@ function resultKey(item: CardItem): string {
 const searchShellStyle: React.CSSProperties = {
 };
 
-const searchSlashStyle: React.CSSProperties = {
-  color: "var(--fg-4)",
-  fontSize: "var(--fs-12)",
-  letterSpacing: "var(--track-wide)",
-  marginRight: "var(--space-2)",
-};
-
 const searchInputStyle: React.CSSProperties = {
   flex: 1,
   background: "transparent",
@@ -399,10 +389,14 @@ const rowNameStyle: React.CSSProperties = {
 const rowTitleStyle: React.CSSProperties = {
   fontFamily: "var(--font-sans)",
   fontSize: "var(--fs-13)",
+  lineHeight: 1.3,
   color: "var(--fg-1)",
-  whiteSpace: "nowrap",
+  // Show the full event name up to two lines instead of a hard one-line
+  // ellipsis — a nav that hides what you searched for is useless.
+  display: "-webkit-box",
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: "vertical",
   overflow: "hidden",
-  textOverflow: "ellipsis",
 };
 
 const rowMetaStyle: React.CSSProperties = {

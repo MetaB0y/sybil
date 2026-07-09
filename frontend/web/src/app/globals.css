@@ -67,13 +67,21 @@
   --radius-pill: var(--radius-pill);
 }
 
-/* Smooth the dark↔light theme switch — only color properties, and respect
- * reduced-motion. Keeps the flip from being jarring without animating layout. */
+/* Smooth the dark↔light theme switch. ThemeProvider adds `.theme-transition`
+ * to <html> only for the duration of the flip, so the whole surface (cards,
+ * borders, text, icons) crossfades together — but hovers and other everyday
+ * interactions never pay for a global transition. Colors only; layout is never
+ * animated, and reduced-motion opts out entirely. */
 @media (prefers-reduced-motion: no-preference) {
-  html[data-theme],
-  html:not([data-theme]) {
-    transition: background-color 200ms var(--ease-standard, ease),
-      color 200ms var(--ease-standard, ease);
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition: background-color var(--dur-slow) var(--ease-standard),
+      border-color var(--dur-slow) var(--ease-standard),
+      color var(--dur-slow) var(--ease-standard),
+      fill var(--dur-slow) var(--ease-standard),
+      stroke var(--dur-slow) var(--ease-standard) !important;
   }
 }
 
@@ -157,6 +165,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .global-nav-tab {
@@ -170,6 +179,8 @@ textarea {
   font-size: var(--fs-13);
   font-weight: 500;
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
   border-radius: var(--radius-md);
   background: transparent;
   transition: color var(--dur-fast) var(--ease-standard),
@@ -181,20 +192,152 @@ textarea {
   background: var(--surface-2);
 }
 
+/* Interactive header controls — subtle hover/press feedback so they read as
+ * clickable (route tabs, Dev Zone, theme toggle, connect chip). `@media
+ * (hover: hover)` keeps touch devices from getting a stuck hover state. */
+.nav-devzone,
+.nav-icon-btn,
+.nav-chip {
+  transition: color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .global-nav-tab:hover {
+    color: var(--fg-1);
+    background: var(--surface-2);
+    text-decoration: none;
+  }
+  .nav-devzone:hover {
+    color: var(--fg-1);
+    background: var(--surface-2);
+  }
+  .nav-icon-btn:hover {
+    color: var(--fg-1);
+    border-color: var(--border-3);
+    background: var(--surface-2);
+  }
+  .nav-chip:hover {
+    color: var(--fg-1);
+    border-color: var(--border-3);
+    background: var(--surface-3);
+  }
+  .nav-chip[data-connected="true"]:hover {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    background: var(--accent-soft);
+  }
+}
+
+/* The disconnected/placeholder chip shouldn't invite a press. */
+.nav-chip:disabled {
+  pointer-events: none;
+}
+
+/* Theme toggle — 32px square icon button. Never shrinks below 32px. */
+.nav-icon-btn {
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fg-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* Account / connect chip. */
+.nav-chip {
+  height: 32px;
+  padding: 0 var(--space-3);
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.nav-chip[data-connected="true"] {
+  background: var(--accent-soft, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--fg-1);
+}
+
+/* Dev Zone dropdown trigger — sits among the route tabs, matches their feel.
+   Never wraps to two lines, never shrinks. */
+.nav-devzone {
+  position: relative;
+  height: 32px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  border: 0;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+
+.nav-devzone[data-active="true"],
+.nav-devzone[data-state="open"] {
+  color: var(--fg-1);
+  background: var(--surface-2);
+}
+
 .global-nav-right {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+  flex-shrink: 0;
+}
+
+/* The desktop search fills the middle of the bar — it grows into whatever space
+   the pinned wordmark, tabs and right-side controls leave, and is the one
+   element that absorbs horizontal squeeze (down to a usable 160px) before the
+   nav collapses to the hamburger. Everything else in the bar is pinned. */
+.global-nav-search-desktop {
+  flex: 1 1 auto;
+  min-width: 160px;
+  max-width: 600px;
+}
+
+.global-nav-search-desktop .nav-search-shell {
+  width: 100%;
+}
+
+/* Batch pill never shrinks or wraps (it's hidden entirely in hamburger mode).
+   Height pinned to 32px so it lines up with the theme toggle / chip / search. */
+.batch-pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+  height: 32px;
 }
 
 .global-nav-menu-button {
   display: none;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
   border: 1px solid var(--border-2);
   border-radius: var(--radius-md);
   background: var(--surface-1);
@@ -240,19 +383,34 @@ textarea {
 .nav-search-shell {
   display: flex;
   align-items: center;
-  height: 40px;
+  height: 32px;
   width: min(280px, 28vw);
   padding: 0 var(--space-3);
   background: var(--surface-1);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+/* Focus affordance: a subtle border brighten on the shell, not the loud cyan
+   focus ring (the input itself suppresses the global :focus-visible ring). */
+.nav-search-shell:focus-within {
+  border-color: var(--border-3);
+}
+
+.nav-search-shell input:focus,
+.nav-search-shell input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .nav-search-dropdown {
   position: absolute;
   top: calc(100% + var(--space-2));
+  /* Span the full width of the search field (its positioned parent) so the
+     results list always lines up with the input, however wide it flexes. */
+  left: 0;
   right: 0;
-  width: min(340px, calc(100vw - 2 * var(--space-4)));
   max-height: min(70vh, 480px);
   overflow-y: auto;
   padding: var(--space-2);
@@ -440,7 +598,10 @@ textarea {
   border-bottom: 1px solid var(--border-2);
 }
 
-@media (max-width: 1100px) {
+/* Nav collapses to the hamburger once the full bar (pinned wordmark + tabs +
+   right controls + a floor-width 160px search) no longer fits — measured at
+   ~1330px for the current tab set. Keep this in sync if tabs are added. */
+@media (max-width: 1330px) {
   .global-nav {
     gap: var(--space-3);
     padding: 0 var(--space-4);
@@ -455,8 +616,18 @@ textarea {
     display: inline-flex;
   }
 
+  /* Search + tabs are gone, so push the controls back to the right edge. */
   .global-nav-right {
     gap: var(--space-2);
+    margin-left: auto;
+  }
+
+  /* Hamburger mode: drop the ambient batch pill so the wordmark, theme
+     toggle, account chip and menu button always fit without overflowing
+     (the live block also shows in the RECENT TRADES strip below the nav).
+     !important overrides the pill's inline `display: inline-flex`. */
+  .batch-pill {
+    display: none !important;
   }
 
   .global-nav-sheet-search .nav-search-shell {
@@ -468,7 +639,11 @@ textarea {
     right: 0;
     width: 100%;
   }
+}
 
+/* Market-detail page reflow keeps its own 1100px breakpoint, independent of the
+   nav collapse above. */
+@media (max-width: 1100px) {
   .market-detail-main {
     height: auto;
     min-height: calc(100dvh - var(--nav-height));
@@ -536,9 +711,11 @@ textarea {
     gap: var(--space-1);
   }
 
-  .global-nav-right .batch-pill-label,
-  .global-nav-right .account-chip-balance {
-    display: none;
+  /* Phones: collapse the chip's "/ cash" half so the account chip stays
+     compact (just the portfolio total) and never clips off-screen.
+     !important overrides the span's inline `display: inline-flex`. */
+  .account-chip-cash {
+    display: none !important;
   }
 
   .global-nav-sheet {

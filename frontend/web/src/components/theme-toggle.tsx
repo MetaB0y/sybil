@@ -8,23 +8,10 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
+      className="nav-icon-btn"
       onClick={toggle}
       aria-label={isLight ? "Switch to dark theme" : "Switch to light theme"}
       title={isLight ? "Dark" : "Light"}
-      style={{
-        height: 32,
-        width: 32,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "transparent",
-        color: "var(--fg-3)",
-        border: "1px solid var(--border-2)",
-        borderRadius: "var(--radius-md)",
-        cursor: "pointer",
-        transition:
-          "color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard)",
-      }}
     >
       {/* sun when light is active (click → dark), moon when dark is active (click → light) */}
       {isLight ? (
