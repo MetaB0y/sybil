@@ -126,7 +126,16 @@ impl Actor for SequencerActor {
             SequencerMsg::SubmitOrder(submission, reply) => {
                 let order_count = submission.orders.len();
                 let result = match state.check_global_submission_rate() {
-                    Ok(()) => state.admit_or_defer(submission).await,
+                    Ok(()) => state.admit_or_defer(submission, false).await,
+                    Err(err) => Err(err),
+                };
+                state.record_submission_metrics("unsigned", order_count, &result);
+                let _ = reply.send(result);
+            }
+            SequencerMsg::SubmitIocOrder(submission, reply) => {
+                let order_count = submission.orders.len();
+                let result = match state.check_global_submission_rate() {
+                    Ok(()) => state.admit_or_defer(submission, true).await,
                     Err(err) => Err(err),
                 };
                 state.record_submission_metrics("unsigned", order_count, &result);

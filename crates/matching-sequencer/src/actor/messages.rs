@@ -41,6 +41,10 @@ pub enum SequencerMsg {
         OrderSubmission,
         RpcReplyPort<Result<Vec<u64>, SequencerError>>,
     ),
+    SubmitIocOrder(
+        OrderSubmission,
+        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
+    ),
     SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<Vec<u64>, SequencerError>>),
     SubmitAuthenticatedOrder(
         AuthenticatedOrder,

@@ -67,7 +67,7 @@ impl SequencerActorState {
             mm_constraint: None,
         };
 
-        self.admit_or_defer(submission).await
+        self.admit_or_defer(submission, false).await
     }
 
     pub(super) async fn handle_signed_cancel(
@@ -133,13 +133,19 @@ impl SequencerActorState {
     pub(super) async fn admit_or_defer(
         &mut self,
         submission: OrderSubmission,
+        is_ioc: bool,
     ) -> Result<Vec<u64>, SequencerError> {
         self.check_account_submission_limits(&submission)?;
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        match self.sequencer.try_admit_direct(submission, now_ms) {
+        let outcome = if is_ioc {
+            self.sequencer.try_admit_ioc(submission, now_ms)
+        } else {
+            self.sequencer.try_admit_direct(submission, now_ms)
+        };
+        match outcome {
             crate::sequencer::AdmitOutcome::Admitted {
                 order_id,
                 resting_order,

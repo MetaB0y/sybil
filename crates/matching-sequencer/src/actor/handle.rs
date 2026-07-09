@@ -270,6 +270,16 @@ impl SequencerHandle {
             .await?
     }
 
+    /// Submit an unsigned IOC order whose concrete expiry is assigned by the
+    /// sequencer actor from its committed height at admission time.
+    pub async fn submit_ioc_order(
+        &self,
+        submission: OrderSubmission,
+    ) -> Result<Vec<u64>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::SubmitIocOrder(submission, reply))
+            .await?
+    }
+
     pub async fn submit_signed_order(
         &self,
         signed: SignedOrder,
@@ -1286,6 +1296,76 @@ mod tests {
         let block = handle.produce_block().await.unwrap();
         assert_eq!(block.canonical.header.height, 1);
         assert!(block.canonical.header.order_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn ioc_expiry_uses_admit_height_after_latest_read_race() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let counterparty = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("IOC race");
+        let sequencer = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+            config,
+        );
+        let handle = SequencerHandle::spawn(sequencer);
+
+        // Model the old API's separate latest-block RPC, then commit a block
+        // before admission. Under the old path, height 1 would be carried on
+        // the order and rejected because the next eligible batch is height 2.
+        let stale_expiry = handle
+            .get_latest_block()
+            .await
+            .unwrap()
+            .map(|block| block.canonical.header.height)
+            .unwrap_or(0)
+            .saturating_add(1);
+        let intervening = handle.produce_block().await.unwrap();
+        assert_eq!(intervening.canonical.header.height, stale_expiry);
+
+        let mut ioc = outcome_buy(&markets, 0, market, 0, 600_000_000, 5);
+        ioc.expires_at_block = Some(stale_expiry);
+        let ioc_order_id = handle
+            .submit_ioc_order(OrderSubmission {
+                account_id: buyer,
+                orders: vec![ioc],
+                mm_constraint: None,
+            })
+            .await
+            .expect("admit-time IOC expiry must replace the stale API-style value")[0];
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: counterparty,
+                orders: vec![outcome_buy(&markets, 0, market, 1, 600_000_000, 5)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+
+        let block = handle.produce_block().await.unwrap();
+        assert_eq!(block.canonical.header.height, stale_expiry + 1);
+        assert!(
+            block
+                .canonical
+                .fills
+                .iter()
+                .any(|fill| fill.order_id == ioc_order_id && fill.fill_qty.0 > 0),
+            "IOC should participate in and match in its first admit-eligible batch"
+        );
+        assert!(handle
+            .get_pending_orders(Some(buyer))
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

@@ -105,11 +105,34 @@ impl GroupCoverageTracker {
 }
 
 impl BlockSequencer {
-    pub fn try_admit_direct(
+    pub fn try_admit_direct(&mut self, submission: OrderSubmission, now_ms: u64) -> AdmitOutcome {
+        self.try_admit_direct_with_ioc(submission, now_ms, false)
+    }
+
+    /// Admit an IOC submission using the currently committed height as the
+    /// single source of truth. The actor calls this while processing the
+    /// submission, so a block cannot commit between deriving the expiry and
+    /// admitting (or deferring) the order.
+    pub fn try_admit_ioc(&mut self, submission: OrderSubmission, now_ms: u64) -> AdmitOutcome {
+        self.try_admit_direct_with_ioc(submission, now_ms, true)
+    }
+
+    fn try_admit_direct_with_ioc(
         &mut self,
         mut submission: OrderSubmission,
         now_ms: u64,
+        is_ioc: bool,
     ) -> AdmitOutcome {
+        if is_ioc {
+            // IOC means the first batch eligible after this atomic admission.
+            // Store the concrete height on the Order so canonical order and
+            // witness encodings remain unchanged.
+            let expires_at_block = self.height.saturating_add(1);
+            for order in &mut submission.orders {
+                order.expires_at_block = Some(expires_at_block);
+            }
+        }
+
         for order in &submission.orders {
             if let Err(reason) = validate_order_shape(order) {
                 return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
