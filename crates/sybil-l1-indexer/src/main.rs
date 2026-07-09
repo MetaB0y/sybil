@@ -56,10 +56,15 @@ struct Args {
     #[arg(long, env = "SYBIL_L1_START_BLOCK", default_value_t = 0)]
     start_block: u64,
     /// L1 confirmation depth: only credit deposits at or below
-    /// `latest - confirmations`. Defaults to a dev-Anvil value; raise to 12-32
-    /// in production. See `DEFAULT_CONFIRMATIONS`.
+    /// `latest - confirmations`. Defaults to a dev-Anvil value; use 12–32 for
+    /// public/mainnet-like chains. See `DEFAULT_CONFIRMATIONS`.
     #[arg(long, env = "SYBIL_L1_CONFIRMATIONS", default_value_t = DEFAULT_CONFIRMATIONS)]
     confirmations: u64,
+    /// Optional minimum L1 confirmation depth enforced at startup. `0` disables
+    /// the guard. For public/mainnet-like chains, configure a value in the
+    /// recommended 12–32 range.
+    #[arg(long, env = "SYBIL_L1_MIN_CONFIRMATIONS", default_value_t = 0)]
+    min_confirmations: u64,
     /// Maximum eth_getLogs block span per poll.
     #[arg(long, env = "SYBIL_L1_MAX_BLOCK_SPAN", default_value_t = 1_000)]
     max_block_span: u64,
@@ -128,6 +133,14 @@ enum IndexerError {
         arg_vault: String,
         arg_chain: u64,
     },
+    #[error(
+        "unsafe L1 confirmation configuration: confirmations={confirmations} is below \
+         min_confirmations={min_confirmations}; deep reorgs can mis-credit already-processed blocks"
+    )]
+    UnsafeConfirmations {
+        confirmations: u64,
+        min_confirmations: u64,
+    },
 }
 
 impl IndexerError {
@@ -144,6 +157,26 @@ impl IndexerError {
 }
 
 type Result<T> = std::result::Result<T, IndexerError>;
+
+fn check_confirmation_safety(confirmations: u64, min_confirmations: u64) -> Result<()> {
+    if min_confirmations > 0 && confirmations < min_confirmations {
+        return Err(IndexerError::UnsafeConfirmations {
+            confirmations,
+            min_confirmations,
+        });
+    }
+    Ok(())
+}
+
+fn warn_if_low_confirmation_depth(confirmations: u64) {
+    if confirmations < 12 {
+        tracing::warn!(
+            "L1 confirmation depth {} is below the recommended 12–32; deep reorgs can \
+             mis-credit already-processed blocks",
+            confirmations
+        );
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct JsonRpcRequest {
@@ -334,11 +367,17 @@ impl DepositSink for SybilClient {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     let args = Args::parse();
+    warn_if_low_confirmation_depth(args.confirmations);
+    if let Err(error) = check_confirmation_safety(args.confirmations, args.min_confirmations) {
+        tracing::error!(%error, "l1.indexer.unsafe_confirmation_config");
+        return Err(error);
+    }
+
     let vault_address = parse_hex_array::<20>(&args.vault_address, "vault_address")?;
     let vault_hex = hex::encode(vault_address);
     let http = reqwest::Client::new();
@@ -1002,6 +1041,7 @@ mod tests {
             chain_id: 31_337,
             start_block: 0,
             confirmations,
+            min_confirmations: 0,
             max_block_span: 1_000,
             poll_ms: 0,
             cursor_path: None,
@@ -1013,6 +1053,48 @@ mod tests {
     fn quantity_roundtrip() {
         assert_eq!(quantity_hex(31_337), "0x7a69");
         assert_eq!(parse_quantity("0x7a69", "chainId").unwrap(), 31_337);
+    }
+
+    #[test]
+    fn confirmation_safety_rejects_depth_below_configured_minimum() {
+        assert!(matches!(
+            check_confirmation_safety(11, 12),
+            Err(IndexerError::UnsafeConfirmations {
+                confirmations: 11,
+                min_confirmations: 12,
+            })
+        ));
+    }
+
+    #[test]
+    fn confirmation_safety_accepts_depth_at_or_above_configured_minimum() {
+        assert!(check_confirmation_safety(12, 12).is_ok());
+        assert!(check_confirmation_safety(32, 12).is_ok());
+    }
+
+    #[test]
+    fn confirmation_safety_disabled_minimum_accepts_any_depth() {
+        assert!(check_confirmation_safety(0, 0).is_ok());
+        assert!(check_confirmation_safety(u64::MAX, 0).is_ok());
+    }
+
+    #[test]
+    fn low_confirmation_depth_emits_reorg_warning() {
+        let logs = LogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(logs.clone())
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || warn_if_low_confirmation_depth(11));
+
+        let logs = logs.contents();
+        assert!(logs.contains("WARN"));
+        assert!(logs.contains(
+            "L1 confirmation depth 11 is below the recommended 12–32; deep reorgs can \
+             mis-credit already-processed blocks"
+        ));
     }
 
     #[test]
