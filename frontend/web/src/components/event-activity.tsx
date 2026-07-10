@@ -702,6 +702,13 @@ function ActivityBarTooltip({
       width={206}
       align="center"
       estHeight={estHeight}
+      // The readout floats over neighbouring columns, so it must swallow the
+      // pointer rather than let it through: otherwise moving onto the tooltip
+      // hovers the bar beneath it and the readout jumps away mid-read. React
+      // computes enter/leave across the portal via the React tree, and this
+      // tooltip renders inside the hovered column — so capturing the pointer
+      // holds that column's hover instead of switching bars.
+      style={{ pointerEvents: "auto", cursor: "default" }}
     >
       <div
         style={{
