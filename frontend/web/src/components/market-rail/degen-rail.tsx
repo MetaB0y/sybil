@@ -11,10 +11,17 @@ import { useQueryClient } from "@tanstack/react-query";
 import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
 import { notionalNanosCeil } from "@/lib/account/quantity";
-import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
+import {
+  useAccountSession,
+  useSetConnectModalOpen,
+} from "@/lib/account/use-account";
 import type { AccountEvent } from "@/lib/account/use-account-events";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
-import { ONE_DOLLAR_NANOS, buildDegenOrder, resolveMarkNanos } from "@/lib/degen";
+import {
+  ONE_DOLLAR_NANOS,
+  buildDegenOrder,
+  resolveMarkNanos,
+} from "@/lib/degen";
 import { priorMaxOrderId } from "@/lib/degen/track";
 import {
   useDegenBetTracker,
@@ -134,7 +141,7 @@ export function DegenRail({
     // The new order's id is strictly greater (ids are monotonic per market), so
     // the tracker binds *this* bet and never re-reads a prior, already-resolved
     // order. Without it, a repeat bet on the same market+side instantly read the
-    // previous order's "Successfully bet…"/"failed" state.
+    // previous order's "Successfully bet…"/"expired" state.
     const floorOrderId = priorMaxOrderId(
       selected.marketId,
       qc.getQueryData<AccountEvent[]>([
@@ -175,9 +182,15 @@ export function DegenRail({
         // DegenActive.expiresAtBlock is number; built.order.expiresAtBlock is bigint.
         expiresAtBlock: Number(built.order.expiresAtBlock),
       });
-      qc.invalidateQueries({ queryKey: ["account", session.accountId, "events"] });
-      qc.invalidateQueries({ queryKey: ["account", session.accountId, "orders"] });
-      qc.invalidateQueries({ queryKey: ["account", session.accountId, "portfolio"] });
+      qc.invalidateQueries({
+        queryKey: ["account", session.accountId, "events"],
+      });
+      qc.invalidateQueries({
+        queryKey: ["account", session.accountId, "orders"],
+      });
+      qc.invalidateQueries({
+        queryKey: ["account", session.accountId, "portfolio"],
+      });
       qc.invalidateQueries({ queryKey: ["orders", "pending"] });
     } catch (e) {
       // warn (not error): the rejection is handled and shown humanized below;
@@ -215,9 +228,15 @@ export function DegenRail({
           limitPriceNanos: String(active.limitPriceNanos),
         },
       });
-      qc.invalidateQueries({ queryKey: ["account", session.accountId, "events"] });
-      qc.invalidateQueries({ queryKey: ["account", session.accountId, "orders"] });
-      qc.invalidateQueries({ queryKey: ["account", session.accountId, "portfolio"] });
+      qc.invalidateQueries({
+        queryKey: ["account", session.accountId, "events"],
+      });
+      qc.invalidateQueries({
+        queryKey: ["account", session.accountId, "orders"],
+      });
+      qc.invalidateQueries({
+        queryKey: ["account", session.accountId, "portfolio"],
+      });
       qc.invalidateQueries({ queryKey: ["orders", "pending"] });
     } catch (e) {
       // The likely failures are "already filled" / "already expired" — undo the
@@ -261,7 +280,7 @@ export function DegenRail({
   // Explainer slot below the form/progress area:
   //  - while a bet is in flight ("tracking"): a compact WaitingAlert with the
   //    "why am I waiting?" copy tucked into an ⓘ tooltip;
-  //  - after a missed bet ("none"): the short "why failed?" explainer;
+  //  - after an unmatched expiry: the short "what happened?" explainer;
   //  - pre-bet (null) and once a bet lands ("filled"/"partial"): nothing (the
   //    result card already explains itself).
   // The optimistic cancel wins over the tracker's phase; if shares already
@@ -274,7 +293,7 @@ export function DegenRail({
     : trackedPhase;
   const resultPhase = active ? effectivePhase : null;
   const showWaiting = resultPhase === "tracking";
-  const showFailed = resultPhase === "none";
+  const showExpired = resultPhase === "expired";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -364,7 +383,7 @@ export function DegenRail({
       )}
 
       {showWaiting && <WaitingAlert />}
-      {showFailed && <WhyWaiting variant="failed" />}
+      {showExpired && <WhyWaiting variant="expired" />}
     </div>
   );
 }

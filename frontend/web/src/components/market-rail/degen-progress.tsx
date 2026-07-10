@@ -33,7 +33,7 @@ export function DegenProgress(props: DegenProgressProps) {
     return (
       <div style={cardStyle}>
         <div style={rowStyle}>
-          <span style={labelStyle}>Placing your bet…</span>
+          <span style={labelStyle}>Waiting for a taker…</span>
           <span style={monoStyle}>⏱ {props.secondsLeft}s</span>
         </div>
         <div style={barTrackStyle}>
@@ -47,7 +47,8 @@ export function DegenProgress(props: DegenProgressProps) {
           />
         </div>
         <div style={monoStyle}>
-          {formatShareUnits(props.filledQty)} / {formatShareUnits(props.targetQty)} shares bought
+          {formatShareUnits(props.filledQty)} /{" "}
+          {formatShareUnits(props.targetQty)} shares bought
         </div>
         {props.onCancel && (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -92,7 +93,7 @@ export function DegenProgress(props: DegenProgressProps) {
             100,
         ) / 100
       : 0;
-  // Success (full or partial fill) always reads green; a miss always reads red
+  // Success (full or partial fill) always reads green; an expiry reads red
   // — independent of whether the user bet YES or NO, so the colour signals
   // outcome, not side. A user-initiated cancel is neither win nor loss, so it
   // reads neutral rather than red.
@@ -107,15 +108,21 @@ export function DegenProgress(props: DegenProgressProps) {
     props.phase === "filled"
       ? `Successfully bet ${money(props.betUsd)} on ${props.side}!`
       : props.phase === "partial"
-        ? `◐ Half in! Successfully bet ${money(filledUsd)} out of ${money(props.betUsd)} on ${props.side}!`
+        ? `◐ Partly matched: ${money(filledUsd)} of ${money(props.betUsd)} on ${props.side}. The rest is back in your balance.`
         : cancelled
           ? `Bet cancelled.`
-          : `Oops, your order failed. Try again!`;
+          : `No match within ~2 min — your funds are back in your balance. Try again.`;
 
   return (
     <div style={cardStyle}>
       <div style={{ ...rowStyle, color: resultColor }}>
-        <span style={{ fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700 }}>
+        <span
+          style={{
+            fontFamily: "var(--font-sans)",
+            fontSize: 14,
+            fontWeight: 700,
+          }}
+        >
           {result}
         </span>
       </div>

@@ -71,7 +71,11 @@ export function findDegenOrderId(
     if (c.minOrderIdExclusive != null && e.orderId <= c.minOrderIdExclusive) {
       continue;
     }
-    if (e.type !== "placed" && e.type !== "partial_fill" && e.type !== "filled") {
+    if (
+      e.type !== "placed" &&
+      e.type !== "partial_fill" &&
+      e.type !== "filled"
+    ) {
       continue;
     }
     if (best === null || e.blockHeight < best.height) {
@@ -116,7 +120,12 @@ export function findDegenPendingOrderId(
   return bestId;
 }
 
-export type DegenPhase = "tracking" | "filled" | "partial" | "none" | "cancelled";
+export type DegenPhase =
+  | "tracking"
+  | "filled"
+  | "partial"
+  | "expired"
+  | "cancelled";
 
 export interface DegenBetState {
   phase: DegenPhase;
@@ -131,6 +140,9 @@ export interface DegenSnapshot {
   expiresAtBlock: number;
   /** The bound order's partial_fill/filled/expired/cancelled rows (empty if unbound). */
   events: DegenEvent[];
+  /** Whether this order is still in the account's open-orders feed. Null until
+   *  that feed has loaded, so a delayed response cannot create a false expiry. */
+  orderOpen?: boolean | null;
   /**
    * True when this bet's order was cancelled out-of-band — e.g. the user hit
    * Cancel in the open-orders table or in the progress card. The backend
@@ -143,10 +155,11 @@ export interface DegenSnapshot {
 
 /**
  * Resolve the bet's phase. Terminal states (filled/cancelled/expired) win; the
- * height backstop (`>= expiresAtBlock + 1`) covers a missed terminal row or a
- * correlation miss so the spinner can never hang. A cancel that lands after some
- * fills reads as `partial` (the filled portion stands) — the same way an expiry
- * after partial fills does.
+ * open-order backstop covers a missed terminal row or correlation miss: once the
+ * expiry block has passed and the order is no longer open, the spinner resolves
+ * to an honest terminal state. A cancel that lands after some fills reads as
+ * `partial` (the filled portion stands) — the same way an expiry after partial
+ * fills does.
  */
 export function resolveDegenBet(s: DegenSnapshot): DegenBetState {
   let filledQty = 0n;
@@ -168,15 +181,16 @@ export function resolveDegenBet(s: DegenSnapshot): DegenBetState {
   const avgPriceNanos = filledQty > 0n ? weighted / filledQty : null;
   const base = { filledQty, targetQty: s.targetQty, avgPriceNanos };
 
-  if (hasFilled || filledQty >= s.targetQty) return { phase: "filled", ...base };
+  if (hasFilled || filledQty >= s.targetQty)
+    return { phase: "filled", ...base };
   if (hasCancelled) {
     return { phase: filledQty > 0n ? "partial" : "cancelled", ...base };
   }
   if (hasExpired) {
-    return { phase: filledQty > 0n ? "partial" : "none", ...base };
+    return { phase: filledQty > 0n ? "partial" : "expired", ...base };
   }
-  if (s.currentHeight >= s.expiresAtBlock + 1) {
-    return { phase: filledQty > 0n ? "partial" : "none", ...base };
+  if (s.currentHeight > s.expiresAtBlock && s.orderOpen === false) {
+    return { phase: filledQty > 0n ? "partial" : "expired", ...base };
   }
   return { phase: "tracking", ...base };
 }

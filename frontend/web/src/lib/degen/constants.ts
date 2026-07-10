@@ -15,4 +15,4 @@ export const DEGEN_PEAK_NANOS = 40_000_000n;
 export const DEGEN_EXPONENT = 1.3;
 
 /** Order stays eligible for the next N batches (1 block = 1 batch). */
-export const DEGEN_BATCHES = 3n;
+export const DEGEN_BATCHES = 12n;

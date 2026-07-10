@@ -27,6 +27,10 @@ describe("degenQuantity", () => {
 });
 
 describe("degenExpiry", () => {
+  it("keeps a degen bet live for 12 batches", () => {
+    expect(DEGEN_BATCHES).toBe(12n);
+  });
+
   it("is the latest height plus DEGEN_BATCHES", () => {
     expect(degenExpiry(100n)).toBe(100n + DEGEN_BATCHES);
   });
