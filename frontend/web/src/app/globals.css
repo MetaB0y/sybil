@@ -301,6 +301,51 @@ textarea {
   background: var(--surface-2);
 }
 
+/* Rows-per-page dropdown on the Activity pager. Same trigger + menu language as
+   the Dev Zone nav dropdown above, sized for a mono table control: the trigger
+   fills on hover/open, the menu lifts on --surface-3, the row under the cursor
+   and the checked row both take --surface-2. */
+.activity-rows-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 12px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.activity-rows-trigger:hover,
+.activity-rows-trigger[data-state="open"] {
+  background: var(--surface-2);
+}
+
+.activity-rows-item {
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-3);
+  outline: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.activity-rows-item[data-highlighted],
+.activity-rows-item[data-state="checked"] {
+  background: var(--surface-2);
+  color: var(--fg-1);
+}
+
 .global-nav-right {
   display: flex;
   align-items: center;

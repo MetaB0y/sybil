@@ -18,6 +18,8 @@
  */
 
 import { useEffect, useState, Fragment, type ReactNode } from "react";
+import { DropdownMenu } from "radix-ui";
+import { ChevronDown } from "lucide-react";
 import {
   formatCompactDollars,
   formatCompactDollarsCents,
@@ -396,9 +398,6 @@ function Pager({
       </span>
 
       <span style={{ marginLeft: "auto", display: "inline-flex", gap: 14, alignItems: "center" }}>
-        {/* A native <select> drops an unstyled OS menu on top of the theme —
-            same reason the portfolio filters are pills. Two options fit a
-            segmented control anyway. */}
         <span
           style={{
             display: "inline-flex",
@@ -412,18 +411,7 @@ function Pager({
           }}
         >
           Rows
-          <SegmentedGroup label="Rows per page">
-            {PAGE_SIZES.map((n) => (
-              <Segment
-                key={n}
-                active={pageSize === n}
-                onClick={() => onPageSize(n)}
-                title={`Show ${n} batches per page`}
-              >
-                {n}
-              </Segment>
-            ))}
-          </SegmentedGroup>
+          <RowsSelect value={pageSize} onChange={onPageSize} />
         </span>
 
         <span style={{ display: "inline-flex", gap: 6 }}>
@@ -436,6 +424,66 @@ function Pager({
         </span>
       </span>
     </div>
+  );
+}
+
+/**
+ * Rows-per-page dropdown, built on the same Radix menu as the Dev Zone nav
+ * dropdown and styled to match it (see `.activity-rows-*` in globals.css).
+ * A native `<select>` would drop unstyled OS chrome over the theme — the same
+ * reason the portfolio filters aren't one either.
+ */
+function RowsSelect({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          className="activity-rows-trigger"
+          aria-label="Batches per page"
+        >
+          {value}
+          <ChevronDown size={12} aria-hidden />
+        </button>
+      </DropdownMenu.Trigger>
+
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          sideOffset={6}
+          align="end"
+          style={{
+            background: "var(--surface-3)",
+            border: "1px solid var(--border-2)",
+            borderRadius: "var(--radius-md)",
+            padding: "var(--space-2)",
+            minWidth: 76,
+            zIndex: 60,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.32)",
+          }}
+        >
+          <DropdownMenu.RadioGroup
+            value={String(value)}
+            onValueChange={(v) => onChange(Number(v))}
+          >
+            {PAGE_SIZES.map((n) => (
+              <DropdownMenu.RadioItem
+                key={n}
+                value={String(n)}
+                className="activity-rows-item"
+              >
+                {n}
+              </DropdownMenu.RadioItem>
+            ))}
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 

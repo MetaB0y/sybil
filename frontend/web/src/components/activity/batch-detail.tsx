@@ -126,6 +126,9 @@ export function BatchDetail({ row }: { row: BatchRow }) {
                 style={{
                   display: "block",
                   width: "100%",
+                  // Pinned to the bottom of the stretched card so it reads as a
+                  // footer of the panel, not as a link trailing the last row.
+                  marginTop: "auto",
                   background: "transparent",
                   border: 0,
                   borderTop: "1px solid var(--border-1)",
