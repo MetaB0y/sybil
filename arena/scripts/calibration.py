@@ -14,6 +14,7 @@ import math
 import re
 import sqlite3
 import statistics
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -113,8 +114,7 @@ def _infer_outcomes_from_final_prices(
     if not _has_table(conn, "decisions"):
         return {}
     rows = conn.execute(
-        "SELECT market_id, market_price FROM decisions "
-        "WHERE market_price IS NOT NULL ORDER BY id"
+        "SELECT market_id, market_price FROM decisions WHERE market_price IS NOT NULL ORDER BY id"
     )
     latest: dict[int, float] = {}
     for row in rows:
@@ -138,7 +138,28 @@ def load_outcomes(
     return _infer_outcomes_from_final_prices(conn, resolved_threshold), "final_price_inferred"
 
 
-def _select_decisions(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def _parse_iso_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(f"invalid ISO timestamp: {value!r}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _select_decisions(
+    conn: sqlite3.Connection,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[sqlite3.Row]:
     cols = _columns(conn, "decisions")
     if not cols:
         return []
@@ -148,6 +169,9 @@ def _select_decisions(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "fair_value_age_s",
         "confidence",
         "countercase",
+        "rejection_reason",
+        "market_category",
+        "market_tags",
     ]
     selected = [
         "id",
@@ -160,7 +184,22 @@ def _select_decisions(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "orders",
         *[col for col in optional if col in cols],
     ]
-    return list(conn.execute(f"SELECT {', '.join(selected)} FROM decisions ORDER BY id"))
+    rows = list(conn.execute(f"SELECT {', '.join(selected)} FROM decisions ORDER BY id"))
+    if since is None and until is None:
+        return rows
+
+    filtered = []
+    for row in rows:
+        timestamp = _parse_iso_timestamp(row["timestamp"])
+        if timestamp is None:
+            continue
+        if since is not None and timestamp < since:
+            continue
+        # Experiment windows are half-open: [since, until).
+        if until is not None and timestamp >= until:
+            continue
+        filtered.append(row)
+    return filtered
 
 
 def _persona_name(trader_name: str) -> str:
@@ -175,6 +214,18 @@ def _orders_count(raw_orders: Any) -> int:
     except (TypeError, json.JSONDecodeError):
         return 0
     return len(orders) if isinstance(orders, list) else 0
+
+
+def _json_string_list(raw_value: Any) -> list[str]:
+    if not raw_value:
+        return []
+    try:
+        values = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(values, list):
+        return []
+    return [str(value) for value in values if str(value).strip()]
 
 
 def _forecast(row: sqlite3.Row) -> float | None:
@@ -218,15 +269,17 @@ def _reliability_curve(
     for idx, bucket in enumerate(buckets):
         forecasts = [forecast for forecast, _outcome in bucket]
         outcomes = [outcome for _forecast, outcome in bucket]
-        curve.append({
-            "bin": idx,
-            "low": idx / bins,
-            "high": (idx + 1) / bins,
-            "n": len(bucket),
-            "mean_forecast": _mean(forecasts),
-            "empirical_yes_rate": _mean(outcomes),
-            "brier": _brier(bucket),
-        })
+        curve.append(
+            {
+                "bin": idx,
+                "low": idx / bins,
+                "high": (idx + 1) / bins,
+                "n": len(bucket),
+                "mean_forecast": _mean(forecasts),
+                "empirical_yes_rate": _mean(outcomes),
+                "brier": _brier(bucket),
+            }
+        )
     return curve
 
 
@@ -247,6 +300,23 @@ def _rejection_calibration(rows: list[dict[str, Any]]) -> dict[str, Any]:
     def confidences(subset: list[dict[str, Any]]) -> list[float]:
         return [row["confidence"] for row in subset if row["confidence"] is not None]
 
+    per_reason: dict[str, dict[str, Any]] = {}
+    for row in rejected:
+        reason = row["rejection_reason"] or "unknown"
+        stats = per_reason.setdefault(reason, {"n": 0, "would_have_profited_n": 0})
+        stats["n"] += 1
+        forecast = row["forecast"]
+        market = row["market_price"]
+        outcome = row["outcome"]
+        would_have_profited = (forecast > market and outcome > market) or (
+            forecast < market and outcome < market
+        )
+        if would_have_profited:
+            stats["would_have_profited_n"] += 1
+    for stats in per_reason.values():
+        stats["would_have_lost_or_broken_even_n"] = stats["n"] - stats["would_have_profited_n"]
+        stats["would_have_profited_rate"] = stats["would_have_profited_n"] / stats["n"]
+
     total = len(rows)
     return {
         "definition": "rejected means decision row had no submitted orders",
@@ -261,7 +331,45 @@ def _rejection_calibration(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "rejected_mean_edge": _mean(edges(rejected)),
         "acted_mean_confidence": _mean(confidences(acted)),
         "rejected_mean_confidence": _mean(confidences(rejected)),
+        "by_reason": dict(sorted(per_reason.items())),
     }
+
+
+def _category_labels(row: dict[str, Any]) -> list[str]:
+    category = str(row.get("market_category") or "").strip()
+    if category:
+        return [category]
+    return [str(tag).strip() for tag in row.get("market_tags", []) if str(tag).strip()]
+
+
+def _by_category_brier(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[tuple[float, float]]] = {}
+    for row in rows:
+        for label in _category_labels(row):
+            grouped.setdefault(label, []).append((row["forecast"], row["outcome"]))
+    return [
+        {"category": category, "n": len(pairs), "brier": _brier(pairs)}
+        for category, pairs in sorted(grouped.items())
+    ]
+
+
+def _surprises(rows: list[dict[str, Any]], top_n: int) -> list[dict[str, Any]]:
+    acted = [row for row in rows if row["orders_count"] > 0]
+    acted.sort(key=lambda row: (-abs(row["forecast"] - row["outcome"]), row["id"]))
+    return [
+        {
+            "decision_id": row["id"],
+            "persona": row["persona"],
+            "trader_name": row["trader_name"],
+            "market_id": row["market_id"],
+            "market_name": row["market_name"],
+            "timestamp": row["timestamp"],
+            "forecast": row["forecast"],
+            "outcome": row["outcome"],
+            "absolute_error": abs(row["forecast"] - row["outcome"]),
+        }
+        for row in acted[:top_n]
+    ]
 
 
 def _native_noise_pnl_baseline(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -296,37 +404,64 @@ def analyze_decisions_db(
     db_path: str,
     bins: int = 10,
     resolved_threshold: float = 0.95,
+    since: str | None = None,
+    until: str | None = None,
+    top_n: int = 10,
 ) -> dict[str, Any]:
     if bins <= 0:
         raise ValueError("bins must be positive")
     if not 0.5 < resolved_threshold <= 1.0:
         raise ValueError("resolved_threshold must be in (0.5, 1.0]")
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    since_dt = _parse_iso_timestamp(since)
+    until_dt = _parse_iso_timestamp(until)
+    if since_dt is not None and until_dt is not None and since_dt >= until_dt:
+        raise ValueError("since must be earlier than until")
 
     conn = _connect(db_path)
     try:
         outcomes, outcome_source = load_outcomes(conn, resolved_threshold)
         rows: list[dict[str, Any]] = []
-        for row in _select_decisions(conn):
+        for row in _select_decisions(conn, since_dt, until_dt):
             outcome = outcomes.get(int(row["market_id"]))
             forecast = _forecast(row)
             market_forecast = _clamp_probability(row["market_price"])
             if outcome is None or forecast is None or market_forecast is None:
                 continue
-            rows.append({
-                "persona": _persona_name(str(row["trader_name"])),
-                "trader_name": str(row["trader_name"]),
-                "market_id": int(row["market_id"]),
-                "forecast": forecast,
-                "raw_forecast": _raw_forecast(row),
-                "market_price": market_forecast,
-                "outcome": outcome,
-                "orders_count": _orders_count(row["orders"]),
-                "confidence": (
-                    _clamp_probability(row["confidence"])
-                    if "confidence" in row.keys()
-                    else None
-                ),
-            })
+            rows.append(
+                {
+                    "id": int(row["id"]),
+                    "persona": _persona_name(str(row["trader_name"])),
+                    "trader_name": str(row["trader_name"]),
+                    "market_id": int(row["market_id"]),
+                    "market_name": str(row["market_name"] or ""),
+                    "timestamp": str(row["timestamp"] or ""),
+                    "forecast": forecast,
+                    "raw_forecast": _raw_forecast(row),
+                    "market_price": market_forecast,
+                    "outcome": outcome,
+                    "orders_count": _orders_count(row["orders"]),
+                    "confidence": (
+                        _clamp_probability(row["confidence"])
+                        if "confidence" in row.keys()
+                        else None
+                    ),
+                    "rejection_reason": (
+                        str(row["rejection_reason"])
+                        if "rejection_reason" in row.keys() and row["rejection_reason"]
+                        else None
+                    ),
+                    "market_category": (
+                        str(row["market_category"])
+                        if "market_category" in row.keys() and row["market_category"]
+                        else ""
+                    ),
+                    "market_tags": (
+                        _json_string_list(row["market_tags"]) if "market_tags" in row.keys() else []
+                    ),
+                }
+            )
 
         personas = []
         for persona in sorted({row["persona"] for row in rows}):
@@ -338,22 +473,24 @@ def analyze_decisions_db(
                 if row["raw_forecast"] is not None
             ]
             market_pairs = [(row["market_price"], row["outcome"]) for row in subset]
-            personas.append({
-                "persona": persona,
-                "n": len(subset),
-                "brier": _brier(forecast_pairs),
-                "raw_brier": _brier(raw_pairs),
-                "market_price_brier": _brier(market_pairs),
-                "mean_forecast": _mean([row["forecast"] for row in subset]),
-                "mean_outcome": _mean([row["outcome"] for row in subset]),
-                "mean_confidence": _mean([
-                    row["confidence"]
-                    for row in subset
-                    if row["confidence"] is not None
-                ]),
-                "reliability": _reliability_curve(forecast_pairs, bins),
-                "rejection_calibration": _rejection_calibration(subset),
-            })
+            personas.append(
+                {
+                    "persona": persona,
+                    "n": len(subset),
+                    "brier": _brier(forecast_pairs),
+                    "raw_brier": _brier(raw_pairs),
+                    "market_price_brier": _brier(market_pairs),
+                    "mean_forecast": _mean([row["forecast"] for row in subset]),
+                    "mean_outcome": _mean([row["outcome"] for row in subset]),
+                    "mean_confidence": _mean(
+                        [row["confidence"] for row in subset if row["confidence"] is not None]
+                    ),
+                    "reliability": _reliability_curve(forecast_pairs, bins),
+                    "rejection_calibration": _rejection_calibration(subset),
+                    "by_category_brier": _by_category_brier(subset),
+                    "surprises": _surprises(subset, top_n),
+                }
+            )
 
         all_forecast_pairs = [(row["forecast"], row["outcome"]) for row in rows]
         all_market_pairs = [(row["market_price"], row["outcome"]) for row in rows]
@@ -361,6 +498,11 @@ def analyze_decisions_db(
             "db_path": str(Path(db_path)),
             "bins": bins,
             "resolved_threshold": resolved_threshold,
+            "window": {
+                "since": since_dt.isoformat() if since_dt is not None else None,
+                "until": until_dt.isoformat() if until_dt is not None else None,
+                "semantics": "since inclusive, until exclusive",
+            },
             "outcomes": {
                 "source": outcome_source,
                 "count": len(outcomes),
@@ -378,7 +520,9 @@ def analyze_decisions_db(
                 "n": len(rows),
                 "brier": _brier(all_forecast_pairs),
                 "market_price_brier": _brier(all_market_pairs),
+                "by_category_brier": _by_category_brier(rows),
             },
+            "surprises": _surprises(rows, top_n),
         }
     finally:
         conn.close()
@@ -419,27 +563,56 @@ def format_report(result: dict[str, Any]) -> str:
         )
 
     baseline = result["baselines"]["native_noise_trader_pnl"]
-    lines.extend([
-        "",
-        (
-            "Market-price baseline Brier: "
-            f"{_fmt(result['baselines']['market_price_as_forecast']['brier'])} "
-            f"(n={result['baselines']['market_price_as_forecast']['n']})"
-        ),
-        (
-            "NativeNoiseTrader PnL baseline: "
-            f"n={baseline.get('n', 0)} "
-            f"mean={_fmt(baseline.get('mean_pnl'), 2)} "
-            f"median={_fmt(baseline.get('median_pnl'), 2)} "
-            f"min={_fmt(baseline.get('min_pnl'), 2)} "
-            f"max={_fmt(baseline.get('max_pnl'), 2)}"
-        ),
-        (
-            "Outcomes: "
-            f"{result['outcomes']['count']} ({result['outcomes']['source']}), "
-            f"decision rows used={result['outcomes']['used_decision_rows']}"
-        ),
-    ])
+    lines.extend(
+        [
+            "",
+            (
+                "Market-price baseline Brier: "
+                f"{_fmt(result['baselines']['market_price_as_forecast']['brier'])} "
+                f"(n={result['baselines']['market_price_as_forecast']['n']})"
+            ),
+            (
+                "NativeNoiseTrader PnL baseline: "
+                f"n={baseline.get('n', 0)} "
+                f"mean={_fmt(baseline.get('mean_pnl'), 2)} "
+                f"median={_fmt(baseline.get('median_pnl'), 2)} "
+                f"min={_fmt(baseline.get('min_pnl'), 2)} "
+                f"max={_fmt(baseline.get('max_pnl'), 2)}"
+            ),
+            (
+                "Outcomes: "
+                f"{result['outcomes']['count']} ({result['outcomes']['source']}), "
+                f"decision rows used={result['outcomes']['used_decision_rows']}"
+            ),
+        ]
+    )
+    reason_rows = []
+    for persona in result["personas"]:
+        for reason, stats in persona["rejection_calibration"]["by_reason"].items():
+            reason_rows.append(
+                f"  {persona['persona']} / {reason}: n={stats['n']} "
+                f"would-have-profited={stats['would_have_profited_n']} "
+                f"({_fmt(stats['would_have_profited_rate'], 3)})"
+            )
+    if reason_rows:
+        lines.extend(["", "Rejection counterfactuals by reason", *reason_rows])
+
+    categories = result["overall"]["by_category_brier"]
+    if categories:
+        lines.extend(["", "Brier by category"])
+        lines.extend(
+            f"  {item['category']}: n={item['n']} brier={_fmt(item['brier'])}"
+            for item in categories
+        )
+
+    if result["surprises"]:
+        lines.extend(["", "Largest submitted-order surprises"])
+        lines.extend(
+            f"  {item['trader_name']} market={item['market_id']} "
+            f"forecast={_fmt(item['forecast'], 3)} outcome={_fmt(item['outcome'], 3)} "
+            f"error={_fmt(item['absolute_error'], 3)}"
+            for item in result["surprises"]
+        )
     return "\n".join(lines)
 
 
@@ -454,9 +627,21 @@ def main() -> None:
         help="Infer outcomes from final prices only outside this threshold",
     )
     parser.add_argument("--json-out", default="", help="Optional path to write JSON output")
+    parser.add_argument("--since", default=None, help="Inclusive ISO timestamp window start")
+    parser.add_argument("--until", default=None, help="Exclusive ISO timestamp window end")
+    parser.add_argument(
+        "--top-n", type=int, default=10, help="Number of submitted-order surprises to show"
+    )
     args = parser.parse_args()
 
-    result = analyze_decisions_db(args.db, bins=args.bins, resolved_threshold=args.resolved_threshold)
+    result = analyze_decisions_db(
+        args.db,
+        bins=args.bins,
+        resolved_threshold=args.resolved_threshold,
+        since=args.since,
+        until=args.until,
+        top_n=args.top_n,
+    )
     print(format_report(result))
     json_text = json.dumps(result, indent=2, sort_keys=True)
     print("\nJSON:")

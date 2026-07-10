@@ -63,6 +63,7 @@ class TradeRecord:
     fair_value_age_s: float | None
     confidence: float | None
     countercase: str
+    rejection_reason: str | None
     orders: list[OrderSpec]
     motivation: str
     raw_llm_response: str
@@ -89,6 +90,7 @@ class FairValueDecisionContext:
 # --------------------------------------------------------------------------- #
 def _describe_order(order: OrderSpec) -> str:
     from sybil_client import BuyNo, BuyYes, SellNo, SellYes
+
     price = order.limit_price_nanos / NANOS_PER_DOLLAR
     if isinstance(order, BuyYes):
         return f"BuyYes {order.quantity} @ ${price:.4f}"
@@ -182,7 +184,8 @@ class LiveLlmTrader(BaseAgent):
         self.fair_value_confidences: dict[int, float | None] = {}
         self.fair_value_countercases: dict[int, str] = {}
         self._latest_rebalance_context: dict[int, FairValueDecisionContext] = {}
-        self._pending_order_logs: list[dict] = []
+        self._latest_rejection_reasons: dict[int, str | None] = {}
+        self._latest_updates: dict[int, FairValueUpdate] = {}
 
     def attach_news_feed(self, feed: NewsFeed) -> None:
         """Wire in the shared feed (price cache only; no news subscription)."""
@@ -214,7 +217,12 @@ class LiveLlmTrader(BaseAgent):
         fair_value_age_s: float | None = None,
         confidence: float | None = None,
         countercase: str = "",
+        rejection_reason: str | None = None,
     ) -> None:
+        if orders and rejection_reason is not None:
+            raise ValueError("submitted decisions cannot have a rejection_reason")
+        if not orders and not rejection_reason:
+            raise ValueError("no-order decisions require a rejection_reason")
         yes_pos = self.get_position(market_id, "YES")
         no_pos = self.get_position(market_id, "NO")
         record = TradeRecord(
@@ -227,6 +235,7 @@ class LiveLlmTrader(BaseAgent):
             fair_value_age_s=fair_value_age_s,
             confidence=confidence,
             countercase=countercase,
+            rejection_reason=rejection_reason,
             orders=orders,
             motivation=motivation,
             raw_llm_response=raw_llm_response,
@@ -243,9 +252,15 @@ class LiveLlmTrader(BaseAgent):
             self.trade_log[market_id] = records[-200:]
 
         if self.db:
+            market = self.markets_info.get(market_id)
+            market_category = getattr(market, "category", "")
+            if not isinstance(market_category, str):
+                market_category = ""
+            market_tags = getattr(market, "tags", [])
+            if not isinstance(market_tags, (list, tuple, set)):
+                market_tags = []
             article_urls = [
-                {"title": a.title, "url": a.url, "source": a.source}
-                for a in (articles or [])
+                {"title": a.title, "url": a.url, "source": a.source} for a in (articles or [])
             ]
             self.db.log_decision(
                 trader_name=self.name,
@@ -267,6 +282,9 @@ class LiveLlmTrader(BaseAgent):
                 fair_value_age_s=fair_value_age_s,
                 confidence=confidence,
                 countercase=countercase,
+                rejection_reason=rejection_reason,
+                market_category=market_category,
+                market_tags=[str(tag) for tag in market_tags],
             )
 
     # -- Price helpers --
@@ -276,9 +294,7 @@ class LiveLlmTrader(BaseAgent):
 
     def _observed_market_prices(self, block: Block) -> dict[int, tuple[int, int]]:
         """Prices worth recording for live trading, without synthetic 50/50s."""
-        return observed_market_prices(
-            self.news_feed, self.markets_info, self.market_ids, block
-        )
+        return observed_market_prices(self.news_feed, self.markets_info, self.market_ids, block)
 
     def _portfolio_value(self, block: Block) -> float:
         pv = self.current_balance
@@ -307,7 +323,7 @@ class LiveLlmTrader(BaseAgent):
         self.fair_value_timestamps.pop(market_id, None)
         self.fair_value_confidences.pop(market_id, None)
         self.fair_value_countercases.pop(market_id, None)
-        self._latest_rebalance_context.pop(market_id, None)
+        self._latest_updates.pop(market_id, None)
 
     def _fresh_fair_value(
         self,
@@ -353,6 +369,7 @@ class LiveLlmTrader(BaseAgent):
 
         all_orders: list[OrderSpec] = []
         self._latest_rebalance_context = {}
+        self._latest_rejection_reasons = {}
 
         markets_to_check = set(self.fair_values.keys())
         for (mid, _outcome), qty in self.positions.items():
@@ -371,14 +388,27 @@ class LiveLlmTrader(BaseAgent):
             self._latest_rebalance_context[market_id] = context
             fv = fresh_fv.effective_fair_value if fresh_fv else None
 
-            if fv is None:
+            market = self.markets_info.get(market_id)
+            is_resolved = (
+                str(getattr(market, "status", "")).lower() == "resolved"
+                or market_price >= RESOLVED_HIGH
+                or market_price <= RESOLVED_LOW
+            )
+
+            if fv is None or is_resolved:
                 # No fair value or drawdown → exit positions
                 from sybil_client import SellNo, SellYes
+
+                market_orders: list[OrderSpec] = []
                 if current_yes > 0:
-                    all_orders.append(SellYes.at_price(market_id, market_price, current_yes))
+                    market_orders.append(SellYes.at_price(market_id, market_price, current_yes))
                 if current_no > 0:
-                    all_orders.append(SellNo.at_price(market_id, 1 - market_price, current_no))
-                if current_yes == 0 and current_no == 0:
+                    market_orders.append(SellNo.at_price(market_id, 1 - market_price, current_no))
+                all_orders.extend(market_orders)
+                self._latest_rejection_reasons[market_id] = (
+                    None if market_orders else "resolved" if is_resolved else "fv_expired"
+                )
+                if not market_orders:
                     self._forget_fair_value(market_id)
                 continue
 
@@ -395,12 +425,29 @@ class LiveLlmTrader(BaseAgent):
 
             available_cash = max(0, cash - min_cash)
             orders = position_orders(
-                market_id, target_yes, target_no,
-                current_yes, current_no,
-                fv, market_price, available_cash,
+                market_id,
+                target_yes,
+                target_no,
+                current_yes,
+                current_no,
+                fv,
+                market_price,
+                available_cash,
             )
 
+            rejection_reason = None
+            if not orders:
+                min_edge = float(getattr(self.strategy, "min_edge", 0.0))
+                if abs(fv - market_price) < min_edge:
+                    rejection_reason = "below_min_edge"
+                elif (target_yes, target_no) != (current_yes, current_no):
+                    rejection_reason = "insufficient_cash"
+                else:
+                    rejection_reason = "hold_position"
+            self._latest_rejection_reasons[market_id] = rejection_reason
+
             from sybil_client import BuyNo, BuyYes
+
             for o in orders:
                 if isinstance(o, (BuyYes, BuyNo)):
                     cost = o.quantity * (o.limit_price_nanos / NANOS_PER_DOLLAR)
@@ -410,31 +457,12 @@ class LiveLlmTrader(BaseAgent):
 
         return all_orders
 
-    def _clear_resolved_markets(self, block: Block) -> None:
-        """Drop fair values for resolved markets so the sizer exits them.
-
-        Pre-split, the trader cleared a resolved market's FV inside its own LLM
-        loop (only when a fresh article arrived). Post-split the analyst clears
-        its copy and stops publishing, so the sizer must notice resolution on
-        its own. This is LLM-free and runs every block, which is strictly more
-        robust; sizing math (_rebalance_all) is unchanged.
-        """
-        for market_id in list(self.fair_values.keys()):
-            ref_price = self._get_market_price(market_id, block)
-            if ref_price > 0 and (ref_price >= RESOLVED_HIGH or ref_price <= RESOLVED_LOW):
-                market = self.markets_info.get(market_id)
-                name = market.name[:30] if market else str(market_id)
-                log.info("[%s] %s resolved (price=%.2f), clearing FV",
-                         self.name, name, ref_price)
-                self._forget_fair_value(market_id)
-
     # -- Main loop --
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         all_orders: list[OrderSpec] = []
         prices = self._observed_market_prices(block)
         now = self._now()
-        self._pending_order_logs = []
 
         for market_id, (yes_nanos, _) in prices.items():
             yes_price = yes_nanos / NANOS_PER_DOLLAR
@@ -463,38 +491,22 @@ class LiveLlmTrader(BaseAgent):
             for update in updates:
                 old_fv = self.fair_values.get(market_id)
                 self._store_fair_value_update(update, now)
+                self._latest_updates[market_id] = update
                 update_ts = update.ts or now
                 if update_ts.tzinfo is None:
                     update_ts = update_ts.replace(tzinfo=timezone.utc)
                 update_age_s = max(0.0, (now - update_ts).total_seconds())
-                log.info("[%s] %s: FV %.2f->%.2f (market=%.2f, age=%.0fs, conf=%s) | %s",
-                         self.name, market_name[:30], old_fv or 0,
-                         update.fair_value, ref_price, update_age_s,
-                         f"{update.confidence:.2f}" if update.confidence is not None else "n/a",
-                         update.motivation)
-                self._record_trade(
-                    market_id=market_id,
-                    market_name=market_name,
-                    fair_value=update.fair_value,
-                    orders=[],
-                    motivation=update.motivation,
-                    analysis=update.analysis,
-                    raw_llm_response="",
-                    llm_duration_s=0.0,
-                    market_price=ref_price,
-                    block_height=update.block_height,
-                    timestamp=now,
-                    articles=update.articles,
-                    raw_fair_value=update.fair_value,
-                    effective_fair_value=update.fair_value,
-                    fair_value_age_s=update_age_s,
-                    confidence=update.confidence,
-                    countercase=update.countercase,
+                log.info(
+                    "[%s] %s: FV %.2f->%.2f (market=%.2f, age=%.0fs, conf=%s) | %s",
+                    self.name,
+                    market_name[:30],
+                    old_fv or 0,
+                    update.fair_value,
+                    ref_price,
+                    update_age_s,
+                    f"{update.confidence:.2f}" if update.confidence is not None else "n/a",
+                    update.motivation,
                 )
-
-        # Exit any markets that have since resolved (LLM-free).
-        self._clear_resolved_markets(block)
-
         # Position management via strategy
         elapsed_rebal = self._monotonic() - self._last_rebalance
         if elapsed_rebal >= self.strategy.rebalance_interval_s or self._last_rebalance == 0:
@@ -502,76 +514,65 @@ class LiveLlmTrader(BaseAgent):
             if rebalance_orders:
                 order_desc = ", ".join(_describe_order(o) for o in rebalance_orders)
                 log.info("[%s] %s rebalance: %s", self.name, self.strategy.name, order_desc)
-                orders_by_market: dict[int, list[OrderSpec]] = {}
-                for order in rebalance_orders:
-                    orders_by_market.setdefault(order.market_id, []).append(order)
-                for market_id, market_orders in orders_by_market.items():
-                    market = self.markets_info.get(market_id)
-                    market_name = market.name if market else str(market_id)
-                    market_price = self._get_market_price(market_id, block)
-                    context = self._latest_rebalance_context.get(market_id)
-                    effective_fv = context.effective_fair_value if context else None
-                    raw_fv = context.raw_fair_value if context else None
-                    fair_value = effective_fv if effective_fv is not None else market_price
-                    if effective_fv is not None:
-                        motivation = f"{self.strategy.name} rebalance to target position"
-                    elif raw_fv is not None:
-                        motivation = f"{self.strategy.name} exit on expired fair value"
-                    else:
-                        motivation = f"{self.strategy.name} exit without an active fair value"
-                    log.info(
-                        "[%s] FV decision market=%d raw=%s effective=%s age_s=%s "
-                        "freshness=%.3f confidence=%s",
-                        self.name,
-                        market_id,
-                        f"{raw_fv:.4f}" if raw_fv is not None else "n/a",
-                        f"{effective_fv:.4f}" if effective_fv is not None else "None",
-                        f"{context.age_s:.0f}" if context and context.age_s is not None else "n/a",
-                        context.freshness_factor if context else 0.0,
-                        (
-                            f"{context.confidence:.2f}"
-                            if context and context.confidence is not None
-                            else "n/a"
-                        ),
+            orders_by_market: dict[int, list[OrderSpec]] = {}
+            for order in rebalance_orders:
+                orders_by_market.setdefault(order.market_id, []).append(order)
+            for market_id, context in self._latest_rebalance_context.items():
+                market_orders = orders_by_market.get(market_id, [])
+                market = self.markets_info.get(market_id)
+                market_name = market.name if market else str(market_id)
+                current_price = self._get_market_price(market_id, block)
+                effective_fv = context.effective_fair_value
+                raw_fv = context.raw_fair_value
+                fair_value = effective_fv if effective_fv is not None else raw_fv
+                fair_value = fair_value if fair_value is not None else current_price
+                update = self._latest_updates.get(market_id)
+                if market_orders:
+                    motivation = f"{self.strategy.name} rebalance to target position"
+                else:
+                    motivation = (
+                        f"{self.strategy.name} rejected: "
+                        f"{self._latest_rejection_reasons[market_id]}"
                     )
-                    self._pending_order_logs.append({
-                        "market_id": market_id,
-                        "market_name": market_name,
-                        "fair_value": fair_value,
-                        "raw_fair_value": raw_fv,
-                        "effective_fair_value": effective_fv,
-                        "fair_value_age_s": context.age_s if context else None,
-                        "confidence": context.confidence if context else None,
-                        "countercase": context.countercase if context else "",
-                        "orders": market_orders,
-                        "motivation": motivation,
-                        "market_price": market_price,
-                        "block_height": block.height,
-                        "timestamp": now,
-                    })
+                entry = {
+                    "market_id": market_id,
+                    "market_name": market_name,
+                    "fair_value": fair_value,
+                    "raw_fair_value": raw_fv,
+                    "effective_fair_value": effective_fv,
+                    "fair_value_age_s": context.age_s if context else None,
+                    "confidence": context.confidence if context else None,
+                    "countercase": context.countercase if context else "",
+                    "orders": market_orders,
+                    "motivation": motivation,
+                    "analysis": update.analysis if update else "",
+                    "articles": update.articles if update else [],
+                    "market_price": current_price,
+                    "block_height": block.height,
+                    "timestamp": now,
+                    "rejection_reason": self._latest_rejection_reasons[market_id],
+                }
+                self._record_trade(
+                    market_id=entry["market_id"],
+                    market_name=entry["market_name"],
+                    fair_value=entry["fair_value"],
+                    orders=entry["orders"],
+                    motivation=entry["motivation"],
+                    analysis=entry["analysis"],
+                    raw_llm_response="",
+                    llm_duration_s=0.0,
+                    market_price=entry["market_price"],
+                    block_height=entry["block_height"],
+                    timestamp=entry["timestamp"],
+                    articles=entry["articles"],
+                    raw_fair_value=entry["raw_fair_value"],
+                    effective_fair_value=entry["effective_fair_value"],
+                    fair_value_age_s=entry["fair_value_age_s"],
+                    confidence=entry["confidence"],
+                    countercase=entry["countercase"],
+                    rejection_reason=entry["rejection_reason"],
+                )
             all_orders.extend(rebalance_orders)
             self._last_rebalance = self._monotonic()
 
         return all_orders
-
-    async def on_orders_submitted(self, block: Block, orders: list[OrderSpec]) -> None:
-        for entry in self._pending_order_logs:
-            self._record_trade(
-                market_id=entry["market_id"],
-                market_name=entry["market_name"],
-                fair_value=entry["fair_value"],
-                orders=entry["orders"],
-                motivation=entry["motivation"],
-                analysis="",
-                raw_llm_response="",
-                llm_duration_s=0.0,
-                market_price=entry["market_price"],
-                block_height=entry["block_height"],
-                timestamp=entry["timestamp"],
-                raw_fair_value=entry["raw_fair_value"],
-                effective_fair_value=entry["effective_fair_value"],
-                fair_value_age_s=entry["fair_value_age_s"],
-                confidence=entry["confidence"],
-                countercase=entry["countercase"],
-            )
-        self._pending_order_logs = []

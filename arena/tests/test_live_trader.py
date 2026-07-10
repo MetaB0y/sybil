@@ -8,6 +8,10 @@ test_analyst.py; the sizer/bus integration tests live in test_analyst.py too.
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
+from live.fair_value_bus import FairValueBus, FairValueUpdate
+from live.strategy import FlatStrategy
 from live.trader import LiveLlmTrader, _order_to_log_dict
 from sybil_client import BuyYes, SellYes
 
@@ -19,6 +23,9 @@ def _make_trader(db=None, **kwargs):
     market.id = 7
     market.name = "Test Market"
     market.reference_price_nanos = None
+    market.status = "Active"
+    market.category = "Politics"
+    market.tags = ["polymarket", "elections"]
     return LiveLlmTrader(
         client=MagicMock(),
         account_id=1,
@@ -66,12 +73,14 @@ def test_record_trade_logs_orders_to_db():
     db.log_decision.assert_called_once()
     payload = db.log_decision.call_args.kwargs
     assert payload["market_id"] == 7
-    assert payload["orders"] == [{
-        "market_id": 7,
-        "side": "BUY_YES",
-        "qty": 12,
-        "price": 0.55,
-    }]
+    assert payload["orders"] == [
+        {
+            "market_id": 7,
+            "side": "BUY_YES",
+            "qty": 12,
+            "price": 0.55,
+        }
+    ]
 
 
 def _price_block():
@@ -156,6 +165,28 @@ def test_db_persists_and_reattaches_bot_account(tmp_path):
         db.close()
 
 
+def test_decision_db_migrates_old_decisions_table_with_rejection_reason(tmp_path):
+    from live.db import DecisionDB
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE decisions (
+               id INTEGER PRIMARY KEY, trader_name TEXT, timestamp TEXT, orders TEXT
+           )"""
+    )
+    conn.commit()
+    conn.close()
+
+    db = DecisionDB(str(db_path))
+    try:
+        columns = {row[1] for row in db.conn.execute("PRAGMA table_info(decisions)")}
+        assert "rejection_reason" in columns
+    finally:
+        db.close()
+
+
 def test_hard_expired_fv_exits_existing_position_and_logs_context():
     now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
     trader = _make_trader(
@@ -181,3 +212,51 @@ def test_hard_expired_fv_exits_existing_position_and_logs_context():
     assert context.effective_fair_value is None
     assert context.age_s == 100
     assert context.confidence == 0.9
+
+
+@pytest.mark.parametrize(
+    ("fair_value", "price", "balance", "position", "age_s", "expected"),
+    [
+        (0.56, 0.55, 500.0, 0, 0, "below_min_edge"),
+        (0.80, 0.55, 0.0, 0, 0, "insufficient_cash"),
+        (0.80, 0.55, 500.0, 10, 0, "hold_position"),
+        (0.80, 0.55, 500.0, 0, 100, "fv_expired"),
+        (0.80, 0.96, 500.0, 0, 0, "resolved"),
+    ],
+)
+async def test_rebalance_records_no_order_rejection_reason(
+    fair_value, price, balance, position, age_s, expected
+):
+    now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+    bus = FairValueBus("test")
+    db = MagicMock()
+    trader = _make_trader(
+        db=db,
+        strategy=FlatStrategy(),
+        fair_value_bus=bus,
+        fair_value_ttl_s=10.0,
+        fair_value_hard_expiry_s=100.0,
+        now_fn=lambda: now,
+        monotonic_fn=lambda: 1000.0,
+    )
+    trader._observed_first_block = True
+    trader.balance_history = [balance]
+    if position:
+        trader.positions = {(7, "YES"): position}
+    trader.news_feed.polymarket_prices.get_price.return_value = price
+    await bus.publish(
+        FairValueUpdate(
+            market_id=7,
+            persona_key="test",
+            fair_value=fair_value,
+            motivation="fixture",
+            analysis="fixture analysis",
+            ts=now - timedelta(seconds=age_s),
+        )
+    )
+
+    orders = await trader.on_block(_price_block())
+
+    assert orders == []
+    assert db.log_decision.call_args.kwargs["rejection_reason"] == expected
+    assert db.log_decision.call_args.kwargs["orders"] == []

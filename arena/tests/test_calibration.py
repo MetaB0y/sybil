@@ -29,19 +29,26 @@ def _fixture_db(path):
             effective_fair_value REAL,
             fair_value_age_s REAL,
             confidence REAL,
-            countercase TEXT
+            countercase TEXT,
+            rejection_reason TEXT,
+            market_category TEXT,
+            market_tags TEXT
         );
         INSERT INTO decisions
             (trader_name, market_id, market_name, timestamp, fair_value,
              market_price, orders, raw_fair_value, effective_fair_value,
-             fair_value_age_s, confidence, countercase)
+             fair_value_age_s, confidence, countercase, rejection_reason,
+             market_category, market_tags)
         VALUES
             ('Alice (Kelly)', 1, 'M1', '2026-01-01T00:00:00Z', 0.75,
-             0.70, '[{"side":"BUY_YES"}]', 0.80, 0.75, 30, 0.60, 'c'),
+             0.70, '[{"side":"BUY_YES"}]', 0.80, 0.75, 30, 0.60, 'c',
+             NULL, 'Politics', '["elections"]'),
             ('Alice (Flat)', 2, 'M2', '2026-01-01T00:01:00Z', 0.45,
-             0.30, '[]', 0.40, 0.45, 60, 0.50, 'c'),
+             0.30, '[]', 0.40, 0.45, 60, 0.50, 'c',
+             'below_min_edge', 'Science', '["space"]'),
             ('Bob (Kelly)', 1, 'M1', '2026-01-01T00:02:00Z', 0.20,
-             0.70, '[]', 0.20, 0.20, 90, 0.40, 'c');
+             0.70, '[]', 0.20, 0.20, 90, 0.40, 'c',
+             'hold_position', 'Politics', '["elections"]');
 
         CREATE TABLE portfolio_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,3 +107,38 @@ def test_calibration_harness_computes_brier_reliability_and_noise_baseline(tmp_p
     assert "Calibration by persona" in report
     assert "Market-price baseline Brier" in report
     assert "NativeNoiseTrader PnL baseline" in report
+
+
+def test_calibration_window_reason_counterfactuals_categories_and_surprises(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+
+    result = analyze_decisions_db(
+        str(db_path),
+        bins=2,
+        since="2026-01-01T00:00:30Z",
+        until="2026-01-01T00:02:00Z",
+        top_n=3,
+    )
+
+    assert result["overall"]["n"] == 1
+    assert result["window"] == {
+        "since": "2026-01-01T00:00:30+00:00",
+        "until": "2026-01-01T00:02:00+00:00",
+        "semantics": "since inclusive, until exclusive",
+    }
+    rejection = result["personas"][0]["rejection_calibration"]
+    assert rejection["by_reason"]["below_min_edge"] == {
+        "n": 1,
+        "would_have_profited_n": 0,
+        "would_have_lost_or_broken_even_n": 1,
+        "would_have_profited_rate": 0.0,
+    }
+    assert result["overall"]["by_category_brier"] == [
+        {"category": "Science", "n": 1, "brier": 0.2025}
+    ]
+    assert result["surprises"] == []
+
+    acted = analyze_decisions_db(str(db_path), until="2026-01-01T00:01:00Z", top_n=1)
+    assert acted["surprises"][0]["market_id"] == 1
+    assert acted["surprises"][0]["absolute_error"] == 0.25

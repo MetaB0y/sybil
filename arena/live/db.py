@@ -33,6 +33,11 @@ class DecisionDB:
                 ("decisions", "fair_value_age_s", "REAL"),
                 ("decisions", "confidence", "REAL"),
                 ("decisions", "countercase", "TEXT"),
+                # SYB-114 Stage 0: explain every no-order sizing decision and
+                # retain market classification for category calibration.
+                ("decisions", "rejection_reason", "TEXT"),
+                ("decisions", "market_category", "TEXT"),
+                ("decisions", "market_tags", "TEXT"),
             ]:
                 try:
                     self.conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
@@ -77,7 +82,10 @@ class DecisionDB:
                     effective_fair_value REAL,
                     fair_value_age_s REAL,
                     confidence REAL,
-                    countercase TEXT
+                    countercase TEXT,
+                    rejection_reason TEXT,
+                    market_category TEXT,
+                    market_tags TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
@@ -167,7 +175,14 @@ class DecisionDB:
         fair_value_age_s: float | None = None,
         confidence: float | None = None,
         countercase: str = "",
+        rejection_reason: str | None = None,
+        market_category: str = "",
+        market_tags: list[str] | None = None,
     ) -> int:
+        if orders and rejection_reason is not None:
+            raise ValueError("submitted decisions cannot have a rejection_reason")
+        if not orders and not rejection_reason:
+            raise ValueError("no-order decisions require a rejection_reason")
         with self._lock:
             cur = self.conn.execute(
                 """INSERT INTO decisions
@@ -175,8 +190,9 @@ class DecisionDB:
                     article_urls, analysis, fair_value, market_price, orders,
                     motivation, raw_llm_response, llm_duration_s, balance,
                     yes_pos, no_pos, raw_fair_value, effective_fair_value,
-                    fair_value_age_s, confidence, countercase)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    fair_value_age_s, confidence, countercase, rejection_reason,
+                    market_category, market_tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     market_id,
@@ -199,6 +215,9 @@ class DecisionDB:
                     fair_value_age_s,
                     confidence,
                     countercase,
+                    rejection_reason,
+                    market_category,
+                    json.dumps(market_tags or []),
                 ),
             )
             self.conn.commit()
@@ -271,8 +290,7 @@ class DecisionDB:
         """
         with self._lock:
             row = self.conn.execute(
-                "SELECT COALESCE(SUM(usd_cost), 0) AS total FROM token_usage "
-                "WHERE trader_name = ?",
+                "SELECT COALESCE(SUM(usd_cost), 0) AS total FROM token_usage WHERE trader_name = ?",
                 (trader_name,),
             ).fetchone()
         return float(row["total"]) if row is not None else 0.0
