@@ -172,6 +172,7 @@ impl BlockSequencer {
             prepared.next_sequencer.markets(),
             prepared.next_sequencer.market_groups(),
             prepared.next_sequencer.market_lifecycle(),
+            prepared.next_sequencer.analytics().last_clearing_prices(),
         );
         let block_state_root = prepared.production.block.header.state_root;
         if prepared_state_root != block_state_root {

@@ -25,7 +25,7 @@ use crate::types::{
     WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 7;
+pub const WITNESS_FORMAT_VERSION: u8 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -37,7 +37,7 @@ pub enum WitnessDecodeError {
     },
     #[error("trailing bytes after canonical witness at offset {offset}: {trailing} bytes")]
     TrailingBytes { offset: usize, trailing: usize },
-    #[error("unknown witness format version {0}; only v6 is supported")]
+    #[error("unknown witness format version {0}; only v8 is supported")]
     UnknownVersion(u8),
     #[error("invalid tag for {field} at offset {offset}: {tag}")]
     InvalidTag {
@@ -845,6 +845,9 @@ impl<'a> WitnessReader<'a> {
             status: self.read_market_status()?,
             metadata_digest: self.read_hash32()?,
             resolution_template: self.read_string("market.resolution_template")?,
+            last_clearing_prices: self.read_vec("market.last_clearing_prices", |reader| {
+                Ok(matching_engine::Nanos(reader.read_u64()?))
+            })?,
         })
     }
 
@@ -1568,6 +1571,7 @@ mod tests {
                     status: MarketStatusSnapshot::Active,
                     metadata_digest: [13u8; 32],
                     resolution_template: "admin_immediate".to_string(),
+                    last_clearing_prices: vec![Nanos(610_000_000), Nanos(390_000_000)],
                 },
                 MarketSnapshot {
                     market_id: MarketId::new(9),
@@ -1576,6 +1580,7 @@ mod tests {
                     status: MarketStatusSnapshot::Resolved { record },
                     metadata_digest: [12u8; 32],
                     resolution_template: "admin_immediate".to_string(),
+                    last_clearing_prices: vec![Nanos(410_000_000), Nanos(590_000_000)],
                 },
             ],
             market_groups: vec![MarketGroupSnapshot {

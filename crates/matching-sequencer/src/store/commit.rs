@@ -712,6 +712,7 @@ impl Store {
             snapshot.markets,
             snapshot.market_groups,
             snapshot.lifecycle,
+            snapshot.analytics.last_clearing_prices,
         );
 
         self.account_state_store

@@ -47,6 +47,7 @@ impl Store {
             snapshot.markets,
             snapshot.market_groups,
             snapshot.lifecycle,
+            snapshot.analytics.last_clearing_prices,
         );
         let rebuilt_accounts =
             crate::canonical_state::CanonicalState::from_accounts(snapshot.accounts);
@@ -223,6 +224,13 @@ fn restored_state_from_witness(
     let pubkey_registry = pubkey_registry_from_witness(witness, &accounts)?;
     let (markets, market_statuses, market_metadata, market_groups) =
         market_state_from_sidecar(&witness.state_sidecar)?;
+    let last_clearing_prices = witness
+        .state_sidecar
+        .markets
+        .iter()
+        .filter(|market| !market.last_clearing_prices.is_empty())
+        .map(|market| (market.market_id, market.last_clearing_prices.clone()))
+        .collect::<HashMap<_, _>>();
     let bridge_state = bridge_state_from_witness(witness)?;
     let resting_orders = resting_orders_from_sidecar(&witness.state_sidecar);
     validate_restored_reservations(&resting_orders)
@@ -260,6 +268,7 @@ fn restored_state_from_witness(
         &markets,
         &market_groups,
         &lifecycle,
+        &last_clearing_prices,
     );
     let rebuilt_root = sybil_verifier::block::compute_state_root_with_sidecar(
         crate::canonical_state::CanonicalState::from_accounts(&accounts).as_snapshots(),
@@ -290,7 +299,7 @@ fn restored_state_from_witness(
         pending_bundles: Vec::new(),
         admit_log: Vec::new(),
         control_plane_log: Vec::new(),
-        analytics: empty_import_analytics(),
+        analytics: empty_import_analytics(last_clearing_prices),
         bridge_state,
         pending_l1_deposits: Vec::new(),
         pending_bridge_withdrawals: Vec::new(),
@@ -792,9 +801,11 @@ fn next_order_id_from_witness(witness: &BlockWitness) -> Result<u64, StoreError>
     }
 }
 
-fn empty_import_analytics() -> AnalyticsRestoredState {
+fn empty_import_analytics(
+    last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+) -> AnalyticsRestoredState {
     AnalyticsRestoredState {
-        last_clearing_prices: HashMap::new(),
+        last_clearing_prices,
         market_volumes: HashMap::new(),
         account_fills: Vec::new(),
         trader_tracker: Default::default(),

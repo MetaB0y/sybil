@@ -1253,6 +1253,7 @@ async fn witness_import_rejects_doctored_reserved_balance_high_and_low_and_accep
         &markets,
         &[],
         &lifecycle,
+        &HashMap::new(),
     );
     let state_root = sybil_verifier::block::compute_state_root_with_sidecar(
         canonical_accounts.as_snapshots(),
@@ -1747,6 +1748,14 @@ async fn import_witness_drill_restores_head_and_produces_children() {
     assert_eq!(restored.bridge_state.deposit_cursor, summary.deposit_cursor);
     assert_eq!(restored.bridge_state.withdrawals.len(), summary.withdrawals);
     assert_eq!(restored.genesis_hash, summary.genesis_hash);
+    let imported_prices = decoded
+        .state_sidecar
+        .markets
+        .iter()
+        .filter(|market| !market.last_clearing_prices.is_empty())
+        .map(|market| (market.market_id, market.last_clearing_prices.clone()))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(restored.analytics.last_clearing_prices, imported_prices);
 
     let signed_seq =
         BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());

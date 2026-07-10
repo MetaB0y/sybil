@@ -12,8 +12,15 @@ impl BlockSequencer {
         let order_book = OrderBook::new(config.order_ttl_blocks);
         let bridge = BridgeState::default();
         let lifecycle = crate::market_lifecycle::MarketLifecycle::new(oracle);
-        let committed_state_sidecar =
-            state_sidecar_snapshot(&bridge, &order_book, &markets, &market_groups, &lifecycle);
+        let last_clearing_prices = HashMap::new();
+        let committed_state_sidecar = state_sidecar_snapshot(
+            &bridge,
+            &order_book,
+            &markets,
+            &market_groups,
+            &lifecycle,
+            &last_clearing_prices,
+        );
         let committed_deposit_frontier = bridge.deposit_frontier;
         Self {
             accounts,
@@ -107,6 +114,7 @@ impl BlockSequencer {
             &state.markets,
             &state.market_groups,
             &lifecycle,
+            &state.analytics.last_clearing_prices,
         );
         let committed_deposit_frontier = state.bridge_state.deposit_frontier;
         let mut order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);

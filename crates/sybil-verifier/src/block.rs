@@ -622,6 +622,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: [1u8; 32],
             resolution_template: "admin_immediate".to_string(),
+            last_clearing_prices: vec![],
         };
         let mut resolved = market.clone();
         resolved.status = MarketStatusSnapshot::Resolved {
@@ -648,6 +649,13 @@ mod tests {
             compute_state_root_with_sidecar(&accounts, &before),
             compute_state_root_with_sidecar(&accounts, &after)
         );
+
+        let mut repriced = before.clone();
+        repriced.markets[0].last_clearing_prices = vec![Nanos(600_000_000), Nanos(400_000_000)];
+        assert_ne!(
+            compute_state_root_with_sidecar(&accounts, &before),
+            compute_state_root_with_sidecar(&accounts, &repriced)
+        );
     }
 
     #[test]
@@ -660,6 +668,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: [2u8; 32],
             resolution_template: "admin_immediate".to_string(),
+            last_clearing_prices: vec![],
         };
         let second_market = MarketSnapshot {
             market_id: MarketId::new(1),
@@ -668,6 +677,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: [1u8; 32],
             resolution_template: "admin_immediate".to_string(),
+            last_clearing_prices: vec![],
         };
         let first_group = MarketGroupSnapshot {
             group_id: 1,
@@ -892,6 +902,7 @@ mod tests {
                 status: MarketStatusSnapshot::Active,
                 metadata_digest: [7u8; 32],
                 resolution_template: "admin".to_string(),
+                last_clearing_prices: vec![],
             }],
             ..StateSidecarSnapshot::default()
         };

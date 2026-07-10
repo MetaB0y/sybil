@@ -406,6 +406,7 @@ impl Harness {
             seq.markets(),
             seq.market_groups(),
             seq.market_lifecycle(),
+            seq.analytics().last_clearing_prices(),
         );
         if !has_uncommitted_wal {
             assert_eq!(
@@ -1117,6 +1118,7 @@ async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart(
         restored_seq.markets(),
         restored_seq.market_groups(),
         restored_seq.market_lifecycle(),
+        restored_seq.analytics().last_clearing_prices(),
     );
     assert_eq!(restarted_root, committed_root);
 }

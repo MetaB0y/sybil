@@ -8,7 +8,7 @@ last_verified: 2026-07-10
 
 # Block Witness Format
 
-`BlockWitness` v7 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v8 is the canonical private audit package for a Sybil block. The
 sequencer persists it, native verification replays it, and the OpenVM guest
 receives it inside `StateTransitionGuestInput`. The proof binds the witness by
 recomputing `witness_root` from canonical witness bytes and including that root
@@ -30,7 +30,9 @@ the full post-block `account_keys` universe, and a second guest qMDB proof that
 authenticates non-genesis pre-state leaves. SYB-272 then moved the format to v7:
 every deposit has a witnessed credit-or-quarantine disposition, the bridge
 sidecar opens the single quarantine ledger, and claims are guest-replayed per
-ADR-0015. See `design/witness-v6-keys-transition.md` and
+ADR-0015. SYB-32 Stage 1a moved the format to v8 by appending committed
+`last_clearing_prices` to every market snapshot. See
+`design/witness-v6-keys-transition.md` and
 `docs/adr/0015-deposit-quarantine.md`.
 
 ## Encoding
@@ -58,11 +60,11 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v7 it is `0x07`.
+The first byte is the format version. For v8 it is `0x08`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x07
+    version:u8 = 0x08
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
@@ -134,7 +136,16 @@ Markets are sorted by `market_id`; prices are in outcome order.
 encoding with the distinct domain `"sybil/witness/pre-state-sidecar"`. Each
 sidecar carries bridge state, markets sorted by `market_id`, market groups
 sorted by `group_id`, resting orders sorted by `order.id`, and account
-reservations sorted by `account_id`. Bridge state is:
+reservations sorted by `account_id`.
+
+Each market snapshot ends with
+`price_count:u64le || price:u64le * price_count`, after the resolution
+template. The count is either zero (never cleared) or exactly
+`num_outcomes`; every price is at most `NANOS_PER_DOLLAR`. On non-genesis
+transitions, witnessed clearing prices must become the post-market prices and
+markets without a clearing entry must carry their pre-market prices unchanged.
+
+Bridge state is:
 
 ```text
 deposit_cursor:u64

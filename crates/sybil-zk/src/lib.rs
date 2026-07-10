@@ -1101,6 +1101,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: state_schema::market_metadata_digest(b"metadata"),
             resolution_template: "yes/no".to_string(),
+            last_clearing_prices: vec![],
         };
         let market_group = MarketGroupSnapshot {
             group_id: 2,
@@ -1764,8 +1765,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                136, 227, 177, 209, 105, 197, 218, 180, 249, 136, 20, 74, 4, 10, 75, 228, 196, 133,
-                38, 247, 201, 54, 51, 150, 137, 2, 45, 72, 152, 25, 211, 151,
+                130, 23, 104, 223, 232, 254, 38, 192, 210, 191, 213, 219, 176, 14, 84, 158, 3, 13,
+                223, 114, 95, 71, 15, 88, 93, 64, 223, 17, 168, 232, 101, 249,
             ]
         );
     }

@@ -121,8 +121,14 @@ pub(super) fn coherent_header_and_witness(
     bridge_state: &BridgeState,
 ) -> (BlockHeader, BlockWitness) {
     let canonical_accounts = crate::canonical_state::CanonicalState::from_accounts(accounts);
-    let state_sidecar =
-        state_sidecar_snapshot_from_resting_orders(bridge_state, &[], markets, &[], lifecycle);
+    let state_sidecar = state_sidecar_snapshot_from_resting_orders(
+        bridge_state,
+        &[],
+        markets,
+        &[],
+        lifecycle,
+        &HashMap::new(),
+    );
     let state_root = sybil_verifier::block::compute_state_root_with_sidecar(
         canonical_accounts.as_snapshots(),
         &state_sidecar,

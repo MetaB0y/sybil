@@ -373,6 +373,7 @@ impl SequencerHandle {
                 state.sequencer.markets(),
                 state.sequencer.market_groups(),
                 state.sequencer.market_lifecycle(),
+                state.sequencer.analytics().last_clearing_prices(),
             )
         })
         .await

@@ -2660,6 +2660,7 @@ fn test_witness_includes_untouched_accounts() {
             seq.markets(),
             seq.market_groups(),
             seq.market_lifecycle(),
+            seq.analytics().last_clearing_prices(),
         )
     );
 }
@@ -2721,6 +2722,19 @@ fn admin_resolution_shrinks_three_market_group_and_survivors_stay_coherent() {
     );
     assert_eq!(bp.witness.market_groups.len(), 1);
     assert_eq!(bp.witness.market_groups[0].markets, vec![m0, m1]);
+    for market_id in [m0, m1] {
+        let snapshot = bp
+            .witness
+            .state_sidecar
+            .markets
+            .iter()
+            .find(|market| market.market_id == market_id)
+            .expect("cleared market snapshot");
+        assert_eq!(
+            Some(&snapshot.last_clearing_prices),
+            bp.block.clearing_prices.get(&market_id)
+        );
+    }
 
     let verification = sybil_verifier::verify_full(&bp.witness, false);
     assert!(
@@ -3483,6 +3497,7 @@ fn stp_undo_preserves_other_accounts_same_block_expired_history_and_state_root()
             seq.markets(),
             seq.market_groups(),
             seq.market_lifecycle(),
+            seq.analytics().last_clearing_prices(),
         )
     );
     let verification = sybil_verifier::verify_full(&production.witness, false);

@@ -333,6 +333,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 },
                 metadata_digest: [12u8; 32],
                 resolution_template: "admin_immediate".to_string(),
+                last_clearing_prices: vec![Nanos(410_000_000), Nanos(590_000_000)],
             },
             MarketSnapshot {
                 market_id: MarketId::new(3),
@@ -344,6 +345,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 },
                 metadata_digest: [13u8; 32],
                 resolution_template: "data_feed".to_string(),
+                last_clearing_prices: vec![Nanos(610_000_000), Nanos(390_000_000)],
             },
         ],
         market_groups: vec![MarketGroupSnapshot {

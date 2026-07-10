@@ -373,6 +373,10 @@ pub struct MarketSnapshot {
     pub status: MarketStatusSnapshot,
     pub metadata_digest: [u8; 32],
     pub resolution_template: String,
+    /// Most recently committed clearing prices, indexed by outcome.
+    /// Empty means the market has never cleared.
+    #[serde(default)]
+    pub last_clearing_prices: Vec<Nanos>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -310,6 +310,7 @@ impl BlockSequencer {
             &self.markets,
             &self.market_groups,
             &self.lifecycle,
+            self.analytics.last_clearing_prices(),
         );
         let system_event_witnesses: Vec<SystemEventWitness> =
             system_events.iter().map(convert_system_event).collect();
