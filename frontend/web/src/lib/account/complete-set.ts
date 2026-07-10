@@ -97,24 +97,27 @@ export function findCompleteSetBlockers({
 }
 
 /**
- * One line of plain copy naming why the bet is blocked and what to do. `labelOf`
- * resolves a market id to its outcome label for the multi-outcome case.
+ * One line of plain copy naming why the order is blocked and what to do.
+ * `labelOf` resolves a market id to its outcome label for the multi-outcome
+ * case; `noun` matches the surface's voice — "bet" in Degen, "order" in Pro.
  */
 export function completeSetReason(
   blockers: readonly CoverageOrder[],
   side: OrderSideName,
   marketId: number,
   labelOf: (m: number) => string | null,
+  noun: "bet" | "order" = "bet",
 ): string {
   const opposite = side === "BuyNo" ? "YES" : "NO";
+  const verb = noun === "bet" ? "bet" : "buy";
   const sameMarket = blockers.find((b) => b.market_id === marketId);
   if (sameMarket) {
-    return `Your open ${opposite} order on this outcome blocks it — cancel that order to bet ${side === "BuyNo" ? "NO" : "YES"}.`;
+    return `Your open ${opposite} order on this outcome blocks it — cancel that order to ${verb} ${side === "BuyNo" ? "NO" : "YES"}.`;
   }
   const only = blockers.length === 1 ? blockers[0] : undefined;
   if (only) {
     const label = labelOf(only.market_id);
-    return `Your open order${label ? ` on ${label}` : ""} already covers the other outcomes — cancel it to bet here.`;
+    return `Your open order${label ? ` on ${label}` : ""} already covers the other outcomes — cancel it to ${verb} here.`;
   }
-  return `Your ${blockers.length} open orders in this event already cover the other outcomes — cancel one to bet here.`;
+  return `Your ${blockers.length} open orders in this event already cover the other outcomes — cancel one to ${verb} here.`;
 }

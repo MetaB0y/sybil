@@ -167,4 +167,12 @@ describe("completeSetReason", () => {
     );
     expect(reason).toContain("2 open orders");
   });
+
+  it("speaks the surface's voice — bets in Degen, buys in Pro", () => {
+    const blockers = [order(1, 72, "BuyYes")];
+    expect(completeSetReason(blockers, "BuyNo", 72, labelOf)).toContain("to bet NO");
+    expect(completeSetReason(blockers, "BuyNo", 72, labelOf, "order")).toContain(
+      "to buy NO",
+    );
+  });
 });

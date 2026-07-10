@@ -23,8 +23,15 @@ import {
   type OrderSide,
   type SubmitTimeInForce,
 } from "@/lib/account/orders";
+import {
+  completeSetReason,
+  findCompleteSetBlockers,
+} from "@/lib/account/complete-set";
 import { humanizeOrderError } from "@/lib/account/order-errors";
-import type { AccountOrder } from "@/lib/account/use-account-orders";
+import {
+  useAccountOrders,
+  type AccountOrder,
+} from "@/lib/account/use-account-orders";
 import {
   formatShareUnits,
   notionalNanosCeil,
@@ -41,7 +48,11 @@ import {
   formatBatchSeconds,
   formatDollars,
 } from "@/lib/format/nanos";
-import type { EventOutcome } from "@/lib/market-detail/use-event-group";
+import {
+  useEventGroup,
+  type EventOutcome,
+} from "@/lib/market-detail/use-event-group";
+import { useGroupMarkets } from "@/lib/markets/use-market-groups";
 import { useBatchCountdown } from "./use-batch-countdown";
 
 type Direction = "buy" | "sell";
@@ -69,6 +80,11 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const portfolio = usePortfolio(session?.accountId ?? null);
   const { availableNanos } = useAvailableBalance(session?.accountId ?? null);
+  // Complete-set preflight inputs. Group membership is NegRisk-only, so it must
+  // come from /v1/markets/groups — an event's siblings are a superset.
+  const { data: openOrders } = useAccountOrders(session?.accountId ?? null);
+  const groupMarkets = useGroupMarkets(outcome.marketId);
+  const { group } = useEventGroup(outcome.marketId);
 
   // A never-traded market has no price yet (absent from /v1/markets/prices).
   // We still need a numeric seed for the limit slider, but we must NOT present
@@ -228,13 +244,40 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const positionsLoaded = portfolio.data != null;
   const insufficientSell =
     connected && dir === "sell" && positionsLoaded && qtyUnits > BigInt(heldUnits);
-  const ctaOff = submitting || insufficientBuy || insufficientSell;
+
+  // NegRisk self-trade prevention: in a market group, a resting buy can make
+  // this order complete a full outcome set, which the engine rejects outright
+  // (CompleteSetFormation). Catch it before signing and name the order in the
+  // way. Sells never complete a set, so the helper no-ops for them.
+  const orderSide = orderSideFor(dir, outcomeSide);
+  const blockers = connected
+    ? findCompleteSetBlockers({
+        groupMarkets,
+        restingOrders: openOrders ?? [],
+        marketId: outcome.marketId,
+        side: orderSide,
+      })
+    : null;
+  const completeSet = blockers != null && blockers.length > 0;
+  const completeSetReasonText = completeSet
+    ? completeSetReason(
+        blockers,
+        orderSide,
+        outcome.marketId,
+        (m) => group?.outcomes.find((o) => o.marketId === m)?.shortLabel ?? null,
+        "order",
+      )
+    : null;
+
+  const ctaOff =
+    submitting || insufficientBuy || insufficientSell || completeSet;
 
   const ctaLabel = (() => {
     if (!connected) return "Connect to trade";
     if (submitting) return "Signing…";
     if (insufficientBuy) return "Not enough funds";
     if (insufficientSell) return "Not enough shares";
+    if (completeSet) return "Cancel your open order first";
     const sideWord = dir === "buy" ? "queue buy" : "queue sell";
     const batchSuffix =
       batchNumber == null ? "" : ` → batch #${batchNumber.toLocaleString()}`;
@@ -927,6 +970,20 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
       >
         {ctaLabel}
       </button>
+
+      {completeSetReasonText && !submitError && (
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            lineHeight: "16px",
+            color: "var(--fg-3)",
+            textAlign: "center",
+          }}
+        >
+          {completeSetReasonText}
+        </div>
+      )}
 
       {submitError && (
         <div
