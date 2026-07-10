@@ -99,7 +99,7 @@ impl AnalyticsState {
 
         Self {
             price_tracker,
-            fill_recorder: FillRecorder::restore_with_counts(
+            fill_recorder: FillRecorder::restore_bounded_newest_first_with_counts(
                 input.account_fills,
                 input.fill_total_counts,
                 config.max_fill_history_per_account,

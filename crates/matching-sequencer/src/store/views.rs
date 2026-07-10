@@ -1,6 +1,37 @@
 use super::*;
 
 impl Store {
+    /// Recover at most `cap` of the newest durable fills for each account.
+    ///
+    /// Fill-history keys cluster records by account and sort them oldest-first,
+    /// so a reverse range scan can stop as soon as the hot restore window is
+    /// full. Records are returned newest-first within each account's group.
+    pub fn recover_account_fills(
+        &self,
+        account_ids: &[AccountId],
+        cap: usize,
+    ) -> Result<Vec<(AccountId, AccountFillRecord)>, StoreError> {
+        if cap == 0 || account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(FILL_HISTORY)?;
+        let mut out = Vec::new();
+        for &account_id in account_ids {
+            let (lo, hi) = fill_history_account_bounds(account_id);
+            for entry in table
+                .range::<&[u8]>(lo.as_slice()..=hi.as_slice())?
+                .rev()
+                .take(cap)
+            {
+                let (_key, value) = entry?;
+                out.push((account_id, rmp_serde::from_slice(value.value())?));
+            }
+        }
+        Ok(out)
+    }
+
     pub async fn state_qmdb_root(
         &self,
         slot: AccountSnapshotSlot,

@@ -530,7 +530,6 @@ fn bridge_state_from_witness(witness: &BlockWitness) -> Result<BridgeState, Stor
         deposit_cursor: witness.state_sidecar.bridge.deposit_cursor,
         deposit_root: witness.state_sidecar.bridge.deposit_root,
         deposit_frontier,
-        deposit_log: Vec::new(),
         next_withdrawal_id: witness.state_sidecar.bridge.next_withdrawal_id,
         withdrawals,
     })

@@ -60,6 +60,17 @@ pub struct RestoredState {
 impl Store {
     /// Load state from the store. Returns None if the store is empty (fresh start).
     pub async fn load_state(&self) -> Result<Option<RestoredState>, StoreError> {
+        self.load_state_with_fill_history_cap(
+            crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
+        )
+        .await
+    }
+
+    /// Load state while bounding each account's restored hot fill window.
+    pub async fn load_state_with_fill_history_cap(
+        &self,
+        max_fill_history_per_account: usize,
+    ) -> Result<Option<RestoredState>, StoreError> {
         let txn = self.db.begin_read()?;
         let Some(recovery_metadata) = read_recovery_metadata(&txn)? else {
             return Ok(None);
@@ -71,6 +82,8 @@ impl Store {
             .await?;
         let num_accounts = accounts_map.len();
         let mut accounts = AccountStore::restore(accounts_map, recovery_metadata.next_account_id);
+        let mut account_ids: Vec<_> = accounts.iter().map(|(account_id, _)| *account_id).collect();
+        account_ids.sort_by_key(|account_id| account_id.0);
 
         // Markets
         let markets = {
@@ -273,19 +286,8 @@ impl Store {
             out
         };
 
-        let account_fills: Vec<(AccountId, AccountFillRecord)> = {
-            let table = txn.open_table(FILL_HISTORY)?;
-            let mut out = Vec::new();
-            for entry in table.iter()? {
-                let (key, value) = entry?;
-                let Some(account_id) = account_id_from_fill_history_key(key.value()) else {
-                    warn!("invalid fill history key in store, skipping");
-                    continue;
-                };
-                out.push((account_id, rmp_serde::from_slice(value.value())?));
-            }
-            out
-        };
+        let account_fills =
+            self.recover_account_fills(&account_ids, max_fill_history_per_account)?;
 
         let bridge_state: BridgeState = {
             let table = txn.open_table(BRIDGE_STATE)?;

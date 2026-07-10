@@ -153,11 +153,6 @@ pub(super) fn seq_from_history_event_key(key: &[u8]) -> Option<u64> {
     Some(u64::from_be_bytes(seq_bytes))
 }
 
-pub(super) fn account_id_from_fill_history_key(key: &[u8]) -> Option<AccountId> {
-    let account_bytes: [u8; 8] = key.get(0..8)?.try_into().ok()?;
-    Some(AccountId(u64::from_be_bytes(account_bytes)))
-}
-
 /// Persisted management metadata for a signing key (SYB-60).
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct PubkeyMetaRow {

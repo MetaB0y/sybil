@@ -12,6 +12,25 @@ pub(super) fn temp_db_path(prefix: &str) -> PathBuf {
     ))
 }
 
+impl Store {
+    pub(crate) fn seed_fill_history_for_test(
+        &self,
+        records: &[(AccountId, AccountFillRecord)],
+    ) -> Result<(), StoreError> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(FILL_HISTORY)?;
+            for (account_id, record) in records {
+                let key = fill_history_key(*account_id, record);
+                let value = rmp_serde::to_vec(record)?;
+                table.insert(key.as_slice(), value.as_slice())?;
+            }
+        }
+        txn.commit()?;
+        Ok(())
+    }
+}
+
 pub(super) fn sample_header(height: u64) -> BlockHeader {
     BlockHeader {
         height,

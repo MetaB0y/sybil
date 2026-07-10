@@ -102,8 +102,6 @@ pub struct BridgeState {
     pub deposit_root: Bytes32,
     #[serde(default = "sybil_l1_protocol::empty_deposit_frontier")]
     pub deposit_frontier: DepositFrontier,
-    #[serde(default)]
-    pub deposit_log: Vec<L1Deposit>,
     pub next_withdrawal_id: u64,
     pub withdrawals: BTreeMap<u64, WithdrawalLeaf>,
 }
@@ -114,7 +112,6 @@ impl Default for BridgeState {
             deposit_cursor: 0,
             deposit_root: empty_deposit_root(),
             deposit_frontier: sybil_l1_protocol::empty_deposit_frontier(),
-            deposit_log: Vec::new(),
             next_withdrawal_id: 1,
             withdrawals: BTreeMap::new(),
         }

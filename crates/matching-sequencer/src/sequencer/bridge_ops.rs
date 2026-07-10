@@ -109,7 +109,6 @@ impl BlockSequencer {
         self.bridge.deposit_cursor = deposit.deposit_id;
         self.bridge.deposit_root = deposit.deposit_root;
         self.bridge.deposit_frontier = frontier;
-        self.bridge.deposit_log.push(deposit.clone());
         self.record_system_event(SystemEvent::L1Deposit {
             account_id,
             amount,
