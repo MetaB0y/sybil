@@ -16,6 +16,11 @@ name: ZK Rebuild Reproducibility
 # scripts/zk-guest-fingerprint.sh --write) or the build stopped being
 # reproducible — both demand attention, not a silent skip.
 #
+# SYB-228: this gate also requires the four pinned, hash-checked OpenVM key
+# files to be provisioned (they are intentionally untracked and cannot be
+# regenerated on the CI box). It invokes the path-remapping just recipe, so
+# the guest commitment reproduces regardless of the runner's checkout path.
+#
 # The fast, always-on ZK job (ci.yml -> zk) stays untouched: it only host-checks
 # the guest source and runs the fingerprint staleness gate; it never rebuilds
 # the consensus artifact.
@@ -83,10 +88,7 @@ jobs:
         continue-on-error: false
         run: |
           set -o pipefail
-          cargo openvm commit \
-            --manifest-path zk/openvm-guest/Cargo.toml \
-            --config zk/openvm-guest/openvm.toml \
-            --output-dir target/openvm/zk-rebuild-ci 2>&1 | tee /tmp/openvm-rebuild.log
+          just openvm-commit target/openvm/zk-rebuild-ci/release 2>&1 | tee /tmp/openvm-rebuild.log
 
       - name: Compare regenerated vs committed commitment
         continue-on-error: false

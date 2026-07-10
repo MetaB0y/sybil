@@ -20,7 +20,7 @@ changes those hashes and requires an on-chain redeploy.
 | --- | --- | --- | --- |
 | Deployed pin | `OpenVmVerifierAdapter` constructor args (on-chain) | What the chain enforces | **Authoritative for consensus** |
 | `commit.json` | `openvm/release/sybil-openvm-guest.commit.json` (committed) | Reviewable, diff-able record of the commitment | Source of truth for the hashes in-repo |
-| Lock file | `guest.commitment.lock.json` (committed) | SHA-256 fingerprint of the guest **source tree + its path-dependency closure** (`crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`, `crates/sybil-l1-protocol`) + a copy of the hashes | Staleness detector for the source |
+| Lock file | `guest.commitment.lock.json` (committed) | SHA-256 fingerprint of the guest build recipe/compiler wrapper and **source tree + its path-dependency closure** (`crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`, `crates/sybil-l1-protocol`), SHA-256 pins for the untracked OpenVM key material, and a copy of the commitment hashes | Staleness detector for build inputs, source, and key material |
 
 Authority order: **deployed pin > `commit.json` > lock file.** The lock owns the
 source-fingerprint role; `commit.json` owns the commitment-hash record.
@@ -29,11 +29,19 @@ Only the two small JSONs (`commit.json`, `baseline.json`) under `openvm/release/
 are committed. The large `.vmexe`, `app.pk`, `app.vk`, and `agg_prefix.pk`
 binaries stay gitignored (see the repo `.gitignore`).
 
-`scripts/zk-guest-fingerprint.sh --check` (run in CI) enforces two things:
-1. the guest **source and its full path-dep closure** (`zk/openvm-guest/`,
-   `crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`,
+`scripts/zk-guest-fingerprint.sh --check` (run in CI) enforces three things:
+1. the guest build recipe/compiler wrapper plus **source and its full path-dep
+   closure** (`zk/openvm-guest/`, `crates/sybil-zk`,
+   `crates/sybil-verifier`, `crates/matching-engine`,
    `crates/sybil-l1-protocol`) still match the lock's `source_sha256`, and
-2. the lock's commitment hashes still equal the committed `commit.json`.
+2. `openvm/app.pk`, `openvm/app.vk`, `openvm/agg_prefix.pk`, and
+   `~/.openvm/internal_recursive.pk` are present and match the tracked
+   `key_material` hashes for `openvm_tag: v2.0.0`, and
+3. the lock's commitment hashes still equal the committed `commit.json`.
+
+The key files themselves remain untracked and must be restored from the pinned
+key-material set; they are not regenerable on the constrained build box. Do not
+run OpenVM setup/keygen locally to replace them.
 
 Hashing the whole closure (not just `zk/openvm-guest/`) closes the SYB-213 blind
 spot: the SYB-196 newtype migration moved the commitment while a guest-only
@@ -51,12 +59,15 @@ the same day under **SYB-208**. Host `cargo build`/`clippy`/tests and the
 source-fingerprint gate never see the zkVM target, which is exactly why the
 weekly `zk-rebuild` CI lane exists.
 
-Rebuild is **deterministic**: two independent `just openvm-commit` runs produce
-identical commitments (first measured 2026-07-03). The 2026-07-10 upgrade to
-OpenVM v2.0.0 final moved both commitments because the final release replaces
-the beta proof system with SWIRL and changes the SHA-2 VM AIR. The committed
-`commit.json` + lock carry the current-source commitments
-(`app_exe_commit 0x002bc246…`, `app_vm_commit 0x007a02fc…`). A fresh genesis
+Rebuild is **deterministic and workspace-path-independent**: `just
+openvm-commit` remaps the checkout root, Cargo home, and Rustup home in guest
+compiler paths, so identical source reproduces from any workspace when the
+untracked key files match the tracked `key_material` hashes (first measured
+across workspaces 2026-07-10). The 2026-07-10 upgrade to OpenVM v2.0.0 final
+moved both commitments because the final release replaces the beta proof
+system with SWIRL and changes the SHA-2 VM AIR. The committed `commit.json` +
+lock carry the current-source commitments
+(`app_exe_commit 0x000f896e…`, `app_vm_commit 0x007a02fc…`). A fresh genesis
 and adapter redeploy must use these new pins; no beta commitment compatibility
 is supported.
 
@@ -69,6 +80,11 @@ is fixed and any intended source change lands):
 just openvm-install     # cargo-openvm v2.0.0 (one-time)
 just openvm-commit      # rebuild + print app_exe_commit / app_vm_commit
 ```
+
+The weekly `zk-rebuild` CI gate uses the same path-remapped recipe and therefore
+does not depend on the runner checkout path. The gate additionally requires the
+four pinned key files above to be provisioned and hash-checked; a clean source
+checkout alone is insufficient because those files are intentionally untracked.
 
 Then:
 

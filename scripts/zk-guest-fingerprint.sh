@@ -9,12 +9,12 @@
 # .gitignore'd, so nothing in the committed tree records "which source the
 # pinned commitment was built from". This script closes that gap.
 #
-# It fingerprints the guest SOURCE tree (the inputs that determine the
-# commitment) and stores the fingerprint in a committed lock file. CI runs
-# `--check`, which recomputes the fingerprint and fails when the guest source
-# changed but the lock file was not refreshed -- i.e. the guest was edited
-# without regenerating the commitment. This script only COMPARES; it never
-# rebuilds the guest or regenerates the on-chain commitment.
+# It fingerprints the guest SOURCE tree and the untracked OpenVM KEY MATERIAL
+# (the inputs that determine the commitment) and stores the fingerprints in a
+# committed lock file. CI runs `--check`, which recomputes the fingerprints and
+# fails when either input changed or is missing. This script only COMPARES; it
+# never rebuilds the guest, regenerates keys, or regenerates the on-chain
+# commitment.
 #
 # SCOPE (SYB-213): the fingerprint covers the guest's full path-dependency
 # closure, NOT just zk/openvm-guest/. The guest compiles `crates/sybil-zk` by
@@ -41,6 +41,14 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GUEST_DIR="$REPO_ROOT/zk/openvm-guest"
 LOCK_FILE="$GUEST_DIR/guest.commitment.lock.json"
 COMMIT_JSON="$GUEST_DIR/openvm/release/sybil-openvm-guest.commit.json"
+OPENVM_TAG="v2.0.0"
+KEY_MATERIAL_NAMES=("app.pk" "app.vk" "agg_prefix.pk" "internal_recursive.pk")
+KEY_MATERIAL_PATHS=(
+    "$GUEST_DIR/openvm/app.pk"
+    "$GUEST_DIR/openvm/app.vk"
+    "$GUEST_DIR/openvm/agg_prefix.pk"
+    "$HOME/.openvm/internal_recursive.pk"
+)
 
 # Consensus-relevant guest source inputs, as paths relative to $REPO_ROOT.
 #
@@ -78,9 +86,12 @@ CLOSURE_CRATES=(crates/sybil-zk crates/sybil-verifier crates/matching-engine cra
 
 collect_source_files() {
     {
-        # Guest crate: manifest, lock, openvm config, and Rust sources. Listed
-        # explicitly so we never sweep in openvm/ artifacts or the lock file.
+        # Guest build recipe/wrapper plus crate manifest, lock, OpenVM config,
+        # and Rust sources. Listed explicitly so we never sweep in openvm/
+        # artifacts or the commitment lock file.
         printf '%s\n' \
+            "justfile" \
+            "scripts/openvm-rustc-wrapper.sh" \
             "zk/openvm-guest/Cargo.toml" \
             "zk/openvm-guest/Cargo.lock" \
             "zk/openvm-guest/openvm.toml"
@@ -119,6 +130,49 @@ read_commit_json_field() {
     local field="$1"
     [ -f "$COMMIT_JSON" ] || return 0
     sed -n "s/.*\"$field\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$COMMIT_JSON" | head -n1
+}
+
+key_material_failure() {
+    local detail="$1"
+    cat >&2 <<EOF
+ERROR: OpenVM key material is missing or does not match the committed lock.
+EOF
+    printf '\n%b\n\n' "$detail" >&2
+    cat >&2 <<EOF
+OpenVM key material is NOT regenerable on this box — do not run setup/keygen
+locally; restore the pinned files instead.
+EOF
+    exit 1
+}
+
+hash_key_file() {
+    local name="$1" path="$2"
+    if [ ! -f "$path" ]; then
+        key_material_failure "Missing pinned key file: $name ($path)"
+    fi
+    sha256sum "$path" | awk '{print $1}'
+}
+
+check_key_material() {
+    local tag name path expected actual i
+    tag="$(read_lock_field openvm_tag)"
+    if [ "$tag" != "$OPENVM_TAG" ]; then
+        key_material_failure "OpenVM provenance mismatch: expected openvm_tag=$OPENVM_TAG, lock has openvm_tag=${tag:-<missing>}"
+    fi
+
+    for i in "${!KEY_MATERIAL_NAMES[@]}"; do
+        name="${KEY_MATERIAL_NAMES[$i]}"
+        path="${KEY_MATERIAL_PATHS[$i]}"
+        expected="$(read_lock_field "$name")"
+        if [ -z "$expected" ]; then
+            key_material_failure "Lock file has no key_material SHA-256 for $name: $LOCK_FILE"
+        fi
+        actual="$(hash_key_file "$name" "$path")"
+        if [ "$expected" != "$actual" ]; then
+            key_material_failure "SHA-256 drift for $name:\n  expected: $expected\n  actual:   $actual"
+        fi
+    done
+    echo "OK: OpenVM $OPENVM_TAG key material matches pinned SHA-256 hashes."
 }
 
 # Cross-check: the lock file's commitment hashes MUST equal the committed
@@ -170,8 +224,12 @@ EOF
 }
 
 write_lock() {
-    local source_hash exe_commit vm_commit
+    local source_hash exe_commit vm_commit app_pk app_vk agg_prefix_pk internal_recursive_pk
     source_hash="$(compute_source_hash)"
+    app_pk="$(hash_key_file app.pk "${KEY_MATERIAL_PATHS[0]}")"
+    app_vk="$(hash_key_file app.vk "${KEY_MATERIAL_PATHS[1]}")"
+    agg_prefix_pk="$(hash_key_file agg_prefix.pk "${KEY_MATERIAL_PATHS[2]}")"
+    internal_recursive_pk="$(hash_key_file internal_recursive.pk "${KEY_MATERIAL_PATHS[3]}")"
     exe_commit=""
     vm_commit=""
     if [ -f "$COMMIT_JSON" ]; then
@@ -185,15 +243,25 @@ write_lock() {
     fi
     cat > "$LOCK_FILE" <<EOF
 {
-  "_comment": "Staleness pin for the OpenVM guest commitment. Regenerate with 'scripts/zk-guest-fingerprint.sh --write' AFTER rebuilding the guest commitment ('just openvm-commit'). CI runs '--check' and fails if source_sha256 no longer matches the guest source tree.",
-  "openvm_tag": "v2.0.0",
+  "_comment": "Staleness pin for the OpenVM guest commitment. Regenerate with 'scripts/zk-guest-fingerprint.sh --write' AFTER rebuilding the guest commitment ('just openvm-commit'). CI runs '--check' and fails if source_sha256 or pinned key material no longer matches.",
+  "openvm_tag": "$OPENVM_TAG",
   "source_sha256": "$source_hash",
+  "key_material": {
+    "app.pk": "$app_pk",
+    "app.vk": "$app_vk",
+    "agg_prefix.pk": "$agg_prefix_pk",
+    "internal_recursive.pk": "$internal_recursive_pk"
+  },
   "app_exe_commit": "$exe_commit",
   "app_vm_commit": "$vm_commit"
 }
 EOF
     echo "Wrote $LOCK_FILE"
     echo "  source_sha256=$source_hash"
+    echo "  key_material.app.pk=$app_pk"
+    echo "  key_material.app.vk=$app_vk"
+    echo "  key_material.agg_prefix.pk=$agg_prefix_pk"
+    echo "  key_material.internal_recursive.pk=$internal_recursive_pk"
     echo "  app_exe_commit=$exe_commit"
     echo "  app_vm_commit=$vm_commit"
 }
@@ -204,6 +272,7 @@ check_lock() {
         echo "       Run: scripts/zk-guest-fingerprint.sh --write" >&2
         exit 1
     fi
+    check_key_material
     local expected actual
     expected="$(read_lock_field source_sha256)"
     actual="$(compute_source_hash)"

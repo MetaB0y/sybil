@@ -95,9 +95,27 @@ openvm-setup:
 openvm-setup-evm-download:
     cargo openvm setup --evm --download
 
-# Print the app executable and VM commitments used by the on-chain verifier adapter
-openvm-commit:
-    cargo openvm commit --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
+# Print the app executable and VM commitments used by the on-chain verifier adapter.
+# OpenVM v2.0.0 forwards RUSTFLAGS to the guest rustc invocation; remap all
+# checkout/toolchain roots that can otherwise leak into panic and debug strings.
+openvm-commit output_dir="target/openvm/sybil":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+    # Keep the remap flags byte-identical across checkouts. The rustc wrapper
+    # expands these sentinels only after Cargo computes its unit metadata.
+    remap_flags="--remap-path-prefix=/__SYBIL_WORKSPACE_ROOT__=/sybil-src --remap-path-prefix=/__SYBIL_CARGO_HOME__=/cargo --remap-path-prefix=/__SYBIL_RUSTUP_HOME__=/rustc"
+    PATH="{{justfile_directory()}}/scripts:$PATH" \
+      SYBIL_WORKSPACE_ROOT="$(pwd -P)" \
+      SYBIL_CARGO_HOME="$cargo_home" \
+      SYBIL_RUSTUP_HOME="$rustup_home" \
+      RUSTC_WRAPPER="openvm-rustc-wrapper.sh" \
+      RUSTFLAGS="$remap_flags${RUSTFLAGS:+ $RUSTFLAGS}" \
+      cargo openvm commit \
+        --manifest-path zk/openvm-guest/Cargo.toml \
+        --config zk/openvm-guest/openvm.toml \
+        --output-dir {{output_dir}}
 
 # Convert a prepared guest input artifact into OpenVM CLI input JSON
 openvm-input guest_input="/tmp/sybil-guest-input.msgpack" openvm_input="/tmp/sybil-openvm-input.json":

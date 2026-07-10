@@ -146,7 +146,7 @@ With the fix, rebuilds are **deterministic** (two independent
 `just openvm-commit` runs → identical commitments), so the `zk-rebuild` CI
 lane (below) is a **hard gate**: regenerated commits must equal the committed
 `commit.json`. The OpenVM v2.0.0 final migration intentionally moved both
-current-source commitments to `app_exe_commit 0x002bc246…` and
+current-source commitments to `app_exe_commit 0x000f896e…` and
 `app_vm_commit 0x007a02fc…`. The planned fresh genesis and adapter redeploy
 must use those final-tag pins; beta proofs and commitments are not supported.
 
