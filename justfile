@@ -521,6 +521,13 @@ deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && dep
 deploy-verify:
     SYBIL_SMOKE_DOCKER_SSH={{SERVER}} SYBIL_SMOKE_REQUIRE_SIGNER={{SMOKE_REQUIRE_SIGNER}} scripts/post-deploy-smoke.sh --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
+# Restart-resilience gate (SYB-267): restarts the live sybil-api container and
+# fails on OOM-kill / boot-loop / unhealthy-after-timeout. OPT-IN — ~20s API
+# downtime, so it is NOT part of the auto-run deploy-verify. Run before demos
+# and after memory/config changes.
+deploy-verify-restart:
+    scripts/restart-resilience-check.sh --ssh {{SERVER}}
+
 # Tail logs from a container on the server
 deploy-logs service="sybil-api":
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} logs -f --tail 100 {{service}}'
