@@ -23,7 +23,8 @@ const TABS: readonly NavTab[] = [
     match: (p) => p.startsWith("/leaderboard"),
   },
   { href: "/portfolio", label: "Portfolio", match: (p) => p.startsWith("/portfolio") },
-  { href: "/settings", label: "Settings", match: (p) => p.startsWith("/settings") },
+  // Settings is reached from the account dropdown (account-chip), not a top-level
+  // tab — it's an account-scoped page, so it lives with the other account actions.
 ];
 
 export function GlobalNav() {

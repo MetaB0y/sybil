@@ -3,10 +3,12 @@
 /**
  * Nav chip showing the current account. Disconnected → "connect" button
  * (opens modal). Connected → the live portfolio "total / cash ▾" with a small
- * dropdown that recaps portfolio / cash / account id and offers disconnect /
- * copy account id / copy JWK.
+ * dropdown that recaps portfolio / cash / account id and offers Settings /
+ * disconnect / copy account id / copy JWK. Settings has no top-level nav tab —
+ * this dropdown is its only entry point.
  */
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { disconnect } from "@/lib/account/actions";
 import { readStoredAccount } from "@/lib/account/storage";
@@ -146,6 +148,9 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
             <InfoRow label="Account" value={`#${accountId}`} />
           </div>
           <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
+          <MenuItem href="/settings" onClick={() => setOpen(false)}>
+            Settings
+          </MenuItem>
           <MenuItem
             onClick={() => {
               void navigator.clipboard?.writeText(String(accountId));
@@ -280,37 +285,61 @@ function PasskeyNotice() {
 function MenuItem({
   children,
   onClick,
+  href,
   danger,
 }: {
   children: React.ReactNode;
   onClick: () => void;
+  href?: string;
   danger?: boolean;
 }) {
+  const style: React.CSSProperties = {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    padding: "8px 10px",
+    background: "transparent",
+    border: 0,
+    borderRadius: 4,
+    color: danger ? "var(--no)" : "var(--fg-2)",
+    fontFamily: "var(--font-sans)",
+    fontSize: 13,
+    textDecoration: "none",
+    cursor: "pointer",
+    boxSizing: "border-box",
+  };
+  const onEnter = (e: React.MouseEvent<HTMLElement>) => {
+    e.currentTarget.style.background = "var(--surface-2)";
+  };
+  const onLeave = (e: React.MouseEvent<HTMLElement>) => {
+    e.currentTarget.style.background = "transparent";
+  };
+  // A navigation entry renders as a real link (keyboard, middle-click, prefetch);
+  // an action entry stays a button. Both share the same look + hover feedback.
+  if (href) {
+    return (
+      <Link
+        className="account-chip"
+        href={href}
+        role="menuitem"
+        onClick={onClick}
+        style={style}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+      >
+        {children}
+      </Link>
+    );
+  }
   return (
     <button
       className="account-chip"
       type="button"
       role="menuitem"
       onClick={onClick}
-      style={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        padding: "8px 10px",
-        background: "transparent",
-        border: 0,
-        borderRadius: 4,
-        color: danger ? "var(--no)" : "var(--fg-2)",
-        fontFamily: "var(--font-sans)",
-        fontSize: 13,
-        cursor: "pointer",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--surface-2)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-      }}
+      style={style}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
     >
       {children}
     </button>
