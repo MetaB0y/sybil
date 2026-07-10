@@ -1,9 +1,10 @@
 name: CI
 
+# SYB-251: Actions billing is intentionally off — every automatic run fails to
+# start and burns nothing but noise. Manual dispatch only until billing returns;
+# the merge gate is the local double-gate (just check-all before every land).
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

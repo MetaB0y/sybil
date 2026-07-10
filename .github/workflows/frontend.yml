@@ -1,14 +1,8 @@
 name: Frontend CI
 
+# SYB-251: manual dispatch only while Actions billing is off (see ci.yml).
 on:
-  push:
-    paths:
-      - "frontend/web/**"
-      - ".github/workflows/frontend.yml"
-  pull_request:
-    paths:
-      - "frontend/web/**"
-      - ".github/workflows/frontend.yml"
+  workflow_dispatch:
 
 jobs:
   build:

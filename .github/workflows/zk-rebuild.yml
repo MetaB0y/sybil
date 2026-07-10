@@ -25,10 +25,10 @@ name: ZK Rebuild Reproducibility
 # the guest source and runs the fingerprint staleness gate; it never rebuilds
 # the consensus artifact.
 
+# SYB-251: schedule removed while Actions billing is off (see ci.yml) — a
+# weekly guaranteed-failure is worse than no run. Re-add the Monday 06:00 UTC
+# cron ("0 6 * * 1") when billing returns.
 on:
-  schedule:
-    # Weekly, Monday 06:00 UTC.
-    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 env:
