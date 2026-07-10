@@ -336,7 +336,7 @@ pin.
 | Byte-identity witness SHA-256 length-prefixed digest | `2cc74a0d572c4519b1dcd06e8b230e1cc1b5af488f93324e3297ee8478d8c1f5` | same byte-identity test |
 | Empty public-input hash | `e37bee4b2c3e7bb723c01665ccc59fbf098e708c878e1d488a792fdb51858a6f` | `public_input_hash_golden` |
 | OL-4 Solidity/Rust public-input hash vector | `42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` | Rust test plus `contracts/test/SybilGoldenVectors.t.sol` |
-| Current `app_exe_commit` | `0x000f896e256293aa0980cc5e9531833ef5a0cafde518aa2e1f61ee58820f5117` | committed OpenVM `commit.json` and lock |
+| Current `app_exe_commit` | `0x000a9cb169bb987eb2cdff9cc550179c1d3aae8ebcf0469b9ecb5f56e9a81398` | committed OpenVM `commit.json` and lock |
 | Current `app_vm_commit` | `0x007a02fc3055c8beb7aa51187d008991bdec498852b5e1e27f223ee04a72cac5` | committed OpenVM `commit.json` and lock |
 
 The L1 deposit leaf/root vectors live in both

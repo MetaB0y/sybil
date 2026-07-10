@@ -117,6 +117,41 @@ openvm-commit output_dir="target/openvm/sybil":
         --config zk/openvm-guest/openvm.toml \
         --output-dir {{output_dir}}
 
+# Local from-source guest rebuild gate (SYB-233, CI-off era): regenerate the
+# guest commitment into a scratch dir, require byte-equality with the committed
+# commit.json, then run the fingerprint staleness check. Run before landing any
+# guest-closure change (and after a repin) while Actions billing is off — it is
+# the local stand-in for the zk-rebuild CI hard gate.
+zk-rebuild-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    release_dir="zk/openvm-guest/openvm/release"
+    committed="$release_dir/sybil-openvm-guest.commit.json"
+    # cargo openvm commit ALWAYS rewrites the canonical release files in
+    # addition to --output-dir, so snapshot the committed records first and
+    # restore them after — the gate must compare against the pre-rebuild
+    # state and never mutate the tree.
+    snapshot="$(mktemp -t zk-rebuild-check-commit.XXXXXX.json)"
+    baseline_snapshot="$(mktemp -t zk-rebuild-check-baseline.XXXXXX.json)"
+    cp "$committed" "$snapshot"
+    cp "$release_dir/sybil-openvm-guest.baseline.json" "$baseline_snapshot"
+    just openvm-commit target/openvm/zk-rebuild-check
+    cp "$snapshot" "$committed"
+    cp "$baseline_snapshot" "$release_dir/sybil-openvm-guest.baseline.json"
+    regenerated="target/openvm/zk-rebuild-check/sybil-openvm-guest.commit.json"
+    for field in app_exe_commit app_vm_commit; do
+        want="$(jq -r ".$field" "$snapshot")"
+        got="$(jq -r ".$field" "$regenerated")"
+        if [[ "$want" != "$got" ]]; then
+            echo "FAIL: $field mismatch — committed $want, regenerated $got" >&2
+            echo "      (source changed without a repin, or the build stopped reproducing)" >&2
+            exit 1
+        fi
+    done
+    rm -f "$snapshot" "$baseline_snapshot"
+    scripts/zk-guest-fingerprint.sh --check
+    echo "OK: from-source rebuild reproduces the committed commitment; fingerprint fresh"
+
 # Convert a prepared guest input artifact into OpenVM CLI input JSON
 openvm-input guest_input="target/sybil-guest-input.msgpack" openvm_input="target/sybil-openvm-input.json":
     cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-input --guest-input {{guest_input}} --openvm-input {{openvm_input}}
