@@ -3091,6 +3091,109 @@ fn cross_block_stp_rejects_set_formation_across_blocks() {
 }
 
 #[test]
+fn stp_undo_preserves_other_accounts_same_block_expired_history_and_state_root() {
+    let (markets, m0, m1, _m2, mut group) = setup_group();
+    group.markets = vec![m0, m1];
+    let mut accounts = AccountStore::new();
+    let stp_account = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+    let expiring_account = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![group],
+        Arc::new(AdminOracle::new()),
+        SequencerConfig {
+            debug_verify_full: true,
+            ..SequencerConfig::default()
+        },
+    );
+
+    let stp_resting = outcome_buy(&markets, 0, m0, 0, 400_000_000, q(1));
+    assert!(matches!(
+        seq.try_admit_direct(single_order_sub(stp_account, stp_resting), 100),
+        AdmitOutcome::Admitted { .. }
+    ));
+
+    let mut expiring = outcome_buy(&markets, 0, m0, 0, 300_000_000, q(1));
+    expiring.expires_at_block = Some(1);
+    let expiring_order_id =
+        match seq.try_admit_direct(single_order_sub(expiring_account, expiring), 200) {
+            AdmitOutcome::Admitted { order_id, .. } => order_id,
+            other => panic!("expected expiring order admission, got {other:?}"),
+        };
+
+    let balance_before = seq.accounts.get(stp_account).unwrap().balance;
+    let reservation_before = seq.order_book.reserved_balance(stp_account);
+    let completing = single_order_sub(
+        stp_account,
+        outcome_buy(&markets, 0, m1, 0, 400_000_000, q(1)),
+    );
+
+    let production = seq.produce_block(vec![completing], 1_000);
+
+    assert_eq!(production.block.rejections.len(), 1);
+    assert!(matches!(
+        production.block.rejections[0].reason,
+        RejectionReason::CompleteSetFormation
+    ));
+    assert_eq!(production.derived_view_sidecar.rejection_history.len(), 1);
+    assert!(matches!(
+        production.derived_view_sidecar.rejection_history[0].reason,
+        RejectionReason::CompleteSetFormation
+    ));
+    assert_eq!(
+        seq.order_book.reserved_balance(stp_account),
+        reservation_before,
+        "the rejected order's reservation must be fully released"
+    );
+    assert_eq!(
+        seq.accounts.get(stp_account).unwrap().balance,
+        balance_before
+    );
+
+    assert!(production
+        .derived_view_sidecar
+        .removed_orders
+        .iter()
+        .any(|removed| {
+            removed.account_id == expiring_account.0
+                && removed.order_id == expiring_order_id
+                && removed.phase == crate::block::RemovedOrderPhase::PostSolve
+                && removed.exit_reason == crate::block::RemovedOrderExitReason::Expired
+        }));
+    assert!(seq
+        .analytics()
+        .account_history(expiring_account, usize::MAX, None, None)
+        .iter()
+        .any(|event| {
+            event.order_id == Some(expiring_order_id)
+                && event.kind == crate::aggregates::HistoryKind::Expired
+        }));
+
+    assert_eq!(
+        production.block.header.state_root,
+        production.witness.header.state_root
+    );
+    assert_eq!(
+        production.block.header.state_root,
+        crate::block::compute_complete_state_root(
+            &seq.accounts,
+            seq.bridge_state(),
+            seq.order_book(),
+            seq.markets(),
+            seq.market_groups(),
+            seq.market_lifecycle(),
+        )
+    );
+    let verification = sybil_verifier::verify_full(&production.witness, false);
+    assert!(
+        verification.valid,
+        "violations: {:?}",
+        verification.violations
+    );
+}
+
+#[test]
 fn cross_block_stp_allows_after_cancel() {
     let (mut seq, aid, markets, m0, m1) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
 

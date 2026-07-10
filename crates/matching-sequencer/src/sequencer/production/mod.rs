@@ -564,15 +564,12 @@ impl BlockSequencer {
                     ) {
                         Ok(accepted) => {
                             if stp.would_complete_set(account_id, &accepted.order) {
-                                // Undo the book acceptance — release reservations
-                                // (settle with a "fully filled" phantom to release)
-                                let phantom_fill =
-                                    Fill::new(accepted.order.id, accepted.order.max_fill, Nanos(0));
-                                let _stp_undo = self.order_book.settle(
-                                    &[phantom_fill],
-                                    &HashSet::new(),
-                                    self.height,
-                                );
+                                // Undo only this acceptance. A book-wide settle here
+                                // would also sweep unrelated same-block expiries before
+                                // their lifecycle sidecar/history can be recorded.
+                                self.order_book
+                                    .cancel_accepted(&accepted)
+                                    .expect("just-accepted order must remain in the book");
                                 witness_rejections.push(WitnessRejection {
                                     order: accepted.order.clone(),
                                     account_id: account_id.0,

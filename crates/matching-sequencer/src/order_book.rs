@@ -500,6 +500,18 @@ impl OrderBook {
         Ok(ro)
     }
 
+    /// Roll back an order that was just returned by [`Self::accept`].
+    ///
+    /// Unlike [`Self::settle`], this only removes the accepted order and
+    /// releases its owner's reservations. In particular, it does not run the
+    /// book-wide expiry sweep performed by settlement.
+    pub(crate) fn cancel_accepted(
+        &mut self,
+        accepted: &Accepted,
+    ) -> Result<RestingOrder, CancelError> {
+        self.cancel(accepted.account_id, accepted.order.id)
+    }
+
     /// After solving: remove filled orders, adjust partially-filled orders,
     /// release reservations for filled portions.
     ///
@@ -975,6 +987,44 @@ mod tests {
 
         assert_eq!(book.reserved_balance(aid), 0);
         assert_eq!(book.len(), 0);
+    }
+
+    #[test]
+    fn cancel_accepted_leaves_other_same_height_expiry_for_settlement() {
+        let (mut accounts, markets, m0) = setup();
+        let accepted_owner = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let expiring_owner = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(10);
+
+        let mut expiring = buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(1));
+        expiring.expires_at_block = Some(7);
+        book.accept(
+            expiring,
+            expiring_owner,
+            accounts.get(expiring_owner).unwrap(),
+            1,
+            0,
+        )
+        .unwrap();
+
+        let accepted = book
+            .accept(
+                buy_yes(&markets, 2, m0, NANOS_PER_DOLLAR / 2, q(1)),
+                accepted_owner,
+                accounts.get(accepted_owner).unwrap(),
+                7,
+                0,
+            )
+            .unwrap();
+        book.cancel_accepted(&accepted).unwrap();
+
+        assert_eq!(book.reserved_balance(accepted_owner), 0);
+        assert_eq!(book.orders_for_account(expiring_owner), 1);
+
+        let removed = book.settle(&[], &HashSet::new(), 7);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0.account_id, expiring_owner);
+        assert_eq!(removed[0].1, RestingExit::Expired);
     }
 
     #[test]
