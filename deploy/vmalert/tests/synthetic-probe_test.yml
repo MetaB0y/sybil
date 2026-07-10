@@ -54,3 +54,50 @@ tests:
             exp_annotations:
               summary: "Sybil synthetic probe has stopped reporting"
               description: "No synthetic result reached VictoriaMetrics for 15m. Check the sybil-synthetic-probe timer, Docker access, and VictoriaMetrics ingestion."
+
+  # Proof-lag samples arrive on the probe's five-minute cadence; last_over_time
+  # bridges the gaps. A wedged prover pipeline grows ~30 blocks per cycle at the
+  # 10s cadence, so lag crosses the 30-block threshold within one cycle and the
+  # alert confirms it over the next two.
+  - interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+        values: "1 _x4 1 _x4 45 _x4 78 _x4 110 _x4 140 _x4"
+    alert_rule_test:
+      - eval_time: 19m
+        alertname: SyntheticProofLagHigh
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: SyntheticProofLagHigh
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-synthetic"
+              instance: "https://172-104-31-54.nip.io"
+              severity: warning
+              component: prover
+            exp_annotations:
+              summary: "Proof pipeline is lagging the chain head"
+              description: "The synthetic probe measured /proofs/latest more than 30 blocks behind /v1/blocks/latest for https://172-104-31-54.nip.io (current lag: 110 blocks). The prover or mock-prover pipeline is likely wedged; see the proof-lag section of the synthetic-monitoring runbook."
+
+  # Healthy devnet: the mock prover trails by at most a block or two.
+  - interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+        values: "0 _x4 1 _x4 0 _x4 1 _x4"
+    alert_rule_test:
+      - eval_time: 19m
+        alertname: SyntheticProofLagHigh
+        exp_alerts: []
+
+  # A one-cycle spike that recovers before the 10m confirmation never fires.
+  - interval: 1m
+    input_series:
+      - series: 'sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="https://172-104-31-54.nip.io"}'
+        values: "45 _x4 45 _x4 2 _x4 2 _x4"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: SyntheticProofLagHigh
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: SyntheticProofLagHigh
+        exp_alerts: []

@@ -251,6 +251,16 @@ groups:
           summary: "Sybil synthetic probe has stopped reporting"
           description: "No synthetic result reached VictoriaMetrics for 15m. Check the sybil-synthetic-probe timer, Docker access, and VictoriaMetrics ingestion."
 
+      - alert: SyntheticProofLagHigh
+        expr: last_over_time(sybil_synthetic_proof_lag_blocks{job="sybil-synthetic"}[15m]) > 30
+        for: 10m
+        labels:
+          severity: warning
+          component: prover
+        annotations:
+          summary: "Proof pipeline is lagging the chain head"
+          description: "The synthetic probe measured /proofs/latest more than 30 blocks behind /v1/blocks/latest for {{ $labels.instance }} (current lag: {{ $value }} blocks). The prover or mock-prover pipeline is likely wedged; see the proof-lag section of the synthetic-monitoring runbook."
+
       - alert: ActorMailboxQueueHigh
         expr: max_over_time(sybil_actor_queue_depth[2m]) > 1000
         for: 2m
