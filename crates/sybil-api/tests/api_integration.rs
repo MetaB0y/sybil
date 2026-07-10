@@ -316,7 +316,18 @@ async fn create_account_is_public_onboarding_without_dev_mode() {
     // creates a demo-capped account with no service token, even in non-dev mode.
     // (It used to 401 here, which was the production onboarding regression.)
     let (app, _) = test_app(false).await;
-    let (status, _) = post_json(app, "/v1/accounts", json!({ "initial_balance_nanos": 100 })).await;
+    let key = new_signing_key();
+    let (status, _) = post_json(
+        app,
+        "/v1/accounts",
+        json!({
+            "initial_balance_nanos": 100,
+            "initial_key": {
+                "public_key_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes())
+            }
+        }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
 }
 

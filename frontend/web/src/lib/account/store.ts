@@ -19,6 +19,7 @@ export interface AccountSession {
   publicKeyHex: string;
   authScheme: AccountAuthScheme;
   credentialIdB64url?: string;
+  readApiKey: string;
 }
 
 interface AccountStore {

@@ -1,4 +1,5 @@
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::Json;
 
 use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
@@ -302,12 +303,17 @@ fn to_pending_response(info: &PendingOrderInfo) -> PendingOrderResponse {
     params(("id" = u64, Path, description = "Account ID")),
     responses(
         (status = 200, description = "Pending orders", body = Vec<PendingOrderResponse>),
-    )
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account"),
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn get_account_orders(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<PendingOrderResponse>>, AppError> {
+    crate::routes::accounts::authorize_account_read(&state, &headers, AccountId(id)).await?;
     let orders = state
         .sequencer
         .get_pending_orders(Some(AccountId(id)))

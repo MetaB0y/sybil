@@ -16,6 +16,20 @@ registration payload, the API extracts the COSE EC2 P256 public key, and the
 registered public key is tagged as WebAuthn. Multiple keys can be registered
 for operational flexibility and backup passkeys.
 
+New self-service accounts register their first key in `POST /v1/accounts` via
+the `initial_key` field. The legacy bare create and unsigned first-key bootstrap
+forms are service-only. Browser passkey onboarding uses a short-lived raw P256
+bootstrap key because the discoverable WebAuthn user handle contains the newly
+allocated account id; it registers the passkey through the signed additional-key
+flow and then revokes the bootstrap key.
+
+Account reads use a separate read-scoped bearer. Passkey login signs the
+existing API-key-creation canonical payload, receives a one-time bearer token,
+and stores it with the browser session. Discoverable login may omit the signer
+public key: the API verifies the assertion against the claimed account's active
+WebAuthn keys and returns the matching public key without exposing the gated key
+list.
+
 For raw P256, clients sign the canonical payload directly. For WebAuthn, the
 assertion challenge is `base64url(SHA-256(canonical_payload_bytes))`, where the
 canonical payload is the same order, cancel, or withdrawal byte string used by

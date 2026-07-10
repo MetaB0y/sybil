@@ -105,9 +105,30 @@ impl SybilClient {
     pub async fn create_account(
         &self,
         initial_balance_nanos: u64,
+        initial_key: RegisterKeyRequest,
     ) -> Result<AccountResponse, Error> {
         let req = CreateAccountRequest {
             initial_balance_nanos,
+            initial_key: Some(initial_key),
+        };
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/accounts")))
+            .json(&req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    /// Deprecated operator-only bare account creation. This requires the
+    /// service token outside dev mode; self-service callers must use
+    /// [`Self::create_account`] with an initial signing key.
+    pub async fn create_bare_account(
+        &self,
+        initial_balance_nanos: u64,
+    ) -> Result<AccountResponse, Error> {
+        let req = CreateAccountRequest {
+            initial_balance_nanos,
+            initial_key: None,
         };
         let resp = self
             .with_service_auth(self.http.post(self.url("/v1/accounts")))

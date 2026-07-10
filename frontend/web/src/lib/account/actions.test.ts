@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAccountStore } from "./store";
 
 const mocks = vi.hoisted(() => ({
-  apiGet: vi.fn(),
+  apiPost: vi.fn(),
   discoverPasskeyAccount: vi.fn(),
+  signWebAuthnBytes: vi.fn(),
   writeStoredAccount: vi.fn(),
 }));
 
 vi.mock("@/lib/api/client", () => ({
-  api: { GET: mocks.apiGet, POST: vi.fn() },
+  api: { GET: vi.fn(), POST: mocks.apiPost },
 }));
 
 vi.mock("@/lib/auth/webauthn", () => ({
@@ -16,6 +17,7 @@ vi.mock("@/lib/auth/webauthn", () => ({
   discoverPasskeyAccount: mocks.discoverPasskeyAccount,
   isWebAuthnAvailable: vi.fn(() => true),
   verifyStoredPasskey: vi.fn(),
+  signWebAuthnBytes: mocks.signWebAuthnBytes,
 }));
 
 vi.mock("./storage", () => ({
@@ -37,11 +39,16 @@ describe("signInWithDiscoverablePasskey", () => {
       accountId: 109,
       credentialIdB64url: "credential-109",
     });
-    mocks.apiGet.mockResolvedValue({
-      data: [
-        { auth_scheme: "raw_p256", public_key_hex: "02raw" },
-        { auth_scheme: "webauthn", public_key_hex: "03passkey" },
-      ],
+    mocks.signWebAuthnBytes.mockResolvedValue({
+      credential_id_b64url: "credential-109",
+    });
+    mocks.apiPost.mockResolvedValue({
+      data: {
+        id: 7,
+        token: "sybk_read",
+        created_at_ms: 1,
+        signer_pubkey_hex: "03passkey",
+      },
     });
 
     await signInWithDiscoverablePasskey();
@@ -51,24 +58,30 @@ describe("signInWithDiscoverablePasskey", () => {
       publicKeyHex: "03passkey",
       authScheme: "webauthn",
       credentialIdB64url: "credential-109",
+      readApiKey: "sybk_read",
     };
-    expect(mocks.apiGet).toHaveBeenCalledWith("/v1/accounts/{id}/keys", {
-      params: { path: { id: 109 } },
-    });
+    expect(mocks.apiPost).toHaveBeenCalledWith(
+      "/v1/accounts/{id}/api-keys",
+      expect.objectContaining({ params: { path: { id: 109 } } }),
+    );
     expect(mocks.writeStoredAccount).toHaveBeenCalledWith(expected);
     expect(useAccountStore.getState().session).toEqual(expected);
     expect(useAccountStore.getState().connectModalOpen).toBe(false);
   });
 
-  it("surfaces a friendly error when the account has no passkey", async () => {
+  it("surfaces a friendly error when the passkey is not registered", async () => {
     mocks.discoverPasskeyAccount.mockResolvedValue({
       accountId: 109,
       credentialIdB64url: "credential-109",
     });
-    mocks.apiGet.mockResolvedValue({ data: [] });
+    mocks.signWebAuthnBytes.mockResolvedValue({});
+    mocks.apiPost.mockResolvedValue({
+      error: { message: "invalid passkey" },
+      response: { status: 401 },
+    });
 
     await expect(signInWithDiscoverablePasskey()).rejects.toMatchObject({
-      message: "No passkey is registered for account #109",
+      message: "This passkey is not registered for account #109",
       kind: "account_not_found",
     } satisfies Partial<AccountError>);
     expect(mocks.writeStoredAccount).not.toHaveBeenCalled();
@@ -80,13 +93,14 @@ describe("signInWithDiscoverablePasskey", () => {
       accountId: 109,
       credentialIdB64url: "credential-109",
     });
-    mocks.apiGet.mockResolvedValue({
+    mocks.signWebAuthnBytes.mockResolvedValue({});
+    mocks.apiPost.mockResolvedValue({
       error: { message: "not found" },
       response: { status: 404 },
     });
 
     await expect(signInWithDiscoverablePasskey()).rejects.toMatchObject({
-      message: "Account #109 was not found",
+      message: "This passkey is not registered for account #109",
       kind: "account_not_found",
     } satisfies Partial<AccountError>);
   });

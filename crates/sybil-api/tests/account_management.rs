@@ -9,11 +9,12 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use common::{get, post_json, test_app};
+use common::{get, post_json, test_app_with_config};
 use http_body_util::BodyExt;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
+use sybil_api::config::ApiConfig;
 use tower::ServiceExt;
 
 use matching_sequencer::crypto::{
@@ -25,6 +26,21 @@ use matching_sequencer::{
     AccountAuthScheme, AccountId, AuthenticatedKeyRegistration, KeyScope, PublicKey,
     SequencerHandle,
 };
+
+const SERVICE_TOKEN: &str = "account-management-service";
+
+async fn test_app(_dev_mode: bool) -> (axum::Router, SequencerHandle) {
+    test_app_with_config(ApiConfig {
+        dev_mode: false,
+        service_token: SERVICE_TOKEN.to_string(),
+        ..ApiConfig::default()
+    })
+    .await
+}
+
+async fn get_as_service(app: axum::Router, uri: &str) -> (StatusCode, Vec<u8>) {
+    get_with_bearer(app, uri, SERVICE_TOKEN).await
+}
 
 fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -44,21 +60,17 @@ fn parse(bytes: &[u8]) -> Value {
 
 /// Create a dev-mode account and register `key` as its primary signing key.
 async fn account_with_key(app: &axum::Router, seed: u8) -> (u64, SigningKey) {
+    let key = signing_key(seed);
     let (_, body) = post_json(
         app.clone(),
         "/v1/accounts",
-        json!({ "initial_balance_nanos": 100_000_000_000u64 }),
+        json!({
+            "initial_balance_nanos": 100_000_000_000u64,
+            "initial_key": {"public_key_hex": pubkey_hex(&key)}
+        }),
     )
     .await;
     let account_id = parse(&body)["account_id"].as_u64().unwrap();
-    let key = signing_key(seed);
-    let (status, _) = post_json(
-        app.clone(),
-        &format!("/v1/accounts/{account_id}/keys"),
-        json!({ "public_key_hex": pubkey_hex(&key) }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
     (account_id, key)
 }
 
@@ -132,6 +144,31 @@ async fn get_with_bearer(app: axum::Router, uri: &str, token: &str) -> (StatusCo
     (status, body)
 }
 
+async fn post_with_bearer(
+    app: axum::Router,
+    uri: &str,
+    token: &str,
+    body: Value,
+) -> (StatusCode, Vec<u8>) {
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let body = resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec();
+    (status, body)
+}
+
 #[tokio::test]
 async fn signed_profile_set_updates_account_response() {
     let (app, _handle) = test_app(true).await;
@@ -165,7 +202,7 @@ async fn signed_profile_set_updates_account_response() {
         String::from_utf8_lossy(&body)
     );
 
-    let (status, body) = get(app, &format!("/v1/accounts/{account_id}")).await;
+    let (status, body) = get_as_service(app, &format!("/v1/accounts/{account_id}")).await;
     assert_eq!(status, StatusCode::OK);
     let account = parse(&body);
     assert_eq!(account["display_name"], display_name);
@@ -241,7 +278,7 @@ async fn list_keys_reflects_registered_metadata() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, body) = get(app, &format!("/v1/accounts/{account_id}/keys")).await;
+    let (status, body) = get_as_service(app, &format!("/v1/accounts/{account_id}/keys")).await;
     assert_eq!(status, StatusCode::OK);
     let keys = parse(&body);
     let arr = keys.as_array().unwrap();
@@ -313,7 +350,7 @@ async fn revoke_last_key_is_refused_but_second_key_can_be_revoked() {
     assert_eq!(status, StatusCode::OK);
 
     // The revoked key is gone; only the primary remains.
-    let (_, body) = get(app, &format!("/v1/accounts/{account_id}/keys")).await;
+    let (_, body) = get_as_service(app, &format!("/v1/accounts/{account_id}/keys")).await;
     let arr = parse(&body);
     let arr = arr.as_array().unwrap();
     assert_eq!(arr.len(), 1);
@@ -330,9 +367,10 @@ async fn unsigned_register_second_key_conflicts() {
     let (account_id, _primary) = account_with_key(&app, 40).await;
 
     let intruder = signing_key(41);
-    let (status, body) = post_json(
+    let (status, body) = post_with_bearer(
         app.clone(),
         &format!("/v1/accounts/{account_id}/keys"),
+        SERVICE_TOKEN,
         json!({ "public_key_hex": pubkey_hex(&intruder) }),
     )
     .await;
@@ -344,7 +382,7 @@ async fn unsigned_register_second_key_conflicts() {
     );
 
     // The intruder key was never attached.
-    let (_, body) = get(app, &format!("/v1/accounts/{account_id}/keys")).await;
+    let (_, body) = get_as_service(app, &format!("/v1/accounts/{account_id}/keys")).await;
     let arr = parse(&body);
     assert_eq!(arr.as_array().unwrap().len(), 1);
 }
@@ -370,7 +408,7 @@ async fn signed_register_accepted_and_replay_rejected() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let (_, body) = get(app.clone(), &format!("/v1/accounts/{account_id}/keys")).await;
+    let (_, body) = get_as_service(app.clone(), &format!("/v1/accounts/{account_id}/keys")).await;
     let arr = parse(&body);
     assert_eq!(arr.as_array().unwrap().len(), 2);
 
@@ -411,7 +449,7 @@ async fn signed_register_rejects_wrong_signer() {
     assert_eq!(status, StatusCode::NOT_FOUND, "unknown signer must 404");
 
     // Neither attempt attached the new key.
-    let (_, body) = get(app, &format!("/v1/accounts/{account_a}/keys")).await;
+    let (_, body) = get_as_service(app, &format!("/v1/accounts/{account_a}/keys")).await;
     assert_eq!(parse(&body).as_array().unwrap().len(), 1);
 }
 
@@ -439,7 +477,7 @@ async fn webauthn_authenticated_register_registers_and_burns_nonce() {
 
     handle.register_key_authenticated(intent()).await.unwrap();
 
-    let (_, body) = get(app, &format!("/v1/accounts/{account_id}/keys")).await;
+    let (_, body) = get_as_service(app, &format!("/v1/accounts/{account_id}/keys")).await;
     let arr = parse(&body);
     assert_eq!(arr.as_array().unwrap().len(), 2);
     let entry = arr
@@ -503,7 +541,8 @@ async fn api_key_create_show_once_then_gate_private_summary() {
     assert!(token.starts_with("sybk_"));
 
     // The listing never exposes the token or its hash.
-    let (status, body) = get(app.clone(), &format!("/v1/accounts/{account_id}/api-keys")).await;
+    let (status, body) =
+        get_as_service(app.clone(), &format!("/v1/accounts/{account_id}/api-keys")).await;
     assert_eq!(status, StatusCode::OK);
     let list = parse(&body);
     let entry = &list.as_array().unwrap()[0];
@@ -512,7 +551,7 @@ async fn api_key_create_show_once_then_gate_private_summary() {
     assert!(entry.get("token").is_none());
     assert!(entry.get("hash").is_none());
 
-    // Bearer extractor: missing token → 401.
+    // Missing token → 401 in production mode.
     let (status, _) = get(
         app.clone(),
         &format!("/v1/accounts/{account_id}/private-summary"),
@@ -585,7 +624,7 @@ async fn api_key_create_show_once_then_gate_private_summary() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // The revoked key remains listed with a revocation timestamp for audit.
-    let (_, body) = get(app, &format!("/v1/accounts/{account_id}/api-keys")).await;
+    let (_, body) = get_as_service(app, &format!("/v1/accounts/{account_id}/api-keys")).await;
     let entry = parse(&body);
     let entry = &entry.as_array().unwrap()[0];
     assert!(entry["revoked_at_ms"].as_u64().is_some());

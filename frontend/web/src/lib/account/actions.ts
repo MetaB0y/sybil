@@ -18,8 +18,13 @@ import {
   createPasskeyForAccount,
   discoverPasskeyAccount,
   isWebAuthnAvailable,
-  verifyStoredPasskey,
 } from "@/lib/auth/webauthn";
+import {
+  createApiKey,
+  registerPasskey,
+  revokeSigningKey,
+  SettingsActionError,
+} from "./settings";
 import { clearKeyHandle, setKeyHandle, useAccountStore } from "./store";
 import {
   clearStoredAccount,
@@ -47,10 +52,10 @@ export class AccountError extends Error {
 export type CreateAccountKeyMode = "passkey" | "local_key";
 
 /**
- * 1. POST /v1/accounts (dev-mode) with chosen initial balance.
- * 2. Generate P-256 keypair locally.
- * 3. POST /v1/accounts/{id}/keys with the compressed pubkey.
- * 4. Persist + open session.
+ * Account creation always registers an initial key in the same request. The
+ * passkey path uses a short-lived raw P-256 bootstrap key because WebAuthn's
+ * discoverable user handle needs the server-assigned account id; it immediately
+ * registers the passkey, revokes the bootstrap key, and mints a read token.
  *
  * Throws AccountError("dev_mode_off") if the server rejects step 1, so the
  * modal can show a "bridge deposits coming soon" message.
@@ -66,11 +71,17 @@ export async function createDemoAccount(
     );
   }
 
+  const bootstrap = await generateKeyPair();
+  const bootstrapPublicKeyHex = await exportPublicKeyCompressedHex(
+    bootstrap.publicKey,
+  );
   const created = await api.POST("/v1/accounts", {
-    // Schema marks *_nanos as `string` (patch-bigints) but wire wants a
-    // JSON number for u64 deserialization. Cast through unknown.
     body: {
       initial_balance_nanos: Number(initialBalanceNanos) as unknown as string,
+      initial_key: {
+        public_key_hex: bootstrapPublicKeyHex,
+        auth_scheme: "raw_p256",
+      },
     },
   });
   if (created.error || !created.data) {
@@ -87,63 +98,72 @@ export async function createDemoAccount(
     );
   }
   const accountId = created.data.account_id;
+  setKeyHandle(accountId, bootstrap.privateKey);
 
   if (mode === "passkey") {
     const passkey = await createPasskeyForAccount(accountId);
-    const registered = await api.POST("/v1/accounts/{id}/keys", {
-      params: { path: { id: accountId } },
-      body: {
-        public_key_hex: passkey.publicKeyHex,
-        auth_scheme: "webauthn",
-        credential_id_b64url: passkey.credentialIdB64url,
-        webauthn_registration: {
-          attestation_object_b64url: passkey.attestationObjectB64url,
-          client_data_json_b64url: passkey.clientDataJSONB64url,
-        },
-      },
+    await registerPasskey({
+      accountId,
+      publicKeyHex: bootstrapPublicKeyHex,
+      authScheme: "raw_p256",
+      passkey,
+      label: "browser passkey",
     });
-    if (registered.error) {
-      throw new AccountError(
-        `register_key failed (HTTP ${registered.response?.status ?? "?"})`,
-        "key_register_failed",
-      );
-    }
+    await revokeSigningKey({
+      accountId,
+      publicKeyHex: bootstrapPublicKeyHex,
+      authScheme: "raw_p256",
+      targetPubkeyHex: bootstrapPublicKeyHex,
+    });
+    clearKeyHandle(accountId);
+    const readKey = await createApiKey({
+      accountId,
+      publicKeyHex: passkey.publicKeyHex,
+      authScheme: "webauthn",
+      credentialIdB64url: passkey.credentialIdB64url,
+      label: "web session",
+    });
 
     writeStoredAccount({
       accountId,
       publicKeyHex: passkey.publicKeyHex,
       authScheme: "webauthn",
       credentialIdB64url: passkey.credentialIdB64url,
+      readApiKey: readKey.token,
     });
     useAccountStore.getState().setSession({
       accountId,
       publicKeyHex: passkey.publicKeyHex,
       authScheme: "webauthn",
       credentialIdB64url: passkey.credentialIdB64url,
+      readApiKey: readKey.token,
     });
     useAccountStore.getState().setConnectModalOpen(false);
     return;
   }
 
-  const kp = await generateKeyPair();
-  const publicKeyHex = await exportPublicKeyCompressedHex(kp.publicKey);
-  const registered = await api.POST("/v1/accounts/{id}/keys", {
-    params: { path: { id: accountId } },
-    body: { public_key_hex: publicKeyHex, auth_scheme: "raw_p256" },
+  const readKey = await createApiKey({
+    accountId,
+    publicKeyHex: bootstrapPublicKeyHex,
+    authScheme: "raw_p256",
+    label: "web session",
   });
-  if (registered.error) {
-    throw new AccountError(
-      `register_key failed (HTTP ${registered.response?.status ?? "?"})`,
-      "key_register_failed",
-    );
-  }
-
-  const jwk = await exportPrivateJwk(kp.privateKey);
-  writeStoredAccount({ accountId, publicKeyHex, authScheme: "raw_p256", jwk });
-  setKeyHandle(accountId, kp.privateKey);
+  const jwk = await exportPrivateJwk(bootstrap.privateKey);
+  writeStoredAccount({
+    accountId,
+    publicKeyHex: bootstrapPublicKeyHex,
+    authScheme: "raw_p256",
+    jwk,
+    readApiKey: readKey.token,
+  });
   useAccountStore
     .getState()
-    .setSession({ accountId, publicKeyHex, authScheme: "raw_p256" });
+    .setSession({
+      accountId,
+      publicKeyHex: bootstrapPublicKeyHex,
+      authScheme: "raw_p256",
+      readApiKey: readKey.token,
+    });
   useAccountStore.getState().setConnectModalOpen(false);
 }
 
@@ -170,22 +190,34 @@ export async function importExistingAccount(
 
   const publicKeyHex = pubHexFromJwk(jwk);
 
-  const account = await api.GET("/v1/accounts/{id}", {
-    params: { path: { id: accountId } },
-  });
-  if (account.error || !account.data) {
-    const status = account.response?.status;
-    throw new AccountError(
-      `Account #${accountId} not found (HTTP ${status ?? "?"})`,
-      "account_not_found",
-    );
-  }
-
-  writeStoredAccount({ accountId, publicKeyHex, authScheme: "raw_p256", jwk });
   setKeyHandle(accountId, privateKey);
+  let readKey;
+  try {
+    readKey = await createApiKey({
+      accountId,
+      publicKeyHex,
+      authScheme: "raw_p256",
+      label: "web session",
+    });
+  } catch (error) {
+    clearKeyHandle(accountId);
+    throw error;
+  }
+  writeStoredAccount({
+    accountId,
+    publicKeyHex,
+    authScheme: "raw_p256",
+    jwk,
+    readApiKey: readKey.token,
+  });
   useAccountStore
     .getState()
-    .setSession({ accountId, publicKeyHex, authScheme: "raw_p256" });
+    .setSession({
+      accountId,
+      publicKeyHex,
+      authScheme: "raw_p256",
+      readApiKey: readKey.token,
+    });
   useAccountStore.getState().setConnectModalOpen(false);
 }
 
@@ -194,12 +226,19 @@ export async function signInWithStoredPasskey(): Promise<void> {
   if (stored?.authScheme !== "webauthn" || !stored.credentialIdB64url) {
     throw new AccountError("No saved passkey account", "account_not_found");
   }
-  await verifyStoredPasskey(stored.credentialIdB64url);
+  const readKey = await createApiKey({
+    accountId: stored.accountId,
+    publicKeyHex: stored.publicKeyHex,
+    authScheme: "webauthn",
+    credentialIdB64url: stored.credentialIdB64url,
+    label: "web session",
+  });
   openPasskeySession({
     accountId: stored.accountId,
     publicKeyHex: stored.publicKeyHex,
     authScheme: "webauthn",
     credentialIdB64url: stored.credentialIdB64url,
+    readApiKey: readKey.token,
   });
 }
 
@@ -210,36 +249,36 @@ export async function signInWithStoredPasskey(): Promise<void> {
  */
 export async function signInWithDiscoverablePasskey(): Promise<void> {
   const discovered = await discoverPasskeyAccount();
-  const keys = await api.GET("/v1/accounts/{id}/keys", {
-    params: { path: { id: discovered.accountId } },
-  });
-  const status = keys.response?.status;
-  if (keys.error || !keys.data) {
-    if (status === 404) {
+  let readKey;
+  try {
+    readKey = await createApiKey({
+      accountId: discovered.accountId,
+      authScheme: "webauthn",
+      credentialIdB64url: discovered.credentialIdB64url,
+      label: "web session",
+    });
+  } catch (error) {
+    if (
+      error instanceof SettingsActionError &&
+      (error.status === 401 || error.status === 404)
+    ) {
       throw new AccountError(
-        `Account #${discovered.accountId} was not found`,
+        `This passkey is not registered for account #${discovered.accountId}`,
         "account_not_found",
       );
     }
     throw new AccountError(
-      `Could not load passkeys for account #${discovered.accountId}. Please try again.`,
+      `Could not sign in to account #${discovered.accountId}. Please try again.`,
       "network",
-    );
-  }
-
-  const passkey = keys.data.find((key) => key.auth_scheme === "webauthn");
-  if (!passkey) {
-    throw new AccountError(
-      `No passkey is registered for account #${discovered.accountId}`,
-      "account_not_found",
     );
   }
 
   openPasskeySession({
     accountId: discovered.accountId,
-    publicKeyHex: passkey.public_key_hex,
+    publicKeyHex: readKey.signerPublicKeyHex,
     authScheme: "webauthn",
     credentialIdB64url: discovered.credentialIdB64url,
+    readApiKey: readKey.token,
   });
 }
 
@@ -269,6 +308,7 @@ export async function rehydrateFromStorage(): Promise<void> {
         publicKeyHex: stored.publicKeyHex,
         authScheme: "webauthn",
         credentialIdB64url: stored.credentialIdB64url,
+        readApiKey: stored.readApiKey,
       });
     } else {
       if (!stored.jwk) throw new Error("missing raw P256 private key");
@@ -278,6 +318,7 @@ export async function rehydrateFromStorage(): Promise<void> {
         accountId: stored.accountId,
         publicKeyHex: stored.publicKeyHex,
         authScheme: "raw_p256",
+        readApiKey: stored.readApiKey,
       });
     }
   } catch (e) {
@@ -300,6 +341,7 @@ type StoredPasskeyAccount = {
   publicKeyHex: string;
   authScheme: "webauthn";
   credentialIdB64url: string;
+  readApiKey: string;
 };
 
 function pubHexFromJwk(jwk: JsonWebKey): string {

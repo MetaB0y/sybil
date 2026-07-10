@@ -13,6 +13,8 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use common::test_app_with_config;
 use http_body_util::BodyExt;
+use matching_sequencer::crypto::PublicKey;
+use p256::ecdsa::SigningKey;
 use serde_json::{json, Value};
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;
@@ -60,15 +62,20 @@ async fn create_account(
     (status, bytes)
 }
 
+fn atomic_body(balance: u64) -> Value {
+    let key = SigningKey::from_bytes((&[31u8; 32]).into()).expect("fixed signing key");
+    json!({
+        "initial_balance_nanos": balance,
+        "initial_key": {
+            "public_key_hex": hex::encode(PublicKey(*key.verifying_key()).compressed_bytes())
+        }
+    })
+}
+
 #[tokio::test]
 async fn non_dev_no_token_over_cap_is_rejected() {
     let (app, _handle) = test_app_with_config(non_dev_config()).await;
-    let (status, body) = create_account(
-        &app,
-        json!({ "initial_balance_nanos": OVER_CAP_NANOS }),
-        None,
-    )
-    .await;
+    let (status, body) = create_account(&app, atomic_body(OVER_CAP_NANOS), None).await;
     assert_eq!(
         status,
         StatusCode::BAD_REQUEST,
@@ -103,12 +110,7 @@ async fn non_dev_valid_service_token_over_cap_is_uncapped() {
 #[tokio::test]
 async fn non_dev_no_token_within_cap_is_allowed() {
     let (app, _handle) = test_app_with_config(non_dev_config()).await;
-    let (status, body) = create_account(
-        &app,
-        json!({ "initial_balance_nanos": WITHIN_CAP_NANOS }),
-        None,
-    )
-    .await;
+    let (status, body) = create_account(&app, atomic_body(WITHIN_CAP_NANOS), None).await;
     assert_eq!(
         status,
         StatusCode::OK,
@@ -120,12 +122,8 @@ async fn non_dev_no_token_within_cap_is_allowed() {
 #[tokio::test]
 async fn non_dev_invalid_token_over_cap_stays_capped() {
     let (app, _handle) = test_app_with_config(non_dev_config()).await;
-    let (status, _body) = create_account(
-        &app,
-        json!({ "initial_balance_nanos": OVER_CAP_NANOS }),
-        Some("wrong-token"),
-    )
-    .await;
+    let (status, _body) =
+        create_account(&app, atomic_body(OVER_CAP_NANOS), Some("wrong-token")).await;
     assert_eq!(
         status,
         StatusCode::BAD_REQUEST,

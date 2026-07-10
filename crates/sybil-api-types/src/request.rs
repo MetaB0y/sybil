@@ -8,6 +8,12 @@ pub struct CreateAccountRequest {
     /// Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
     #[cfg_attr(feature = "openapi", schema(example = 100_000_000_000u64))]
     pub initial_balance_nanos: u64,
+    /// First signing key to register in the same account-creation operation.
+    ///
+    /// This is required for public self-service onboarding. Omitting it uses
+    /// the deprecated service-only bare-account creation path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_key: Option<RegisterKeyRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,7 +291,11 @@ pub struct CreateApiKeyRequest {
     /// Optional human label, e.g. "grafana".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    pub signer_pubkey_hex: String,
+    /// Hex-encoded signer key. WebAuthn login bootstrap may omit this field;
+    /// the server identifies the matching registered WebAuthn key by verifying
+    /// the assertion against the account's active WebAuthn keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signer_pubkey_hex: Option<String>,
     #[serde(default)]
     pub auth_scheme: AuthScheme,
     #[serde(default, skip_serializing_if = "Option::is_none")]

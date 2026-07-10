@@ -72,14 +72,13 @@ pub struct CreateApiKeyResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub created_at_ms: u64,
+    /// The active signing key that authorized creation. This is especially
+    /// useful during discoverable WebAuthn login, where the browser assertion
+    /// does not itself expose the credential public key.
+    pub signer_pubkey_hex: String,
 }
 
-/// Private account summary served behind a read-scoped bearer token (SYB-60).
-///
-/// This is the template for bearer-gated private reads: it exposes the same
-/// data the public account/portfolio endpoints already do, but demonstrates the
-/// `Authorization: Bearer` gating pattern on a NEW endpoint. Gating the existing
-/// public endpoints is a deliberate future breaking change, not done here.
+/// Private account summary served behind owner-or-service read auth (SYB-60/237).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PrivateAccountSummaryResponse {

@@ -72,8 +72,16 @@ async function addVirtualAuthenticator(page: Page): Promise<CDPSession> {
   return client;
 }
 
-async function getJson<T>(request: APIRequestContext, url: string): Promise<T> {
-  const res = await request.get(url);
+async function getJson<T>(
+  request: APIRequestContext,
+  url: string,
+  readToken?: string,
+): Promise<T> {
+  const res = await request.get(url, {
+    ...(readToken
+      ? { headers: { authorization: `Bearer ${readToken}` } }
+      : {}),
+  });
   expect(res.ok(), `GET ${url} → ${res.status()}`).toBeTruthy();
   return (await res.json()) as T;
 }
@@ -171,7 +179,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   //    while leaving the resident credential in the virtual authenticator.
   await accountMenu.click();
   const accountDropdown = page.getByRole("menu");
-  await accountDropdown.getByRole("button", { name: "Disconnect" }).click();
+  await accountDropdown.getByRole("menuitem", { name: "Disconnect" }).click();
   await expect(
     connect,
     "disconnect should return to the connect state",
@@ -179,6 +187,10 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   expect(
     await page.evaluate(() => localStorage.getItem("sybil:auth:account_id")),
     "disconnect should clear the locally saved account",
+  ).toBeNull();
+  expect(
+    await page.evaluate(() => localStorage.getItem("sybil:auth:read_api_key")),
+    "disconnect should clear the read API key",
   ).toBeNull();
 
   // 5. Reconnect through an empty allowCredentials list. Chromium's resident
@@ -188,6 +200,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   await expect(connectDialog).toBeVisible();
   await connectDialog
     .getByRole("button", { name: "Passkey", exact: true })
+    .first()
     .click();
   const signInButton = connectDialog.getByRole("button", {
     name: "Sign in with passkey",
@@ -207,11 +220,18 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     Number(recoveredAccountIdRaw),
     "discoverable sign-in should recover the same account",
   ).toBe(accountId);
+  const readToken = await page.evaluate(() =>
+    localStorage.getItem("sybil:auth:read_api_key"),
+  );
+  expect(readToken, "passkey login should mint and persist a read key").toMatch(
+    /^sybk_/,
+  );
 
   // 6. Confirm the reconnected account has its demo balance (capped $5k).
   const pf0 = await getJson<Portfolio>(
     request,
     `${API_BASE}/v1/accounts/${accountId}/portfolio`,
+    readToken!,
   );
   const balance0 = BigInt(pf0.balance_nanos);
   expect(
@@ -238,9 +258,11 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
 
   // 8. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
   //    Clicking the CTA runs a WebAuthn assertion → POST /v1/orders/signed.
-  const cta = orderDialog.getByRole("button", { name: /queue buy/i });
+  const cta = orderDialog.getByRole("button", { name: /review buy|queue buy/i });
   await expect(cta).toBeVisible();
   await cta.click();
+  const confirm = orderDialog.getByRole("button", { name: /confirm buy/i });
+  if (await confirm.isVisible().catch(() => false)) await confirm.click();
 
   // 9. Assert the signed order was ACCEPTED — and fail loudly, with the exact
   //    server error, if the passkey assertion was rejected (the rp_id/origin
@@ -302,14 +324,17 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
       getJson<unknown[]>(
         request,
         `${API_BASE}/v1/accounts/${accountId}/orders`,
+        readToken!,
       ),
       getJson<unknown[]>(
         request,
         `${API_BASE}/v1/accounts/${accountId}/fills?limit=10`,
+        readToken!,
       ),
       getJson<Portfolio>(
         request,
         `${API_BASE}/v1/accounts/${accountId}/portfolio`,
+        readToken!,
       ),
     ]);
     const hasPending = Array.isArray(orders) && orders.length > 0;

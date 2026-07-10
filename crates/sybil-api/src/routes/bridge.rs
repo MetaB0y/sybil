@@ -1,4 +1,5 @@
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::Json;
 
 use matching_sequencer::crypto::{
@@ -166,13 +167,18 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<BridgeStatusRe
     params(("id" = u64, Path, description = "Account ID")),
     responses(
         (status = 200, description = "Account bridge key", body = BridgeAccountKeyResponse),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account"),
         (status = 404, description = "Account not found")
-    )
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn account_key(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
 ) -> Result<Json<BridgeAccountKeyResponse>, AppError> {
+    crate::routes::accounts::authorize_account_read(&state, &headers, AccountId(id)).await?;
     let key = state
         .sequencer
         .get_bridge_account_key(AccountId(id))

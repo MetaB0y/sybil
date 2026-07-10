@@ -8,16 +8,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use http_body_util::BodyExt;
-use matching_sequencer::crypto::{canonical_bridge_withdrawal_bytes, PublicKey};
+use matching_sequencer::crypto::{
+    canonical_api_key_create_bytes, canonical_bridge_withdrawal_bytes, PublicKey,
+};
 use matching_sequencer::{AccountId, BridgeWithdrawalRequest};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
-use sybil_api::app::{RouteMount, DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE};
+use sybil_api::app::{
+    RouteMount, DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE,
+};
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;
 
-use common::{get, test_app_with_config};
+use common::test_app_with_config;
 
 const TOKEN: &str = "route-policy-token";
 
@@ -60,18 +64,6 @@ fn exact_public_routes() -> &'static [RouteMount] {
             path: "/v1/accounts",
         },
         RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/keys",
-        },
-        RouteMount {
-            method: "POST",
-            path: "/v1/accounts/{id}/keys",
-        },
-        RouteMount {
             method: "POST",
             path: "/v1/accounts/{id}/keys/register",
         },
@@ -84,44 +76,12 @@ fn exact_public_routes() -> &'static [RouteMount] {
             path: "/v1/accounts/{id}/profile",
         },
         RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/api-keys",
-        },
-        RouteMount {
             method: "POST",
             path: "/v1/accounts/{id}/api-keys",
         },
         RouteMount {
             method: "POST",
             path: "/v1/accounts/{id}/api-keys/revoke",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/private-summary",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/portfolio",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/fills",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/equity",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/events",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/bridge-key",
-        },
-        RouteMount {
-            method: "GET",
-            path: "/v1/accounts/{id}/orders",
         },
         RouteMount {
             method: "GET",
@@ -218,6 +178,51 @@ fn exact_public_routes() -> &'static [RouteMount] {
     ]
 }
 
+fn exact_owner_routes() -> &'static [RouteMount] {
+    &[
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/portfolio",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/fills",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/equity",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/events",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/orders",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/keys",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/api-keys",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/bridge-key",
+        },
+        RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/private-summary",
+        },
+    ]
+}
+
 fn exact_service_routes() -> &'static [RouteMount] {
     &[
         RouteMount {
@@ -235,6 +240,10 @@ fn exact_service_routes() -> &'static [RouteMount] {
         RouteMount {
             method: "POST",
             path: "/v1/accounts/{id}/fund",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/accounts/{id}/keys",
         },
         RouteMount {
             method: "GET",
@@ -356,6 +365,43 @@ async fn prod_app() -> axum::Router {
     app
 }
 
+async fn create_owner_with_read_key(app: axum::Router, key_byte: u8) -> (u64, String) {
+    let signing_key = SigningKey::from_bytes((&[key_byte; 32]).into()).expect("fixed signing key");
+    let public_key_hex = hex::encode(PublicKey(*signing_key.verifying_key()).compressed_bytes());
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/accounts",
+        None,
+        json!({
+            "initial_balance_nanos": 1_000_000_000u64,
+            "initial_key": {"public_key_hex": public_key_hex}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let nonce = 1_000 + u64::from(key_byte);
+    let canonical = canonical_api_key_create_bytes(AccountId(account_id), None, nonce);
+    let signature: Signature = signing_key.sign(&canonical);
+    let (status, body) = request_json(
+        app,
+        Method::POST,
+        &format!("/v1/accounts/{account_id}/api-keys"),
+        None,
+        json!({
+            "signer_pubkey_hex": public_key_hex,
+            "signature_hex": hex::encode(signature.to_bytes()),
+            "nonce": nonce
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let token = parse_json(&body)["token"].as_str().unwrap().to_string();
+    (account_id, token)
+}
+
 async fn request_json(
     app: axum::Router,
     method: Method,
@@ -433,6 +479,11 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             Method::POST,
             "/v1/accounts/1/fund",
             json!({"amount_nanos": 1000}),
+        ),
+        (
+            Method::POST,
+            "/v1/accounts/1/keys",
+            json!({"public_key_hex": "00"}),
         ),
         (Method::GET, "/v1/bridge/accounts/by-key/00", json!({})),
         (
@@ -547,6 +598,7 @@ fn expected_deposit_root(
 #[test]
 fn route_policy_mount_tables_are_exact() {
     assert_eq!(PUBLIC_ROUTE_TABLE, exact_public_routes());
+    assert_eq!(OWNER_ROUTE_TABLE, exact_owner_routes());
     assert_eq!(SERVICE_ROUTE_TABLE, exact_service_routes());
     assert_eq!(DEV_ROUTE_TABLE, exact_dev_routes());
 }
@@ -621,30 +673,44 @@ async fn service_routes_fail_closed_when_token_is_unset_in_prod() {
 async fn onboarding_is_public_and_demo_capped_in_prod() {
     let app = prod_app().await;
 
-    // A fresh browser user creates a demo account and bootstraps its first key
-    // with NO service token — this is the passkey onboarding path.
-    let (status, body) = request_json(
-        app.clone(),
-        Method::POST,
-        "/v1/accounts",
-        None,
-        json!({"initial_balance_nanos": 1_000_000_000_000u64}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
-
+    // A fresh browser user creates a demo account and its first key atomically
+    // with NO service token.
     let key = SigningKey::from_bytes((&[9u8; 32]).into()).expect("fixed signing key");
     let pubkey_hex = hex::encode(PublicKey(*key.verifying_key()).compressed_bytes());
     let (status, body) = request_json(
         app.clone(),
         Method::POST,
-        &format!("/v1/accounts/{account_id}/keys"),
+        "/v1/accounts",
         None,
-        json!({"public_key_hex": pubkey_hex}),
+        json!({
+            "initial_balance_nanos": 1_000_000_000_000u64,
+            "initial_key": {"public_key_hex": pubkey_hex}
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    let (status, body) = request_json(
+        app.clone(),
+        Method::GET,
+        &format!("/v1/accounts/{account_id}/keys"),
+        Some(TOKEN),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body).as_array().unwrap().len(), 1);
+
+    // The legacy bare form is retained only for service/dev tooling.
+    let (status, _) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/accounts",
+        None,
+        json!({"initial_balance_nanos": 100u64}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // Minting above the public demo ceiling is rejected (no unbounded mint).
     let (status, _) = request_json(
@@ -652,10 +718,61 @@ async fn onboarding_is_public_and_demo_capped_in_prod() {
         Method::POST,
         "/v1/accounts",
         None,
-        json!({"initial_balance_nanos": 5_000_000_000_001u64}),
+        json!({
+            "initial_balance_nanos": 5_000_000_000_001u64,
+            "initial_key": {"public_key_hex": hex::encode(PublicKey(*SigningKey::from_bytes((&[7u8; 32]).into()).unwrap().verifying_key()).compressed_bytes())}
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn account_reads_enforce_owner_or_service_matrix() {
+    let app = prod_app().await;
+    let (owner_id, owner_token) = create_owner_with_read_key(app.clone(), 21).await;
+    let (_, wrong_owner_token) = create_owner_with_read_key(app.clone(), 22).await;
+
+    for suffix in ["", "/portfolio", "/orders"] {
+        let uri = format!("/v1/accounts/{owner_id}{suffix}");
+
+        let (status, _) = request_json(app.clone(), Method::GET, &uri, None, json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "no auth: {uri}");
+
+        let (status, _) = request_json(
+            app.clone(),
+            Method::GET,
+            &uri,
+            Some(&wrong_owner_token),
+            json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "wrong owner: {uri}");
+
+        let (status, body) = request_json(
+            app.clone(),
+            Method::GET,
+            &uri,
+            Some(&owner_token),
+            json!({}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "owner: {uri}: {}",
+            String::from_utf8_lossy(&body)
+        );
+
+        let (status, body) =
+            request_json(app.clone(), Method::GET, &uri, Some(TOKEN), json!({})).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "service: {uri}: {}",
+            String::from_utf8_lossy(&body)
+        );
+    }
 }
 
 #[tokio::test]
@@ -683,9 +800,12 @@ async fn service_routes_succeed_with_token_in_prod() {
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
 
-    let (status, body) = get(
+    let (status, body) = request_json(
         app.clone(),
+        Method::GET,
         &format!("/v1/accounts/{account_id}/bridge-key"),
+        Some(TOKEN),
+        json!({}),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));

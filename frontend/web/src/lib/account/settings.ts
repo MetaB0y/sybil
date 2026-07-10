@@ -27,7 +27,10 @@ import {
   generateKeyPair,
   signBytes,
 } from "@/lib/auth/p256";
-import { signWebAuthnBytes } from "@/lib/auth/webauthn";
+import {
+  signWebAuthnBytes,
+  type CreatedPasskey,
+} from "@/lib/auth/webauthn";
 import { getGenesisHashBytes } from "./orders";
 import { getKeyHandle, useAccountStore } from "./store";
 import type { AccountAuthScheme } from "./storage";
@@ -134,6 +137,60 @@ export async function addAgentKey(
   return { publicKeyHex, jwk };
 }
 
+export interface RegisterPasskeyArgs extends SettingsSignerArgs {
+  passkey: CreatedPasskey;
+  label?: string;
+}
+
+/** Register a newly-created passkey using an existing account signer. */
+export async function registerPasskey(
+  args: RegisterPasskeyArgs,
+): Promise<void> {
+  const nonce = args.nonce ?? nextReplayNonce(args.accountId);
+  const genesisHash = await getGenesisHashBytesWithRetry();
+  const canonical = canonicalKeyRegistrationBytes(
+    BigInt(args.accountId),
+    "webauthn",
+    fromHex(args.passkey.publicKeyHex),
+    fromHex(args.publicKeyHex),
+    nonce,
+    genesisHash,
+  );
+  const body = {
+    public_key_hex: args.passkey.publicKeyHex,
+    auth_scheme: "webauthn" as const,
+    credential_id_b64url: args.passkey.credentialIdB64url,
+    webauthn_registration: {
+      attestation_object_b64url: args.passkey.attestationObjectB64url,
+      client_data_json_b64url: args.passkey.clientDataJSONB64url,
+    },
+    scope: "primary" as const,
+    ...(args.label ? { label: args.label } : {}),
+    signer_pubkey_hex: args.publicKeyHex,
+    nonce: u64JsonNumber(nonce),
+  };
+  const res = await api.POST("/v1/accounts/{id}/keys/register", {
+    params: { path: { id: args.accountId } },
+    body: await attachSignerAuth(args, body, canonical),
+  });
+  throwIfError(res, "register_passkey");
+}
+
+async function getGenesisHashBytesWithRetry(): Promise<Uint8Array> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      return await getGenesisHashBytes();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("genesis_hash is unavailable");
+}
+
 /**
  * Append the SIGNER's auth fields to a signed key-registration body. Unlike
  * `attachSignature`, the signer scheme lives in `signer_auth_scheme` (the plain
@@ -199,7 +256,12 @@ export async function revokeSigningKey(
 
 // --- Read API keys --------------------------------------------------------
 
-export interface CreateApiKeyArgs extends SettingsSignerArgs {
+export interface CreateApiKeyArgs {
+  accountId: number;
+  publicKeyHex?: string;
+  nonce?: bigint;
+  authScheme?: AccountAuthScheme;
+  credentialIdB64url?: string;
   label?: string;
 }
 
@@ -209,6 +271,7 @@ export interface CreatedApiKey {
   token: string;
   label?: string;
   createdAtMs: number;
+  signerPublicKeyHex: string;
 }
 
 /**
@@ -225,15 +288,38 @@ export async function createApiKey(
     nonce,
   );
 
-  const body = {
+  const unsignedBody = {
     ...(args.label ? { label: args.label } : {}),
-    signer_pubkey_hex: args.publicKeyHex,
     nonce: u64JsonNumber(nonce),
   };
 
+  const auth = resolveAuthContext(args);
+  const body =
+    auth.authScheme === "webauthn" && !args.publicKeyHex
+      ? {
+          ...unsignedBody,
+          auth_scheme: "webauthn" as const,
+          webauthn_assertion: await signWebAuthnBytes(
+            auth.credentialIdB64url,
+            canonical,
+          ),
+        }
+      : await attachSignature(
+          {
+            ...args,
+            publicKeyHex:
+              args.publicKeyHex ??
+              (() => {
+                throw new Error("Missing signer public key");
+              })(),
+          },
+          { ...unsignedBody, signer_pubkey_hex: args.publicKeyHex },
+          canonical,
+        );
+
   const res = await api.POST("/v1/accounts/{id}/api-keys", {
     params: { path: { id: args.accountId } },
-    body: await attachSignature(args, body, canonical),
+    body,
   });
   throwIfError(res, "create_api_key");
   const data = res.data!;
@@ -242,6 +328,7 @@ export async function createApiKey(
     token: data.token,
     ...(data.label != null ? { label: data.label } : {}),
     createdAtMs: Number(data.created_at_ms),
+    signerPublicKeyHex: data.signer_pubkey_hex,
   };
 }
 
