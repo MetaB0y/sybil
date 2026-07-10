@@ -19,7 +19,7 @@ import { useRailMode } from "./use-rail-mode";
 
 export function MarketRail({ marketId }: { marketId: number }) {
   const [mode, setMode] = useRailMode();
-  const { group, isPending } = useEventGroup(marketId);
+  const { group, isPending, error, refetch } = useEventGroup(marketId);
   // Held here, not inside DegenRail, so an in-flight bet's status survives a
   // Degen↔Pro toggle (which unmounts the rail body below).
   const [degenActive, setDegenActive] = useState<DegenActive | null>(null);
@@ -46,8 +46,8 @@ export function MarketRail({ marketId }: { marketId: number }) {
         paddingBottom: "var(--space-5)",
       }}
     >
-      {!closed && <ModeTabs value={mode} onChange={setMode} />}
-      {isPending && (
+      {!closed && !error && <ModeTabs value={mode} onChange={setMode} />}
+      {isPending && !error && (
         <div
           style={{
             padding: "24px 12px",
@@ -60,6 +60,9 @@ export function MarketRail({ marketId }: { marketId: number }) {
           loading rail…
         </div>
       )}
+      {/* The markets list failed to load — without this the rail silently
+          rendered a blank trade box. Surface it with a retry instead. */}
+      {!!error && !group && <RailError onRetry={refetch} />}
       {group && closed && <ClosedRail />}
       {group && !closed && (
         // Keyed by mode so the body remounts and eases in on each Lite↔Pro
@@ -80,6 +83,52 @@ export function MarketRail({ marketId }: { marketId: number }) {
         </div>
       )}
     </aside>
+  );
+}
+
+/** Error + retry state for when the markets list fails to load, so the trade
+ *  rail never renders as a silent blank box. */
+function RailError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      style={{
+        padding: "24px 16px",
+        borderRadius: "var(--radius-md)",
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 12,
+        textAlign: "center",
+      }}
+    >
+      <span
+        className="text-mono"
+        style={{ color: "var(--fg-2)", fontSize: 12, lineHeight: "18px" }}
+      >
+        Couldn&apos;t load this market&apos;s trading data.
+      </span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="text-mono"
+        style={{
+          minHeight: 40,
+          padding: "8px 16px",
+          borderRadius: "var(--radius-md)",
+          border: "1px solid var(--border-2)",
+          background: "var(--surface-2)",
+          color: "var(--fg-1)",
+          fontSize: "11px",
+          textTransform: "uppercase",
+          letterSpacing: "var(--track-wide)",
+          cursor: "pointer",
+        }}
+      >
+        Retry
+      </button>
+    </div>
   );
 }
 

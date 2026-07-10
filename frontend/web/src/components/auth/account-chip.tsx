@@ -15,6 +15,7 @@ import {
   useAccountSession,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
+import { selectBalances } from "@/lib/account/use-available-balance";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import { formatDollars, parseNanos } from "@/lib/format/nanos";
 
@@ -50,14 +51,30 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const portfolio = usePortfolio(accountId).data ?? null;
 
+  // Which auth scheme backs this account decides whether a real key backup is
+  // possible. raw_p256 stores an extractable JWK (copyable = a real backup);
+  // webauthn/passkey has NO exportable secret — the credential id is just a
+  // handle, not a restore key — so we must not offer it as "backup". Read
+  // lazily from localStorage; this menu only mounts post-hydration (AccountChip
+  // gates on `hydrated`), so there's no SSR/first-paint mismatch.
+  const [authScheme] = useState<"raw_p256" | "webauthn" | null>(
+    () => readStoredAccount()?.authScheme ?? null,
+  );
+
   const total =
     portfolio != null
       ? formatDollars(parseNanos(portfolio.portfolio_value_nanos), { decimals: 2 })
       : "—";
+  // "Cash" is the AVAILABLE (spendable) balance — total minus funds reserved by
+  // open orders — so the chip never implies more buying power than the engine
+  // will accept. Reserved is surfaced separately when non-zero.
+  const { availableNanos, reservedNanos } = selectBalances(portfolio);
   const cash =
-    portfolio != null
-      ? formatDollars(parseNanos(portfolio.balance_nanos), { decimals: 2 })
+    availableNanos != null
+      ? formatDollars(availableNanos, { decimals: 2 })
       : "—";
+  const reserved =
+    reservedNanos > 0n ? formatDollars(reservedNanos, { decimals: 2 }) : null;
 
   useEffect(() => {
     if (!open) return;
@@ -85,7 +102,7 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={`Portfolio ${total} · Cash ${cash} · Account #${accountId}`}
+        title={`Portfolio ${total} · Available ${cash}${reserved ? ` · Reserved ${reserved}` : ""} · Account #${accountId}`}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
           <span style={{ color: "var(--fg-1)" }}>{total}</span>
@@ -121,7 +138,8 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         >
           <div style={{ padding: "6px 10px 8px" }}>
             <InfoRow label="Portfolio" value={total} strong />
-            <InfoRow label="Cash" value={cash} />
+            <InfoRow label="Available" value={cash} />
+            {reserved && <InfoRow label="Reserved" value={reserved} />}
             <InfoRow label="Account" value={`#${accountId}`} />
           </div>
           <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
@@ -133,19 +151,23 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           >
             Copy account id
           </MenuItem>
-          <MenuItem
-            onClick={() => {
-              const stored = readStoredAccount();
-              if (stored?.authScheme === "raw_p256" && stored.jwk) {
-                void navigator.clipboard?.writeText(JSON.stringify(stored.jwk));
-              } else if (stored?.credentialIdB64url) {
-                void navigator.clipboard?.writeText(stored.credentialIdB64url);
-              }
-              setOpen(false);
-            }}
-          >
-            Copy key handle
-          </MenuItem>
+          {authScheme === "webauthn" ? (
+            <PasskeyNotice />
+          ) : (
+            <MenuItem
+              onClick={() => {
+                const stored = readStoredAccount();
+                if (stored?.authScheme === "raw_p256" && stored.jwk) {
+                  void navigator.clipboard?.writeText(
+                    JSON.stringify(stored.jwk),
+                  );
+                }
+                setOpen(false);
+              }}
+            >
+              Copy private key (backup)
+            </MenuItem>
+          )}
           <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
           <MenuItem
             onClick={() => {
@@ -202,6 +224,51 @@ function InfoRow({
         }}
       >
         {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Read-only warning shown in place of the "copy key" affordance for passkey
+ * (WebAuthn) accounts. A passkey has no exportable private key — the credential
+ * lives in this browser + authenticator only — so there is nothing to copy as a
+ * backup. Saying so plainly avoids false backup confidence (the old "copy key
+ * handle" copied the non-restorable credential id).
+ */
+function PasskeyNotice() {
+  return (
+    <div
+      role="note"
+      style={{
+        padding: "8px 10px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+          color: "var(--warn)",
+        }}
+      >
+        Passkey account
+      </span>
+      <span
+        style={{
+          fontFamily: "var(--font-sans)",
+          fontSize: 12,
+          lineHeight: 1.4,
+          color: "var(--fg-3)",
+        }}
+      >
+        Lives in this browser + authenticator. There is no exportable key to
+        back up — clearing this browser or losing the authenticator loses
+        access.
       </span>
     </div>
   );

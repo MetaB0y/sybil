@@ -76,9 +76,14 @@ impl BlockSequencer {
         timestamp_ms: u64,
     ) -> Result<PreparedBlock, SequencerError> {
         let mut next_sequencer = self.clone();
+        let preassigned_submission_count = next_sequencer.pending_bundles.len();
         let mut all_submissions = std::mem::take(&mut next_sequencer.pending_bundles);
         all_submissions.extend(submissions);
-        let production = next_sequencer.produce_block_in_place(all_submissions, timestamp_ms)?;
+        let production = next_sequencer.produce_block_in_place(
+            all_submissions,
+            preassigned_submission_count,
+            timestamp_ms,
+        )?;
         let prepared = PreparedBlock {
             next_sequencer,
             production,
@@ -207,6 +212,7 @@ impl BlockSequencer {
     fn produce_block_in_place(
         &mut self,
         submissions: Vec<OrderSubmission>,
+        preassigned_submission_count: usize,
         timestamp_ms: u64,
     ) -> Result<BlockProduction, SequencerError> {
         self.height += 1;
@@ -428,8 +434,9 @@ impl BlockSequencer {
         let mut stp = GroupCoverageTracker::new(&self.market_groups);
         self.seed_group_coverage_from_all_resting(&mut stp);
 
-        for mut sub in submissions {
+        for (submission_index, mut sub) in submissions.into_iter().enumerate() {
             let account_id = sub.account_id;
+            let order_ids_were_preassigned = submission_index < preassigned_submission_count;
 
             let Some(account) = self.accounts.get(account_id) else {
                 for order in &sub.orders {
@@ -467,9 +474,15 @@ impl BlockSequencer {
                     continue;
                 }
 
-                let order_id = self.next_order_id;
-                self.next_order_id += 1;
-                order.id = order_id;
+                let order_id = if order_ids_were_preassigned {
+                    self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
+                    order.id
+                } else {
+                    let order_id = self.next_order_id;
+                    self.next_order_id = self.next_order_id.saturating_add(1);
+                    order.id = order_id;
+                    order_id
+                };
 
                 if let Err(reason) = validate_order_shape(&order) {
                     witness_rejections.push(WitnessRejection {

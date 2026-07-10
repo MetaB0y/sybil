@@ -63,7 +63,7 @@ export interface SubmitSignedOrderArgs {
 
 export async function submitSignedOrder(
   args: SubmitSignedOrderArgs,
-): Promise<{ accepted: boolean }> {
+): Promise<{ accepted: boolean; orderIds: number[] }> {
   // Resolve the effective TIF. IOC/GTD sign `expires_at_block`; GTC signs None.
   const tif: SubmitTimeInForce =
     args.timeInForce ?? (args.expiresAtBlock !== undefined ? "GTD" : "GTC");
@@ -128,7 +128,12 @@ export async function submitSignedOrder(
     const detail = serverErrorMessage(res.error);
     throw new Error(`submit_signed failed (HTTP ${status ?? "?"}): ${detail}`);
   }
-  return { accepted: res.data?.accepted ?? false };
+  // `order_ids` is the sequencer's authoritative id(s) for the admitted
+  // order(s); older API builds omit it, hence the `?? []` fallback.
+  return {
+    accepted: res.data?.accepted ?? false,
+    orderIds: res.data?.order_ids ?? [],
+  };
 }
 
 export interface CancelSignedOrderArgs {

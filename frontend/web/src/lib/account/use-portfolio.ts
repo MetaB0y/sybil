@@ -4,17 +4,21 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/api/schema";
-import { selectLatestBlock, useStore } from "@/lib/store";
+import { selectLatestBlock, selectWsLive, useStore } from "@/lib/store";
+import { ACCOUNT_POLL_MS } from "@/lib/constants";
 
 export type Portfolio = components["schemas"]["PortfolioResponse"];
 
 /**
  * GET /v1/accounts/{id}/portfolio. Invalidates on every block so positions
- * and PnL reflect the latest clearing prices.
+ * and PnL reflect the latest clearing prices. When the block WS is not live,
+ * falls back to interval polling so Holdings still refresh (fills land
+ * on-chain even while the socket reconnects).
  */
 export function usePortfolio(accountId: number | null) {
   const qc = useQueryClient();
   const latest = useStore(selectLatestBlock);
+  const wsLive = useStore(selectWsLive);
 
   useEffect(() => {
     if (accountId === null) return;
@@ -34,5 +38,6 @@ export function usePortfolio(accountId: number | null) {
     },
     staleTime: 0,
     refetchOnWindowFocus: false,
+    refetchInterval: wsLive ? false : ACCOUNT_POLL_MS,
   });
 }

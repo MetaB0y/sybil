@@ -189,10 +189,6 @@ fn exact_public_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "POST",
-            path: "/v1/orders",
-        },
-        RouteMount {
-            method: "POST",
             path: "/v1/orders/signed",
         },
         RouteMount {
@@ -224,6 +220,10 @@ fn exact_public_routes() -> &'static [RouteMount] {
 
 fn exact_service_routes() -> &'static [RouteMount] {
     &[
+        RouteMount {
+            method: "POST",
+            path: "/v1/orders",
+        },
         RouteMount {
             method: "GET",
             path: "/v1/proofs/state/{leaf_key_hex}",
@@ -415,6 +415,11 @@ async fn request_empty_with_headers(
 fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
     vec![
         (
+            Method::POST,
+            "/v1/orders",
+            json!({"account_id": 0, "orders": []}),
+        ),
+        (
             Method::GET,
             "/v1/proofs/state/616363742f6d697373696e67",
             json!({}),
@@ -547,6 +552,39 @@ async fn service_routes_reject_missing_and_wrong_tokens_in_prod() {
         let (status, _) = request_json(app.clone(), method, uri, Some("wrong-token"), body).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
     }
+}
+
+#[tokio::test]
+async fn unsigned_orders_are_service_gated_while_signed_orders_remain_public() {
+    let app = prod_app().await;
+    let unsigned = json!({"account_id": 0, "orders": []});
+
+    let (status, _) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/orders",
+        None,
+        unsigned.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, _) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/orders",
+        Some(TOKEN),
+        unsigned,
+    )
+    .await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED);
+    assert_ne!(status, StatusCode::FORBIDDEN);
+
+    // A malformed signed request reaches public request validation rather
+    // than the service gate; real web clients authorize with the signature.
+    let (status, _) = request_json(app, Method::POST, "/v1/orders/signed", None, json!({})).await;
+    assert_ne!(status, StatusCode::UNAUTHORIZED);
+    assert_ne!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -754,6 +792,24 @@ async fn service_routes_succeed_with_token_in_prod() {
     .await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
+
+    let (status, body) = request_json(
+        app.clone(),
+        Method::POST,
+        "/v1/orders",
+        Some(TOKEN),
+        json!({
+            "account_id": account_id,
+            "orders": [{
+                "type": "BuyYes",
+                "market_id": market_id,
+                "limit_price_nanos": 500_000_000u64,
+                "quantity": 1u64
+            }]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
 
     let (status, body) = request_json(
         app.clone(),

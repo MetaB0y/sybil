@@ -1,6 +1,9 @@
 use super::*;
 
 impl BlockSequencer {
+    /// Idempotent under replay: applying the same L1 event yields the same
+    /// withdrawal leaf and never changes account balances. The L1 indexer relies
+    /// on this for retry safety (SYB-254/SYB-262).
     pub fn apply_bridge_withdrawal_l1_event(
         &mut self,
         event: BridgeWithdrawalL1Event,

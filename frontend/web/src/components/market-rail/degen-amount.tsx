@@ -21,6 +21,7 @@ export function DegenAmount({
   maxFill,
   availableDollars,
   reservedDollars = 0,
+  seeding = false,
 }: {
   amount: string;
   setAmount: (a: string) => void;
@@ -31,6 +32,9 @@ export function DegenAmount({
   availableDollars: number | null;
   /** Cash reserved by resting buy orders, surfaced as a small hint. */
   reservedDollars?: number;
+  /** Market has never traded (no price / history), so the mark is a neutral
+   *  fallback. Show a "seed the book" note instead of a fabricated payout. */
+  seeding?: boolean;
 }) {
   const bet = parseFloat(amount) || 0;
   const win = maxFill == null ? null : unitsToShares(maxFill);
@@ -173,56 +177,93 @@ export function DegenAmount({
         </button>
       </div>
 
-      <div
-        style={{
-          background:
-            "linear-gradient(135deg, color-mix(in srgb, var(--yes) 10%, transparent), color-mix(in srgb, var(--yes) 2%, transparent))",
-          border: "1px solid color-mix(in srgb, var(--yes) 30%, transparent)",
-          borderRadius: 6,
-          padding: "12px 14px",
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          gap: 10,
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {seeding ? (
+        <div
+          style={{
+            background: "var(--bg-2)",
+            border: "1px solid var(--border-2)",
+            borderRadius: 6,
+            padding: "12px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
+        >
           <span
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 9.5,
-              color: "var(--yes)",
+              color: "var(--fg-3)",
               textTransform: "uppercase",
               letterSpacing: "0.06em",
             }}
           >
-            to win up to
+            no price yet
           </span>
           <span
             style={{
               fontFamily: "var(--font-sans)",
-              fontSize: 22,
+              fontSize: 13,
+              color: "var(--fg-2)",
+              lineHeight: 1.35,
+            }}
+          >
+            This market hasn&apos;t traded — your bet would seed the book. The
+            payout can&apos;t be estimated until it clears.
+          </span>
+        </div>
+      ) : (
+        <div
+          style={{
+            background:
+              "linear-gradient(135deg, color-mix(in srgb, var(--yes) 10%, transparent), color-mix(in srgb, var(--yes) 2%, transparent))",
+            border: "1px solid color-mix(in srgb, var(--yes) 30%, transparent)",
+            borderRadius: 6,
+            padding: "12px 14px",
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 9.5,
+                color: "var(--yes)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              to win up to
+            </span>
+            <span
+              style={{
+                fontFamily: "var(--font-sans)",
+                fontSize: 22,
+                fontWeight: 600,
+                color: "var(--yes)",
+                letterSpacing: "-0.01em",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {win == null ? "—" : `$${win.toFixed(2)}`}
+            </span>
+          </div>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 14,
               fontWeight: 600,
               color: "var(--yes)",
-              letterSpacing: "-0.01em",
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {win == null ? "—" : `$${win.toFixed(2)}`}
+            {mult == null ? "—" : `${mult.toFixed(2)}×`}
           </span>
         </div>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--yes)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {mult == null ? "—" : `${mult.toFixed(2)}×`}
-        </span>
-      </div>
+      )}
     </div>
   );
 }

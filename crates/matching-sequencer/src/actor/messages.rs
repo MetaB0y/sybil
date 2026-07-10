@@ -37,9 +37,19 @@ pub enum SequencerMsg {
     TestCrashOnNextBlock(SequencerTestCrashpoint),
     #[cfg(test)]
     TestHoldNextTick(SequencerTestTickHold, RpcReplyPort<()>),
-    SubmitOrder(OrderSubmission, RpcReplyPort<Result<(), SequencerError>>),
-    SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<(), SequencerError>>),
-    SubmitAuthenticatedOrder(AuthenticatedOrder, RpcReplyPort<Result<(), SequencerError>>),
+    SubmitOrder(
+        OrderSubmission,
+        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
+    ),
+    SubmitIocOrder(
+        OrderSubmission,
+        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
+    ),
+    SubmitSignedOrder(SignedOrder, RpcReplyPort<Result<Vec<u64>, SequencerError>>),
+    SubmitAuthenticatedOrder(
+        AuthenticatedOrder,
+        RpcReplyPort<Result<Vec<u64>, SequencerError>>,
+    ),
     CancelSignedOrder(SignedCancel, RpcReplyPort<Result<(), SequencerError>>),
     CancelAuthenticatedOrder(
         AuthenticatedCancel,

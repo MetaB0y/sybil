@@ -368,7 +368,8 @@ print("OK", len(native), len(mirror), pick if pick is not None else "")
 
 # ── 5. Order placement + deterministic fills gate ────────────────────────────
 # Create two demo accounts, submit a crossing BuyYes/BuyNo pair on the same
-# market (unsigned public /v1/orders path), and assert matched orders INCREASE.
+# market (unsigned /v1/orders path, now service-token gated — seed as trusted infra),
+# and assert matched orders INCREASE.
 check_orders_and_fills() {
     section "5. Order placement + fills-after-seed gate"
     if [[ -z "$ORDER_MARKET" ]]; then
@@ -395,14 +396,14 @@ check_orders_and_fills() {
 
     # Crossing pair at 0.99 each: complementary demand that must clear.
     http POST /v1/orders \
-        "{\"account_id\":$a,\"orders\":[{\"type\":\"BuyYes\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" none
+        "{\"account_id\":$a,\"orders\":[{\"type\":\"BuyYes\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" token
     if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget accepted)" == "true" ]]; then
         pass "order placement: BuyYes accepted (acct $a)"
     else
         fail "order placement: BuyYes -> $HTTP_CODE: $HTTP_BODY"
     fi
     http POST /v1/orders \
-        "{\"account_id\":$c,\"orders\":[{\"type\":\"BuyNo\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" none
+        "{\"account_id\":$c,\"orders\":[{\"type\":\"BuyNo\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" token
     if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget accepted)" == "true" ]]; then
         pass "order placement: BuyNo accepted (acct $c)"
     else
@@ -566,12 +567,137 @@ PY
     fi
 }
 
+# ── 7b. Signed cancel lifecycle + reservation release ────────────────────────
+# Exercises the full client cancel path the web app uses: place a deep
+# out-of-market resting order (holds a balance reservation), cancel it with a
+# signed request, and assert it disappears AND the reservation is released
+# (available balance restored). Guards the SYB reservation-accounting path.
+check_signed_cancel_lifecycle() {
+    section "7b. Signed cancel lifecycle + reservation release"
+    setup_signing
+    if [[ -z "$SIGN_BIN" ]]; then
+        if [[ "$REQUIRE_SIGNER" == "1" ]]; then
+            fail "signer unavailable but --require-signer set (ship smoke_sign in the deploy image)"
+        else
+            skip "signer (smoke_sign) unavailable; cancel-lifecycle check skipped"
+        fi
+        return
+    fi
+    if [[ -z "$ORDER_MARKET" || -z "$GENESIS_HASH" ]]; then
+        fail "cannot run cancel lifecycle (market=$ORDER_MARKET genesis=${GENESIS_HASH:0:8})"
+        return
+    fi
+
+    # Fresh funded account + registered key.
+    http POST /v1/accounts '{"initial_balance_nanos":1000000000000}' none
+    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
+    local kp priv pub
+    kp="$("$SIGN_BIN" keygen 2>/dev/null)"
+    priv="$(echo "$kp" | jget private_key_hex)"
+    pub="$(echo "$kp" | jget public_key_hex)"
+    http POST "/v1/accounts/$acct/keys" "{\"public_key_hex\":\"$pub\"}" none
+    if ! is_2xx "$HTTP_CODE"; then
+        fail "cancel-lifecycle prep: key register -> $HTTP_CODE: $HTTP_BODY"; return
+    fi
+
+    # Deep out-of-market resting BuyYes at $0.01 so it never crosses (stays cancellable).
+    local nonce osig ospk ossig obody oid
+    nonce="$(date +%s%3N)"
+    osig="$("$SIGN_BIN" order --priv "$priv" --market "$ORDER_MARKET" --nonce "$nonce" \
+        --price 10000000 --qty 1000 --genesis-hash "$GENESIS_HASH" 2>/dev/null)"
+    ospk="$(echo "$osig" | jget signer_pubkey_hex)"
+    ossig="$(echo "$osig" | jget signature_hex)"
+    obody="$(python3 - "$ospk" "$ossig" "$ORDER_MARKET" "$nonce" <<'PY'
+import sys, json
+pk, sig, m, n = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+print(json.dumps({"signer_pubkey_hex": pk,
+    "order": {"market_ids": [m], "payoffs": [1, 0], "limit_price_nanos": 10000000, "max_fill": 1000},
+    "nonce": n, "signature_hex": sig}))
+PY
+)"
+    http POST /v1/orders/signed "$obody" none
+    oid="$(echo "$HTTP_BODY" | python3 -c 'import sys,json; ids=json.load(sys.stdin).get("order_ids") or []; print(ids[0] if ids else "")' 2>/dev/null)"
+    if [[ -z "$oid" ]]; then
+        fail "cancel-lifecycle: order not accepted -> $HTTP_CODE: $HTTP_BODY"; return
+    fi
+    pass "cancel-lifecycle: signed order accepted (acct $acct, order $oid)"
+
+    # Order visible + reservation held.
+    http GET "/v1/accounts/$acct/orders" none
+    if echo "$HTTP_BODY" | python3 -c "import sys,json; sys.exit(0 if any(o.get('order_id')==$oid for o in json.load(sys.stdin)) else 1)" 2>/dev/null; then
+        pass "cancel-lifecycle: resting order visible in account orders"
+    else
+        fail "cancel-lifecycle: order $oid not visible after placement"; return
+    fi
+    http GET "/v1/accounts/$acct" none
+    local reserved_held; reserved_held="$(echo "$HTTP_BODY" | jget reserved_balance_nanos)"
+    if [[ -n "$reserved_held" && "$reserved_held" != "0" ]]; then
+        pass "cancel-lifecycle: reservation held (reserved=$reserved_held)"
+    else
+        fail "cancel-lifecycle: expected non-zero reservation after resting order, got '$reserved_held'"; return
+    fi
+
+    # Signed cancel.
+    local cnonce csig cspk cssig cbody
+    cnonce="$(date +%s%3N)"
+    csig="$("$SIGN_BIN" cancel --priv "$priv" --account "$acct" --order "$oid" --nonce "$cnonce" --genesis-hash "$GENESIS_HASH" 2>/dev/null)"
+    cspk="$(echo "$csig" | jget signer_pubkey_hex)"
+    cssig="$(echo "$csig" | jget signature_hex)"
+    cbody="$(python3 - "$cspk" "$cssig" "$acct" "$oid" "$cnonce" <<'PY'
+import sys, json
+pk, sig, a, o, n = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+print(json.dumps({"signer_pubkey_hex": pk, "account_id": a, "order_id": o, "nonce": n, "signature_hex": sig}))
+PY
+)"
+    http POST /v1/orders/cancel/signed "$cbody" none
+    if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget cancelled)" == "true" ]]; then
+        pass "cancel-lifecycle: signed cancel accepted"
+    else
+        fail "cancel-lifecycle: signed cancel -> $HTTP_CODE: $HTTP_BODY"; return
+    fi
+
+    # Order gone + reservation released.
+    local gone=no i
+    for i in 1 2 3 4 5 6; do
+        http GET "/v1/accounts/$acct/orders" none
+        if echo "$HTTP_BODY" | python3 -c "import sys,json; sys.exit(0 if all(o.get('order_id')!=$oid for o in json.load(sys.stdin)) else 1)" 2>/dev/null; then
+            gone=yes; break
+        fi
+        sleep "$INTERVAL"
+    done
+    if [[ "$gone" == "yes" ]]; then
+        pass "cancel-lifecycle: order removed after cancel"
+    else
+        fail "cancel-lifecycle: order $oid still present after cancel"; return
+    fi
+    http GET "/v1/accounts/$acct" none
+    local reserved_after; reserved_after="$(echo "$HTTP_BODY" | jget reserved_balance_nanos)"
+    if [[ "$reserved_after" == "0" ]]; then
+        pass "cancel-lifecycle: reservation released (reserved=0 after cancel)"
+    else
+        fail "cancel-lifecycle: reservation not released, reserved=$reserved_after"
+    fi
+}
+
 # ── 8. Bot decisions (public) ────────────────────────────────────────────────
 check_bots() {
     section "8. Bot decisions"
     http GET /v1/bots/decisions
-    if is_2xx "$HTTP_CODE"; then pass "/v1/bots/decisions -> $HTTP_CODE"
-    else fail "/v1/bots/decisions -> $HTTP_CODE: $HTTP_BODY"; fi
+    if ! is_2xx "$HTTP_CODE"; then
+        fail "/v1/bots/decisions -> $HTTP_CODE: $HTTP_BODY"; return
+    fi
+    pass "/v1/bots/decisions -> $HTTP_CODE"
+    # HTTP 200 alone is not enough: the arena decisions DB can be present but
+    # unreadable (e.g. a column-type mismatch), which returns 200 with
+    # db_available=false + an error and silently empties the arena view.
+    local db_ok err
+    db_ok="$(echo "$HTTP_BODY" | jget db_available)"
+    err="$(echo "$HTTP_BODY" | jget error)"
+    if [[ "$db_ok" == "false" || "$db_ok" == "False" ]]; then
+        fail "arena decisions DB unreadable (db_available=false): ${err:-unknown}"
+    else
+        pass "arena decisions DB readable (db_available=$db_ok)"
+    fi
 }
 
 # ── Run ─────────────────────────────────────────────────────────────────────
@@ -589,6 +715,7 @@ check_markets
 check_orders_and_fills
 check_gating
 check_signed_order
+check_signed_cancel_lifecycle
 check_bots
 
 section "Summary"

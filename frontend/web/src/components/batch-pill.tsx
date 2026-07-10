@@ -54,7 +54,16 @@ export function BatchPill() {
     };
   }, []);
 
-  const isLive = connection.state === "live";
+  const isLive =
+    connection.state === "live" || connection.state === "replaying";
+  // When the stream isn't live the countdown is frozen, so label the pill with
+  // the real state instead of "batch" — otherwise a stalled timer reads as a
+  // hang rather than a reconnect.
+  const label = isLive
+    ? "batch"
+    : connection.state === "reconnecting" || connection.state === "connecting"
+      ? "reconnecting"
+      : "offline";
   const remainingMs = Math.max(0, BLOCK_MS - progress * BLOCK_MS);
   const remainingSecs = formatBatchSeconds(
     Math.min(remainingMs, MAX_DISPLAY_MS) / 1000
@@ -103,7 +112,7 @@ export function BatchPill() {
           color: labelColor,
         }}
       >
-        batch
+        {label}
       </span>
       <span
         className="tabular"

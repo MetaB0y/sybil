@@ -400,6 +400,17 @@ SERVER := "root@172.104.31.54"
 COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml"
 
+# Post-deploy verification gate (SYB-248). `deploy-verify` runs the fail-closed
+# smoke gate against the LIVE stack as the FINAL step of every deploy recipe.
+#
+# TODO(SYB-248): flip SMOKE_REQUIRE_SIGNER to "1" once the `smoke_sign` signing
+# helper ships in the deploy image AND the live /v1/orders/signed path is
+# confirmed green. Requiring the signer today would red-fail every deploy while
+# the signer is not guaranteed present in the image, so the signed-order check
+# stays advisory (SKIP, not FAIL) for now. Every other core flow is already a
+# hard, fail-closed assertion regardless of this knob.
+SMOKE_REQUIRE_SIGNER := "0"
+
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
     ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts && touch /opt/sybil/arena.env'
@@ -408,15 +419,15 @@ deploy-sync:
     scp scripts/ops-smoke.sh {{SERVER}}:/opt/sybil/scripts/
 
 deploy-prod-env-check:
-    ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env && grep -q "^SYBIL_SERVICE_TOKEN=." .env'
+    ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env && grep -q "^SYBIL_SERVICE_TOKEN=." .env && grep -q "^SYBIL_WEBAUTHN_RP_ID=." .env && grep -q "^SYBIL_WEBAUTHN_ORIGIN=." .env'
 
 deploy-openrouter-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f arena.env && grep -q "^OPENROUTER_API_KEY=." arena.env'
 
 # Build and deploy sybil-api, polymarket mirror, and prover status/mock API.
 # The real filesystem prover worker is profile-gated until proof-job export is live.
-deploy-api: deploy-sync deploy-prod-env-check
-    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
+deploy-api: deploy-sync deploy-prod-env-check && deploy-verify
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-mock'
 
@@ -434,8 +445,8 @@ deploy-reset-state confirm: deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.
-deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check
-    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
+deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
 
@@ -453,8 +464,8 @@ deploy-telegram-alerts: deploy-sync deploy-prod-env-check
 #   NEXT_PUBLIC_API_BASE=https://api.sybil.exchange \
 #   NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange \
 #   NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange just deploy-web
-deploy-web: deploy-sync deploy-prod-env-check
-    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
+deploy-web: deploy-sync deploy-prod-env-check && deploy-verify
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
     docker save sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-web caddy'
 
@@ -463,10 +474,20 @@ deploy-caddy: deploy-sync deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d caddy'
 
 # Deploy everything
-deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check
-    DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
+deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
+    DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
     docker save sybil-api:latest sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
+
+# Post-deploy smoke GATE against the LIVE stack (SYB-248). Fail-closed: exits
+# non-zero if any core flow is broken (health, CORS, passkey onboarding,
+# deterministic fills-after-seed, service-token matrix), which fails the deploy.
+# The service token is read from /opt/sybil/.env on the server; per-container
+# health is probed over SSH (SYBIL_SMOKE_DOCKER_SSH={{SERVER}}). Runs
+# automatically as the final step of deploy-api / deploy-web / deploy-arena /
+# deploy-all; can also be invoked directly.
+deploy-verify:
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} SYBIL_SMOKE_REQUIRE_SIGNER={{SMOKE_REQUIRE_SIGNER}} scripts/post-deploy-smoke.sh --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Tail logs from a container on the server
 deploy-logs service="sybil-api":

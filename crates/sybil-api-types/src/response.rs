@@ -10,8 +10,15 @@ use crate::request::BridgeWithdrawalL1Status;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AccountResponse {
     pub account_id: u64,
-    /// Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+    /// Total (gross) account balance; see `available_balance_nanos` for spendable
+    /// funds. Integer nanodollars; 1_000_000_000 = $1.
     pub balance_nanos: i64,
+    /// Spendable account balance after live-order reservations. Integer
+    /// nanodollars; 1_000_000_000 = $1.
+    pub available_balance_nanos: i64,
+    /// Balance reserved by live resting orders. Integer nanodollars;
+    /// 1_000_000_000 = $1.
+    pub reserved_balance_nanos: i64,
     #[serde(default)]
     pub positions: Vec<PositionResponse>,
     /// Optional opt-in display name (SYB-60). Not yet used for leaderboard
@@ -77,8 +84,15 @@ pub struct CreateApiKeyResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PrivateAccountSummaryResponse {
     pub account_id: u64,
-    /// Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+    /// Total (gross) account balance; see `available_balance_nanos` for spendable
+    /// funds. Integer nanodollars; 1_000_000_000 = $1.
     pub balance_nanos: i64,
+    /// Spendable account balance after live-order reservations. Integer
+    /// nanodollars; 1_000_000_000 = $1.
+    pub available_balance_nanos: i64,
+    /// Balance reserved by live resting orders. Integer nanodollars;
+    /// 1_000_000_000 = $1.
+    pub reserved_balance_nanos: i64,
     /// Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
     pub total_deposited_nanos: i64,
     /// Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
@@ -322,6 +336,8 @@ pub struct MarketPriceResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OrderAcceptedResponse {
     pub accepted: bool,
+    /// Sequencer-assigned IDs for the admitted orders, in request order.
+    pub order_ids: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -841,8 +857,15 @@ pub struct CreateMarketResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PortfolioResponse {
     pub account_id: u64,
-    /// Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+    /// Total (gross) account balance; see `available_balance_nanos` for spendable
+    /// funds. Integer nanodollars; 1_000_000_000 = $1.
     pub balance_nanos: i64,
+    /// Spendable account balance after live-order reservations. Integer
+    /// nanodollars; 1_000_000_000 = $1.
+    pub available_balance_nanos: i64,
+    /// Balance reserved by live resting orders. Integer nanodollars;
+    /// 1_000_000_000 = $1.
+    pub reserved_balance_nanos: i64,
     /// Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
     pub total_deposited_nanos: i64,
     pub positions: Vec<PositionValueResponse>,

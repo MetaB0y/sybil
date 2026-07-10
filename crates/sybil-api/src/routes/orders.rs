@@ -17,6 +17,7 @@ use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
     AuthScheme, CancelSignedOrderRequest, OrderSpec, SubmitOrderRequest, SubmitSignedOrderRequest,
+    TimeInForce,
 };
 use crate::types::response::{CancelOrderResponse, OrderAcceptedResponse, PendingOrderResponse};
 use crate::webauthn;
@@ -87,14 +88,6 @@ async fn ensure_registered_scheme(
     Ok(())
 }
 
-async fn next_block_height(state: &AppState) -> Result<u64, AppError> {
-    let latest = state.sequencer.get_latest_block().await?;
-    Ok(latest
-        .map(|block| block.canonical.header.height)
-        .unwrap_or(0)
-        .saturating_add(1))
-}
-
 /// POST /v1/orders
 #[utoipa::path(
     post,
@@ -112,18 +105,20 @@ pub async fn submit_orders(
 ) -> Result<Json<OrderAcceptedResponse>, AppError> {
     // Get current markets for validation
     let markets = state.sequencer.list_markets().await?;
-    let ioc_expires_at_block = next_block_height(&state).await?;
+    let is_ioc = req.time_in_force == TimeInForce::Ioc;
+    if is_ioc && req.expires_at_block.is_some() {
+        return Err(AppError::bad_request(
+            "expires_at_block is not valid for IOC orders",
+        ));
+    }
 
     let mut orders = Vec::with_capacity(req.orders.len());
     for spec in &req.orders {
         let mut order = order_spec_to_order(spec, &markets).map_err(AppError::bad_request)?;
-        apply_time_in_force(
-            &mut order,
-            req.time_in_force,
-            req.expires_at_block,
-            Some(ioc_expires_at_block),
-        )
-        .map_err(AppError::bad_request)?;
+        if !is_ioc {
+            apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block, None)
+                .map_err(AppError::bad_request)?;
+        }
         orders.push(order);
     }
 
@@ -144,9 +139,16 @@ pub async fn submit_orders(
         mm_constraint,
     };
 
-    state.sequencer.submit_order(submission).await?;
+    let order_ids = if is_ioc {
+        state.sequencer.submit_ioc_order(submission).await?
+    } else {
+        state.sequencer.submit_order(submission).await?
+    };
 
-    Ok(Json(OrderAcceptedResponse { accepted: true }))
+    Ok(Json(OrderAcceptedResponse {
+        accepted: true,
+        order_ids,
+    }))
 }
 
 /// POST /v1/orders/signed
@@ -169,7 +171,7 @@ pub async fn submit_signed_order(
     let mut order = signed_order_data_to_order(&req.order).map_err(AppError::bad_request)?;
     apply_time_in_force(&mut order, req.time_in_force, req.expires_at_block, None)
         .map_err(AppError::bad_request)?;
-    match req.auth_scheme {
+    let order_ids = match req.auth_scheme {
         AuthScheme::RawP256 => {
             let signature = parse_required_signature(req.signature_hex.as_deref())?;
             let signed = SignedOrder {
@@ -178,7 +180,7 @@ pub async fn submit_signed_order(
                 signer,
                 signature,
             };
-            state.sequencer.submit_signed_order(signed).await?;
+            state.sequencer.submit_signed_order(signed).await?
         }
         AuthScheme::WebAuthn => {
             ensure_registered_scheme(&state, &signer, sequencer_auth_scheme(req.auth_scheme))
@@ -202,11 +204,14 @@ pub async fn submit_signed_order(
                     nonce: req.nonce,
                     signer,
                 })
-                .await?;
+                .await?
         }
-    }
+    };
 
-    Ok(Json(OrderAcceptedResponse { accepted: true }))
+    Ok(Json(OrderAcceptedResponse {
+        accepted: true,
+        order_ids,
+    }))
 }
 
 /// POST /v1/orders/cancel/signed

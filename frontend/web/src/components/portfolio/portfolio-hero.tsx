@@ -6,6 +6,7 @@
  */
 
 import { formatDollars, parseNanos } from "@/lib/format/nanos";
+import { selectBalances } from "@/lib/account/use-available-balance";
 import type { PnlSplit } from "@/lib/account/use-pnl-split";
 import type { Portfolio } from "@/lib/account/use-portfolio";
 import type { EquityCurve } from "@/lib/account/use-equity-curve";
@@ -30,7 +31,10 @@ export function PortfolioHero({
   const totalValue = portfolio
     ? parseNanos(portfolio.portfolio_value_nanos)
     : null;
-  const balance = portfolio ? parseNanos(portfolio.balance_nanos) : null;
+  // "Cash" shows AVAILABLE (spendable) balance — total minus funds reserved by
+  // open orders — so it matches what the trader can actually deploy. Reserved is
+  // surfaced in the sub-line when non-zero.
+  const { availableNanos: balance, reservedNanos } = selectBalances(portfolio);
   const positionsValue = portfolio
     ? parseNanos(portfolio.total_position_value_nanos)
     : null;
@@ -140,7 +144,11 @@ export function PortfolioHero({
           primary={
             balance == null ? "—" : formatDollars(balance, { decimals: 2 })
           }
-          sub="available"
+          sub={
+            reservedNanos > 0n
+              ? `available · ${formatDollars(reservedNanos, { decimals: 2 })} reserved`
+              : "available"
+          }
         />
         <Stat
           label="Unrealized P&L"

@@ -89,8 +89,8 @@ export default function MarketDetailPage({
         className="market-detail-main"
       >
         {marketQ.isPending && <Placeholder>loading market…</Placeholder>}
-        {marketQ.isError && (
-          <Placeholder error>error: {String(marketQ.error)}</Placeholder>
+        {marketQ.isError && !market && (
+          <MarketNotFound onRetry={() => marketQ.refetch()} />
         )}
 
         {market && (
@@ -839,6 +839,92 @@ function DiscussionPlaceholder() {
         Comments are coming.
       </p>
     </section>
+  );
+}
+
+/**
+ * Friendly replacement for the raw `error: Error: fetch … failed` string when a
+ * market can't be loaded — most often a bad/stale id, but also a transient
+ * network drop, so we offer both a way back and a retry.
+ */
+function MarketNotFound({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "var(--space-4)",
+        padding: "var(--space-8) var(--space-4)",
+        textAlign: "center",
+      }}
+    >
+      <h1
+        style={{
+          fontFamily: "var(--font-display)",
+          fontWeight: 600,
+          fontSize: "var(--fs-24)",
+          color: "var(--fg-1)",
+          margin: 0,
+        }}
+      >
+        Market not found
+      </h1>
+      <p
+        className="text-mono"
+        style={{
+          color: "var(--fg-3)",
+          fontSize: "var(--fs-13)",
+          maxWidth: 420,
+          margin: 0,
+          lineHeight: "var(--lh-20)",
+        }}
+      >
+        This market doesn&apos;t exist or couldn&apos;t be loaded. It may have
+        been removed, or the connection dropped.
+      </p>
+      <div style={{ display: "flex", gap: "var(--space-3)" }}>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-mono"
+          style={{
+            minHeight: 40,
+            padding: "8px 16px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border-2)",
+            background: "var(--surface-1)",
+            color: "var(--fg-1)",
+            fontSize: "11px",
+            textTransform: "uppercase",
+            letterSpacing: "var(--track-wide)",
+            cursor: "pointer",
+          }}
+        >
+          Retry
+        </button>
+        <Link
+          href="/"
+          className="text-mono"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            minHeight: 40,
+            padding: "8px 16px",
+            borderRadius: "var(--radius-md)",
+            border: 0,
+            background: "var(--accent)",
+            color: "var(--fg-on-accent)",
+            fontSize: "11px",
+            textTransform: "uppercase",
+            letterSpacing: "var(--track-wide)",
+            textDecoration: "none",
+          }}
+        >
+          Back to all markets
+        </Link>
+      </div>
+    </div>
   );
 }
 

@@ -87,7 +87,8 @@ describe("submitSignedOrder", () => {
       maxFill,
       nonce,
     });
-    expect(res).toEqual({ accepted: true });
+    // No `order_ids` in this response → orderIds falls back to [] (older API).
+    expect(res).toEqual({ accepted: true, orderIds: [] });
 
     const body = bodyOf();
     expect(body.signer_pubkey_hex).toBe(pubHex);

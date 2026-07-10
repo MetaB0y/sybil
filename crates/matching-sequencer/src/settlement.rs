@@ -5,18 +5,22 @@ use matching_engine::{
 
 use crate::account::{Account, AccountId, AccountStore};
 use crate::digest;
+use crate::error::{BlockInvariantFailure, UnsettleableFillReason};
 
 /// Settle a single fill: update the account's balance and positions.
 ///
 /// Delegates to `matching_engine::compute_fill_settlement` for the pure math,
 /// then applies the computed deltas to the account.
-pub fn settle_fill(account: &mut Account, order: &Order, fill: &Fill) {
-    if let Some(delta) = compute_fill_settlement(order, fill) {
-        account.balance += delta.balance_delta;
-        for (market, outcome, qty_delta) in delta.position_deltas {
-            *account.positions.entry((market, outcome)).or_insert(0) += qty_delta;
-        }
+pub fn settle_fill(account: &mut Account, order: &Order, fill: &Fill) -> bool {
+    let Some(delta) = compute_fill_settlement(order, fill) else {
+        return false;
+    };
+
+    account.balance += delta.balance_delta;
+    for (market, outcome, qty_delta) in delta.position_deltas {
+        *account.positions.entry((market, outcome)).or_insert(0) += qty_delta;
     }
+    true
 }
 
 /// Settle all fills from a batch result. Each fill carries its own `account_id`.
@@ -29,10 +33,11 @@ pub fn settle_batch(
     fills: &[Fill],
     orders: &[Order],
     block_height: u64,
-) {
+) -> Vec<BlockInvariantFailure> {
     // Build order lookup
     let order_map: std::collections::HashMap<u64, &Order> =
         orders.iter().map(|o| (o.id, o)).collect();
+    let mut failures = Vec::new();
 
     for fill in fills {
         if fill.fill_qty.0 == 0 {
@@ -41,17 +46,36 @@ pub fn settle_batch(
 
         let account_id = AccountId(fill.account_id);
         let Some(order) = order_map.get(&fill.order_id) else {
+            failures.push(BlockInvariantFailure::UnsettleableFill {
+                order_id: fill.order_id,
+                account_id: fill.account_id,
+                reason: UnsettleableFillReason::MissingOrder,
+            });
             continue;
         };
         let Some(account) = accounts.get_mut(account_id) else {
+            failures.push(BlockInvariantFailure::UnsettleableFill {
+                order_id: fill.order_id,
+                account_id: fill.account_id,
+                reason: UnsettleableFillReason::MissingAccount,
+            });
             continue;
         };
 
-        settle_fill(account, order, fill);
+        if !settle_fill(account, order, fill) {
+            failures.push(BlockInvariantFailure::UnsettleableFill {
+                order_id: fill.order_id,
+                account_id: fill.account_id,
+                reason: UnsettleableFillReason::SettlementOverflow,
+            });
+            continue;
+        }
         let event =
             digest::encode_fill_event(fill.order_id, fill.fill_qty, fill.fill_price, block_height);
         account.events_digest = digest::update_digest(&account.events_digest, &event);
     }
+
+    failures
 }
 
 /// Apply minting adjustments to the MINT account.
@@ -83,7 +107,11 @@ pub fn resolve_market(
     market: MarketId,
     yes_payout_nanos: Nanos,
 ) -> Vec<AccountId> {
-    let no_payout_nanos = Nanos(NANOS_PER_DOLLAR - yes_payout_nanos.0);
+    debug_assert!(
+        yes_payout_nanos.0 <= NANOS_PER_DOLLAR,
+        "YES payout must not exceed one dollar"
+    );
+    let no_payout_nanos = Nanos(NANOS_PER_DOLLAR.saturating_sub(yes_payout_nanos.0));
     let mut affected_accounts = Vec::new();
 
     // Collect account IDs first to avoid borrow issues
@@ -166,7 +194,7 @@ mod tests {
         let account = accounts
             .get_mut(aid)
             .expect("account present: id sourced from this AccountStore");
-        settle_fill(account, &order, &fill);
+        assert!(settle_fill(account, &order, &fill));
 
         // Should have paid 0.50 * 10 = 5 nanos * 10
         let expected_cost = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
@@ -193,7 +221,7 @@ mod tests {
         let order = outcome_sell(&markets, 2, m0, 0, 500_000_000, qty); // Sell YES at 0.50, qty 5
         let fill = Fill::new(2, Qty(qty), Nanos(500_000_000));
 
-        settle_fill(account, &order, &fill);
+        assert!(settle_fill(account, &order, &fill));
 
         // Should have received 0.50 * 5
         let expected_revenue = notional_nanos(Nanos(500_000_000), Qty(qty)).0 as i64;
@@ -290,6 +318,63 @@ mod tests {
         assert_eq!(account.position(m0, 1), 0);
     }
 
+    #[test]
+    fn nonzero_fill_with_missing_order_reports_failure_without_mutating_balances() {
+        let (_, mut accounts) = setup();
+        let aid = AccountId(0);
+        let mut fill = Fill::new(999, Qty(1), Nanos(500_000_000));
+        fill.account_id = aid.0;
+        let balances_before: Vec<_> = accounts
+            .iter()
+            .map(|(account_id, account)| (*account_id, account.balance))
+            .collect();
+
+        let failures = settle_batch(&mut accounts, &[fill], &[], 1);
+
+        assert_eq!(
+            failures,
+            vec![BlockInvariantFailure::UnsettleableFill {
+                order_id: 999,
+                account_id: aid.0,
+                reason: UnsettleableFillReason::MissingOrder,
+            }]
+        );
+        let balances_after: Vec<_> = accounts
+            .iter()
+            .map(|(account_id, account)| (*account_id, account.balance))
+            .collect();
+        assert_eq!(balances_before, balances_after);
+    }
+
+    #[test]
+    fn nonzero_fill_with_missing_account_reports_failure_without_mutating_balances() {
+        let (markets, mut accounts) = setup();
+        let missing_account_id = 999;
+        let order = outcome_buy(&markets, 1, MarketId::new(0), 0, 500_000_000, 1);
+        let mut fill = Fill::new(order.id, Qty(1), Nanos(500_000_000));
+        fill.account_id = missing_account_id;
+        let balances_before: Vec<_> = accounts
+            .iter()
+            .map(|(account_id, account)| (*account_id, account.balance))
+            .collect();
+
+        let failures = settle_batch(&mut accounts, &[fill], &[order], 1);
+
+        assert_eq!(
+            failures,
+            vec![BlockInvariantFailure::UnsettleableFill {
+                order_id: 1,
+                account_id: missing_account_id,
+                reason: UnsettleableFillReason::MissingAccount,
+            }]
+        );
+        let balances_after: Vec<_> = accounts
+            .iter()
+            .map(|(account_id, account)| (*account_id, account.balance))
+            .collect();
+        assert_eq!(balances_before, balances_after);
+    }
+
     proptest! {
         #[test]
         fn prop_zero_fill_does_not_mutate_store(
@@ -307,9 +392,10 @@ mod tests {
             fill.account_id = aid.0;
 
             let before = snapshot_accounts(&accounts);
-            settle_batch(&mut accounts, &[fill], &[order], 1);
+            let failures = settle_batch(&mut accounts, &[fill], &[order], 1);
             let after = snapshot_accounts(&accounts);
 
+            prop_assert!(failures.is_empty());
             prop_assert_eq!(before, after);
         }
 
@@ -336,7 +422,8 @@ mod tests {
             fill.account_id = aid.0;
 
             let post_system_state = snapshot_accounts(&accounts);
-            settle_batch(&mut accounts, &[fill.clone()], &[order], 7);
+            let failures = settle_batch(&mut accounts, &[fill.clone()], &[order], 7);
+            prop_assert!(failures.is_empty());
             let mut clearing_prices = HashMap::new();
             clearing_prices.insert(
                 m0,
@@ -408,9 +495,11 @@ mod tests {
             let mut fill_b_2 = Fill::new(order_b.id, Qty(qty_b), Nanos(price_b));
             fill_b_2.account_id = aid_b_2.0;
 
-            settle_batch(&mut accounts_ab, &[fill_a, fill_b], &orders, 1);
-            settle_batch(&mut accounts_ba, &[fill_b_2, fill_a_2], &orders, 1);
+            let failures_ab = settle_batch(&mut accounts_ab, &[fill_a, fill_b], &orders, 1);
+            let failures_ba = settle_batch(&mut accounts_ba, &[fill_b_2, fill_a_2], &orders, 1);
 
+            prop_assert!(failures_ab.is_empty());
+            prop_assert!(failures_ba.is_empty());
             prop_assert_eq!(snapshot_accounts(&accounts_ab), snapshot_accounts(&accounts_ba));
         }
     }

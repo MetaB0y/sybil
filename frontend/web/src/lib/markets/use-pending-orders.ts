@@ -4,7 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import type { components } from "@/lib/api/schema";
 import { api } from "@/lib/api/client";
-import { selectLatestBlock, useStore } from "@/lib/store";
+import { selectLatestBlock, selectWsLive, useStore } from "@/lib/store";
+import { ACCOUNT_POLL_MS } from "@/lib/constants";
 
 export type PendingOrder = components["schemas"]["PendingOrderResponse"];
 
@@ -19,6 +20,7 @@ export type PendingOrder = components["schemas"]["PendingOrderResponse"];
 export function usePendingOrdersForMarket(marketId: number) {
   const qc = useQueryClient();
   const latest = useStore(selectLatestBlock);
+  const wsLive = useStore(selectWsLive);
 
   // Each new block invalidates the cached pending list so we pull fresh.
   useEffect(() => {
@@ -36,5 +38,6 @@ export function usePendingOrdersForMarket(marketId: number) {
       all.filter((o) => o.market_id === marketId),
     staleTime: 0,
     refetchOnWindowFocus: false,
+    refetchInterval: wsLive ? false : ACCOUNT_POLL_MS,
   });
 }

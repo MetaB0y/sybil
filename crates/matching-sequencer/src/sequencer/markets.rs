@@ -103,53 +103,7 @@ impl BlockSequencer {
             .resolve_market(market_id, payout_nanos, timestamp_ms)?;
 
         // Sequencer executes the side effects
-        match action {
-            sybil_oracle::ResolutionAction::SettleNow {
-                market_id,
-                payout_nanos,
-                record,
-            } => {
-                let mut pre_settle_positions: Vec<(AccountId, u8, i64)> = Vec::new();
-                let affected_accounts: Vec<AccountId> = self
-                    .accounts
-                    .iter()
-                    .filter_map(|(&account_id, account)| {
-                        let yes_pos = account.position(market_id, 0);
-                        let no_pos = account.position(market_id, 1);
-                        if yes_pos != 0 {
-                            pre_settle_positions.push((account_id, 0, yes_pos));
-                        }
-                        if no_pos != 0 {
-                            pre_settle_positions.push((account_id, 1, no_pos));
-                        }
-                        (yes_pos != 0 || no_pos != 0).then_some(account_id)
-                    })
-                    .collect();
-                for account_id in &affected_accounts {
-                    self.capture_system_account_baseline(*account_id);
-                }
-                let affected_accounts =
-                    settlement::resolve_market(&mut self.accounts, market_id, payout_nanos);
-                self.analytics.apply_resolution(
-                    market_id,
-                    payout_nanos.0 as i64,
-                    pre_settle_positions,
-                );
-                self.record_system_event(SystemEvent::MarketResolved {
-                    market_id,
-                    payout_nanos,
-                    affected_accounts,
-                });
-                self.shrink_market_groups_after_resolution(market_id);
-                Ok(record)
-            }
-            sybil_oracle::ResolutionAction::Propose { .. } => Err(SequencerError::OracleError(
-                "resolution proposed but not yet settled".to_string(),
-            )),
-            sybil_oracle::ResolutionAction::Reject { reason } => {
-                Err(SequencerError::OracleError(reason))
-            }
-        }
+        self.execute_resolution_action(action)
     }
 
     /// Resolve a market from a signed attestation via the market's template
@@ -170,6 +124,13 @@ impl BlockSequencer {
             .lifecycle
             .resolve_from_attestation(market_id, signed, timestamp_ms)?;
 
+        self.execute_resolution_action(action)
+    }
+
+    fn execute_resolution_action(
+        &mut self,
+        action: sybil_oracle::ResolutionAction,
+    ) -> Result<ResolutionRecord, SequencerError> {
         match action {
             sybil_oracle::ResolutionAction::SettleNow {
                 market_id,

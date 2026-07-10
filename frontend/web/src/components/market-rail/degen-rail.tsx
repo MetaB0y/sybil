@@ -231,6 +231,12 @@ export function DegenRail({
   }
 
   const connected = session !== null;
+  // A never-traded market has no clearing price and no price history — the mark
+  // then falls back to a neutral 50¢, which we must NOT present as a real quote.
+  // Surface it as a "seed the book" state instead of a fabricated payout.
+  const hasPrice =
+    selected.yesPriceNanos != null ||
+    (pricePoints != null && pricePoints.length > 0);
   // Cash the engine would reserve for this bet. Block the CTA when it exceeds
   // what's available so we never trip a server-side InsufficientBalance rejection.
   const requiredNanos = built.ok
@@ -311,6 +317,7 @@ export function DegenRail({
               maxFill={built.ok ? built.order.maxFill : null}
               availableDollars={availableDollars}
               reservedDollars={reservedDollars}
+              seeding={!hasPrice}
             />
           </div>
 

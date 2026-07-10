@@ -7,8 +7,13 @@ x-default-logging: &default-logging
 services:
   sybil-api:
     image: sybil-api:latest
-    mem_limit: "900m"
-    memswap_limit: "900m"
+    # Cold-start restore replays the full durable log to rebuild in-memory
+    # sequencer state; its transient peak exceeds steady-state RSS. At 900m with
+    # memswap==mem (swap denied) a mature chain OOM-loops on boot and can never
+    # restart. Give headroom + a swap cushion for the restore peak. Real fix is
+    # bounded-memory restore (state snapshot + log truncation) — see SYB-266.
+    mem_limit: "1280m"
+    memswap_limit: "1600m"
     environment:
       SYBIL_PORT: "3000"
       SYBIL_DEV_MODE: "true"

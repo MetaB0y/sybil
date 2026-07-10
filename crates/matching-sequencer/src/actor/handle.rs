@@ -262,12 +262,28 @@ impl SequencerHandle {
         }
     }
 
-    pub async fn submit_order(&self, submission: OrderSubmission) -> Result<(), SequencerError> {
+    pub async fn submit_order(
+        &self,
+        submission: OrderSubmission,
+    ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitOrder(submission, reply))
             .await?
     }
 
-    pub async fn submit_signed_order(&self, signed: SignedOrder) -> Result<(), SequencerError> {
+    /// Submit an unsigned IOC order whose concrete expiry is assigned by the
+    /// sequencer actor from its committed height at admission time.
+    pub async fn submit_ioc_order(
+        &self,
+        submission: OrderSubmission,
+    ) -> Result<Vec<u64>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::SubmitIocOrder(submission, reply))
+            .await?
+    }
+
+    pub async fn submit_signed_order(
+        &self,
+        signed: SignedOrder,
+    ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitSignedOrder(signed, reply))
             .await?
     }
@@ -275,7 +291,7 @@ impl SequencerHandle {
     pub async fn submit_authenticated_order(
         &self,
         authenticated: AuthenticatedOrder,
-    ) -> Result<(), SequencerError> {
+    ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitAuthenticatedOrder(authenticated, reply))
             .await?
     }
@@ -317,6 +333,31 @@ impl SequencerHandle {
         account_id: AccountId,
     ) -> Result<Option<Account>, SequencerError> {
         self.read_query(move |state| state.sequencer.accounts.get(account_id).cloned())
+            .await
+    }
+
+    /// Read an account and its live resting-order balance reservation atomically.
+    pub async fn get_account_with_reserved_balance(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<(Account, i64)>, SequencerError> {
+        self.read_query(move |state| {
+            state
+                .sequencer
+                .accounts
+                .get(account_id)
+                .cloned()
+                .map(|account| {
+                    let reserved = state.sequencer.reserved_balance_nanos(account_id);
+                    (account, reserved)
+                })
+        })
+        .await
+    }
+
+    /// Read the balance committed to an account's live resting orders.
+    pub async fn get_reserved_balance(&self, account_id: AccountId) -> Result<i64, SequencerError> {
+        self.read_query(move |state| state.sequencer.reserved_balance_nanos(account_id))
             .await
     }
 
@@ -752,6 +793,33 @@ impl SequencerHandle {
     ) -> Result<PortfolioSummary, SequencerError> {
         self.read_query(move |state| state.sequencer.portfolio_summary(account_id))
             .await?
+    }
+
+    /// Read a portfolio and its resting-order balance reservation atomically.
+    pub async fn get_portfolio_with_reserved_balance(
+        &self,
+        account_id: AccountId,
+    ) -> Result<(PortfolioSummary, i64), SequencerError> {
+        self.read_query(move |state| {
+            let portfolio = state.sequencer.portfolio_summary(account_id)?;
+            let reserved = state.sequencer.reserved_balance_nanos(account_id);
+            Ok((portfolio, reserved))
+        })
+        .await?
+    }
+
+    /// Read the components of the private account summary from one actor state.
+    pub async fn get_account_summary_with_reserved_balance(
+        &self,
+        account_id: AccountId,
+    ) -> Result<Option<(Account, PortfolioSummary, i64)>, SequencerError> {
+        self.read_query(move |state| {
+            let account = state.sequencer.accounts.get(account_id).cloned()?;
+            let portfolio = state.sequencer.portfolio_summary(account_id).ok()?;
+            let reserved = state.sequencer.reserved_balance_nanos(account_id);
+            Some((account, portfolio, reserved))
+        })
+        .await
     }
 
     pub async fn create_market_with_metadata(
@@ -1228,6 +1296,76 @@ mod tests {
         let block = handle.produce_block().await.unwrap();
         assert_eq!(block.canonical.header.height, 1);
         assert!(block.canonical.header.order_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn ioc_expiry_uses_admit_height_after_latest_read_race() {
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let mut accounts = AccountStore::new();
+        let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let counterparty = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("IOC race");
+        let sequencer = BlockSequencer::with_default_solver(
+            accounts,
+            markets.clone(),
+            vec![],
+            Arc::new(AdminOracle::new()),
+            config,
+        );
+        let handle = SequencerHandle::spawn(sequencer);
+
+        // Model the old API's separate latest-block RPC, then commit a block
+        // before admission. Under the old path, height 1 would be carried on
+        // the order and rejected because the next eligible batch is height 2.
+        let stale_expiry = handle
+            .get_latest_block()
+            .await
+            .unwrap()
+            .map(|block| block.canonical.header.height)
+            .unwrap_or(0)
+            .saturating_add(1);
+        let intervening = handle.produce_block().await.unwrap();
+        assert_eq!(intervening.canonical.header.height, stale_expiry);
+
+        let mut ioc = outcome_buy(&markets, 0, market, 0, 600_000_000, 5);
+        ioc.expires_at_block = Some(stale_expiry);
+        let ioc_order_id = handle
+            .submit_ioc_order(OrderSubmission {
+                account_id: buyer,
+                orders: vec![ioc],
+                mm_constraint: None,
+            })
+            .await
+            .expect("admit-time IOC expiry must replace the stale API-style value")[0];
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: counterparty,
+                orders: vec![outcome_buy(&markets, 0, market, 1, 600_000_000, 5)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+
+        let block = handle.produce_block().await.unwrap();
+        assert_eq!(block.canonical.header.height, stale_expiry + 1);
+        assert!(
+            block
+                .canonical
+                .fills
+                .iter()
+                .any(|fill| fill.order_id == ioc_order_id && fill.fill_qty.0 > 0),
+            "IOC should participate in and match in its first admit-eligible batch"
+        );
+        assert!(handle
+            .get_pending_orders(Some(buyer))
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

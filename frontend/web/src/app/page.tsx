@@ -175,7 +175,11 @@ function MarketsPageInner() {
         {error && <Placeholder error>error: {String(error)}</Placeholder>}
 
         {filtered && filtered.length === 0 && (
-          <Placeholder>no events match these filters.</Placeholder>
+          <Placeholder>
+            {query !== "" || category != null || sort !== "volume" || showClosed
+              ? "no events match these filters."
+              : "no open markets right now — check back soon."}
+          </Placeholder>
         )}
 
         {paged && paged.length > 0 && (

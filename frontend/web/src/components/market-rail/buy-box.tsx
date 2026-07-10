@@ -70,6 +70,10 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const portfolio = usePortfolio(session?.accountId ?? null);
   const { availableNanos } = useAvailableBalance(session?.accountId ?? null);
 
+  // A never-traded market has no price yet (absent from /v1/markets/prices).
+  // We still need a numeric seed for the limit slider, but we must NOT present
+  // that seed as a real indicative quote — see `hasPrice` gating below.
+  const hasPrice = outcome.yesCents != null;
   const yesCents = outcome.yesCents ?? 50;
   const noCents = 100 - yesCents;
 
@@ -292,17 +296,20 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         });
         qc.invalidateQueries({ queryKey: ["orders", "pending"] });
 
-        // The signed endpoint returns only `{ accepted }`, so recover the
-        // order-id best-effort from the refreshed pending list (newest open
-        // order for this market). A filled IOC leaves nothing pending → null.
-        const orderId = latestOrderIdFor(
-          qc.getQueryData<AccountOrder[]>([
-            "account",
-            session.accountId,
-            "orders",
-          ]),
-          outcome.marketId,
-        );
+        // Prefer the sequencer's authoritative id from the submit response.
+        // Older API builds return no `order_ids`, so fall back to a best-effort
+        // recovery from the refreshed pending list (newest open order for this
+        // market). A filled IOC leaves nothing pending → null.
+        const orderId =
+          res.orderIds[0] ??
+          latestOrderIdFor(
+            qc.getQueryData<AccountOrder[]>([
+              "account",
+              session.accountId,
+              "orders",
+            ]),
+            outcome.marketId,
+          );
         setAccepted({
           orderId,
           block: batchNumber,
@@ -467,7 +474,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
                     fontSize: 13,
                   }}
                 >
-                  {cents}¢
+                  {hasPrice ? `${cents}¢` : "—"}
                 </span>
               </button>
             );
@@ -616,22 +623,26 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           <button
             type="button"
             onClick={() => setLimit(indicativeCents)}
-            disabled={disabledInputs}
+            disabled={disabledInputs || !hasPrice}
             style={{
               background: "transparent",
               border: 0,
               minHeight: 40,
               padding: "0 var(--space-1)",
-              cursor: disabledInputs ? "not-allowed" : "pointer",
-              color:
-                limit === indicativeCents ? "var(--fg-3)" : "var(--accent)",
+              cursor:
+                disabledInputs || !hasPrice ? "not-allowed" : "pointer",
+              color: !hasPrice
+                ? "var(--fg-4)"
+                : limit === indicativeCents
+                  ? "var(--fg-3)"
+                  : "var(--accent)",
               fontFamily: "var(--font-mono)",
               fontSize: 10,
-              textDecoration: "underline",
+              textDecoration: hasPrice ? "underline" : "none",
               textUnderlineOffset: 2,
             }}
           >
-            set indicative {indicativeCents}¢
+            {hasPrice ? `set indicative ${indicativeCents}¢` : "no indicative yet"}
           </button>
         </div>
         <div
@@ -700,7 +711,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           }}
         >
           <span>1¢</span>
-          <span>indicative {indicativeCents}¢</span>
+          <span>{hasPrice ? `indicative ${indicativeCents}¢` : "seed the book"}</span>
           <span>99¢</span>
         </div>
       </div>
@@ -834,15 +845,24 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
         }}
       >
         {/* Live clearing estimate — labelled an estimate; a batch auction gives
-            no firm quote until the next batch clears. */}
-        <ReceiptRow
-          label={dir === "buy" ? "est. fill · next batch" : "est. proceeds · next batch"}
-          value={
-            <span style={{ color: "var(--fg-2)" }}>
-              ~${estFillDollars.toFixed(2)} at ~{estClearingCents}%
-            </span>
-          }
-        />
+            no firm quote until the next batch clears. For a never-traded market
+            there is no price to estimate against, so instead of a fabricated
+            ~50% fill we say the order would seed the book at the chosen limit. */}
+        {hasPrice ? (
+          <ReceiptRow
+            label={dir === "buy" ? "est. fill · next batch" : "est. proceeds · next batch"}
+            value={
+              <span style={{ color: "var(--fg-2)" }}>
+                ~${estFillDollars.toFixed(2)} at ~{estClearingCents}%
+              </span>
+            }
+          />
+        ) : (
+          <div style={{ color: "var(--fg-3)", lineHeight: 1.35 }}>
+            no price yet — your order would seed the book at{" "}
+            <span style={{ color: "var(--fg-1)" }}>{limitCentsPreview}¢</span>
+          </div>
+        )}
         {dir === "buy" ? (
           <>
             {/* Buy: pay AT MOST limit×qty (uniform clearing may be cheaper),

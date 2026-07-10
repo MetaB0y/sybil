@@ -616,10 +616,6 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "POST",
-        path: "/v1/orders",
-    },
-    RouteMount {
-        method: "POST",
         path: "/v1/orders/signed",
     },
     RouteMount {
@@ -649,6 +645,10 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
 ];
 
 pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
+    RouteMount {
+        method: "POST",
+        path: "/v1/orders",
+    },
     RouteMount {
         method: "GET",
         path: "/v1/proofs/state/{leaf_key_hex}",
@@ -912,11 +912,8 @@ fn public_routes() -> Router<AppState> {
         )
         // Feeds
         .route("/v1/feeds", axum::routing::get(routes::feeds::list_feeds))
-        // Orders
-        .route(
-            "/v1/orders",
-            axum::routing::post(routes::orders::submit_orders),
-        )
+        // Signed trader orders remain public; authorization is carried by the
+        // P256/WebAuthn payload rather than the service bearer token.
         .route(
             "/v1/orders/signed",
             axum::routing::post(routes::orders::submit_signed_order),
@@ -950,6 +947,12 @@ fn public_routes() -> Router<AppState> {
 
 fn service_routes() -> Router<AppState> {
     Router::new()
+        // Unsigned orders can name arbitrary accounts (and MM budgets), so
+        // production admission is restricted to trusted service clients.
+        .route(
+            "/v1/orders",
+            axum::routing::post(routes::orders::submit_orders),
+        )
         .route(
             "/v1/proofs/state/{leaf_key_hex}",
             axum::routing::get(routes::proofs::get_state_proof),

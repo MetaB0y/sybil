@@ -26,7 +26,10 @@ pub enum AdmitOutcome {
     },
     /// Submission is not eligible for direct admission; caller should route
     /// it through the existing pre-block buffer.
-    Deferred(OrderSubmission),
+    Deferred {
+        order_ids: Vec<u64>,
+        submission: OrderSubmission,
+    },
     /// Submission was rejected synchronously (bad market, missing account,
     /// insufficient balance, ...).
     Rejected(SequencerError),
