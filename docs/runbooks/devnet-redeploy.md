@@ -269,3 +269,45 @@ Once the redeploy is verified healthy, the parked hotfix chain is dead:
 - Record the newly deployed revision, the four contract addresses (adapter,
   settlement, vault, MockUSDC), and the `app_exe_commit` / `app_vm_commit` you
   pinned, so the next redeploy has an unambiguous "moving off" baseline.
+
+---
+
+## Troubleshooting: `sybil-api` OOM-loops on restart (cold-start restore)
+
+**Symptom.** After a deploy/restart/host-reboot `sybil-api` is stuck
+`Restarting (137)`; `docker inspect sybil-sybil-api-1 --format '{{.State.OOMKilled}} {{.State.ExitCode}}'`
+returns `true 137`, and `dmesg | grep -i oom` shows a cgroup OOM-kill of
+`sybil-api`. The API logs reach `Starting Sybil API server` and then die ~8s in
+with no panic.
+
+**Cause.** Cold-start restore replays the **entire durable log** to rebuild the
+in-memory sequencer state; its transient peak exceeds the container `mem_limit`.
+On 2026-07-09 at block ~12k the peak was ~973 MB while steady-state RSS is only
+~643 MB — so the API *runs* fine at a given cap but cannot *boot*. The peak grows
+with chain length. A `memswap_limit` equal to `mem_limit` also denies the
+container the host's free swap, making the OOM hard. This is `SYB-266`; the
+durable fix is bounded-memory restore (state snapshot + log truncation).
+
+**Shipped mitigation.** `docker-compose.yml` sets `sybil-api`
+`mem_limit: 1280m` + `memswap_limit: 1600m` (headroom + swap cushion). Do not
+lower these below the observed restore peak.
+
+**Recovery if it recurs** (the peak has outgrown the cap on the 2 GB box):
+
+```bash
+# 1. Free RAM headroom by stopping non-demo monitoring (~200 MB, safe to drop):
+ssh root@172.104.31.54 'docker stop sybil-victoriametrics-1 sybil-grafana-1 sybil-vmalert-1 sybil-node-exporter-1'
+# 2. Raise the cap in docker-compose.yml, then push it WITHOUT a rebuild
+#    (the image is already loaded; this is a compose-only change):
+scp docker-compose.yml root@172.104.31.54:/opt/sybil/
+ssh root@172.104.31.54 'cd /opt/sybil && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d sybil-api'
+# 3. Wait ~20s for health, then bring the full stack back:
+ssh root@172.104.31.54 'cd /opt/sybil && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d'
+# 4. Gate it:
+just deploy-verify
+```
+
+If raising the cap is not viable on the box's RAM, the last resort is a fresh
+genesis (`just deploy-reset-state CONFIRM`, Step 2) — restore then replays almost
+nothing. A `deploy-verify` that shows the stack healthy does **not** prove
+restart-safety; validate that separately (`SYB-267`).
