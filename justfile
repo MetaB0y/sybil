@@ -370,6 +370,11 @@ smoke:
 compose-smoke:
     ./scripts/compose-profile-smoke.sh
 
+# Isolated Docker money-path E2E (SYB-243). Builds sybil-api, runs the shared
+# deterministic signed seeder, asserts exact fills/prices/balances, then down -v.
+itest-compose:
+    ./scripts/itest-compose.sh
+
 LOCAL_COMPOSE := "docker-compose"
 DEPLOY_PLATFORM := "linux/amd64"
 

@@ -1,8 +1,8 @@
 ---
 tags: [testing, infrastructure]
 layer: sequencer
-status: planned
-last_verified: 2026-07-01
+status: current
+last_verified: 2026-07-10
 ---
 
 # Testing Strategy
@@ -106,10 +106,24 @@ Docker tests are for packaging and service wiring only:
 - health endpoint returns OK
 - Prometheus scrape target for `sybil-api` is up
 
-Do not put deep exchange semantics here. They are slower and harder to diagnose
-than the in-process and process-restart layers. The current profile/config smoke
-is `just compose-smoke`; it checks the prover-worker profile boundary without
-starting containers.
+Keep most exchange semantics below this layer because container failures are
+slower to diagnose. Two deliberately small Compose gates cover packaging and
+the highest-value deployment contract:
+
+- `just compose-smoke` parses the production Compose profiles and checks the
+  prover-worker boundary without starting containers.
+- `just itest-compose` uses an isolated project and throwaway volumes, starts
+  only `sybil-api`, runs the shared `sybil-client` `seed_book` fixture over real
+  HTTP, and asserts exact statuses, fills, clearing prices, reservations, and
+  marked-balance conservation. It always runs `down -v` and retains container
+  logs under `target/itest-compose/` on failure. `--dry-run` on the script runs
+  its assertion self-test without Docker.
+
+The fixture is `SYB-247-v1`: BuyYes 0.60 × 1000 and BuyNo 0.50 × 2000. The
+partially filled NO order pins the exact YES/NO clearing vector at 0.50/0.50;
+matched volume is exactly 1000 share-units. Run id 0 is single-use on fresh
+state. Persistent devnet smoke callers choose a new numeric `--run-id`, which
+deterministically derives disjoint P256 seeds and replay nonces.
 
 ## Next Implementation Slice
 

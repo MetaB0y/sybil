@@ -340,8 +340,9 @@ assertion regardless of that knob.
 Checks: per-container health for every compose service; CORS preflight from the
 app origin on `POST /v1/accounts`; unauthenticated passkey onboarding
 (create + demo-cap 400 + first-key bootstrap + 409 on the second key); order
-placement; a **deterministic fills gate** (a crossing `BuyYes`/`BuyNo` seed must
-increase `activity/overview.all_time.orders.matched`); the service-token gating
+placement; a **deterministic fills gate** delegated to the shared `sybil-client`
+`seed_book` example (a versioned crossing `BuyYes`/`BuyNo` seed must increase
+`activity/overview.all_time.orders.matched`); the service-token gating
 matrix (gated routes 401 without the token / 2xx with it, public routes stay
 public); and a signed-order acceptance path. Only `curl` and `python3` are
 required (no `jq`); `python3-cryptography` enables the key-bootstrap check.
@@ -367,3 +368,11 @@ Config via env (flags override): `SYBIL_SMOKE_BASE`
 (default `sybil`), and `SYBIL_SMOKE_REQUIRE_SIGNER=1` / `--require-signer` to
 make the signed-order step a hard failure when the signer is missing (ship
 `smoke_sign` in the deploy image).
+
+The shared seeder uses canonical `sybil-signing` bytes, fixed deterministic
+P256 seed derivation, and deterministic replay nonces. It refuses an unmarked
+target unless the caller explicitly passes `--i-know-this-is-dev`; the
+post-deploy smoke is itself the intentional operator-authorized demo/devnet
+mutation and supplies that acknowledgement. If `cargo`/the repo (or a prebuilt
+`SYBIL_SMOKE_SEED_BIN`) is unavailable, the delegated fills gate retains the
+existing helper-unavailable SKIP behavior.

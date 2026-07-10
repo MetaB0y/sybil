@@ -1,0 +1,33 @@
+# SYB-243: isolated, throwaway sybil-api integration-test overlay.
+# Always combine with docker-compose.yml; the harness supplies a unique project
+# name and removes both named volumes with `down -v`.
+services:
+  sybil-api:
+    # Test-scoped tag: never clobber the deployable sybil-api:latest on the
+    # local daemon (a deploy without rebuild would otherwise ship a test image).
+    image: sybil-api:itest
+    build:
+      context: .
+      args:
+        CARGO_BUILD_JOBS: ${SYBIL_DOCKER_BUILD_JOBS:-4}
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${SYBIL_DOCKER_RELEASE_CODEGEN_UNITS:-16}
+    ports:
+      - "127.0.0.1:${SYBIL_ITEST_PORT:-3300}:3000"
+    environment:
+      SYBIL_DEPLOYMENT_PROFILE: "local"
+      SYBIL_DEV_MODE: "true"
+      SYBIL_BLOCK_INTERVAL_MS: "1000"
+      SYBIL_DATA_DIR: "/itest-data"
+      SYBIL_ARENA_DB_PATH: ""
+      RUST_LOG: "warn,sybil_api=info,matching_sequencer=info"
+    volumes:
+      - itest-data:/itest-data
+    restart: "no"
+
+volumes:
+  # Override docker-compose.yml's globally named arena volume so concurrent or
+  # failed test projects cannot touch developer/deployment data.
+  arena-data:
+    name: "${COMPOSE_PROJECT_NAME:-sybil-itest}-arena-data"
+  itest-data:
+    name: "${COMPOSE_PROJECT_NAME:-sybil-itest}-data"

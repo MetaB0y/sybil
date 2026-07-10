@@ -4291,6 +4291,7 @@ dependencies = [
  "sybil-api-types",
  "sybil-signing",
  "thiserror 2.0.18",
+ "tokio",
  "tokio-tungstenite 0.29.0",
  "tracing",
 ]

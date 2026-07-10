@@ -22,6 +22,7 @@ sybil-signing = { path = "../sybil-signing" }
 p256 = { version = "0.14.0-rc.7", features = ["ecdsa"] }
 getrandom = "0.4"
 hex = "0.4"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [lints.clippy]
 # f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,
