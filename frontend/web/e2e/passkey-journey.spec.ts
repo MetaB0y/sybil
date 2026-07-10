@@ -29,7 +29,8 @@ const API_BASE = process.env.E2E_API_BASE ?? deriveApiBase(APP_BASE);
 
 // Strings whose appearance in a console error or the UI means the passkey /
 // signed-order path is broken (the exact failure class this test guards).
-const CRITICAL = /OriginMismatch|RpIdHashMismatch|webauthn|passkey|signature|accepted=false|InvalidAssertion/i;
+const CRITICAL =
+  /OriginMismatch|RpIdHashMismatch|webauthn|passkey|signature|accepted=false|InvalidAssertion/i;
 
 /** The API lives on the app host's PARENT domain: `app.<x>` → `<x>`. */
 function deriveApiBase(appUrl: string): string {
@@ -166,7 +167,48 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   expect(accountIdRaw, "account id should be persisted").toBeTruthy();
   const accountId = Number(accountIdRaw);
 
-  // 4. Confirm the new account was funded with demo balance (capped $5k).
+  // 4. Disconnect. This deliberately clears every sybil:auth localStorage key
+  //    while leaving the resident credential in the virtual authenticator.
+  await accountMenu.click();
+  const accountDropdown = page.getByRole("menu");
+  await accountDropdown.getByRole("button", { name: "Disconnect" }).click();
+  await expect(
+    connect,
+    "disconnect should return to the connect state",
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("sybil:auth:account_id")),
+    "disconnect should clear the locally saved account",
+  ).toBeNull();
+
+  // 5. Reconnect through an empty allowCredentials list. Chromium's resident
+  //    credential returns the original 8-byte userHandle, so the app can
+  //    recover the account id and registered public key without local state.
+  await connect.click();
+  await expect(connectDialog).toBeVisible();
+  await connectDialog
+    .getByRole("button", { name: "Passkey", exact: true })
+    .click();
+  const signInButton = connectDialog.getByRole("button", {
+    name: "Sign in with passkey",
+  });
+  await expect(signInButton).toBeEnabled();
+  await signInButton.click();
+
+  await expect(connectDialog).toBeHidden({ timeout: 30_000 });
+  await expect(
+    accountMenu,
+    "discoverable passkey sign-in should reconnect the account",
+  ).toBeVisible({ timeout: 30_000 });
+  const recoveredAccountIdRaw = await page.evaluate(() =>
+    localStorage.getItem("sybil:auth:account_id"),
+  );
+  expect(
+    Number(recoveredAccountIdRaw),
+    "discoverable sign-in should recover the same account",
+  ).toBe(accountId);
+
+  // 6. Confirm the reconnected account has its demo balance (capped $5k).
   const pf0 = await getJson<Portfolio>(
     request,
     `${API_BASE}/v1/accounts/${accountId}/portfolio`,
@@ -177,7 +219,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     "new passkey account should be funded with demo balance",
   ).toBeGreaterThan(0n);
 
-  // 5. Open a market that has a price.
+  // 7. Open a market that has a price.
   const { priced } = await pickMarkets(request);
   expect(priced, "need an active market with a price").toBeTruthy();
   const market = priced!;
@@ -194,13 +236,13 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   // seed-the-book copy) — sanity that we picked a live market.
   await expect(orderDialog).toContainText(/est\. fill · next batch/i);
 
-  // 6. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
+  // 8. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
   //    Clicking the CTA runs a WebAuthn assertion → POST /v1/orders/signed.
   const cta = orderDialog.getByRole("button", { name: /queue buy/i });
   await expect(cta).toBeVisible();
   await cta.click();
 
-  // 7. Assert the signed order was ACCEPTED — and fail loudly, with the exact
+  // 9. Assert the signed order was ACCEPTED — and fail loudly, with the exact
   //    server error, if the passkey assertion was rejected (the rp_id/origin
   //    regression class). Race the accepted receipt against the error alert.
   const acceptedStatus = orderDialog
@@ -221,7 +263,10 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   if (outcome !== "accepted") {
     let detail = "(no error text surfaced)";
     if ((await errorAlert.count()) > 0) {
-      detail = await errorAlert.first().innerText().catch(() => detail);
+      detail = await errorAlert
+        .first()
+        .innerText()
+        .catch(() => detail);
     }
     await page.screenshot({
       path: `test-results/signed-order-failure-${Date.now()}.png`,
@@ -235,10 +280,9 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
 
   // The UI must never surface a WebAuthn origin / rp-id mismatch.
   const bodyText = await page.locator("body").innerText();
-  expect(
-    bodyText,
-    "UI surfaced a WebAuthn origin/rp-id mismatch",
-  ).not.toMatch(/OriginMismatch|RpIdHashMismatch/i);
+  expect(bodyText, "UI surfaced a WebAuthn origin/rp-id mismatch").not.toMatch(
+    /OriginMismatch|RpIdHashMismatch/i,
+  );
 
   // No console error / uncaught exception referencing the passkey/order path.
   const criticalConsole = consoleErrors.filter((e) => CRITICAL.test(e));
@@ -246,12 +290,11 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     criticalConsole,
     `console errors on the passkey/order path:\n${criticalConsole.join("\n")}`,
   ).toEqual([]);
-  expect(
-    pageErrors,
-    `uncaught page errors:\n${pageErrors.join("\n")}`,
-  ).toEqual([]);
+  expect(pageErrors, `uncaught page errors:\n${pageErrors.join("\n")}`).toEqual(
+    [],
+  );
 
-  // 8. Within ~2 blocks (10s each), the order must leave a trace: a pending
+  // 10. Within ~2 blocks (10s each), the order must leave a trace: a pending
   //    order, a fill, a position, or a reserved-balance decrease. Any of these
   //    proves the signature verified server-side.
   await expect(async () => {

@@ -17,6 +17,11 @@ export interface CreatedPasskey {
   clientDataJSONB64url: string;
 }
 
+export interface DiscoveredPasskey {
+  accountId: number;
+  credentialIdB64url: string;
+}
+
 export function isWebAuthnAvailable(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -72,7 +77,9 @@ export async function createPasskeyForAccount(
     attestationObjectB64url: base64UrlEncode(
       new Uint8Array(response.attestationObject),
     ),
-    clientDataJSONB64url: base64UrlEncode(new Uint8Array(response.clientDataJSON)),
+    clientDataJSONB64url: base64UrlEncode(
+      new Uint8Array(response.clientDataJSON),
+    ),
   };
 }
 
@@ -117,7 +124,9 @@ export async function signWebAuthnBytes(
     signature_b64url: base64UrlEncode(new Uint8Array(response.signature)),
   };
   if (response.userHandle) {
-    payload.user_handle_b64url = base64UrlEncode(new Uint8Array(response.userHandle));
+    payload.user_handle_b64url = base64UrlEncode(
+      new Uint8Array(response.userHandle),
+    );
   }
   return payload;
 }
@@ -144,6 +153,43 @@ export async function verifyStoredPasskey(
   if (!credential) throw new Error("Passkey sign-in was cancelled");
 }
 
+/**
+ * Ask the authenticator to choose a discoverable credential. Passkeys created
+ * by Sybil store the account id as their 8-byte WebAuthn user handle, allowing
+ * a signed-out browser to recover the account without localStorage.
+ */
+export async function discoverPasskeyAccount(): Promise<DiscoveredPasskey> {
+  if (!isWebAuthnAvailable()) {
+    throw new Error("WebAuthn is not available in this browser");
+  }
+
+  const publicKey: PublicKeyCredentialRequestOptions = {
+    challenge: randomBytes(32) as unknown as BufferSource,
+    allowCredentials: [],
+    userVerification: "required",
+    timeout: 60_000,
+  };
+  const configuredRpId = rpId();
+  if (configuredRpId) publicKey.rpId = configuredRpId;
+
+  const credential = (await navigator.credentials.get({
+    publicKey,
+  })) as PublicKeyCredential | null;
+  if (!credential) throw new Error("Passkey sign-in was cancelled");
+
+  const response = credential.response as AuthenticatorAssertionResponse;
+  if (!response.userHandle) {
+    throw new Error(
+      "This passkey predates usernameless login; use the same browser it was created in",
+    );
+  }
+
+  return {
+    accountId: accountIdFromUserHandle(new Uint8Array(response.userHandle)),
+    credentialIdB64url: base64UrlEncode(new Uint8Array(credential.rawId)),
+  };
+}
+
 function rpId(): string | undefined {
   const value = process.env.NEXT_PUBLIC_WEBAUTHN_RP_ID?.trim();
   return value ? value : undefined;
@@ -154,6 +200,21 @@ function accountUserId(accountId: number): Uint8Array {
   const view = new DataView(out.buffer);
   view.setBigUint64(0, BigInt(accountId), false);
   return out;
+}
+
+export function accountIdFromUserHandle(userHandle: Uint8Array): number {
+  if (userHandle.length !== 8) {
+    throw new Error("Passkey contains an invalid Sybil account id");
+  }
+  const accountId = new DataView(
+    userHandle.buffer,
+    userHandle.byteOffset,
+    userHandle.byteLength,
+  ).getBigUint64(0, false);
+  if (accountId > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("Passkey account id is too large for this browser");
+  }
+  return Number(accountId);
 }
 
 async function publicKeyHexFromSpki(spki: ArrayBuffer): Promise<string> {
@@ -191,7 +252,10 @@ function randomBytes(len: number): Uint8Array {
 export function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 export function base64UrlDecode(value: string): Uint8Array {

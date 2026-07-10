@@ -16,14 +16,11 @@ import {
 } from "@/lib/auth/p256";
 import {
   createPasskeyForAccount,
+  discoverPasskeyAccount,
   isWebAuthnAvailable,
   verifyStoredPasskey,
 } from "@/lib/auth/webauthn";
-import {
-  clearKeyHandle,
-  setKeyHandle,
-  useAccountStore,
-} from "./store";
+import { clearKeyHandle, setKeyHandle, useAccountStore } from "./store";
 import {
   clearStoredAccount,
   readStoredAccount,
@@ -73,9 +70,7 @@ export async function createDemoAccount(
     // Schema marks *_nanos as `string` (patch-bigints) but wire wants a
     // JSON number for u64 deserialization. Cast through unknown.
     body: {
-      initial_balance_nanos: Number(
-        initialBalanceNanos,
-      ) as unknown as string,
+      initial_balance_nanos: Number(initialBalanceNanos) as unknown as string,
     },
   });
   if (created.error || !created.data) {
@@ -200,13 +195,52 @@ export async function signInWithStoredPasskey(): Promise<void> {
     throw new AccountError("No saved passkey account", "account_not_found");
   }
   await verifyStoredPasskey(stored.credentialIdB64url);
-  useAccountStore.getState().setSession({
+  openPasskeySession({
     accountId: stored.accountId,
     publicKeyHex: stored.publicKeyHex,
     authScheme: "webauthn",
     credentialIdB64url: stored.credentialIdB64url,
   });
-  useAccountStore.getState().setConnectModalOpen(false);
+}
+
+/**
+ * Sign in without relying on localStorage. The authenticator returns the
+ * account id as the discoverable credential's user handle; the API then
+ * restores the registered public key needed by the local account session.
+ */
+export async function signInWithDiscoverablePasskey(): Promise<void> {
+  const discovered = await discoverPasskeyAccount();
+  const keys = await api.GET("/v1/accounts/{id}/keys", {
+    params: { path: { id: discovered.accountId } },
+  });
+  const status = keys.response?.status;
+  if (keys.error || !keys.data) {
+    if (status === 404) {
+      throw new AccountError(
+        `Account #${discovered.accountId} was not found`,
+        "account_not_found",
+      );
+    }
+    throw new AccountError(
+      `Could not load passkeys for account #${discovered.accountId}. Please try again.`,
+      "network",
+    );
+  }
+
+  const passkey = keys.data.find((key) => key.auth_scheme === "webauthn");
+  if (!passkey) {
+    throw new AccountError(
+      `No passkey is registered for account #${discovered.accountId}`,
+      "account_not_found",
+    );
+  }
+
+  openPasskeySession({
+    accountId: discovered.accountId,
+    publicKeyHex: passkey.public_key_hex,
+    authScheme: "webauthn",
+    credentialIdB64url: discovered.credentialIdB64url,
+  });
 }
 
 export function disconnect(): void {
@@ -228,7 +262,8 @@ export async function rehydrateFromStorage(): Promise<void> {
   if (current && current.accountId === stored.accountId) return;
   try {
     if (stored.authScheme === "webauthn") {
-      if (!stored.credentialIdB64url) throw new Error("missing WebAuthn credential id");
+      if (!stored.credentialIdB64url)
+        throw new Error("missing WebAuthn credential id");
       useAccountStore.getState().setSession({
         accountId: stored.accountId,
         publicKeyHex: stored.publicKeyHex,
@@ -254,6 +289,19 @@ export async function rehydrateFromStorage(): Promise<void> {
 
 // --- helpers --------------------------------------------------------------
 
+function openPasskeySession(account: StoredPasskeyAccount): void {
+  writeStoredAccount(account);
+  useAccountStore.getState().setSession(account);
+  useAccountStore.getState().setConnectModalOpen(false);
+}
+
+type StoredPasskeyAccount = {
+  accountId: number;
+  publicKeyHex: string;
+  authScheme: "webauthn";
+  credentialIdB64url: string;
+};
+
 function pubHexFromJwk(jwk: JsonWebKey): string {
   if (jwk.kty !== "EC" || !jwk.x || !jwk.y) {
     throw new AccountError(
@@ -270,7 +318,8 @@ function pubHexFromJwk(jwk: JsonWebKey): string {
     );
   }
   const last = y[31];
-  if (last === undefined) throw new AccountError("malformed JWK", "invalid_jwk");
+  if (last === undefined)
+    throw new AccountError("malformed JWK", "invalid_jwk");
   const prefix = (last & 1) === 0 ? 0x02 : 0x03;
   const out = new Uint8Array(33);
   out[0] = prefix;
