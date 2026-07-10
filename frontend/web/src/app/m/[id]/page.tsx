@@ -173,17 +173,30 @@ function Header({
     : undefined;
   const title = rawQuestion || market.name;
 
+  const imageUrl = market.market_image_url ?? market.event_image_url ?? null;
+  const fallbackIconUrl = market.market_icon_url ?? market.event_icon_url ?? null;
+
+  // The title, meta and thumb all re-key on `marketId`, so switching an outcome
+  // remounts all three in the same commit — their blur-in starts immediately on
+  // the switch (no waiting for the image to decode) and in sync with each other
+  // and the rail picker. The new image simply paints in mid-blur as it decodes;
+  // the animation never waits on it (waiting was the lag).
+
   return (
     <header
       className="market-detail-header"
+      // Slow the above-chart outcome blur to match the rail picker: the title,
+      // meta and thumb all animate on `var(--dur-swap)`, so overriding it here to
+      // the shared --dur-outcome-swap slows exactly those three (scoped to this
+      // header — card thumbnails elsewhere keep the fast 460ms --dur-swap).
+      style={{ ["--dur-swap" as string]: "var(--dur-outcome-swap)" } as React.CSSProperties}
     >
       <MarketThumb
+        key={marketId}
         marketId={market.market_id}
         name={market.name}
-        imageUrl={market.market_image_url ?? market.event_image_url ?? null}
-        fallbackIconUrl={
-          market.market_icon_url ?? market.event_icon_url ?? null
-        }
+        imageUrl={imageUrl}
+        fallbackIconUrl={fallbackIconUrl}
         size={56}
       />
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", minWidth: 0 }}>
@@ -236,8 +249,8 @@ function Header({
             an active market needs no "ACTIVE" badge. Ordering lives in the rail,
             so there's no header CTA. */}
         <div className="market-detail-title-row">
-          {/* Re-keyed per outcome so the new question eases in instead of
-              hard-cutting when you switch outcomes. */}
+          {/* Re-keyed per outcome so the new question blurs in immediately on the
+              switch, in sync with the thumb + meta (all keyed on marketId). */}
           <h1
             key={marketId}
             className="market-detail-title"
@@ -253,8 +266,9 @@ function Header({
         </div>
 
         {/* 5-stat meta row, all scoped to this market. Fixed value-slot widths
-            keep the columns from sliding as digit counts change; the row eases
-            in on an outcome switch (re-keyed by marketId). */}
+            keep the columns from sliding as digit counts change; the row eases in
+            on the outcome switch (re-keyed by marketId) in sync with the title +
+            thumb. */}
         <div
           key={marketId}
           className="text-mono"

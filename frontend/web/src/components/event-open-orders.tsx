@@ -27,7 +27,12 @@ import {
 } from "@/lib/account/quantity";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
-import { formatAge, formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
+import {
+  formatAge,
+  formatCentsPrecise,
+  formatDollarsRounded,
+  parseNanos,
+} from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
@@ -75,7 +80,7 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "outcome", label: "Outcome", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
-  { key: "placed", label: "Placed/Filled", align: "right" },
+  { key: "placed", label: "Filled/Placed", align: "right" },
   { key: "limit", label: "Limit", align: "right" },
   { key: "avgfill", label: "Avg fill", align: "right" },
   { key: "value", label: "Value", align: "right" },
@@ -331,12 +336,13 @@ function OrderRow({
       </span>
       <Right mono>
         {placed === 0 ? (
-          <>{formatShareUnits(order.remaining_quantity)}</>
+          <>{formatShareUnits(order.remaining_quantity, 1)}</>
         ) : (
+          // Rounded to 1dp in view; the hover title keeps the exact share counts.
           <span
             title={`${formatShareUnits(filled)} filled of ${formatShareUnits(placed)} placed`}
           >
-            {`${formatShareUnits(placed)} / ${formatShareUnits(filled)}`}
+            {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
           </span>
         )}
       </Right>
@@ -344,7 +350,7 @@ function OrderRow({
       <Right mono>
         <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />
       </Right>
-      <Right mono>{formatDollars(valueNanos, { decimals: 2 })}</Right>
+      <Right mono>{formatDollarsRounded(valueNanos, { decimals: 1 })}</Right>
       <Right mono>
         <CreatedCell placedAtMs={placedAtMs} nowMs={nowMs} />
       </Right>
@@ -392,30 +398,20 @@ function CreatedCell({ placedAtMs, nowMs }: { placedAtMs: number; nowMs: number 
   );
 }
 
-/** Avg fill price (WAC, side-adjusted) with fill count beneath. */
+/** Avg fill price (WAC, side-adjusted) with the fill count inline as a faded
+ *  "·N" suffix — one line, so the row stays a single row. */
 function AvgFillCell({ priceNanos, count }: { priceNanos: bigint | null; count: number }) {
   return (
     <span
-      style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "flex-end",
-        gap: 1,
-        fontFamily: "var(--font-mono)",
-      }}
+      title={count === 1 ? "1 fill" : `${count} fills`}
+      style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}
     >
-      <span style={{ fontSize: 12, color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
+      <span style={{ color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
         {priceNanos != null ? formatCentsPrecise(priceNanos) : "—"}
       </span>
-      <span
-        style={{
-          fontSize: 9.5,
-          color: "var(--fg-4)",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {count === 1 ? "1 fill" : `${count} fills`}
-      </span>
+      {count > 0 && (
+        <span style={{ color: "var(--fg-4)", fontSize: 10 }}>{` ·${count}`}</span>
+      )}
     </span>
   );
 }

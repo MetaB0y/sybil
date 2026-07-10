@@ -37,7 +37,11 @@ import {
   unitsToShares,
 } from "@/lib/account/quantity";
 import { usePortfolio, type Portfolio } from "@/lib/account/use-portfolio";
-import { formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
+import {
+  formatCentsPrecise,
+  formatDollarsRounded,
+  parseNanos,
+} from "@/lib/format/nanos";
 import {
   useEventGroup,
   type EventOutcome,
@@ -697,13 +701,21 @@ function HoldingRow({ holding }: { holding: Holding }) {
       <span>
         <SidePill outcome={outcome} />
       </span>
-      <Right mono>{formatShareUnits(quantity)}</Right>
+      <Right mono>{formatShareUnits(quantity, 1)}</Right>
       <Right mono>
-        {avgNanos == null
-          ? formatCentsPrecise(markNanos)
-          : `${formatCentsPrecise(avgNanos)} → ${formatCentsPrecise(markNanos)}`}
+        {avgNanos == null ? (
+          formatCentsPrecise(markNanos)
+        ) : (
+          // entry → mark. Fade the entry (what you paid, historical) so the eye
+          // lands on the mark — the live price that's actually true right now.
+          <span title="entry → current">
+            <span style={{ color: "var(--fg-4)" }}>{formatCentsPrecise(avgNanos)}</span>
+            <span style={{ color: "var(--fg-4)" }}>{" → "}</span>
+            {formatCentsPrecise(markNanos)}
+          </span>
+        )}
       </Right>
-      <Right mono>{formatDollars(valueNanos, { decimals: 2 })}</Right>
+      <Right mono>{formatDollarsRounded(valueNanos, { decimals: 1 })}</Right>
       <Right>
         <span
           style={{
@@ -719,7 +731,7 @@ function HoldingRow({ holding }: { holding: Holding }) {
         >
           {pnlNanos == null
             ? "—"
-            : formatDollars(pnlNanos, { decimals: 2, sign: true })}
+            : formatDollarsRounded(pnlNanos, { decimals: 1, sign: true })}
         </span>
       </Right>
     </Row>

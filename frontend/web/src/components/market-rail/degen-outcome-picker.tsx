@@ -89,10 +89,12 @@ export function DegenOutcomePicker({
 
   // Blur focus-in only after an outcome change (animKey bumps above); on first
   // mount it's absent, so the box appears without animating. Keyed by animKey so
-  // the CSS animation restarts on each change.
+  // the CSS animation restarts on each change. Uses the shared --dur-outcome-swap
+  // (the slow, deliberate blur) so the picker and the market-detail header ease in
+  // at the exact same speed whenever the outcome changes.
   const swapStyle: React.CSSProperties =
     animKey > 0
-      ? { animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)" }
+      ? { animation: "sybil-fade-swap var(--dur-outcome-swap) var(--ease-standard)" }
       : {};
 
   const boxContent = (

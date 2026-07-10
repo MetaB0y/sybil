@@ -57,11 +57,16 @@ export function DegenProgress(props: DegenProgressProps) {
             }}
           />
         </div>
+        {/* One number the eye can land on — how much of the stake has gone in —
+            then the share target as a quiet aside. The old "$0 / $10 · 0 / 15.11
+            shares" read as two competing fractions; this reads as a sentence. */}
         <div style={monoStyle}>
-          {money(filledUsd)} / {money(props.betUsd)}
+          <span style={{ color: "var(--fg-1)", fontWeight: 600 }}>
+            {money(filledUsd)}
+          </span>
+          {` of ${money(props.betUsd)} in`}
           <span style={{ color: "var(--fg-4)" }}>
-            {"  ·  "}
-            {formatShareUnits(props.filledQty)} / {formatShareUnits(props.targetQty)} shares
+            {`  ·  ${formatShareUnits(props.targetQty)} shares`}
           </span>
         </div>
         {props.onCancel && (

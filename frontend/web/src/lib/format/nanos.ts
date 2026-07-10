@@ -20,7 +20,9 @@ export const parseNanos = (v: NanosInput): bigint => {
   return BigInt(v);
 };
 
-/** Format nanos as a dollar string with N decimal places (default 2). */
+/** Format nanos as a dollar string with N decimal places (default 2). Truncates
+ *  toward zero — use `formatDollarsRounded` when a coarse display should round to
+ *  nearest instead (e.g. a 1-decimal Value/P&L column). */
 export const formatDollars = (
   v: NanosInput,
   opts?: { decimals?: number; sign?: boolean }
@@ -34,6 +36,26 @@ export const formatDollars = (
   const fracStr = frac.toString().padStart(9, "0").slice(0, decimals);
   const sign = negative ? "-" : opts?.sign ? "+" : "";
   return decimals > 0 ? `${sign}$${whole.toString()}.${fracStr}` : `${sign}$${whole}`;
+};
+
+/**
+ * Like `formatDollars` but ROUNDS to `decimals` places (default 1) instead of
+ * truncating, so $8.694 → "$8.7" and $9.99 → "$10.0". For the compact 1-decimal
+ * money columns where a floored "$9.9" (from $9.99) would read as wrong. Table
+ * magnitudes are ≪ 2^53 nanos, so Number math is exact enough for a rounded
+ * display; keep the bigint truncating `formatDollars` for exact-cent contexts.
+ */
+export const formatDollarsRounded = (
+  v: NanosInput,
+  opts?: { decimals?: number; sign?: boolean }
+): string => {
+  const nanos = parseNanos(v);
+  const decimals = opts?.decimals ?? 1;
+  const negative = nanos < 0n;
+  const abs = negative ? -nanos : nanos;
+  const dollars = Number(abs) / Number(NANOS_PER_UNIT);
+  const sign = negative ? "-" : opts?.sign ? "+" : "";
+  return `${sign}$${dollars.toFixed(decimals)}`;
 };
 
 /** Format probability nanos (range 0..1e9 = 0..100%). */

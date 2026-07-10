@@ -134,6 +134,7 @@
   --dur-base:       200ms;   /* @kind other */
   --dur-slow:       320ms;   /* @kind other */
   --dur-swap:       460ms;   /* market-detail header focus-in swap @kind other */
+  --dur-outcome-swap: 1500ms; /* deliberate slow blur when switching outcomes: rail picker + market-detail header @kind other */
 
   /* ── Backdrop ────────────────────────────────────────────────────────── */
   --blur-nav: blur(12px) saturate(140%);   /* @kind other */
