@@ -8,12 +8,18 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  completeSetReason,
+  findCompleteSetBlockers,
+} from "@/lib/account/complete-set";
 import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
 import { humanizeOrderError } from "@/lib/account/order-errors";
 import { notionalNanosCeil } from "@/lib/account/quantity";
 import { useAccountSession, useSetConnectModalOpen } from "@/lib/account/use-account";
 import type { AccountEvent } from "@/lib/account/use-account-events";
+import { useAccountOrders } from "@/lib/account/use-account-orders";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
+import { useGroupMarkets } from "@/lib/markets/use-market-groups";
 import { ONE_DOLLAR_NANOS, buildDegenOrder, resolveMarkNanos } from "@/lib/degen";
 import { priorMaxOrderId } from "@/lib/degen/track";
 import {
@@ -80,6 +86,11 @@ export function DegenRail({
   const selected =
     group.outcomes.find((o) => o.marketId === group.currentMarketId) ??
     group.outcomes[0];
+
+  // Complete-set preflight inputs. Group membership is NegRisk-only, so it must
+  // come from /v1/markets/groups — an event's siblings are a superset.
+  const { data: openOrders } = useAccountOrders(session?.accountId ?? null);
+  const groupMarkets = useGroupMarkets(selected?.marketId ?? null);
 
   const { data: pricePoints } = usePriceHistory(selected?.marketId ?? -1);
   const tracking = useDegenBetTracker(active);
@@ -247,6 +258,29 @@ export function DegenRail({
     built.ok &&
     availableNanos != null &&
     requiredNanos > availableNanos;
+
+  // NegRisk self-trade prevention: in a market group, a resting buy can make
+  // this bet complete a full outcome set, which the engine rejects outright
+  // (CompleteSetFormation). Catch it before the bettor signs, and say which
+  // order is in the way — the raw rejection explains nothing.
+  const blockers = connected
+    ? findCompleteSetBlockers({
+        groupMarkets,
+        restingOrders: openOrders ?? [],
+        marketId: selected.marketId,
+        side: side === "YES" ? "BuyYes" : "BuyNo",
+      })
+    : null;
+  const completeSet = blockers != null && blockers.length > 0;
+  const completeSetReasonText = completeSet
+    ? completeSetReason(
+        blockers,
+        side === "YES" ? "BuyYes" : "BuyNo",
+        selected.marketId,
+        (m) => group.outcomes.find((o) => o.marketId === m)?.shortLabel ?? null,
+      )
+    : null;
+
   const ctaLabel = !connected
     ? "Connect to bet"
     : signing
@@ -255,8 +289,11 @@ export function DegenRail({
         ? "Raise your bet"
         : insufficient
           ? "Not enough funds"
-          : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
-  const ctaDisabled = connected && (signing || !built.ok || insufficient);
+          : completeSet
+            ? `Cancel your open order to bet ${side}`
+            : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
+  const ctaDisabled =
+    connected && (signing || !built.ok || insufficient || completeSet);
 
   // Explainer slot below the form/progress area:
   //  - while a bet is in flight ("tracking"): a compact WaitingAlert with the
@@ -344,6 +381,20 @@ export function DegenRail({
           >
             {ctaLabel}
           </button>
+
+          {completeSetReasonText && !submitError && (
+            <div
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                lineHeight: "16px",
+                color: "var(--fg-3)",
+                textAlign: "center",
+              }}
+            >
+              {completeSetReasonText}
+            </div>
+          )}
 
           {submitError && (
             <div

@@ -35,8 +35,12 @@ export function humanizeOrderError(err: unknown, noun: OrderNoun = "bet"): strin
     return `Couldn't verify your ${noun} — reconnect and try again.`;
   if (/market not found/i.test(m)) return "This market isn't available right now.";
   if (/account not found/i.test(m)) return "Account not found — reconnect.";
+  // NegRisk self-trade prevention: this order would give the account buy-side
+  // coverage of every outcome in the group — a complete set. The rail normally
+  // catches it before signing (see `lib/account/complete-set.ts`); this copy is
+  // the fallback for a stale open-orders list, so it has to say what to do.
   if (/CompleteSetFormation/i.test(m))
-    return `That ${noun} can't be placed right now.`;
+    return `Your open orders in this event already cover the other outcomes — cancel one to place this ${noun}.`;
 
   return `Couldn't place your ${noun}. Try again.`;
 }
