@@ -100,16 +100,15 @@ impl SequencerActorState {
         if account_id != authenticated.account_id {
             return Err(SequencerError::SignerAccountMismatch);
         }
-        self.accept_replay_nonce(account_id, authenticated.nonce)
-            .await?;
 
         let timestamp_ms = current_timestamp_ms();
-        let mut validation = self.sequencer.clone();
-        validation.cancel_pending_order_at(
+        self.sequencer.can_cancel_pending_order(
             authenticated.account_id,
             authenticated.order_id,
             timestamp_ms,
         )?;
+        self.accept_replay_nonce(account_id, authenticated.nonce)
+            .await?;
         self.persist_control_plane(&ControlPlaneCommand::CancelPendingOrder {
             account_id: authenticated.account_id,
             order_id: authenticated.order_id,

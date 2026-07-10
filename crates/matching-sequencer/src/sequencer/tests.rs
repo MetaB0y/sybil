@@ -3409,6 +3409,50 @@ fn cancel_nonexistent_does_not_emit_order_cancelled() {
     assert_eq!(seq.pending_system_events.len(), pending_before);
 }
 
+#[test]
+fn can_cancel_pending_order_matches_apply_validation() {
+    let (mut seq, owner, markets, market_id, _) =
+        make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+    let order_id = match seq.try_admit_direct(
+        single_order_sub(
+            owner,
+            outcome_buy(&markets, 0, market_id, 0, 400_000_000, 7),
+        ),
+        0,
+    ) {
+        AdmitOutcome::Admitted { order_id, .. } => order_id,
+        other => panic!("expected Admitted, got {other:?}"),
+    };
+    let wrong_owner = AccountId(owner.0 + 1);
+
+    let cases = [
+        ("owned order", owner, order_id, true),
+        ("wrong owner", wrong_owner, order_id, false),
+        ("missing order", owner, order_id + 1, false),
+    ];
+
+    for (name, account_id, candidate_order_id, expected_ok) in cases {
+        let preflight = seq.can_cancel_pending_order(account_id, candidate_order_id, 1_000);
+        let mut applying = seq.clone();
+        let apply = applying.cancel_pending_order_at(account_id, candidate_order_id, 1_000);
+
+        assert_eq!(preflight.is_ok(), expected_ok, "preflight: {name}");
+        assert_eq!(apply.is_ok(), expected_ok, "apply: {name}");
+        assert_eq!(
+            preflight.is_ok(),
+            apply.is_ok(),
+            "preflight/apply parity: {name}"
+        );
+        if let (Err(preflight), Err(apply)) = (preflight, apply) {
+            assert_eq!(
+                std::mem::discriminant(&preflight),
+                std::mem::discriminant(&apply),
+                "preflight/apply error parity: {name}"
+            );
+        }
+    }
+}
+
 // --- Mark-price portfolio valuation ---
 
 /// After a crossing batch at price P, the mark is set to the clearing

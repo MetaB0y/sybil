@@ -343,34 +343,55 @@ impl BlockSequencer {
         order_id: u64,
         timestamp_ms: u64,
     ) -> Result<(), SequencerError> {
-        match self.order_book.cancel(account_id, order_id) {
-            Ok(ro) => {
-                self.capture_system_account_baseline(account_id);
-                let market_ids: Vec<MarketId> = ro.order.active_markets().collect();
-                let primary_market = market_ids.first().copied().unwrap_or(MarketId::NONE);
-                let side = derive_order_direction(&ro.order, primary_market);
-                self.pending_system_events
-                    .push(SystemEvent::OrderCancelled {
-                        account_id,
-                        order_id,
-                        market_ids,
-                        side,
-                        remaining_quantity: ro.order.max_fill.0,
-                    });
-                self.analytics.record_order_history(
-                    account_id,
-                    crate::aggregates::HistoryKind::Cancelled,
-                    self.height,
-                    timestamp_ms,
-                    &ro.order,
-                    OrderHistoryOptions::default(),
-                );
-                Ok(())
-            }
-            Err(crate::order_book::CancelError::NotFound) => Err(SequencerError::OrderNotFound),
-            Err(crate::order_book::CancelError::WrongOwner) => {
-                Err(SequencerError::OrderOwnershipMismatch)
-            }
-        }
+        let ro = self
+            .order_book
+            .cancel(account_id, order_id)
+            .map_err(cancel_error_to_sequencer_error)?;
+        self.capture_system_account_baseline(account_id);
+        let market_ids: Vec<MarketId> = ro.order.active_markets().collect();
+        let primary_market = market_ids.first().copied().unwrap_or(MarketId::NONE);
+        let side = derive_order_direction(&ro.order, primary_market);
+        self.pending_system_events
+            .push(SystemEvent::OrderCancelled {
+                account_id,
+                order_id,
+                market_ids,
+                side,
+                remaining_quantity: ro.order.max_fill.0,
+            });
+        self.analytics.record_order_history(
+            account_id,
+            crate::aggregates::HistoryKind::Cancelled,
+            self.height,
+            timestamp_ms,
+            &ro.order,
+            OrderHistoryOptions::default(),
+        );
+        Ok(())
+    }
+
+    /// Check whether [`Self::cancel_pending_order_at`] would accept a cancel
+    /// without mutating sequencer state.
+    ///
+    /// `timestamp_ms` is accepted to keep the preflight boundary identical to
+    /// the apply boundary. It currently affects only cancellation history after
+    /// validation succeeds.
+    pub fn can_cancel_pending_order(
+        &self,
+        account_id: AccountId,
+        order_id: u64,
+        timestamp_ms: u64,
+    ) -> Result<(), SequencerError> {
+        let _ = timestamp_ms;
+        self.order_book
+            .can_cancel(account_id, order_id)
+            .map_err(cancel_error_to_sequencer_error)
+    }
+}
+
+fn cancel_error_to_sequencer_error(error: crate::order_book::CancelError) -> SequencerError {
+    match error {
+        crate::order_book::CancelError::NotFound => SequencerError::OrderNotFound,
+        crate::order_book::CancelError::WrongOwner => SequencerError::OrderOwnershipMismatch,
     }
 }

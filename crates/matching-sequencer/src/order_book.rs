@@ -122,6 +122,31 @@ pub(crate) enum CancelError {
 }
 
 impl OrderBook {
+    /// Validate a cancellation and return the order's current index.
+    ///
+    /// Both the read-only preflight and the mutating cancel path go through
+    /// this helper so persistence cannot admit a command that replay would
+    /// reject under the same state.
+    fn cancel_index(&self, account_id: AccountId, order_id: u64) -> Result<usize, CancelError> {
+        let Some(index) = self.orders.iter().position(|ro| ro.order.id == order_id) else {
+            return Err(CancelError::NotFound);
+        };
+
+        if self.orders[index].account_id != account_id {
+            return Err(CancelError::WrongOwner);
+        }
+
+        Ok(index)
+    }
+
+    pub(crate) fn can_cancel(
+        &self,
+        account_id: AccountId,
+        order_id: u64,
+    ) -> Result<(), CancelError> {
+        self.cancel_index(account_id, order_id).map(|_| ())
+    }
+
     pub fn new(ttl: u64) -> Self {
         Self {
             orders: Vec::new(),
@@ -465,14 +490,7 @@ impl OrderBook {
         account_id: AccountId,
         order_id: u64,
     ) -> Result<RestingOrder, CancelError> {
-        let Some(index) = self.orders.iter().position(|ro| ro.order.id == order_id) else {
-            return Err(CancelError::NotFound);
-        };
-
-        if self.orders[index].account_id != account_id {
-            return Err(CancelError::WrongOwner);
-        }
-
+        let index = self.cancel_index(account_id, order_id)?;
         let ro = self.orders.remove(index);
         Self::release_reservations(
             &mut self.balance_reservations,

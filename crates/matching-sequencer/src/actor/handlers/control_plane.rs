@@ -132,8 +132,8 @@ impl SequencerActorState {
         group_id: u64,
         market_id: MarketId,
     ) -> Result<(MarketGroup, bool), SequencerError> {
-        let mut validation = self.sequencer.clone();
-        validation.extend_market_group(group_id, market_id)?;
+        self.sequencer
+            .can_extend_market_group(group_id, market_id)?;
         self.persist_control_plane(&ControlPlaneCommand::ExtendMarketGroup {
             group_id,
             market_id,
@@ -405,11 +405,11 @@ impl SequencerActorState {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
         let target = PublicKey::from_compressed_bytes(&authenticated.target_pubkey)
             .ok_or(SequencerError::KeyNotFound)?;
-        // Validate the revocation (ownership + last-key lockout) against a clone
+        // Validate the revocation (ownership + last-key lockout)
         // before burning the nonce or writing the WAL, so a rejected revocation
         // doesn't consume the nonce.
-        let mut validation = self.sequencer.clone();
-        validation.revoke_signing_key(authenticated.account_id, &target)?;
+        self.sequencer
+            .can_revoke_signing_key(authenticated.account_id, &target)?;
         self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
             .await?;
         self.persist_control_plane(&ControlPlaneCommand::RevokeSigningKey {
@@ -479,8 +479,7 @@ impl SequencerActorState {
     ) -> Result<(), SequencerError> {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
         let revoked_at_ms = current_timestamp_ms();
-        let mut validation = self.sequencer.clone();
-        validation.revoke_api_key(
+        self.sequencer.can_revoke_api_key(
             authenticated.account_id,
             authenticated.api_key_id,
             revoked_at_ms,

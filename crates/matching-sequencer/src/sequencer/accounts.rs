@@ -70,6 +70,21 @@ impl BlockSequencer {
         account_id: AccountId,
         target: &crate::crypto::PublicKey,
     ) -> Result<(), SequencerError> {
+        self.can_revoke_signing_key(account_id, target)?;
+        self.pubkey_registry.remove(target);
+        crate::digest::refresh_account_keys_digest(
+            &mut self.accounts,
+            account_id,
+            &self.pubkey_registry,
+        );
+        Ok(())
+    }
+
+    pub fn can_revoke_signing_key(
+        &self,
+        account_id: AccountId,
+        target: &crate::crypto::PublicKey,
+    ) -> Result<(), SequencerError> {
         let registered = self
             .pubkey_registry
             .get(target)
@@ -85,12 +100,6 @@ impl BlockSequencer {
         if remaining <= 1 {
             return Err(SequencerError::LastSigningKey);
         }
-        self.pubkey_registry.remove(target);
-        crate::digest::refresh_account_keys_digest(
-            &mut self.accounts,
-            account_id,
-            &self.pubkey_registry,
-        );
         Ok(())
     }
 
@@ -195,21 +204,44 @@ impl BlockSequencer {
         api_key_id: u64,
         revoked_at_ms: u64,
     ) -> Result<(), SequencerError> {
+        let hash = self.api_key_hash_for_revocation(account_id, api_key_id)?;
         let account = self
             .accounts
             .get_mut(account_id)
-            .ok_or(SequencerError::ApiKeyNotFound)?;
+            .expect("account exists: validated above");
         let record = account
             .api_keys
             .iter_mut()
             .find(|k| k.id == api_key_id)
-            .ok_or(SequencerError::ApiKeyNotFound)?;
-        let hash = record.hash;
+            .expect("API key exists: validated above");
         if record.revoked_at_ms.is_none() {
             record.revoked_at_ms = Some(revoked_at_ms);
         }
         self.api_key_index.remove(&hash);
         Ok(())
+    }
+
+    pub fn can_revoke_api_key(
+        &self,
+        account_id: AccountId,
+        api_key_id: u64,
+        revoked_at_ms: u64,
+    ) -> Result<(), SequencerError> {
+        let _ = revoked_at_ms;
+        self.api_key_hash_for_revocation(account_id, api_key_id)
+            .map(|_| ())
+    }
+
+    fn api_key_hash_for_revocation(
+        &self,
+        account_id: AccountId,
+        api_key_id: u64,
+    ) -> Result<[u8; 32], SequencerError> {
+        self.accounts
+            .get(account_id)
+            .and_then(|account| account.api_keys.iter().find(|key| key.id == api_key_id))
+            .map(|record| record.hash)
+            .ok_or(SequencerError::ApiKeyNotFound)
     }
 
     /// Resolve a bearer token hash to its owning account, if the key is active

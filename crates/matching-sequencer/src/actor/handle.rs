@@ -2351,7 +2351,74 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_signed_cancel_replay_rejected() {
+    async fn failed_cancel_validation_does_not_advance_replay_nonce() {
+        let (seq, aid) = make_test_sequencer();
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        handle.register_pubkey(aid, pubkey).await.unwrap();
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&ms, 1, m0, 0, 500_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+
+        let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        let order_id = pending[0].order_id;
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+
+        let error = handle
+            .cancel_signed_order(crate::crypto::sign_cancel(
+                aid,
+                order_id + 1,
+                1,
+                genesis_hash,
+                &signing_key,
+            ))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SequencerError::OrderNotFound));
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().last_nonce,
+            0
+        );
+
+        handle
+            .cancel_signed_order(crate::crypto::sign_cancel(
+                aid,
+                order_id,
+                1,
+                genesis_hash,
+                &signing_key,
+            ))
+            .await
+            .expect("the same nonce should still authorize a valid cancel");
+
+        assert!(handle
+            .get_pending_orders(Some(aid))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().last_nonce,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_signed_cancel_replay_is_rejected_by_validation_first() {
         let (seq, aid) = make_test_sequencer();
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
@@ -2399,14 +2466,11 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert!(matches!(
-            replay_error,
-            SequencerError::ReplayNonceStale {
-                account_id,
-                nonce: 1,
-                last_nonce: 1
-            } if account_id == aid
-        ));
+        assert!(matches!(replay_error, SequencerError::OrderNotFound));
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().last_nonce,
+            1
+        );
     }
 
     #[tokio::test]
