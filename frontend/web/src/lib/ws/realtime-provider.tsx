@@ -1,9 +1,25 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 import { api } from "../api/client";
 import { useStore } from "../store";
 import { getBlockStream } from "./client";
+
+/**
+ * Min gap between REST stat-chip refreshes (vol / 24h / liq / traders). Blocks
+ * arrive ~every 2.5s; refreshing that often would hammer the API, so we coalesce
+ * to roughly one refetch per this window. Live enough for slow-moving stats.
+ */
+const STAT_REFRESH_MS = 5000;
+
+/**
+ * Timestamp (perf clock) of the last stat-chip refresh, module-scoped so the
+ * throttle holds across any number of listener registrations — React StrictMode
+ * double-invokes effects in dev, and HMR can briefly stack them. The block
+ * stream is a singleton too, so one shared gate is the right granularity.
+ */
+let lastStatRefresh = 0;
 
 /**
  * Owns the singleton block-stream connection for the whole app.
@@ -19,6 +35,8 @@ import { getBlockStream } from "./client";
  * On unmount: detach event listeners and close the socket.
  */
 export function RealtimeProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+
   useEffect(() => {
     const stream = getBlockStream();
     const {
@@ -37,6 +55,34 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     const offBlock = stream.on("block", (event) => {
       applyBlock(event.block);
+      // The stat chips (vol / 24h / liq / traders) live only in the REST market
+      // queries, which the store never writes to — so without this they freeze
+      // at first paint while the odds tick live. Nudge the mounted market
+      // queries to refetch so every number tracks the batches instead. Only
+      // ACTIVE observers refetch, so it's a no-op on pages not showing markets;
+      // react-query also dedupes an in-flight refetch (e.g. a reconnect replay
+      // burst). Coalesce to STAT_REFRESH_MS: blocks land ~every 2.5s and these
+      // stats don't need sub-block freshness, so we spare the API — especially
+      // the full /v1/markets list on the home page — while staying "live". The
+      // odds themselves still update every block via the store, unthrottled.
+      const now = performance.now();
+      if (now - lastStatRefresh >= STAT_REFRESH_MS) {
+        lastStatRefresh = now;
+        void queryClient.invalidateQueries({
+          predicate: (q) => {
+            const k = q.queryKey;
+            // Home-page markets list: ["markets", "all"] — carries the stat
+            // fields (vol / liq / traders / 24h) for every card.
+            if (k[0] === "markets") return true;
+            // Market-detail stat object: exactly ["market", id]. Deliberately
+            // NOT its chart sub-queries (["market", id, "prices", …] /
+            // [..., "candles", …] / [..., "history", "24h"]) — those already
+            // move live off the WS store, so re-pulling them every few seconds
+            // would only add API load and chart flicker.
+            return k[0] === "market" && k.length === 2;
+          },
+        });
+      }
     });
 
     let cancelled = false;
@@ -82,7 +128,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       offBlock();
       stream.disconnect();
     };
-  }, []);
+    // `queryClient` is created once in <Providers> (useState) so its identity is
+    // stable — listing it here satisfies exhaustive-deps without re-running the
+    // effect and re-opening the socket.
+  }, [queryClient]);
 
   return <>{children}</>;
 }
