@@ -683,8 +683,21 @@ PY
 check_bots() {
     section "8. Bot decisions"
     http GET /v1/bots/decisions
-    if is_2xx "$HTTP_CODE"; then pass "/v1/bots/decisions -> $HTTP_CODE"
-    else fail "/v1/bots/decisions -> $HTTP_CODE: $HTTP_BODY"; fi
+    if ! is_2xx "$HTTP_CODE"; then
+        fail "/v1/bots/decisions -> $HTTP_CODE: $HTTP_BODY"; return
+    fi
+    pass "/v1/bots/decisions -> $HTTP_CODE"
+    # HTTP 200 alone is not enough: the arena decisions DB can be present but
+    # unreadable (e.g. a column-type mismatch), which returns 200 with
+    # db_available=false + an error and silently empties the arena view.
+    local db_ok err
+    db_ok="$(echo "$HTTP_BODY" | jget db_available)"
+    err="$(echo "$HTTP_BODY" | jget error)"
+    if [[ "$db_ok" == "false" || "$db_ok" == "False" ]]; then
+        fail "arena decisions DB unreadable (db_available=false): ${err:-unknown}"
+    else
+        pass "arena decisions DB readable (db_available=$db_ok)"
+    fi
 }
 
 # ── Run ─────────────────────────────────────────────────────────────────────

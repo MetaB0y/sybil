@@ -168,8 +168,8 @@ pub struct BotDecisionResponse {
     pub article_urls: Value,
     pub llm_duration_s: Option<f64>,
     pub balance: Option<f64>,
-    pub yes_pos: Option<i64>,
-    pub no_pos: Option<i64>,
+    pub yes_pos: Option<f64>,
+    pub no_pos: Option<f64>,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -821,8 +821,8 @@ mod tests {
                 raw_llm_response TEXT,
                 llm_duration_s REAL,
                 balance REAL,
-                yes_pos INTEGER,
-                no_pos INTEGER
+                yes_pos REAL,
+                no_pos REAL
             );",
         )
         .expect("create decisions table");
@@ -871,7 +871,7 @@ mod tests {
                     trader_name, market_id, market_name, timestamp, article_urls,
                     analysis, fair_value, market_price, orders, motivation,
                     raw_llm_response, llm_duration_s, balance, yes_pos, no_pos
-                ) VALUES (?1, ?2, 'Market', ?3, '[]', 'analysis', ?4, 0.40, '[]', 'why', '{}', 1.0, 99.0, 0, 0)",
+                ) VALUES (?1, ?2, 'Market', ?3, '[]', 'analysis', ?4, 0.40, '[]', 'why', '{}', 1.0, 99.0, 5.0, 3.0)",
                 rusqlite::params![trader, market_id, timestamp, fair_value],
             )
             .expect("insert decision");
@@ -890,6 +890,8 @@ mod tests {
         assert_eq!(rows[0].trader_name, "alice");
         assert_eq!(rows[0].market_id, Some(7));
         assert_eq!(rows[0].fair_value, Some(0.42));
+        assert_eq!(rows[0].yes_pos, Some(5.0));
+        assert_eq!(rows[0].no_pos, Some(3.0));
     }
 
     #[test]
