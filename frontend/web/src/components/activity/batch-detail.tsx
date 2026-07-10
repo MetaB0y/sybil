@@ -355,8 +355,10 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
         </Link>
       </div>
 
-      {/* Clear price (real) */}
-      <span style={cellNumber("var(--fg-1)", 13)}>
+      {/* Clear price (real). 12px, matching the other money columns: at 13px
+          and in --fg-1 it sat at the same size and colour as the Inter market
+          title beside it, which made the shared mono face read as sans. */}
+      <span style={cellNumber("var(--fg-1)", 12)}>
         {formatCents(row.clearPriceNanos)}
       </span>
 
