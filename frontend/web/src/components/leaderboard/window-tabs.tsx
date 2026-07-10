@@ -29,6 +29,12 @@ export function WindowTabs({
             key={w}
             type="button"
             onClick={() => onChange(w)}
+            onMouseEnter={(e) => {
+              if (!active) e.currentTarget.style.color = "var(--fg-1)";
+            }}
+            onMouseLeave={(e) => {
+              if (!active) e.currentTarget.style.color = "var(--fg-3)";
+            }}
             style={{
               padding: "4px 12px",
               minHeight: 40,
@@ -40,6 +46,8 @@ export function WindowTabs({
               fontSize: 11,
               letterSpacing: "var(--track-wide)",
               cursor: "pointer",
+              transition:
+                "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
             }}
           >
             {w}
