@@ -78,7 +78,12 @@ struct Args {
     )]
     min_confirmations: u64,
     /// Maximum eth_getLogs block span per poll.
-    #[arg(long, env = "SYBIL_L1_MAX_BLOCK_SPAN", default_value_t = 1_000)]
+    #[arg(
+        long,
+        env = "SYBIL_L1_MAX_BLOCK_SPAN",
+        default_value_t = 1_000,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
     max_block_span: u64,
     /// Poll interval in milliseconds.
     #[arg(long, env = "SYBIL_L1_POLL_MS", default_value_t = 1_000)]
@@ -153,6 +158,15 @@ enum IndexerError {
         confirmations: u64,
         min_confirmations: u64,
     },
+    #[error(
+        "configured start block {start_block} is ahead of persisted cursor {persisted_cursor}; \
+         refusing to skip unprocessed L1 blocks (to intentionally re-point at a new \
+         deployment, delete the cursor file at SYBIL_L1_CURSOR_PATH / --cursor-path)"
+    )]
+    StartBlockAheadOfCursor {
+        start_block: u64,
+        persisted_cursor: u64,
+    },
 }
 
 impl IndexerError {
@@ -187,6 +201,17 @@ fn warn_if_low_confirmation_depth(confirmations: u64) {
              mis-credit already-processed blocks",
             confirmations
         );
+    }
+}
+
+fn effective_scan_start(start_block: u64, persisted_cursor: Option<u64>) -> Result<u64> {
+    match persisted_cursor {
+        Some(cursor) if start_block > cursor => Err(IndexerError::StartBlockAheadOfCursor {
+            start_block,
+            persisted_cursor: cursor,
+        }),
+        Some(cursor) => Ok(cursor),
+        None => Ok(start_block),
     }
 }
 
@@ -414,12 +439,25 @@ async fn main() -> Result<()> {
         args.sybil_service_token.clone(),
     );
 
-    let mut next_from = args.start_block;
-    if let Some(path) = args.cursor_path.as_deref() {
-        if let Some(persisted) = load_cursor(path, &vault_hex, args.chain_id)? {
-            next_from = persisted.max(args.start_block);
-            tracing::info!(next_from, path = %path.display(), "l1.indexer.cursor_restored");
-        }
+    let persisted_cursor = match args.cursor_path.as_deref() {
+        Some(path) => load_cursor(path, &vault_hex, args.chain_id)?,
+        None => None,
+    };
+    let mut next_from = effective_scan_start(args.start_block, persisted_cursor)?;
+    match persisted_cursor {
+        Some(cursor) => tracing::info!(
+            effective_start = next_from,
+            persisted_cursor = cursor,
+            configured_start = args.start_block,
+            reason = "persisted cursor; resume without rescanning processed blocks",
+            "l1.indexer.scan_start"
+        ),
+        None => tracing::info!(
+            effective_start = next_from,
+            configured_start = args.start_block,
+            reason = "no persisted cursor; use configured start block",
+            "l1.indexer.scan_start"
+        ),
     }
 
     loop {
@@ -831,6 +869,7 @@ fn strip_hex_prefix(value: &str) -> &str {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use tracing::instrument::WithSubscriber as _;
 
@@ -930,6 +969,10 @@ mod tests {
         latest: u64,
         logs: Vec<EthLog>,
         withdrawal_logs: Vec<EthLog>,
+        deposit_log_ranges: Mutex<Vec<(u64, u64)>>,
+        withdrawal_log_ranges: Mutex<Vec<(u64, u64)>>,
+        fail_deposit_logs_once_at: Option<u64>,
+        deposit_log_failure_triggered: AtomicBool,
         /// deposit_id -> canonical on-chain root returned by depositRootByCount.
         onchain_roots: std::collections::HashMap<u64, Bytes32>,
         /// Records (count, block) each reconciliation queried.
@@ -947,6 +990,17 @@ mod tests {
             from_block: u64,
             to_block: u64,
         ) -> Result<Vec<EthLog>> {
+            self.deposit_log_ranges
+                .lock()
+                .unwrap()
+                .push((from_block, to_block));
+            if self.fail_deposit_logs_once_at == Some(from_block)
+                && !self
+                    .deposit_log_failure_triggered
+                    .swap(true, Ordering::SeqCst)
+            {
+                return Err(IndexerError::MissingRpcResult);
+            }
             Ok(self
                 .logs
                 .iter()
@@ -968,6 +1022,10 @@ mod tests {
             from_block: u64,
             to_block: u64,
         ) -> Result<Vec<EthLog>> {
+            self.withdrawal_log_ranges
+                .lock()
+                .unwrap()
+                .push((from_block, to_block));
             Ok(self
                 .withdrawal_logs
                 .iter()
@@ -1141,6 +1199,28 @@ mod tests {
     fn confirmation_safety_disabled_minimum_accepts_any_depth() {
         assert!(check_confirmation_safety(0, 0).is_ok());
         assert!(check_confirmation_safety(u64::MAX, 0).is_ok());
+    }
+
+    #[test]
+    fn no_cursor_uses_configured_start_block() {
+        assert_eq!(effective_scan_start(123, None).unwrap(), 123);
+    }
+
+    #[test]
+    fn configured_start_behind_cursor_resumes_without_rescanning() {
+        assert_eq!(effective_scan_start(100, Some(123)).unwrap(), 123);
+        assert_eq!(effective_scan_start(123, Some(123)).unwrap(), 123);
+    }
+
+    #[test]
+    fn configured_start_ahead_of_cursor_is_refused() {
+        assert!(matches!(
+            effective_scan_start(124, Some(123)),
+            Err(IndexerError::StartBlockAheadOfCursor {
+                start_block: 124,
+                persisted_cursor: 123,
+            })
+        ));
     }
 
     #[test]
@@ -1388,6 +1468,60 @@ mod tests {
         let next = run_once(&l1, &sink, &args, vault, 5).await.unwrap();
         assert_eq!(next, None);
         assert!(sink.submitted.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn wide_gap_is_scanned_in_bounded_chunks_and_resumes_after_failure() {
+        let vault = [0x10; 20];
+        let l1 = FakeL1 {
+            latest: 8,
+            fail_deposit_logs_once_at: Some(3),
+            ..Default::default()
+        };
+        let sink = FakeSink::default();
+        let mut args = test_args(0);
+        args.max_block_span = 3;
+        let mut cursor = 0;
+
+        cursor = run_once(&l1, &sink, &args, vault, cursor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cursor, 3);
+
+        let failed_cursor = cursor;
+        assert!(matches!(
+            run_once(&l1, &sink, &args, vault, cursor).await,
+            Err(IndexerError::MissingRpcResult)
+        ));
+        assert_eq!(cursor, failed_cursor);
+
+        cursor = run_once(&l1, &sink, &args, vault, cursor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cursor, 6);
+        cursor = run_once(&l1, &sink, &args, vault, cursor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cursor, 9);
+        assert_eq!(
+            run_once(&l1, &sink, &args, vault, cursor).await.unwrap(),
+            None
+        );
+
+        let deposit_ranges = l1.deposit_log_ranges.lock().unwrap();
+        assert_eq!(deposit_ranges.as_slice(), &[(0, 2), (3, 5), (3, 5), (6, 8)]);
+        assert!(deposit_ranges
+            .iter()
+            .all(|(from, to)| from <= to && to - from < args.max_block_span));
+        let withdrawal_ranges = l1.withdrawal_log_ranges.lock().unwrap();
+        assert_eq!(withdrawal_ranges.as_slice(), &[(0, 2), (3, 5), (6, 8)]);
+        assert!(withdrawal_ranges
+            .iter()
+            .all(|(from, to)| from <= to && to - from < args.max_block_span));
+        assert_eq!(sink.observed_heights.lock().unwrap().as_slice(), &[2, 5, 8]);
     }
 
     #[test]
