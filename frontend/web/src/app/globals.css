@@ -713,6 +713,62 @@ textarea {
   gap: 10px;
 }
 
+/* Arena bot-selector dropdowns — hover / focus border feedback + transition,
+   matching the app's input convention (nav-search, settings inputs). */
+.arena-select {
+  min-height: 40px;
+  min-width: 180px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--fg-1);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+.arena-select:hover {
+  border-color: var(--border-3);
+}
+.arena-select:focus,
+.arena-select:focus-visible {
+  border-color: var(--border-focus);
+}
+
+/* Arena Bot Roster cards — resting look unchanged; adds the hover / press
+   feedback + transition an interactive card should have (inline styles beat a
+   stylesheet :hover, so the visuals live here). Active card keeps the accent. */
+.arena-bot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 40px;
+  padding: 14px;
+  text-align: left;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-1);
+  background: var(--surface-1);
+  color: var(--fg-1);
+  cursor: pointer;
+  box-shadow: var(--shadow-inset-top);
+  transition: border-color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+}
+.arena-bot-card[data-active="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-1));
+}
+.arena-bot-card:active {
+  transform: translateY(1px);
+}
+@media (hover: hover) {
+  .arena-bot-card:not([data-active="true"]):hover {
+    border-color: var(--border-3);
+    background: var(--surface-2);
+  }
+}
+
 .settings-inline-form,
 .settings-profile-grid,
 .settings-row {
