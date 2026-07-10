@@ -8,6 +8,7 @@ import {
   RANGE_MS,
   type ChartRange,
 } from "@/components/chart-range-bar";
+import { EventActivity } from "@/components/event-activity";
 import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
 import { MarketThumb } from "@/components/market-thumb";
@@ -114,7 +115,7 @@ export default function MarketDetailPage({
                 <ChartSection marketId={marketId} />
                 <EventHoldings marketId={marketId} />
                 <DescriptionBlock market={market} />
-                <DiscussionPlaceholder />
+                <EventActivity marketId={marketId} />
               </div>
 
               <MarketRail marketId={marketId} />
@@ -777,68 +778,6 @@ function ProposeResolution() {
         coming soon
       </span>
     </div>
-  );
-}
-
-/**
- * Empty Discussion card. Backend has no comments endpoint today; this slot
- * reserves the layout so the page doesn't shift later when the thread lands.
- */
-function DiscussionPlaceholder() {
-  return (
-    <section
-      style={{
-        padding: "var(--space-5)",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-2)",
-        borderRadius: "var(--radius-lg)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-2)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          gap: "var(--space-3)",
-        }}
-      >
-        <h3
-          style={{
-            fontFamily: "var(--font-sans)",
-            fontSize: 16,
-            fontWeight: 600,
-            color: "var(--fg-1)",
-            margin: 0,
-          }}
-        >
-          Discussion
-        </h3>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            color: "var(--fg-4)",
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
-          coming soon
-        </span>
-      </div>
-      <p
-        style={{
-          margin: 0,
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-          lineHeight: "20px",
-          color: "var(--fg-3)",
-        }}
-      >
-        Comments are coming.
-      </p>
-    </section>
   );
 }
 
