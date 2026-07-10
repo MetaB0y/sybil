@@ -33,6 +33,7 @@ export function AccountChip() {
   if (!session) {
     return (
       <button
+        className="account-chip"
         type="button"
         onClick={() => setOpen(true)}
         style={chipButtonStyle(false)}
@@ -96,6 +97,7 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
       <button
+        className="account-chip"
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
@@ -103,7 +105,10 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         style={chipButtonStyle(true)}
         title={`Portfolio ${total} · Available ${cash}${reserved ? ` · Reserved ${reserved}` : ""} · Account #${accountId}`}
       >
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+        <span
+          className="account-chip-balance"
+          style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+        >
           <span style={{ color: "var(--fg-1)" }}>{total}</span>
           <span aria-hidden style={{ color: "var(--fg-4)" }}>
             /
@@ -279,6 +284,7 @@ function MenuItem({
 }) {
   return (
     <button
+      className="account-chip"
       type="button"
       role="menuitem"
       onClick={onClick}

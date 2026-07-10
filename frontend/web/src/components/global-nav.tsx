@@ -40,6 +40,7 @@ export function GlobalNav() {
     <header className="global-nav">
       {/* Wordmark + status pill */}
       <Link
+        className="global-nav-brand"
         href="/"
         style={{
           display: "inline-flex",

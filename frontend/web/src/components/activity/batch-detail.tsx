@@ -105,7 +105,10 @@ export function BatchDetail({ row }: { row: BatchRow }) {
         <MetaPair label="Algo" value="uniform clearing · pro-rata" />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}>
+      <div
+        className="activity-batch-detail-grid"
+        style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}
+      >
         {/* Left: market rows */}
         <div>
           <div

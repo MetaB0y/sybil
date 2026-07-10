@@ -34,6 +34,8 @@ export function PortfolioTabs({
   return (
     <div
       role="tablist"
+      aria-label="Portfolio sections"
+      className="portfolio-tabs"
       style={{
         display: "flex",
         gap: "var(--space-4)",

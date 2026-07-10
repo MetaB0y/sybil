@@ -44,7 +44,7 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
     },
   ];
   return (
-    <section style={{ padding: "20px 24px 4px" }}>
+    <section className="activity-pulse-section" style={{ padding: "20px 24px 4px" }}>
       <div
         style={{
           display: "flex",

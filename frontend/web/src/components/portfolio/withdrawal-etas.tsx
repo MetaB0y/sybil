@@ -77,6 +77,7 @@ export function WithdrawalEtas({
       }}
     >
       <div
+        className="withdrawal-section-head"
         style={{
           padding: "12px 16px",
           borderBottom: "1px solid var(--border-1)",
@@ -125,6 +126,7 @@ function WithdrawalRow({
   });
   return (
     <div
+      className="withdrawal-row"
       style={{
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr) auto",

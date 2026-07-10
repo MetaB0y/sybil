@@ -28,17 +28,23 @@ export function PlaceOrderModal({
 }) {
   useEffect(() => {
     if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
   }, [open, onClose]);
 
   if (!open || typeof document === "undefined") return null;
 
   return createPortal(
     <div
+      className="place-order-overlay"
       role="dialog"
       aria-modal="true"
       aria-label="Place order"
@@ -81,6 +87,7 @@ function ModalBody({
   return (
     <div
       onClick={(e) => e.stopPropagation()}
+      className="no-scrollbar place-order-sheet"
       style={{
         width: "100%",
         maxWidth: 420,
@@ -92,9 +99,9 @@ function ModalBody({
         boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
         fontFamily: "var(--font-sans)",
       }}
-      className="no-scrollbar"
     >
       <div
+        className="place-order-sheet-header"
         style={{
           display: "flex",
           alignItems: "center",
@@ -137,6 +144,7 @@ function ModalBody({
           )}
         </div>
         <button
+          className="place-order-close"
           type="button"
           onClick={onClose}
           aria-label="Close"
@@ -155,7 +163,7 @@ function ModalBody({
         </button>
       </div>
 
-      <div style={{ padding: "16px 18px 18px" }}>
+      <div className="place-order-sheet-body" style={{ padding: "16px 18px 18px" }}>
         {isPending && (
           <div
             style={{
@@ -185,7 +193,9 @@ function ModalBody({
             This market has closed. Trading is disabled.
           </div>
         )}
-        {selected && !closed && <BuyBox outcome={selected} />}
+        {selected && !closed && (
+          <BuyBox outcome={selected} requireConfirmation />
+        )}
       </div>
     </div>
   );

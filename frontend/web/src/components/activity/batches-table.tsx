@@ -58,8 +58,9 @@ export function BatchesTable({
   };
 
   return (
-    <section style={{ padding: "26px 24px 40px" }}>
+    <section className="activity-batches-section" style={{ padding: "26px 24px 40px" }}>
       <div
+        className="activity-table-head"
         style={{
           display: "flex",
           alignItems: "baseline",

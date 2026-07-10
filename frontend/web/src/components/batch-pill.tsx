@@ -78,6 +78,7 @@ export function BatchPill() {
 
   return (
     <div
+      className="batch-pill"
       style={{
         display: "inline-flex",
         alignItems: "center",

@@ -112,6 +112,7 @@ export default function MarketDetailPage({
 
             <div
               className="market-detail-grid"
+              data-testid="market-detail-grid"
             >
               <div
                 className="no-scrollbar market-detail-content"
