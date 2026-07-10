@@ -118,11 +118,11 @@ openvm-commit output_dir="target/openvm/sybil":
         --output-dir {{output_dir}}
 
 # Convert a prepared guest input artifact into OpenVM CLI input JSON
-openvm-input guest_input="/tmp/sybil-guest-input.msgpack" openvm_input="/tmp/sybil-openvm-input.json":
+openvm-input guest_input="target/sybil-guest-input.msgpack" openvm_input="target/sybil-openvm-input.json":
     cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-input --guest-input {{guest_input}} --openvm-input {{openvm_input}}
 
 # Run the Sybil OpenVM guest against an OpenVM CLI input JSON file
-openvm-run input="/tmp/sybil-openvm-input.json":
+openvm-run input="target/sybil-openvm-input.json":
     cargo openvm run --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}}
 
 # Run local sequencer -> witgen -> prover input -> OpenVM smoke; prove=true adds app proof verification, never EVM proving.
@@ -169,19 +169,19 @@ zk-smoke prove="false":
     echo "zk_smoke=ok"
 
 # Generate an OpenVM app proof for the Sybil guest
-openvm-prove-app input="/tmp/sybil-openvm-input.json" proof="/tmp/sybil-openvm.app.proof":
+openvm-prove-app input="target/sybil-openvm-input.json" proof="target/sybil-openvm.app.proof":
     cargo openvm prove app --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}} --proof {{proof}}
 
 # Generate an OpenVM EVM proof for the Sybil guest
-openvm-prove-evm input="/tmp/sybil-openvm-input.json" proof="/tmp/sybil-openvm.evm.proof":
+openvm-prove-evm input="target/sybil-openvm-input.json" proof="target/sybil-openvm.evm.proof":
     cargo openvm prove evm --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil --input {{input}} --proof {{proof}}
 
 # Verify an OpenVM app proof for the Sybil guest
-openvm-verify-app proof="/tmp/sybil-openvm.app.proof":
+openvm-verify-app proof="target/sybil-openvm.app.proof":
     cargo openvm verify app --manifest-path zk/openvm-guest/Cargo.toml --proof {{proof}}
 
 # Verify an OpenVM EVM proof locally with the generated Halo2 verifier artifacts
-openvm-verify-evm proof="/tmp/sybil-openvm.evm.proof":
+openvm-verify-evm proof="target/sybil-openvm.evm.proof":
     cargo openvm verify evm --proof {{proof}}
 
 # Inspect a serialized state-transition proof job
@@ -189,47 +189,47 @@ prover-inspect job:
     cargo run -p sybil-prover -- inspect --job {{job}}
 
 # Validate a proof job and emit a serialized OpenVM guest input artifact
-prover-prepare job guest_input="/tmp/sybil-guest-input.msgpack" public_input_hash="/tmp/sybil-public-input-hash.hex":
+prover-prepare job guest_input="target/sybil-guest-input.msgpack" public_input_hash="target/sybil-public-input-hash.hex":
     cargo run -p sybil-prover -- prepare --job {{job}} --guest-input {{guest_input}} --public-input-hash {{public_input_hash}}
 
 # Validate a proof job, bind a deterministic file DA provider ref, and emit all host artifacts
-prover-prepare-file-da job guest_input="/tmp/sybil-guest-input.msgpack" payload_dir="/tmp/sybil-da" manifest="/tmp/sybil-da-manifest.json" public_input_hash="/tmp/sybil-public-input-hash.hex":
+prover-prepare-file-da job guest_input="target/sybil-guest-input.msgpack" payload_dir="target/sybil-da" manifest="target/sybil-da-manifest.json" public_input_hash="target/sybil-public-input-hash.hex":
     cargo run -p sybil-prover -- prepare-file-da --job {{job}} --guest-input {{guest_input}} --payload-dir {{payload_dir}} --manifest {{manifest}} --public-input-hash {{public_input_hash}}
 
 # Run one local prover-worker scan over exported proof jobs
-prover-worker-once jobs_dir="/tmp/sybil-prover-jobs" artifacts_dir="/tmp/sybil-prover-artifacts":
+prover-worker-once jobs_dir="target/sybil-prover-jobs" artifacts_dir="target/sybil-prover-artifacts":
     cargo run -p sybil-prover -- worker --jobs-dir {{jobs_dir}} --artifacts-dir {{artifacts_dir}} --once
 
 # Run the local prover worker continuously
-prover-worker jobs_dir="/tmp/sybil-prover-jobs" artifacts_dir="/tmp/sybil-prover-artifacts" poll_ms="1000":
+prover-worker jobs_dir="target/sybil-prover-jobs" artifacts_dir="target/sybil-prover-artifacts" poll_ms="1000":
     cargo run -p sybil-prover -- worker --jobs-dir {{jobs_dir}} --artifacts-dir {{artifacts_dir}} --poll-ms {{poll_ms}}
 
 # Serve prepared prover artifact status and Prometheus metrics
-prover-serve artifacts_dir="/tmp/sybil-prover-artifacts" jobs_dir="/tmp/sybil-prover-jobs" bind="127.0.0.1:3002":
+prover-serve artifacts_dir="target/sybil-prover-artifacts" jobs_dir="target/sybil-prover-jobs" bind="127.0.0.1:3002":
     cargo run -p sybil-prover -- serve --artifacts-dir {{artifacts_dir}} --jobs-dir {{jobs_dir}} --bind {{bind}}
 
 # Write the canonical witness payload and provider-neutral DA manifest from prepared guest input
-prover-publish-da guest_input="/tmp/sybil-guest-input.msgpack" payload="/tmp/sybil-da-witness.bin" manifest="/tmp/sybil-da-manifest.json":
+prover-publish-da guest_input="target/sybil-guest-input.msgpack" payload="target/sybil-da-witness.bin" manifest="target/sybil-da-manifest.json":
     cargo run -p sybil-prover -- publish-da --guest-input {{guest_input}} --payload {{payload}} --manifest {{manifest}}
 
 # Encode a SybilSettlement.submitStateRoot transaction from guest input and proof bytes
-prover-submit-state-root settlement guest_input="/tmp/sybil-guest-input.msgpack" proof="/tmp/sybil-openvm.app.proof" calldata="/tmp/sybil-submit-state-root.calldata":
+prover-submit-state-root settlement guest_input="target/sybil-guest-input.msgpack" proof="target/sybil-openvm.app.proof" calldata="target/sybil-submit-state-root.calldata":
     cargo run -p sybil-prover -- submit-state-root --settlement {{settlement}} --guest-input {{guest_input}} --proof {{proof}} --calldata {{calldata}}
 
 # Encode calldata plus a file-based eth_sendTransaction request for large proof bytes
-prover-submit-state-root-rpc settlement from gas="0x1c9c380" guest_input="/tmp/sybil-guest-input.msgpack" proof="/tmp/sybil-openvm.app.proof" calldata="/tmp/sybil-submit-state-root.calldata" rpc_request="/tmp/sybil-submit-state-root-rpc.json":
+prover-submit-state-root-rpc settlement from gas="0x1c9c380" guest_input="target/sybil-guest-input.msgpack" proof="target/sybil-openvm.app.proof" calldata="target/sybil-submit-state-root.calldata" rpc_request="target/sybil-submit-state-root-rpc.json":
     cargo run -p sybil-prover -- submit-state-root --settlement {{settlement}} --guest-input {{guest_input}} --proof {{proof}} --calldata {{calldata}} --rpc-request {{rpc_request}} --from {{from}} --gas {{gas}}
 
 # Encode a real OpenVM EVM proof JSON for OpenVmVerifierAdapter and submitStateRoot
-prover-submit-state-root-evm-rpc settlement from gas="0x1c9c380" guest_input="/tmp/sybil-guest-input.msgpack" proof="/tmp/sybil-openvm.evm.proof" calldata="/tmp/sybil-submit-state-root.calldata" rpc_request="/tmp/sybil-submit-state-root-rpc.json":
+prover-submit-state-root-evm-rpc settlement from gas="0x1c9c380" guest_input="target/sybil-guest-input.msgpack" proof="target/sybil-openvm.evm.proof" calldata="target/sybil-submit-state-root.calldata" rpc_request="target/sybil-submit-state-root-rpc.json":
     cargo run -p sybil-prover -- submit-state-root --settlement {{settlement}} --guest-input {{guest_input}} --proof {{proof}} --proof-format openvm-evm-json --calldata {{calldata}} --rpc-request {{rpc_request}} --from {{from}} --gas {{gas}}
 
 # Export the latest committed sequencer block as a portable proof job
-witgen-export-latest store job="/tmp/sybil-proof-job.msgpack":
+witgen-export-latest store job="target/sybil-proof-job.msgpack":
     cargo run -p sybil-prover --features sequencer-store -- witgen export-latest --store {{store}} --job {{job}}
 
 # Create a one-block local sequencer smoke fixture and export its proof job
-witgen-smoke-job store="/tmp/sybil-smoke.redb" job="/tmp/sybil-proof-job.msgpack":
+witgen-smoke-job store="target/sybil-smoke.redb" job="target/sybil-proof-job.msgpack":
     cargo run -p sybil-prover --features sequencer-store -- witgen smoke-job --store {{store}} --job {{job}}
 
 # Clean and rebuild
