@@ -1,24 +1,55 @@
 ---
 tags: [sybil, roadmap, backlog-triage]
-status: current (reviewed by orchestrator 2026-07-10)
-date: 2026-07-10
+status: current (refreshed by orchestrator 2026-07-11 early AM — post-landing-wave + escape-arc dispatch)
+date: 2026-07-10 (updated 2026-07-11)
 supersedes: the 2026-07-10 morning roadmap (session artifact, archived in ~/sybil-handoff-artifacts-2026-07-10/)
-sources: full Linear sweep (76 open → 71 after flips), repo @ main d2b987d5, ADR set 0001–0015
+sources: full Linear sweep, repo @ main 757efb06, ADR set 0001–0015
 ---
 
-# Sybil roadmap — 2026-07-10 evening (post-landing-wave)
+# Sybil roadmap — 2026-07-10 evening, refreshed 2026-07-11 (post-landing-wave, escape arc live)
 
-## 1. Current state
+## 1. Current state (refreshed 2026-07-11 early AM)
 
-Main moved `060dec4f` → `d2b987d5` today: OpenVM 2.0.0 (SWIRL) with path-independent guest builds (canonical pin `app_exe_commit 0x000f896e…`), fresh-genesis devnet redeploy (genesis `e16c7655…`, healthy), the whole SYB-252 money-path punch-list landed (12/13 children), golden-vector single source, compose integration harness + deterministic seeder, mobile frontend deployed, backup/restore drill + synthetic monitoring live, restart-resilience gate. The 2026-07 review debt is nearly retired: of the SYB-269 adversarial findings only ZK-1 (270), L1-1 (272) — both mid-lane — and API-2 (275, rides 237) remain. Tonight's triage flipped five stale-but-landed tickets Done (225, 216, 28, 29, 76): the M4 "ZK settlement" milestone and the witness-schema/DA design arcs are, in substance, finished. Open count is now ~71, of which ~40 are deliberately parked strategic tracks (TEE, Sepolia, selective-reveal proofs, sponsors, M6 growth). The near-term game: finish the in-flight soundness/security lanes, then pivot from "fix the reviewed" to the two structural arcs the ADRs already ratified — escape-claim implementation (custody) and encrypted DA (privacy) — while keeping the devnet demo sharp for the Polymarket-refugee-quant wedge.
+The full witness-v6 + wire-v7 landing wave is **done and deployed**. Main is at
+`757efb06`; the fresh-genesis devnet redeploy is live and healthy at genesis
+`ecf25142a6041a682fc903afbf0bee405450a9ff324327a19b104e235e2bdde5` (smoke 47/0,
+restart-resilient). What landed since the evening draft: **SYB-270** witness v6
+(guest keys_digest transition constraint — last HIGH soundness finding closed),
+**SYB-272** wire v7 deposit-quarantine (ADR-0015), **SYB-237** per-account read
+auth + **SYB-271** atomic create-with-initial-key (privacy leak closed),
+**SYB-265** reservation-restore hardening (→ SYB-252 money-path umbrella retired),
+**SYB-246** economic property catalog, **SYB-233** local `just zk-rebuild-check`
+guest-reproducibility gate, the conservative **dependency refresh** (commonware
+pinned back to 2026.4.0), proof-lag monitoring, and the guest repin
+(`app_exe_commit 0x000a9cb1…` / `app_vm_commit 0x007a02fc…`). The SYB-269
+adversarial-review umbrella is closed; only the SYB-275 residual (public fill-
+history deanonymization) remains, re-scoped.
 
-## 2. In flight (landing today/tomorrow — do not re-plan)
+The project has now **pivoted from "fix the reviewed" to the custody arc**. The
+escape-claim plan (`design/escape-claim-plan.md`) and its Stage-0 interface
+freeze (`design/escape-claim-stage0-brief.md`, landed `fd3580d9`) are done; the
+critical path is `0 → {1a ∥ 1b ∥ 2 ∥ 3} → 4 → 5`. This is the single biggest
+credibility item for real-money custody. Encrypted DA (privacy, SYB-120) is the
+second ratified structural arc, sequenced after the custody arc frees a slot.
 
-- **SYB-270 witness-v6** — witnessed key events + guest keys_digest transition constraint; wire v6; fresh genesis + fingerprint refresh at end of session. Closes the last HIGH soundness finding.
-- **SYB-237 Phase 1b** read-auth (option A ratified) + **SYB-271** atomic create-with-initial-key (271 already flipped Done; 1b in lane).
-- **SYB-272 deposit-quarantine** (option 1 ratified; ADR-0015 already committed `b3041997`; implementation in lane).
-- **Dependency-update pass** — queued behind the heavy lanes.
-- After 270+272 land: close SYB-269 umbrella (only 275 residual remains, re-scoped per comment).
+## 2. In flight (escape-claim custody arc — do not re-plan)
+
+- **Stage 1a — market-leaf `last_clearing_prices` + transition constraint**
+  (codex lane, ws3). Adds the price field positions are valued against at rest;
+  wire v7→v8; owns the main-guest repin. Rides a later fresh genesis.
+- **Stage 3 — vault `escapeClaim` + second (`escapeVerifier`) pin** (codex lane,
+  ws2). L1-only Solidity/Foundry; no genesis coupling; newest-root-only (D8),
+  pause-bypass (D9), shared nullifier map. Devnet-deployable independently.
+- **Next lanes (held, not yet dispatched):** **Stage 1b** (main-guest in-guest
+  P-256 / WebAuthn signature verification — ADR-0008; the hard soundness
+  prerequisite that must precede any *live* escape deploy) — held because it
+  shares 1a's fresh-genesis/repin window (can't run as a blind parallel lane) and
+  wants an adversarial review before repin. **Stage 2** (escape guest, Form L) —
+  its valuation arm needs 1a's types landed in-tree first. Both become
+  dispatchable the moment 1a lands.
+- **Four Stage-0 readings await Valery's one-word ratify** (see §4.0) — none
+  block 1a or 3 (they govern guest-internal valuation/claim-bytes, not the L1
+  struct or the leaf encoding), so the lanes proceed against the frozen shapes.
 
 ## 3. Prioritized lanes — next ~2 weeks
 
@@ -26,10 +57,10 @@ Ordering reflects: soundness > custody/escape > privacy > product polish > ops. 
 
 | # | Lane | Size | Depends on | Who |
 |---|------|------|-----------|-----|
-| 1 | **Post-v6 verification + closeout** — verify fresh genesis, fingerprint refresh, golden vectors extended to keys_digest transitions; close SYB-269/270/272; refresh SYB-218 description (stale v3 commitments) | S | in-flight lanes land | autonomous |
-| 2 | **Soundness guardrails while CI is off** — SYB-233 re-scoped: local from-source guest rebuild-and-compare gate as a `just` target wired into the land ritual (path-filtered); plus SYB-246 economic property catalog (value conservation incl. bridge refunds, no-arb, crossing-book non-triviality, order-independence; resolve the `#[ignore]`d `iter_lp_solver_conformance`) | M | none | autonomous |
-| 3 | **Money-path residue** — SYB-265 items 3–4 (reserved_balance restore validation, release_reservations tripwire); then close SYB-265 → SYB-252 umbrella | S | none | autonomous |
-| 4 | **Custody arc opener: escape-claim guest (SYB-32)** — keys_digest is now committed (225 Done) and, after v6, transition-constrained; `design/escape-claim-guest.md` + ADR-0013 valuation rule are ratified. Write the implementation brief, then staged implementation (guest + vault escape mode + claim flow). This is the single biggest credibility item for real-money custody | L | lane 1 (v6 landed) | autonomous (design ratified) |
+| 1 | ✅ **DONE** — Post-v6 verification + closeout: fresh genesis verified (`ecf25142…`), fingerprint refreshed, SYB-269/270/272 closed | S | — | done |
+| 2 | ✅ **DONE** — Soundness guardrails: SYB-233 local `just zk-rebuild-check` gate + SYB-246 economic property catalog landed | M | — | done |
+| 3 | ✅ **DONE** — Money-path residue: SYB-265 items 3–4 landed; SYB-252 umbrella retired | S | — | done |
+| 4 | 🔵 **ACTIVE — Custody arc (SYB-32), staged.** Stage 0 (interface freeze) done `fd3580d9`. **In flight:** 1a (market-leaf prices, ws3), 3 (vault escapeClaim, ws2). **Next:** 1b (in-guest P-256/WebAuthn — gates any live escape deploy), 2 (escape guest Form L), then 4 (prover+custody CLI), 5 (deploy+drill, Valery-gated), 6 (Form P tail). Plan: `design/escape-claim-plan.md`. The single biggest custody-credibility item | L | staged (see plan §5) | autonomous code; **Valery gates the live deploy (D9 funds-bearing) + the 4 readings** |
 | 5 | **Privacy arc: SYB-237 residual + encrypted-DA increments (SYB-120)** — after 1b lands: per-endpoint decision on remaining structured reads (SYB-275 residual — public fill history deanonymization; coordinate arena); start ADR-0012 implementation in landable increments: view-key derivation from passkey-PRF, per-account HPKE blob writer behind a flag, blinded-slot layout | L | 237 1b landed | autonomous (ADR ratified); staged |
 | 6 | **SYB-119 SWIRL-era aggregation note** — recursive vs monolithic batch proofs re-evaluated under OpenVM 2.0.0; output = settlement cadence recommendation + what hardware SYB-126 actually needs now; sequences SYB-87/95/126 | M | none | autonomous (research) |
 | 7 | **SYB-88 proving benchmark suite** — 100/1k/10k orders per block on SWIRL; produces the recruiting-pitch numbers ("10k trades proven in X") and a proving-time regression guard | M | lane 6 helps | autonomous |
@@ -43,7 +74,23 @@ Notes on sequencing: lanes 2–3 are immediate fillers behind the in-flight heav
 
 ## 4. Valery decision queue (each ≤5 min unless noted)
 
-1. **Linear workspace** — at the free-issue cap; tonight's triage freed 5 slots by closing, but filing is still effectively blocked. Upgrade one seat (~$8/mo) or bulk-archive pre-M2 issues. (Standing from morning roadmap; still open.)
+**4.0 — NEW, time-sensitive: four escape-claim Stage-0 readings** (one word each;
+the two lanes are already building against the recommendations, so a "no" is a
+small edit, not a rebuild). Full context in `design/escape-claim-stage0-brief.md`
+§5 and §8. All four are ADR-conformant readings of already-ratified designs, not
+new decisions:
+- **(a)** Escape payout is NOT capped at `total_deposited` — trading gains are
+  escapable; the systemic cap is price coherence + vault balance, not a
+  per-account cap. *Recommend: yes.*
+- **(b)** Never-cleared markets value at **0** (empty price vector). *Recommend: yes.*
+- **(c)** Claim bytes include `chain_id` + `vault_address` (deployment binding
+  beyond genesis+root). *Recommend: yes.*
+- **(d)** `genesis_hash` is a signature-bound private guest input, not a baked
+  guest constant (keeps path-independent build reproducible). *Recommend: yes.*
+
+**Standing items (unchanged):**
+
+1. **Linear workspace** — at the free-issue cap; filing new tickets is blocked. Upgrade one seat (~$8/mo) or bulk-archive pre-M2 issues. (Standing; still open. This is why triage items below are recorded here, not filed.)
 2. **GitHub Actions billing** — $10–20 cap re-enables CI → unblocks the CI half of SYB-248 and makes SYB-233's gate a required check instead of a ritual. Local gates cover us meanwhile.
 3. **SYB-56 / SYB-101 device pass** — iOS/Android/macOS/Windows passkey journey + Lighthouse mobile run on the deployed origin; flips SYB-56 (and most of 101) Done. Needs his hands, ~30 min.
 4. **Telegram alert live-fire test** (optional) — synthetic monitoring is live; one deliberate failure confirms the pager path.
