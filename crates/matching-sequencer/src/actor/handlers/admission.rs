@@ -101,14 +101,6 @@ impl SequencerActorState {
             return Err(SequencerError::SignerAccountMismatch);
         }
 
-        // Reject a stale/duplicate action before consulting the mutable order
-        // book. A successfully applied cancel removes its target, but replaying
-        // that same signed action is still a nonce conflict rather than an
-        // unrelated "order not found" result. This is only a read-only check;
-        // a fresh nonce is not advanced until the cancel itself validates.
-        self.sequencer
-            .validate_replay_nonce(account_id, authenticated.nonce)?;
-
         let timestamp_ms = current_timestamp_ms();
         self.sequencer.can_cancel_pending_order(
             authenticated.account_id,

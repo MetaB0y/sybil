@@ -2534,7 +2534,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_signed_cancel_replay_is_rejected_as_stale_nonce() {
+    async fn test_signed_cancel_replay_is_rejected_as_order_not_found() {
         let (seq, aid) = make_test_sequencer();
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
@@ -2582,14 +2582,10 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert!(matches!(
-            replay_error,
-            SequencerError::ReplayNonceStale {
-                account_id,
-                nonce: 1,
-                last_nonce: 1,
-            } if account_id == aid
-        ));
+        // The applied cancel removed its target, so the replay fails order
+        // validation (SYB-263: cancel validates before the nonce is consulted)
+        // and the nonce is left untouched.
+        assert!(matches!(replay_error, SequencerError::OrderNotFound));
         assert_eq!(
             handle.get_account(aid).await.unwrap().unwrap().last_nonce,
             1
