@@ -1,6 +1,6 @@
 use matching_engine::{
     compute_fill_settlement, notional_nanos, Fill, MarketId, MintAdjustment, Nanos, Order, Qty,
-    NANOS_PER_DOLLAR,
+    SettlementDelta, NANOS_PER_DOLLAR,
 };
 
 use crate::account::{Account, AccountId, AccountStore};
@@ -12,15 +12,21 @@ use crate::error::{BlockInvariantFailure, UnsettleableFillReason};
 /// Delegates to `matching_engine::compute_fill_settlement` for the pure math,
 /// then applies the computed deltas to the account.
 pub fn settle_fill(account: &mut Account, order: &Order, fill: &Fill) -> bool {
-    let Some(delta) = compute_fill_settlement(order, fill) else {
-        return false;
-    };
+    settle_fill_with_delta(account, order, fill).is_some()
+}
+
+fn settle_fill_with_delta(
+    account: &mut Account,
+    order: &Order,
+    fill: &Fill,
+) -> Option<SettlementDelta> {
+    let delta = compute_fill_settlement(order, fill)?;
 
     account.balance += delta.balance_delta;
-    for (market, outcome, qty_delta) in delta.position_deltas {
+    for &(market, outcome, qty_delta) in &delta.position_deltas {
         *account.positions.entry((market, outcome)).or_insert(0) += qty_delta;
     }
-    true
+    Some(delta)
 }
 
 /// Settle all fills from a batch result. Each fill carries its own `account_id`.
@@ -34,10 +40,26 @@ pub fn settle_batch(
     orders: &[Order],
     block_height: u64,
 ) -> Vec<BlockInvariantFailure> {
+    settle_batch_with_position_deltas(accounts, fills, orders, block_height).0
+}
+
+/// Settle a batch and return the position deltas that were actually applied.
+///
+/// The finalize path uses these deltas to advance its pre-settlement market
+/// totals without rebuilding canonical account state between fills and MINT
+/// settlement. Deltas for missing orders/accounts and zero or unsettleable
+/// fills are excluded, exactly matching account mutation.
+pub(crate) fn settle_batch_with_position_deltas(
+    accounts: &mut AccountStore,
+    fills: &[Fill],
+    orders: &[Order],
+    block_height: u64,
+) -> (Vec<BlockInvariantFailure>, Vec<(MarketId, u8, i64)>) {
     // Build order lookup
     let order_map: std::collections::HashMap<u64, &Order> =
         orders.iter().map(|o| (o.id, o)).collect();
     let mut failures = Vec::new();
+    let mut position_deltas = Vec::new();
 
     for fill in fills {
         if fill.fill_qty.0 == 0 {
@@ -62,20 +84,21 @@ pub fn settle_batch(
             continue;
         };
 
-        if !settle_fill(account, order, fill) {
+        let Some(delta) = settle_fill_with_delta(account, order, fill) else {
             failures.push(BlockInvariantFailure::UnsettleableFill {
                 order_id: fill.order_id,
                 account_id: fill.account_id,
                 reason: UnsettleableFillReason::SettlementOverflow,
             });
             continue;
-        }
+        };
+        position_deltas.extend(delta.position_deltas);
         let event =
             digest::encode_fill_event(fill.order_id, fill.fill_qty, fill.fill_price, block_height);
         account.events_digest = digest::update_digest(&account.events_digest, &event);
     }
 
-    failures
+    (failures, position_deltas)
 }
 
 /// Apply minting adjustments to the MINT account.

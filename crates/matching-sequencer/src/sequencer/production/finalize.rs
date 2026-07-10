@@ -1,4 +1,80 @@
+use std::collections::BTreeMap;
+
 use super::*;
+
+#[derive(Default)]
+struct AccountAggregates {
+    total_balance: i64,
+    market_position_totals: BTreeMap<MarketId, (i64, i64)>,
+    negative_balances: Vec<(AccountId, i64)>,
+}
+
+impl AccountAggregates {
+    fn from_accounts(accounts: &AccountStore) -> Self {
+        let mut aggregates = Self::default();
+        for (account_id, account) in accounts.iter() {
+            aggregates.observe_account(*account_id, account);
+        }
+        aggregates
+    }
+
+    fn observe_account(&mut self, account_id: AccountId, account: &Account) {
+        self.total_balance += account.balance;
+        if account_id != AccountId::MINT && account.balance < 0 {
+            self.negative_balances.push((account_id, account.balance));
+        }
+        for (&(market_id, outcome), &qty) in &account.positions {
+            if qty == 0 {
+                continue;
+            }
+            self.apply_position_delta(market_id, outcome, qty);
+        }
+    }
+
+    fn apply_position_deltas(
+        &mut self,
+        position_deltas: impl IntoIterator<Item = (MarketId, u8, i64)>,
+    ) {
+        for (market_id, outcome, qty_delta) in position_deltas {
+            self.apply_position_delta(market_id, outcome, qty_delta);
+        }
+    }
+
+    fn apply_position_delta(&mut self, market_id: MarketId, outcome: u8, qty_delta: i64) {
+        let entry = self
+            .market_position_totals
+            .entry(market_id)
+            .or_insert((0, 0));
+        match outcome {
+            0 => entry.0 += qty_delta,
+            1 => entry.1 += qty_delta,
+            _ => {}
+        }
+    }
+
+    fn minting_inputs(&self) -> Vec<(MarketId, i64, i64)> {
+        self.market_position_totals
+            .iter()
+            .map(|(&market_id, &(total_yes, total_no))| (market_id, total_yes, total_no))
+            .collect()
+    }
+
+    fn totals_for(&self, market_id: MarketId) -> (i64, i64) {
+        self.market_position_totals
+            .get(&market_id)
+            .copied()
+            .unwrap_or((0, 0))
+    }
+}
+
+fn canonical_state_with_aggregates(accounts: &AccountStore) -> (CanonicalState, AccountAggregates) {
+    let mut aggregates = AccountAggregates::default();
+    let snapshots = accounts.iter().map(|(account_id, account)| {
+        aggregates.observe_account(*account_id, account);
+        snapshot_account(account)
+    });
+    (CanonicalState::from_snapshot_iter(snapshots), aggregates)
+}
 
 pub(crate) fn expected_balance_delta_from_fills(
     fills: &[Fill],
@@ -28,20 +104,24 @@ pub(crate) fn collect_account_invariant_failures(
     accounts: &AccountStore,
     markets: &MarketSet,
 ) -> Vec<BlockInvariantFailure> {
+    let aggregates = AccountAggregates::from_accounts(accounts);
+    collect_account_invariant_failures_from_aggregates(&aggregates, markets)
+}
+
+fn collect_account_invariant_failures_from_aggregates(
+    aggregates: &AccountAggregates,
+    markets: &MarketSet,
+) -> Vec<BlockInvariantFailure> {
     let mut failures = Vec::new();
-    for (account_id, account) in accounts.iter() {
-        if *account_id != AccountId::MINT && account.balance < 0 {
-            failures.push(BlockInvariantFailure::NegativeBalance {
-                account_id: *account_id,
-                balance: account.balance,
-            });
-        }
+    for &(account_id, balance) in &aggregates.negative_balances {
+        failures.push(BlockInvariantFailure::NegativeBalance {
+            account_id,
+            balance,
+        });
     }
 
-    let post_state = CanonicalState::from_accounts(accounts);
-    let post_position_totals = post_state.market_position_totals();
     for market in markets.iter() {
-        let (total_yes, total_no) = post_position_totals.totals_for(market.id);
+        let (total_yes, total_no) = aggregates.totals_for(market.id);
         if total_yes != total_no {
             failures.push(BlockInvariantFailure::PositionImbalance {
                 market_id: market.id,
@@ -66,19 +146,21 @@ impl BlockSequencer {
         clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
         timestamp_ms: u64,
     ) -> FinalizedBlockState {
-        let pre_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
-        let pre_market_totals = CanonicalState::from_accounts(&self.accounts)
-            .market_position_totals()
-            .minting_inputs();
+        let mut pre_aggregates = AccountAggregates::from_accounts(&self.accounts);
+        let pre_total_balance = pre_aggregates.total_balance;
+        let pre_market_totals = pre_aggregates.minting_inputs();
         let pre_mint_adjustments =
             matching_engine::derive_minting(&pre_market_totals, clearing_prices);
 
-        let settle_failures =
-            settlement::settle_batch(&mut self.accounts, fills, &problem.orders, self.height);
+        let (settle_failures, fill_position_deltas) = settlement::settle_batch_with_position_deltas(
+            &mut self.accounts,
+            fills,
+            &problem.orders,
+            self.height,
+        );
 
-        let market_totals = CanonicalState::from_accounts(&self.accounts)
-            .market_position_totals()
-            .minting_inputs();
+        pre_aggregates.apply_position_deltas(fill_position_deltas);
+        let market_totals = pre_aggregates.minting_inputs();
         let mint_adjustments = matching_engine::derive_minting(&market_totals, clearing_prices);
         let fill_balance_delta =
             matching_engine::fill_balance_delta_from_fills(problem.orders.iter(), fills);
@@ -113,7 +195,8 @@ impl BlockSequencer {
             &self.accounts,
         );
 
-        let post_total_balance: i64 = self.accounts.iter().map(|(_, a)| a.balance).sum();
+        let (post_state, post_aggregates) = canonical_state_with_aggregates(&self.accounts);
+        let post_total_balance = post_aggregates.total_balance;
         let balance_delta = post_total_balance - pre_total_balance;
         let mut invariant_failures = settle_failures;
         if balance_delta != 0 {
@@ -127,12 +210,10 @@ impl BlockSequencer {
             }
         }
 
-        invariant_failures.extend(collect_account_invariant_failures(
-            &self.accounts,
+        invariant_failures.extend(collect_account_invariant_failures_from_aggregates(
+            &post_aggregates,
             &self.markets,
         ));
-
-        let post_state = CanonicalState::from_accounts(&self.accounts);
 
         FinalizedBlockState {
             post_state,
