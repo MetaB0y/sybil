@@ -1,0 +1,68 @@
+site_name: Sybil
+site_description: Sybil — verifiable prediction-market exchange (validium)
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  logo: logo/light.png
+  favicon: favicon.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+  # Resolves Obsidian-style [[wikilinks]] used throughout docs/architecture
+  - roamlinks
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+# Keep tooling debris and Obsidian internals out of the built site
+exclude_docs: |
+  node_modules/
+  package.json
+  package-lock.json
+  .obsidian/
+
+# Nav is auto-generated from the docs/ tree (README.md acts as the index).
+# Directories (architecture/, adr/, review/, runbooks/, strategy/) become
+# sections; keeping this implicit avoids nav churn as docs move.
+
+validation:
+  links:
+    # Wikilinks are resolved by the roamlinks plugin after this check runs,
+    # so unrecognized-link warnings would be noise at error level.
+    not_found: warn
+    absolute_links: warn

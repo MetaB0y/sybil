@@ -505,6 +505,16 @@ arena-status hours="24":
 status:
     ./scripts/status.sh
 
+# ── Docs ────────────────────────────────────────────────────────────────────
+
+# Serve the docs site locally with live reload (http://127.0.0.1:8000)
+docs-serve:
+    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs serve
+
+# Build the static docs site into ./site
+docs-build:
+    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build
+
 # ── Contracts ───────────────────────────────────────────────────────────────
 
 # Format Solidity contracts
