@@ -2,14 +2,17 @@
 
 /**
  * Pro-mode hero card — the showpiece of the rail. Big circular countdown
- * gauge + batch # + "N traders joined" + indicative trio + last-24-batches
- * mini bars. Matches the inline hero block in `V2BatchTheater` ProRail
- * (`fed-variations.jsx:128`).
+ * gauge + batch # + "N traders joined" + last-price / indicative-volume /
+ * liquidity stats + last-24-batches mini bars. Matches the inline hero block in
+ * `V2BatchTheater` ProRail (`fed-variations.jsx:128`).
  *
  * All values are real:
  *  - circular countdown progress + batch number
  *  - traders in this batch — polled open-batch unique placers
- *  - indicative price / volume — polled open-batch shadow-solve (C2)
+ *  - last price — clearing price of the most recent batch that traded this
+ *    market (falls back to the mark when quiet)
+ *  - indicative volume — polled open-batch shadow-solve (C2)
+ *  - liquidity — per-batch avg near-the-money band depth
  *  - past-batch bar heights (matched volume)
  */
 
@@ -25,6 +28,7 @@ import {
   parseNanos,
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
+import { avgLiquidityNanos } from "@/lib/markets/liquidity";
 import { useOpenBatchLive } from "@/lib/market-detail/use-open-batch-live";
 import { selectConnection, selectRecentBlocks, useStore } from "@/lib/store";
 import { useBatchCountdown } from "./use-batch-countdown";
@@ -39,16 +43,19 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
 
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const placers = live?.uniquePlacers ?? null;
-  // Indicative YES price: only trust the live shadow-solve when something would
-  // actually clear (indicative volume > 0). A thin / one-sided open batch still
-  // reports a degenerate clearing price (often >99¢) that bears no relation to
-  // the market — so when nothing crosses we fall back to the mark, keeping this
-  // number in agreement with the chart and the BuyBox limit default.
-  const liveIndicativeYesNanos =
-    live != null && live.indicativeVolumeNanos > 0n
-      ? live.indicativeYesPriceNanos
-      : null;
-  const indicativeYesNanos = liveIndicativeYesNanos ?? outcome.yesPriceNanos;
+
+  // Last price for this outcome: the YES clearing price of the most recent batch
+  // that actually traded this market (matched volume > 0) — i.e. the price it
+  // last changed hands at. Uniform-price batches clear every fill at one price,
+  // so that clearing price IS the last traded price. If the market's been quiet
+  // across the whole recent-blocks window, fall back to the latest batch's
+  // clearing price (the mark). This is a stable "last price", not the jittery
+  // live would-clear that swings around as orders trickle into the open batch.
+  const lastPriceNanos =
+    lastTradedYesNanos(outcome.marketId, recent) ?? outcome.yesPriceNanos;
+
+  // Per-batch average band depth (the wire field is a 10-block sum).
+  const liqAvgNanos = avgLiquidityNanos(outcome.liquidityNanos);
 
   // Honest connection pill: only claim a "live batch" when the block stream is
   // actually connected. If it's reconnecting/failed the countdown freezes at
@@ -173,24 +180,27 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
         }}
       />
 
-      {/* Indicative trio */}
+      {/* Live batch stats */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <SubStat
-          label={
-            <Glossary term="Indicative price">indicative price</Glossary>
-          }
+          label={<Glossary term="Last price">last price</Glossary>}
           secondary={`for ${outcome.shortLabel}`}
           value={
-            indicativeYesNanos == null ? "—" : formatCentsPrecise(indicativeYesNanos)
+            lastPriceNanos == null ? "—" : formatCentsPrecise(lastPriceNanos)
           }
           valueColor="var(--yes)"
         />
         <SubStat
           label={<Glossary term="IEV">indicative volume</Glossary>}
-          secondary="would clear at indicative"
+          secondary="would clear this batch"
           value={
             live == null ? "—" : formatCompactDollars(live.indicativeVolumeNanos)
           }
+        />
+        <SubStat
+          label={<Glossary term="Liquidity">liquidity</Glossary>}
+          secondary="resting near the price"
+          value={liqAvgNanos > 0n ? formatCompactDollars(liqAvgNanos) : "—"}
         />
       </div>
 
@@ -215,6 +225,25 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
       </div>
     </div>
   );
+}
+
+/** Clearing YES price of the most recent block where `marketId` had matched
+ *  volume — effectively that market's last traded price (uniform-price batches
+ *  clear every fill at one price). `blocks` is newest-first, so the first
+ *  traded batch found is the most recent; returns `null` when none in the
+ *  window traded this market. */
+function lastTradedYesNanos(
+  marketId: number,
+  blocks: import("@/lib/api/schema").components["schemas"]["BlockResponse"][],
+): bigint | null {
+  const key = String(marketId);
+  for (const b of blocks) {
+    const vol = b.by_market?.[key]?.volume_nanos;
+    if (vol == null || parseNanos(vol) <= 0n) continue;
+    const raw = b.clearing_prices_nanos?.[key]?.[0];
+    if (raw != null) return parseNanos(raw);
+  }
+  return null;
 }
 
 function CircularCountdown({

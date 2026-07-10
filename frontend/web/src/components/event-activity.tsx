@@ -34,6 +34,7 @@ import {
   useEventCandles,
 } from "@/lib/market-detail/use-event-candles";
 import { selectLatestBlock, useStore } from "@/lib/store";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
 type ActivityRange = "1H" | "6H" | "24H" | "ALL";
 
@@ -301,7 +302,10 @@ function buildBars(
   const factor = Math.max(1, Math.ceil(bucketCount / MAX_BARS));
   const groupMs = res * factor;
   const groupCount = Math.ceil(bucketCount / factor);
-  const title = `${bucketLabel(groupMs)} bucket`;
+  // Each bar spans `groupMs`, i.e. this many 10s batches — surfaced alongside
+  // the bucket width so the tooltip reads "1h bucket · 360 batches".
+  const barBatches = Math.max(1, Math.round(groupMs / BLOCK_INTERVAL_MS));
+  const title = `${bucketLabel(groupMs)} bucket · ${barBatches} ${barBatches === 1 ? "batch" : "batches"}`;
 
   const bars: ActivityBar[] = [];
   for (let g = 0; g < groupCount; g++) {

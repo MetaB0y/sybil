@@ -15,7 +15,11 @@ import { FloatingTooltip } from "./floating-tooltip";
 export const GLOSSARY: Record<string, string> = {
   "Indicative price":
     "The price the current batch would clear at if it ran right now. Updates as new orders come in. Not final until the batch closes.",
-  IEV: "Indicative Executable Volume — how much $ would actually trade at the indicative price. High IEV = a thick batch; low = thin.",
+  "Last price":
+    "The price this outcome last traded at. If it's been quiet, the most recent midpoint (mark) price.",
+  Liquidity:
+    "Resting orders within 5¢ of the price. Averaged over the last few batches.",
+  IEV: "Indicative Executable Volume — the $ that would trade when this batch clears.",
   Imbalance:
     "Net direction of unmatched orders. Buy = more demand than supply at current price; sell = the reverse. Tells you which side is leaning.",
   Batch:

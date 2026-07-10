@@ -49,6 +49,11 @@ export type EventOutcome = {
   /** Total lifetime trading volume in nanos ($) for this outcome's market.
    *  Summed across the group for the chart's event-total footer. */
   volumeNanos: bigint;
+  /** Windowed near-the-money band-depth SUM from the backend
+   *  (`liquidity_avg10_nanos`, a 10-block sum despite its name). Divide by the
+   *  ring length via `avgLiquidityNanos` for the per-batch average shown in the
+   *  Pro hero. `0n` when the market has no clearing price yet. */
+  liquidityNanos: bigint;
   /** Real market creation time (epoch ms), or `null` if unknown. Bounds how
    *  far back the price chart holds the line flat — never before the market
    *  existed. See `build-chart-series`. */
@@ -118,6 +123,7 @@ export function useEventGroup(marketId: number): {
         delta24Cents,
         volume24hNanos: m.volume_24h_nanos ? BigInt(m.volume_24h_nanos) : 0n,
         volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
+        liquidityNanos: m.liquidity_avg10_nanos ? BigInt(m.liquidity_avg10_nanos) : 0n,
         createdAtMs: m.created_at_ms ?? null,
         endDateMs: m.market_end_date_ms ?? m.expiry_timestamp_ms ?? null,
       };

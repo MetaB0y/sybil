@@ -324,6 +324,7 @@ export function DegenRail({
           filledQty={tracking?.filledQty ?? 0n}
           targetQty={active.targetQty}
           betUsd={active.betUsd}
+          avgPriceNanos={tracking?.avgPriceNanos ?? null}
           onBetAgain={() => setActive(null)}
           onCancel={onCancelBet}
           canCancel={(tracking?.orderId ?? null) !== null}

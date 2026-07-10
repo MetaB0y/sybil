@@ -45,9 +45,11 @@ import {
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import {
+  formatAge,
   formatBatchSeconds,
   formatDollars,
 } from "@/lib/format/nanos";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 import {
   useEventGroup,
   type EventOutcome,
@@ -72,6 +74,26 @@ function orderSideFor(dir: Direction, side: OutcomeSide): OrderSide {
   return side === "YES" ? "SellYes" : "SellNo";
 }
 
+/** Share-units of THIS outcome+market locked by the account's resting SELL
+ *  orders (a sell reserves position, not cash — the mirror of the buy-side
+ *  `reservedNanos`). Side strings arrive as "SellYes"/"SellNo"; match loosely
+ *  the way `event-open-orders` does. */
+function sumSellShareReservations(
+  orders: AccountOrder[] | undefined,
+  marketId: number,
+  side: OutcomeSide,
+): bigint {
+  const want = side.toLowerCase();
+  let units = 0n;
+  for (const o of orders ?? []) {
+    if (o.market_id !== marketId) continue;
+    const s = o.side.toLowerCase();
+    if (!s.includes("sell") || !s.includes(want)) continue;
+    units += BigInt(o.remaining_quantity);
+  }
+  return units;
+}
+
 export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const session = useAccountSession();
   const openConnectModal = useSetConnectModalOpen();
@@ -79,7 +101,9 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const { secondsLeftPrecise, latestHeight } = useBatchCountdown();
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const portfolio = usePortfolio(session?.accountId ?? null);
-  const { availableNanos } = useAvailableBalance(session?.accountId ?? null);
+  const { availableNanos, reservedNanos } = useAvailableBalance(
+    session?.accountId ?? null,
+  );
   // Complete-set preflight inputs. Group membership is NegRisk-only, so it must
   // come from /v1/markets/groups — an event's siblings are a superset.
   const { data: openOrders } = useAccountOrders(session?.accountId ?? null);
@@ -99,8 +123,18 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   const [amount, setAmount] = useState("25");
   const [shares, setShares] = useState("100");
   const [tif, setTif] = useState<Tif>("GTC");
-  // GTD block-height picker: how many batches ahead the order stays eligible.
-  const [gtdBatches, setGtdBatches] = useState(5);
+  // GTD picker: how many batches ahead the order stays eligible. `gtdBatches`
+  // is the clamped numeric source of truth the submit path reads; `gtdText` is
+  // the editable text buffer so the user can type freely (or clear the field)
+  // without the value snapping mid-edit. `setGtd` keeps the two in sync + clamps.
+  const [gtdBatches, setGtdBatches] = useState(10);
+  const [gtdText, setGtdText] = useState("10");
+  const GTD_MAX = 60;
+  const setGtd = (n: number) => {
+    const c = Math.max(1, Math.min(GTD_MAX, Math.round(n)));
+    setGtdBatches(c);
+    setGtdText(String(c));
+  };
 
   const indicativeCents = outcomeSide === "YES" ? yesCents : noCents;
   const [limit, setLimit] = useState<number>(indicativeCents);
@@ -154,17 +188,21 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
     Number(notionalNanosCeil(limitPriceNanosPreview, qtyUnits)) / 1e9;
   const payoutIfWin = qtyShares; // qty × $1
 
-  // Live clearing ESTIMATE from the side's indicative price. A batch auction
-  // gives no firm quote, so this is only "what the next batch would fill near
-  // if it clears at today's indicative" — surfaced as an estimate, never a quote.
-  const estClearingCents = Math.max(1, Math.min(99, Math.round(indicativeCents)));
-  const estFillDollars = qtyShares * (estClearingCents / 100);
-
   // Cash available to BUY = balance − cash reserved by resting buy orders.
   // (Sells are gated by held shares below, not cash.) Matches the engine so a
   // buy MAX / headroom never proposes more than will be accepted.
   const availableDollars =
     availableNanos == null ? null : Number(availableNanos) / 1e9;
+
+  // "Order in" locked-in-orders figures (mirrors the Lite rail's "$X in
+  // orders"): cash reserved by resting BUY orders (account-wide, engine-
+  // authoritative), and shares of THIS outcome reserved by resting SELL orders.
+  const cashLockedNanos = reservedNanos ?? 0n;
+  const sellLockedUnits = sumSellShareReservations(
+    openOrders,
+    outcome.marketId,
+    outcomeSide,
+  );
 
   // Shares of THIS outcome+side the user currently holds — what they can sell.
   // Positions carry the outcome as "YES"/"NO" (accounts route), matching
@@ -543,13 +581,29 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
               color: "var(--fg-4)",
             }}
           >
-            {dir === "sell"
-              ? `balance ${formatShareUnits(heldUnits)} sh`
-              : availableDollars == null
-                ? ""
-                : unit === "usd"
+            {dir === "sell" ? (
+              <>
+                {`balance ${formatShareUnits(heldUnits)} sh`}
+                {sellLockedUnits > 0n && (
+                  <span style={{ opacity: 0.7 }}>
+                    {` · ${formatShareUnits(sellLockedUnits)} sh in orders`}
+                  </span>
+                )}
+              </>
+            ) : availableDollars == null ? (
+              ""
+            ) : (
+              <>
+                {unit === "usd"
                   ? `available ${formatDollars(BigInt(Math.floor(availableDollars * 1e9)), { decimals: 2 })}`
                   : `max ${(availableDollars / limitDec).toFixed(0)} sh`}
+                {cashLockedNanos > 0n && (
+                  <span style={{ opacity: 0.7 }}>
+                    {` · ${formatDollars(cashLockedNanos, { decimals: 2 })} in orders`}
+                  </span>
+                )}
+              </>
+            )}
           </span>
         </div>
         <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
@@ -835,29 +889,58 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
               <StepButton
                 label="−"
                 disabled={disabledInputs || gtdBatches <= 1}
-                onClick={() => setGtdBatches((n) => Math.max(1, n - 1))}
+                onClick={() => setGtd(gtdBatches - 1)}
               />
               <span
                 className="tabular"
                 style={{
+                  display: "inline-flex",
+                  alignItems: "baseline",
+                  justifyContent: "center",
+                  gap: 3,
                   minWidth: 60,
-                  textAlign: "center",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                  color: "var(--fg-1)",
                 }}
               >
-                {gtdBatches} {gtdBatches === 1 ? "batch" : "batches"}
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label="batches until expiry"
+                  value={gtdText}
+                  disabled={disabledInputs}
+                  onChange={(e) => {
+                    const t = e.target.value.replace(/[^0-9]/g, "").slice(0, 3);
+                    setGtdText(t);
+                    const n = parseInt(t, 10);
+                    if (Number.isFinite(n) && n >= 1) {
+                      setGtdBatches(Math.min(GTD_MAX, n));
+                    }
+                  }}
+                  onBlur={() => setGtd(parseInt(gtdText, 10) || gtdBatches)}
+                  style={{
+                    width: 32,
+                    textAlign: "right",
+                    background: "transparent",
+                    border: 0,
+                    color: "var(--fg-1)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 12,
+                    padding: 0,
+                    outline: "none",
+                  }}
+                />
+                <span style={{ fontSize: 10, color: "var(--fg-3)" }}>
+                  {gtdBatches === 1 ? "batch" : "batches"}
+                </span>
               </span>
               <StepButton
                 label="+"
-                disabled={disabledInputs || gtdBatches >= 60}
-                onClick={() => setGtdBatches((n) => Math.min(60, n + 1))}
+                disabled={disabledInputs || gtdBatches >= GTD_MAX}
+                onClick={() => setGtd(gtdBatches + 1)}
               />
             </div>
           </div>
         )}
-        {tif !== "GTC" && latestHeight != null && (
+        {tif === "GTD" && (
           <div
             style={{
               marginTop: 5,
@@ -867,8 +950,12 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
               textAlign: "right",
             }}
           >
-            expires block #
-            {(latestHeight + (tif === "IOC" ? 1 : Math.max(1, gtdBatches))).toLocaleString()}
+            {`cancels in ~${formatAge(Math.max(1, gtdBatches) * BLOCK_INTERVAL_MS)}`}
+            {latestHeight != null && (
+              <span style={{ opacity: 0.7 }}>
+                {` · block #${(latestHeight + Math.max(1, gtdBatches)).toLocaleString()}`}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -887,20 +974,11 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           fontSize: 11,
         }}
       >
-        {/* Live clearing estimate — labelled an estimate; a batch auction gives
-            no firm quote until the next batch clears. For a never-traded market
-            there is no price to estimate against, so instead of a fabricated
-            ~50% fill we say the order would seed the book at the chosen limit. */}
-        {hasPrice ? (
-          <ReceiptRow
-            label={dir === "buy" ? "est. fill · next batch" : "est. proceeds · next batch"}
-            value={
-              <span style={{ color: "var(--fg-2)" }}>
-                ~${estFillDollars.toFixed(2)} at ~{estClearingCents}%
-              </span>
-            }
-          />
-        ) : (
+        {/* Never-traded market: no price to fill against, so note that the order
+            seeds the book at the chosen limit. (Traded markets previously showed
+            a live "est. fill" estimate here; removed — the max-cost / min-receive
+            rows below already bound the outcome without implying a firm quote.) */}
+        {!hasPrice && (
           <div style={{ color: "var(--fg-3)", lineHeight: 1.35 }}>
             no price yet — your order would seed the book at{" "}
             <span style={{ color: "var(--fg-1)" }}>{limitCentsPreview}¢</span>

@@ -14,6 +14,10 @@ export interface DegenProgressProps {
   targetQty: bigint;
   /** The dollar amount the user bet (the full intended stake). */
   betUsd: number;
+  /** Volume-weighted average fill price (nanos), or null before any priced
+   *  fill. With `filledQty` this yields the ACTUAL dollars spent — usually below
+   *  the nominal stake because the batch clears at a better price than the limit. */
+  avgPriceNanos?: bigint | null;
   onBetAgain: () => void;
   /** Cancel the in-flight bet (tracking phase only). Omit to hide the control. */
   onCancel?: () => void;
@@ -40,6 +44,23 @@ export function DegenProgress(props: DegenProgressProps) {
         ) / 100
       : 0;
 
+  // What the user ACTUALLY spent = filled shares × the average price they really
+  // got (usually below their limit, so below the nominal stake). `filledQty` is
+  // in share-units (1000 = 1 share); `avgPriceNanos` is a per-share price in
+  // nanos (1e9 = $1). Falls back to the nominal proportional before any priced
+  // fill. `savedUsd` is the welfare — what the better-than-limit clear saved.
+  const actualUsd =
+    props.avgPriceNanos != null &&
+    props.avgPriceNanos > 0n &&
+    props.filledQty > 0n
+      ? Math.round(
+          (Number(props.filledQty) / 1000) *
+            (Number(props.avgPriceNanos) / 1e9) *
+            100,
+        ) / 100
+      : filledUsd;
+  const savedUsd = Math.max(0, Math.round((filledUsd - actualUsd) * 100) / 100);
+
   if (props.phase === "tracking") {
     return (
       <div style={cardStyle}>
@@ -62,7 +83,7 @@ export function DegenProgress(props: DegenProgressProps) {
             shares" read as two competing fractions; this reads as a sentence. */}
         <div style={monoStyle}>
           <span style={{ color: "var(--fg-1)", fontWeight: 600 }}>
-            {money(filledUsd)}
+            {money(actualUsd)}
           </span>
           {` of ${money(props.betUsd)} in`}
           <span style={{ color: "var(--fg-4)" }}>
@@ -116,9 +137,9 @@ export function DegenProgress(props: DegenProgressProps) {
       : "var(--no)";
   const result =
     props.phase === "filled"
-      ? `Successfully bet ${money(props.betUsd)} on ${props.side}!`
+      ? `Successfully bet ${money(actualUsd)} on ${props.side}!`
       : props.phase === "partial"
-        ? `◐ Half in! Successfully bet ${money(filledUsd)} out of ${money(props.betUsd)} on ${props.side}!`
+        ? `◐ Half in! Bet ${money(actualUsd)} of ${money(props.betUsd)} on ${props.side}!`
         : cancelled
           ? `Bet cancelled.`
           : `Oops, your order failed. Try again!`;
@@ -130,6 +151,11 @@ export function DegenProgress(props: DegenProgressProps) {
           {result}
         </span>
       </div>
+      {success && savedUsd >= 0.01 && (
+        <div style={{ ...monoStyle, color: "var(--fg-3)" }}>
+          {`better price · saved ${money(savedUsd)}`}
+        </div>
+      )}
       <button type="button" onClick={props.onBetAgain} style={betAgainStyle}>
         Bet again
       </button>

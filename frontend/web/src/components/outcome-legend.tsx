@@ -108,7 +108,11 @@ export function OutcomeLegend({
     onChange(selectedIds.filter((x) => x !== id));
   };
   const add = (id: number) => {
-    if (!atCap) onChange([...selectedIds, id]);
+    if (atCap) return;
+    onChange([...selectedIds, id]);
+    // Adding an outcome's line also makes it the selected/active outcome, so the
+    // rail + page switch to what you just pulled onto the chart.
+    selectOutcome(id);
   };
 
   return (
