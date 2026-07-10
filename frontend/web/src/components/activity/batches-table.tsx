@@ -218,18 +218,7 @@ function TailSwitch({
   onFrozen: () => void;
 }) {
   return (
-    <span
-      role="group"
-      aria-label="Batch tail"
-      style={{
-        display: "inline-flex",
-        gap: 4,
-        padding: 3,
-        background: "var(--bg-2)",
-        border: "1px solid var(--border-1)",
-        borderRadius: 999,
-      }}
-    >
+    <SegmentedGroup label="Batch tail">
       <Segment
         active={!live}
         onClick={onFrozen}
@@ -279,6 +268,37 @@ function TailSwitch({
           </span>
         )}
       </Segment>
+    </SegmentedGroup>
+  );
+}
+
+/**
+ * The pill shell both segmented controls sit in. `--bg-0` is the "deeper than
+ * the page" token, so the shell reads as an inset track under its raised active
+ * segment, in both themes. (Not `--bg-2`, which ModeTabs asks for and silently
+ * gets `transparent` — no such token exists.)
+ */
+function SegmentedGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      role="group"
+      aria-label={label}
+      style={{
+        display: "inline-flex",
+        gap: 4,
+        padding: 3,
+        background: "var(--bg-0)",
+        border: "1px solid var(--border-1)",
+        borderRadius: 999,
+      }}
+    >
+      {children}
     </span>
   );
 }
@@ -376,11 +396,14 @@ function Pager({
       </span>
 
       <span style={{ marginLeft: "auto", display: "inline-flex", gap: 14, alignItems: "center" }}>
-        <label
+        {/* A native <select> drops an unstyled OS menu on top of the theme —
+            same reason the portfolio filters are pills. Two options fit a
+            segmented control anyway. */}
+        <span
           style={{
             display: "inline-flex",
             alignItems: "center",
-            gap: 6,
+            gap: 8,
             fontFamily: "var(--font-mono)",
             fontSize: 10,
             textTransform: "uppercase",
@@ -389,27 +412,19 @@ function Pager({
           }}
         >
           Rows
-          <select
-            value={pageSize}
-            onChange={(e) => onPageSize(Number(e.target.value))}
-            style={{
-              background: "var(--surface-1)",
-              border: "1px solid var(--border-1)",
-              borderRadius: 4,
-              color: "var(--fg-1)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              padding: "3px 6px",
-              cursor: "pointer",
-            }}
-          >
+          <SegmentedGroup label="Rows per page">
             {PAGE_SIZES.map((n) => (
-              <option key={n} value={n}>
+              <Segment
+                key={n}
+                active={pageSize === n}
+                onClick={() => onPageSize(n)}
+                title={`Show ${n} batches per page`}
+              >
                 {n}
-              </option>
+              </Segment>
             ))}
-          </select>
-        </label>
+          </SegmentedGroup>
+        </span>
 
         <span style={{ display: "inline-flex", gap: 6 }}>
           <PageButton onClick={onNewer} disabled={page === 0}>

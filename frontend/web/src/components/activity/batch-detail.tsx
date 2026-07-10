@@ -24,7 +24,9 @@ import { useBatchDetail } from "@/lib/activity/use-batch-detail";
 import type { BatchMarketRow, BatchRow } from "@/lib/activity/types";
 import { DonutOutcome } from "./donut-outcome";
 
-const ROWS_INITIAL = 6;
+// Sized so the market table's natural height lands on the sidebar's, leaving
+// the stretch to absorb only a few pixels rather than a visible gap.
+const ROWS_INITIAL = 7;
 const ROWS_STEP = 10;
 
 const GRID = "2fr 70px 60px 110px 100px 130px";
@@ -67,11 +69,16 @@ export function BatchDetail({ row }: { row: BatchRow }) {
         padding: "18px 24px 24px 70px",
       }}
     >
+      {/* Grid items stretch, so the left card claims the full row height and
+          the two columns always end on the same line — no row-count tuning. */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}>
         {/* Left: market rows */}
-        <div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
           <div
             style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
               background: "var(--surface-1)",
               border: "1px solid var(--border-1)",
               borderRadius: 6,
@@ -142,7 +149,9 @@ export function BatchDetail({ row }: { row: BatchRow }) {
 
         {/* Right: batch identity, then the order stats it belongs to */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <BatchIdentity height={row.height} />
+          <SidebarPanel>
+            <BatchIdentity height={row.height} />
+          </SidebarPanel>
           <SidebarPanel title="Order outcome">
             <DonutOutcome
               matched={row.ordersMatched}
@@ -391,7 +400,8 @@ function SidebarPanel({
   title,
   children,
 }: {
-  title: string;
+  /** Omitted by the identity panel, whose rows are self-labelling. */
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -403,9 +413,11 @@ function SidebarPanel({
         padding: "12px 14px",
       }}
     >
-      <div className="eyebrow" style={{ color: "var(--fg-3)", paddingBottom: 10 }}>
-        {title}
-      </div>
+      {title != null && (
+        <div className="eyebrow" style={{ color: "var(--fg-3)", paddingBottom: 10 }}>
+          {title}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {children}
       </div>
@@ -467,7 +479,7 @@ function KvRow({
  */
 function BatchIdentity({ height }: { height: number }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <>
       <IdentityRow label="Batch">
         <span
           style={{
@@ -498,7 +510,7 @@ function BatchIdentity({ height }: { height: number }) {
           </span>
         </MockValue>
       </IdentityRow>
-    </div>
+    </>
   );
 }
 
