@@ -201,6 +201,36 @@ pub async fn get_account(
     Ok(Json(account_to_response(&account, reserved_balance)))
 }
 
+/// GET /v1/accounts/{id}/keyop-state — public signing state for key operations.
+///
+/// These digests are already committed validity state and reveal no key or
+/// portfolio data. A client must fetch them immediately before signing a
+/// registration or revocation; admission rejects stale values with 409.
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{id}/keyop-state",
+    params(("id" = u64, Path, description = "Account ID")),
+    responses(
+        (status = 200, description = "Current key-operation signing state", body = KeyOpStateResponse),
+        (status = 404, description = "Account not found")
+    )
+)]
+pub async fn get_keyop_state(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<Json<KeyOpStateResponse>, AppError> {
+    let account = state
+        .sequencer
+        .get_account(AccountId(id))
+        .await?
+        .ok_or_else(|| AppError::not_found(format!("Account {id} not found")))?;
+    Ok(Json(KeyOpStateResponse {
+        account_id: id,
+        keys_digest_hex: hex::encode(account.keys_digest),
+        events_digest_hex: hex::encode(account.events_digest),
+    }))
+}
+
 /// Parse + validate the NEW key material shared by the first-key (service) and
 /// signed (public) registration paths. Returns the compressed public key. For
 /// WebAuthn keys, `webauthn_registration` must prove possession of the new key.
@@ -302,12 +332,10 @@ pub async fn register_key(
 /// POST /v1/accounts/{id}/keys/register — register an additional signing key,
 /// authorized by a signature from an existing account key (SYB-229).
 ///
-/// Mirrors the SYB-60 revoke shape: canonical bytes cover the account, the new
-/// key (scheme + compressed SEC1), the signer, and a replay nonce, and are
-/// domain-separated by `genesis_hash` (SYB-224). The `raw_p256` signer path
-/// hands a `SignedKeyRegistration` to the sequencer (which re-verifies and burns
-/// the nonce); the `webauthn` signer path verifies the assertion at the edge and
-/// hands an already-authenticated intent.
+/// Canonical bytes cover the full new key record and the account's current
+/// key/event digests, domain-separated by `genesis_hash`. The raw-P256 path is
+/// re-verified by the sequencer; the WebAuthn path is verified at the edge and
+/// again by the shared verifier before the authenticated intent is forwarded.
 #[utoipa::path(
     post,
     path = "/v1/accounts/{id}/keys/register",
@@ -318,7 +346,7 @@ pub async fn register_key(
         (status = 400, description = "Invalid key or signature"),
         (status = 403, description = "Signer/account mismatch"),
         (status = 404, description = "Unknown signer or account"),
-        (status = 409, description = "Key already registered, or stale nonce")
+        (status = 409, description = "Key already registered, or stale state binding")
     )
 )]
 pub async fn register_signed_key(
@@ -337,6 +365,17 @@ pub async fn register_signed_key(
     let new_auth_scheme = sequencer_auth_scheme(req.auth_scheme);
     let scope = sequencer_key_scope(req.scope);
     let label = req.label.clone();
+    let bound_keys_digest = parse_digest32("bound_keys_digest_hex", &req.bound_keys_digest_hex)?;
+    let bound_events_digest =
+        parse_digest32("bound_events_digest_hex", &req.bound_events_digest_hex)?;
+    let key_record = sybil_verifier::KeyRecord {
+        auth_scheme: new_auth_scheme.canonical_byte(),
+        pubkey_sec1: new_pubkey
+            .compressed_bytes()
+            .try_into()
+            .expect("compressed P-256 key is 33 bytes"),
+        capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+    };
 
     match req.signer_auth_scheme {
         AuthScheme::RawP256 => {
@@ -346,7 +385,8 @@ pub async fn register_signed_key(
                 new_auth_scheme,
                 label,
                 scope,
-                nonce: req.nonce,
+                bound_keys_digest,
+                bound_events_digest,
                 signer,
                 signature: parse_raw_signature(req.signature_hex.as_deref())?,
             };
@@ -359,12 +399,11 @@ pub async fn register_signed_key(
                 .await?
                 .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
             let canonical = canonical_key_registration_bytes(
-                account_id,
-                new_auth_scheme,
-                &new_pubkey.compressed_bytes(),
-                &signer.compressed_bytes(),
-                req.nonce,
                 genesis_hash,
+                account_id,
+                &key_record,
+                bound_keys_digest,
+                bound_events_digest,
             );
             verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
                 .await?;
@@ -373,6 +412,18 @@ pub async fn register_signed_key(
                 req.webauthn_assertion.as_ref().expect("verified above"),
             )
             .map_err(|err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")))?;
+            let signer_record = sybil_verifier::KeyRecord {
+                auth_scheme: AccountAuthScheme::WebAuthn.canonical_byte(),
+                pubkey_sec1: signer
+                    .compressed_bytes()
+                    .try_into()
+                    .expect("compressed P-256 key is 33 bytes"),
+                capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+            };
+            sybil_verifier::verify_keyop_auth(&authorization, [&signer_record], &canonical)
+                .map_err(|err| {
+                    AppError::bad_request(format!("Invalid WebAuthn assertion: {err}"))
+                })?;
             state
                 .sequencer
                 .register_key_authenticated(AuthenticatedKeyRegistration {
@@ -381,7 +432,8 @@ pub async fn register_signed_key(
                     new_auth_scheme,
                     label,
                     scope,
-                    nonce: req.nonce,
+                    bound_keys_digest,
+                    bound_events_digest,
                     signer,
                     authorization,
                 })
@@ -402,8 +454,8 @@ fn sequencer_key_scope(scope: KeyScopeDto) -> KeyScope {
 
 // --- SYB-60 shared signed-mutation helpers ---
 //
-// Bearer-vs-signing boundary: every mutation below is P256-signed over canonical
-// bytes plus a replay nonce, exactly like orders/cancels/withdrawals. Bearer API
+// Bearer-vs-signing boundary: every mutation below is P256-signed. Key ops bind
+// current state digests; the others use replay nonces. Bearer API
 // keys (created here) are READ-ONLY and can never authorize these mutations —
 // that is what preserves the signing model's replay protection. To grant an
 // agent trade authority, register an additional P256 key (`scope: agent`), which
@@ -429,10 +481,18 @@ fn parse_raw_signature(signature_hex: Option<&str>) -> Result<Signature, AppErro
         .map_err(|_| AppError::bad_request("Invalid P256 ECDSA signature"))
 }
 
+fn parse_digest32(field: &str, value: &str) -> Result<[u8; 32], AppError> {
+    let bytes = hex::decode(value.trim_start_matches("0x"))
+        .map_err(|_| AppError::bad_request(format!("Invalid hex encoding for {field}")))?;
+    bytes.try_into().map_err(|bytes: Vec<u8>| {
+        AppError::bad_request(format!("{field} must be 32 bytes, got {}", bytes.len()))
+    })
+}
+
 /// For the WebAuthn path, confirm the signer is registered as a WebAuthn key and
 /// verify the assertion over the canonical bytes. Returns Ok once the intent is
 /// authenticated (the caller then hands an `Authenticated*` value to the
-/// sequencer, which re-checks signer↔account and burns the nonce).
+/// sequencer, which re-checks signer↔account and the relevant replay binding).
 async fn verify_webauthn_intent(
     state: &AppState,
     signer: &PublicKey,
@@ -886,7 +946,7 @@ pub async fn list_account_keys(
         (status = 400, description = "Invalid request or signature"),
         (status = 403, description = "Signer/account mismatch"),
         (status = 404, description = "Unknown signer or key"),
-        (status = 409, description = "Cannot revoke the last key, or stale nonce")
+        (status = 409, description = "Cannot revoke the last key, or stale key state")
     )
 )]
 pub async fn revoke_key(
@@ -900,13 +960,33 @@ pub async fn revoke_key(
     let target = parse_signer(&req.target_pubkey_hex)?;
     let target_bytes = target.compressed_bytes();
     let signer = parse_signer(&req.signer_pubkey_hex)?;
+    let target_registered = state
+        .sequencer
+        .lookup_registered_pubkey(target.clone())
+        .await?
+        .ok_or(matching_sequencer::SequencerError::KeyNotFound)?;
+    if target_registered.account_id != account_id {
+        return Err(matching_sequencer::SequencerError::SignerAccountMismatch.into());
+    }
+    let target_key = sybil_verifier::KeyRecord {
+        auth_scheme: target_registered.auth_scheme.canonical_byte(),
+        pubkey_sec1: target_bytes
+            .as_slice()
+            .try_into()
+            .expect("compressed P-256 key is 33 bytes"),
+        capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+    };
+    let bound_keys_digest = parse_digest32("bound_keys_digest_hex", &req.bound_keys_digest_hex)?;
+    let bound_events_digest =
+        parse_digest32("bound_events_digest_hex", &req.bound_events_digest_hex)?;
 
     match req.auth_scheme {
         AuthScheme::RawP256 => {
             let signed = SignedKeyRevocation {
                 account_id,
-                target_pubkey: target_bytes,
-                nonce: req.nonce,
+                target_key,
+                bound_keys_digest,
+                bound_events_digest,
                 signer,
                 signature: parse_raw_signature(req.signature_hex.as_deref())?,
             };
@@ -921,8 +1001,13 @@ pub async fn revoke_key(
                 .get_genesis_hash()
                 .await?
                 .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
-            let canonical =
-                canonical_key_revocation_bytes(account_id, &target_bytes, req.nonce, genesis_hash);
+            let canonical = canonical_key_revocation_bytes(
+                genesis_hash,
+                account_id,
+                &target_key,
+                bound_keys_digest,
+                bound_events_digest,
+            );
             verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
                 .await?;
             let authorization = webauthn::key_op_authorization(
@@ -930,12 +1015,25 @@ pub async fn revoke_key(
                 req.webauthn_assertion.as_ref().expect("verified above"),
             )
             .map_err(|err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")))?;
+            let signer_record = sybil_verifier::KeyRecord {
+                auth_scheme: AccountAuthScheme::WebAuthn.canonical_byte(),
+                pubkey_sec1: signer
+                    .compressed_bytes()
+                    .try_into()
+                    .expect("compressed P-256 key is 33 bytes"),
+                capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+            };
+            sybil_verifier::verify_keyop_auth(&authorization, [&signer_record], &canonical)
+                .map_err(|err| {
+                    AppError::bad_request(format!("Invalid WebAuthn assertion: {err}"))
+                })?;
             state
                 .sequencer
                 .revoke_signing_key_authenticated(AuthenticatedKeyRevocation {
                     account_id,
-                    target_pubkey: target_bytes,
-                    nonce: req.nonce,
+                    target_key,
+                    bound_keys_digest,
+                    bound_events_digest,
                     signer,
                     authorization,
                 })

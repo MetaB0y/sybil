@@ -153,7 +153,11 @@ pub async fn restart_api_with_env(
 }
 
 pub async fn wait_for_health(client: &reqwest::Client, base_url: &str) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // A full `cargo test --workspace` can leave this process competing with
+    // linker/test cleanup for several seconds even though the same process test
+    // starts immediately in isolation. Keep the assertion bounded, but allow
+    // enough headroom for the workspace gate on loaded CI and dev hosts.
+    let deadline = Instant::now() + Duration::from_secs(30);
 
     loop {
         let last_error = match client.get(format!("{base_url}/v1/health")).send().await {

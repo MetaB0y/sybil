@@ -721,6 +721,7 @@ mod tests {
         let witness = BlockWitness {
             header: genesis_header(state_root),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -760,6 +761,7 @@ mod tests {
         let witness = BlockWitness {
             header: genesis_header([0xff; 32]), // wrong root
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -804,6 +806,7 @@ mod tests {
                 timestamp_ms: 1000,
             },
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -859,6 +862,7 @@ mod tests {
         let witness = BlockWitness {
             header,
             previous_header: Some(prev_header),
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -924,6 +928,7 @@ mod tests {
         let mut witness = BlockWitness {
             header,
             previous_header: Some(prev_header),
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -976,6 +981,7 @@ mod tests {
         let witness = BlockWitness {
             header,
             previous_header: Some(prev_header),
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],

@@ -1,5 +1,9 @@
 use openvm::io::{read_vec, reveal_bytes32};
+#[allow(unused_imports)]
+use openvm_p256::P256Point;
 use sybil_zk::{verify_state_transition_input, StateTransitionGuestInput};
+
+openvm::init!("openvm_init.rs");
 
 fn main() {
     let input = read_guest_input();

@@ -32,8 +32,10 @@ list.
 
 For raw P256, clients sign the canonical payload directly. For WebAuthn, the
 assertion challenge is `base64url(SHA-256(canonical_payload_bytes))`, where the
-canonical payload is the same order, cancel, or withdrawal byte string used by
-raw P256, including the replay nonce. The authenticator signs
+canonical payload is the same byte string used by raw P256. Ordinary actions
+include the replay nonce. Key registration/revocation instead bind to the
+account's current `keys_digest` and `events_digest`, fetched from
+`GET /v1/accounts/{id}/keyop-state`. The authenticator signs
 `authenticatorData || SHA-256(clientDataJSON)`. The API verifies the P256
 signature, `clientDataJSON.type`, challenge, origin, `rpIdHash`, user presence,
 user verification, and the registered auth scheme before forwarding an
@@ -43,16 +45,16 @@ Signed orders go to `POST /v1/orders/signed`; signed cancellations go to `POST
 /v1/orders/cancel/signed`; signed bridge withdrawals go to
 `POST /v1/bridge/withdrawals/signed`. The raw signed path still verifies inside
 the sequencer exactly as before. The WebAuthn path verifies the envelope at the
-API boundary, then uses the same registered-key lookup, durable nonce advance,
-admission, cancellation, or bridge WAL machinery. The v6 block witness contains
+API boundary, then uses the same registered-key lookup and the appropriate
+nonce- or state-bound admission/WAL machinery. The v9 block witness contains
 WebAuthn envelopes or raw signatures for `KeyRegistered` and `KeyRevoked`
-events so the authorization bytes are commitment-bound. The current OpenVM
-guest checks envelope caps and that the declared signer is an active
-scheme-matching key in the running key set, but cryptographic guest verification
-remains deferred to the separate P256 acceleration ticket. Admission-time
-verification remains mandatory.
+events so the authorization bytes are commitment-bound. The OpenVM guest uses
+the accelerated P-256 extension to verify both schemes. WebAuthn key ops also
+enforce the pinned RP id hash, UP+UV, `webauthn.get`, the exact challenge, and
+the envelope caps with an escape-aware RFC 8259 scanner. Admission-time
+verification remains mandatory and uses the same canonical bytes.
 
-Every signed order, signed cancellation, and signed bridge withdrawal carries a per-account `nonce: u64` covered by the canonical P256 payload. The sequencer stores each account's highest accepted signed-action nonce and requires strict increase; gaps are allowed. Stale or duplicate nonces are rejected at the API boundary as `409 REPLAY_NONCE_STALE`. The nonce advance is durably logged before the signed action becomes live, so a process restart cannot reopen the replay window for an already acknowledged signed payload.
+Every signed order, signed cancellation, and signed bridge withdrawal carries a per-account `nonce: u64` covered by the canonical P256 payload. The sequencer stores each account's highest accepted signed-action nonce and requires strict increase; gaps are allowed. Key operations do not consume that nonce: their canonical bytes bind the running `keys_digest` plus the never-repeating `events_digest`, and stale bindings return HTTP 409 before WAL admission. The nonce advance for other signed actions is durably logged before the action becomes live.
 
 Unsigned order submission (`POST /v1/orders`) is also available and is the primary path in dev mode. Production deployments would require all orders to be signed, ensuring that only the account holder can submit orders against their balance. The P256 choice also aligns with the [[ZK Integration Path]]: P256 signature verification has efficient implementations in SNARK circuits, enabling on-chain verification of order authenticity as part of the block proof.
 
@@ -65,7 +67,7 @@ Signed bridge withdrawals are scaffolding for [[L1 Settlement and Vault]] rather
 - Signed cancellation: `POST /orders/cancel/signed` — signature verified against registered keys
 - Signed withdrawal scaffold: `POST /bridge/withdrawals/signed` — signature verified against registered keys and service-gated
 - Passkey support: WebAuthn assertions over the hash of the same canonical bytes
-- Replay protection: per-account strictly increasing signed-action nonce, persisted through restart
+- Replay protection: nonces for ordinary actions; state-bound running digests for key operations
 - Unsigned path available for dev mode
 - Hardware-compatible: Secure Enclave, StrongBox, FIDO2 keys
 - ZK-friendly: efficient P256 verification circuits exist

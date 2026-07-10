@@ -802,6 +802,7 @@ mod conformance {
                 timestamp_ms: 0,
             },
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders,
             rejections: vec![],
             system_events: vec![],

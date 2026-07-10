@@ -2,6 +2,24 @@ use super::super::*;
 use super::current_timestamp_ms;
 
 impl SequencerActorState {
+    fn validate_keyop_state_binding(
+        &self,
+        account_id: AccountId,
+        bound_keys_digest: [u8; 32],
+        bound_events_digest: [u8; 32],
+    ) -> Result<(), SequencerError> {
+        let account = self
+            .sequencer
+            .accounts
+            .get(account_id)
+            .ok_or(SequencerError::UnknownSigner)?;
+        if account.keys_digest != bound_keys_digest || account.events_digest != bound_events_digest
+        {
+            return Err(SequencerError::KeyOpStateStale { account_id });
+        }
+        Ok(())
+    }
+
     pub(super) async fn persist_control_plane(
         &self,
         command: &crate::store::ControlPlaneCommand,
@@ -215,11 +233,11 @@ impl SequencerActorState {
 
     // --- SYB-60 account management signed mutations ---
     //
-    // All four follow the same shape as bridge withdrawals: verify the P256
-    // signature (or accept an already-verified WebAuthn intent), confirm the
-    // signer key is registered to the target account, burn a replay nonce, then
-    // persist a control-plane WAL row before applying the in-memory change so a
-    // crash between the mutation and the next block commit cannot lose it.
+    // All four verify the P256 signature (or accept an already-verified
+    // WebAuthn intent), confirm the signer key belongs to the target account,
+    // then persist a control-plane WAL row before applying the in-memory change.
+    // Key operations bind the running key/event digests; profile and API-key
+    // operations retain the ordinary replay nonce.
 
     pub(super) async fn handle_register_pubkey_with_meta(
         &mut self,
@@ -265,7 +283,8 @@ impl SequencerActorState {
             new_auth_scheme: signed.new_auth_scheme,
             label: signed.label,
             scope: signed.scope,
-            nonce: signed.nonce,
+            bound_keys_digest: signed.bound_keys_digest,
+            bound_events_digest: signed.bound_events_digest,
             signer: signed.signer,
             authorization,
         })
@@ -280,12 +299,15 @@ impl SequencerActorState {
         // also implies the account has >= 1 key, so the signed path can never be
         // used to bootstrap the very first key (that stays on the service tier).
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
-        // Reject a duplicate registration BEFORE burning the nonce so a rejected
-        // request doesn't consume it (mirrors the revoke validation ordering).
+        self.validate_keyop_state_binding(
+            authenticated.account_id,
+            authenticated.bound_keys_digest,
+            authenticated.bound_events_digest,
+        )?;
+        // Reject a duplicate registration before writing the WAL. The digest
+        // binding has already rejected stale or replayed key operations.
         self.sequencer
             .can_register_pubkey(authenticated.account_id, &authenticated.new_pubkey)?;
-        self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
-            .await?;
         let meta = RegisteredPubkey {
             account_id: authenticated.account_id,
             auth_scheme: authenticated.new_auth_scheme,
@@ -378,8 +400,9 @@ impl SequencerActorState {
         let authorization = raw_key_op_auth(&signed.signer, &signed.signature);
         self.handle_authenticated_key_revocation(AuthenticatedKeyRevocation {
             account_id: signed.account_id,
-            target_pubkey: signed.target_pubkey,
-            nonce: signed.nonce,
+            target_key: signed.target_key,
+            bound_keys_digest: signed.bound_keys_digest,
+            bound_events_digest: signed.bound_events_digest,
             signer: signed.signer,
             authorization,
         })
@@ -391,18 +414,27 @@ impl SequencerActorState {
         authenticated: AuthenticatedKeyRevocation,
     ) -> Result<(), SequencerError> {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
-        let target = PublicKey::from_compressed_bytes(&authenticated.target_pubkey)
+        self.validate_keyop_state_binding(
+            authenticated.account_id,
+            authenticated.bound_keys_digest,
+            authenticated.bound_events_digest,
+        )?;
+        let target = PublicKey::from_compressed_bytes(&authenticated.target_key.pubkey_sec1)
             .ok_or(SequencerError::KeyNotFound)?;
-        // Validate the revocation (ownership + last-key lockout)
-        // before burning the nonce or writing the WAL, so a rejected revocation
-        // doesn't consume the nonce.
+        let registered = self
+            .sequencer
+            .lookup_registered_pubkey(&target)
+            .ok_or(SequencerError::KeyNotFound)?;
+        if crate::digest::key_record(&target, &registered) != authenticated.target_key {
+            return Err(SequencerError::KeyNotFound);
+        }
+        // Validate the revocation (ownership + last-key lockout) before writing
+        // the WAL. The digest binding has already rejected stale/replayed ops.
         self.sequencer
             .can_revoke_signing_key(authenticated.account_id, &target)?;
-        self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
-            .await?;
         self.persist_control_plane(&ControlPlaneCommand::RevokeSigningKey {
             account_id: authenticated.account_id,
-            compressed_pubkey: authenticated.target_pubkey,
+            compressed_pubkey: authenticated.target_key.pubkey_sec1.to_vec(),
             authorization: authenticated.authorization.clone(),
         })
         .await?;

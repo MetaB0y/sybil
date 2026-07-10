@@ -36,6 +36,7 @@ mod header_hash {
         "/../sybil-zk/src/header_hash_impl.rs"
     ));
 }
+pub mod key_op_auth;
 pub mod key_transition;
 pub mod match_verifier;
 pub mod orders;
@@ -68,6 +69,7 @@ pub use account_keys::{
     MAX_KEYS_PER_ACCOUNT, MAX_KEY_OPS_PER_BLOCK, MAX_WEBAUTHN_AUTHENTICATOR_DATA_BYTES,
     MAX_WEBAUTHN_CLIENT_DATA_JSON_BYTES,
 };
+pub use key_op_auth::{verify_keyop_auth, EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID};
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
     ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,

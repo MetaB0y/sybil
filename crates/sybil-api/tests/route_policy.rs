@@ -64,6 +64,10 @@ fn exact_public_routes() -> &'static [RouteMount] {
             path: "/v1/accounts",
         },
         RouteMount {
+            method: "GET",
+            path: "/v1/accounts/{id}/keyop-state",
+        },
+        RouteMount {
             method: "POST",
             path: "/v1/accounts/{id}/keys/register",
         },

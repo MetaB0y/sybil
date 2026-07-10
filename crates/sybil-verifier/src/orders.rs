@@ -329,6 +329,7 @@ mod tests {
         BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders,
             rejections,
             system_events: vec![],

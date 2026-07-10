@@ -3,9 +3,9 @@
 /**
  * SYB-60 account-management actions: profile, signing keys, read API keys.
  *
- * Mirrors `orders.ts`: each signed mutation builds canonical borsh bytes,
- * pulls a monotonic replay nonce, signs (raw P256 or WebAuthn depending on the
- * session's auth scheme), and POSTs via the typed `api` client.
+ * Profile/read-key mutations use canonical borsh bytes plus a replay nonce.
+ * Signing-key operations use verifier-owned bytes bound to current account
+ * digests. Both sign with raw P256 or WebAuthn according to the session.
  *
  * SECURITY: read API keys (bearer tokens, `sybk_…`) are READ-ONLY and cannot
  * trade. Trade authority comes only from a registered P256 signing key — add an
@@ -27,10 +27,7 @@ import {
   generateKeyPair,
   signBytes,
 } from "@/lib/auth/p256";
-import {
-  signWebAuthnBytes,
-  type CreatedPasskey,
-} from "@/lib/auth/webauthn";
+import { signWebAuthnBytes, type CreatedPasskey } from "@/lib/auth/webauthn";
 import { getGenesisHashBytes } from "./orders";
 import { getKeyHandle, useAccountStore } from "./store";
 import type { AccountAuthScheme } from "./storage";
@@ -92,6 +89,21 @@ export interface AddAgentKeyResult {
   jwk: JsonWebKey;
 }
 
+async function getKeyOpBinding(accountId: number): Promise<{
+  keysDigestHex: string;
+  eventsDigestHex: string;
+}> {
+  const { data, error } = await api.GET("/v1/accounts/{id}/keyop-state", {
+    params: { path: { id: accountId } },
+  });
+  if (error || !data)
+    throw new Error("failed to load key-operation signing state");
+  return {
+    keysDigestHex: data.keys_digest_hex,
+    eventsDigestHex: data.events_digest_hex,
+  };
+}
+
 /**
  * POST /v1/accounts/{id}/keys/register — register a NEW agent P256 signing key,
  * authorized by the session's existing key (SYB-229).
@@ -107,16 +119,16 @@ export async function addAgentKey(
 ): Promise<AddAgentKeyResult> {
   const kp = await generateKeyPair();
   const publicKeyHex = await exportPublicKeyCompressedHex(kp.publicKey);
-  const nonce = args.nonce ?? nextReplayNonce(args.accountId);
   const genesisHash = await getGenesisHashBytes();
+  const binding = await getKeyOpBinding(args.accountId);
   // The new agent key is always raw P256; the SIGNER may be raw or WebAuthn.
   const canonical = canonicalKeyRegistrationBytes(
     BigInt(args.accountId),
     "raw_p256",
     fromHex(publicKeyHex),
-    fromHex(args.publicKeyHex),
-    nonce,
     genesisHash,
+    fromHex(binding.keysDigestHex),
+    fromHex(binding.eventsDigestHex),
   );
 
   const body = {
@@ -125,7 +137,8 @@ export async function addAgentKey(
     scope: "agent" as const,
     ...(args.label ? { label: args.label } : {}),
     signer_pubkey_hex: args.publicKeyHex,
-    nonce: u64JsonNumber(nonce),
+    bound_keys_digest_hex: binding.keysDigestHex,
+    bound_events_digest_hex: binding.eventsDigestHex,
   };
 
   const res = await api.POST("/v1/accounts/{id}/keys/register", {
@@ -146,15 +159,15 @@ export interface RegisterPasskeyArgs extends SettingsSignerArgs {
 export async function registerPasskey(
   args: RegisterPasskeyArgs,
 ): Promise<void> {
-  const nonce = args.nonce ?? nextReplayNonce(args.accountId);
   const genesisHash = await getGenesisHashBytesWithRetry();
+  const binding = await getKeyOpBinding(args.accountId);
   const canonical = canonicalKeyRegistrationBytes(
     BigInt(args.accountId),
     "webauthn",
     fromHex(args.passkey.publicKeyHex),
-    fromHex(args.publicKeyHex),
-    nonce,
     genesisHash,
+    fromHex(binding.keysDigestHex),
+    fromHex(binding.eventsDigestHex),
   );
   const body = {
     public_key_hex: args.passkey.publicKeyHex,
@@ -167,7 +180,8 @@ export async function registerPasskey(
     scope: "primary" as const,
     ...(args.label ? { label: args.label } : {}),
     signer_pubkey_hex: args.publicKeyHex,
-    nonce: u64JsonNumber(nonce),
+    bound_keys_digest_hex: binding.keysDigestHex,
+    bound_events_digest_hex: binding.eventsDigestHex,
   };
   const res = await api.POST("/v1/accounts/{id}/keys/register", {
     params: { path: { id: args.accountId } },
@@ -222,6 +236,7 @@ async function attachSignerAuth<T extends Record<string, unknown>>(
 export interface RevokeSigningKeyArgs extends SettingsSignerArgs {
   /** Hex-encoded compressed P256 pubkey of the key to revoke. */
   targetPubkeyHex: string;
+  targetAuthScheme?: AccountAuthScheme;
 }
 
 /**
@@ -232,19 +247,22 @@ export interface RevokeSigningKeyArgs extends SettingsSignerArgs {
 export async function revokeSigningKey(
   args: RevokeSigningKeyArgs,
 ): Promise<void> {
-  const nonce = args.nonce ?? nextReplayNonce(args.accountId);
   const genesisHash = await getGenesisHashBytes();
+  const binding = await getKeyOpBinding(args.accountId);
   const canonical = canonicalKeyRevocationBytes(
     BigInt(args.accountId),
     fromHex(args.targetPubkeyHex),
-    nonce,
+    args.targetAuthScheme ?? "raw_p256",
     genesisHash,
+    fromHex(binding.keysDigestHex),
+    fromHex(binding.eventsDigestHex),
   );
 
   const body = {
     target_pubkey_hex: args.targetPubkeyHex,
     signer_pubkey_hex: args.publicKeyHex,
-    nonce: u64JsonNumber(nonce),
+    bound_keys_digest_hex: binding.keysDigestHex,
+    bound_events_digest_hex: binding.eventsDigestHex,
   };
 
   const res = await api.POST("/v1/accounts/{id}/keys/revoke", {

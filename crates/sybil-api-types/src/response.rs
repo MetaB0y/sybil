@@ -19,6 +19,10 @@ pub struct AccountResponse {
     /// Balance reserved by live resting orders. Integer nanodollars;
     /// 1_000_000_000 = $1.
     pub reserved_balance_nanos: i64,
+    /// Current validity key-set digest used to state-bind key operations.
+    pub keys_digest_hex: String,
+    /// Current event-chain digest used to make every key operation one-shot.
+    pub events_digest_hex: String,
     #[serde(default)]
     pub positions: Vec<PositionResponse>,
     /// Optional opt-in display name (SYB-60). Not yet used for leaderboard
@@ -45,6 +49,15 @@ pub struct AccountKeyResponse {
     pub label: Option<String>,
     /// Registration time in Unix milliseconds (0 for keys predating SYB-60).
     pub created_at_ms: u64,
+}
+
+/// Public, non-secret state needed to construct a one-shot key operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct KeyOpStateResponse {
+    pub account_id: u64,
+    pub keys_digest_hex: String,
+    pub events_digest_hex: String,
 }
 
 /// A read-scoped bearer API key's metadata (never the token or its hash).

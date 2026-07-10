@@ -177,6 +177,8 @@ pub fn account_to_response(account: &Account, reserved_balance_nanos: i64) -> Ac
         balance_nanos: account.balance,
         available_balance_nanos,
         reserved_balance_nanos,
+        keys_digest_hex: hex::encode(account.keys_digest),
+        events_digest_hex: hex::encode(account.events_digest),
         positions,
         display_name: account.profile.display_name.clone(),
         avatar_seed: account.profile.avatar_seed.clone(),

@@ -230,7 +230,7 @@ fn checked_add(value: i64, delta: i64, account_id: u64) -> Result<i64, String> {
         .ok_or_else(|| format!("account {account_id} system balance arithmetic overflowed"))
 }
 
-fn update_digest(current: &[u8; 32], event_bytes: &[u8]) -> [u8; 32] {
+pub(crate) fn update_digest(current: &[u8; 32], event_bytes: &[u8]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(current);
     hasher.update(event_bytes);
@@ -243,7 +243,7 @@ fn encode_fill_prefix(tag: u8, capacity: usize) -> Vec<u8> {
     bytes
 }
 
-fn encode_create_account_event(initial_balance: i64, block_height: u64) -> Vec<u8> {
+pub(crate) fn encode_create_account_event(initial_balance: i64, block_height: u64) -> Vec<u8> {
     let mut bytes = encode_fill_prefix(0x04, 17);
     bytes.extend_from_slice(&initial_balance.to_le_bytes());
     bytes.extend_from_slice(&block_height.to_le_bytes());
@@ -332,7 +332,7 @@ fn encode_order_cancelled_event(
     bytes
 }
 
-fn encode_key_event(tag: u8, key: &KeyRecord, block_height: u64) -> Vec<u8> {
+pub(crate) fn encode_key_event(tag: u8, key: &KeyRecord, block_height: u64) -> Vec<u8> {
     let mut bytes = encode_fill_prefix(tag, 47);
     bytes.push(key.auth_scheme);
     bytes.extend_from_slice(&key.pubkey_sec1);

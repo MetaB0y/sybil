@@ -190,6 +190,7 @@ fn byte_identity_witness() -> BlockWitness {
     BlockWitness {
         header,
         previous_header: Some(previous_header),
+        genesis_hash: [0u8; 32],
         orders: vec![WitnessOrder {
             order: accepted_order.clone(),
             account_id: 1001,

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::types::{AccountSnapshot, BlockWitness, KeyOpAuth, KeyRecord, SystemEventWitness};
+use crate::types::{AccountSnapshot, BlockWitness, KeyRecord, SystemEventWitness};
 use crate::violations::{VerificationResult, Violation, ViolationKind};
 
 pub fn verify_key_transitions(witness: &BlockWitness) -> VerificationResult {
@@ -139,10 +139,15 @@ fn verify(witness: &BlockWitness) -> Result<(), String> {
     // uniqueness for CreateAccount.initial_keys and KeyRegistered.
     let mut running = post_keys;
     let mut pubkeys = pubkey_owner_map(&running)?;
+    let mut running_events: BTreeMap<u64, [u8; 32]> = pre_accounts
+        .iter()
+        .map(|(account_id, account)| (*account_id, account.events_digest))
+        .collect();
     for event in &witness.system_events {
         match event {
             SystemEventWitness::CreateAccount {
                 account_id,
+                initial_balance,
                 initial_keys,
                 ..
             } => {
@@ -155,6 +160,14 @@ fn verify(witness: &BlockWitness) -> Result<(), String> {
                     insert_globally_unique_key(*account_id, *key, &mut keys, &mut pubkeys)?;
                 }
                 running.insert(*account_id, keys);
+                let encoded = crate::system::encode_create_account_event(
+                    *initial_balance,
+                    witness.header.height,
+                );
+                running_events.insert(
+                    *account_id,
+                    crate::system::update_digest(&[0; 32], &encoded),
+                );
             }
             SystemEventWitness::KeyRegistered {
                 account_id,
@@ -165,7 +178,19 @@ fn verify(witness: &BlockWitness) -> Result<(), String> {
                 let keys = running.get_mut(account_id).ok_or_else(|| {
                     format!("KeyRegistered account {account_id} has no running account")
                 })?;
-                validate_authorization(*account_id, authorization, keys)?;
+                let events_digest = *running_events.get(account_id).ok_or_else(|| {
+                    format!("KeyRegistered account {account_id} has no running events digest")
+                })?;
+                let keys_digest = crate::account_keys_digest(*account_id, keys.iter().copied());
+                let canonical = crate::canonical_key_registration_bytes(
+                    witness.genesis_hash,
+                    *account_id,
+                    key,
+                    keys_digest,
+                    events_digest,
+                );
+                crate::verify_keyop_auth(authorization, keys.iter(), &canonical)
+                    .map_err(|details| format!("account {account_id} registration: {details}"))?;
                 if keys.len() >= crate::MAX_KEYS_PER_ACCOUNT {
                     return Err(format!(
                         "account {account_id} exceeds MAX_KEYS_PER_ACCOUNT={} on registration",
@@ -173,6 +198,11 @@ fn verify(witness: &BlockWitness) -> Result<(), String> {
                     ));
                 }
                 insert_globally_unique_key(*account_id, *key, keys, &mut pubkeys)?;
+                let encoded = crate::system::encode_key_event(0x0a, key, witness.header.height);
+                running_events.insert(
+                    *account_id,
+                    crate::system::update_digest(&events_digest, &encoded),
+                );
             }
             SystemEventWitness::KeyRevoked {
                 account_id,
@@ -183,7 +213,19 @@ fn verify(witness: &BlockWitness) -> Result<(), String> {
                 let keys = running.get_mut(account_id).ok_or_else(|| {
                     format!("KeyRevoked account {account_id} has no running account")
                 })?;
-                validate_authorization(*account_id, authorization, keys)?;
+                let events_digest = *running_events.get(account_id).ok_or_else(|| {
+                    format!("KeyRevoked account {account_id} has no running events digest")
+                })?;
+                let keys_digest = crate::account_keys_digest(*account_id, keys.iter().copied());
+                let canonical = crate::canonical_key_revocation_bytes(
+                    witness.genesis_hash,
+                    *account_id,
+                    key,
+                    keys_digest,
+                    events_digest,
+                );
+                crate::verify_keyop_auth(authorization, keys.iter(), &canonical)
+                    .map_err(|details| format!("account {account_id} revocation: {details}"))?;
                 if keys.len() <= 1 {
                     return Err(format!(
                         "KeyRevoked would remove account {account_id}'s last active key"
@@ -195,6 +237,11 @@ fn verify(witness: &BlockWitness) -> Result<(), String> {
                     ));
                 }
                 pubkeys.remove(&key.pubkey_sec1);
+                let encoded = crate::system::encode_key_event(0x0b, key, witness.header.height);
+                running_events.insert(
+                    *account_id,
+                    crate::system::update_digest(&events_digest, &encoded),
+                );
             }
             _ => {}
         }
@@ -350,37 +397,6 @@ fn insert_globally_unique_key(
     Ok(())
 }
 
-fn validate_authorization(
-    account_id: u64,
-    authorization: &KeyOpAuth,
-    running_keys: &BTreeSet<KeyRecord>,
-) -> Result<(), String> {
-    if let KeyOpAuth::WebAuthn {
-        authenticator_data,
-        client_data_json,
-        ..
-    } = authorization
-    {
-        if authenticator_data.len() > crate::MAX_WEBAUTHN_AUTHENTICATOR_DATA_BYTES {
-            return Err("WebAuthn authenticator_data exceeds protocol cap".to_string());
-        }
-        if client_data_json.len() > crate::MAX_WEBAUTHN_CLIENT_DATA_JSON_BYTES {
-            return Err("WebAuthn client_data_json exceeds protocol cap".to_string());
-        }
-    }
-    let signer = authorization.signer_pubkey();
-    let scheme = authorization.signer_auth_scheme();
-    if !running_keys
-        .iter()
-        .any(|key| key.pubkey_sec1 == *signer && key.auth_scheme == scheme)
-    {
-        return Err(format!(
-            "key op signer is not an active scheme-matching key on account {account_id}"
-        ));
-    }
-    Ok(())
-}
-
 fn key_touched_accounts(events: &[SystemEventWitness]) -> BTreeSet<u64> {
     events
         .iter()
@@ -442,12 +458,17 @@ fn event_account_ids(event: &SystemEventWitness) -> Vec<u64> {
 mod tests {
     use std::collections::HashMap;
 
+    use p256::ecdsa::signature::Signer as _;
+    use p256::ecdsa::{Signature, SigningKey};
+
     use super::*;
+    use crate::KeyOpAuth;
     use crate::{DepositAccumulatorWitness, StateSidecarSnapshot, WitnessBlockHeader};
 
     fn key(byte: u8, auth_scheme: u8) -> KeyRecord {
-        let mut pubkey_sec1 = [byte; 33];
-        pubkey_sec1[0] = 0x02;
+        let signing = SigningKey::from_slice(&[byte; 32]).unwrap();
+        let mut pubkey_sec1 = [0u8; 33];
+        pubkey_sec1.copy_from_slice(signing.verifying_key().to_encoded_point(true).as_bytes());
         KeyRecord {
             auth_scheme,
             pubkey_sec1,
@@ -455,10 +476,19 @@ mod tests {
         }
     }
 
-    fn auth(signer: KeyRecord) -> KeyOpAuth {
+    fn dummy_auth(signer: KeyRecord) -> KeyOpAuth {
         KeyOpAuth::RawP256 {
             signer_pubkey: signer.pubkey_sec1,
             signature: [0u8; 64],
+        }
+    }
+
+    fn signed_auth(signer_byte: u8, canonical: &[u8]) -> KeyOpAuth {
+        let signing = SigningKey::from_slice(&[signer_byte; 32]).unwrap();
+        let signature: Signature = signing.sign(canonical);
+        KeyOpAuth::RawP256 {
+            signer_pubkey: key(signer_byte, 0).pubkey_sec1,
+            signature: signature.to_bytes().into(),
         }
     }
 
@@ -499,6 +529,7 @@ mod tests {
                 fill_count: 0,
                 timestamp_ms: 0,
             }),
+            genesis_hash: [0x42; 32],
             orders: Vec::new(),
             rejections: Vec::new(),
             system_events,
@@ -545,7 +576,7 @@ mod tests {
             vec![SystemEventWitness::KeyRegistered {
                 account_id: 7,
                 key: witnessed,
-                authorization: auth(old),
+                authorization: dummy_auth(old),
             }],
         ));
         assert!(!result.valid);
@@ -562,7 +593,7 @@ mod tests {
         witness.system_events = vec![SystemEventWitness::KeyRegistered {
             account_id: 8,
             key: added,
-            authorization: auth(old),
+            authorization: dummy_auth(old),
         }];
         let result = verify_key_transitions(&witness);
         assert!(!result.valid);
@@ -575,30 +606,52 @@ mod tests {
     fn register_then_revoke_across_blocks_round_trips_canonical_witness() {
         let primary = key(1, 0);
         let agent = key(2, 0);
-        let register = witness(
+        let mut register = witness(
             &[primary],
             &[primary, agent],
             vec![SystemEventWitness::KeyRegistered {
                 account_id: 7,
                 key: agent,
-                authorization: auth(primary),
+                authorization: dummy_auth(primary),
             }],
         );
+        let canonical = crate::canonical_key_registration_bytes(
+            register.genesis_hash,
+            7,
+            &agent,
+            crate::account_keys_digest(7, [primary]),
+            [0; 32],
+        );
+        if let SystemEventWitness::KeyRegistered { authorization, .. } =
+            &mut register.system_events[0]
+        {
+            *authorization = signed_auth(1, &canonical);
+        }
         assert!(verify_key_transitions(&register).valid);
 
         let bytes = crate::witness_schema::canonical_witness_bytes(&register);
         let restored = crate::witness_schema::decode_canonical_witness_bytes(&bytes).unwrap();
         assert!(verify_key_transitions(&restored).valid);
 
-        let revoke = witness(
+        let mut revoke = witness(
             &[primary, agent],
             &[agent],
             vec![SystemEventWitness::KeyRevoked {
                 account_id: 7,
                 key: primary,
-                authorization: auth(agent),
+                authorization: dummy_auth(agent),
             }],
         );
+        let canonical = crate::canonical_key_revocation_bytes(
+            revoke.genesis_hash,
+            7,
+            &primary,
+            crate::account_keys_digest(7, [primary, agent]),
+            [0; 32],
+        );
+        if let SystemEventWitness::KeyRevoked { authorization, .. } = &mut revoke.system_events[0] {
+            *authorization = signed_auth(2, &canonical);
+        }
         assert!(verify_key_transitions(&revoke).valid);
     }
 }

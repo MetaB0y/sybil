@@ -18,6 +18,9 @@ pub struct BlockWitness {
     pub header: WitnessBlockHeader,
     /// Previous block header (`None` for genesis).
     pub previous_header: Option<WitnessBlockHeader>,
+    /// Chain-instance domain used by validity-critical signed key operations.
+    /// This is a private guest input covered by every key-op signature.
+    pub genesis_hash: [u8; 32],
 
     // -- Orders --
     /// Orders accepted into this batch (with account mapping).

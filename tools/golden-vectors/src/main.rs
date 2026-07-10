@@ -562,6 +562,7 @@ fn key_op_witness() -> BlockWitness {
             fill_count: 0,
             timestamp_ms: 1_700_000_001_000,
         }),
+        genesis_hash: [0x42; 32],
         orders: Vec::new(),
         rejections: Vec::new(),
         system_events: vec![event],
@@ -660,6 +661,7 @@ fn quarantine_claim_witness() -> BlockWitness {
             timestamp_ms: 1_700_000_002_000,
         },
         previous_header: None,
+        genesis_hash: [0u8; 32],
         orders: vec![],
         rejections: vec![],
         system_events: events,
@@ -802,6 +804,7 @@ fn byte_identity_witness() -> BlockWitness {
     BlockWitness {
         header,
         previous_header: Some(previous_header),
+        genesis_hash: [0u8; 32],
         orders: vec![WitnessOrder {
             order: accepted_order.clone(),
             account_id: 1001,

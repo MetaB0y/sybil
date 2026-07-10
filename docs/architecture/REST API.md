@@ -17,6 +17,11 @@ wrong-account read bearer is `403`; missing, invalid, or revoked read credential
 are `401`. Public market, activity, aggregate-statistics, and leaderboard reads
 remain unauthenticated.
 
+`GET /v1/accounts/{id}/keyop-state` is intentionally public and exposes only
+the current committed `keys_digest` and `events_digest`. Clients fetch it just
+before signing key registration/revocation; it contains no key list, balance,
+position, or profile data. Admission rejects a stale state binding with 409.
+
 Public account onboarding uses `POST /v1/accounts` with both
 `initial_balance_nanos` and `initial_key`. Omitting `initial_key` retains the
 deprecated bare-account form for service/dev tooling only; the old unsigned

@@ -96,7 +96,9 @@ function padMarketIds(ids: readonly number[]): number[] {
 
 function padPayoffs(payoffs: readonly number[]): number[] {
   if (payoffs.length > MAX_STATES) {
-    throw new Error(`order has ${payoffs.length} payoffs; max is ${MAX_STATES}`);
+    throw new Error(
+      `order has ${payoffs.length} payoffs; max is ${MAX_STATES}`,
+    );
   }
   return Array.from({ length: MAX_STATES }, (_, i) => payoffs[i] ?? 0);
 }
@@ -104,10 +106,14 @@ function padPayoffs(payoffs: readonly number[]): number[] {
 type EncodedCondition = {
   market: number;
   threshold: bigint;
-  direction: { Above: Record<string, never> } | { Below: Record<string, never> };
+  direction:
+    | { Above: Record<string, never> }
+    | { Below: Record<string, never> };
 };
 
-function encodeCondition(c: PriceCondition | undefined): EncodedCondition | null {
+function encodeCondition(
+  c: PriceCondition | undefined,
+): EncodedCondition | null {
   if (!c) return null;
   return {
     market: c.market,
@@ -170,38 +176,50 @@ const PROFILE_UPDATE_SCHEMA = {
   },
 };
 
-// SYB-231: signing-key revocation. Domain-separated by genesis_hash like
-// orders/cancels (SYB-224) and key registration (SYB-229). Field ORDER matches
-// `KeyRevocation` in the Rust signing crate.
-const KEY_REVOCATION_SCHEMA = {
-  struct: {
-    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
-    account_id: "u64",
-    target_pubkey: { array: { type: "u8" } },
-    nonce: "u64",
-  },
-};
-
-// SYB-229: signing-key registration. Domain-separated by genesis_hash like
-// orders/cancels (SYB-224). `new_key_auth_scheme` is 0 for raw_p256, 1 for
-// webauthn. Field ORDER matches `KeyRegistration` in the Rust signing crate.
-const KEY_REGISTRATION_SCHEMA = {
-  struct: {
-    genesis_hash: { array: { type: "u8", len: GENESIS_HASH_LEN } },
-    account_id: "u64",
-    new_key_auth_scheme: "u8",
-    new_key_pubkey: { array: { type: "u8" } },
-    signer_pubkey: { array: { type: "u8" } },
-    nonce: "u64",
-  },
-};
-
 /** Auth-scheme byte tag; MUST match `AccountAuthScheme::canonical_byte` in Rust. */
 export type CanonicalAuthScheme = "raw_p256" | "webauthn";
 
 function authSchemeByte(scheme: CanonicalAuthScheme): number {
   return scheme === "webauthn" ? 1 : 0;
 }
+
+function fixedBytes(
+  value: Uint8Array,
+  length: number,
+  field: string,
+): Uint8Array {
+  if (value.length !== length) {
+    throw new Error(`${field} must be ${length} bytes`);
+  }
+  return value;
+}
+
+function u64le(value: bigint): Uint8Array {
+  if (value < 0n || value > 0xffffffffffffffffn) {
+    throw new Error("u64 value out of range");
+  }
+  const out = new Uint8Array(8);
+  let remaining = value;
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Number(remaining & 0xffn);
+    remaining >>= 8n;
+  }
+  return out;
+}
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(
+    parts.reduce((total, part) => total + part.length, 0),
+  );
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+const FULL_CAPABILITY_MASK_LE = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
 
 const API_KEY_CREATE_SCHEMA = {
   struct: {
@@ -249,16 +267,20 @@ export function canonicalProfileUpdateBytes(
 export function canonicalKeyRevocationBytes(
   accountId: bigint,
   targetPubkey: Uint8Array,
-  nonce: bigint,
+  targetAuthScheme: CanonicalAuthScheme,
   genesisHash: Uint8Array,
+  boundKeysDigest: Uint8Array,
+  boundEventsDigest: Uint8Array,
 ): Uint8Array {
-  return new Uint8Array(
-    serialize(KEY_REVOCATION_SCHEMA as never, {
-      genesis_hash: encodeGenesisHash(genesisHash),
-      account_id: accountId,
-      target_pubkey: targetPubkey,
-      nonce,
-    }),
+  return concatBytes(
+    new TextEncoder().encode("sybil/keyop/revoke/v1"),
+    fixedBytes(genesisHash, 32, "genesis hash"),
+    u64le(accountId),
+    new Uint8Array([authSchemeByte(targetAuthScheme)]),
+    fixedBytes(targetPubkey, 33, "target public key"),
+    FULL_CAPABILITY_MASK_LE,
+    fixedBytes(boundKeysDigest, 32, "bound keys digest"),
+    fixedBytes(boundEventsDigest, 32, "bound events digest"),
   );
 }
 
@@ -271,19 +293,19 @@ export function canonicalKeyRegistrationBytes(
   accountId: bigint,
   newKeyAuthScheme: CanonicalAuthScheme,
   newKeyPubkey: Uint8Array,
-  signerPubkey: Uint8Array,
-  nonce: bigint,
   genesisHash: Uint8Array,
+  boundKeysDigest: Uint8Array,
+  boundEventsDigest: Uint8Array,
 ): Uint8Array {
-  return new Uint8Array(
-    serialize(KEY_REGISTRATION_SCHEMA as never, {
-      genesis_hash: encodeGenesisHash(genesisHash),
-      account_id: accountId,
-      new_key_auth_scheme: authSchemeByte(newKeyAuthScheme),
-      new_key_pubkey: newKeyPubkey,
-      signer_pubkey: signerPubkey,
-      nonce,
-    }),
+  return concatBytes(
+    new TextEncoder().encode("sybil/keyop/register/v1"),
+    fixedBytes(genesisHash, 32, "genesis hash"),
+    u64le(accountId),
+    new Uint8Array([authSchemeByte(newKeyAuthScheme)]),
+    fixedBytes(newKeyPubkey, 33, "new public key"),
+    FULL_CAPABILITY_MASK_LE,
+    fixedBytes(boundKeysDigest, 32, "bound keys digest"),
+    fixedBytes(boundEventsDigest, 32, "bound events digest"),
   );
 }
 

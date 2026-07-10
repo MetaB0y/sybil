@@ -13,4 +13,7 @@ overflow-checks = true
 
 [dependencies]
 openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0", features = ["std"] }
+openvm-algebra-guest = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0" }
+openvm-ecc-guest = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0" }
+openvm-p256 = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0", package = "p256", features = ["ecdsa"] }
 sybil-zk = { path = "../../crates/sybil-zk" }

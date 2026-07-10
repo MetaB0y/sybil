@@ -31,6 +31,7 @@ use crate::util::now_ms;
         routes::accounts::create_account,
         routes::accounts::fund_account,
         routes::accounts::get_account,
+        routes::accounts::get_keyop_state,
         routes::accounts::register_key,
         routes::accounts::register_signed_key,
         routes::accounts::set_profile,
@@ -110,6 +111,7 @@ use crate::util::now_ms;
         CreateApiKeyRequest,
         RevokeApiKeyRequest,
         AccountKeyResponse,
+        KeyOpStateResponse,
         ApiKeyResponse,
         CreateApiKeyResponse,
         PrivateAccountSummaryResponse,
@@ -500,6 +502,10 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/accounts",
     },
     RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/keyop-state",
+    },
+    RouteMount {
         method: "POST",
         path: "/v1/accounts/{id}/keys/register",
     },
@@ -813,6 +819,10 @@ fn public_routes(state: &AppState) -> Router<AppState> {
         .route(
             "/v1/accounts/{id}",
             axum::routing::get(routes::accounts::get_account),
+        )
+        .route(
+            "/v1/accounts/{id}/keyop-state",
+            axum::routing::get(routes::accounts::get_keyop_state),
         )
         .route(
             "/v1/accounts/{id}/keys",

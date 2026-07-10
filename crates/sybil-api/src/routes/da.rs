@@ -139,6 +139,7 @@ mod tests {
                 timestamp_ms: 1_000,
             },
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: Vec::new(),
             rejections: Vec::new(),
             system_events: Vec::new(),

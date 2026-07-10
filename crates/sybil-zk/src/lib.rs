@@ -897,6 +897,8 @@ mod tests {
     use commonware_storage::qmdb::current::VariableConfig;
     use commonware_storage::translator::OneCap;
     use matching_engine::{MarketId, Order};
+    use p256::ecdsa::{signature::hazmat::PrehashSigner as _, Signature, SigningKey};
+    use sha2::Sha256;
     use sybil_verifier::{
         commitments::{event_schema, state_schema},
         AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot,
@@ -1057,6 +1059,7 @@ mod tests {
         let witness = BlockWitness {
             header,
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -1172,6 +1175,7 @@ mod tests {
         let witness = BlockWitness {
             header,
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -1228,6 +1232,7 @@ mod tests {
         let witness = BlockWitness {
             header,
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -1271,6 +1276,34 @@ mod tests {
         KeyOpAuth::RawP256 {
             signer_pubkey: signer.pubkey_sec1,
             signature: [0u8; 64],
+        }
+    }
+
+    fn real_test_key(byte: u8) -> (SigningKey, KeyRecord) {
+        let signing_key = SigningKey::from_bytes((&[byte; 32]).into()).expect("valid test key");
+        let encoded = signing_key.verifying_key().to_encoded_point(true);
+        let pubkey_sec1 = encoded
+            .as_bytes()
+            .try_into()
+            .expect("compressed P-256 key is 33 bytes");
+        (
+            signing_key,
+            KeyRecord {
+                auth_scheme: 0,
+                pubkey_sec1,
+                capability_mask: KeyRecord::FULL_CAPABILITY_MASK,
+            },
+        )
+    }
+
+    fn signed_key_auth(signing_key: &SigningKey, signer: KeyRecord, canonical: &[u8]) -> KeyOpAuth {
+        let digest: [u8; 32] = Sha256::digest(canonical).into();
+        let signature: Signature = signing_key
+            .sign_prehash(&digest)
+            .expect("test prehash signs");
+        KeyOpAuth::RawP256 {
+            signer_pubkey: signer.pubkey_sec1,
+            signature: signature.to_bytes().into(),
         }
     }
 
@@ -1369,6 +1402,7 @@ mod tests {
                 timestamp_ms: 2_000,
             },
             previous_header: Some(previous_header),
+            genesis_hash: [0u8; 32],
             orders: Vec::new(),
             rejections: Vec::new(),
             system_events,
@@ -1765,8 +1799,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                130, 23, 104, 223, 232, 254, 38, 192, 210, 191, 213, 219, 176, 14, 84, 158, 3, 13,
-                223, 114, 95, 71, 15, 88, 93, 64, 223, 17, 168, 232, 101, 249,
+                126, 40, 160, 245, 139, 139, 88, 160, 242, 67, 82, 7, 12, 104, 127, 241, 144, 154,
+                39, 150, 206, 0, 53, 109, 98, 111, 56, 229, 197, 28, 16, 101,
             ]
         );
     }
@@ -2225,8 +2259,16 @@ mod tests {
 
     #[test]
     fn guest_accepts_register_then_revoke_across_blocks() {
-        let primary = test_key(1);
-        let agent = test_key(2);
+        let (primary_signing_key, primary) = real_test_key(1);
+        let (agent_signing_key, agent) = real_test_key(2);
+        let genesis_hash = [0; 32];
+        let register_canonical = sybil_verifier::canonical_key_registration_bytes(
+            genesis_hash,
+            7,
+            &agent,
+            sybil_verifier::account_keys_digest(7, [primary]),
+            [0; 32],
+        );
         let after_register = fold_key_event_digest([0; 32], 0x0a, agent, 2);
         let register = keyed_transition_input(
             2,
@@ -2237,11 +2279,18 @@ mod tests {
             vec![SystemEventWitness::KeyRegistered {
                 account_id: 7,
                 key: agent,
-                authorization: test_key_auth(primary),
+                authorization: signed_key_auth(&primary_signing_key, primary, &register_canonical),
             }],
         );
         assert!(verify_state_transition_input(&register).is_ok());
 
+        let revoke_canonical = sybil_verifier::canonical_key_revocation_bytes(
+            genesis_hash,
+            7,
+            &primary,
+            sybil_verifier::account_keys_digest(7, [primary, agent]),
+            after_register,
+        );
         let after_revoke = fold_key_event_digest(after_register, 0x0b, primary, 3);
         let revoke = keyed_transition_input(
             3,
@@ -2252,7 +2301,7 @@ mod tests {
             vec![SystemEventWitness::KeyRevoked {
                 account_id: 7,
                 key: primary,
-                authorization: test_key_auth(agent),
+                authorization: signed_key_auth(&agent_signing_key, agent, &revoke_canonical),
             }],
         );
         assert!(verify_state_transition_input(&revoke).is_ok());

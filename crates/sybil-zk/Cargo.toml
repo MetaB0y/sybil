@@ -23,6 +23,7 @@ commonware-cryptography = "2026.4.0"
 commonware-runtime = "2026.4.0"
 commonware-storage = "2026.4.0"
 matching-engine = { path = "../matching-engine" }
+p256 = { version = "0.13", features = ["ecdsa"] }
 serde_json = "1"
 
 [lints.clippy]

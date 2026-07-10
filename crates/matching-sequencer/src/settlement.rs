@@ -463,6 +463,7 @@ mod tests {
             let witness = BlockWitness {
                 header,
                 previous_header: None,
+                genesis_hash: [0u8; 32],
                 orders: vec![witness_order],
                 rejections: vec![],
                 system_events: vec![],
