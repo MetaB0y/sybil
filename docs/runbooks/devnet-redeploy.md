@@ -175,10 +175,14 @@ list as complete:**
   and `--metrics-host` in `arena/live/runner.py`. Off by default; only set a
   port if you want the arena exporter scraped.
 - **L1 indexer (SYB-190):** `sybil-l1-indexer` is run separately (not a compose
-  service). For a real chain raise `SYBIL_L1_CONFIRMATIONS` to 12–32 (dev-Anvil
-  default is `2`; crediting a reorged-away deposit is unrecoverable), and set
-  `--cursor-path` / `SYBIL_L1_CURSOR_PATH` so restarts resume the scan instead
-  of rescanning from `start_block`. Other vars (`SYBIL_L1_RPC_URL`,
+  service). Source `deploy/l1-indexer.dev.env` in the dev-Anvil launcher; it
+  sets `SYBIL_L1_MIN_CONFIRMATIONS=0` explicitly because the local chain mines
+  deposits immediately. This preserves the post-deploy deposit smoke flow while
+  making omission fail closed everywhere else. For a real chain raise both
+  `SYBIL_L1_CONFIRMATIONS` and `SYBIL_L1_MIN_CONFIRMATIONS` to 12–32 (the
+  ordinary confirmation-depth default is `2`; crediting a reorged-away deposit
+  is unrecoverable), and set `--cursor-path` / `SYBIL_L1_CURSOR_PATH` so
+  restarts resume the scan instead of rescanning from `start_block`. Other vars (`SYBIL_L1_RPC_URL`,
   `SYBIL_L1_VAULT`, `SYBIL_L1_CHAIN_ID`, `SYBIL_L1_START_BLOCK`) are in
   `crates/sybil-l1-indexer/src/main.rs`.
 - **Telegram overlay:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in

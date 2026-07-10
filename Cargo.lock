@@ -2865,6 +2865,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "openvm-custom-insn"
+version = "0.1.0"
+source = "git+https://github.com/openvm-org/openvm.git?tag=v2.0.0#15a7ab6baed03d75050dbef2bbad4b4e98fb8dba"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "openvm-platform"
+version = "2.0.0"
+source = "git+https://github.com/openvm-org/openvm.git?tag=v2.0.0#15a7ab6baed03d75050dbef2bbad4b4e98fb8dba"
+dependencies = [
+ "openvm-custom-insn",
+ "openvm-rv32im-guest",
+]
+
+[[package]]
+name = "openvm-rv32im-guest"
+version = "2.0.0"
+source = "git+https://github.com/openvm-org/openvm.git?tag=v2.0.0#15a7ab6baed03d75050dbef2bbad4b4e98fb8dba"
+dependencies = [
+ "openvm-custom-insn",
+ "strum_macros",
+]
+
+[[package]]
+name = "openvm-sha2"
+version = "2.0.0"
+source = "git+https://github.com/openvm-org/openvm.git?tag=v2.0.0#15a7ab6baed03d75050dbef2bbad4b4e98fb8dba"
+dependencies = [
+ "openvm-sha2-guest",
+]
+
+[[package]]
+name = "openvm-sha2-guest"
+version = "2.0.0"
+source = "git+https://github.com/openvm-org/openvm.git?tag=v2.0.0#15a7ab6baed03d75050dbef2bbad4b4e98fb8dba"
+dependencies = [
+ "openvm-platform",
+]
+
+[[package]]
 name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4247,8 +4291,23 @@ dependencies = [
  "sybil-api-types",
  "sybil-signing",
  "thiserror 2.0.18",
+ "tokio",
  "tokio-tungstenite 0.29.0",
  "tracing",
+]
+
+[[package]]
+name = "sybil-golden-vectors"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "matching-engine",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sybil-l1-protocol",
+ "sybil-verifier",
+ "sybil-zk",
 ]
 
 [[package]]
@@ -4275,6 +4334,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "serde",
+ "serde_json",
  "sha3",
  "thiserror 2.0.18",
 ]
@@ -4358,6 +4418,7 @@ dependencies = [
  "matching-engine",
  "proptest",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "sybil-l1-protocol",
  "thiserror 2.0.18",
@@ -4373,7 +4434,9 @@ dependencies = [
  "commonware-runtime",
  "commonware-storage",
  "matching-engine",
+ "openvm-sha2",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "sha3",
  "sybil-l1-protocol",

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use matching_engine::{outcome_buy, MarketId, NANOS_PER_DOLLAR};
+use matching_engine::{outcome_buy, MarketId, MarketSet, Nanos, NANOS_PER_DOLLAR};
 use p256::ecdsa::SigningKey;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -19,7 +19,7 @@ use crate::actor::{SequencerHandle, SequencerTestCrashpoint};
 use crate::block::compute_complete_state_root;
 use crate::bridge::{account_key, BridgeWithdrawalRequest, L1Deposit};
 use crate::crypto::{sign_cancel, PublicKey};
-use crate::market_info::MarketMetadata;
+use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::order_book::reservation_snapshots_from_resting_orders;
 use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
 use crate::store::{RestoredState, Store, StoreFaultPoint};
@@ -378,7 +378,7 @@ impl Harness {
         );
         let restored = self
             .store
-            .load_state()
+            .load_state_with_fill_history_cap(self.config.max_fill_history_per_account)
             .await
             .unwrap_or_else(|error| panic!("{context}: load_state failed: {error}"))
             .unwrap_or_else(|| panic!("{context}: store unexpectedly empty after recovery"));
@@ -654,9 +654,15 @@ impl Harness {
             amount_token_units: 1_000 + self.op_index,
             deposit_root: [0u8; 32],
         };
-        let mut prefix = bridge_state.deposit_log.clone();
-        prefix.push(deposit.clone());
-        deposit.deposit_root = crate::bridge::deposit_log_root(&prefix);
+        let mut frontier = bridge_state.deposit_frontier;
+        let Some(deposit_root) = crate::bridge::append_deposit_frontier(
+            &mut frontier,
+            bridge_state.deposit_cursor,
+            &deposit,
+        ) else {
+            return;
+        };
+        deposit.deposit_root = deposit_root;
         let _ = self.handle.submit_l1_deposit(deposit).await;
     }
 
@@ -901,6 +907,7 @@ fn has_uncommitted_wal(restored: &RestoredState) -> bool {
         || !restored.control_plane_log.is_empty()
         || !restored.pending_l1_deposits.is_empty()
         || !restored.pending_bridge_withdrawals.is_empty()
+        || !restored.pending_bridge_l1_inputs.is_empty()
 }
 
 fn signing_key_for(seed: u64, account_id: AccountId) -> SigningKey {
@@ -941,4 +948,174 @@ async fn randomized_persistence_crashpoints_default_profile() {
         let mut harness = Harness::new(seed).await;
         harness.run(profile.iterations).await;
     }
+}
+
+#[tokio::test]
+async fn cold_restore_bounds_fill_history_per_account_to_newest_window() {
+    const ACCOUNT_COUNT: usize = 4;
+    const FILLS_PER_ACCOUNT: usize = 37;
+    const CAP: usize = 5;
+
+    let store_dir = TempStoreDir::new(0x266a);
+    let store = Store::open(&store_dir.store_path()).unwrap();
+    let mut accounts = AccountStore::new();
+    let account_ids: Vec<_> = (0..ACCOUNT_COUNT)
+        .map(|_| accounts.create_account(INITIAL_BALANCE))
+        .collect();
+    let config = SequencerConfig {
+        max_fill_history_per_account: CAP,
+        ..SequencerConfig::default()
+    };
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        MarketSet::new(),
+        Vec::new(),
+        Arc::new(AdminOracle::new()),
+        config.clone(),
+    );
+    seq.try_produce_block(Vec::new(), 1).unwrap();
+    store.save_block(seq.snapshot()).await.unwrap();
+
+    let all_records: Vec<_> = account_ids
+        .iter()
+        .flat_map(|&account_id| {
+            (1..=FILLS_PER_ACCOUNT as u64).map(move |height| {
+                (
+                    account_id,
+                    AccountFillRecord {
+                        order_id: height,
+                        fill_qty: height,
+                        fill_price: Nanos(NANOS_PER_DOLLAR / 2),
+                        block_height: height,
+                        timestamp_ms: height * 1_000,
+                        position_deltas: Vec::new(),
+                    },
+                )
+            })
+        })
+        .collect();
+    store.seed_fill_history_for_test(&all_records).unwrap();
+
+    let recovered = store.recover_account_fills(&account_ids, CAP).unwrap();
+    assert_eq!(all_records.len(), ACCOUNT_COUNT * FILLS_PER_ACCOUNT);
+    assert_eq!(recovered.len(), ACCOUNT_COUNT * CAP);
+    for &account_id in &account_ids {
+        let heights: Vec<_> = recovered
+            .iter()
+            .filter(|(recovered_id, _)| *recovered_id == account_id)
+            .map(|(_, record)| record.block_height)
+            .collect();
+        assert_eq!(
+            heights,
+            ((FILLS_PER_ACCOUNT - CAP + 1) as u64..=FILLS_PER_ACCOUNT as u64)
+                .rev()
+                .collect::<Vec<_>>()
+        );
+    }
+
+    let restored = store
+        .load_state_with_fill_history_cap(CAP)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored.analytics.account_fills, recovered);
+    let restored_seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+    for &account_id in &account_ids {
+        let heights: Vec<_> = restored_seq
+            .analytics()
+            .account_fills(account_id, None, usize::MAX, 0)
+            .into_iter()
+            .map(|record| record.block_height)
+            .collect();
+        assert_eq!(
+            heights,
+            ((FILLS_PER_ACCOUNT - CAP + 1) as u64..=FILLS_PER_ACCOUNT as u64)
+                .rev()
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[tokio::test]
+async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart() {
+    const DEPOSIT_COUNT: u64 = 64;
+
+    let store_dir = TempStoreDir::new(0x266b);
+    let store = Store::open(&store_dir.store_path()).unwrap();
+    let mut accounts = AccountStore::new();
+    let account_id = accounts.create_account(0);
+    let config = SequencerConfig::default();
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        MarketSet::new(),
+        Vec::new(),
+        Arc::new(AdminOracle::new()),
+        config.clone(),
+    );
+    let serialized_size_bound = rmp_serde::to_vec(&crate::bridge::BridgeState {
+        deposit_cursor: u64::MAX,
+        deposit_root: [u8::MAX; 32],
+        deposit_frontier: [[u8::MAX; 32]; sybil_l1_protocol::DEPOSIT_TREE_DEPTH],
+        observed_l1_height: u64::MAX,
+        next_withdrawal_id: u64::MAX,
+        withdrawals: Default::default(),
+    })
+    .unwrap()
+    .len();
+
+    for deposit_id in 1..=DEPOSIT_COUNT {
+        let mut deposit = L1Deposit {
+            deposit_id,
+            account_id,
+            chain_id: 1,
+            vault_address: eth_address(0x266b, deposit_id, 1),
+            token_address: eth_address(0x266b, deposit_id, 2),
+            sender: eth_address(0x266b, deposit_id, 3),
+            sybil_account_key: account_key(account_id),
+            amount_token_units: 1,
+            deposit_root: [0; 32],
+        };
+        let mut frontier = seq.bridge_state().deposit_frontier;
+        deposit.deposit_root = crate::bridge::append_deposit_frontier(
+            &mut frontier,
+            seq.bridge_state().deposit_cursor,
+            &deposit,
+        )
+        .unwrap();
+        seq.ingest_l1_deposit(deposit).unwrap();
+        assert!(
+            rmp_serde::to_vec(seq.bridge_state()).unwrap().len() <= serialized_size_bound,
+            "bridge state exceeded its fixed-field serialization bound"
+        );
+    }
+
+    let production = seq.try_produce_block(Vec::new(), 1_000).unwrap();
+    let committed_root = production.block.header.state_root;
+    store
+        .save_block_with_witness(seq.snapshot(), &production.witness)
+        .await
+        .unwrap();
+    drop(store);
+
+    let reopened = Store::open(&store_dir.store_path()).unwrap();
+    let restored = reopened
+        .load_state_with_fill_history_cap(config.max_fill_history_per_account)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored.bridge_state.deposit_cursor, DEPOSIT_COUNT);
+    assert!(
+        rmp_serde::to_vec(&restored.bridge_state).unwrap().len() <= serialized_size_bound,
+        "restored bridge state exceeded its fixed-field serialization bound"
+    );
+    let restored_seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+    let restarted_root = compute_complete_state_root(
+        &restored_seq.accounts,
+        restored_seq.bridge_state(),
+        restored_seq.order_book(),
+        restored_seq.markets(),
+        restored_seq.market_groups(),
+        restored_seq.market_lifecycle(),
+    );
+    assert_eq!(restarted_root, committed_root);
 }

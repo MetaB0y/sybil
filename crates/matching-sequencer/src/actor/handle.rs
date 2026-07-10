@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+const TEST_ACTOR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Cloneable handle to the sequencer actor.
 #[derive(Clone)]
 pub struct SequencerHandle {
@@ -130,7 +133,7 @@ impl SequencerHandle {
         &self,
         old_id: ractor::ActorId,
     ) -> Result<(), SequencerError> {
-        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = Instant::now() + TEST_ACTOR_TIMEOUT;
         loop {
             let actor = self
                 .inner
@@ -156,7 +159,7 @@ impl SequencerHandle {
         let actor = self.actor_ref().await?;
         let old_id = actor.get_id();
         actor
-            .kill_and_wait(Some(std::time::Duration::from_secs(5)))
+            .kill_and_wait(Some(TEST_ACTOR_TIMEOUT))
             .await
             .map_err(|error| {
                 SequencerError::Persistence(format!("actor test kill failed: {error}"))
@@ -438,8 +441,16 @@ impl SequencerHandle {
     pub async fn apply_bridge_withdrawal_l1_event(
         &self,
         event: BridgeWithdrawalL1Event,
-    ) -> Result<WithdrawalLeaf, SequencerError> {
+    ) -> Result<Option<WithdrawalLeaf>, SequencerError> {
         self.rpc(|reply| SequencerMsg::ApplyBridgeWithdrawalL1Event(event, reply))
+            .await?
+    }
+
+    pub async fn observe_bridge_l1_height(
+        &self,
+        height: u64,
+    ) -> Result<Vec<WithdrawalLeaf>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::ObserveBridgeL1Height(height, reply))
             .await?
     }
 
@@ -1143,6 +1154,7 @@ impl SequencerHandle {
 mod tests {
     use super::*;
     use crate::account::AccountStore;
+    use crate::bridge::L1WithdrawalStatus;
     use crate::crypto::sign_cancel;
     use crate::market_info::ResolutionConfig;
     use crate::sequencer::SequencerConfig;
@@ -1585,7 +1597,7 @@ mod tests {
 
         let stopper = tokio::spawn({
             let handle = handle.clone();
-            async move { handle.stop_and_wait(Duration::from_secs(5)).await }
+            async move { handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await }
         });
         tokio::time::sleep(Duration::from_millis(25)).await;
         assert!(
@@ -2159,6 +2171,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn acknowledged_withdrawal_cancel_refund_survives_actor_crash_before_block() {
+        let path = temp_store_path("bridge-l1-refund-wal");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
+        baseline.produce_block(Vec::new(), 1);
+        store.save_block(baseline.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+        let withdrawal = handle
+            .create_bridge_withdrawal(BridgeWithdrawalRequest {
+                account_id: aid,
+                chain_id: 1,
+                vault_address: [0x10; 20],
+                recipient: [0x40; 20],
+                token_address: [0x20; 20],
+                amount_token_units: 10_000_000,
+                expiry_height: 100,
+            })
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().balance,
+            90 * NANOS_PER_DOLLAR as i64
+        );
+
+        let cancelled = BridgeWithdrawalL1Event {
+            nullifier: withdrawal.nullifier,
+            status: L1WithdrawalStatus::Cancelled,
+            event_at_unix: 1_700_000_005,
+            executable_at_unix: None,
+            tx_hash: Some([0xAB; 32]),
+            l1_block_height: 5,
+        };
+        let refunded = handle
+            .apply_bridge_withdrawal_l1_event(cancelled.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(refunded.l1_status, L1WithdrawalStatus::Refunded);
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64
+        );
+        let pre_crash = store.load_state().await.unwrap().unwrap();
+        assert_eq!(pre_crash.pending_bridge_l1_inputs.len(), 1);
+
+        handle.crash_actor_for_test().await.unwrap();
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64,
+            "WAL replay must restore the refund exactly once"
+        );
+        assert_eq!(
+            handle
+                .get_bridge_state()
+                .await
+                .unwrap()
+                .withdrawals
+                .get(&withdrawal.withdrawal_id)
+                .unwrap()
+                .l1_status,
+            L1WithdrawalStatus::Refunded
+        );
+
+        let duplicate = handle
+            .apply_bridge_withdrawal_l1_event(cancelled)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(duplicate.l1_status, L1WithdrawalStatus::Refunded);
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64,
+            "duplicate cancellation after restore must not double-credit"
+        );
+
+        let committed = handle.produce_block().await.unwrap();
+        assert_eq!(
+            committed
+                .canonical
+                .system_events
+                .iter()
+                .filter(|event| matches!(event, SystemEvent::WithdrawalRefunded { withdrawal_id, .. } if *withdrawal_id == withdrawal.withdrawal_id))
+                .count(),
+            1
+        );
+        let after_commit = store.load_state().await.unwrap().unwrap();
+        assert!(after_commit.pending_bridge_l1_inputs.is_empty());
+        assert!(after_commit.bridge_state.withdrawals.is_empty());
+        assert_eq!(
+            after_commit.accounts.get(aid).unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64
+        );
+        assert!(handle.stop_and_wait(Duration::from_secs(5)).await);
+    }
+
+    #[tokio::test]
     async fn test_fund_nonexistent_account() {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq);
@@ -2351,7 +2467,74 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_signed_cancel_replay_rejected() {
+    async fn failed_cancel_validation_does_not_advance_replay_nonce() {
+        let (seq, aid) = make_test_sequencer();
+        let mut ms = MarketSet::new();
+        let m0 = ms.add_binary("Test");
+        let handle = SequencerHandle::spawn(seq);
+
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        handle.register_pubkey(aid, pubkey).await.unwrap();
+
+        handle
+            .submit_order(OrderSubmission {
+                account_id: aid,
+                orders: vec![outcome_buy(&ms, 1, m0, 0, 500_000_000, 1)],
+                mm_constraint: None,
+            })
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+
+        let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        let order_id = pending[0].order_id;
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+
+        let error = handle
+            .cancel_signed_order(crate::crypto::sign_cancel(
+                aid,
+                order_id + 1,
+                1,
+                genesis_hash,
+                &signing_key,
+            ))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SequencerError::OrderNotFound));
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().last_nonce,
+            0
+        );
+
+        handle
+            .cancel_signed_order(crate::crypto::sign_cancel(
+                aid,
+                order_id,
+                1,
+                genesis_hash,
+                &signing_key,
+            ))
+            .await
+            .expect("the same nonce should still authorize a valid cancel");
+
+        assert!(handle
+            .get_pending_orders(Some(aid))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().last_nonce,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_signed_cancel_replay_is_rejected_as_order_not_found() {
         let (seq, aid) = make_test_sequencer();
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
@@ -2399,14 +2582,14 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert!(matches!(
-            replay_error,
-            SequencerError::ReplayNonceStale {
-                account_id,
-                nonce: 1,
-                last_nonce: 1
-            } if account_id == aid
-        ));
+        // The applied cancel removed its target, so the replay fails order
+        // validation (SYB-263: cancel validates before the nonce is consulted)
+        // and the nonce is left untouched.
+        assert!(matches!(replay_error, SequencerError::OrderNotFound));
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().last_nonce,
+            1
+        );
     }
 
     #[tokio::test]
@@ -2459,6 +2642,116 @@ mod tests {
             result,
             Err(SequencerError::AccountAlreadyRegistered)
         ));
+    }
+
+    #[tokio::test]
+    async fn second_first_key_bootstrap_is_rejected_before_wal_append() {
+        let path = temp_store_path("first-key-bootstrap");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut sequencer, account_id) = make_test_sequencer_with_config(config.clone());
+        sequencer.produce_block(Vec::new(), 1);
+        store.save_block(sequencer.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let sequencer =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+
+        let first_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let racing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+
+        handle
+            .register_pubkey(account_id, PublicKey(*first_key.verifying_key()))
+            .await
+            .unwrap();
+        let error = handle
+            .register_pubkey(account_id, PublicKey(*racing_key.verifying_key()))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SequencerError::AccountAlreadyRegistered));
+
+        let pending_restore = store.load_state().await.unwrap().unwrap();
+        assert_eq!(
+            pending_restore.control_plane_log.len(),
+            1,
+            "the rejected racing bootstrap must never enter the control-plane WAL"
+        );
+        let replayed =
+            BlockSequencer::restore(pending_restore, Arc::new(AdminOracle::new()), config);
+        let keys = replayed.signing_keys_for_account(account_id);
+        assert_eq!(keys.len(), 1);
+        assert_eq!(
+            keys[0].0,
+            first_key.verifying_key().to_sec1_point(true).as_bytes()
+        );
+
+        drop(handle);
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn onboarding_bootstrap_then_signed_key_allows_no_later_bootstrap() {
+        let (sequencer, _) = make_test_sequencer();
+        let handle = SequencerHandle::spawn(sequencer);
+        let account = handle.create_account(0).await.unwrap();
+
+        let primary =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        handle
+            .register_pubkey(account.id, PublicKey(*primary.verifying_key()))
+            .await
+            .expect("first-key bootstrap should succeed");
+
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let second = <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+        );
+        let signed = crate::crypto::sign_key_registration(
+            account.id,
+            PublicKey(*second.verifying_key()),
+            AccountAuthScheme::RawP256,
+            Some("backup".to_string()),
+            crate::crypto::KeyScope::Custom,
+            1,
+            genesis_hash,
+            &primary,
+        );
+        handle
+            .register_key_signed(signed)
+            .await
+            .expect("an existing key should authorize a second key");
+
+        let late_bootstrap =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let error = handle
+            .register_pubkey(account.id, PublicKey(*late_bootstrap.verifying_key()))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SequencerError::AccountAlreadyRegistered));
+        assert_eq!(
+            handle
+                .signing_keys_for_account(account.id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[tokio::test]
@@ -2666,7 +2959,7 @@ mod tests {
             block_history_retention_blocks: 1,
             history_prune_interval_blocks: 1,
             history_prune_max_rows: 10,
-            block_interval: Duration::from_secs(60),
+            block_interval: Duration::from_secs(60 * 60),
             ..SequencerConfig::default()
         };
         let (seq, _) = make_test_sequencer_with_config(config);

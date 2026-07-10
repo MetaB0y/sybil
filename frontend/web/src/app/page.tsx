@@ -136,6 +136,7 @@ function MarketsPageInner() {
           }}
         >
           <h1
+            className="markets-page-title"
             style={{
               fontFamily: "var(--font-display)",
               fontWeight: 600,
@@ -184,7 +185,7 @@ function MarketsPageInner() {
 
         {paged && paged.length > 0 && (
           <>
-            <div className="markets-grid">
+            <div className="markets-grid" data-testid="markets-grid">
               {paged.map((it) =>
                 it.kind === "multi" ? (
                   <MultiCard

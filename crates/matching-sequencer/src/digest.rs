@@ -105,6 +105,40 @@ pub fn encode_withdrawal_created_event(
     bytes
 }
 
+pub fn encode_withdrawal_refunded_event(
+    withdrawal_id: u64,
+    amount: i64,
+    reason: crate::bridge::WithdrawalRefundReason,
+    block_height: u64,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 8 + 8 + 1 + 8 + 8);
+    bytes.push(0x09);
+    bytes.extend_from_slice(&withdrawal_id.to_le_bytes());
+    bytes.extend_from_slice(&amount.to_le_bytes());
+    match reason {
+        crate::bridge::WithdrawalRefundReason::L1Cancelled => bytes.push(0),
+        crate::bridge::WithdrawalRefundReason::L1Expired { observed_l1_height } => {
+            bytes.push(1);
+            bytes.extend_from_slice(&observed_l1_height.to_le_bytes());
+        }
+    }
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
+pub fn encode_withdrawal_finalized_event(
+    withdrawal_id: u64,
+    amount: i64,
+    block_height: u64,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 8 + 8 + 8);
+    bytes.push(0x0A);
+    bytes.extend_from_slice(&withdrawal_id.to_le_bytes());
+    bytes.extend_from_slice(&amount.to_le_bytes());
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
 pub fn encode_resolution_event(
     market_id: MarketId,
     payout_nanos: Nanos,

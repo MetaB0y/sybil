@@ -258,6 +258,10 @@ fn exact_service_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "POST",
+            path: "/v1/bridge/l1-height",
+        },
+        RouteMount {
+            method: "POST",
             path: "/v1/markets",
         },
         RouteMount {
@@ -445,6 +449,12 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             Method::POST,
             "/v1/bridge/withdrawals/signed",
             json!({"withdrawal": {"account_id": 1}}),
+        ),
+        (Method::POST, "/v1/bridge/withdrawals/l1-events", json!({})),
+        (
+            Method::POST,
+            "/v1/bridge/l1-height",
+            json!({"l1_block_height": 1}),
         ),
         (
             Method::POST,

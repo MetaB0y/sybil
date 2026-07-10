@@ -41,6 +41,7 @@
 #                            (e.g. root@172.104.31.54) instead of local docker.
 #   SYBIL_COMPOSE_PROJECT    compose project label to enumerate (default sybil).
 #   SYBIL_SMOKE_SIGN_BIN     path to a prebuilt smoke_sign binary (skips cargo).
+#   SYBIL_SMOKE_SEED_BIN     path to a prebuilt seed_book binary (skips cargo).
 #
 # Exit: 0 only if FAIL=0. Any FAIL exits 1 and blocks promotion.
 
@@ -367,13 +368,32 @@ print("OK", len(native), len(mirror), pick if pick is not None else "")
 }
 
 # ── 5. Order placement + deterministic fills gate ────────────────────────────
-# Create two demo accounts, submit a crossing BuyYes/BuyNo pair on the same
-# market (unsigned /v1/orders path, now service-token gated — seed as trusted infra),
-# and assert matched orders INCREASE.
+# Delegate the account/key/funding/market/order fixture to SYB-247's shared
+# seed_book example. This block intentionally contains no duplicate seed logic.
+SEED_BIN="${SYBIL_SMOKE_SEED_BIN:-}"
+setup_seed_book() {
+    if [[ -n "$SEED_BIN" && -x "$SEED_BIN" ]]; then return; fi
+    local prebuilt="$REPO_ROOT/target/debug/examples/seed_book"
+    if [[ -x "$prebuilt" ]]; then SEED_BIN="$prebuilt"; return; fi
+    if ! command -v cargo >/dev/null 2>&1 \
+       || [[ ! -f "$REPO_ROOT/crates/sybil-client/examples/seed_book.rs" ]]; then
+        SEED_BIN=""; return
+    fi
+    info "building seed_book deterministic seeder (cargo)..."
+    if cargo build -q --manifest-path "$REPO_ROOT/Cargo.toml" \
+        -p sybil-client --example seed_book 2>"$TMP/seed-build.log"; then
+        SEED_BIN="$REPO_ROOT/target/debug/examples/seed_book"
+    else
+        SEED_BIN=""
+        sed 's/^/       /' "$TMP/seed-build.log" | tail -10
+    fi
+}
+
 check_orders_and_fills() {
     section "5. Order placement + fills-after-seed gate"
-    if [[ -z "$ORDER_MARKET" ]]; then
-        fail "no market available; cannot place orders or seed fills"
+    setup_seed_book
+    if [[ -z "$SEED_BIN" ]]; then
+        skip "seed_book unavailable (cargo/repo absent or build failed); shared deterministic fills seed not run"
         return
     fi
 
@@ -382,33 +402,25 @@ check_orders_and_fills() {
     [[ -z "$before" ]] && before=0
     info "baseline all_time.orders.matched = $before"
 
-    # Two funded demo accounts (initial_balance == demo cap; no service token needed).
-    local a c
-    http POST /v1/accounts '{"initial_balance_nanos":5000000000000}' none
-    a="$(echo "$HTTP_BODY" | jget account_id)"
-    http POST /v1/accounts '{"initial_balance_nanos":5000000000000}' none
-    c="$(echo "$HTTP_BODY" | jget account_id)"
-    if [[ -z "$a" || -z "$c" ]]; then
-        fail "could not create two demo accounts for the fills seed"
+    # post-deploy-smoke is itself an explicit operator-authorized mutation of
+    # the demo/devnet. Use a fresh deterministic run id so repeated deploy
+    # verification does not reuse P256 identities or replay nonces.
+    local run_id seed_summary
+    run_id="$(date +%s%N)"
+    local -a seed_args=(--base-url "$BASE" --run-id "$run_id" --i-know-this-is-dev)
+    [[ -n "$SERVICE_TOKEN" ]] && seed_args+=(--service-token "$SERVICE_TOKEN")
+    if ! seed_summary="$("$SEED_BIN" "${seed_args[@]}" 2>"$TMP/seed-book.log")"; then
+        fail "shared seed_book failed: $(tail -5 "$TMP/seed-book.log" | tr '\n' ' ')"
         return
     fi
-    info "seed accounts: $a (BuyYes), $c (BuyNo)"
-
-    # Crossing pair at 0.99 each: complementary demand that must clear.
-    http POST /v1/orders \
-        "{\"account_id\":$a,\"orders\":[{\"type\":\"BuyYes\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" token
-    if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget accepted)" == "true" ]]; then
-        pass "order placement: BuyYes accepted (acct $a)"
-    else
-        fail "order placement: BuyYes -> $HTTP_CODE: $HTTP_BODY"
+    if [[ "$(echo "$seed_summary" | jget schema)" != "sybil.seed_book.v1" \
+       || "$(echo "$seed_summary" | jget expected.matched_volume)" != "1000" \
+       || "$(echo "$seed_summary" | jget expected.yes_price_nanos)" != "500000000" \
+       || "$(echo "$seed_summary" | jget expected.no_price_nanos)" != "500000000" ]]; then
+        fail "shared seed_book returned an unexpected summary: $seed_summary"
+        return
     fi
-    http POST /v1/orders \
-        "{\"account_id\":$c,\"orders\":[{\"type\":\"BuyNo\",\"market_id\":$ORDER_MARKET,\"limit_price_nanos\":990000000,\"quantity\":1000}],\"time_in_force\":\"GTC\"}" token
-    if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget accepted)" == "true" ]]; then
-        pass "order placement: BuyNo accepted (acct $c)"
-    else
-        fail "order placement: BuyNo -> $HTTP_CODE: $HTTP_BODY"
-    fi
+    pass "shared seed_book accepted exact fixture (run=$run_id, matched_volume=1000, YES/NO=500000000)"
 
     # Poll for matched to increase over ~ a few blocks.
     local deadline after now

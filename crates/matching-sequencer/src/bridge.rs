@@ -49,6 +49,7 @@ pub enum L1WithdrawalStatus {
     Queued,
     Finalized,
     Cancelled,
+    Refunded,
 }
 
 impl L1WithdrawalStatus {
@@ -58,8 +59,24 @@ impl L1WithdrawalStatus {
             Self::Queued => "queued",
             Self::Finalized => "finalized",
             Self::Cancelled => "cancelled",
+            Self::Refunded => "refunded",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WithdrawalRefundReason {
+    L1Cancelled,
+    L1Expired { observed_l1_height: u64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WithdrawalTransition {
+    Unchanged,
+    Queued,
+    Finalized,
+    Refunded(WithdrawalRefundReason),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -69,6 +86,14 @@ pub struct BridgeWithdrawalL1Event {
     pub event_at_unix: u64,
     pub executable_at_unix: Option<u64>,
     pub tx_hash: Option<Bytes32>,
+    /// Confirmed L1 block carrying this event.
+    pub l1_block_height: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum BridgeL1Input {
+    WithdrawalEvent(BridgeWithdrawalL1Event),
+    ObservedHeight(u64),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -96,14 +121,74 @@ pub struct WithdrawalLeaf {
     pub l1_tx_hash: Option<Bytes32>,
 }
 
+impl WithdrawalLeaf {
+    /// Apply one source event through the withdrawal state machine. Terminal
+    /// states absorb every later event, so a refund transition can occur once.
+    pub(crate) fn apply_l1_event(
+        &mut self,
+        event: &BridgeWithdrawalL1Event,
+    ) -> WithdrawalTransition {
+        if matches!(
+            self.l1_status,
+            L1WithdrawalStatus::Finalized | L1WithdrawalStatus::Refunded
+        ) {
+            return WithdrawalTransition::Unchanged;
+        }
+
+        self.l1_executable_at_unix = event.executable_at_unix.or(self.l1_executable_at_unix);
+        self.l1_tx_hash = event.tx_hash.or(self.l1_tx_hash);
+
+        match event.status {
+            L1WithdrawalStatus::NotRequested => WithdrawalTransition::Unchanged,
+            L1WithdrawalStatus::Queued => {
+                if self.l1_status == L1WithdrawalStatus::NotRequested {
+                    self.l1_status = L1WithdrawalStatus::Queued;
+                    self.l1_requested_at_unix = Some(event.event_at_unix);
+                    WithdrawalTransition::Queued
+                } else {
+                    WithdrawalTransition::Unchanged
+                }
+            }
+            L1WithdrawalStatus::Finalized => {
+                self.l1_status = L1WithdrawalStatus::Finalized;
+                self.l1_finalized_at_unix = Some(event.event_at_unix);
+                WithdrawalTransition::Finalized
+            }
+            L1WithdrawalStatus::Cancelled => {
+                self.l1_status = L1WithdrawalStatus::Refunded;
+                self.l1_cancelled_at_unix = Some(event.event_at_unix);
+                WithdrawalTransition::Refunded(WithdrawalRefundReason::L1Cancelled)
+            }
+            // `Refunded` is a local terminal state, never an L1 source event.
+            L1WithdrawalStatus::Refunded => WithdrawalTransition::Unchanged,
+        }
+    }
+
+    pub(crate) fn observe_l1_height(&mut self, l1_height: u64) -> WithdrawalTransition {
+        if matches!(
+            self.l1_status,
+            L1WithdrawalStatus::Finalized | L1WithdrawalStatus::Refunded
+        ) || l1_height <= self.expiry_height
+        {
+            return WithdrawalTransition::Unchanged;
+        }
+
+        self.l1_status = L1WithdrawalStatus::Refunded;
+        WithdrawalTransition::Refunded(WithdrawalRefundReason::L1Expired {
+            observed_l1_height: l1_height,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BridgeState {
     pub deposit_cursor: u64,
     pub deposit_root: Bytes32,
     #[serde(default = "sybil_l1_protocol::empty_deposit_frontier")]
     pub deposit_frontier: DepositFrontier,
+    /// Highest confirmed L1 height consumed from the indexer's scan cursor.
     #[serde(default)]
-    pub deposit_log: Vec<L1Deposit>,
+    pub observed_l1_height: u64,
     pub next_withdrawal_id: u64,
     pub withdrawals: BTreeMap<u64, WithdrawalLeaf>,
 }
@@ -114,7 +199,7 @@ impl Default for BridgeState {
             deposit_cursor: 0,
             deposit_root: empty_deposit_root(),
             deposit_frontier: sybil_l1_protocol::empty_deposit_frontier(),
-            deposit_log: Vec::new(),
+            observed_l1_height: 0,
             next_withdrawal_id: 1,
             withdrawals: BTreeMap::new(),
         }
@@ -143,10 +228,10 @@ pub enum BridgeError {
     DepositRootMismatch { expected: Bytes32, actual: Bytes32 },
     #[error("insufficient available balance: required {required}, available {available}")]
     InsufficientAvailableBalance { required: i64, available: i64 },
-    #[error("withdrawal expiry {expiry_height} is before next committed height {next_height}")]
+    #[error("withdrawal expiry {expiry_height} is behind observed L1 height {observed_l1_height}")]
     WithdrawalExpired {
         expiry_height: u64,
-        next_height: u64,
+        observed_l1_height: u64,
     },
     #[error("unknown withdrawal nullifier {0:?}")]
     UnknownWithdrawalNullifier(Bytes32),
@@ -292,6 +377,7 @@ pub fn bridge_state_snapshot(state: &BridgeState) -> sybil_verifier::BridgeState
     sybil_verifier::BridgeStateSnapshot {
         deposit_cursor: state.deposit_cursor,
         deposit_root: state.deposit_root,
+        observed_l1_height: state.observed_l1_height,
         next_withdrawal_id: state.next_withdrawal_id,
         withdrawals,
     }

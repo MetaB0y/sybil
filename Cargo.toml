@@ -18,6 +18,7 @@ members = [
     "crates/sybil-zk",
     "crates/sybil-prover",
     "crates/sybil-polymarket",
+    "tools/golden-vectors",
 ]
 
 [profile.release]

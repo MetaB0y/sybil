@@ -99,7 +99,7 @@ impl AnalyticsState {
 
         Self {
             price_tracker,
-            fill_recorder: FillRecorder::restore_with_counts(
+            fill_recorder: FillRecorder::restore_bounded_newest_first_with_counts(
                 input.account_fills,
                 input.fill_total_counts,
                 config.max_fill_history_per_account,
@@ -592,6 +592,18 @@ impl AnalyticsState {
                     event.amount_nanos = Some(-*amount);
                     self.record_history(event);
                 }
+                SystemEvent::WithdrawalRefunded {
+                    account_id, amount, ..
+                } => {
+                    let mut event = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Withdrawal,
+                        height,
+                        timestamp_ms,
+                    );
+                    event.amount_nanos = Some(*amount);
+                    self.record_history(event);
+                }
                 SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -616,7 +628,10 @@ impl AnalyticsState {
                         self.record_history(event);
                     }
                 }
-                SystemEvent::OrderCancelled { .. } | SystemEvent::MarketGroupExtended { .. } => {}
+                SystemEvent::WithdrawalFinalized { .. }
+                | SystemEvent::L1BlockObserved { .. }
+                | SystemEvent::OrderCancelled { .. }
+                | SystemEvent::MarketGroupExtended { .. } => {}
             }
         }
     }

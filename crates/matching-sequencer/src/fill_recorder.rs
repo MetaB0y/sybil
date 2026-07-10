@@ -92,6 +92,32 @@ impl FillRecorder {
         recorder
     }
 
+    /// Restore records produced by [`crate::store::Store::recover_account_fills`].
+    ///
+    /// The store has already bounded each account's records and returns them
+    /// newest-first. Reverse each group into the recorder's oldest-first
+    /// internal order without sorting or trimming the cold-start input.
+    pub fn restore_bounded_newest_first_with_counts(
+        records: Vec<(AccountId, AccountFillRecord)>,
+        total_count: HashMap<AccountId, u64>,
+        max_history_per_account: usize,
+    ) -> Self {
+        let mut account_fills: HashMap<AccountId, Vec<AccountFillRecord>> = HashMap::new();
+        for (account_id, record) in records {
+            account_fills.entry(account_id).or_default().push(record);
+        }
+        for fills in account_fills.values_mut() {
+            debug_assert!(fills.len() <= max_history_per_account);
+            fills.reverse();
+        }
+        Self {
+            account_fills,
+            max_history_per_account,
+            pending_delta: Vec::new(),
+            total_count,
+        }
+    }
+
     pub fn snapshot(&self) -> Vec<(AccountId, AccountFillRecord)> {
         let mut records: Vec<_> = self
             .account_fills

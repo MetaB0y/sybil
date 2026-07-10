@@ -4,7 +4,7 @@ import { DegenProgress } from "./degen-progress";
 
 const common = {
   side: "YES" as const,
-  secondsLeft: 22,
+  secondsLeft: 112,
   timeProgress01: 0.4,
   filledQty: 12_000n,
   targetQty: 20_000n,
@@ -17,8 +17,8 @@ describe("DegenProgress", () => {
     const html = renderToStaticMarkup(
       <DegenProgress {...common} phase="tracking" />,
     );
-    expect(html).toMatch(/Placing your bet/i);
-    expect(html).toContain("22s");
+    expect(html).toMatch(/Waiting for a taker/i);
+    expect(html).toContain("112s");
     expect(html).toContain("12");
     expect(html).toContain("20");
     expect(html).not.toMatch(/Bet again/i);
@@ -37,13 +37,18 @@ describe("DegenProgress", () => {
 
   it("colours success green even on a NO bet, and a miss red", () => {
     const filledNo = renderToStaticMarkup(
-      <DegenProgress {...common} side="NO" phase="filled" filledQty={20_000n} />,
+      <DegenProgress
+        {...common}
+        side="NO"
+        phase="filled"
+        filledQty={20_000n}
+      />,
     );
     expect(filledNo).toContain("var(--yes)");
     expect(filledNo).not.toContain("color:var(--no)");
 
     const missedYes = renderToStaticMarkup(
-      <DegenProgress {...common} side="YES" phase="none" filledQty={0n} />,
+      <DegenProgress {...common} side="YES" phase="expired" filledQty={0n} />,
     );
     expect(missedYes).toContain("var(--no)");
   });
@@ -56,14 +61,17 @@ describe("DegenProgress", () => {
     expect(html).toMatch(/Half in/i);
     expect(html).toContain("$6");
     expect(html).toContain("$10");
+    expect(html).toMatch(/rest is back in your balance/i);
     expect(html).toMatch(/Bet again/i);
   });
 
   it("shows a no-fill result", () => {
     const html = renderToStaticMarkup(
-      <DegenProgress {...common} phase="none" filledQty={0n} />,
+      <DegenProgress {...common} phase="expired" filledQty={0n} />,
     );
-    expect(html).toMatch(/failed/i);
+    expect(html).toMatch(/No match within ~2 min/i);
+    expect(html).toMatch(/funds are back in your balance/i);
+    expect(html).toMatch(/Try again/i);
     expect(html).toMatch(/Bet again/i);
   });
 

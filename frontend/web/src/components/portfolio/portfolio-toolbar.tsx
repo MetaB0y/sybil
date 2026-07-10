@@ -22,6 +22,7 @@ export function PortfolioToolbar({
 }) {
   return (
     <div
+      className="portfolio-toolbar"
       style={{
         display: "flex",
         alignItems: "flex-end",
@@ -32,12 +33,16 @@ export function PortfolioToolbar({
     >
       {tabs}
       {search && (
-        <div style={{ display: "flex", alignItems: "center", paddingBottom: 8 }}>
+        <div
+          className="portfolio-toolbar-search"
+          style={{ display: "flex", alignItems: "center", paddingBottom: 8 }}
+        >
           {search}
         </div>
       )}
       {children && (
         <div
+          className="portfolio-toolbar-actions"
           style={{
             display: "flex",
             alignItems: "center",

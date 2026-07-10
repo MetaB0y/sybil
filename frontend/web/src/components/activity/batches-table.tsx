@@ -114,8 +114,9 @@ export function BatchesTable({
   const oldest = rows.length > 0 ? rows[rows.length - 1]?.height ?? null : null;
 
   return (
-    <section style={{ padding: "26px 24px 40px" }}>
+    <section className="activity-batches-section" style={{ padding: "26px 24px 40px" }}>
       <div
+        className="activity-table-head"
         style={{
           display: "flex",
           alignItems: "baseline",

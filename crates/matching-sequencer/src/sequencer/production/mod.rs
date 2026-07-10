@@ -276,6 +276,39 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
+                SystemEvent::WithdrawalRefunded {
+                    account_id,
+                    withdrawal_id,
+                    amount,
+                    reason,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded = crate::digest::encode_withdrawal_refunded_event(
+                            *withdrawal_id,
+                            *amount,
+                            *reason,
+                            self.height,
+                        );
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
+                SystemEvent::WithdrawalFinalized {
+                    account_id,
+                    withdrawal_id,
+                    amount,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded = crate::digest::encode_withdrawal_finalized_event(
+                            *withdrawal_id,
+                            *amount,
+                            self.height,
+                        );
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
+                SystemEvent::L1BlockObserved { .. } => {}
                 SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -313,6 +346,19 @@ impl BlockSequencer {
                     }
                 }
                 SystemEvent::MarketGroupExtended { .. } => {}
+            }
+        }
+        // A terminal leaf remains addressable until the block carrying its
+        // terminal event is prepared. The event and deletion therefore enter
+        // the same atomic state transition and cannot be observed separately.
+        for event in &system_events {
+            let withdrawal_id = match event {
+                SystemEvent::WithdrawalRefunded { withdrawal_id, .. }
+                | SystemEvent::WithdrawalFinalized { withdrawal_id, .. } => Some(*withdrawal_id),
+                _ => None,
+            };
+            if let Some(withdrawal_id) = withdrawal_id {
+                self.bridge.withdrawals.remove(&withdrawal_id);
             }
         }
         let bridge = bridge_block_data(&system_events, &self.bridge);
@@ -564,15 +610,12 @@ impl BlockSequencer {
                     ) {
                         Ok(accepted) => {
                             if stp.would_complete_set(account_id, &accepted.order) {
-                                // Undo the book acceptance — release reservations
-                                // (settle with a "fully filled" phantom to release)
-                                let phantom_fill =
-                                    Fill::new(accepted.order.id, accepted.order.max_fill, Nanos(0));
-                                let _stp_undo = self.order_book.settle(
-                                    &[phantom_fill],
-                                    &HashSet::new(),
-                                    self.height,
-                                );
+                                // Undo only this acceptance. A book-wide settle here
+                                // would also sweep unrelated same-block expiries before
+                                // their lifecycle sidecar/history can be recorded.
+                                self.order_book
+                                    .cancel_accepted(&accepted)
+                                    .expect("just-accepted order must remain in the book");
                                 witness_rejections.push(WitnessRejection {
                                     order: accepted.order.clone(),
                                     account_id: account_id.0,

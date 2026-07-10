@@ -32,8 +32,38 @@ impl SequencerActorState {
     pub(super) async fn handle_bridge_withdrawal_l1_event(
         &mut self,
         event: BridgeWithdrawalL1Event,
-    ) -> Result<WithdrawalLeaf, SequencerError> {
+    ) -> Result<Option<WithdrawalLeaf>, SequencerError> {
+        let mut preflight = self.sequencer.clone();
+        preflight.apply_bridge_withdrawal_l1_event(event.clone())?;
+        if let Some(store) = &self.store {
+            store
+                .append_pending_bridge_l1_input(&crate::bridge::BridgeL1Input::WithdrawalEvent(
+                    event.clone(),
+                ))
+                .await
+                .map_err(|err| SequencerError::Persistence(err.to_string()))?;
+        }
         self.sequencer.apply_bridge_withdrawal_l1_event(event)
+    }
+
+    pub(super) async fn handle_observe_bridge_l1_height(
+        &mut self,
+        height: u64,
+    ) -> Result<Vec<WithdrawalLeaf>, SequencerError> {
+        if height <= self.sequencer.bridge_state().observed_l1_height {
+            return Ok(Vec::new());
+        }
+        let mut preflight = self.sequencer.clone();
+        preflight.observe_bridge_l1_height(height)?;
+        if let Some(store) = &self.store {
+            store
+                .append_pending_bridge_l1_input(&crate::bridge::BridgeL1Input::ObservedHeight(
+                    height,
+                ))
+                .await
+                .map_err(|err| SequencerError::Persistence(err.to_string()))?;
+        }
+        self.sequencer.observe_bridge_l1_height(height)
     }
 
     pub(super) async fn handle_signed_bridge_withdrawal(

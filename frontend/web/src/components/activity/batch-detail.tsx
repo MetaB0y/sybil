@@ -70,8 +70,12 @@ export function BatchDetail({ row }: { row: BatchRow }) {
       }}
     >
       {/* Grid items stretch, so the left card claims the full row height and
-          the two columns always end on the same line — no row-count tuning. */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}>
+          the two columns always end on the same line — no row-count tuning.
+          The className carries the mobile reflow to a single column. */}
+      <div
+        className="activity-batch-detail-grid"
+        style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}
+      >
         {/* Left: market rows */}
         <div style={{ display: "flex", flexDirection: "column" }}>
           <div

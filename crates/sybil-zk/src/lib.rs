@@ -316,6 +316,7 @@ pub fn verify_state_transition_input(
         &input.state_root_proof,
     )?;
     ensure_valid("match", sybil_verifier::verify_match(&input.witness, false))?;
+    ensure_valid("system", sybil_verifier::verify_system(&input.witness))?;
     ensure_valid(
         "settlement",
         sybil_verifier::verify_settlement(&input.witness),
@@ -687,6 +688,9 @@ fn verify_l1_deposit_checkpoint(
             SystemEventWitness::CreateAccount { .. }
             | SystemEventWitness::Deposit { .. }
             | SystemEventWitness::WithdrawalCreated { .. }
+            | SystemEventWitness::WithdrawalRefunded { .. }
+            | SystemEventWitness::WithdrawalFinalized { .. }
+            | SystemEventWitness::L1BlockObserved { .. }
             | SystemEventWitness::MarketResolved { .. }
             | SystemEventWitness::OrderCancelled { .. }
             | SystemEventWitness::MarketGroupExtended { .. } => None,
@@ -872,6 +876,34 @@ mod tests {
     const MAX_KEY_BYTES: usize = 64;
     const MAX_VALUE_BYTES: usize = 1 << 20;
 
+    fn golden_vectors() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../golden/golden-vectors.json"))
+            .expect("committed golden-vectors.json must be valid JSON")
+    }
+
+    fn golden_bytes32(pointer: &str) -> [u8; 32] {
+        let vectors = golden_vectors();
+        let encoded = vectors
+            .pointer(pointer)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("golden vector {pointer} must be a hex string"));
+        let encoded = encoded
+            .strip_prefix("0x")
+            .unwrap_or_else(|| panic!("golden vector {pointer} must start with 0x"));
+        assert_eq!(
+            encoded.len(),
+            64,
+            "golden vector {pointer} must encode 32 bytes"
+        );
+
+        let mut out = [0u8; 32];
+        for (index, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&encoded[index * 2..index * 2 + 2], 16)
+                .unwrap_or_else(|_| panic!("golden vector {pointer} contains invalid hex"));
+        }
+        out
+    }
+
     type TestStateDb = OrderedVariableDb<
         MmrFamily,
         deterministic::Context,
@@ -966,10 +998,8 @@ mod tests {
 
         assert_eq!(
             hash_header(&header),
-            [
-                237, 2, 52, 82, 23, 11, 241, 36, 196, 211, 229, 155, 159, 99, 198, 162, 76, 210,
-                68, 96, 104, 0, 3, 235, 39, 53, 0, 15, 146, 163, 93, 242,
-            ],
+            golden_bytes32("/header/hash"),
+            "header hash differs from committed golden vector"
         );
     }
 
@@ -1063,6 +1093,7 @@ mod tests {
             bridge: BridgeStateSnapshot {
                 deposit_cursor: 5,
                 deposit_root: l1_deposits.last().expect("non-empty prefix").deposit_root,
+                observed_l1_height: 17,
                 next_withdrawal_id: 5,
                 withdrawals: vec![withdrawal],
             },
@@ -1208,6 +1239,20 @@ mod tests {
         let mut deposits = l1_deposit_prefix(1, account_id);
         let deposit = deposits.pop().expect("one deposit");
         let amount = deposit_amount_nanos(&deposit).expect("small deposit amount");
+        let pre_account = AccountSnapshot {
+            id: account_id,
+            balance: 0,
+            total_deposited: 0,
+            positions: vec![],
+            events_digest: [0; 32],
+            keys_digest: sybil_verifier::empty_account_keys_digest(account_id),
+        };
+        let mut post_account = pre_account.clone();
+        post_account.balance = amount;
+        post_account.total_deposited = amount;
+        input.witness.pre_state = vec![pre_account];
+        input.witness.post_system_state = vec![post_account.clone()];
+        input.witness.post_state = vec![post_account];
         input.witness.system_events = vec![SystemEventWitness::L1Deposit {
             account_id,
             amount,
@@ -1245,6 +1290,20 @@ mod tests {
 
         let deposit = deposits[2].clone();
         let amount = deposit_amount_nanos(&deposit).expect("small deposit amount");
+        let pre_account = AccountSnapshot {
+            id: account_id,
+            balance: 0,
+            total_deposited: 0,
+            positions: vec![],
+            events_digest: [0; 32],
+            keys_digest: sybil_verifier::empty_account_keys_digest(account_id),
+        };
+        let mut post_account = pre_account.clone();
+        post_account.balance = amount;
+        post_account.total_deposited = amount;
+        input.witness.pre_state = vec![pre_account];
+        input.witness.post_system_state = vec![post_account.clone()];
+        input.witness.post_state = vec![post_account];
         input.witness.pre_state_sidecar.bridge.deposit_cursor = 2;
         input.witness.pre_state_sidecar.bridge.deposit_root = prefix_roots[1];
         input.witness.system_events = vec![SystemEventWitness::L1Deposit {
@@ -1443,16 +1502,16 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                64, 57, 123, 28, 177, 17, 224, 212, 38, 229, 155, 66, 90, 206, 225, 133, 166, 21,
-                63, 166, 234, 180, 190, 245, 236, 115, 36, 141, 224, 191, 63, 80,
+                96, 246, 144, 226, 198, 64, 221, 168, 213, 64, 75, 64, 232, 123, 92, 56, 177, 149,
+                232, 21, 175, 201, 12, 110, 13, 146, 132, 209, 81, 213, 142, 105,
             ]
         );
     }
 
     #[test]
     fn state_transition_public_input_hash_solidity_golden_vector() {
-        // Twin: contracts/test/SybilGoldenVectors.t.sol. Keep these constants
-        // byte-for-byte aligned with the Solidity suite.
+        // Twin: contracts/test/SybilGoldenVectors.t.sol. Both suites consume
+        // the generator-owned repo-root JSON rather than maintaining literals.
         let inputs = StateTransitionPublicInputs {
             previous_height: 41,
             new_height: 42,
@@ -1462,19 +1521,14 @@ mod tests {
             events_root: [0x40; 32],
             witness_root: [0x50; 32],
             da_commitment: [0x60; 32],
-            deposit_root: [
-                93, 155, 73, 65, 157, 237, 20, 180, 127, 175, 15, 148, 49, 152, 195, 54, 71, 192,
-                22, 189, 55, 249, 152, 177, 217, 25, 107, 16, 58, 207, 236, 218,
-            ],
+            deposit_root: golden_bytes32("/state_transition_public_inputs/deposit_root"),
             deposit_count: 3,
         };
 
         assert_eq!(
             state_transition_public_input_hash(&inputs),
-            [
-                66, 25, 125, 13, 255, 123, 194, 248, 106, 110, 53, 159, 24, 122, 221, 161, 99, 252,
-                155, 79, 250, 160, 231, 207, 185, 132, 85, 97, 187, 116, 72, 48,
-            ]
+            golden_bytes32("/state_transition_public_inputs/hash"),
+            "Solidity public-input hash differs from committed golden vector"
         );
     }
 

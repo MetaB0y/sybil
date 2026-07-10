@@ -283,37 +283,103 @@ fn verify_withdrawal_transition(witness: &BlockWitness, violations: &mut Vec<Vio
         }
     }
 
+    let mut created = BTreeMap::new();
+    let mut terminal = BTreeMap::new();
+    let mut observed_heights = BTreeSet::new();
+    for event in &witness.system_events {
+        match event {
+            SystemEventWitness::WithdrawalCreated { withdrawal_id, .. } => {
+                if created.insert(*withdrawal_id, event).is_some() {
+                    violations.push(Violation {
+                        kind: ViolationKind::SidecarWithdrawalMismatch,
+                        details: format!("duplicate WithdrawalCreated event {withdrawal_id}"),
+                    });
+                }
+            }
+            SystemEventWitness::WithdrawalRefunded { withdrawal_id, .. }
+            | SystemEventWitness::WithdrawalFinalized { withdrawal_id, .. } => {
+                if terminal.insert(*withdrawal_id, event).is_some() {
+                    violations.push(Violation {
+                        kind: ViolationKind::SidecarWithdrawalMismatch,
+                        details: format!("duplicate terminal event for withdrawal {withdrawal_id}"),
+                    });
+                }
+            }
+            SystemEventWitness::L1BlockObserved { height } => {
+                if !observed_heights.insert(*height) {
+                    violations.push(Violation {
+                        kind: ViolationKind::SidecarWithdrawalMismatch,
+                        details: format!("duplicate L1 height observation {height}"),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut expected_observed_height = witness.pre_state_sidecar.bridge.observed_l1_height;
+    for event in &witness.system_events {
+        if let SystemEventWitness::L1BlockObserved { height } = event {
+            if *height <= expected_observed_height {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarWithdrawalMismatch,
+                    details: format!(
+                        "L1 height observation {height} did not advance {expected_observed_height}"
+                    ),
+                });
+            } else {
+                expected_observed_height = *height;
+            }
+        }
+    }
+    if witness.state_sidecar.bridge.observed_l1_height != expected_observed_height {
+        violations.push(Violation {
+            kind: ViolationKind::SidecarWithdrawalMismatch,
+            details: format!(
+                "post observed_l1_height {} != event-derived {}",
+                witness.state_sidecar.bridge.observed_l1_height, expected_observed_height
+            ),
+        });
+    }
+
     for (&withdrawal_id, pre_leaf) in &pre {
-        match post.get(&withdrawal_id) {
-            Some(post_leaf) if *post_leaf == *pre_leaf => {}
-            Some(_) => violations.push(Violation {
+        match (
+            terminal.contains_key(&withdrawal_id),
+            post.get(&withdrawal_id),
+        ) {
+            (true, None) => {}
+            (true, Some(_)) => violations.push(Violation {
+                kind: ViolationKind::SidecarWithdrawalMismatch,
+                details: format!("terminal withdrawal {withdrawal_id} was not pruned"),
+            }),
+            (false, Some(post_leaf)) if *post_leaf == *pre_leaf => {}
+            (false, Some(_)) => violations.push(Violation {
                 kind: ViolationKind::SidecarWithdrawalMismatch,
                 details: format!("pre-existing withdrawal {withdrawal_id} was silently edited"),
             }),
-            None => violations.push(Violation {
+            (false, None) => violations.push(Violation {
                 kind: ViolationKind::SidecarWithdrawalMismatch,
-                details: format!("pre-existing withdrawal {withdrawal_id} was deleted"),
+                details: format!(
+                    "pre-existing withdrawal {withdrawal_id} was deleted without a terminal event"
+                ),
             }),
         }
     }
 
-    let mut created_count = 0u64;
-    for event in &witness.system_events {
+    for (&withdrawal_id, event) in &created {
         let SystemEventWitness::WithdrawalCreated {
             account_id,
             amount,
-            withdrawal_id,
             recipient,
             token,
             amount_token_units,
             expiry_height,
             nullifier,
+            ..
         } = event
         else {
-            continue;
+            unreachable!()
         };
-        created_count = created_count.saturating_add(1);
-
         let Ok(amount_nanos) = u64::try_from(*amount) else {
             violations.push(Violation {
                 kind: ViolationKind::SidecarWithdrawalMismatch,
@@ -321,17 +387,24 @@ fn verify_withdrawal_transition(witness: &BlockWitness, violations: &mut Vec<Vio
             });
             continue;
         };
-
-        let Some(withdrawal) = post.get(withdrawal_id).copied() else {
+        if terminal.contains_key(&withdrawal_id) {
+            if post.contains_key(&withdrawal_id) {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarWithdrawalMismatch,
+                    details: format!(
+                        "same-block terminal withdrawal {withdrawal_id} was not pruned"
+                    ),
+                });
+            }
+            continue;
+        }
+        let Some(withdrawal) = post.get(&withdrawal_id).copied() else {
             violations.push(Violation {
                 kind: ViolationKind::SidecarWithdrawalMismatch,
-                details: format!(
-                    "WithdrawalCreated event {withdrawal_id} missing from committed withdrawal leaves"
-                ),
+                details: format!("WithdrawalCreated event {withdrawal_id} missing from committed withdrawal leaves"),
             });
             continue;
         };
-
         if withdrawal.account_id != *account_id
             || withdrawal.recipient != *recipient
             || withdrawal.token != *token
@@ -342,13 +415,75 @@ fn verify_withdrawal_transition(witness: &BlockWitness, violations: &mut Vec<Vio
         {
             violations.push(Violation {
                 kind: ViolationKind::SidecarWithdrawalMismatch,
+                details: format!("WithdrawalCreated event {withdrawal_id} does not match committed withdrawal leaf"),
+            });
+        }
+    }
+
+    for (&withdrawal_id, event) in &terminal {
+        let source = pre
+            .get(&withdrawal_id)
+            .copied()
+            .or_else(|| post.get(&withdrawal_id).copied());
+        let created_event = created.get(&withdrawal_id).copied();
+        let (leaf_account, leaf_amount, leaf_expiry) = if let Some(leaf) = source {
+            (leaf.account_id, leaf.amount_nanos, leaf.expiry_height)
+        } else if let Some(SystemEventWitness::WithdrawalCreated {
+            account_id,
+            amount,
+            expiry_height,
+            ..
+        }) = created_event
+        {
+            (*account_id, amount.unsigned_abs(), *expiry_height)
+        } else {
+            violations.push(Violation {
+                kind: ViolationKind::SidecarWithdrawalMismatch,
+                details: format!("terminal event references unknown withdrawal {withdrawal_id}"),
+            });
+            continue;
+        };
+
+        let (account_id, amount) = match event {
+            SystemEventWitness::WithdrawalRefunded {
+                account_id,
+                amount,
+                reason,
+                ..
+            } => {
+                if let crate::types::WithdrawalRefundReasonWitness::L1Expired {
+                    observed_l1_height,
+                } = reason
+                {
+                    if *observed_l1_height <= leaf_expiry
+                        || !observed_heights.contains(observed_l1_height)
+                    {
+                        violations.push(Violation {
+                            kind: ViolationKind::SidecarWithdrawalMismatch,
+                            details: format!(
+                                "withdrawal {withdrawal_id} expiry refund at L1 height {observed_l1_height} is not justified by expiry {leaf_expiry}"
+                            ),
+                        });
+                    }
+                }
+                (*account_id, *amount)
+            }
+            SystemEventWitness::WithdrawalFinalized {
+                account_id, amount, ..
+            } => (*account_id, *amount),
+            _ => unreachable!(),
+        };
+        if account_id != leaf_account || u64::try_from(amount).ok() != Some(leaf_amount) {
+            violations.push(Violation {
+                kind: ViolationKind::SidecarWithdrawalMismatch,
                 details: format!(
-                    "WithdrawalCreated event {withdrawal_id} does not match committed withdrawal leaf"
+                    "terminal event {withdrawal_id} does not match withdrawal owner/amount"
                 ),
             });
         }
     }
 
+    let created_count = created.len() as u64;
     let expected_next = witness
         .pre_state_sidecar
         .bridge

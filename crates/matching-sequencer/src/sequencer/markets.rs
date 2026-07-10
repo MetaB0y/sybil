@@ -43,6 +43,39 @@ impl BlockSequencer {
         group_id: u64,
         market_id: MarketId,
     ) -> Result<(MarketGroup, bool), SequencerError> {
+        let (group_index, should_insert) =
+            self.validate_market_group_extension(group_id, market_id)?;
+        if !should_insert {
+            return Ok((self.market_groups[group_index].clone(), false));
+        }
+
+        let group = self
+            .market_groups
+            .get_mut(group_index)
+            .expect("group exists: validated above");
+        group.add_market(market_id);
+        let updated = group.clone();
+        self.record_system_event(SystemEvent::MarketGroupExtended {
+            group_id,
+            market_id,
+        });
+        Ok((updated, true))
+    }
+
+    pub fn can_extend_market_group(
+        &self,
+        group_id: u64,
+        market_id: MarketId,
+    ) -> Result<(), SequencerError> {
+        self.validate_market_group_extension(group_id, market_id)
+            .map(|_| ())
+    }
+
+    fn validate_market_group_extension(
+        &self,
+        group_id: u64,
+        market_id: MarketId,
+    ) -> Result<(usize, bool), SequencerError> {
         if self.markets.get(market_id).is_none() {
             return Err(SequencerError::MarketNotFound);
         }
@@ -60,7 +93,7 @@ impl BlockSequencer {
             return Err(SequencerError::MarketGroupNotFound);
         };
         if group.markets.contains(&market_id) {
-            return Ok((group.clone(), false));
+            return Ok((group_index, false));
         }
 
         for (existing_group_id, group) in self.market_groups.iter().enumerate() {
@@ -71,17 +104,7 @@ impl BlockSequencer {
             }
         }
 
-        let group = self
-            .market_groups
-            .get_mut(group_index)
-            .expect("group exists: checked above");
-        group.add_market(market_id);
-        let updated = group.clone();
-        self.record_system_event(SystemEvent::MarketGroupExtended {
-            group_id,
-            market_id,
-        });
-        Ok((updated, true))
+        Ok((group_index, true))
     }
 
     pub fn set_market_metadata(&mut self, market_id: MarketId, metadata: MarketMetadata) {

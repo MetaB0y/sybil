@@ -486,6 +486,10 @@ where
         let mut table = txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
         table.retain(|_, _| false)?;
     }
+    {
+        let mut table = txn.open_table(PENDING_BRIDGE_L1_INPUTS)?;
+        table.retain(|_, _| false)?;
+    }
 
     {
         let mut table = txn.open_table(TRADER_TRACKER)?;
@@ -600,6 +604,7 @@ impl Store {
         txn.open_table(BRIDGE_STATE)?;
         txn.open_table(PENDING_L1_DEPOSITS)?;
         txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
+        txn.open_table(PENDING_BRIDGE_L1_INPUTS)?;
         txn.open_table(TRADER_TRACKER)?;
         txn.open_table(PRICE_TRACKER_VOLUME)?;
         txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;

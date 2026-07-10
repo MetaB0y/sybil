@@ -2,12 +2,12 @@
 tags: [zk]
 layer: verification
 status: planned
-last_verified: 2026-07-03
+last_verified: 2026-07-10
 ---
 
 Sybil is designed for a Validium architecture: off-chain data, on-chain proofs. The exchange runs off-chain for performance, but every batch's correctness is attested by an OpenVM proof posted to Ethereum L1. The [[L1 Settlement and Vault|on-chain contracts]] store accepted [[State Root and Parent Hash|state roots]], custody collateral, and process proof-backed withdrawals — they never see individual orders, fills, or account balances.
 
-The path from current architecture to ZK proofs is deliberately incremental. The [[Four-Layer Verification|4-layer verification logic]] already exists and runs on every batch in tests. This same logic — match validity, settlement correctness, block integrity, order validation — is exactly what the ZK circuit will enforce. The [[Block Witness]] is designed as the circuit's input: a self-contained package of everything needed to verify a state transition. OpenVM is the chosen proving stack: the guest program is Rust, and the L1 contracts verify proofs through an OpenVM Solidity adapter. The current OpenVM integration is pinned to the 2.0 prerelease line, currently `v2.0.0-beta.2`.
+The path from current architecture to ZK proofs is deliberately incremental. The [4-layer verification logic](<Four-Layer Verification.md>) already exists and runs on every batch in tests. This same logic — match validity, settlement correctness, block integrity, order validation — is exactly what the ZK circuit will enforce. The [[Block Witness]] is designed as the circuit's input: a self-contained package of everything needed to verify a state transition. OpenVM is the chosen proving stack: the guest program is Rust, and the L1 contracts verify proofs through an OpenVM Solidity adapter. The current integration is pinned to OpenVM `v2.0.0` final, which replaces the beta proof system with SWIRL and requires fresh guest commitments and verifier artifacts.
 
 Several architectural choices were made specifically for ZK-friendliness. [[Nanos and Integer Arithmetic|All-integer arithmetic]] maps directly to finite field operations (no floating-point emulation needed). The [[State Root Schema|state commitment]] uses a SHA-256 qMDB root so membership/exclusion checks can be wrapped in settlement and withdrawal proofs without forcing Solidity to understand qMDB directly. The [[Payoff Vectors|payoff vector]] representation keeps orders as small fixed-size arrays rather than variable-length structures, simplifying circuit layout. The verification layers are independent, allowing the circuit to be decomposed and parallelized. The OpenVM guest boundary now exists; prover orchestration, proof service operations, and DA semantics are still future work. The rollout is planned in four phases:
 
@@ -45,14 +45,14 @@ The first guest boundary is intentionally narrow:
   through `GET /proofs/{height}`. Real OpenVM proof orchestration is still
   follow-up service work.
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
-  `v2.0.0-beta.2`. It is outside the root Cargo workspace so normal Rust
-  checks do not require the OpenVM prerelease CLI or generated artifacts.
+  `v2.0.0`. It is outside the root Cargo workspace so normal Rust checks do
+  not require the OpenVM CLI or generated artifacts.
 - `zk/openvm-tools/` is a standalone host-tool package pinned to the same
   OpenVM tag. It converts prepared `StateTransitionGuestInput` MessagePack into
   the JSON/hex input format expected by `cargo openvm run` and
   `cargo openvm prove`. It stays outside the root workspace because the encoder
   must call `openvm::serde` from the pinned OpenVM git tag to match the guest
-  byte-for-byte, and folding it into `sybil-prover` would pull that prerelease
+  byte-for-byte, and folding it into `sybil-prover` would pull that pinned
   dependency graph into normal checks and production builds.
 - The OpenVM CLI input is a raw byte stream containing little-endian
   `openvm::serde` words. The guest reconstructs those words and decodes
@@ -74,9 +74,8 @@ The first guest boundary is intentionally narrow:
   `keccak256(abi.encode("sybil/openvm/state-transition/v1", ...))` as the
   public value expected by `SybilSettlement`.
 - `contracts/src/OpenVmVerifierAdapter.sol` wraps the generated OpenVM Halo2
-  verifier contract. It pins `appExeCommit` and `appVmCommit`, checks the first
-  OpenVM user public value equals the settlement public-input hash, requires
-  the remaining default public-value words to be zero, then calls
+  verifier contract. It pins `appExeCommit` and `appVmCommit`, checks the 32
+  OpenVM user-public-value bytes equal the settlement public-input hash, then calls
   `IOpenVmHalo2Verifier.verify`.
 - The current state-root proof is a post-state exact-keyspace proof: every
   witness leaf must be in qMDB, and hidden extra leaves are rejected because
@@ -113,7 +112,8 @@ roles and authority (SYB-208):
 3. **`guest.commitment.lock.json` (source fingerprint).** A SHA-256 fingerprint
    of the guest *source tree and its full path-dependency closure*
    (`zk/openvm-guest/`, `crates/sybil-zk`, `crates/sybil-verifier`,
-   `crates/matching-engine`) plus a copy of the commitment hashes. Its job is
+   `crates/matching-engine`, `crates/sybil-l1-protocol`) plus a copy of the
+   commitment hashes. Its job is
    staleness detection: `scripts/zk-guest-fingerprint.sh --check` fails if any
    of that source changes without regenerating the pin, and now also
    cross-checks that its copied hashes still equal `commit.json`.
@@ -145,12 +145,10 @@ args, same commit as the SYB-208 landing).
 With the fix, rebuilds are **deterministic** (two independent
 `just openvm-commit` runs → identical commitments), so the `zk-rebuild` CI
 lane (below) is a **hard gate**: regenerated commits must equal the committed
-`commit.json`. The committed `commit.json` + lock now carry the
-**current-source** commitment (`app_exe_commit 0x0094ea7a…`); the **deployed**
-adapter still pins the **May-2026** build (`0x00796a20…`). Consensus bytes are
-golden-vector-identical, but the artifact differs — the next devnet redeploy
-must update the adapter constructor args to the committed values (freshly
-built proofs will not verify against the old pin until then).
+`commit.json`. The OpenVM v2.0.0 final migration intentionally moved both
+current-source commitments to `app_exe_commit 0x000f896e…` and
+`app_vm_commit 0x007a02fc…`. The planned fresh genesis and adapter redeploy
+must use those final-tag pins; beta proofs and commitments are not supported.
 
 ### Redeploy procedure (when the commitment legitimately changes)
 
@@ -247,7 +245,7 @@ heavy. It must not be used for production or public testnet deployments.
 > `crates/sybil-verifier/` — verification logic that will become the ZK circuit
 > `crates/sybil-prover/` — portable proof jobs, OpenVM guest input construction, optional sequencer-store export, local worker/API, settlement calldata encoder, and future proof orchestrator
 > `crates/sybil-zk/` — public input hash and guest-safe transition verifier
-> `zk/openvm-guest/` — OpenVM 2.0 beta guest entrypoint
+> `zk/openvm-guest/` — OpenVM 2.0 guest entrypoint
 > `zk/openvm-tools/` — OpenVM CLI input encoder for prepared guest inputs
 > `contracts/src/OpenVmVerifierAdapter.sol` — L1 adapter from Sybil public-input hash to OpenVM Halo2 verifier calls
 > `crates/matching-sequencer/src/qmdb_state.rs` — persisted typed-state qMDB roots and proofs used by witgen

@@ -1,0 +1,32 @@
+name: Compose Integration
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TMPDIR: /home/runner/work/_temp
+
+jobs:
+  itest-compose:
+    name: Deterministic Compose Money Path
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@just
+
+      - name: Compose account-to-fill integration # just itest-compose
+        run: just itest-compose

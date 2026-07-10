@@ -3,7 +3,10 @@
 use matching_engine::Fill;
 
 use crate::canonical::append_order;
-use crate::types::{RejectionReason, SystemEventWitness, WitnessOrder, WitnessRejection};
+use crate::types::{
+    RejectionReason, SystemEventWitness, WithdrawalRefundReasonWitness, WitnessOrder,
+    WitnessRejection,
+};
 
 /// Return canonical event leaf bytes in the section order committed by `events_root`.
 pub fn event_leaf_values(
@@ -118,6 +121,38 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
             value.push(6);
             value.extend_from_slice(&group_id.to_le_bytes());
             value.extend_from_slice(&market_id.0.to_le_bytes());
+        }
+        SystemEventWitness::WithdrawalRefunded {
+            account_id,
+            withdrawal_id,
+            amount,
+            reason,
+        } => {
+            value.push(7);
+            value.extend_from_slice(&account_id.to_le_bytes());
+            value.extend_from_slice(&withdrawal_id.to_le_bytes());
+            value.extend_from_slice(&amount.to_le_bytes());
+            match reason {
+                WithdrawalRefundReasonWitness::L1Cancelled => value.push(0),
+                WithdrawalRefundReasonWitness::L1Expired { observed_l1_height } => {
+                    value.push(1);
+                    value.extend_from_slice(&observed_l1_height.to_le_bytes());
+                }
+            }
+        }
+        SystemEventWitness::WithdrawalFinalized {
+            account_id,
+            withdrawal_id,
+            amount,
+        } => {
+            value.push(8);
+            value.extend_from_slice(&account_id.to_le_bytes());
+            value.extend_from_slice(&withdrawal_id.to_le_bytes());
+            value.extend_from_slice(&amount.to_le_bytes());
+        }
+        SystemEventWitness::L1BlockObserved { height } => {
+            value.push(9);
+            value.extend_from_slice(&height.to_le_bytes());
         }
     }
     value

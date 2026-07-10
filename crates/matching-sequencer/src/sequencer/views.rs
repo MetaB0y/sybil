@@ -237,8 +237,8 @@ impl BlockSequencer {
     }
 
     pub fn default_bridge_withdrawal_expiry_height(&self) -> u64 {
-        self.height
-            .saturating_add(1)
+        self.bridge
+            .observed_l1_height
             .saturating_add(DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS)
     }
 

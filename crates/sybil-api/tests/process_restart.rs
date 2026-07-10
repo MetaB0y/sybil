@@ -408,11 +408,11 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     let replay_cancel_body: Value =
         serde_json::from_str(&replay_cancel_resp.text().await.unwrap_or_default())
             .expect("replay signed cancel error body is JSON");
-    assert_eq!(replay_cancel_status, StatusCode::CONFLICT);
-    assert_eq!(
-        replay_cancel_body["code"].as_str(),
-        Some("REPLAY_NONCE_STALE")
-    );
+    // Cancel validation runs before replay-nonce validation, so after the
+    // pre-restart cancel removed the order, the replay is rejected as not
+    // found without consuming or otherwise consulting the stale nonce.
+    assert_eq!(replay_cancel_status, StatusCode::NOT_FOUND);
+    assert_eq!(replay_cancel_body["code"].as_str(), Some("NOT_FOUND"));
 
     post_json(
         &client,

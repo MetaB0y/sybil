@@ -33,8 +33,8 @@ export function AccountChip() {
   if (!session) {
     return (
       <button
+        className="account-chip nav-chip"
         type="button"
-        className="nav-chip"
         onClick={() => setOpen(true)}
         title="Create or import an account"
       >
@@ -96,15 +96,18 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
       <button
+        className="account-chip nav-chip"
         type="button"
-        className="nav-chip"
         data-connected="true"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
         title={`Portfolio ${total} · Available ${cash}${reserved ? ` · Reserved ${reserved}` : ""} · Account #${accountId}`}
       >
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+        <span
+          className="account-chip-balance"
+          style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+        >
           <span style={{ color: "var(--fg-1)" }}>{total}</span>
           <span
             className="account-chip-cash"
@@ -285,6 +288,7 @@ function MenuItem({
 }) {
   return (
     <button
+      className="account-chip"
       type="button"
       role="menuitem"
       onClick={onClick}

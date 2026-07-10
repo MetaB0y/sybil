@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
@@ -118,7 +119,14 @@ pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle
 /// for endpoints that depend on qMDB state roots or proofs.
 #[allow(dead_code)]
 pub async fn test_app_with_store(dev_mode: bool) -> (Router, SequencerHandle) {
-    test_app_with_store_config(dev_mode, SequencerConfig::default()).await
+    test_app_with_store_config(
+        dev_mode,
+        SequencerConfig {
+            block_interval: Duration::from_secs(60 * 60),
+            ..SequencerConfig::default()
+        },
+    )
+    .await
 }
 
 /// Create a store-backed test app with an explicit sequencer config.
@@ -167,6 +175,7 @@ pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, Sequencer
     let markets = MarketSet::new();
     let oracle = Arc::new(AdminOracle::new());
     let config = SequencerConfig {
+        block_interval: Duration::from_secs(60 * 60),
         max_fill_history_per_account: 0,
         max_equity_points_per_account: 0,
         max_history_events_per_account: 0,

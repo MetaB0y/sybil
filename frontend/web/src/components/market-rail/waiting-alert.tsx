@@ -5,9 +5,8 @@ import { useEffect, useRef, useState } from "react";
 /**
  * Compact "in-flight bet" alert shown below the Bet button while a degen bet is
  * being settled (tracker phase === "tracking"). A pulsing dot + short status
- * line "Finding the best quote for you…" with an ⓘ info affordance that toggles
- * a tiny popover explaining the FBA batch. The fuller "why am I waiting?" copy
- * now lives in that tooltip rather than an always-visible bottom link.
+ * line that makes it clear the bet is live, with an ⓘ info affordance that
+ * explains the waiting window without auction jargon.
  */
 export function WaitingAlert() {
   const [open, setOpen] = useState(false);
@@ -16,7 +15,8 @@ export function WaitingAlert() {
   useEffect(() => {
     if (!open) return;
     function onPointer(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
@@ -70,7 +70,7 @@ export function WaitingAlert() {
           color: "var(--fg-2)",
         }}
       >
-        Finding the best quote for you…
+        Your bet is live and will keep trying for about 2 minutes.
       </span>
       <button
         type="button"
@@ -117,8 +117,8 @@ export function WaitingAlert() {
             color: "var(--fg-2)",
           }}
         >
-          Every few seconds, all bets clear at one price. Same price for
-          everyone in the batch.
+          We’re looking for someone to take the other side. If no one does, your
+          funds go back to your balance.
         </div>
       )}
     </div>

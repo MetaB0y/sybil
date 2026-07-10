@@ -185,7 +185,7 @@ A timer tick (interval configurable: `SequencerConfig::block_interval`, nominall
 
 Inside `produce_block_in_place` (`sequencer.rs:2227`):
 
-1. **Apply system events** queued since the last block (account creation, funding, L1 deposits, withdrawal creation, resolutions), updating each touched account's `events_digest` (a running BLAKE3 accumulator committed in the state root).
+1. **Apply system events** queued since the last block (account creation, funding, L1 deposits, withdrawal creation/refund/finalization, confirmed L1-height observations, resolutions), updating each touched account's `events_digest` (a running BLAKE3 accumulator committed in the state root). Terminal withdrawal events prune their active leaves in this same transition.
 2. **Expire & revalidate** the resting book: drop TTL-expired orders, orders on resolved markets, and orders whose reservations no longer hold.
 3. **Collect** all resting orders into the batch.
 4. **Process fresh submissions**: direct-admit stragglers and drained deferred bundles, with group-coverage self-trade prevention; MM quotes join as one-shot flash liquidity (never rested, never carried over).
@@ -229,7 +229,7 @@ The 200-OK contract: anything acknowledged (orders, account creation, funding, m
 | `events_root` | keyless qMDB over this block's canonical events (orders, rejections, fills, system events) | "did fill F happen in block N" proofs |
 | `witness_root` | `BLAKE3("sybil/witness" ‖ canonical witness bytes)` | the prover; full-block auditability (in proof public inputs; not yet in the header) |
 
-**`BlockWitness`** (`sybil-verifier/src/types.rs`, 16 fields) is self-contained and reproducible: header + parent header, accepted orders, rejections with reasons, system events, fills, clearing prices, welfare + minting cost, MM constraints, market groups, three account-state snapshots (`pre_state`, `post_system_state`, `post_state`), the non-account `state_sidecar`, and resolved markets. Two invariants define validity: *(a)* replaying `pre_state + system_events + fills` yields `post_state`; *(b)* recomputing the roots from the witness matches the header.
+**`BlockWitness`** (`sybil-verifier/src/types.rs`, 16 fields) is self-contained and reproducible: header + parent header, accepted orders, rejections with reasons, system events, fills, clearing prices, welfare + minting cost, MM constraints, market groups, three account-state snapshots (`pre_state`, `post_system_state`, `post_state`), the pre/post non-account sidecars, and resolved markets. Two invariants define validity: *(a)* replaying `pre_state + system_events + fills` yields `post_state`, including withdrawal refunds and deterministic terminal-leaf pruning; *(b)* recomputing the roots from the witness matches the header.
 
 **Canonical serialization** (`sybil-verifier::commitments` — `state_schema.rs`, `event_schema.rs`, `witness_schema.rs`): hand-specified little-endian byte layouts with domain-separation strings, version bytes, and golden test vectors. This is *the* byte truth consumed by native verification, witness generation, and the zkVM guest. (A separate, unrelated system — `sybil-signing`, borsh-based — defines the bytes that *clients sign*: orders, cancels, attestations. Signing bytes and commitment bytes are deliberately different systems.)
 
@@ -245,6 +245,7 @@ The 200-OK contract: anything acknowledged (orders, account creation, funding, m
 |---|---|---|
 | 1 — Match | `match_verifier.rs` | fill ↔ order existence, `qty ≤ max_fill`, seller-aware limit compliance, per-fill welfare ≥ 0, welfare totals, uniform clearing price, YES+NO = $1, no fills on resolved markets, conditional activation |
 | 2 — Settlement | `settlement.rs` | replays fills over `post_system_state` with the *same shared* `matching-engine` settlement functions, re-derives the MINT adjustment, compares every balance/position to claimed `post_state`, non-negativity |
+| System transition | `system.rs` | replays account-value effects of system events from authenticated `pre_state`, including exact withdrawal refund credits, and compares to `post_system_state` |
 | 3 — Block integrity | `block.rs`, `event_commitment.rs` | recomputes `state_root` (typed qMDB) and `events_root` (keyless qMDB), parent-hash chain, consecutive heights, count fields *(feature `qmdb`; native only)* |
 | 4 — Orders | `orders.rs` | pre-state balance sufficiency for buys (with intra-batch reservation accumulation — double-spend detection), position sufficiency for sells, expiry eligibility, no false rejections, correct rejection reasons |
 
@@ -270,7 +271,7 @@ Crate boundaries and why they exist:
 
 - **`sybil-zk`** — guest-safe: the public-input binding (`StateTransitionPublicInputs`, keccak hash `"sybil/openvm/state-transition/v1"`), the transition verifier the guest calls, and `guest_commitments`: a from-scratch SHA-256/MMR/qMDB-range-proof verifier so the guest never links commonware. Golden tests pin guest roots == native roots.
 - **`sybil-prover`** — owns the portable `StateTransitionProofJob` (committed witness + ordered post-state leaf proofs), job→guest-input conversion, job inbox worker, artifact store (`status.json` per height), HTTP serving (`GET /proofs/{height}`, `/metrics`), DA publication, and L1 calldata encoding. The `sequencer-store` feature adds `sybil-prover witgen export-latest` / `smoke-job`; default prover builds do not link the sequencer. Actual proof generation is invoked through the `just openvm-*` recipes. The dev-only `sybil-prover-mock` binary fabricates artifacts for dashboard wiring.
-- **`zk/openvm-guest`, `zk/openvm-tools`** — standalone workspaces pinned to OpenVM `v2.0.0-beta.2`, kept outside the root workspace so normal builds never need the OpenVM toolchain.
+- **`zk/openvm-guest`, `zk/openvm-tools`** — standalone workspaces pinned to OpenVM `v2.0.0`, kept outside the root workspace so normal builds never need the OpenVM toolchain.
 
 `just zk-smoke` runs the full local pipeline on a one-block fixture; `just zk-smoke true` adds app-proof generation and verification.
 

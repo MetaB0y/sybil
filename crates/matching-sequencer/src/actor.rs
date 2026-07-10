@@ -32,7 +32,7 @@ use crate::crypto::{
     SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
     SignedKeyRegistration, SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
 };
-use crate::error::{Rejection, RejectionReason, SequencerError};
+use crate::error::SequencerError;
 use crate::market_info::{
     AccountFillCursor, AccountFillRecord, MarketMetadata, MarketSearchQuery, PriceCandle,
     PriceCandlePage, PriceHistoryPage, PricePoint,

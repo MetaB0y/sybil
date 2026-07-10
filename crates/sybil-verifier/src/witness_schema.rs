@@ -20,11 +20,11 @@ use crate::types::{
     ChallengeSnapshot, DepositAccumulatorWitness, L1DepositWitness, MarketGroupSnapshot,
     MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason,
     ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
-    StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
-    WitnessRejection,
+    StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness, WithdrawalSnapshot,
+    WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 4;
+pub const WITNESS_FORMAT_VERSION: u8 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -36,7 +36,7 @@ pub enum WitnessDecodeError {
     },
     #[error("trailing bytes after canonical witness at offset {offset}: {trailing} bytes")]
     TrailingBytes { offset: usize, trailing: usize },
-    #[error("unknown witness format version {0}; only v4 is supported")]
+    #[error("unknown witness format version {0}; only v5 is supported")]
     UnknownVersion(u8),
     #[error("invalid tag for {field} at offset {offset}: {tag}")]
     InvalidTag {
@@ -491,6 +491,39 @@ impl<'a> WitnessReader<'a> {
                 group_id: self.read_u64()?,
                 market_id: self.read_market_id()?,
             }),
+            7 => {
+                let account_id = self.read_u64()?;
+                let withdrawal_id = self.read_u64()?;
+                let amount = self.read_i64()?;
+                let reason_offset = self.offset;
+                let reason = match self.read_tag("withdrawal_refund_reason")? {
+                    0 => WithdrawalRefundReasonWitness::L1Cancelled,
+                    1 => WithdrawalRefundReasonWitness::L1Expired {
+                        observed_l1_height: self.read_u64()?,
+                    },
+                    tag => {
+                        return Err(WitnessDecodeError::InvalidTag {
+                            field: "withdrawal_refund_reason",
+                            tag,
+                            offset: reason_offset,
+                        })
+                    }
+                };
+                Ok(SystemEventWitness::WithdrawalRefunded {
+                    account_id,
+                    withdrawal_id,
+                    amount,
+                    reason,
+                })
+            }
+            8 => Ok(SystemEventWitness::WithdrawalFinalized {
+                account_id: self.read_u64()?,
+                withdrawal_id: self.read_u64()?,
+                amount: self.read_i64()?,
+            }),
+            9 => Ok(SystemEventWitness::L1BlockObserved {
+                height: self.read_u64()?,
+            }),
             tag => Err(WitnessDecodeError::InvalidTag {
                 field: "system_event",
                 tag,
@@ -661,6 +694,7 @@ impl<'a> WitnessReader<'a> {
         Ok(BridgeStateSnapshot {
             deposit_cursor: self.read_u64()?,
             deposit_root: self.read_hash32()?,
+            observed_l1_height: self.read_u64()?,
             next_withdrawal_id: self.read_u64()?,
             withdrawals: self.read_vec("bridge.withdrawals", |reader| reader.read_withdrawal())?,
         })
@@ -1031,7 +1065,7 @@ mod tests {
 
         let bytes = canonical_witness_bytes(&witness);
         assert_eq!(bytes[0], WITNESS_FORMAT_VERSION);
-        assert_eq!(bytes.len(), 1533);
+        assert_eq!(bytes.len(), 1549);
     }
 
     #[test]
@@ -1162,6 +1196,7 @@ mod tests {
         let post_bridge = BridgeStateSnapshot {
             deposit_cursor: 3,
             deposit_root: deposit_accumulator.new_deposits[0].deposit_root,
+            observed_l1_height: 11,
             next_withdrawal_id: 4,
             withdrawals: vec![WithdrawalSnapshot {
                 withdrawal_id: 3,
@@ -1181,6 +1216,7 @@ mod tests {
                 deposit_accumulator.pre_count,
             )
             .unwrap(),
+            observed_l1_height: 10,
             next_withdrawal_id: 3,
             withdrawals: vec![],
         };

@@ -948,10 +948,16 @@ async fn test_store_restores_pending_bridge_wals() {
         .append_pending_bridge_withdrawal(&withdrawal)
         .await
         .unwrap();
+    let l1_input = BridgeL1Input::ObservedHeight(42);
+    store
+        .append_pending_bridge_l1_input(&l1_input)
+        .await
+        .unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
     assert_eq!(restored.pending_l1_deposits, vec![deposit]);
     assert_eq!(restored.pending_bridge_withdrawals, vec![withdrawal]);
+    assert_eq!(restored.pending_bridge_l1_inputs, vec![l1_input]);
 }
 
 #[tokio::test]

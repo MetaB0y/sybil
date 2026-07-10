@@ -58,7 +58,7 @@ fn make_asymmetric(problem: &mut Problem, seed: u64) {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let g_of = group_of(problem);
     // Deep groups: even index. Shallow: odd index.
-    let is_deep = |gi: usize| gi % 2 == 0;
+    let is_deep = |gi: usize| gi.is_multiple_of(2);
 
     // Keep the generator's native MMs (two-sided ladders spanning many groups):
     // their budgets genuinely bind and their liquidity provision is what creates

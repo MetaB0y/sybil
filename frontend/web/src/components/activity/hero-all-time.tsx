@@ -26,6 +26,7 @@ export function HeroAllTime({
 }) {
   return (
     <section
+      className="activity-hero-section"
       style={{
         padding: "28px 24px 28px",
         borderBottom: "1px solid var(--border-1)",
@@ -38,6 +39,7 @@ export function HeroAllTime({
         {/* Left: two hero numbers — matched volume + welfare, same size */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div
+            className="activity-hero-numbers"
             style={{
               display: "flex",
               flexWrap: "wrap",

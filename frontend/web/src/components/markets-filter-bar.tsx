@@ -34,6 +34,7 @@ export function MarketsFilterBar({
 }: Props) {
   return (
     <div
+      className="markets-filter-bar"
       style={{
         display: "flex",
         alignItems: "center",
@@ -46,6 +47,7 @@ export function MarketsFilterBar({
       <CategoryTabs />
 
       <div
+        className="markets-sort-controls"
         style={{
           display: "flex",
           alignItems: "center",

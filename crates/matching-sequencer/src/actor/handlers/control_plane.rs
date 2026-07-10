@@ -72,24 +72,19 @@ impl SequencerActorState {
         pubkey: PublicKey,
         auth_scheme: AccountAuthScheme,
     ) -> Result<(), SequencerError> {
-        if self.sequencer.accounts.get(account_id).is_none() {
-            return Err(SequencerError::Rejected(Rejection {
-                order_id: 0,
-                account_id,
-                reason: RejectionReason::AccountNotFound,
-            }));
-        }
-        if self.sequencer.lookup_pubkey(&pubkey).is_some() {
-            return Err(SequencerError::AccountAlreadyRegistered);
-        }
+        self.sequencer
+            .can_register_first_pubkey(account_id, &pubkey)?;
         self.persist_control_plane(&ControlPlaneCommand::RegisterPubkey {
             account_id,
             compressed_pubkey: pubkey.compressed_bytes(),
             auth_scheme,
         })
         .await?;
-        self.sequencer
-            .register_pubkey_with_scheme(account_id, pubkey, auth_scheme)
+        self.sequencer.register_first_pubkey_with_meta(
+            account_id,
+            pubkey,
+            RegisteredPubkey::primary(account_id, auth_scheme),
+        )
     }
 
     pub(super) async fn handle_create_market(
@@ -132,8 +127,8 @@ impl SequencerActorState {
         group_id: u64,
         market_id: MarketId,
     ) -> Result<(MarketGroup, bool), SequencerError> {
-        let mut validation = self.sequencer.clone();
-        validation.extend_market_group(group_id, market_id)?;
+        self.sequencer
+            .can_extend_market_group(group_id, market_id)?;
         self.persist_control_plane(&ControlPlaneCommand::ExtendMarketGroup {
             group_id,
             market_id,
@@ -232,16 +227,8 @@ impl SequencerActorState {
         pubkey: PublicKey,
         meta: RegisteredPubkey,
     ) -> Result<(), SequencerError> {
-        if self.sequencer.accounts.get(account_id).is_none() {
-            return Err(SequencerError::Rejected(Rejection {
-                order_id: 0,
-                account_id,
-                reason: RejectionReason::AccountNotFound,
-            }));
-        }
-        if self.sequencer.lookup_pubkey(&pubkey).is_some() {
-            return Err(SequencerError::AccountAlreadyRegistered);
-        }
+        self.sequencer
+            .can_register_first_pubkey(account_id, &pubkey)?;
         self.persist_control_plane(&ControlPlaneCommand::RegisterPubkeyWithMeta {
             account_id,
             compressed_pubkey: pubkey.compressed_bytes(),
@@ -252,7 +239,7 @@ impl SequencerActorState {
         })
         .await?;
         self.sequencer
-            .register_pubkey_with_meta(account_id, pubkey, meta)
+            .register_first_pubkey_with_meta(account_id, pubkey, meta)
     }
 
     /// Register a NEW signing key authorized by an existing account key (SYB-229).
@@ -293,13 +280,8 @@ impl SequencerActorState {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
         // Reject a duplicate registration BEFORE burning the nonce so a rejected
         // request doesn't consume it (mirrors the revoke validation ordering).
-        if self
-            .sequencer
-            .lookup_pubkey(&authenticated.new_pubkey)
-            .is_some()
-        {
-            return Err(SequencerError::AccountAlreadyRegistered);
-        }
+        self.sequencer
+            .can_register_pubkey(authenticated.account_id, &authenticated.new_pubkey)?;
         self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
             .await?;
         let meta = RegisteredPubkey {
@@ -405,11 +387,11 @@ impl SequencerActorState {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
         let target = PublicKey::from_compressed_bytes(&authenticated.target_pubkey)
             .ok_or(SequencerError::KeyNotFound)?;
-        // Validate the revocation (ownership + last-key lockout) against a clone
+        // Validate the revocation (ownership + last-key lockout)
         // before burning the nonce or writing the WAL, so a rejected revocation
         // doesn't consume the nonce.
-        let mut validation = self.sequencer.clone();
-        validation.revoke_signing_key(authenticated.account_id, &target)?;
+        self.sequencer
+            .can_revoke_signing_key(authenticated.account_id, &target)?;
         self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
             .await?;
         self.persist_control_plane(&ControlPlaneCommand::RevokeSigningKey {
@@ -479,8 +461,7 @@ impl SequencerActorState {
     ) -> Result<(), SequencerError> {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
         let revoked_at_ms = current_timestamp_ms();
-        let mut validation = self.sequencer.clone();
-        validation.revoke_api_key(
+        self.sequencer.can_revoke_api_key(
             authenticated.account_id,
             authenticated.api_key_id,
             revoked_at_ms,

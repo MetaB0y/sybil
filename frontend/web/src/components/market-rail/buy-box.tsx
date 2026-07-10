@@ -94,7 +94,14 @@ function sumSellShareReservations(
   return units;
 }
 
-export function BuyBox({ outcome }: { outcome: EventOutcome }) {
+export function BuyBox({
+  outcome,
+  requireConfirmation = false,
+}: {
+  outcome: EventOutcome;
+  /** Modal flow only: review once, then explicitly confirm before signing. */
+  requireConfirmation?: boolean;
+}) {
   const session = useAccountSession();
   const openConnectModal = useSetConnectModalOpen();
   const qc = useQueryClient();
@@ -153,6 +160,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   /* eslint-enable */
 
   const [submitting, setSubmitting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Accepted receipt: the order-id (best-effort, looked up from the refreshed
   // pending list — the signed endpoint returns only `{ accepted }`) plus the
@@ -168,6 +176,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
   // lines up a different order (e.g. flips to Sell NO).
   /* eslint-disable react-hooks/set-state-in-effect -- clear stale receipt on edit */
   useEffect(() => {
+    setConfirming(false);
     setAccepted(null);
     setSubmitError(null);
   }, [dir, outcomeSide, unit, amount, shares, tif, gtdBatches, limit]);
@@ -316,7 +325,17 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
     if (insufficientBuy) return "Not enough funds";
     if (insufficientSell) return "Not enough shares";
     if (completeSet) return "Cancel your open order first";
-    const sideWord = dir === "buy" ? "queue buy" : "queue sell";
+    const sideWord = requireConfirmation
+      ? confirming
+        ? dir === "buy"
+          ? "confirm buy"
+          : "confirm sell"
+        : dir === "buy"
+          ? "review buy"
+          : "review sell"
+      : dir === "buy"
+        ? "queue buy"
+        : "queue sell";
     const batchSuffix =
       batchNumber == null ? "" : ` → batch #${batchNumber.toLocaleString()}`;
     return `${sideWord}${batchSuffix}`;
@@ -349,6 +368,14 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
       // IOC commits to the very next block; GTD rests for the picked horizon.
       const horizon = tif === "IOC" ? 1 : Math.max(1, Math.round(gtdBatches));
       expiresAtBlock = BigInt(latestHeight + horizon);
+    }
+
+    // The focused modal is intentionally two-step: the first press freezes a
+    // clear review state; the second is the only press that starts signing.
+    // Editing any order field clears this state via the effect above.
+    if (requireConfirmation && !confirming) {
+      setConfirming(true);
+      return;
     }
 
     setSubmitting(true);
@@ -396,6 +423,7 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           block: batchNumber,
           summary: `${formatShareUnits(maxFill)} sh @ ${limitCents}¢ · ${tif}`,
         });
+        setConfirming(false);
       }
     } catch (e) {
       // warn (not error): the rejection is handled and shown humanized below;
@@ -1023,6 +1051,37 @@ export function BuyBox({ outcome }: { outcome: EventOutcome }) {
           </span>
         </div>
       </div>
+
+      {requireConfirmation && confirming && !accepted && (
+        <div
+          role="status"
+          data-testid="order-review"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 5,
+            padding: "9px 10px",
+            borderRadius: 4,
+            border: "1px solid color-mix(in srgb, var(--accent) 38%, transparent)",
+            background: "color-mix(in srgb, var(--accent) 10%, transparent)",
+            color: "var(--fg-2)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+          }}
+        >
+          <strong style={{ color: "var(--fg-1)", fontWeight: 600 }}>
+            Confirm {dir} {outcomeSide}
+          </strong>
+          <span>
+            {formatShareUnits(qtyUnits)} shares @ {limitCentsPreview}¢ · {tif}
+          </span>
+          <span style={{ color: "var(--fg-3)" }}>
+            {dir === "buy"
+              ? `maximum cost $${grossAtLimit.toFixed(2)}`
+              : `minimum receive $${grossAtLimit.toFixed(2)}`}
+          </span>
+        </div>
+      )}
 
       {/* CTA */}
       <button

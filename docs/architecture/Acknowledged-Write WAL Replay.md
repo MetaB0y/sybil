@@ -3,7 +3,7 @@ tags: [infrastructure, storage, recovery]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-03
+last_verified: 2026-07-10
 ---
 
 # Acknowledged-Write WAL Replay
@@ -42,10 +42,10 @@ Read `docs/review/40-do-not-break.md` first. The relevant invariants:
 
 ## Current tables inventory
 
-The five acknowledged-write WAL tables live in
-`crates/matching-sequencer/src/store.rs`. Each is keyed by a monotonic `u64`
-sequence (except `resting_orders`, a single rewritten snapshot row) and is
-cleared atomically inside `save_block`.
+The six acknowledged-write WAL tables live under
+`crates/matching-sequencer/src/store/`. Each is keyed by a monotonic `u64`
+sequence. `resting_orders` is a separate rewritten snapshot row rather than a
+WAL. Every WAL is cleared atomically inside `save_block`.
 
 | WAL table | Written by (durable append) | Replayed / applied at | Cleared at |
 |-----------|-----------------------------|-----------------------|------------|
@@ -55,6 +55,7 @@ cleared atomically inside `save_block`.
 | `control_plane_log` | actor `persist_control_plane`, before the in-memory mutation (`crates/matching-sequencer/src/actor.rs:1386`); append in `crates/matching-sequencer/src/store.rs:2057` | `restore` replays each `ControlPlaneCommand` in ascending seq (`crates/matching-sequencer/src/sequencer.rs:855`); dispatch in `replay_control_plane_command` (`crates/matching-sequencer/src/sequencer.rs:926`) | `save_block_inner` (`crates/matching-sequencer/src/store.rs:1022`) |
 | `pending_l1_deposits` | actor `handle_l1_deposit`, after validate, before ingest (`crates/matching-sequencer/src/actor.rs:1568`); append in `crates/matching-sequencer/src/store.rs:2064` | `restore` re-ingests each deposit (`crates/matching-sequencer/src/sequencer.rs:883`) | `save_block_inner` (`crates/matching-sequencer/src/store.rs:1029`) |
 | `pending_bridge_withdrawals` | actor `handle_bridge_withdrawal`, after validate, before request (`crates/matching-sequencer/src/actor.rs:1582`); append in `crates/matching-sequencer/src/store.rs:2068` | `restore` re-requests each withdrawal (`crates/matching-sequencer/src/sequencer.rs:901`) | `save_block_inner` (`crates/matching-sequencer/src/store.rs:1033`) |
+| `pending_bridge_l1_inputs` | actor bridge handlers, after transition preflight and before the live mutation | `restore` replays withdrawal events and confirmed-height observations after withdrawal creation rows | the same `save_block_inner` transaction that persists bridge state |
 
 `control_plane_log` carries a single typed enum, `ControlPlaneCommand`
 (`crates/matching-sequencer/src/store.rs:479`), covering account create/fund,
@@ -83,7 +84,9 @@ applies state in exactly this order:
 5. stale resting orders expired for the restored height (`sequencer.rs:870`);
 6. `pending_l1_deposits` re-ingested (`sequencer.rs:883`);
 7. `pending_bridge_withdrawals` re-requested (`sequencer.rs:901`);
-8. `pending_bundles` are *not* applied here — they wait in the queue for the next
+8. `pending_bridge_l1_inputs` replay withdrawal status events and confirmed L1
+   heights only after every acknowledged withdrawal request has been restored;
+9. `pending_bundles` are *not* applied here — they wait in the queue for the next
    block's normal solve.
 
 Within a single table, ascending `u64` seq preserves exact acknowledgement
@@ -105,16 +108,20 @@ correct end state (recall: no block is produced during restore, so only the
 | `control_plane` signed cancel | `pending_bridge_withdrawals` | cancel releases resting-order reservations that a withdrawal validates against | replay order (**the July 1 fix**) | **No** — this is the regression edge; guarded by `bridge_withdrawal_replays_after_control_plane_cancel_wal` |
 | stale-order expiry | `pending_bridge_withdrawals` | TTL-expired resting orders must release reservations before a withdrawal checks free balance | expiry runs at `sequencer.rs:870`, before bridge replay | No — guarded by `restore_expires_stale_resting_orders_before_bridge_wal_replay` |
 | `pending_l1_deposits` | `pending_bridge_withdrawals` | a deposit that funds a same-window withdrawal must land first | replay order (deposits before withdrawals) | Yes (monotone) — deposits only *raise* balance, so a valid-at-ack withdrawal stays valid; reorder cannot manufacture an over-withdrawal because each withdrawal was already validated at ack time |
+| `pending_bridge_withdrawals` | `pending_bridge_l1_inputs` | a queued/finalized/cancelled event or expiry observation must see the withdrawal leaf it targets | replay order (withdrawal creation before L1 lifecycle inputs) | No — otherwise an acknowledged refund/finalization could be discarded as an unknown leaf; guarded by the actor crash/restart refund test |
 | `admit_log` | `control_plane` fund/create-market | a direct admit acked *after* a fund/market-create is replayed *before* it | none (relies on non-validating replay) | Yes (latent) — `reinsert_for_replay` (`order_book.rs:175`) does **not** re-validate against balance or market existence; it re-sums reservations and pushes the row. Aggregates are commutative, no block is produced mid-restore, so the end state is correct regardless of order |
 | `control_plane` resolve | resting orders / `admit_log` | resolution must see resting orders on the market to refund/clear them | admit_log replays before control-plane (`sequencer.rs:824` before `:855`) | No — resolve must run after the book is rebuilt |
 | any table | `pending_bundles` drain | bundles re-validate against fully restored state | bundles deferred to next block (`sequencer.rs:846`) | Yes — bundles are never trusted; a stale/over-reserved bundle becomes a block rejection, guarded by `restored_pending_bundle_revalidates_against_replayed_admit_reservations` |
 | any table | invalid WAL row | one bad row must not abort recovery | per-row crash guards drop + count (`sybil_restore_wal_rows_dropped_total`); guarded by `restore_drops_invalid_bridge_and_deposit_wal_rows` | n/a |
 
-Reading the matrix: there are effectively **four hard ordering edges** —
+Reading the matrix: there are effectively **four hard cross-subsystem ordering
+edges**, plus the intra-bridge rule that withdrawal creation precedes its L1
+lifecycle inputs —
 (1) admit_log before the id-advance/bundle-drain, (2) control-plane before bridge
 WALs, (3) the cancel→withdrawal reservation edge, (4) expiry→withdrawal. Edges 2
 and 3 collapse into the same "control-plane/expiry before bridge" rule. The
-remaining reorderings are provably safe: they are either monotone (deposits) or
+bridge stage itself is ordered funding → withdrawal creation → L1 lifecycle
+input. The remaining reorderings are provably safe: they are either monotone (deposits) or
 end-state-commutative because replay never re-validates and never emits a block.
 
 ## The July 1 incident (motivating case)

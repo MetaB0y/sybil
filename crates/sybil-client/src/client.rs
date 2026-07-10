@@ -184,9 +184,21 @@ impl SybilClient {
     pub async fn submit_l1_withdrawal_event(
         &self,
         req: &SubmitL1WithdrawalEventRequest,
-    ) -> Result<BridgeWithdrawalResponse, Error> {
+    ) -> Result<BridgeWithdrawalL1EventResponse, Error> {
         let resp = self
             .with_service_auth(self.http.post(self.url("/v1/bridge/withdrawals/l1-events")))
+            .json(req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    pub async fn observe_l1_height(
+        &self,
+        req: &ObserveL1HeightRequest,
+    ) -> Result<ObserveL1HeightResponse, Error> {
+        let resp = self
+            .with_service_auth(self.http.post(self.url("/v1/bridge/l1-height")))
             .json(req)
             .send()
             .await?;

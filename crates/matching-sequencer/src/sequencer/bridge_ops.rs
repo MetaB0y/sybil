@@ -1,43 +1,126 @@
 use super::*;
 
 impl BlockSequencer {
-    /// Idempotent under replay: applying the same L1 event yields the same
-    /// withdrawal leaf and never changes account balances. The L1 indexer relies
-    /// on this for retry safety (SYB-254/SYB-262).
+    /// Idempotent under replay: terminal states absorb all later observations,
+    /// so duplicate/crossed Cancelled and expiry observations cannot re-credit.
     pub fn apply_bridge_withdrawal_l1_event(
         &mut self,
         event: BridgeWithdrawalL1Event,
-    ) -> Result<WithdrawalLeaf, SequencerError> {
+    ) -> Result<Option<WithdrawalLeaf>, SequencerError> {
+        let withdrawal_id = self
+            .bridge
+            .withdrawals
+            .values()
+            .find(|withdrawal| withdrawal.nullifier == event.nullifier)
+            .map(|withdrawal| withdrawal.withdrawal_id);
+
+        if let Some(withdrawal_id) = withdrawal_id {
+            let transition = self
+                .bridge
+                .withdrawals
+                .get_mut(&withdrawal_id)
+                .expect("withdrawal id sourced from bridge map")
+                .apply_l1_event(&event);
+            self.apply_withdrawal_transition(withdrawal_id, transition)?;
+        }
+
+        // Apply the targeted event first: a Finalized/Cancelled event carried
+        // by this block wins over expiry observed at the same scan point.
+        // Even when the target was already pruned, its confirmed block height
+        // still advances the shared L1 cursor and can expire other active
+        // withdrawals.
+        self.observe_bridge_l1_height(event.l1_block_height)?;
+
+        Ok(withdrawal_id.map(|withdrawal_id| {
+            self.bridge
+                .withdrawals
+                .get(&withdrawal_id)
+                .expect("terminal withdrawals are pruned only at block production")
+                .clone()
+        }))
+    }
+
+    /// Advance the withdrawal clock from the L1 indexer's existing confirmed
+    /// scan cursor and refund every newly expired active withdrawal in id order.
+    pub fn observe_bridge_l1_height(
+        &mut self,
+        l1_height: u64,
+    ) -> Result<Vec<WithdrawalLeaf>, SequencerError> {
+        if l1_height <= self.bridge.observed_l1_height {
+            return Ok(Vec::new());
+        }
+        self.bridge.observed_l1_height = l1_height;
+        self.record_system_event(SystemEvent::L1BlockObserved { height: l1_height });
+
+        let withdrawal_ids: Vec<u64> = self.bridge.withdrawals.keys().copied().collect();
+        let mut refunded = Vec::new();
+        for withdrawal_id in withdrawal_ids {
+            let transition = self
+                .bridge
+                .withdrawals
+                .get_mut(&withdrawal_id)
+                .expect("withdrawal id sourced from bridge map")
+                .observe_l1_height(l1_height);
+            self.apply_withdrawal_transition(withdrawal_id, transition)?;
+            if matches!(transition, crate::bridge::WithdrawalTransition::Refunded(_)) {
+                refunded.push(
+                    self.bridge
+                        .withdrawals
+                        .get(&withdrawal_id)
+                        .expect("terminal withdrawals are pruned only at block production")
+                        .clone(),
+                );
+            }
+        }
+        Ok(refunded)
+    }
+
+    fn apply_withdrawal_transition(
+        &mut self,
+        withdrawal_id: u64,
+        transition: crate::bridge::WithdrawalTransition,
+    ) -> Result<(), SequencerError> {
         let withdrawal = self
             .bridge
             .withdrawals
-            .values_mut()
-            .find(|withdrawal| withdrawal.nullifier == event.nullifier)
-            .ok_or_else(|| {
-                SequencerError::Bridge(
-                    BridgeError::UnknownWithdrawalNullifier(event.nullifier).to_string(),
-                )
-            })?;
+            .get(&withdrawal_id)
+            .expect("transition withdrawal exists")
+            .clone();
+        let amount = i64::try_from(withdrawal.amount_nanos)
+            .map_err(|_| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
 
-        withdrawal.l1_status = event.status;
-        withdrawal.l1_executable_at_unix = event
-            .executable_at_unix
-            .or(withdrawal.l1_executable_at_unix);
-        withdrawal.l1_tx_hash = event.tx_hash.or(withdrawal.l1_tx_hash);
-        match event.status {
-            L1WithdrawalStatus::NotRequested => {}
-            L1WithdrawalStatus::Queued => {
-                withdrawal.l1_requested_at_unix = Some(event.event_at_unix);
+        match transition {
+            crate::bridge::WithdrawalTransition::Unchanged
+            | crate::bridge::WithdrawalTransition::Queued => {}
+            crate::bridge::WithdrawalTransition::Finalized => {
+                self.capture_system_account_baseline(withdrawal.account_id);
+                self.record_system_event(SystemEvent::WithdrawalFinalized {
+                    account_id: withdrawal.account_id,
+                    withdrawal_id,
+                    amount,
+                });
             }
-            L1WithdrawalStatus::Finalized => {
-                withdrawal.l1_finalized_at_unix = Some(event.event_at_unix);
-            }
-            L1WithdrawalStatus::Cancelled => {
-                withdrawal.l1_cancelled_at_unix = Some(event.event_at_unix);
+            crate::bridge::WithdrawalTransition::Refunded(reason) => {
+                self.capture_system_account_baseline(withdrawal.account_id);
+                let account = self.accounts.get_mut(withdrawal.account_id).ok_or({
+                    SequencerError::Rejected(Rejection {
+                        order_id: 0,
+                        account_id: withdrawal.account_id,
+                        reason: RejectionReason::AccountNotFound,
+                    })
+                })?;
+                account.balance = account.balance.checked_add(amount).ok_or_else(|| {
+                    SequencerError::Bridge(BridgeError::AmountOverflow.to_string())
+                })?;
+                self.record_system_event(SystemEvent::WithdrawalRefunded {
+                    account_id: withdrawal.account_id,
+                    withdrawal_id,
+                    amount,
+                    reason,
+                });
             }
         }
-
-        Ok(withdrawal.clone())
+        Ok(())
     }
 
     pub fn validate_l1_deposit(&self, deposit: &L1Deposit) -> Result<i64, SequencerError> {
@@ -109,7 +192,6 @@ impl BlockSequencer {
         self.bridge.deposit_cursor = deposit.deposit_id;
         self.bridge.deposit_root = deposit.deposit_root;
         self.bridge.deposit_frontier = frontier;
-        self.bridge.deposit_log.push(deposit.clone());
         self.record_system_event(SystemEvent::L1Deposit {
             account_id,
             amount,
@@ -132,12 +214,11 @@ impl BlockSequencer {
         })?;
         let amount = amount_token_units_to_i64_nanos(request.amount_token_units)
             .map_err(|err| SequencerError::Bridge(err.to_string()))?;
-        let next_height = self.height.saturating_add(1);
-        if request.expiry_height < next_height {
+        if request.expiry_height < self.bridge.observed_l1_height {
             return Err(SequencerError::Bridge(
                 BridgeError::WithdrawalExpired {
                     expiry_height: request.expiry_height,
-                    next_height,
+                    observed_l1_height: self.bridge.observed_l1_height,
                 }
                 .to_string(),
             ));

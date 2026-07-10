@@ -20,6 +20,14 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
+# Regenerate the single Rust/Solidity canonical golden-vector artifact.
+golden-write:
+    cargo run -p sybil-golden-vectors --bin emit-golden -- --write
+
+# Fail if canonical encoders no longer reproduce the committed artifact.
+golden-check:
+    cargo run -p sybil-golden-vectors --bin emit-golden -- --check
+
 # Quick simulation with detailed output (~50 orders)
 sim-quick:
     cargo run --bin matching-sim --release -- --preset quick -v
@@ -60,9 +68,9 @@ sim-agent scenario="standard":
 build:
     cargo build --release
 
-# Install OpenVM 2.0 beta CLI used by the ZK guest tooling
+# Install the OpenVM 2.0 CLI used by the ZK guest tooling
 openvm-install:
-    cargo install --locked --git https://github.com/openvm-org/openvm.git --tag v2.0.0-beta.2 cargo-openvm
+    cargo +1.91 install --locked --git https://github.com/openvm-org/openvm.git --tag v2.0.0 cargo-openvm
 
 # Check the OpenVM guest crate with the normal host compiler
 openvm-guest-check:
@@ -87,9 +95,27 @@ openvm-setup:
 openvm-setup-evm-download:
     cargo openvm setup --evm --download
 
-# Print the app executable and VM commitments used by the on-chain verifier adapter
-openvm-commit:
-    cargo openvm commit --manifest-path zk/openvm-guest/Cargo.toml --config zk/openvm-guest/openvm.toml --output-dir target/openvm/sybil
+# Print the app executable and VM commitments used by the on-chain verifier adapter.
+# OpenVM v2.0.0 forwards RUSTFLAGS to the guest rustc invocation; remap all
+# checkout/toolchain roots that can otherwise leak into panic and debug strings.
+openvm-commit output_dir="target/openvm/sybil":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+    # Keep the remap flags byte-identical across checkouts. The rustc wrapper
+    # expands these sentinels only after Cargo computes its unit metadata.
+    remap_flags="--remap-path-prefix=/__SYBIL_WORKSPACE_ROOT__=/sybil-src --remap-path-prefix=/__SYBIL_CARGO_HOME__=/cargo --remap-path-prefix=/__SYBIL_RUSTUP_HOME__=/rustc"
+    PATH="{{justfile_directory()}}/scripts:$PATH" \
+      SYBIL_WORKSPACE_ROOT="$(pwd -P)" \
+      SYBIL_CARGO_HOME="$cargo_home" \
+      SYBIL_RUSTUP_HOME="$rustup_home" \
+      RUSTC_WRAPPER="openvm-rustc-wrapper.sh" \
+      RUSTFLAGS="$remap_flags${RUSTFLAGS:+ $RUSTFLAGS}" \
+      cargo openvm commit \
+        --manifest-path zk/openvm-guest/Cargo.toml \
+        --config zk/openvm-guest/openvm.toml \
+        --output-dir {{output_dir}}
 
 # Convert a prepared guest input artifact into OpenVM CLI input JSON
 openvm-input guest_input="/tmp/sybil-guest-input.msgpack" openvm_input="/tmp/sybil-openvm-input.json":
@@ -362,6 +388,11 @@ smoke:
 compose-smoke:
     ./scripts/compose-profile-smoke.sh
 
+# Isolated Docker money-path E2E (SYB-243). Builds sybil-api, runs the shared
+# deterministic signed seeder, asserts exact fills/prices/balances, then down -v.
+itest-compose:
+    ./scripts/itest-compose.sh
+
 LOCAL_COMPOSE := "docker-compose"
 DEPLOY_PLATFORM := "linux/amd64"
 
@@ -504,6 +535,16 @@ arena-status hours="24":
 # Live system status (containers, blocks, traders, fills)
 status:
     ./scripts/status.sh
+
+# ── Docs ────────────────────────────────────────────────────────────────────
+
+# Serve the docs site locally with live reload (http://127.0.0.1:8000)
+docs-serve:
+    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs serve
+
+# Build the static docs site into ./site
+docs-build:
+    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build
 
 # ── Contracts ───────────────────────────────────────────────────────────────
 

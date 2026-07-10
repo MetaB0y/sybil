@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useAccountEvents } from "@/lib/account/use-account-events";
 import { useTrackedCancels } from "@/lib/account/use-cancelled-orders";
@@ -37,8 +37,8 @@ export interface DegenActive {
   batchAnchorPerfMs: number;
   /** `performance.now()` at submit — the start of the bet's lifetime. The progress
    *  bar and ⏱ span from here to expiry, so a bet placed late in a batch shows its
-   *  true (shorter) remaining time from an EMPTY bar — e.g. 22s when submitted 8s
-   *  into the batch, not the nominal 30s already 8s in. Frozen so it survives a
+   *  true (shorter) remaining time from an EMPTY bar — e.g. 112s when submitted
+   *  8s into the batch, not the nominal 120s already 8s in. Frozen so it survives a
    *  Degen↔Pro toggle. */
   submitPerfMs: number;
   expiresAtBlock: number;
@@ -108,24 +108,35 @@ export function useDegenBetTracker(
   // Faster path: the backend assigns the id at submit and lists the resting order
   // in the pending feed within ~1s — during the open batch. Bind from there so
   // Cancel unlocks immediately instead of waiting for `placed` at the next clear.
-  const pendingBoundId = usePendingOrderId(active, eventsBoundId === null);
+  const pendingStatus = usePendingOrderStatus(
+    active,
+    eventsBoundId,
+    latestHeight,
+  );
+  const pendingBoundId = pendingStatus.pendingBoundId;
 
   // Cumulative clock anchored to the *submit moment*, spanning the bet's real
   // remaining lifetime (submit → on-chain expiry). Expiry is pinned to block
   // production: `expiresAtBlock` is produced `gtdWindowMs` after the submit batch's
   // block (`batchAnchorPerfMs`), so a bet placed late in a batch has LESS than the
-  // nominal GTD left — submit with 2s to clear → 22s, not 30s. The bar fills 0→1
+  // nominal GTD left — submit with 2s to clear → 112s, not 120s. The bar fills 0→1
   // over THAT lifetime (starts empty, never partway), and the ⏱ number counts the
   // same span down — one interval, no per-batch reset.
   const submitPerf = active?.submitPerfMs ?? null;
   const gtdWindowMs =
     active == null
       ? 0
-      : Math.max(1, (active.expiresAtBlock - active.submitHeight) * BLOCK_INTERVAL_MS);
+      : Math.max(
+          1,
+          (active.expiresAtBlock - active.submitHeight) * BLOCK_INTERVAL_MS,
+        );
   const lifetimeMs =
     active == null
       ? 1
-      : Math.max(1, active.batchAnchorPerfMs + gtdWindowMs - active.submitPerfMs);
+      : Math.max(
+          1,
+          active.batchAnchorPerfMs + gtdWindowMs - active.submitPerfMs,
+        );
 
   const [progressSnapshot, setProgressSnapshot] =
     useState<ProgressSnapshot | null>(null);
@@ -161,7 +172,8 @@ export function useDegenBetTracker(
   // Prefer the events id (carries fills); fall back to the pending id so Cancel
   // is live during the open batch. Both resolve to the same order once placed.
   const boundId = eventsBoundId ?? pendingBoundId;
-  const ours = boundId === null ? [] : events.filter((e) => e.orderId === boundId);
+  const ours =
+    boundId === null ? [] : events.filter((e) => e.orderId === boundId);
 
   // The bet is cancelled once we've bound an order id and the local cancel log
   // has a record for it. Pre-binding (boundId null) we can't correlate a cancel,
@@ -174,6 +186,7 @@ export function useDegenBetTracker(
     currentHeight: latestHeight ?? active.submitHeight,
     expiresAtBlock: active.expiresAtBlock,
     events: ours,
+    orderOpen: pendingStatus.orderOpen,
     cancelled,
   });
 
@@ -195,12 +208,14 @@ export function useDegenBetTracker(
  * submit, mid-batch — is picked up promptly and Cancel unlocks without waiting
  * for the next clear. Polling stops the moment the bet binds or clears.
  */
-function usePendingOrderId(
+function usePendingOrderStatus(
   active: DegenActive | null,
-  unbound: boolean,
-): number | null {
+  eventsBoundId: number | null,
+  latestHeight: number | null,
+): DegenPendingStatus {
   const accountId = active?.accountId ?? null;
-  const { data } = useQuery({
+  const qc = useQueryClient();
+  const { data, isSuccess } = useQuery({
     enabled: accountId !== null,
     queryKey: ["account", accountId, "orders"],
     queryFn: async (): Promise<PendingOrder[]> => {
@@ -211,17 +226,56 @@ function usePendingOrderId(
       if (error || !data) throw new Error("fetch account orders failed");
       return data;
     },
-    refetchInterval: accountId !== null && unbound ? 1000 : false,
+    refetchInterval:
+      accountId !== null && eventsBoundId === null ? 1000 : false,
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
-  if (!active) return null;
-  return findDegenPendingOrderId(data ?? [], {
+
+  // Once the order has an events-feed id, the fast registration poll above can
+  // stop. Keep refreshing open orders on each block so expiry is confirmed by
+  // the order actually disappearing from the live feed, even when the terminal
+  // `expired` event is delayed or missed.
+  useEffect(() => {
+    if (accountId === null) return;
+    qc.invalidateQueries({ queryKey: ["account", accountId, "orders"] });
+  }, [accountId, latestHeight, qc]);
+
+  return resolveDegenPendingStatus(
+    data ?? [],
+    active,
+    eventsBoundId,
+    isSuccess,
+  );
+}
+
+export interface DegenPendingStatus {
+  pendingBoundId: number | null;
+  /** True/false after a successful open-orders fetch; null while unknown. */
+  orderOpen: boolean | null;
+}
+
+/** Pure pending-feed correlation used by the tracker and its lifecycle tests. */
+export function resolveDegenPendingStatus(
+  pending: PendingOrder[],
+  active: DegenActive | null,
+  eventsBoundId: number | null,
+  ordersLoaded: boolean,
+): DegenPendingStatus {
+  if (!active) return { pendingBoundId: null, orderOpen: null };
+
+  const pendingBoundId = findDegenPendingOrderId(pending, {
     marketId: active.marketId,
     outcome: active.outcome,
     submitHeight: active.submitHeight,
     minOrderIdExclusive: active.priorMaxOrderId,
   });
+  const boundId = eventsBoundId ?? pendingBoundId;
+  const orderOpen = ordersLoaded
+    ? boundId !== null && pending.some((o) => o.order_id === boundId)
+    : null;
+
+  return { pendingBoundId, orderOpen };
 }
 
 interface ProgressSnapshot {
@@ -231,6 +285,7 @@ interface ProgressSnapshot {
 }
 
 function computeProgress01(submitPerf: number, lifetimeMs: number) {
-  const now = typeof performance === "undefined" ? submitPerf : performance.now();
+  const now =
+    typeof performance === "undefined" ? submitPerf : performance.now();
   return Math.min(1, Math.max(0, (now - submitPerf) / lifetimeMs));
 }

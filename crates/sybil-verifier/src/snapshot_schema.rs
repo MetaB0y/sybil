@@ -290,6 +290,7 @@ fn append_witness_state_sidecar_with_domain(
 fn append_witness_bridge(out: &mut Vec<u8>, bridge: &BridgeStateSnapshot) {
     append_u64(out, bridge.deposit_cursor);
     out.extend_from_slice(&bridge.deposit_root);
+    append_u64(out, bridge.observed_l1_height);
     append_u64(out, bridge.next_withdrawal_id);
 
     let mut withdrawals: Vec<_> = bridge.withdrawals.iter().collect();

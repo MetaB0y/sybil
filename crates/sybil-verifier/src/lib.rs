@@ -42,6 +42,7 @@ pub mod settlement;
 pub mod sidecar;
 mod snapshot_schema;
 pub mod state_schema;
+pub mod system;
 pub mod types;
 pub mod violations;
 pub mod witness_schema;
@@ -68,8 +69,8 @@ pub use types::{
     ChallengeSnapshot, DepositAccumulatorWitness, L1DepositWitness, MarketGroupSnapshot,
     MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason,
     ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
-    StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
-    WitnessRejection,
+    StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness, WithdrawalSnapshot,
+    WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
@@ -85,6 +86,12 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
 /// Verify that `post_system_state + fills → post_state`.
 pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
     settlement::verify_settlement(witness)
+}
+
+/// Verify that authenticated pre-state plus system events reproduces the
+/// account-value fields in post-system state.
+pub fn verify_system(witness: &BlockWitness) -> VerificationResult {
+    system::verify_system_transition(witness)
 }
 
 /// Verify block header integrity (state root, parent hash, height, counts).
@@ -107,6 +114,7 @@ pub fn verify_sidecar(witness: &BlockWitness) -> VerificationResult {
 #[cfg(feature = "qmdb")]
 pub fn verify_full(witness: &BlockWitness, diagnostics: bool) -> VerificationResult {
     let mut result = verify_match(witness, diagnostics);
+    result.merge(verify_system(witness));
     result.merge(verify_settlement(witness));
     result.merge(verify_block(witness));
     result.merge(verify_orders(witness));

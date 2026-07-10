@@ -14,6 +14,9 @@ pub(super) fn bridge_block_data(
             }
             SystemEvent::CreateAccount { .. }
             | SystemEvent::Deposit { .. }
+            | SystemEvent::WithdrawalRefunded { .. }
+            | SystemEvent::WithdrawalFinalized { .. }
+            | SystemEvent::L1BlockObserved { .. }
             | SystemEvent::MarketResolved { .. }
             | SystemEvent::OrderCancelled { .. }
             | SystemEvent::MarketGroupExtended { .. } => {}
@@ -169,6 +172,38 @@ pub(super) fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
             expiry_height: withdrawal.expiry_height,
             nullifier: withdrawal.nullifier,
         },
+        SystemEvent::WithdrawalRefunded {
+            account_id,
+            withdrawal_id,
+            amount,
+            reason,
+        } => SystemEventWitness::WithdrawalRefunded {
+            account_id: account_id.0,
+            withdrawal_id: *withdrawal_id,
+            amount: *amount,
+            reason: match reason {
+                crate::bridge::WithdrawalRefundReason::L1Cancelled => {
+                    sybil_verifier::WithdrawalRefundReasonWitness::L1Cancelled
+                }
+                crate::bridge::WithdrawalRefundReason::L1Expired { observed_l1_height } => {
+                    sybil_verifier::WithdrawalRefundReasonWitness::L1Expired {
+                        observed_l1_height: *observed_l1_height,
+                    }
+                }
+            },
+        },
+        SystemEvent::WithdrawalFinalized {
+            account_id,
+            withdrawal_id,
+            amount,
+        } => SystemEventWitness::WithdrawalFinalized {
+            account_id: account_id.0,
+            withdrawal_id: *withdrawal_id,
+            amount: *amount,
+        },
+        SystemEvent::L1BlockObserved { height } => {
+            SystemEventWitness::L1BlockObserved { height: *height }
+        }
         SystemEvent::MarketResolved {
             market_id,
             payout_nanos,
@@ -242,6 +277,9 @@ impl BlockSequencer {
                 SystemEvent::CreateAccount { .. }
                 | SystemEvent::Deposit { .. }
                 | SystemEvent::WithdrawalCreated { .. }
+                | SystemEvent::WithdrawalRefunded { .. }
+                | SystemEvent::WithdrawalFinalized { .. }
+                | SystemEvent::L1BlockObserved { .. }
                 | SystemEvent::MarketResolved { .. }
                 | SystemEvent::OrderCancelled { .. }
                 | SystemEvent::MarketGroupExtended { .. } => None,

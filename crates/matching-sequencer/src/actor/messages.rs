@@ -81,7 +81,11 @@ pub enum SequencerMsg {
     ),
     ApplyBridgeWithdrawalL1Event(
         BridgeWithdrawalL1Event,
-        RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,
+        RpcReplyPort<Result<Option<WithdrawalLeaf>, SequencerError>>,
+    ),
+    ObserveBridgeL1Height(
+        u64,
+        RpcReplyPort<Result<Vec<WithdrawalLeaf>, SequencerError>>,
     ),
     RegisterPubkey(
         AccountId,

@@ -174,7 +174,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Separate, out-of-workspace crates pinned to the OpenVM v2.0.0-beta.2
+          # Separate, out-of-workspace crates pinned to the OpenVM v2.0.0
           # git dependency graph; cache their target dirs independently.
           workspaces: |
             zk/openvm-tools
@@ -185,6 +185,9 @@ jobs:
       # never rebuilds or updates the pin. See scripts/zk-guest-fingerprint.sh.
       - name: Guest commitment staleness gate
         run: scripts/zk-guest-fingerprint.sh --check
+
+      - name: Canonical golden-vector staleness gate
+        run: cargo run -p sybil-golden-vectors --bin emit-golden -- --check
 
       # Host-side encoder (not consensus surface). Full check + clippy.
       - name: Check openvm-tools

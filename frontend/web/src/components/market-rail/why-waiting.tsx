@@ -2,16 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type Variant = "waiting" | "failed";
+type Variant = "waiting" | "expired";
 
 const COPY: Record<Variant, { trigger: string; body: string }> = {
   waiting: {
     trigger: "why am I waiting?",
-    body: "Every 10 seconds, all open bets settle together at one fair price.",
+    body: "Your bet stays live for about 2 minutes while we look for someone to take the other side.",
   },
-  failed: {
-    trigger: "why failed?",
-    body: "No one took the other side. Tap Bet again to retry.",
+  expired: {
+    trigger: "what happened?",
+    body: "No one matched your bet in time. Your funds are back in your balance.",
   },
 };
 
@@ -19,7 +19,7 @@ const COPY: Record<Variant, { trigger: string; body: string }> = {
  * Small hover/tap explainer at the bottom of the Degen rail. Two variants:
  *  - `waiting` — plain-language FBA explainer (the default, shown while the
  *    bet is pending or before placing one).
- *  - `failed`  — shown after a bet finds no taker.
+ *  - `expired` — shown after a bet finds no taker.
  *
  * The popover opens *downward* (below the trigger, which is the last element
  * in the rail) so it never overlaps the Bet button above it.
@@ -31,7 +31,8 @@ export function WhyWaiting({ variant = "waiting" }: { variant?: Variant }) {
 
   useEffect(() => {
     function close(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     }
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
@@ -40,7 +41,11 @@ export function WhyWaiting({ variant = "waiting" }: { variant?: Variant }) {
   return (
     <div
       ref={ref}
-      style={{ position: "relative", display: "flex", justifyContent: "center" }}
+      style={{
+        position: "relative",
+        display: "flex",
+        justifyContent: "center",
+      }}
     >
       <button
         type="button"

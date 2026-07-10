@@ -6,6 +6,8 @@
 !Cargo.lock
 !crates/
 !crates/**
+!tools/
+!tools/**
 
 # Do not re-include generated artifacts nested inside an allowed crate.
 crates/**/target/

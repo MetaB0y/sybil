@@ -7,8 +7,8 @@ export function ThemeToggle() {
   const isLight = theme === "light";
   return (
     <button
+      className="theme-toggle nav-icon-btn"
       type="button"
-      className="nav-icon-btn"
       onClick={toggle}
       aria-label={isLight ? "Switch to dark theme" : "Switch to light theme"}
       title={isLight ? "Dark" : "Light"}

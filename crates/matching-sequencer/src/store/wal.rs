@@ -157,6 +157,15 @@ impl Store {
         self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_BRIDGE_WITHDRAWALS, bytes))
             .await
     }
+
+    pub async fn append_pending_bridge_l1_input(
+        &self,
+        input: &crate::bridge::BridgeL1Input,
+    ) -> Result<(), StoreError> {
+        let bytes = rmp_serde::to_vec(input)?;
+        self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_BRIDGE_L1_INPUTS, bytes))
+            .await
+    }
 }
 
 fn append_msgpack_row_bytes(

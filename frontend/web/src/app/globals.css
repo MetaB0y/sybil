@@ -546,6 +546,32 @@ textarea {
   flex-wrap: nowrap;
 }
 
+.place-order-close {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.markets-filter-bar,
+.markets-sort-controls,
+.portfolio-toolbar,
+.portfolio-tabs,
+.activity-table-head {
+  max-width: 100%;
+}
+
+.portfolio-tabs {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.portfolio-tabs::-webkit-scrollbar {
+  display: none;
+}
+
 .portfolio-hero-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
@@ -645,7 +671,8 @@ textarea {
 
 /* Nav collapses to the hamburger once the full bar (pinned wordmark + tabs +
    right controls + a floor-width 160px search) no longer fits — measured at
-   ~1330px for the current tab set. Keep this in sync if tabs are added. */
+   ~1330px for the current tab set, and now also carries the connected account
+   chip + bots stat. Keep this in sync if tabs are added. */
 @media (max-width: 1330px) {
   .global-nav {
     gap: var(--space-3);
@@ -712,6 +739,10 @@ textarea {
     overflow: visible !important;
     padding-bottom: var(--space-6) !important;
   }
+
+  .activity-batch-detail-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 @media (max-width: 900px) {
@@ -748,6 +779,12 @@ textarea {
     padding-right: var(--space-4);
   }
 
+  .h-display,
+  .markets-page-title {
+    font-size: 40px !important;
+    line-height: 1.05 !important;
+  }
+
   .global-nav {
     padding: 0 var(--space-3);
   }
@@ -757,7 +794,8 @@ textarea {
   }
 
   /* Phones: collapse the chip's "/ cash" half so the account chip stays
-     compact (just the portfolio total) and never clips off-screen.
+     compact (just the portfolio total) and never clips off-screen. The batch
+     pill is already hidden by the nav-collapse block above.
      !important overrides the span's inline `display: inline-flex`. */
   .account-chip-cash {
     display: none !important;
@@ -769,6 +807,23 @@ textarea {
 
   .markets-grid {
     grid-template-columns: 1fr;
+  }
+
+  .markets-filter-bar {
+    align-items: stretch !important;
+    flex-wrap: wrap;
+    gap: var(--space-3) !important;
+  }
+
+  .markets-filter-bar > nav {
+    flex: 1 0 100% !important;
+  }
+
+  .markets-sort-controls {
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
   }
 
   .market-detail-header-pad,
@@ -806,9 +861,58 @@ textarea {
     gap: var(--space-5);
   }
 
+  .portfolio-toolbar {
+    align-items: stretch !important;
+    gap: var(--space-2) !important;
+  }
+
+  .portfolio-tabs {
+    flex: 1 0 100%;
+  }
+
+  .portfolio-toolbar-search,
+  .portfolio-toolbar-actions {
+    flex: 1 0 100%;
+    justify-content: flex-start !important;
+    margin-left: 0 !important;
+  }
+
+  .portfolio-toolbar-search > * {
+    width: 100% !important;
+  }
+
+  .withdrawal-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .withdrawal-row > :last-child {
+    justify-self: start;
+  }
+
   .activity-hero-stats,
   .activity-pulse-grid {
     grid-template-columns: 1fr;
+  }
+
+  .activity-hero-section,
+  .activity-pulse-section,
+  .activity-batches-section {
+    padding-left: var(--space-4) !important;
+    padding-right: var(--space-4) !important;
+  }
+
+  .activity-hero-numbers {
+    gap: var(--space-5) !important;
+  }
+
+  .activity-table-head {
+    align-items: center !important;
+    flex-wrap: wrap;
+  }
+
+  .activity-table-head > .text-annotation {
+    flex: 1 0 100%;
+    order: 3;
   }
 
   .activity-pulse-cell {
@@ -826,6 +930,37 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .place-order-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  .place-order-sheet {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: calc(100dvh - var(--space-4)) !important;
+    border-radius: 16px 16px 0 0 !important;
+    border-bottom: 0 !important;
+  }
+
+  .place-order-sheet::before {
+    content: "";
+    display: block;
+    width: 40px;
+    height: 4px;
+    margin: 8px auto 0;
+    border-radius: var(--radius-pill);
+    background: var(--border-3);
+  }
+
+  .place-order-sheet-header {
+    padding-top: 8px !important;
+  }
+
+  .place-order-sheet-body {
+    padding-bottom: calc(18px + env(safe-area-inset-bottom)) !important;
+  }
+
   .settings-profile-grid,
   .settings-inline-form,
   .settings-row {
@@ -835,5 +970,38 @@ textarea {
 
   .settings-row-actions {
     margin-left: 0 !important;
+  }
+}
+
+/* Compact/touch layouts get 44px controls without perturbing desktop. */
+@media (max-width: 1280px) and (pointer: coarse) {
+  button,
+  input,
+  select,
+  textarea,
+  [role="button"],
+  [role="tab"],
+  summary {
+    min-height: 44px !important;
+  }
+
+  button,
+  [role="button"],
+  [role="tab"] {
+    min-width: 44px;
+  }
+
+  .global-nav-menu-button,
+  .place-order-close,
+  .theme-toggle {
+    min-width: 44px;
+  }
+
+  .global-nav-tab {
+    min-height: 44px;
+  }
+
+  .global-nav-brand {
+    min-height: 44px;
   }
 }

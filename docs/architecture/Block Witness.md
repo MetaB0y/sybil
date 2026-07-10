@@ -3,12 +3,12 @@ tags: [zk, serialization, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-06
+last_verified: 2026-07-10
 ---
 
 # Block Witness Format
 
-`BlockWitness` v4 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v5 is the canonical private audit package for a Sybil block. The
 sequencer persists it, native verification replays it, and the OpenVM guest
 receives it inside `StateTransitionGuestInput`. The proof binds the witness by
 recomputing `witness_root` from canonical witness bytes and including that root
@@ -22,10 +22,11 @@ convenience data. `DerivedViewSidecar` is explicitly outside
 outside the guest input; it rides beside sealed blocks for API and analytics
 consumers only.
 
-The SYB-216 design produced v3, and SYB-225 moved the on-wire format to v4 by
-adding `keys_digest` to account snapshots. The base design is ratified in
+The SYB-216 design produced v3, SYB-225 moved the on-wire format to v4 by
+adding `keys_digest`, and SYB-253 moved it to v5 for withdrawal refund/prune
+events plus the committed observed L1 height. The base design is ratified in
 `design/witness-schema-v2.md`. The design name was "v2", but the on-wire format
-version is now `4`.
+version is now `5`.
 
 ## Encoding
 
@@ -52,11 +53,11 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v4 it is `0x04`.
+The first byte is the format version. For v5 it is `0x05`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x04
+    version:u8 = 0x05
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
@@ -123,6 +124,7 @@ reservations sorted by `account_id`. Bridge state is:
 ```text
 deposit_cursor:u64
 || deposit_root:[u8;32]
+|| observed_l1_height:u64
 || next_withdrawal_id:u64
 || withdrawal_count:u64
 || withdrawal_bytes * withdrawal_count          // sorted by withdrawal_id
@@ -271,7 +273,7 @@ compute_state_root_with_sidecar(post_state, state_sidecar)
 
 ## Versioning And Compatibility
 
-The version byte is the first byte of `canonical_witness_bytes`. v4 is `0x04`.
+The version byte is the first byte of `canonical_witness_bytes`. v5 is `0x05`.
 Unknown versions must fail closed. This repo does not maintain dual witness
 decoders for devnet schema changes; ADR-0011 rejects compatibility wrappers
 before launch because they double validity-critical encoder surface.
@@ -300,14 +302,14 @@ pin.
 
 | Pin | Current value | Test or artifact |
 |---|---:|---|
-| Witness format byte | `4` | `witness_schema::WITNESS_FORMAT_VERSION` |
-| Empty canonical witness length | `1533` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
-| Byte-identity canonical witness length | `3857` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
-| Byte-identity witness SHA-256 length-prefixed digest | `d02f89bc1704e2516c7ac411362800476ee8b3d19fc0027ce9d2f6c58c961076` | same byte-identity test |
-| Empty public-input hash | `40397b1cb111e0d426e59b425acee185a6153fa6eab4bef5ec73248de0bf3f50` | `public_input_hash_golden` |
+| Witness format byte | `5` | `witness_schema::WITNESS_FORMAT_VERSION` |
+| Empty canonical witness length | `1549` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
+| Byte-identity canonical witness length | `3873` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
+| Byte-identity witness SHA-256 length-prefixed digest | `54f53e94e279187b03ea48565c3602b20af9930969445a92dde68e5b5a9cdff1` | same byte-identity test |
+| Empty public-input hash | `60f690e2c640dda8d5404b40e87b5c38b195e815afc90c6e0d9284d151d58e69` | `public_input_hash_golden` |
 | OL-4 Solidity/Rust public-input hash vector | `42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` | Rust test plus `contracts/test/SybilGoldenVectors.t.sol` |
-| Current `app_exe_commit` | `0x007d494ee05284a028069d5eacdeed7c4da134c4838cc6daffcfe5ed0703e0bf` | committed OpenVM `commit.json` and lock |
-| Current `app_vm_commit` | `0x0026ab66d716f85bcf60b89ee1d7ce192253a7452935f2ee0e4b6880b6154e3b` | committed OpenVM `commit.json` and lock |
+| Current `app_exe_commit` | `0x000f896e256293aa0980cc5e9531833ef5a0cafde518aa2e1f61ee58820f5117` | committed OpenVM `commit.json` and lock |
+| Current `app_vm_commit` | `0x007a02fc3055c8beb7aa51187d008991bdec498852b5e1e27f223ee04a72cac5` | committed OpenVM `commit.json` and lock |
 
 The L1 deposit leaf/root vectors live in both
 `crates/sybil-l1-protocol/src/lib.rs` and
@@ -321,9 +323,9 @@ Concrete claims above were cross-checked against these source ranges:
 
 | Claim area | Source |
 |---|---|
-| `BlockWitness` field set and v4 `deposit_accumulator`/`pre_state_sidecar` fields | `crates/sybil-verifier/src/types.rs:16-60` |
+| `BlockWitness` field set and v5 `deposit_accumulator`/`pre_state_sidecar` fields | `crates/sybil-verifier/src/types.rs:16-60` |
 | `DepositAccumulatorWitness` field semantics and default depth | `crates/sybil-verifier/src/types.rs:176-194` |
-| Format version byte `4` and first-byte placement | `crates/sybil-verifier/src/witness_schema.rs:16-21` |
+| Format version byte `5` and first-byte placement | `crates/sybil-verifier/src/witness_schema.rs:16-30` |
 | Exact top-level field order | `crates/sybil-verifier/src/witness_schema.rs:18-74` |
 | Header byte order | `crates/sybil-verifier/src/witness_schema.rs:77-85`; `crates/sybil-zk/src/header_hash_impl.rs:1-10` |
 | Clearing-price map encoding | `crates/sybil-verifier/src/witness_schema.rs:87-98` |
@@ -331,7 +333,7 @@ Concrete claims above were cross-checked against these source ranges:
 | Market-group encoding and sort | `crates/sybil-verifier/src/witness_schema.rs:134-163` |
 | Account sections sorted by id | `crates/sybil-verifier/src/witness_schema.rs:165-172` |
 | Deposit-accumulator byte layout | `crates/sybil-verifier/src/witness_schema.rs:174-192` |
-| Empty witness length `1533` | `crates/sybil-verifier/src/witness_schema.rs:199-233` |
+| Empty witness length `1549` | `crates/sybil-verifier/src/witness_schema.rs` test `canonical_witness_bytes_are_stable_for_empty_witness` |
 | Snapshot sidecar domains and sort rules | `crates/sybil-verifier/src/snapshot_schema.rs:244-300` |
 | Primitive LE append helpers | `crates/sybil-verifier/src/snapshot_schema.rs:302-340` |
 | Event section order and leaf encodings | `crates/sybil-verifier/src/event_schema.rs:8-21`, `29-151` |

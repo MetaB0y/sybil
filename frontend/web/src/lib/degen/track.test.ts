@@ -31,7 +31,9 @@ describe("findDegenOrderId", () => {
   });
 
   it("binds a filled row when there is no placed (instant fill)", () => {
-    const events = [ev({ type: "filled", orderId: 43, blockHeight: 101, qty: 5n })];
+    const events = [
+      ev({ type: "filled", orderId: 43, blockHeight: 101, qty: 5n }),
+    ];
     expect(findDegenOrderId(events, crit)).toBe(43);
   });
 
@@ -58,7 +60,9 @@ describe("findDegenOrderId", () => {
     // floor it would re-bind and read as instantly filled. The floor (=42)
     // excludes it, and the fresh order (43) hasn't surfaced yet → null.
     const events = [ev({ type: "filled", orderId: 42, blockHeight: 101 })];
-    expect(findDegenOrderId(events, { ...crit, minOrderIdExclusive: 42 })).toBeNull();
+    expect(
+      findDegenOrderId(events, { ...crit, minOrderIdExclusive: 42 }),
+    ).toBeNull();
   });
 
   it("binds the new order above the id floor", () => {
@@ -66,7 +70,9 @@ describe("findDegenOrderId", () => {
       ev({ type: "filled", orderId: 42, blockHeight: 101 }),
       ev({ type: "placed", orderId: 43, blockHeight: 101 }),
     ];
-    expect(findDegenOrderId(events, { ...crit, minOrderIdExclusive: 42 })).toBe(43);
+    expect(findDegenOrderId(events, { ...crit, minOrderIdExclusive: 42 })).toBe(
+      43,
+    );
   });
 
   it("returns null when nothing matches", () => {
@@ -75,7 +81,13 @@ describe("findDegenOrderId", () => {
 });
 
 function po(p: Partial<DegenPendingOrder>): DegenPendingOrder {
-  return { order_id: 1, market_id: 7, side: "BuyYes", created_at_block: 100, ...p };
+  return {
+    order_id: 1,
+    market_id: 7,
+    side: "BuyYes",
+    created_at_block: 100,
+    ...p,
+  };
 }
 
 describe("findDegenPendingOrderId", () => {
@@ -85,7 +97,10 @@ describe("findDegenPendingOrderId", () => {
 
   it("matches NO bets to the BuyNo side", () => {
     const noCrit = { marketId: 7, outcome: "NO" as const, submitHeight: 100 };
-    const pending = [po({ order_id: 9, side: "BuyYes" }), po({ order_id: 10, side: "BuyNo" })];
+    const pending = [
+      po({ order_id: 9, side: "BuyYes" }),
+      po({ order_id: 10, side: "BuyNo" }),
+    ];
     expect(findDegenPendingOrderId(pending, noCrit)).toBe(10);
   });
 
@@ -188,9 +203,9 @@ describe("resolveDegenBet", () => {
     expect(s.filledQty).toBe(12n);
   });
 
-  it("is none when expired with zero fills", () => {
+  it("is expired when an expired row has zero fills", () => {
     const s = resolveDegenBet({ ...base, events: [ev({ type: "expired" })] });
-    expect(s.phase).toBe("none");
+    expect(s.phase).toBe("expired");
     expect(s.filledQty).toBe(0n);
     expect(s.avgPriceNanos).toBeNull();
   });
@@ -225,14 +240,40 @@ describe("resolveDegenBet", () => {
     expect(s.phase).toBe("filled");
   });
 
-  it("falls back to height when the terminal row is missed", () => {
+  it("expires after the height passes and the order is no longer open", () => {
     const partial = resolveDegenBet({
       ...base,
       currentHeight: 104, // >= expiresAtBlock + 1
+      orderOpen: false,
       events: [ev({ type: "partial_fill", qty: 5n, priceNanos: 5n })],
     });
     expect(partial.phase).toBe("partial");
-    const none = resolveDegenBet({ ...base, currentHeight: 104, events: [] });
-    expect(none.phase).toBe("none");
+    const expired = resolveDegenBet({
+      ...base,
+      currentHeight: 104,
+      orderOpen: false,
+      events: [],
+    });
+    expect(expired.phase).toBe("expired");
+  });
+
+  it("keeps tracking past the nominal expiry while the order is still open", () => {
+    const s = resolveDegenBet({
+      ...base,
+      currentHeight: 104,
+      orderOpen: true,
+      events: [],
+    });
+    expect(s.phase).toBe("tracking");
+  });
+
+  it("waits for the open-orders feed before using the expiry backstop", () => {
+    const s = resolveDegenBet({
+      ...base,
+      currentHeight: 104,
+      orderOpen: null,
+      events: [],
+    });
+    expect(s.phase).toBe("tracking");
   });
 });

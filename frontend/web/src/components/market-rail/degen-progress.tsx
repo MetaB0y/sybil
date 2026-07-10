@@ -65,7 +65,7 @@ export function DegenProgress(props: DegenProgressProps) {
     return (
       <div style={cardStyle}>
         <div style={rowStyle}>
-          <span style={labelStyle}>Placing your bet…</span>
+          <span style={labelStyle}>Waiting for a taker…</span>
           <span style={monoStyle}>⏱ {props.secondsLeft}s</span>
         </div>
         <div style={barTrackStyle}>
@@ -139,15 +139,21 @@ export function DegenProgress(props: DegenProgressProps) {
     props.phase === "filled"
       ? `Successfully bet ${money(actualUsd)} on ${props.side}!`
       : props.phase === "partial"
-        ? `◐ Half in! Bet ${money(actualUsd)} of ${money(props.betUsd)} on ${props.side}!`
+        ? `◐ Half in! Bet ${money(actualUsd)} of ${money(props.betUsd)} on ${props.side} — the rest is back in your balance.`
         : cancelled
           ? `Bet cancelled.`
-          : `Oops, your order failed. Try again!`;
+          : `No match within ~2 min — your funds are back in your balance. Try again.`;
 
   return (
     <div style={cardStyle}>
       <div style={{ ...rowStyle, color: resultColor }}>
-        <span style={{ fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700 }}>
+        <span
+          style={{
+            fontFamily: "var(--font-sans)",
+            fontSize: 14,
+            fontWeight: 700,
+          }}
+        >
           {result}
         </span>
       </div>

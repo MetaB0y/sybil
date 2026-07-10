@@ -219,6 +219,7 @@ Implemented key encodings:
 | `order/{order_id}` | `"order/" || order_id:u64_be` |
 | `sys/deposit_cursor` | ASCII literal |
 | `sys/deposit_root` | ASCII literal |
+| `sys/observed_l1_height` | ASCII literal |
 | `sys/next_withdrawal_id` | ASCII literal |
 | `withdrawal/{withdrawal_id}` | `"withdrawal/" || withdrawal_id:u64_be` |
 
@@ -421,7 +422,10 @@ Events are tag-dispatched single-byte sum types. The running
 | `0x05` | Mint | `count:u64 \|\| (market_id:u32 \|\| outcome:u8 \|\| position_delta:i64 \|\| balance_delta:i64) * count \|\| block_height:u64` | `encode_mint_event` |
 | `0x06` | L1Deposit | `deposit_id:u64 \|\| amount:i64 \|\| deposit_root:[u8;32] \|\| block_height:u64` | `encode_l1_deposit_event` |
 | `0x07` | WithdrawalCreated | `withdrawal_id:u64 \|\| amount:i64 \|\| nullifier:[u8;32] \|\| block_height:u64` | `encode_withdrawal_created_event` |
-| `0x08` – `0xFE` | reserved for future events | — | — |
+| `0x08` | OrderCancelled | order identity, markets, side, remainder, and block height | `encode_order_cancelled_event` |
+| `0x09` | WithdrawalRefunded | `withdrawal_id:u64 \|\| amount:i64 \|\| reason \|\| block_height:u64` | `encode_withdrawal_refunded_event` |
+| `0x0A` | WithdrawalFinalized | `withdrawal_id:u64 \|\| amount:i64 \|\| block_height:u64` | `encode_withdrawal_finalized_event` |
+| `0x0B` – `0xFE` | reserved for future events | — | — |
 | `0xFF` | reserved as sentinel (do not use) | — | — |
 
 Adding an event type consumes the next free tag. Removing or re-tagging

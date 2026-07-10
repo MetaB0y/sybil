@@ -223,6 +223,28 @@ impl BlockSequencer {
                 );
             }
         }
+        for input in state.pending_bridge_l1_inputs {
+            let result = match input {
+                crate::bridge::BridgeL1Input::WithdrawalEvent(event) => {
+                    restored.apply_bridge_withdrawal_l1_event(event).map(|_| ())
+                }
+                crate::bridge::BridgeL1Input::ObservedHeight(height) => {
+                    restored.observe_bridge_l1_height(height).map(|_| ())
+                }
+            };
+            if let Err(error) = result {
+                metrics::counter!(
+                    "sybil_restore_wal_rows_dropped_total",
+                    "kind" => "bridge_l1_input"
+                )
+                .increment(1);
+                tracing::warn!(
+                    height = restored.height,
+                    %error,
+                    "dropping invalid pending bridge L1 input WAL row during restore"
+                );
+            }
+        }
         let account_ids: Vec<AccountId> = restored.accounts.iter().map(|(id, _)| *id).collect();
         restored.analytics.seed_equity_known(account_ids);
         restored.rebuild_api_key_index();

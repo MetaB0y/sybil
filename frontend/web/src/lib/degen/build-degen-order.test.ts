@@ -20,7 +20,7 @@ describe("buildDegenOrder", () => {
     expect(res.order.side).toBe("BuyYes");
     expect(res.order.limitPriceNanos).toBe(limit);
     expect(res.order.maxFill).toBe((usd(10) * SHARE_SCALE) / limit); // 18.518 shares
-    expect(res.order.expiresAtBlock).toBe(1003n);
+    expect(res.order.expiresAtBlock).toBe(1012n);
   });
 
   it("maps a NO bet to BuyNo", () => {

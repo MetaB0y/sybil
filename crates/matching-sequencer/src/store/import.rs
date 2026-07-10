@@ -123,6 +123,10 @@ impl Store {
                 "pending_bridge_withdrawals",
                 txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?.len()?,
             ),
+            (
+                "pending_bridge_l1_inputs",
+                txn.open_table(PENDING_BRIDGE_L1_INPUTS)?.len()?,
+            ),
         ];
         for (table, rows) in data_rows {
             if rows != 0 {
@@ -282,6 +286,7 @@ fn restored_state_from_witness(
         bridge_state,
         pending_l1_deposits: Vec::new(),
         pending_bridge_withdrawals: Vec::new(),
+        pending_bridge_l1_inputs: Vec::new(),
     })
 }
 
@@ -530,7 +535,7 @@ fn bridge_state_from_witness(witness: &BlockWitness) -> Result<BridgeState, Stor
         deposit_cursor: witness.state_sidecar.bridge.deposit_cursor,
         deposit_root: witness.state_sidecar.bridge.deposit_root,
         deposit_frontier,
-        deposit_log: Vec::new(),
+        observed_l1_height: witness.state_sidecar.bridge.observed_l1_height,
         next_withdrawal_id: witness.state_sidecar.bridge.next_withdrawal_id,
         withdrawals,
     })

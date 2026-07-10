@@ -388,6 +388,22 @@ pub enum SystemEventResponse {
         withdrawal_id: u64,
         nullifier_hex: String,
     },
+    WithdrawalRefunded {
+        account_id: u64,
+        /// Refunded account credit. Integer nanodollars; 1_000_000_000 = $1.
+        amount_nanos: i64,
+        withdrawal_id: u64,
+        reason: String,
+    },
+    WithdrawalFinalized {
+        account_id: u64,
+        /// Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
+        amount_nanos: i64,
+        withdrawal_id: u64,
+    },
+    L1BlockObserved {
+        height: u64,
+    },
     MarketResolved {
         market_id: u32,
         /// Resolution payout per YES share. Integer nanodollars;
@@ -612,6 +628,7 @@ pub struct BridgeDepositEventResponse {
 pub struct BridgeStatusResponse {
     pub deposit_cursor: u64,
     pub deposit_root_hex: String,
+    pub observed_l1_height: u64,
     pub next_withdrawal_id: u64,
     pub withdrawal_count: usize,
     #[serde(default)]
@@ -620,6 +637,15 @@ pub struct BridgeStatusResponse {
     pub finalized_withdrawal_count: usize,
     #[serde(default)]
     pub cancelled_withdrawal_count: usize,
+    #[serde(default)]
+    pub refunded_withdrawal_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ObserveL1HeightResponse {
+    pub observed_l1_height: u64,
+    pub refunded_withdrawal_ids: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -668,6 +694,16 @@ pub struct BridgeWithdrawalResponse {
     pub l1_cancelled_at_unix: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub l1_tx_hash_hex: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BridgeWithdrawalL1EventResponse {
+    /// False when the terminal withdrawal was already pruned; the observation
+    /// is still accepted as an idempotent no-op.
+    pub active_withdrawal_found: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawal: Option<BridgeWithdrawalResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

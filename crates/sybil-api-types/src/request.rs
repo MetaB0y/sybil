@@ -57,7 +57,7 @@ pub struct CreateBridgeWithdrawalRequest {
     pub token_address_hex: String,
     /// Token base units released by the vault.
     pub amount_token_units: u64,
-    /// Last Sybil block height at which this withdrawal leaf is valid.
+    /// Last L1 block height at which this withdrawal leaf is valid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_height: Option<u64>,
     /// Per-account replay nonce. Required for signed bridge withdrawals.
@@ -93,6 +93,7 @@ pub enum BridgeWithdrawalL1Status {
     Queued,
     Finalized,
     Cancelled,
+    Refunded,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +111,15 @@ pub struct SubmitL1WithdrawalEventRequest {
     /// L1 transaction hash carrying the event, if indexed from logs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tx_hash_hex: Option<String>,
+    /// Confirmed L1 block number carrying the event.
+    pub l1_block_height: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ObserveL1HeightRequest {
+    /// Highest fully scanned and confirmed L1 block.
+    pub l1_block_height: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -17,6 +17,7 @@ import {
   type CreateAccountKeyMode,
   createDemoAccount,
   importExistingAccount,
+  signInWithDiscoverablePasskey,
   signInWithStoredPasskey,
 } from "@/lib/account/actions";
 import { readStoredAccount } from "@/lib/account/storage";
@@ -221,9 +222,9 @@ function CreateTab() {
           ? "Demo accounts are disabled on this server. Bridge deposits coming soon."
           : e instanceof AccountError && e.kind === "webauthn_unavailable"
             ? "Passkeys are not available in this browser."
-          : e instanceof Error
-            ? e.message
-            : "Failed to create account";
+            : e instanceof Error
+              ? e.message
+              : "Failed to create account";
       setError(msg);
     } finally {
       setBusy(false);
@@ -285,7 +286,11 @@ function CreateTab() {
         disabled={busy}
         style={primaryButtonStyle(busy)}
       >
-        {busy ? "Creating…" : mode === "passkey" ? "Create with passkey" : "Create local account"}
+        {busy
+          ? "Creating…"
+          : mode === "passkey"
+            ? "Create with passkey"
+            : "Create local account"}
       </button>
     </div>
   );
@@ -301,7 +306,11 @@ function PasskeyTab() {
     setError(null);
     setBusy(true);
     try {
-      await signInWithStoredPasskey();
+      if (hasSavedPasskey) {
+        await signInWithStoredPasskey();
+      } else {
+        await signInWithDiscoverablePasskey();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Passkey sign-in failed");
     } finally {
@@ -312,8 +321,8 @@ function PasskeyTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
-        Use the saved passkey account on this browser. The device will ask for
-        a passkey check before reconnecting.
+        Choose a passkey from this device. Saved accounts reconnect directly;
+        otherwise Sybil recovers the account from the passkey.
       </p>
 
       {error && <ErrorRow>{error}</ErrorRow>}
@@ -321,10 +330,10 @@ function PasskeyTab() {
       <button
         type="button"
         onClick={onSubmit}
-        disabled={busy || !hasSavedPasskey}
-        style={primaryButtonStyle(busy || !hasSavedPasskey)}
+        disabled={busy}
+        style={primaryButtonStyle(busy)}
       >
-        {busy ? "Checking…" : hasSavedPasskey ? "Sign in with passkey" : "No saved passkey"}
+        {busy ? "Checking…" : "Sign in with passkey"}
       </button>
     </div>
   );
@@ -364,8 +373,8 @@ function ImportTab() {
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
         Paste an account id and the JWK from a previous browser session. The
-        public key is derived from the JWK. We don&apos;t verify the key
-        matches what&apos;s registered server-side until you place an order.
+        public key is derived from the JWK. We don&apos;t verify the key matches
+        what&apos;s registered server-side until you place an order.
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -386,7 +395,11 @@ function ImportTab() {
           onChange={(e) => setJwkRaw(e.target.value)}
           placeholder='{"kty":"EC","crv":"P-256","x":"…","y":"…","d":"…"}'
           rows={6}
-          style={{ ...inputStyle, fontFamily: "var(--font-mono)", resize: "vertical" }}
+          style={{
+            ...inputStyle,
+            fontFamily: "var(--font-mono)",
+            resize: "vertical",
+          }}
         />
       </div>
 
@@ -428,7 +441,8 @@ function ErrorRow({ children }: { children: React.ReactNode }) {
       role="alert"
       style={{
         padding: "8px 10px",
-        background: "var(--no-soft, color-mix(in srgb, var(--no) 12%, transparent))",
+        background:
+          "var(--no-soft, color-mix(in srgb, var(--no) 12%, transparent))",
         border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
         borderRadius: 6,
         color: "var(--no)",
@@ -463,9 +477,7 @@ function chipStyle(active: boolean): React.CSSProperties {
   return {
     padding: "6px 12px",
     background: active ? "var(--surface-2)" : "var(--bg-2)",
-    border: active
-      ? "1px solid var(--accent)"
-      : "1px solid var(--border-1)",
+    border: active ? "1px solid var(--accent)" : "1px solid var(--border-1)",
     borderRadius: 999,
     color: active ? "var(--fg-1)" : "var(--fg-2)",
     fontFamily: "var(--font-mono)",
