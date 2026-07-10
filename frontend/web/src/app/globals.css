@@ -647,6 +647,45 @@ textarea {
   min-width: 860px;
 }
 
+/* Dev-zone sub-nav tabs — same hover / active feedback as the global route
+   tabs, kept compact for the dev toolbar's density. */
+.dev-sub-nav-tab {
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--fg-3);
+  background: transparent;
+  transition: color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+}
+.dev-sub-nav-tab[data-active="true"] {
+  color: var(--fg-1);
+  background: var(--surface-2);
+}
+@media (hover: hover) {
+  .dev-sub-nav-tab:hover {
+    color: var(--fg-1);
+    background: var(--surface-2);
+  }
+}
+
+/* Dev + arena DataTable rows pick up the same hover feedback the public
+   tables have. */
+.dev-data-table tbody tr,
+.arena-data-table tbody tr {
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+@media (hover: hover) {
+  .dev-data-table tbody tr:hover,
+  .arena-data-table tbody tr:hover {
+    background: var(--surface-2);
+  }
+}
+
 .arena-main {
   min-height: 100vh;
   background: var(--bg-1);
