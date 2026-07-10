@@ -60,6 +60,7 @@ pub(super) fn sample_witness(header: &BlockHeader) -> BlockWitness {
         pre_state: Vec::new(),
         post_system_state: Vec::new(),
         post_state: Vec::new(),
+        account_keys: vec![],
         state_sidecar: sybil_verifier::StateSidecarSnapshot::default(),
         pre_state_sidecar: sybil_verifier::StateSidecarSnapshot::default(),
         resolved_markets: Vec::new(),

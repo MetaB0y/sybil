@@ -368,6 +368,11 @@ pub async fn register_signed_key(
             );
             verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
                 .await?;
+            let authorization = webauthn::key_op_authorization(
+                &signer.0,
+                req.webauthn_assertion.as_ref().expect("verified above"),
+            )
+            .map_err(|err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")))?;
             state
                 .sequencer
                 .register_key_authenticated(AuthenticatedKeyRegistration {
@@ -378,6 +383,7 @@ pub async fn register_signed_key(
                     scope,
                     nonce: req.nonce,
                     signer,
+                    authorization,
                 })
                 .await?;
         }
@@ -919,6 +925,11 @@ pub async fn revoke_key(
                 canonical_key_revocation_bytes(account_id, &target_bytes, req.nonce, genesis_hash);
             verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
                 .await?;
+            let authorization = webauthn::key_op_authorization(
+                &signer.0,
+                req.webauthn_assertion.as_ref().expect("verified above"),
+            )
+            .map_err(|err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")))?;
             state
                 .sequencer
                 .revoke_signing_key_authenticated(AuthenticatedKeyRevocation {
@@ -926,6 +937,7 @@ pub async fn revoke_key(
                     target_pubkey: target_bytes,
                     nonce: req.nonce,
                     signer,
+                    authorization,
                 })
                 .await?;
         }

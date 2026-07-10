@@ -220,6 +220,7 @@ fn restored_state_from_witness(
     genesis_hash: [u8; 32],
 ) -> Result<RestoredState, StoreError> {
     let accounts = account_store_from_witness(&witness.post_state)?;
+    let pubkey_registry = pubkey_registry_from_witness(witness, &accounts)?;
     let (markets, market_statuses, market_metadata, market_groups) =
         market_state_from_sidecar(&witness.state_sidecar)?;
     let bridge_state = bridge_state_from_witness(witness)?;
@@ -275,7 +276,7 @@ fn restored_state_from_witness(
         last_header: Some(block_header_from_witness(&witness.header)),
         genesis_hash,
         next_order_id: next_order_id_from_witness(witness)?,
-        pubkey_registry: HashMap::new(),
+        pubkey_registry,
         resting_orders: restored_resting_orders,
         data_feeds: Vec::new(),
         resolution_templates: Vec::new(),
@@ -288,6 +289,71 @@ fn restored_state_from_witness(
         pending_bridge_withdrawals: Vec::new(),
         pending_bridge_l1_inputs: Vec::new(),
     })
+}
+
+fn pubkey_registry_from_witness(
+    witness: &BlockWitness,
+    accounts: &AccountStore,
+) -> Result<HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>, StoreError> {
+    let mut sets: HashMap<u64, Vec<sybil_verifier::KeyRecord>> = HashMap::new();
+    for (account_id, keys) in &witness.account_keys {
+        if sets.insert(*account_id, keys.clone()).is_some() {
+            return Err(import_err(format!(
+                "duplicate account {account_id} in witness.account_keys"
+            )));
+        }
+    }
+
+    let mut registry = HashMap::new();
+    for (account_id, account) in accounts.iter() {
+        let keys = sets.remove(&account_id.0).unwrap_or_default();
+        if keys.len() > sybil_verifier::MAX_KEYS_PER_ACCOUNT {
+            return Err(import_err(format!(
+                "account {} exceeds MAX_KEYS_PER_ACCOUNT",
+                account_id.0
+            )));
+        }
+        let digest = sybil_verifier::account_keys_digest(account_id.0, keys.iter().copied());
+        if digest != account.keys_digest {
+            return Err(import_err(format!(
+                "account {} key set does not match committed keys_digest",
+                account_id.0
+            )));
+        }
+        for key in keys {
+            if key.capability_mask != sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK {
+                return Err(import_err("unsupported non-full key capability mask"));
+            }
+            let auth_scheme = match key.auth_scheme {
+                0 => crate::crypto::AccountAuthScheme::RawP256,
+                1 => crate::crypto::AccountAuthScheme::WebAuthn,
+                other => {
+                    return Err(import_err(format!(
+                        "unsupported account key auth scheme {other}"
+                    )))
+                }
+            };
+            let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&key.pubkey_sec1)
+                .ok_or_else(|| import_err("invalid compressed P256 key in witness.account_keys"))?;
+            if registry
+                .insert(
+                    pubkey,
+                    crate::crypto::RegisteredPubkey::primary(*account_id, auth_scheme),
+                )
+                .is_some()
+            {
+                return Err(import_err(
+                    "duplicate pubkey across witness.account_keys accounts",
+                ));
+            }
+        }
+    }
+    if let Some(account_id) = sets.keys().next() {
+        return Err(import_err(format!(
+            "witness.account_keys references unknown account {account_id}"
+        )));
+    }
+    Ok(registry)
 }
 
 fn account_store_from_witness(accounts: &[AccountSnapshot]) -> Result<AccountStore, StoreError> {

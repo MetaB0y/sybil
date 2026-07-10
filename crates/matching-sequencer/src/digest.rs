@@ -18,17 +18,20 @@ pub fn account_keys_digest(
     let keys = pubkey_registry
         .iter()
         .filter(|(_, registered)| registered.account_id == account_id)
-        .map(|(pubkey, registered)| {
-            let compressed = pubkey.compressed_bytes();
-            let mut pubkey_sec1 = [0u8; 33];
-            pubkey_sec1.copy_from_slice(&compressed);
-            sybil_verifier::AccountKeyDigestRecord {
-                auth_scheme: registered.auth_scheme.canonical_byte(),
-                pubkey_sec1,
-            }
-        });
+        .map(|(pubkey, registered)| key_record(pubkey, registered));
 
     sybil_verifier::account_keys_digest(account_id.0, keys)
+}
+
+pub fn key_record(pubkey: &PublicKey, registered: &RegisteredPubkey) -> sybil_verifier::KeyRecord {
+    let compressed = pubkey.compressed_bytes();
+    let mut pubkey_sec1 = [0u8; 33];
+    pubkey_sec1.copy_from_slice(&compressed);
+    sybil_verifier::KeyRecord {
+        auth_scheme: registered.auth_scheme.canonical_byte(),
+        pubkey_sec1,
+        capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+    }
 }
 
 pub fn refresh_account_keys_digest(
@@ -126,19 +129,6 @@ pub fn encode_withdrawal_refunded_event(
     bytes
 }
 
-pub fn encode_withdrawal_finalized_event(
-    withdrawal_id: u64,
-    amount: i64,
-    block_height: u64,
-) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(1 + 8 + 8 + 8);
-    bytes.push(0x0A);
-    bytes.extend_from_slice(&withdrawal_id.to_le_bytes());
-    bytes.extend_from_slice(&amount.to_le_bytes());
-    bytes.extend_from_slice(&block_height.to_le_bytes());
-    bytes
-}
-
 pub fn encode_resolution_event(
     market_id: MarketId,
     payout_nanos: Nanos,
@@ -190,6 +180,24 @@ pub fn encode_mint_event(adjustments: &[MintAdjustment], block_height: u64) -> V
         bytes.extend_from_slice(&adjustment.position_delta.to_le_bytes());
         bytes.extend_from_slice(&adjustment.balance_delta.to_le_bytes());
     }
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
+pub fn encode_key_registered_event(key: &sybil_verifier::KeyRecord, block_height: u64) -> Vec<u8> {
+    encode_key_event(0x0a, key, block_height)
+}
+
+pub fn encode_key_revoked_event(key: &sybil_verifier::KeyRecord, block_height: u64) -> Vec<u8> {
+    encode_key_event(0x0b, key, block_height)
+}
+
+fn encode_key_event(tag: u8, key: &sybil_verifier::KeyRecord, block_height: u64) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 1 + 33 + 4 + 8);
+    bytes.push(tag);
+    bytes.push(key.auth_scheme);
+    bytes.extend_from_slice(&key.pubkey_sec1);
+    bytes.extend_from_slice(&key.capability_mask.to_le_bytes());
     bytes.extend_from_slice(&block_height.to_le_bytes());
     bytes
 }

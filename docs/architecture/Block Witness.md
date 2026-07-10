@@ -8,7 +8,7 @@ last_verified: 2026-07-10
 
 # Block Witness Format
 
-`BlockWitness` v5 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v6 is the canonical private audit package for a Sybil block. The
 sequencer persists it, native verification replays it, and the OpenVM guest
 receives it inside `StateTransitionGuestInput`. The proof binds the witness by
 recomputing `witness_root` from canonical witness bytes and including that root
@@ -23,10 +23,12 @@ outside the guest input; it rides beside sealed blocks for API and analytics
 consumers only.
 
 The SYB-216 design produced v3, SYB-225 moved the on-wire format to v4 by
-adding `keys_digest`, and SYB-253 moved it to v5 for withdrawal refund/prune
-events plus the committed observed L1 height. The base design is ratified in
-`design/witness-schema-v2.md`. The design name was "v2", but the on-wire format
-version is now `5`.
+adding `keys_digest`, SYB-253 moved it to v5 for withdrawal refund/prune events
+plus the committed observed L1 height, and SYB-270 moved it to v6 for proven key
+operations. v6 adds `KeyRegistered`/`KeyRevoked`, `CreateAccount.initial_keys`,
+the full post-block `account_keys` universe, and a second guest qMDB proof that
+authenticates non-genesis pre-state leaves. See
+`design/witness-v6-keys-transition.md`.
 
 ## Encoding
 
@@ -53,11 +55,11 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v5 it is `0x05`.
+The first byte is the format version. For v6 it is `0x06`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x05
+    version:u8 = 0x06
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
@@ -74,6 +76,7 @@ canonical_witness_bytes =
  || pre_state_section
  || post_system_state_section
  || post_state_section
+ || account_keys_section                       // full post-block active key universe
  || state_sidecar                              // post non-account state
  || pre_state_sidecar                          // pre non-account state
  || resolved_markets_section
@@ -103,7 +106,15 @@ Sections are `count:u64 || item_bytes * count`, except where noted:
 | `mm_constraints` | `mm_id:u64`, `max_capital:u64`, sorted `order_ids`, sorted `(order_id, side)` | sort by `mm_id` |
 | `market_groups` | `name`, sorted `markets` | sort by first market id, then name |
 | `pre_state`, `post_system_state`, `post_state` | `"sybil/witness/account"` plus account fields | sort by account id |
+| `account_keys` | `"sybil/witness/account-keys"`, account id, then sorted `KeyRecord`s | sort accounts by id; keys by pubkey then scheme |
 | `resolved_markets` | `market_id:u32` | sort by market id |
+
+`KeyRecord` is `auth_scheme:u8 || pubkey_sec1:[u8;33] ||
+capability_mask:u32le`. System-event tags 10 and 11 commit key registration and
+revocation respectively, including the complete raw-P256 or WebAuthn
+authorization envelope. The guest welds each opened set to the post-state
+`keys_digest`, reverse-folds key events to the authenticated pre-state digest,
+then forward-replays them over a running globally unique key universe.
 
 `clearing_prices_section` is:
 
@@ -302,11 +313,11 @@ pin.
 
 | Pin | Current value | Test or artifact |
 |---|---:|---|
-| Witness format byte | `5` | `witness_schema::WITNESS_FORMAT_VERSION` |
-| Empty canonical witness length | `1549` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
-| Byte-identity canonical witness length | `3873` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
-| Byte-identity witness SHA-256 length-prefixed digest | `54f53e94e279187b03ea48565c3602b20af9930969445a92dde68e5b5a9cdff1` | same byte-identity test |
-| Empty public-input hash | `60f690e2c640dda8d5404b40e87b5c38b195e815afc90c6e0d9284d151d58e69` | `public_input_hash_golden` |
+| Witness format byte | `6` | `witness_schema::WITNESS_FORMAT_VERSION` |
+| Empty canonical witness length | `1583` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
+| Byte-identity canonical witness length | `3907` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
+| Byte-identity witness SHA-256 length-prefixed digest | `2cc74a0d572c4519b1dcd06e8b230e1cc1b5af488f93324e3297ee8478d8c1f5` | same byte-identity test |
+| Empty public-input hash | `e37bee4b2c3e7bb723c01665ccc59fbf098e708c878e1d488a792fdb51858a6f` | `public_input_hash_golden` |
 | OL-4 Solidity/Rust public-input hash vector | `42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` | Rust test plus `contracts/test/SybilGoldenVectors.t.sol` |
 | Current `app_exe_commit` | `0x000f896e256293aa0980cc5e9531833ef5a0cafde518aa2e1f61ee58820f5117` | committed OpenVM `commit.json` and lock |
 | Current `app_vm_commit` | `0x007a02fc3055c8beb7aa51187d008991bdec498852b5e1e27f223ee04a72cac5` | committed OpenVM `commit.json` and lock |

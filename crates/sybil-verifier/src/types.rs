@@ -49,6 +49,10 @@ pub struct BlockWitness {
     pub post_system_state: Vec<AccountSnapshot>,
     /// Account snapshots *after* settlement, sorted by id.
     pub post_state: Vec<AccountSnapshot>,
+    /// Active signing-key sets at block end. Entries are canonicalized by
+    /// account id and each key list by [`KeyRecord::canonical_sort_key`].
+    /// Accounts with no active keys may be omitted.
+    pub account_keys: Vec<(u64, Vec<KeyRecord>)>,
     /// Non-account state committed by the header's `state_root`.
     pub state_sidecar: StateSidecarSnapshot,
     /// Non-account state at block start, authenticated against the previous
@@ -119,6 +123,7 @@ pub enum SystemEventWitness {
     CreateAccount {
         account_id: u64,
         initial_balance: i64,
+        initial_keys: Vec<KeyRecord>,
     },
     Deposit {
         account_id: u64,
@@ -173,6 +178,119 @@ pub enum SystemEventWitness {
         group_id: u64,
         market_id: MarketId,
     },
+    KeyRegistered {
+        account_id: u64,
+        key: KeyRecord,
+        authorization: KeyOpAuth,
+    },
+    KeyRevoked {
+        account_id: u64,
+        key: KeyRecord,
+        authorization: KeyOpAuth,
+    },
+}
+
+/// Validity-critical signing-key record committed by `keys_digest` v2.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub struct KeyRecord {
+    /// `0 = raw_p256`, `1 = webauthn`.
+    pub auth_scheme: u8,
+    /// Compressed SEC1 P-256 public key.
+    #[serde(with = "pubkey_bytes")]
+    pub pubkey_sec1: [u8; 33],
+    /// Reserved validity-critical capability bits. All bits are authoritative
+    /// today because scoped delegation is not active yet.
+    pub capability_mask: u32,
+}
+
+impl KeyRecord {
+    pub const FULL_CAPABILITY_MASK: u32 = u32::MAX;
+
+    pub fn canonical_sort_key(&self) -> ([u8; 33], u8) {
+        (self.pubkey_sec1, self.auth_scheme)
+    }
+}
+
+/// Authorization envelope retained one-for-one with a witnessed key mutation.
+/// Cryptographic verification is wired by the separate P256-in-guest ticket;
+/// v6 already constrains the signer to the running active set.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum KeyOpAuth {
+    RawP256 {
+        #[serde(with = "pubkey_bytes")]
+        signer_pubkey: [u8; 33],
+        #[serde(with = "signature_bytes")]
+        signature: [u8; 64],
+    },
+    WebAuthn {
+        #[serde(with = "pubkey_bytes")]
+        signer_pubkey: [u8; 33],
+        authenticator_data: Vec<u8>,
+        client_data_json: Vec<u8>,
+        #[serde(with = "signature_bytes")]
+        signature: [u8; 64],
+    },
+}
+
+mod pubkey_bytes {
+    use serde::{Deserialize as _, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &[u8; 33], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(bytes)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 33], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        bytes
+            .try_into()
+            .map_err(|bytes: Vec<u8>| serde::de::Error::invalid_length(bytes.len(), &"33 bytes"))
+    }
+}
+
+mod signature_bytes {
+    use serde::{Deserialize as _, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &[u8; 64], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(bytes)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 64], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        bytes
+            .try_into()
+            .map_err(|bytes: Vec<u8>| serde::de::Error::invalid_length(bytes.len(), &"64 bytes"))
+    }
+}
+
+impl KeyOpAuth {
+    pub fn signer_pubkey(&self) -> &[u8; 33] {
+        match self {
+            Self::RawP256 { signer_pubkey, .. } | Self::WebAuthn { signer_pubkey, .. } => {
+                signer_pubkey
+            }
+        }
+    }
+
+    pub fn signer_auth_scheme(&self) -> u8 {
+        match self {
+            Self::RawP256 { .. } => 0,
+            Self::WebAuthn { .. } => 1,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -9,7 +9,8 @@ use matching_engine::{
 };
 
 use crate::event_schema::{
-    fill_leaf_value, order_accepted_leaf_value, order_rejected_leaf_value, system_event_leaf_value,
+    append_key_record, fill_leaf_value, order_accepted_leaf_value, order_rejected_leaf_value,
+    system_event_leaf_value,
 };
 use crate::snapshot_schema::{
     append_i64, append_market_id, append_string, append_u32, append_u64, append_witness_account,
@@ -17,14 +18,14 @@ use crate::snapshot_schema::{
 };
 use crate::types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, DepositAccumulatorWitness, L1DepositWitness, MarketGroupSnapshot,
-    MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason,
-    ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
+    ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,
+    MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
+    RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
     StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness, WithdrawalSnapshot,
     WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 5;
+pub const WITNESS_FORMAT_VERSION: u8 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -36,7 +37,7 @@ pub enum WitnessDecodeError {
     },
     #[error("trailing bytes after canonical witness at offset {offset}: {trailing} bytes")]
     TrailingBytes { offset: usize, trailing: usize },
-    #[error("unknown witness format version {0}; only v5 is supported")]
+    #[error("unknown witness format version {0}; only v6 is supported")]
     UnknownVersion(u8),
     #[error("invalid tag for {field} at offset {offset}: {tag}")]
     InvalidTag {
@@ -94,6 +95,7 @@ pub fn decode_canonical_witness_bytes(bytes: &[u8]) -> Result<BlockWitness, Witn
     let post_system_state =
         reader.read_vec("post_system_state", |reader| reader.read_witness_account())?;
     let post_state = reader.read_vec("post_state", |reader| reader.read_witness_account())?;
+    let account_keys = reader.read_account_keys()?;
     let state_sidecar =
         reader.read_state_sidecar(b"sybil/witness/state-sidecar", "state_sidecar")?;
     let pre_state_sidecar =
@@ -123,6 +125,7 @@ pub fn decode_canonical_witness_bytes(bytes: &[u8]) -> Result<BlockWitness, Witn
         pre_state,
         post_system_state,
         post_state,
+        account_keys,
         state_sidecar,
         pre_state_sidecar,
         resolved_markets,
@@ -208,6 +211,14 @@ impl<'a> WitnessReader<'a> {
         self.read_exact::<32>()
     }
 
+    fn read_pubkey33(&mut self) -> Result<[u8; 33], WitnessDecodeError> {
+        self.read_exact::<33>()
+    }
+
+    fn read_signature64(&mut self) -> Result<[u8; 64], WitnessDecodeError> {
+        self.read_exact::<64>()
+    }
+
     fn read_address20(&mut self) -> Result<[u8; 20], WitnessDecodeError> {
         self.read_exact::<20>()
     }
@@ -248,6 +259,32 @@ impl<'a> WitnessReader<'a> {
     fn read_len(&mut self, field: &'static str) -> Result<usize, WitnessDecodeError> {
         let count = self.read_u64()?;
         usize::try_from(count).map_err(|_| WitnessDecodeError::CountTooLarge { field, count })
+    }
+
+    fn read_bytes(
+        &mut self,
+        field: &'static str,
+        max_len: usize,
+    ) -> Result<Vec<u8>, WitnessDecodeError> {
+        let offset = self.offset;
+        let len = self.read_len(field)?;
+        if len > max_len {
+            return Err(WitnessDecodeError::InvalidValue {
+                field,
+                offset,
+                details: "length exceeds protocol cap",
+            });
+        }
+        if self.bytes.len().saturating_sub(self.offset) < len {
+            return Err(WitnessDecodeError::UnexpectedEof {
+                offset: self.offset,
+                needed: len,
+                remaining: self.bytes.len().saturating_sub(self.offset),
+            });
+        }
+        let bytes = self.bytes[self.offset..self.offset + len].to_vec();
+        self.offset += len;
+        Ok(bytes)
     }
 
     fn read_vec<T>(
@@ -451,6 +488,7 @@ impl<'a> WitnessReader<'a> {
             0 => Ok(SystemEventWitness::CreateAccount {
                 account_id: self.read_u64()?,
                 initial_balance: self.read_i64()?,
+                initial_keys: self.read_key_records("system_event.initial_keys")?,
             }),
             1 => Ok(SystemEventWitness::Deposit {
                 account_id: self.read_u64()?,
@@ -524,8 +562,68 @@ impl<'a> WitnessReader<'a> {
             9 => Ok(SystemEventWitness::L1BlockObserved {
                 height: self.read_u64()?,
             }),
+            10 => Ok(SystemEventWitness::KeyRegistered {
+                account_id: self.read_u64()?,
+                key: self.read_key_record()?,
+                authorization: self.read_key_op_auth()?,
+            }),
+            11 => Ok(SystemEventWitness::KeyRevoked {
+                account_id: self.read_u64()?,
+                key: self.read_key_record()?,
+                authorization: self.read_key_op_auth()?,
+            }),
             tag => Err(WitnessDecodeError::InvalidTag {
                 field: "system_event",
+                tag,
+                offset,
+            }),
+        }
+    }
+
+    fn read_key_record(&mut self) -> Result<KeyRecord, WitnessDecodeError> {
+        Ok(KeyRecord {
+            auth_scheme: self.read_u8()?,
+            pubkey_sec1: self.read_pubkey33()?,
+            capability_mask: self.read_u32()?,
+        })
+    }
+
+    fn read_key_records(
+        &mut self,
+        field: &'static str,
+    ) -> Result<Vec<KeyRecord>, WitnessDecodeError> {
+        let keys = self.read_vec(field, |reader| reader.read_key_record())?;
+        if keys.len() > crate::MAX_KEYS_PER_ACCOUNT {
+            return Err(WitnessDecodeError::InvalidValue {
+                field,
+                offset: self.offset,
+                details: "key count exceeds MAX_KEYS_PER_ACCOUNT",
+            });
+        }
+        Ok(keys)
+    }
+
+    fn read_key_op_auth(&mut self) -> Result<KeyOpAuth, WitnessDecodeError> {
+        let offset = self.offset;
+        match self.read_tag("key_op_auth")? {
+            0 => Ok(KeyOpAuth::RawP256 {
+                signer_pubkey: self.read_pubkey33()?,
+                signature: self.read_signature64()?,
+            }),
+            1 => Ok(KeyOpAuth::WebAuthn {
+                signer_pubkey: self.read_pubkey33()?,
+                authenticator_data: self.read_bytes(
+                    "key_op_auth.authenticator_data",
+                    crate::MAX_WEBAUTHN_AUTHENTICATOR_DATA_BYTES,
+                )?,
+                client_data_json: self.read_bytes(
+                    "key_op_auth.client_data_json",
+                    crate::MAX_WEBAUTHN_CLIENT_DATA_JSON_BYTES,
+                )?,
+                signature: self.read_signature64()?,
+            }),
+            tag => Err(WitnessDecodeError::InvalidTag {
+                field: "key_op_auth",
                 tag,
                 offset,
             }),
@@ -653,6 +751,15 @@ impl<'a> WitnessReader<'a> {
             positions: self.read_positions("account.positions")?,
             events_digest: self.read_hash32()?,
             keys_digest: self.read_hash32()?,
+        })
+    }
+
+    fn read_account_keys(&mut self) -> Result<Vec<(u64, Vec<KeyRecord>)>, WitnessDecodeError> {
+        self.read_domain(b"sybil/witness/account-keys", "account_keys")?;
+        self.read_vec("account_keys", |reader| {
+            let account_id = reader.read_u64()?;
+            let keys = reader.read_key_records("account_keys.keys")?;
+            Ok((account_id, keys))
         })
     }
 
@@ -893,6 +1000,7 @@ pub fn canonical_witness_bytes(witness: &BlockWitness) -> Vec<u8> {
     append_account_section(&mut out, &witness.pre_state);
     append_account_section(&mut out, &witness.post_system_state);
     append_account_section(&mut out, &witness.post_state);
+    append_account_keys(&mut out, &witness.account_keys);
     append_witness_state_sidecar(&mut out, &witness.state_sidecar);
     append_witness_pre_state_sidecar(&mut out, &witness.pre_state_sidecar);
 
@@ -904,6 +1012,21 @@ pub fn canonical_witness_bytes(witness: &BlockWitness) -> Vec<u8> {
     }
 
     out
+}
+
+fn append_account_keys(out: &mut Vec<u8>, account_keys: &[(u64, Vec<KeyRecord>)]) {
+    out.extend_from_slice(b"sybil/witness/account-keys");
+    let mut account_keys = account_keys.to_vec();
+    account_keys.sort_by_key(|(account_id, _)| *account_id);
+    append_u64(out, account_keys.len() as u64);
+    for (account_id, mut keys) in account_keys {
+        append_u64(out, account_id);
+        keys.sort_by_key(KeyRecord::canonical_sort_key);
+        append_u64(out, keys.len() as u64);
+        for key in &keys {
+            append_key_record(out, key);
+        }
+    }
 }
 
 fn append_header(out: &mut Vec<u8>, header: &WitnessBlockHeader) {
@@ -1058,6 +1181,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state: vec![],
+            account_keys: vec![],
             state_sidecar: StateSidecarSnapshot::default(),
             pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: vec![],
@@ -1065,7 +1189,7 @@ mod tests {
 
         let bytes = canonical_witness_bytes(&witness);
         assert_eq!(bytes[0], WITNESS_FORMAT_VERSION);
-        assert_eq!(bytes.len(), 1549);
+        assert_eq!(bytes.len(), 1583);
     }
 
     #[test]
@@ -1094,6 +1218,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state: vec![],
+            account_keys: vec![],
             state_sidecar: StateSidecarSnapshot::default(),
             pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: vec![],
@@ -1323,6 +1448,7 @@ mod tests {
             pre_state: vec![account_snapshot(1001), account_snapshot(1002)],
             post_system_state: vec![account_snapshot(1001), account_snapshot(1002)],
             post_state: vec![account_snapshot(1001), account_snapshot(1002)],
+            account_keys: vec![],
             state_sidecar,
             pre_state_sidecar,
             resolved_markets: vec![market_a, market_b],

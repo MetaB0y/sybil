@@ -103,10 +103,12 @@ fn golden_vectors_pin_account_keys_digest() {
                 AccountKeyDigestRecord {
                     auth_scheme: 1,
                     pubkey_sec1: webauthn_key,
+                    capability_mask: crate::KeyRecord::FULL_CAPABILITY_MASK,
                 },
                 AccountKeyDigestRecord {
                     auth_scheme: 0,
                     pubkey_sec1: raw_key,
+                    capability_mask: crate::KeyRecord::FULL_CAPABILITY_MASK,
                 },
             ],
         ),
@@ -228,6 +230,7 @@ fn byte_identity_witness() -> BlockWitness {
         pre_state: vec![account_snapshot(1002), account_snapshot(1001)],
         post_system_state: vec![account_snapshot(1001), account_snapshot(1002)],
         post_state: vec![account_snapshot(1002), account_snapshot(1001)],
+        account_keys: vec![],
         state_sidecar: state_sidecar(accepted_order),
         pre_state_sidecar: Default::default(),
         resolved_markets: vec![market_b, market_a],

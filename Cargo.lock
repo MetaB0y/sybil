@@ -2492,6 +2492,7 @@ dependencies = [
 name = "matching-solver"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "clarabel",
  "divan",
  "highs",
@@ -4300,6 +4301,7 @@ dependencies = [
 name = "sybil-golden-vectors"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "hex",
  "matching-engine",
  "serde",

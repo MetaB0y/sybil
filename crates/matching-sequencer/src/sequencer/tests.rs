@@ -2127,7 +2127,17 @@ fn key_registry_mutations_refresh_account_keys_digest() {
     assert_eq!(seq.accounts.get(aid).unwrap().keys_digest, two_key_digest);
     assert_ne!(two_key_digest, one_key_digest);
 
-    seq.revoke_signing_key(aid, &raw_key).unwrap();
+    let mut signer_pubkey = [0u8; 33];
+    signer_pubkey.copy_from_slice(&raw_key.compressed_bytes());
+    seq.revoke_signing_key(
+        aid,
+        &raw_key,
+        sybil_verifier::KeyOpAuth::RawP256 {
+            signer_pubkey,
+            signature: [0u8; 64],
+        },
+    )
+    .unwrap();
     let remaining_key_digest = crate::digest::account_keys_digest(aid, seq.pubkey_registry());
     assert_eq!(
         seq.accounts.get(aid).unwrap().keys_digest,

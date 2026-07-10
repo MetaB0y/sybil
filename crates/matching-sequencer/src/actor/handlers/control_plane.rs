@@ -258,6 +258,7 @@ impl SequencerActorState {
             .genesis_hash()
             .ok_or(SequencerError::GenesisHashUnavailable)?;
         verify_signed_key_registration(&signed, genesis_hash)?;
+        let authorization = raw_key_op_auth(&signed.signer, &signed.signature);
         self.handle_authenticated_key_registration(AuthenticatedKeyRegistration {
             account_id: signed.account_id,
             new_pubkey: signed.new_pubkey,
@@ -266,6 +267,7 @@ impl SequencerActorState {
             scope: signed.scope,
             nonce: signed.nonce,
             signer: signed.signer,
+            authorization,
         })
         .await
     }
@@ -291,19 +293,21 @@ impl SequencerActorState {
             scope: authenticated.scope,
             created_at_ms: current_timestamp_ms(),
         };
-        self.persist_control_plane(&ControlPlaneCommand::RegisterPubkeyWithMeta {
+        self.persist_control_plane(&ControlPlaneCommand::RegisterPubkeyAuthorized {
             account_id: authenticated.account_id,
             compressed_pubkey: authenticated.new_pubkey.compressed_bytes(),
             auth_scheme: meta.auth_scheme,
             label: meta.label.clone(),
             scope: meta.scope,
             created_at_ms: meta.created_at_ms,
+            authorization: authenticated.authorization.clone(),
         })
         .await?;
-        self.sequencer.register_pubkey_with_meta(
+        self.sequencer.register_pubkey_with_meta_authorized(
             authenticated.account_id,
             authenticated.new_pubkey,
             meta,
+            authenticated.authorization,
         )
     }
 
@@ -371,11 +375,13 @@ impl SequencerActorState {
             .genesis_hash()
             .ok_or(SequencerError::GenesisHashUnavailable)?;
         verify_signed_key_revocation(&signed, genesis_hash)?;
+        let authorization = raw_key_op_auth(&signed.signer, &signed.signature);
         self.handle_authenticated_key_revocation(AuthenticatedKeyRevocation {
             account_id: signed.account_id,
             target_pubkey: signed.target_pubkey,
             nonce: signed.nonce,
             signer: signed.signer,
+            authorization,
         })
         .await
     }
@@ -397,10 +403,14 @@ impl SequencerActorState {
         self.persist_control_plane(&ControlPlaneCommand::RevokeSigningKey {
             account_id: authenticated.account_id,
             compressed_pubkey: authenticated.target_pubkey,
+            authorization: authenticated.authorization.clone(),
         })
         .await?;
-        self.sequencer
-            .revoke_signing_key(authenticated.account_id, &target)
+        self.sequencer.revoke_signing_key(
+            authenticated.account_id,
+            &target,
+            authenticated.authorization,
+        )
     }
 
     pub(super) async fn handle_signed_api_key_create(
@@ -479,5 +489,18 @@ impl SequencerActorState {
             authenticated.api_key_id,
             revoked_at_ms,
         )
+    }
+}
+
+fn raw_key_op_auth(
+    signer: &PublicKey,
+    signature: &p256::ecdsa::Signature,
+) -> sybil_verifier::KeyOpAuth {
+    let compressed = signer.compressed_bytes();
+    let mut signer_pubkey = [0u8; 33];
+    signer_pubkey.copy_from_slice(&compressed);
+    sybil_verifier::KeyOpAuth::RawP256 {
+        signer_pubkey,
+        signature: signature.to_bytes().into(),
     }
 }

@@ -722,6 +722,7 @@ mod tests {
             pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -760,6 +761,7 @@ mod tests {
             pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -803,6 +805,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
             pre_state_sidecar: Default::default(),
             resolved_markets: vec![],
@@ -857,6 +860,7 @@ mod tests {
             pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -920,6 +924,7 @@ mod tests {
             pre_state,
             post_system_state: post_state.clone(),
             post_state,
+            account_keys: vec![],
             state_sidecar,
             pre_state_sidecar,
             resolved_markets: vec![],
@@ -971,6 +976,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),

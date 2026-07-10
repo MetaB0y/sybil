@@ -88,7 +88,7 @@ contract SybilGoldenVectorsTest {
     address private constant VAULT_ADDRESS = 0x1111111111111111111111111111111111111111;
     address private constant VERIFIER_ADDRESS = 0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC;
 
-    bytes private constant ACCOUNT_KEYS_DIGEST_DOMAIN = "sybil/state/account-keys-digest/v1";
+    bytes private constant ACCOUNT_KEYS_DIGEST_DOMAIN = "sybil/state/account-keys-digest/v2";
 
     SybilVaultDepositHarness private vault;
     SybilSettlement private settlement;
@@ -201,8 +201,10 @@ contract SybilGoldenVectorsTest {
         bytes memory sortedRecords = bytes.concat(
             hex"00",
             goldenBytes(".account_keys.raw_p256_key"),
+            hex"ffffffff",
             hex"01",
-            goldenBytes(".account_keys.webauthn_key")
+            goldenBytes(".account_keys.webauthn_key"),
+            hex"ffffffff"
         );
         require(
             accountKeysDigest(accountId, 2, sortedRecords)

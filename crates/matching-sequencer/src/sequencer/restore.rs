@@ -298,7 +298,11 @@ impl BlockSequencer {
                             "invalid pubkey in control-plane WAL".to_string(),
                         )
                     })?;
-                self.register_pubkey_with_scheme(account_id, pubkey, auth_scheme)
+                self.register_first_pubkey_with_meta(
+                    account_id,
+                    pubkey,
+                    crate::crypto::RegisteredPubkey::primary(account_id, auth_scheme),
+                )
             }
             ControlPlaneCommand::AdvanceReplayNonce { account_id, nonce } => {
                 self.advance_replay_nonce(account_id, nonce)
@@ -364,7 +368,7 @@ impl BlockSequencer {
                             "invalid pubkey in control-plane WAL".to_string(),
                         )
                     })?;
-                self.register_pubkey_with_meta(
+                self.register_first_pubkey_with_meta(
                     account_id,
                     pubkey,
                     crate::crypto::RegisteredPubkey {
@@ -376,9 +380,14 @@ impl BlockSequencer {
                     },
                 )
             }
-            ControlPlaneCommand::RevokeSigningKey {
+            ControlPlaneCommand::RegisterPubkeyAuthorized {
                 account_id,
                 compressed_pubkey,
+                auth_scheme,
+                label,
+                scope,
+                created_at_ms,
+                authorization,
             } => {
                 let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&compressed_pubkey)
                     .ok_or_else(|| {
@@ -386,7 +395,31 @@ impl BlockSequencer {
                             "invalid pubkey in control-plane WAL".to_string(),
                         )
                     })?;
-                self.revoke_signing_key(account_id, &pubkey)
+                self.register_pubkey_with_meta_authorized(
+                    account_id,
+                    pubkey,
+                    crate::crypto::RegisteredPubkey {
+                        account_id,
+                        auth_scheme,
+                        label,
+                        scope,
+                        created_at_ms,
+                    },
+                    authorization,
+                )
+            }
+            ControlPlaneCommand::RevokeSigningKey {
+                account_id,
+                compressed_pubkey,
+                authorization,
+            } => {
+                let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&compressed_pubkey)
+                    .ok_or_else(|| {
+                        SequencerError::Persistence(
+                            "invalid pubkey in control-plane WAL".to_string(),
+                        )
+                    })?;
+                self.revoke_signing_key(account_id, &pubkey, authorization)
             }
             ControlPlaneCommand::SetProfile {
                 account_id,

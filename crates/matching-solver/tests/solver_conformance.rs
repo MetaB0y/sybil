@@ -4,8 +4,8 @@ mod conformance {
 
     use matching_engine::{
         compute_fill_settlement, derive_minting, notional_nanos, outcome_buy, outcome_sell,
-        shares_to_qty, MarketId, MarketSet, MmConstraint, MmId, MmSide, Nanos, Order, Problem, Qty,
-        MAX_ORDER_QTY, NANOS_PER_DOLLAR,
+        shares_to_qty, MarketId, MarketSet, MintAdjustment, MmConstraint, MmId, MmSide, Nanos,
+        Order, Problem, Qty, MAX_ORDER_QTY, NANOS_PER_DOLLAR,
     };
     use matching_solver::{PipelineResult, Solver};
     use proptest::prelude::*;
@@ -53,7 +53,7 @@ mod conformance {
     }
 
     type AccountStates = BTreeMap<u64, AccountState>;
-    type SettlementStates = (AccountStates, AccountStates, i64);
+    type SettlementStates = (AccountStates, AccountStates, i64, Vec<MintAdjustment>);
 
     fn arb_price() -> impl Strategy<Value = Nanos> {
         prop_oneof![
@@ -332,7 +332,7 @@ mod conformance {
             .unwrap_or_default();
         assert_clearing_prices_cover_fills(&case.problem, &pipeline, &clearing_prices)?;
 
-        let (pre_accounts, post_accounts, expected_balance_delta) =
+        let (pre_accounts, post_accounts, expected_balance_delta, mint_adjustments) =
             derive_account_states(case, &pipeline, &clearing_prices)?;
         assert_balance_delta(&pre_accounts, &post_accounts, expected_balance_delta)?;
         assert_position_balance(&post_accounts, &case.problem.markets)?;
@@ -343,6 +343,7 @@ mod conformance {
             clearing_prices,
             snapshots(&pre_accounts),
             snapshots(&post_accounts),
+            &mint_adjustments,
         );
 
         let match_result = verify_match(&witness, true);
@@ -578,7 +579,7 @@ mod conformance {
             );
         }
         let mint = post_accounts.entry(MINT_ACCOUNT_ID).or_default();
-        for adjustment in mint_adjustments {
+        for adjustment in &mint_adjustments {
             *mint
                 .positions
                 .entry((adjustment.market_id, adjustment.outcome))
@@ -587,7 +588,12 @@ mod conformance {
             expected_balance_delta += adjustment.balance_delta;
         }
 
-        Ok((pre_accounts, post_accounts, expected_balance_delta))
+        Ok((
+            pre_accounts,
+            post_accounts,
+            expected_balance_delta,
+            mint_adjustments,
+        ))
     }
 
     fn initial_accounts(case: &GeneratedCase) -> BTreeMap<u64, AccountState> {
@@ -731,7 +737,8 @@ mod conformance {
         pipeline: &PipelineResult,
         clearing_prices: HashMap<MarketId, Vec<Nanos>>,
         pre_state: Vec<AccountSnapshot>,
-        post_state: Vec<AccountSnapshot>,
+        mut post_state: Vec<AccountSnapshot>,
+        mint_adjustments: &[MintAdjustment],
     ) -> BlockWitness {
         let mm_order_ids: BTreeSet<u64> = case
             .problem
@@ -748,7 +755,41 @@ mod conformance {
                 account_id: case.order_accounts[&order.id],
                 is_mm: mm_order_ids.contains(&order.id),
             })
+            .collect::<Vec<_>>();
+
+        let pre_by_id: BTreeMap<_, _> = pre_state
+            .iter()
+            .map(|account| (account.id, account))
             .collect();
+        let mut event_digests: BTreeMap<_, _> = pre_state
+            .iter()
+            .map(|account| (account.id, account.events_digest))
+            .collect();
+        for fill in &pipeline.result.fills {
+            if fill.fill_qty == Qty::ZERO {
+                continue;
+            }
+            let account_id = if fill.account_id != 0 {
+                fill.account_id
+            } else {
+                case.order_accounts[&fill.order_id]
+            };
+            let encoded = encode_fill_event(fill);
+            let digest = event_digests.entry(account_id).or_insert([0; 32]);
+            *digest = update_digest(digest, &encoded);
+        }
+        if !mint_adjustments.is_empty() {
+            let encoded = encode_mint_event(mint_adjustments);
+            let digest = event_digests.entry(MINT_ACCOUNT_ID).or_insert([0; 32]);
+            *digest = update_digest(digest, &encoded);
+        }
+        for account in &mut post_state {
+            account.total_deposited = pre_by_id
+                .get(&account.id)
+                .map(|pre| pre.total_deposited)
+                .unwrap_or(0);
+            account.events_digest = event_digests.get(&account.id).copied().unwrap_or([0; 32]);
+        }
 
         BlockWitness {
             header: WitnessBlockHeader {
@@ -774,10 +815,42 @@ mod conformance {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: StateSidecarSnapshot::default(),
             pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: vec![],
         }
+    }
+
+    fn update_digest(current: &[u8; 32], event_bytes: &[u8]) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(current);
+        hasher.update(event_bytes);
+        *hasher.finalize().as_bytes()
+    }
+
+    fn encode_fill_event(fill: &matching_engine::Fill) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(1 + 8 * 4);
+        bytes.push(0x01);
+        bytes.extend_from_slice(&fill.order_id.to_le_bytes());
+        bytes.extend_from_slice(&fill.fill_qty.0.to_le_bytes());
+        bytes.extend_from_slice(&fill.fill_price.0.to_le_bytes());
+        bytes.extend_from_slice(&BLOCK_HEIGHT.to_le_bytes());
+        bytes
+    }
+
+    fn encode_mint_event(adjustments: &[MintAdjustment]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(1 + 8 + adjustments.len() * (4 + 1 + 8 + 8));
+        bytes.push(0x05);
+        bytes.extend_from_slice(&(adjustments.len() as u64).to_le_bytes());
+        for adjustment in adjustments {
+            bytes.extend_from_slice(&adjustment.market_id.0.to_le_bytes());
+            bytes.push(adjustment.outcome);
+            bytes.extend_from_slice(&adjustment.position_delta.to_le_bytes());
+            bytes.extend_from_slice(&adjustment.balance_delta.to_le_bytes());
+        }
+        bytes.extend_from_slice(&BLOCK_HEIGHT.to_le_bytes());
+        bytes
     }
 
     fn format_violations(violations: &[sybil_verifier::Violation]) -> String {

@@ -219,7 +219,17 @@ impl BlockSequencer {
         tracing::Span::current().record("height", self.height);
         let pre_state_sidecar = self.committed_state_sidecar.clone();
         let pre_deposit_frontier = self.committed_deposit_frontier;
-        let system_events = std::mem::take(&mut self.pending_system_events);
+        let mut system_events = std::mem::take(&mut self.pending_system_events);
+        // Phase 0: account creation/key mutations precede all other system
+        // events. Stable sorting preserves admission order within each phase.
+        system_events.sort_by_key(|event| {
+            !matches!(
+                event,
+                SystemEvent::CreateAccount { .. }
+                    | SystemEvent::KeyRegistered { .. }
+                    | SystemEvent::KeyRevoked { .. }
+            )
+        });
         let system_account_baselines = std::mem::take(&mut self.pending_system_account_baselines);
 
         for event in &system_events {
@@ -227,6 +237,7 @@ impl BlockSequencer {
                 SystemEvent::CreateAccount {
                     account_id,
                     initial_balance,
+                    ..
                 } => {
                     if let Some(account) = self.accounts.get_mut(*account_id) {
                         let encoded = crate::digest::encode_create_account_event(
@@ -293,21 +304,7 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
-                SystemEvent::WithdrawalFinalized {
-                    account_id,
-                    withdrawal_id,
-                    amount,
-                } => {
-                    if let Some(account) = self.accounts.get_mut(*account_id) {
-                        let encoded = crate::digest::encode_withdrawal_finalized_event(
-                            *withdrawal_id,
-                            *amount,
-                            self.height,
-                        );
-                        account.events_digest =
-                            crate::digest::update_digest(&account.events_digest, &encoded);
-                    }
-                }
+                SystemEvent::WithdrawalFinalized { .. } => {}
                 SystemEvent::L1BlockObserved { .. } => {}
                 SystemEvent::MarketResolved {
                     market_id,
@@ -346,6 +343,9 @@ impl BlockSequencer {
                     }
                 }
                 SystemEvent::MarketGroupExtended { .. } => {}
+                // Key-op digests are folded at admission so a subsequent key
+                // op in the same block binds to the running digest.
+                SystemEvent::KeyRegistered { .. } | SystemEvent::KeyRevoked { .. } => {}
             }
         }
         // A terminal leaf remains addressable until the block carrying its

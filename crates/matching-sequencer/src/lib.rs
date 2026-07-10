@@ -70,6 +70,7 @@ pub use store::{
     DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
     DA_PROVIDER_REFS_ENCODING_BYTES,
 };
+pub use sybil_verifier::{KeyOpAuth, KeyRecord};
 pub use system_event::SystemEvent;
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)

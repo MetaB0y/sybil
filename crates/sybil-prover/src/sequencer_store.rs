@@ -70,7 +70,51 @@ pub async fn collect_state_transition_proof_job(
         });
     }
 
-    Ok(StateTransitionProofJob::new(witness, state_leaf_proofs))
+    let mut pre_state_leaf_proofs = Vec::new();
+    if let Some(previous) = &witness.previous_header {
+        let pre_slot = root.slot.inactive();
+        let pre_root = store
+            .state_qmdb_root(pre_slot)
+            .await
+            .map_err(|error| SequencerStoreWitgenError::Persistence(error.to_string()))?;
+        if pre_root.root != previous.state_root {
+            return Err(SequencerStoreWitgenError::StateRootMismatch);
+        }
+        let pre_leaves =
+            state_schema::state_root_leaves(&witness.pre_state, &witness.pre_state_sidecar);
+        pre_state_leaf_proofs.reserve(pre_leaves.len());
+        for (index, (key, value)) in pre_leaves.iter().enumerate() {
+            let proof = store
+                .state_qmdb_leaf_proof(pre_slot, key)
+                .await
+                .map_err(|error| SequencerStoreWitgenError::Persistence(error.to_string()))?
+                .ok_or_else(|| {
+                    SequencerStoreWitgenError::ProofUnavailable(format!(
+                        "missing pre-state qMDB leaf proof at sorted leaf index {index}"
+                    ))
+                })?;
+            if proof.root != previous.state_root || proof.slot != pre_slot {
+                return Err(SequencerStoreWitgenError::ProofRootMismatch { index });
+            }
+            if &proof.leaf_key != key || &proof.leaf_value != value {
+                return Err(SequencerStoreWitgenError::WitnessLeafMismatch { index });
+            }
+            if !proof.verify() {
+                return Err(SequencerStoreWitgenError::NativeProofFailed { index });
+            }
+            pre_state_leaf_proofs.push(StateTransitionStateLeafProof {
+                key: key.clone(),
+                value: value.clone(),
+                proof: proof.proof_parts(),
+            });
+        }
+    }
+
+    Ok(StateTransitionProofJob::new(
+        witness,
+        state_leaf_proofs,
+        pre_state_leaf_proofs,
+    ))
 }
 
 pub async fn build_state_transition_guest_input_from_store(
@@ -167,6 +211,23 @@ mod tests {
             sybil_zk::verify_state_transition_input(&input),
             Ok(sybil_zk::state_transition_public_input_hash(
                 &input.public_inputs
+            ))
+        );
+
+        let next = sequencer.produce_block(vec![], 2_000);
+        store
+            .save_block_with_witness(sequencer.snapshot(), &next.witness)
+            .await
+            .unwrap();
+        let next_job = collect_state_transition_proof_job(&store, next.witness)
+            .await
+            .unwrap();
+        assert!(!next_job.pre_state_leaf_proofs.is_empty());
+        let next_input = build_state_transition_guest_input(next_job).unwrap();
+        assert_eq!(
+            sybil_zk::verify_state_transition_input(&next_input),
+            Ok(sybil_zk::state_transition_public_input_hash(
+                &next_input.public_inputs
             ))
         );
     }

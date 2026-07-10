@@ -1253,6 +1253,15 @@ async fn import_witness_drill_restores_head_and_produces_children() {
         oracle.clone(),
         config.clone(),
     );
+    let signing_key =
+        <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+        );
+    seq.register_pubkey(
+        fill_buyer,
+        crate::crypto::PublicKey(*signing_key.verifying_key()),
+    )
+    .unwrap();
 
     let opening_deposit = next_l1_deposit_for(&seq, bridge_account, 50_000);
     seq.ingest_l1_deposit(opening_deposit).unwrap();
@@ -1468,18 +1477,13 @@ async fn import_witness_drill_restores_head_and_produces_children() {
     assert_eq!(restored.bridge_state.withdrawals.len(), summary.withdrawals);
     assert_eq!(restored.genesis_hash, summary.genesis_hash);
 
-    let signing_key =
-        <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
-            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
-        );
-    let mut signed_seq =
+    let signed_seq =
         BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
-    signed_seq
-        .register_pubkey(
-            fill_buyer,
-            crate::crypto::PublicKey(*signing_key.verifying_key()),
-        )
-        .unwrap();
+    assert_eq!(
+        signed_seq.lookup_pubkey(&crate::crypto::PublicKey(*signing_key.verifying_key())),
+        Some(fill_buyer),
+        "witness import must rebuild the active signing-key registry"
+    );
     let signed_handle = crate::actor::SequencerHandle::spawn(signed_seq);
     let signed = crate::crypto::sign_order(
         &outcome_buy(&markets, 0, active_b, 0, 400_000_000, 1),

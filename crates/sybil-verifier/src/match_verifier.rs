@@ -620,6 +620,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state: vec![],
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),

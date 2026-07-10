@@ -631,7 +631,9 @@ impl AnalyticsState {
                 SystemEvent::WithdrawalFinalized { .. }
                 | SystemEvent::L1BlockObserved { .. }
                 | SystemEvent::OrderCancelled { .. }
-                | SystemEvent::MarketGroupExtended { .. } => {}
+                | SystemEvent::MarketGroupExtended { .. }
+                | SystemEvent::KeyRegistered { .. }
+                | SystemEvent::KeyRevoked { .. } => {}
             }
         }
     }

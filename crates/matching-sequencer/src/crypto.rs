@@ -134,6 +134,7 @@ pub struct AuthenticatedKeyRevocation {
     pub target_pubkey: Vec<u8>,
     pub nonce: u64,
     pub signer: PublicKey,
+    pub authorization: sybil_verifier::KeyOpAuth,
 }
 
 /// A signed request to register a NEW signing key on an account (SYB-229).
@@ -163,6 +164,7 @@ pub struct AuthenticatedKeyRegistration {
     pub scope: KeyScope,
     pub nonce: u64,
     pub signer: PublicKey,
+    pub authorization: sybil_verifier::KeyOpAuth,
 }
 
 /// A signed request to create a read-scoped bearer API key (SYB-60).

@@ -429,6 +429,18 @@ pub enum SystemEventResponse {
         group_id: u64,
         market_id: u32,
     },
+    KeyRegistered {
+        account_id: u64,
+        public_key_hex: String,
+        auth_scheme: u8,
+        capability_mask: u32,
+    },
+    KeyRevoked {
+        account_id: u64,
+        public_key_hex: String,
+        auth_scheme: u8,
+        capability_mask: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

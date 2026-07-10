@@ -1612,6 +1612,16 @@ async fn signed_sell_order_creates_pending_resting_order() {
 
     post_json(app.clone(), "/v1/markets", json!({ "name": "Test" })).await;
 
+    let key = new_signing_key();
+    let public_key_hex = to_hex(key.verifying_key().to_sec1_point(true).as_bytes());
+    let (status, _) = post_json(
+        app.clone(),
+        &format!("/v1/accounts/{}/keys", seller),
+        json!({ "public_key_hex": public_key_hex }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     post_json(
         app.clone(),
         "/v1/orders",
@@ -1631,16 +1641,6 @@ async fn signed_sell_order_creates_pending_resting_order() {
     )
     .await;
     handle.produce_block().await.unwrap();
-
-    let key = new_signing_key();
-    let public_key_hex = to_hex(key.verifying_key().to_sec1_point(true).as_bytes());
-    let (status, _) = post_json(
-        app.clone(),
-        &format!("/v1/accounts/{}/keys", seller),
-        json!({ "public_key_hex": public_key_hex }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
 
     let genesis_hash = ensure_genesis_hash(&handle).await;
     let payload = signed_sell_yes_payload(0, 550_000_000, 2, 1, genesis_hash, &key);

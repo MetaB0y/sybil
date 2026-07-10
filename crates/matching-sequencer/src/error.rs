@@ -161,6 +161,14 @@ pub enum SequencerError {
     /// A public key is already registered to an account.
     #[error("public key already registered to an account")]
     AccountAlreadyRegistered,
+    /// First keys are validity-bound to the account-creation event.
+    #[error(
+        "the first signing key must be attached before the account's creation block is sealed"
+    )]
+    FirstKeyMustBeInitial,
+    /// Per-account validity key cap reached.
+    #[error("account signing-key limit reached")]
+    SigningKeyLimit,
     /// The signing key targeted for revocation is not registered (SYB-60).
     #[error("signing key not found")]
     KeyNotFound,

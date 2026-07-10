@@ -13,6 +13,8 @@ pub(super) fn bridge_block_data(
                 withdrawal_leaves.push(withdrawal.clone());
             }
             SystemEvent::CreateAccount { .. }
+            | SystemEvent::KeyRegistered { .. }
+            | SystemEvent::KeyRevoked { .. }
             | SystemEvent::Deposit { .. }
             | SystemEvent::WithdrawalRefunded { .. }
             | SystemEvent::WithdrawalFinalized { .. }
@@ -139,9 +141,11 @@ pub(super) fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
         SystemEvent::CreateAccount {
             account_id,
             initial_balance,
+            initial_keys,
         } => SystemEventWitness::CreateAccount {
             account_id: account_id.0,
             initial_balance: *initial_balance,
+            initial_keys: initial_keys.clone(),
         },
         SystemEvent::Deposit { account_id, amount } => SystemEventWitness::Deposit {
             account_id: account_id.0,
@@ -233,6 +237,24 @@ pub(super) fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
             group_id: *group_id,
             market_id: *market_id,
         },
+        SystemEvent::KeyRegistered {
+            account_id,
+            key,
+            authorization,
+        } => SystemEventWitness::KeyRegistered {
+            account_id: account_id.0,
+            key: *key,
+            authorization: authorization.clone(),
+        },
+        SystemEvent::KeyRevoked {
+            account_id,
+            key,
+            authorization,
+        } => SystemEventWitness::KeyRevoked {
+            account_id: account_id.0,
+            key: *key,
+            authorization: authorization.clone(),
+        },
     }
 }
 
@@ -275,6 +297,8 @@ impl BlockSequencer {
             .filter_map(|event| match event {
                 SystemEvent::L1Deposit { deposit, .. } => Some(l1_deposit_witness(deposit)),
                 SystemEvent::CreateAccount { .. }
+                | SystemEvent::KeyRegistered { .. }
+                | SystemEvent::KeyRevoked { .. }
                 | SystemEvent::Deposit { .. }
                 | SystemEvent::WithdrawalCreated { .. }
                 | SystemEvent::WithdrawalRefunded { .. }
@@ -330,6 +354,7 @@ impl BlockSequencer {
             pre_state,
             post_system_state,
             post_state: post_state.into_snapshots(),
+            account_keys: account_key_sets(&self.accounts, &self.pubkey_registry),
             state_sidecar,
             pre_state_sidecar,
             resolved_markets,
@@ -337,4 +362,25 @@ impl BlockSequencer {
 
         WitnessArtifacts { header, witness }
     }
+}
+
+fn account_key_sets(
+    accounts: &AccountStore,
+    registry: &HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
+) -> Vec<(u64, Vec<sybil_verifier::KeyRecord>)> {
+    let mut sets = Vec::new();
+    for (account_id, _) in accounts.iter() {
+        let mut keys: Vec<_> = registry
+            .iter()
+            .filter(|(_, registered)| registered.account_id == *account_id)
+            .map(|(pubkey, registered)| crate::digest::key_record(pubkey, registered))
+            .collect();
+        if keys.is_empty() {
+            continue;
+        }
+        keys.sort_by_key(sybil_verifier::KeyRecord::canonical_sort_key);
+        sets.push((account_id.0, keys));
+    }
+    sets.sort_by_key(|(account_id, _)| *account_id);
+    sets
 }

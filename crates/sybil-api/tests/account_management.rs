@@ -23,7 +23,7 @@ use matching_sequencer::crypto::{
     canonical_profile_update_bytes,
 };
 use matching_sequencer::{
-    AccountAuthScheme, AccountId, AuthenticatedKeyRegistration, KeyScope, PublicKey,
+    AccountAuthScheme, AccountId, AuthenticatedKeyRegistration, KeyOpAuth, KeyScope, PublicKey,
     SequencerHandle,
 };
 
@@ -473,6 +473,12 @@ async fn webauthn_authenticated_register_registers_and_burns_nonce() {
         scope: KeyScope::Agent,
         nonce: 5,
         signer: signer.clone(),
+        authorization: KeyOpAuth::WebAuthn {
+            signer_pubkey: signer.compressed_bytes().try_into().unwrap(),
+            authenticator_data: vec![],
+            client_data_json: vec![],
+            signature: [0; 64],
+        },
     };
 
     handle.register_key_authenticated(intent()).await.unwrap();
@@ -500,6 +506,12 @@ async fn webauthn_authenticated_register_registers_and_burns_nonce() {
         scope: KeyScope::Agent,
         nonce: 5,
         signer: signer.clone(),
+        authorization: KeyOpAuth::WebAuthn {
+            signer_pubkey: signer.compressed_bytes().try_into().unwrap(),
+            authenticator_data: vec![],
+            client_data_json: vec![],
+            signature: [0; 64],
+        },
     };
     let err = handle.register_key_authenticated(replay).await;
     assert!(err.is_err(), "replayed authenticated nonce must be refused");

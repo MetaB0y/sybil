@@ -145,6 +145,7 @@ mod tests {
             pre_state: Vec::new(),
             post_system_state: Vec::new(),
             post_state: Vec::new(),
+            account_keys: vec![],
             state_sidecar: StateSidecarSnapshot::default(),
             pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: Vec::new(),

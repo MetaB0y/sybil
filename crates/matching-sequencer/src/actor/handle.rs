@@ -1165,6 +1165,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use sybil_oracle::{AdminOracle, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
+    use sybil_verifier::SystemEventWitness;
 
     static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -1737,6 +1738,7 @@ mod tests {
             SystemEvent::CreateAccount {
                 account_id,
                 initial_balance,
+                ..
             } => {
                 assert_eq!(*account_id, account.id);
                 assert_eq!(*initial_balance, 50 * NANOS_PER_DOLLAR as i64);
@@ -1762,6 +1764,13 @@ mod tests {
             ..SequencerConfig::default()
         };
         let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
+        let cancel_signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        baseline
+            .register_pubkey(aid, PublicKey(*cancel_signing_key.verifying_key()))
+            .unwrap();
         baseline.produce_block(Vec::new(), 1);
         store.save_block(baseline.snapshot()).await.unwrap();
 
@@ -1783,7 +1792,10 @@ mod tests {
                 &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
             );
         let pubkey = PublicKey(*signing_key.verifying_key());
-        handle.register_pubkey(aid, pubkey.clone()).await.unwrap();
+        handle
+            .register_pubkey(created.id, pubkey.clone())
+            .await
+            .unwrap();
 
         let plain_market = handle
             .create_market("plain wal market".to_string())
@@ -1856,7 +1868,13 @@ mod tests {
         let pending = handle.get_pending_orders(Some(aid)).await.unwrap();
         assert_eq!(pending.len(), 1);
         let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
-        let signed_cancel = sign_cancel(aid, pending[0].order_id, 1, genesis_hash, &signing_key);
+        let signed_cancel = sign_cancel(
+            aid,
+            pending[0].order_id,
+            1,
+            genesis_hash,
+            &cancel_signing_key,
+        );
         handle.cancel_signed_order(signed_cancel).await.unwrap();
 
         let assert_replayed = |restored_seq: &BlockSequencer| {
@@ -1871,7 +1889,7 @@ mod tests {
             );
             assert_eq!(
                 restored_seq.lookup_pubkey(&pubkey),
-                Some(aid),
+                Some(created.id),
                 "pubkey registration was acknowledged but not replayed after restore"
             );
             assert!(
@@ -2652,7 +2670,7 @@ mod tests {
             block_interval: Duration::from_secs(60),
             ..SequencerConfig::default()
         };
-        let (mut sequencer, account_id) = make_test_sequencer_with_config(config.clone());
+        let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
         sequencer.produce_block(Vec::new(), 1);
         store.save_block(sequencer.snapshot()).await.unwrap();
 
@@ -2660,6 +2678,7 @@ mod tests {
         let sequencer =
             BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+        let account_id = handle.create_account(0).await.unwrap().id;
 
         let first_key =
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
@@ -2683,8 +2702,8 @@ mod tests {
         let pending_restore = store.load_state().await.unwrap().unwrap();
         assert_eq!(
             pending_restore.control_plane_log.len(),
-            1,
-            "the rejected racing bootstrap must never enter the control-plane WAL"
+            2,
+            "only CreateAccount + the accepted bootstrap may enter the control-plane WAL"
         );
         let replayed =
             BlockSequencer::restore(pending_restore, Arc::new(AdminOracle::new()), config);
@@ -2752,6 +2771,87 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[tokio::test]
+    async fn key_register_revoke_events_survive_blocks_and_store_restore() {
+        let path = temp_store_path("witness-v6-key-ops");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(600),
+            ..SequencerConfig::default()
+        };
+        let (sequencer, _) = make_test_sequencer_with_config(config.clone());
+        let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+        let account = handle.create_account(0).await.unwrap();
+
+        let primary =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        handle
+            .register_pubkey(account.id, PublicKey(*primary.verifying_key()))
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let agent = <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+        );
+        let signed_register = crate::crypto::sign_key_registration(
+            account.id,
+            PublicKey(*agent.verifying_key()),
+            AccountAuthScheme::RawP256,
+            Some("restore-agent".to_string()),
+            crate::crypto::KeyScope::Agent,
+            1,
+            genesis_hash,
+            &primary,
+        );
+        handle.register_key_signed(signed_register).await.unwrap();
+        handle.produce_block().await.unwrap();
+        let register_witness = store.latest_block_witness().unwrap().unwrap();
+        assert!(matches!(
+            register_witness.system_events.as_slice(),
+            [SystemEventWitness::KeyRegistered { account_id, .. }] if *account_id == account.id.0
+        ));
+        assert!(sybil_verifier::verify_full(&register_witness, false).valid);
+
+        let signed_revoke = crate::crypto::sign_key_revocation(
+            account.id,
+            primary
+                .verifying_key()
+                .to_sec1_point(true)
+                .as_bytes()
+                .to_vec(),
+            2,
+            genesis_hash,
+            &agent,
+        );
+        handle
+            .revoke_signing_key_signed(signed_revoke)
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+        let revoke_witness = store.latest_block_witness().unwrap().unwrap();
+        assert!(matches!(
+            revoke_witness.system_events.as_slice(),
+            [SystemEventWitness::KeyRevoked { account_id, .. }] if *account_id == account.id.0
+        ));
+        assert!(sybil_verifier::verify_full(&revoke_witness, false).valid);
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let mut restored_sequencer =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+        let restored_keys = restored_sequencer.signing_keys_for_account(account.id);
+        assert_eq!(restored_keys.len(), 1);
+        assert_eq!(
+            restored_keys[0].0,
+            agent.verifying_key().to_sec1_point(true).as_bytes()
+        );
+        let child = restored_sequencer.produce_block(Vec::new(), 4_000);
+        assert!(sybil_verifier::verify_full(&child.witness, false).valid);
     }
 
     #[tokio::test]

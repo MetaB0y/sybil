@@ -18,6 +18,7 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
         matching_sequencer::SystemEvent::CreateAccount {
             account_id,
             initial_balance,
+            ..
         } => SystemEventResponse::CreateAccount {
             account_id: account_id.0,
             initial_balance_nanos: *initial_balance,
@@ -107,6 +108,22 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
         } => SystemEventResponse::MarketGroupExtended {
             group_id: *group_id,
             market_id: market_id.0,
+        },
+        matching_sequencer::SystemEvent::KeyRegistered {
+            account_id, key, ..
+        } => SystemEventResponse::KeyRegistered {
+            account_id: account_id.0,
+            public_key_hex: hex::encode(key.pubkey_sec1),
+            auth_scheme: key.auth_scheme,
+            capability_mask: key.capability_mask,
+        },
+        matching_sequencer::SystemEvent::KeyRevoked {
+            account_id, key, ..
+        } => SystemEventResponse::KeyRevoked {
+            account_id: account_id.0,
+            public_key_hex: hex::encode(key.pubkey_sec1),
+            auth_scheme: key.auth_scheme,
+            capability_mask: key.capability_mask,
         },
     }
 }
