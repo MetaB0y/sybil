@@ -4,30 +4,25 @@
  * EventActivity — bottom-of-page section with an Activity / Comments switcher.
  *
  * Activity (default): matched-volume bars for ALL of the event's outcomes —
- * the rail's BatchHero mini-bars grown up. Batch granularity ("24B") reads the
- * live block ring (`by_market` volume + clearing price per outcome, REST
- * backfill like the activity page); longer ranges read per-market volume
- * candles. With all outcomes shown the bars stack per outcome, colored to
- * match the chart legend; filtering to one outcome switches to BatchHero's
- * price-move coloring. Range ↔ resolution pairs sit far inside each
- * resolution's server retention (1m→30d, 5m→180d, 1h→forever), so
- * `retention_min_bucket_ms` can never clip these views.
+ * the rail's BatchHero mini-bars grown up, reading per-market volume candles.
+ * With all outcomes shown the bars stack per outcome, colored to match the
+ * chart legend; filtering to one outcome switches to BatchHero's price-move
+ * coloring. Each range/resolution pair sits far inside that resolution's
+ * server retention (1m→30d, 5m→180d, 1h→forever), so `retention_min_bucket_ms`
+ * can never clip these views.
  *
  * Comments: no backend yet — the tab renders faded and floats the same "soon"
  * cursor tooltip as the markets page's empty categories (CategoryTabs).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FloatingTooltip } from "@/components/floating-tooltip";
 import { colorForOutcome } from "@/components/outcome-legend";
-import { api } from "@/lib/api/client";
-import type { components } from "@/lib/api/schema";
 import {
   formatAge,
   formatCentsPrecise,
   formatCompactDollars,
-  formatInt,
   parseNanos,
 } from "@/lib/format/nanos";
 import {
@@ -38,47 +33,71 @@ import {
   type PriceCandle,
   useEventCandles,
 } from "@/lib/market-detail/use-event-candles";
-import { selectLatestBlock, selectRecentBlocks, useStore } from "@/lib/store";
+import { selectLatestBlock, useStore } from "@/lib/store";
 
-type BlockResponse = components["schemas"]["BlockResponse"];
+type ActivityRange = "1H" | "6H" | "24H" | "ALL";
 
-type ActivityRange = "24B" | "1H" | "6H" | "24H" | "ALL";
+const RANGES: ActivityRange[] = ["1H", "6H", "24H", "ALL"];
 
-const RANGES: ActivityRange[] = ["24B", "1H", "6H", "24H", "ALL"];
+const DEFAULT_RANGE: ActivityRange = "24H";
 
-/** Bars in the batch-granularity view — matches the rail hero's window. */
-const BATCH_BAR_COUNT = 24;
+/**
+ * Most bars we'll draw. Wider windows don't truncate — `buildBars` folds
+ * consecutive buckets together until the count fits, so ALL always spans the
+ * whole chain (at a coarser bucket) instead of silently dropping its tail.
+ */
+const MAX_BARS = 180;
 
-/** Hard cap on rendered bars (ALL grows with the chain's age). */
-const MAX_BARS = 500;
+type RangeCfg = {
+  resolution: string;
+  resolutionMs: number;
+  /** Window length; null = every bucket the chain has (ALL). */
+  windowMs: number | null;
+  /** Where the time ticks sit across the plot, left → right. */
+  tickFractions: number[];
+};
 
-/** Candle resolution per range — the finest that keeps the bar count sane. */
-const CANDLE_CFG: Record<
-  Exclude<ActivityRange, "24B">,
-  { resolution: string; resolutionMs: number; windowMs: number | null }
-> = {
-  "1H": { resolution: "1m", resolutionMs: 60_000, windowMs: 3_600_000 },
-  "6H": { resolution: "5m", resolutionMs: 300_000, windowMs: 21_600_000 },
-  "24H": { resolution: "1h", resolutionMs: 3_600_000, windowMs: 86_400_000 },
-  ALL: { resolution: "1h", resolutionMs: 3_600_000, windowMs: null },
+const CANDLE_CFG: Record<ActivityRange, RangeCfg> = {
+  "1H": {
+    resolution: "1m",
+    resolutionMs: 60_000,
+    windowMs: 3_600_000,
+    tickFractions: [0, 0.25, 0.5, 0.75, 1],
+  },
+  "6H": {
+    resolution: "5m",
+    resolutionMs: 300_000,
+    windowMs: 21_600_000,
+    tickFractions: [0, 1 / 3, 2 / 3, 1],
+  },
+  "24H": {
+    resolution: "1h",
+    resolutionMs: 3_600_000,
+    windowMs: 86_400_000,
+    tickFractions: [0, 0.25, 0.5, 0.75, 1],
+  },
+  ALL: {
+    resolution: "1h",
+    resolutionMs: 3_600_000,
+    windowMs: null,
+    tickFractions: [0, 0.25, 0.5, 0.75, 1],
+  },
 };
 
 /** One outcome's slice of a bar. */
 type BarSegment = {
   marketId: number;
   volNanos: bigint;
-  /** Outcome's YES price at the end of the bar, null when it didn't clear. */
+  /** Outcome's YES price at the bar's close, null when it never cleared. */
   yesNanos: bigint | null;
-  /** YES move across the bar in percentage points, null when unknown. */
+  /** YES move across the bar in percentage points, null when it never cleared. */
   ppChange: number | null;
 };
 
 type ActivityBar = {
   key: string;
-  /** First tooltip line — "batch #N" or the candle bucket length. */
+  /** Tooltip's first line — the bar's bucket width ("1h bucket"). */
   title: string;
-  /** How the end-time line is labelled — batches "settled", buckets "ended". */
-  endedVerb: string;
   /** Bar end timestamp (ms) for the "ended N ago" tooltip line. */
   endMs: number;
   totalVolNanos: bigint;
@@ -88,80 +107,71 @@ type ActivityBar = {
 
 export function EventActivity({ marketId }: { marketId: number }) {
   const { group } = useEventGroup(marketId);
-  const [range, setRange] = useState<ActivityRange>("24B");
+  const [range, setRange] = useState<ActivityRange>(DEFAULT_RANGE);
+  // The range still on screen while `range`'s candles are in flight. Switching
+  // ranges then blurs the old chart out and the new one in (as the outcome swap
+  // does) instead of blanking to a spinner.
+  const [prevRange, setPrevRange] = useState<ActivityRange | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
 
-  const outcomes = useMemo(() => group?.outcomes ?? [], [group]);
-  const marketIds = useMemo(
-    () => outcomes.map((o) => o.marketId),
-    [outcomes],
-  );
+  const outcomes = group?.outcomes ?? [];
+  const marketIds = outcomes.map((o) => o.marketId);
+  const enabled = marketIds.length > 0;
 
-  const recentBlocks = useStore(selectRecentBlocks);
-  const latestBlock = useStore(selectLatestBlock);
-
-  // One-shot REST backfill of the block ring, same rationale as use-batches:
-  // WS replay is all-or-nothing, REST clamps to whatever the server holds and
-  // merges cleanly with the live tail via applyBlocks' dedupe.
-  const backfilled = useRef(false);
-  const [backfilling, setBackfilling] = useState(true);
-  useEffect(() => {
-    if (backfilled.current) return;
-    backfilled.current = true;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { data, error } = await api.GET("/v1/blocks", {
-          params: { query: { limit: BATCH_BAR_COUNT } },
-        });
-        if (cancelled || error || !data || data.length === 0) return;
-        useStore.getState().applyBlocks(data);
-      } finally {
-        if (!cancelled) setBackfilling(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const candleCfg = range === "24B" ? null : CANDLE_CFG[range];
-  const candles = useEventCandles(
-    marketIds,
-    candleCfg?.resolution ?? "1h",
-    candleCfg != null && marketIds.length > 0,
-  );
-
-  // "Now" for ago-labels and bucket padding — the newest committed batch, so
+  // "Now" for ago-labels and the bucket grid — the newest committed batch, so
   // the section shares the page's block clock (never Date.now() in render).
-  const nowMs = latestBlock?.timestamp_ms ?? 0;
+  const nowMs = useStore(selectLatestBlock)?.timestamp_ms ?? 0;
 
-  const bars = useMemo<ActivityBar[]>(() => {
-    if (outcomes.length === 0) return [];
-    return candleCfg == null
-      ? buildBatchBars(recentBlocks, outcomes)
-      : buildCandleBars(candles.byMarket, outcomes, candleCfg, nowMs);
-  }, [candleCfg, candles.byMarket, nowMs, outcomes, recentBlocks]);
+  const cfg = CANDLE_CFG[range];
+  const candles = useEventCandles(marketIds, cfg.resolution, enabled);
+
+  // The outgoing range's candles, served straight from the query cache (the
+  // fetch already happened) and parked as soon as the incoming range lands.
+  const prevCfg = prevRange != null ? CANDLE_CFG[prevRange] : cfg;
+  const prevCandles = useEventCandles(
+    marketIds,
+    prevCfg.resolution,
+    enabled && prevRange != null && candles.isPending,
+  );
+
+  // Ranges that share a resolution (24H and ALL both ride 1h) are a cache hit,
+  // so `isPending` is false and the swap is instant.
+  const showPrev = candles.isPending && prevRange != null;
+  const shownRange = showPrev ? prevRange : range;
+  const shownCfg = showPrev ? prevCfg : cfg;
+  const shownCandles = showPrev ? prevCandles : candles;
+
+  // Cheap enough to derive every render (outcomes × buckets ≈ 10³ ops) — and
+  // `byMarket` is a fresh Map each render, so a useMemo here would never hit.
+  const bars = enabled
+    ? buildBars(shownCandles.byMarket, outcomes, shownCfg, nowMs)
+    : [];
 
   // A single binary market has nothing to filter — it IS the one outcome, and
   // single-outcome bars use price-move coloring.
   const isMulti = group?.isMultiOutcome === true;
   const selectedId = isMulti ? selected : (group?.currentMarketId ?? null);
 
+  // Re-keying the chart on the drawn range restarts the focus-in animation.
+  const swapKey = `${shownRange}:${selectedId ?? "all"}`;
+  const swapping = showPrev && bars.length > 0;
+
+  function pickRange(next: ActivityRange) {
+    if (next === range) return;
+    // Hold whatever is on screen right now, not the requested range — a second
+    // click mid-load keeps the visible chart rather than an unloaded one.
+    setPrevRange(shownRange);
+    setRange(next);
+  }
+
   const empty =
     !group || outcomes.length === 0
       ? "loading activity…"
-      : candleCfg == null
-        ? bars.length === 0
-          ? backfilling
-            ? "loading batches…"
-            : "waiting for batches…"
-          : null
-        : bars.length === 0
-          ? candles.isPending
-            ? "loading volume history…"
-            : "no matched volume yet."
-          : null;
+      : bars.length === 0
+        ? shownCandles.isPending
+          ? "loading volume history…"
+          : "no matched volume yet."
+        : null;
 
   return (
     <section
@@ -173,7 +183,7 @@ export function EventActivity({ marketId }: { marketId: number }) {
         boxShadow: "var(--shadow-inset-top)",
         display: "flex",
         flexDirection: "column",
-        gap: "var(--space-3)",
+        gap: "var(--space-4)",
       }}
     >
       <div
@@ -185,16 +195,15 @@ export function EventActivity({ marketId }: { marketId: number }) {
           flexWrap: "wrap",
         }}
       >
+        <SectionTabs />
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "var(--space-3)",
-            minWidth: 0,
+            gap: "var(--space-2)",
             flexWrap: "wrap",
           }}
         >
-          <div className="eyebrow">activity</div>
           {isMulti && (
             <OutcomeFilter
               outcomes={outcomes}
@@ -202,54 +211,38 @@ export function EventActivity({ marketId }: { marketId: number }) {
               onChange={setSelected}
             />
           )}
+          <RangeTabs value={range} onChange={pickRange} />
         </div>
-        <SectionTabs />
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "var(--space-3)",
-          flexWrap: "wrap",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 9,
-            color: "var(--fg-4)",
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
-          {candleCfg == null
-            ? `last ${BATCH_BAR_COUNT} batches`
-            : range === "ALL"
-              ? `all time · ${candleCfg.resolution} buckets`
-              : `last ${range.toLowerCase()} · ${candleCfg.resolution} buckets`}
-          {selectedId != null
-            ? " · matched vol · price move"
-            : " · matched vol by outcome"}
-        </span>
-        <RangeTabs value={range} onChange={setRange} />
       </div>
 
       {empty != null ? (
         <Empty>{empty}</Empty>
       ) : (
-        <VolumeBars
-          bars={bars}
-          outcomes={outcomes}
-          selectedId={selectedId}
-          padTo={candleCfg == null ? BATCH_BAR_COUNT : 0}
-          nowMs={nowMs}
-        />
-      )}
-
-      {selectedId == null && isMulti && empty == null && (
-        <OutcomeKey outcomes={outcomes} />
+        <div
+          style={{
+            filter: swapping ? "blur(5px)" : undefined,
+            opacity: swapping ? 0.5 : 1,
+            transition:
+              "filter var(--dur-swap) var(--ease-standard), opacity var(--dur-swap) var(--ease-standard)",
+          }}
+        >
+          <div
+            key={swapKey}
+            style={{
+              animation:
+                "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
+            }}
+          >
+            <VolumeBars
+              bars={bars}
+              outcomes={outcomes}
+              selectedId={selectedId}
+              spanMs={shownCfg.windowMs}
+              tickFractions={shownCfg.tickFractions}
+            />
+            {selectedId == null && isMulti && <OutcomeKey outcomes={outcomes} />}
+          </div>
+        </div>
       )}
     </section>
   );
@@ -259,55 +252,27 @@ export function EventActivity({ marketId }: { marketId: number }) {
 /* Bar derivation                                                      */
 /* ------------------------------------------------------------------ */
 
-/**
- * Batch bars from the block ring — BatchHero's derivation widened to every
- * outcome. Price move compares against the previous batch that actually
- * cleared that outcome (batches skip a market with no crossing orders).
- */
-function buildBatchBars(
-  blocks: BlockResponse[],
-  outcomes: EventOutcome[],
-): ActivityBar[] {
-  const window = [...blocks.slice(0, BATCH_BAR_COUNT)].reverse();
-  const prevYes = new Map<number, bigint>();
-  return window.map((b) => {
-    let total = 0n;
-    const segments = outcomes.map((o) => {
-      const key = String(o.marketId);
-      const rawYes = b.clearing_prices_nanos?.[key]?.[0];
-      const yesNanos = rawYes == null ? null : parseNanos(rawYes);
-      const volNanos = parseNanos(b.by_market?.[key]?.volume_nanos ?? 0);
-      total += volNanos;
-      let ppChange: number | null = null;
-      if (yesNanos != null) {
-        const prev = prevYes.get(o.marketId);
-        if (prev != null) ppChange = Number(yesNanos - prev) / 1e7;
-        prevYes.set(o.marketId, yesNanos);
-      }
-      return { marketId: o.marketId, volNanos, yesNanos, ppChange };
-    });
-    return {
-      key: `b${b.height}`,
-      title: `batch #${formatInt(b.height)}`,
-      endedVerb: "settled",
-      endMs: b.timestamp_ms ?? 0,
-      totalVolNanos: total,
-      segments,
-    };
-  });
+/** Human bucket width — "5m", "1h", "6h", "1d". */
+function bucketLabel(ms: number): string {
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h`;
+  return `${Math.round(ms / 86_400_000)}d`;
 }
 
 /**
- * Candle bars on a contiguous bucket grid. Candles only exist for buckets a
- * market cleared in, so the grid is generated (window ranges from `nowMs`
- * back; ALL from the earliest bucket seen) and misses read as zero volume —
- * a quiet hour is a real data point, not a gap. Price move is the bucket's
- * own open→close.
+ * Bars on a contiguous bucket grid. Candles only exist for buckets a market
+ * cleared in, so the grid is generated (windowed ranges count back from the
+ * block clock; ALL starts at the earliest bucket seen) and misses read as zero
+ * volume — a quiet hour is a real data point, not a gap.
+ *
+ * When the grid is longer than `MAX_BARS`, consecutive buckets fold together
+ * by an integer factor: ALL keeps covering the whole chain, just at a coarser
+ * bucket. Volume sums; price move spans the group's first open → last close.
  */
-function buildCandleBars(
+function buildBars(
   byMarket: Map<number, PriceCandle[]>,
   outcomes: EventOutcome[],
-  cfg: { resolution: string; resolutionMs: number; windowMs: number | null },
+  cfg: RangeCfg,
   nowMs: number,
 ): ActivityBar[] {
   const indexed = new Map<number, Map<number, PriceCandle>>();
@@ -325,50 +290,69 @@ function buildCandleBars(
   if (latest === 0) return [];
 
   const res = cfg.resolutionMs;
-  // Grid head: the newest of block-clock / newest bucket, bucket-aligned —
+  // Grid head: the newer of block clock / newest bucket, bucket-aligned —
   // candles can momentarily lead the store's latest block on a fresh load.
   const head = Math.floor(Math.max(nowMs, latest) / res) * res;
   const start =
     cfg.windowMs != null
       ? head - (Math.floor(cfg.windowMs / res) - 1) * res
-      : earliest;
-  const count = Math.min(MAX_BARS, Math.floor((head - start) / res) + 1);
+      : Math.floor(earliest / res) * res;
+  const bucketCount = Math.max(1, Math.floor((head - start) / res) + 1);
+  const factor = Math.max(1, Math.ceil(bucketCount / MAX_BARS));
+  const groupMs = res * factor;
+  const groupCount = Math.ceil(bucketCount / factor);
+  const title = `${bucketLabel(groupMs)} bucket`;
 
   const bars: ActivityBar[] = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const bucketStart = head - i * res;
+  for (let g = 0; g < groupCount; g++) {
+    // Right-align the folding so the newest group always ends at `head`.
+    const groupEndIdx = bucketCount - 1 - g * factor;
+    const groupStartIdx = Math.max(0, groupEndIdx - factor + 1);
     let total = 0n;
-    const segments = outcomes.map((o) => {
-      const c = indexed.get(o.marketId)?.get(bucketStart);
-      const volNanos = c ? parseNanos(c.volume_nanos) : 0n;
-      total += volNanos;
-      const yesNanos = c ? parseNanos(c.close_yes_price_nanos) : null;
-      const ppChange = c
-        ? Number(
-            parseNanos(c.close_yes_price_nanos) -
-              parseNanos(c.open_yes_price_nanos),
-          ) / 1e7
-        : null;
-      return { marketId: o.marketId, volNanos, yesNanos, ppChange };
+
+    const segments = outcomes.map<BarSegment>((o) => {
+      const idx = indexed.get(o.marketId);
+      let vol = 0n;
+      let firstOpen: bigint | null = null;
+      let lastClose: bigint | null = null;
+      for (let i = groupStartIdx; i <= groupEndIdx; i++) {
+        const c = idx?.get(start + i * res);
+        if (!c) continue;
+        vol += parseNanos(c.volume_nanos);
+        if (firstOpen == null) firstOpen = parseNanos(c.open_yes_price_nanos);
+        lastClose = parseNanos(c.close_yes_price_nanos);
+      }
+      total += vol;
+      return {
+        marketId: o.marketId,
+        volNanos: vol,
+        yesNanos: lastClose,
+        ppChange:
+          firstOpen != null && lastClose != null
+            ? Number(lastClose - firstOpen) / 1e7
+            : null,
+      };
     });
+
     bars.push({
-      key: `c${bucketStart}`,
-      title: `${cfg.resolution} bucket`,
-      endedVerb: "ended",
-      endMs: bucketStart + res,
+      key: `c${start + groupEndIdx * res}`,
+      title,
+      endMs: start + groupEndIdx * res + res,
       totalVolNanos: total,
       segments,
     });
   }
-  return bars;
+  // Built newest-first above (so folding right-aligns); read left-to-right.
+  return bars.reverse();
 }
 
 /* ------------------------------------------------------------------ */
 /* Chart                                                               */
 /* ------------------------------------------------------------------ */
 
-const CHART_H = 120;
-const BAR_MAX_H = CHART_H - 8;
+const CHART_H = 132;
+const Y_GUTTER = 46;
+const MIN_BAR_H = 3;
 
 /** ±N.N pp with an explicit sign (true minus glyph) — as BatchHero. */
 function formatPp(pp: number): string {
@@ -384,19 +368,32 @@ function moveColor(ppChange: number | null): string {
   return ppChange > 0 ? "var(--yes)" : "var(--no)";
 }
 
+/** Elapsed span as an axis label — "45m ago", "12h ago", "3d ago", "now". */
+function formatSpanAgo(ms: number): string {
+  if (ms < 60_000) return "now";
+  const minutes = ms / 60_000;
+  if (minutes < 60) return `${Math.round(minutes)}m ago`;
+  const hours = ms / 3_600_000;
+  if (hours < 48) {
+    const rounded = hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours);
+    return `${rounded}h ago`;
+  }
+  return `${Math.round(ms / 86_400_000)}d ago`;
+}
+
 function VolumeBars({
   bars,
   outcomes,
   selectedId,
-  /** Left-pad with placeholder stubs up to this many bars (batch mode). */
-  padTo,
-  nowMs,
+  /** Fixed window length; null = ALL, where the span is whatever we drew. */
+  spanMs,
+  tickFractions,
 }: {
   bars: ActivityBar[];
   outcomes: EventOutcome[];
   selectedId: number | null;
-  padTo: number;
-  nowMs: number;
+  spanMs: number | null;
+  tickFractions: number[];
 }) {
   const [hover, setHover] = useState<{ key: string; rect: DOMRect } | null>(
     null,
@@ -418,113 +415,185 @@ function VolumeBars({
     if (v > max) max = v;
   }
 
-  const padCount = Math.max(0, padTo - bars.length);
-  const oldest = bars[0];
+  // Bars thin out as the window widens; keep a hairline gap so they stay
+  // individually pickable instead of merging into a filled area.
+  const gap = bars.length <= 48 ? 3 : bars.length <= 100 ? 2 : 1;
+
+  const first = bars[0];
+  const last = bars[bars.length - 1];
+  const axisSpanMs =
+    spanMs ?? (first && last ? Math.max(0, last.endMs - first.endMs) : 0);
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          gap: 2,
-          height: CHART_H,
-          position: "relative",
-          borderBottom: "1px solid var(--border-1)",
-        }}
-      >
-        {Array.from({ length: padCount }).map((_, i) => (
+      <div style={{ display: "flex" }}>
+        {/* Y axis — peak and midpoint, so a bar's height reads as a $ number. */}
+        <div
+          style={{
+            width: Y_GUTTER,
+            height: CHART_H,
+            position: "relative",
+            flexShrink: 0,
+            fontFamily: "var(--font-mono)",
+            fontSize: 9,
+            color: "var(--fg-4)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {max > 0n && (
+            <>
+              <span style={{ position: "absolute", top: -4, right: 8 }}>
+                {formatCompactDollars(max)}
+              </span>
+              <span
+                style={{ position: "absolute", top: CHART_H / 2 - 5, right: 8 }}
+              >
+                {formatCompactDollars(max / 2n)}
+              </span>
+            </>
+          )}
+          <span style={{ position: "absolute", bottom: -5, right: 8 }}>$0</span>
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0, position: "relative", height: CHART_H }}>
+          {/* Gridlines at peak + midpoint, behind the bars. */}
+          {max > 0n &&
+            [0, 0.5].map((t) => (
+              <div
+                key={t}
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: `${t * 100}%`,
+                  borderTop: "1px dashed color-mix(in srgb, var(--fg-4) 18%, transparent)",
+                }}
+              />
+            ))}
           <div
-            key={`empty-${i}`}
+            aria-hidden
             style={{
-              flex: "1 1 0",
-              alignSelf: "flex-end",
-              height: 3,
-              background: "color-mix(in srgb, var(--fg-4) 12%, transparent)",
-              borderRadius: 1,
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              borderTop: "1px solid var(--border-1)",
             }}
           />
-        ))}
-        {bars.map((bar) => {
-          const isHover = hover?.key === bar.key;
-          const barVol = volOf(bar);
-          const ratio =
-            max === 0n ? 0 : Number((barVol * 1000n) / max) / 1000;
-          const barH = Math.max(3, ratio * BAR_MAX_H);
 
-          // Topmost-first stack: with one outcome selected a single segment
-          // colored by price move; otherwise the reverse of outcome order so
-          // the favourite sits on the baseline.
-          const stack: { color: string; h: number }[] = [];
-          if (selectedId != null) {
-            const seg = bar.segments.find((s) => s.marketId === selectedId);
-            stack.push({ color: moveColor(seg?.ppChange ?? null), h: barH });
-          } else if (barVol > 0n) {
-            for (const seg of bar.segments) {
-              if (seg.volNanos <= 0n) continue;
-              stack.unshift({
-                color: colorOf.get(seg.marketId) ?? "var(--fg-4)",
-                h: Number((seg.volNanos * 1000n) / barVol) / 1000 * barH,
-              });
-            }
-          } else {
-            stack.push({ color: moveColor(null), h: barH });
-          }
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "flex-end",
+              gap,
+            }}
+          >
+            {bars.map((bar) => {
+              const isHover = hover?.key === bar.key;
+              const dimmed = hover != null && !isHover;
+              const barVol = volOf(bar);
+              const ratio = max === 0n ? 0 : Number((barVol * 1000n) / max) / 1000;
+              const barH = Math.max(MIN_BAR_H, ratio * CHART_H);
 
-          return (
-            <div
-              key={bar.key}
-              onMouseEnter={(e) =>
-                setHover({
-                  key: bar.key,
-                  rect: e.currentTarget.getBoundingClientRect(),
-                })
+              // Topmost-first stack: with one outcome selected a single segment
+              // colored by price move; otherwise the reverse of outcome order so
+              // the favourite sits on the baseline.
+              const stack: { color: string; h: number }[] = [];
+              if (barVol === 0n) {
+                stack.push({
+                  color: "color-mix(in srgb, var(--fg-4) 14%, transparent)",
+                  h: barH,
+                });
+              } else if (selectedId != null) {
+                const seg = bar.segments.find((s) => s.marketId === selectedId);
+                stack.push({ color: moveColor(seg?.ppChange ?? null), h: barH });
+              } else {
+                for (const seg of bar.segments) {
+                  if (seg.volNanos <= 0n) continue;
+                  stack.unshift({
+                    color: colorOf.get(seg.marketId) ?? "var(--fg-4)",
+                    h: (Number((seg.volNanos * 1000n) / barVol) / 1000) * barH,
+                  });
+                }
               }
-              onMouseLeave={() =>
-                setHover((cur) => (cur?.key === bar.key ? null : cur))
-              }
-              style={{
-                flex: "1 1 0",
-                height: "100%",
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "flex-end",
-                position: "relative",
-                cursor: "default",
-              }}
-            >
-              {stack.map((seg, i) => (
+
+              return (
                 <div
-                  key={i}
-                  style={{
-                    width: "100%",
-                    height: seg.h,
-                    background: seg.color,
-                    opacity: isHover ? 1 : 0.8,
-                    borderRadius: i === 0 ? "1px 1px 0 0" : 0,
-                    transition: "opacity 80ms linear",
+                  key={bar.key}
+                  onMouseEnter={(e) => {
+                    // Anchor the tooltip to the BAR, not the column: it rides the
+                    // bar's top edge, so a tall bar's readout sits high and a
+                    // quiet bucket's sits near the baseline.
+                    const col = e.currentTarget.getBoundingClientRect();
+                    setHover({
+                      key: bar.key,
+                      rect: new DOMRect(
+                        col.left,
+                        col.bottom - barH,
+                        col.width,
+                        barH,
+                      ),
+                    });
                   }}
-                />
-              ))}
-              {isHover && hover && (
-                <ActivityBarTooltip
-                  bar={bar}
-                  anchor={hover.rect}
-                  outcomes={outcomes}
-                  colorOf={colorOf}
-                  selectedId={selectedId}
-                  endedAgoMs={nowMs > 0 ? Math.max(0, nowMs - bar.endMs) : null}
-                />
-              )}
-            </div>
-          );
-        })}
+                  onMouseLeave={() =>
+                    setHover((cur) => (cur?.key === bar.key ? null : cur))
+                  }
+                  style={{
+                    flex: "1 1 0",
+                    minWidth: 0,
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "flex-end",
+                    position: "relative",
+                    cursor: "default",
+                    background: isHover
+                      ? "color-mix(in srgb, var(--fg-4) 8%, transparent)"
+                      : "transparent",
+                    borderRadius: 2,
+                    transition: "background 80ms linear",
+                  }}
+                >
+                  {stack.map((seg, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        width: "100%",
+                        height: seg.h,
+                        background: seg.color,
+                        // The hovered bar reads at full strength while its
+                        // neighbours recede — pointing at a bar isolates it.
+                        opacity: isHover ? 1 : dimmed ? 0.3 : 0.85,
+                        borderRadius: i === 0 ? "1px 1px 0 0" : 0,
+                        transition: "opacity 80ms linear",
+                      }}
+                    />
+                  ))}
+                  {isHover && hover && (
+                    <ActivityBarTooltip
+                      bar={bar}
+                      anchor={hover.rect}
+                      outcomes={outcomes}
+                      colorOf={colorOf}
+                      selectedId={selectedId}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
+
+      {/* Time axis — interim ticks so a bar's position reads as a moment. */}
       <div
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginTop: 4,
+          marginLeft: Y_GUTTER,
+          position: "relative",
+          height: 18,
           fontFamily: "var(--font-mono)",
           fontSize: 9,
           color: "var(--fg-4)",
@@ -532,13 +601,39 @@ function VolumeBars({
           letterSpacing: "0.04em",
         }}
       >
-        <span>
-          {oldest && nowMs > 0
-            ? `${formatAge(Math.max(0, nowMs - oldest.endMs))} ago`
-            : ""}
-        </span>
-        <span>{max > 0n ? `peak ${formatCompactDollars(max)}` : ""}</span>
-        <span>now</span>
+        {tickFractions.map((f) => {
+          const atStart = f === 0;
+          const atEnd = f === 1;
+          const label = atEnd ? "now" : formatSpanAgo(axisSpanMs * (1 - f));
+          return (
+            <div
+              key={f}
+              style={{
+                position: "absolute",
+                top: 0,
+                ...(atStart
+                  ? { left: 0 }
+                  : atEnd
+                    ? { right: 0 }
+                    : { left: `${f * 100}%`, transform: "translateX(-50%)" }),
+                display: "flex",
+                flexDirection: "column",
+                alignItems: atStart ? "flex-start" : atEnd ? "flex-end" : "center",
+                gap: 3,
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 1,
+                  height: 3,
+                  background: "color-mix(in srgb, var(--fg-4) 35%, transparent)",
+                }}
+              />
+              <span style={{ whiteSpace: "nowrap" }}>{label}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -553,22 +648,20 @@ function ActivityBarTooltip({
   outcomes,
   colorOf,
   selectedId,
-  endedAgoMs,
 }: {
   bar: ActivityBar;
   anchor: DOMRect;
   outcomes: EventOutcome[];
   colorOf: Map<number, string>;
   selectedId: number | null;
-  endedAgoMs: number | null;
 }) {
+  // Ago is measured against the newest bar's end, not the wall clock, so the
+  // hovered bucket reads relative to the same block clock the chart is drawn on.
+  const nowMs = useStore(selectLatestBlock)?.timestamp_ms ?? 0;
   const labelOf = new Map(outcomes.map((o) => [o.marketId, o.shortLabel]));
+  const agoMs = nowMs > 0 ? Math.max(0, nowMs - bar.endMs) : null;
   const endedLabel =
-    endedAgoMs == null
-      ? "—"
-      : endedAgoMs < 5000
-        ? "just now"
-        : `${formatAge(endedAgoMs)} ago`;
+    agoMs == null ? "—" : agoMs < 60_000 ? "just now" : `${formatAge(agoMs)} ago`;
 
   const selected =
     selectedId == null
@@ -601,26 +694,34 @@ function ActivityBarTooltip({
     </div>
   );
 
+  const estHeight = 58 + (selected ? 34 : shown.length * 16 + (overflow > 0 ? 14 : 0));
+
   return (
-    <FloatingTooltip anchor={anchor} width={210} align="center" estHeight={140}>
+    <FloatingTooltip
+      anchor={anchor}
+      width={206}
+      align="center"
+      estHeight={estHeight}
+    >
       <div
         style={{
           whiteSpace: "nowrap",
           background: "var(--surface-3)",
-          border: "1px solid var(--border-1)",
+          border: "1px solid var(--border-2)",
           borderRadius: 6,
           boxShadow: "var(--shadow-popover)",
-          padding: "6px 8px",
+          padding: "7px 9px",
           display: "flex",
           flexDirection: "column",
           gap: 3,
           fontFamily: "var(--font-mono)",
           fontSize: 10,
           fontVariantNumeric: "tabular-nums",
+          animation: "sybil-fade-in var(--dur-fast) var(--ease-standard)",
         }}
       >
         <span style={{ color: "var(--fg-3)" }}>{bar.title}</span>
-        {kv(bar.endedVerb, endedLabel)}
+        {kv("ended", endedLabel)}
         {kv(
           "matched vol",
           formatCompactDollars(selected ? selected.volNanos : bar.totalVolNanos),
@@ -643,6 +744,16 @@ function ActivityBarTooltip({
               ppColor,
             )}
           </>
+        )}
+        {shown.length > 0 && (
+          <div
+            aria-hidden
+            style={{
+              height: 1,
+              background: "var(--border-1)",
+              margin: "2px 0 1px",
+            }}
+          />
         )}
         {shown.map((seg) => (
           <div
@@ -677,7 +788,7 @@ function ActivityBarTooltip({
                   color: "var(--fg-2)",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
-                  maxWidth: 110,
+                  maxWidth: 108,
                 }}
               >
                 {labelOf.get(seg.marketId) ?? seg.marketId}
@@ -835,7 +946,6 @@ function RangeTabs({
             key={r}
             type="button"
             onClick={() => onChange(r)}
-            title={r === "24B" ? `last ${BATCH_BAR_COUNT} batches` : undefined}
             style={{
               padding: "4px 9px",
               borderRadius: 3,
@@ -864,6 +974,7 @@ function OutcomeKey({ outcomes }: { outcomes: EventOutcome[] }) {
         display: "flex",
         flexWrap: "wrap",
         gap: "4px 14px",
+        marginTop: "var(--space-3)",
         fontFamily: "var(--font-mono)",
         fontSize: 10,
         color: "var(--fg-3)",
@@ -1020,7 +1131,7 @@ function OutcomeFilter({
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",
-            left: 0,
+            right: 0,
             zIndex: 30,
             minWidth: 200,
             background: "var(--surface-2)",
@@ -1127,7 +1238,7 @@ function Empty({ children }: { children: React.ReactNode }) {
   return (
     <div
       style={{
-        padding: "24px 0",
+        padding: "48px 0",
         color: "var(--fg-4)",
         fontFamily: "var(--font-mono)",
         fontSize: 12,

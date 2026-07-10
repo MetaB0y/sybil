@@ -23,26 +23,34 @@ export type EventCandles = {
 };
 
 /**
- * Buckets requested per outcome. The server clamps to its own maximum; one
- * page is plenty for every range the activity chart offers (its hourly "ALL"
- * view outlives the young chain by weeks).
+ * Buckets fetched per outcome, keyed by resolution rather than by the caller's
+ * range. Two ranges on the same resolution (24H and ALL both ride 1h) then
+ * share one query key, so switching between them is a cache hit rather than a
+ * refetch. Each cap covers its widest consumer with slack: 1m→2h, 5m→10h,
+ * 1h→20d.
  */
-const CANDLE_LIMIT = 500;
+const LIMIT_BY_RESOLUTION: Record<string, number> = {
+  "1m": 120,
+  "5m": 120,
+  "1h": 500,
+};
 
 export function useEventCandles(
   marketIds: number[],
-  /** Candle resolution — "1m" | "5m" | "1h" (or raw seconds). */
+  /** Candle resolution — "1m" | "5m" | "1h". */
   resolution: string,
-  /** False parks every query (e.g. while the batch-granularity view is up). */
+  /** False parks every query (e.g. before the event group has resolved). */
   enabled: boolean,
 ): EventCandles {
+  const limit = LIMIT_BY_RESOLUTION[resolution] ?? 500;
+
   const results = useQueries({
     queries: marketIds.map((id) => ({
       queryKey: ["market", id, "prices", "candles", resolution],
       queryFn: async (): Promise<PriceCandle[]> => {
         const { data, error } = await api.GET(
           "/v1/markets/{id}/prices/candles",
-          { params: { path: { id }, query: { resolution, limit: CANDLE_LIMIT } } },
+          { params: { path: { id }, query: { resolution, limit } } },
         );
         if (error || !data) {
           throw new Error(`fetch /v1/markets/${id}/prices/candles failed`);
@@ -53,7 +61,7 @@ export function useEventCandles(
         );
       },
       // The open bucket keeps accruing volume as batches commit — refresh on a
-      // slow tick instead of per 2s block so N outcomes don't hammer the API.
+      // slow tick instead of per block so N outcomes don't hammer the API.
       staleTime: 30_000,
       refetchInterval: 30_000,
       enabled: enabled && Number.isFinite(id) && id >= 0,
