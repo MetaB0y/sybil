@@ -71,20 +71,15 @@ contract OpenVmVerifierAdapterTest {
         require(!adapter.verify(proof, PUBLIC_INPUT_HASH), "wrong public input accepted");
     }
 
-    function testRejectsNonzeroTrailingPublicValues() public view {
-        bytes memory publicValues = _publicValues(PUBLIC_INPUT_HASH);
-        _writePublicValue(publicValues, 1, keccak256("extra-public-value"));
-        bytes memory proof = abi.encode(publicValues, hex"01020304", APP_EXE_COMMIT, APP_VM_COMMIT);
-
-        require(!adapter.verify(proof, PUBLIC_INPUT_HASH), "extra public value accepted");
-    }
-
     function testRejectsWrongPublicValueLength() public view {
         bytes memory proof = abi.encode(
-            abi.encodePacked(PUBLIC_INPUT_HASH), hex"01020304", APP_EXE_COMMIT, APP_VM_COMMIT
+            abi.encodePacked(PUBLIC_INPUT_HASH, bytes1(0)),
+            hex"01020304",
+            APP_EXE_COMMIT,
+            APP_VM_COMMIT
         );
 
-        require(!adapter.verify(proof, PUBLIC_INPUT_HASH), "short public values accepted");
+        require(!adapter.verify(proof, PUBLIC_INPUT_HASH), "wrong public values length accepted");
     }
 
     function testRejectsMalformedProofEncoding() public view {
@@ -103,7 +98,7 @@ contract OpenVmVerifierAdapterTest {
     function _publicValues(
         bytes32 firstWord
     ) internal pure returns (bytes memory publicValues) {
-        publicValues = new bytes(32 * 32);
+        publicValues = new bytes(32);
         _writePublicValue(publicValues, 0, firstWord);
     }
 

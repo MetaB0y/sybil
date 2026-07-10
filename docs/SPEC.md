@@ -271,7 +271,7 @@ Crate boundaries and why they exist:
 
 - **`sybil-zk`** — guest-safe: the public-input binding (`StateTransitionPublicInputs`, keccak hash `"sybil/openvm/state-transition/v1"`), the transition verifier the guest calls, and `guest_commitments`: a from-scratch SHA-256/MMR/qMDB-range-proof verifier so the guest never links commonware. Golden tests pin guest roots == native roots.
 - **`sybil-prover`** — owns the portable `StateTransitionProofJob` (committed witness + ordered post-state leaf proofs), job→guest-input conversion, job inbox worker, artifact store (`status.json` per height), HTTP serving (`GET /proofs/{height}`, `/metrics`), DA publication, and L1 calldata encoding. The `sequencer-store` feature adds `sybil-prover witgen export-latest` / `smoke-job`; default prover builds do not link the sequencer. Actual proof generation is invoked through the `just openvm-*` recipes. The dev-only `sybil-prover-mock` binary fabricates artifacts for dashboard wiring.
-- **`zk/openvm-guest`, `zk/openvm-tools`** — standalone workspaces pinned to OpenVM `v2.0.0-beta.2`, kept outside the root workspace so normal builds never need the OpenVM toolchain.
+- **`zk/openvm-guest`, `zk/openvm-tools`** — standalone workspaces pinned to OpenVM `v2.0.0`, kept outside the root workspace so normal builds never need the OpenVM toolchain.
 
 `just zk-smoke` runs the full local pipeline on a one-block fixture; `just zk-smoke true` adds app-proof generation and verification.
 

@@ -252,7 +252,7 @@ integration.
 
 **Consequence — this moves `app_vm_commit`, not just `app_exe_commit`.**
 Enabling a new VM extension changes the VM configuration, so this is the first
-`app_vm_commit` change since `0x0026ab66…`. That is fine — it's a deliberate
+`app_vm_commit` change from the current `0x007a02fc…`. That is fine — it's a deliberate
 consensus change riding the fresh-genesis window (§ Migration) — but it is a
 *deeper* commitment move than the source-only exe repins we have been doing,
 and SYB-228's reproducibility caveats (untracked `agg_prefix.pk`, build-path

@@ -28,10 +28,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  OPENVM_TAG: v2.0.0-beta.2
+  OPENVM_TAG: v2.0.0
   # Nightly the OpenVM guest build driver invokes (cargo +<toolchain> build
   # --target riscv32im-risc0-zkvm-elf -Z build-std=...). Keep in sync with the
-  # toolchain cargo-openvm v2.0.0-beta.2 selects locally.
+  # toolchain cargo-openvm v2.0.0 selects locally.
   GUEST_NIGHTLY: nightly-2026-01-18
   COMMIT_JSON: zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json
 
@@ -74,7 +74,7 @@ jobs:
       - name: Install cargo-openvm (pinned)
         if: steps.cache-openvm.outputs.cache-hit != 'true'
         run: |
-          cargo install --locked \
+          cargo +1.91 install --locked \
             --git https://github.com/openvm-org/openvm.git \
             --tag "$OPENVM_TAG" cargo-openvm
 

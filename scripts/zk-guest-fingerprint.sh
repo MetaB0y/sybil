@@ -18,9 +18,9 @@
 #
 # SCOPE (SYB-213): the fingerprint covers the guest's full path-dependency
 # closure, NOT just zk/openvm-guest/. The guest compiles `crates/sybil-zk` by
-# path, which pulls in `crates/sybil-verifier`, which pulls in
-# `crates/matching-engine` -- all by path, all consensus surface. Editing any of
-# them changes the built guest and its app_exe_commit/app_vm_commit. Hashing
+# path, which pulls in `crates/sybil-verifier`, `crates/matching-engine`, and
+# `crates/sybil-l1-protocol` -- all by path, all consensus surface. Editing any
+# of them changes the built guest and its app_exe_commit/app_vm_commit. Hashing
 # only zk/openvm-guest/ was a real blind spot: the SYB-196 newtype migration
 # moved the commitment (app_exe_commit 0x0094ea7a -> 0x0036273c) while this gate
 # stayed green. See collect_source_files() for the enumerated closure.
@@ -49,12 +49,13 @@ COMMIT_JSON="$GUEST_DIR/openvm/release/sybil-openvm-guest.commit.json"
 # is (each arrow is a Cargo `path = ` dependency):
 #
 #   zk/openvm-guest       -> crates/sybil-zk
-#   crates/sybil-zk       -> crates/sybil-verifier
+#   crates/sybil-zk       -> crates/sybil-verifier, crates/sybil-l1-protocol
 #   crates/sybil-verifier -> crates/matching-engine
 #   crates/matching-engine   (leaf; no path deps)
+#   crates/sybil-l1-protocol (leaf; no path deps)
 #
 # We hardcode these roots rather than parse `cargo metadata`: the guest lives
-# outside the workspace and needs the OpenVM prerelease toolchain to resolve, so
+# outside the workspace and needs the OpenVM toolchain to resolve, so
 # metadata isn't cheaply available, and shell-parsing it is fragile. Keep this
 # list in sync with the guest's transitive path deps if any crate gains a new
 # `path = ` dependency.
@@ -185,7 +186,7 @@ write_lock() {
     cat > "$LOCK_FILE" <<EOF
 {
   "_comment": "Staleness pin for the OpenVM guest commitment. Regenerate with 'scripts/zk-guest-fingerprint.sh --write' AFTER rebuilding the guest commitment ('just openvm-commit'). CI runs '--check' and fails if source_sha256 no longer matches the guest source tree.",
-  "openvm_tag": "v2.0.0-beta.2",
+  "openvm_tag": "v2.0.0",
   "source_sha256": "$source_hash",
   "app_exe_commit": "$exe_commit",
   "app_vm_commit": "$vm_commit"

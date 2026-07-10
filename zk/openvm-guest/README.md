@@ -1,8 +1,8 @@
 # Sybil OpenVM guest
 
 Standalone OpenVM guest program for Sybil state-transition verification, pinned
-to `cargo-openvm` **v2.0.0-beta.2**. It lives outside the root Cargo workspace
-so normal `cargo test --workspace` does not require the OpenVM prerelease
+to `cargo-openvm` **v2.0.0**. It lives outside the root Cargo workspace
+so normal `cargo test --workspace` does not require the OpenVM
 toolchain. See the architecture note **ZK Integration Path** (`docs/architecture/`)
 for how the guest fits the validium proof pipeline.
 
@@ -10,7 +10,8 @@ The compiled guest yields two commitment hashes — `app_exe_commit` and
 `app_vm_commit` — that `contracts/src/OpenVmVerifierAdapter.sol` pins at deploy
 time. This directory is **consensus surface**: changing the guest source — or
 any crate in its path-dependency closure (`crates/sybil-zk` →
-`crates/sybil-verifier` → `crates/matching-engine`, all compiled by path) —
+`crates/sybil-verifier` → `crates/matching-engine`, plus
+`crates/sybil-l1-protocol`, all compiled by path) —
 changes those hashes and requires an on-chain redeploy.
 
 ## Three commitment records
@@ -19,7 +20,7 @@ changes those hashes and requires an on-chain redeploy.
 | --- | --- | --- | --- |
 | Deployed pin | `OpenVmVerifierAdapter` constructor args (on-chain) | What the chain enforces | **Authoritative for consensus** |
 | `commit.json` | `openvm/release/sybil-openvm-guest.commit.json` (committed) | Reviewable, diff-able record of the commitment | Source of truth for the hashes in-repo |
-| Lock file | `guest.commitment.lock.json` (committed) | SHA-256 fingerprint of the guest **source tree + its path-dependency closure** (`crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`) + a copy of the hashes | Staleness detector for the source |
+| Lock file | `guest.commitment.lock.json` (committed) | SHA-256 fingerprint of the guest **source tree + its path-dependency closure** (`crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`, `crates/sybil-l1-protocol`) + a copy of the hashes | Staleness detector for the source |
 
 Authority order: **deployed pin > `commit.json` > lock file.** The lock owns the
 source-fingerprint role; `commit.json` owns the commitment-hash record.
@@ -30,8 +31,8 @@ binaries stay gitignored (see the repo `.gitignore`).
 
 `scripts/zk-guest-fingerprint.sh --check` (run in CI) enforces two things:
 1. the guest **source and its full path-dep closure** (`zk/openvm-guest/`,
-   `crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`) still
-   match the lock's `source_sha256`, and
+   `crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`,
+   `crates/sybil-l1-protocol`) still match the lock's `source_sha256`, and
 2. the lock's commitment hashes still equal the committed `commit.json`.
 
 Hashing the whole closure (not just `zk/openvm-guest/`) closes the SYB-213 blind
@@ -40,7 +41,7 @@ fingerprint stayed green. The gate deliberately over-hashes — `#[cfg(test)]`
 code in those crates affects the hash but not the built guest — because a false
 "stale" (re-run `--write`) is far safer than a false "fresh".
 
-## Rebuild status and the 2026-07-03 divergence
+## Rebuild status
 
 A guest-target build break (owned arrays passed to the guest's `&[u8]`-taking
 `Sha256::update` in `crates/sybil-zk/src/guest_commitments.rs` — compiles on
@@ -50,15 +51,14 @@ the same day under **SYB-208**. Host `cargo build`/`clippy`/tests and the
 source-fingerprint gate never see the zkVM target, which is exactly why the
 weekly `zk-rebuild` CI lane exists.
 
-Rebuild is **deterministic**: two independent `just openvm-commit` runs
-produce identical commitments (measured 2026-07-03). The committed
-`commit.json` + lock now carry the **current-source** commitments
-(`app_exe_commit 0x000b608f…`, `app_vm_commit 0x007a02fc…`). The **deployed** OpenVmVerifierAdapter pin
-still carries the **May-2026** build (`0x00796a20…`) — consensus bytes are
-golden-vector-identical (SYB-170), but the artifact differs, so the next
-devnet redeploy MUST update the adapter constructor args to the committed
-values. Until then, on-chain verification of freshly built proofs would fail
-against the old pin — expected and documented.
+Rebuild is **deterministic**: two independent `just openvm-commit` runs produce
+identical commitments (first measured 2026-07-03). The 2026-07-10 upgrade to
+OpenVM v2.0.0 final moved both commitments because the final release replaces
+the beta proof system with SWIRL and changes the SHA-2 VM AIR. The committed
+`commit.json` + lock carry the current-source commitments
+(`app_exe_commit 0x002bc246…`, `app_vm_commit 0x007a02fc…`). A fresh genesis
+and adapter redeploy must use these new pins; no beta commitment compatibility
+is supported.
 
 ## Rebuild / redeploy procedure
 
@@ -66,7 +66,7 @@ When a rebuild *does* produce a new, correct commitment (after the guest build
 is fixed and any intended source change lands):
 
 ```bash
-just openvm-install     # cargo-openvm v2.0.0-beta.2 (one-time)
+just openvm-install     # cargo-openvm v2.0.0 (one-time)
 just openvm-commit      # rebuild + print app_exe_commit / app_vm_commit
 ```
 

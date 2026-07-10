@@ -5,8 +5,7 @@ import {IOpenVmHalo2Verifier} from "./interfaces/IOpenVmHalo2Verifier.sol";
 import {IOpenVmVerifierAdapter} from "./interfaces/IOpenVmVerifierAdapter.sol";
 
 contract OpenVmVerifierAdapter is IOpenVmVerifierAdapter {
-    uint256 public constant OPENVM_PUBLIC_VALUE_WORDS = 32;
-    uint256 public constant OPENVM_PUBLIC_VALUES_BYTES = OPENVM_PUBLIC_VALUE_WORDS * 32;
+    uint256 public constant OPENVM_PUBLIC_VALUES_BYTES = 32;
 
     IOpenVmHalo2Verifier public immutable halo2Verifier;
     bytes32 public immutable expectedAppExeCommit;
@@ -82,20 +81,6 @@ contract OpenVmVerifierAdapter is IOpenVmVerifierAdapter {
         assembly {
             revealedHash := mload(add(publicValues, 32))
         }
-        if (revealedHash != publicInputHash) {
-            return false;
-        }
-
-        for (uint256 offset = 32; offset < OPENVM_PUBLIC_VALUES_BYTES; offset += 32) {
-            bytes32 word;
-            assembly {
-                word := mload(add(add(publicValues, 32), offset))
-            }
-            if (word != bytes32(0)) {
-                return false;
-            }
-        }
-
-        return true;
+        return revealedHash == publicInputHash;
     }
 }

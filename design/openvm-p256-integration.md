@@ -2,7 +2,7 @@
 tags: [design, zk, openvm, p256, consensus]
 layer: core
 status: confirmed-feasible
-last_verified: 2026-07-07
+last_verified: 2026-07-10
 ---
 
 # In-guest P-256 ECDSA via OpenVM — integration recipe
@@ -14,9 +14,9 @@ only `rv32i, rv32m, io, sha2`). This note is the confirmed, codex-followable wir
 
 ## Feasibility: CONFIRMED ✅
 
-OpenVM **v2.0.0-beta.2** — the exact tag already pinned in
+OpenVM **v2.0.0** — the exact tag pinned in
 `zk/openvm-guest/Cargo.toml` (git `openvm-org/openvm`, resolved commit
-`30a13e2`) — supports **secp256r1 / P-256 as a first-class accelerated curve**,
+`15a7ab6`) — supports **secp256r1 / P-256 as a first-class accelerated curve**,
 at full parity with secp256k1. Evidence in the resolved cargo checkout:
 
 - `guest-libs/p256/` — a drop-in patch of the crates.io `p256` crate, exporting
@@ -61,9 +61,9 @@ b = "410583637251521421293261297800472684091144410159937255548352563140394674012
 ### (b) Guest `Cargo.toml` deps (same tag)
 
 ```toml
-openvm-algebra-guest = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0-beta.2" }
-openvm-ecc-guest     = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0-beta.2" }
-openvm-p256          = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0-beta.2", package = "p256", features = ["ecdsa"] }
+openvm-algebra-guest = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0" }
+openvm-ecc-guest     = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0" }
+openvm-p256          = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0", package = "p256", features = ["ecdsa"] }
 ```
 
 ### (c) Init + verify API
@@ -94,7 +94,7 @@ already prehashed under a domain string — feed that SHA-256 digest to
 ## Commitment consequence
 
 Adding the `modular` + `ecc` extensions **changes `app_vm_config` ⇒ moves
-`app_vm_commit`** — the first VM-commit move since `0x0026ab66`. Adding the new
+`app_vm_commit`** from the current `0x007a02fc…` pin. Adding the new
 guest crate deps also moves `app_exe_commit`. Repin discipline (per SYB-228):
 run everything in `~/sybil`, then `just openvm-commit`, refresh the
 `OpenVmVerifierAdapter.sol` pin, and `scripts/zk-guest-fingerprint.sh --write`

@@ -175,7 +175,7 @@ public value. The adapter checks four things before returning true:
 
 1. The proof payload decodes as `(bytes publicValues, bytes proofData, bytes32 appExeCommit, bytes32 appVmCommit)`.
 2. `appExeCommit` and `appVmCommit` equal the Sybil guest commitments pinned in the adapter constructor.
-3. `publicValues` has the default OpenVM EVM-verifier length of 32 words, its first word equals `publicInputHash`, and the remaining words are zero.
+3. `publicValues` has the default OpenVM EVM-verifier length of 32 bytes and equals `publicInputHash`.
 4. The generated OpenVM Halo2 verifier accepts `proofData` for those public values and pinned commits.
 
 This extra commit pinning is part of the soundness boundary: a generic OpenVM

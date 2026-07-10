@@ -26,7 +26,7 @@ millions of cycles.
 
 Verify P-256 signatures **in-guest using OpenVM's accelerated ECC extension**
 (the dedicated EC STARK chips), not a soft `p256` crate. Feasibility is
-confirmed: OpenVM **v2.0.0-beta.2** — the tag already pinned — ships secp256r1 as
+confirmed: OpenVM **v2.0.0** — the tag pinned — ships secp256r1 as
 a first-class accelerated curve (`P256Point`, `NistP256`, drop-in `openvm-p256`
 guest crate, `verify_prehash`), at parity with secp256k1. The concrete wiring
 (the `openvm.toml` `modular`+`ecc` stanza with P-256's `a = -3`/`b` constants,
@@ -51,7 +51,7 @@ integration serves both SYB-225 and SYB-32; cost is a bounded number of
 accelerated chip rows, not soft-crypto cycles.
 
 **Costs / constraints:** enabling a new VM extension **moves `app_vm_commit`** —
-the first VM-commit move since `0x0026ab66` — a *deeper* commitment change than
+another `app_vm_commit` move from `0x007a02fc…` — a *deeper* commitment change than
 the source-only `app_exe_commit` repins we've done, and it drags in the SYB-228
 reproducibility caveats (untracked `agg_prefix.pk`, build-path dependence; repin
 in `~/sybil`). New crypto crosses into the guest-safe proven core

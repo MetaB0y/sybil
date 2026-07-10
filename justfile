@@ -60,9 +60,9 @@ sim-agent scenario="standard":
 build:
     cargo build --release
 
-# Install OpenVM 2.0 beta CLI used by the ZK guest tooling
+# Install the OpenVM 2.0 CLI used by the ZK guest tooling
 openvm-install:
-    cargo install --locked --git https://github.com/openvm-org/openvm.git --tag v2.0.0-beta.2 cargo-openvm
+    cargo +1.91 install --locked --git https://github.com/openvm-org/openvm.git --tag v2.0.0 cargo-openvm
 
 # Check the OpenVM guest crate with the normal host compiler
 openvm-guest-check:

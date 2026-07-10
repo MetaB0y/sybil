@@ -1,7 +1,7 @@
 {
   "_comment": "Staleness pin for the OpenVM guest commitment. Regenerate with 'scripts/zk-guest-fingerprint.sh --write' AFTER rebuilding the guest commitment ('just openvm-commit'). CI runs '--check' and fails if source_sha256 no longer matches the guest source tree.",
-  "openvm_tag": "v2.0.0-beta.2",
-  "source_sha256": "b8c021ad95f55a382a8a53a46365c6e5e2c7311ae7e5c9ee56a628bcd8b6f43e",
-  "app_exe_commit": "0x000b608ff7e5a7d8a76d080353224d431d4361fdcb531d07ef99f4cc59e8fef7",
+  "openvm_tag": "v2.0.0",
+  "source_sha256": "48b5f8eb08b4e50bb4089dc2eda25d05daec4170e50f9c29a8ba2159c6ec754f",
+  "app_exe_commit": "0x002bc246897d1b635f56a22dbb571c6e41aa7df214eb29f8bea1fbd013b36637",
   "app_vm_commit": "0x007a02fc3055c8beb7aa51187d008991bdec498852b5e1e27f223ee04a72cac5"
 }

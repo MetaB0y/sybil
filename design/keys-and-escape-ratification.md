@@ -96,9 +96,9 @@ so the two docs stay consistent.
   events (tags 7+); guest repin. Batched with SYB-224's `genesis_hash` domain
   discipline (key-op + escape canonical bytes both lead with `genesis_hash[32]`).
 - **In-guest P-256** via OpenVM's **accelerated ECC extension** (secp256**r1**/P-256),
-  not soft `p256`. **Moves `app_vm_commit`** — first VM-commit move since
-  `0x0026ab66`. **Feasibility CONFIRMED** (2026-07-07): OpenVM v2.0.0-beta.2 — the
-  tag we already pin — ships P-256 as a first-class accelerated curve with a
+  not soft `p256`. **Moves `app_vm_commit`** from the current `0x007a02fc…`
+  pin. **Feasibility CONFIRMED** (2026-07-10): OpenVM v2.0.0 — the tag we pin —
+  ships P-256 as a first-class accelerated curve with a
   drop-in `p256` guest crate and a copy-paste ECDSA example. Concrete `openvm.toml`
   + guest-macro + `verify_prehash` recipe in
   [`openvm-p256-integration.md`](../design/openvm-p256-integration.md). The gating

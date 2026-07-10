@@ -1,6 +1,3 @@
-#[cfg(target_os = "zkvm")]
-extern crate openvm_sha2_guest;
-
 use openvm::io::{read_vec, reveal_bytes32};
 use sybil_zk::{verify_state_transition_input, StateTransitionGuestInput};
 

@@ -69,5 +69,5 @@ D-cluster (SYB-224/225/32/P-256) is sequenced into a single fresh-genesis
 redeploy.
 
 **Follow-ups:** exercise the in-place migration fallback on a throwaway
-deployment before mainnet; keep `devnet-redeploy.md` turnkey (current pins:
-exe `0x000b608f`, vm `0x007a02fc`).
+deployment before mainnet; keep `devnet-redeploy.md` turnkey (current final-tag
+pins: exe `0x002bc246`, vm `0x007a02fc`).
