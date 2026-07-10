@@ -110,8 +110,12 @@ export function BatchDetail({ row }: { row: BatchRow }) {
                 no markets cleared in this batch
               </div>
             )}
-            {visible.map((m) => (
-              <MarketRow key={m.marketId} row={m} />
+            {visible.map((m, i) => (
+              <MarketRow
+                key={m.marketId}
+                row={m}
+                isLast={i === visible.length - 1}
+              />
             ))}
 
             {(remaining > 0 || shown > ROWS_INITIAL) && (
@@ -310,7 +314,16 @@ function sortMarketRows(
   });
 }
 
-function MarketRow({ row }: { row: BatchMarketRow }) {
+function MarketRow({
+  row,
+  isLast,
+}: {
+  row: BatchMarketRow;
+  /** The last row skips its divider: the card stretches to the sidebar's
+   *  height, so that line would otherwise hang in the middle of the empty
+   *  space above the footer, which draws its own top border. */
+  isLast: boolean;
+}) {
   const deltaCents =
     row.deltaNanos == null ? null : Number(row.deltaNanos) / 1e7;
   return (
@@ -321,7 +334,7 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
         gap: GRID_GAP,
         padding: "10px 14px",
         alignItems: "center",
-        borderBottom: "1px solid var(--border-1)",
+        borderBottom: isLast ? 0 : "1px solid var(--border-1)",
       }}
     >
       {/* Title + category dot */}
