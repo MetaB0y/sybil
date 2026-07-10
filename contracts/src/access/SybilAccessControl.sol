@@ -44,7 +44,10 @@ abstract contract SybilAccessControl {
         _;
     }
 
-    constructor(address initialAdmin, uint64 initialAdminActionDelay) {
+    constructor(
+        address initialAdmin,
+        uint64 initialAdminActionDelay
+    ) {
         if (initialAdmin == address(0)) revert ZeroAddress();
         admin = initialAdmin;
         adminActionDelay = initialAdminActionDelay;
@@ -113,10 +116,7 @@ abstract contract SybilAccessControl {
 
         bytes32 dataHash = keccak256(data);
         timelockProposals[id] = TimelockProposal({
-            operation: operation,
-            dataHash: dataHash,
-            executableAt: executableAt,
-            exists: true
+            operation: operation, dataHash: dataHash, executableAt: executableAt, exists: true
         });
         emit TimelockProposed(id, operation, dataHash, executableAt);
     }

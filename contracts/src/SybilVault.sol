@@ -13,25 +13,18 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     uint8 public constant DEPOSIT_TREE_DEPTH = 32;
 
     bytes32 public constant OP_SET_VERIFIER = keccak256("sybil/vault/set-verifier/v1");
+    bytes32 public constant OP_SET_ESCAPE_VERIFIER =
+        keccak256("sybil/vault/set-escape-verifier/v1");
     bytes32 public constant OP_SET_WITHDRAWAL_DELAY =
         keccak256("sybil/vault/set-withdrawal-delay/v1");
     bytes32 public constant OP_SET_ESCAPE_TIMEOUT = keccak256("sybil/vault/set-escape-timeout/v1");
     bytes32 public constant CLAIM_KIND_NORMAL = keccak256("sybil/claim-kind/normal-withdrawal/v1");
-    // NOTE: The emergency escape-cash claim is unimplemented. It requires a
-    // distinct ZK guest program (proving `acct`/`acct_resv` membership against
-    // the latest accepted root and computing conservative withdrawable cash),
-    // which is a different public-input shape and app commitment than the
-    // single guest this vault's verifier adapter is pinned to. Until that guest
-    // and a claimKind-dispatched verifier exist, `requestWithdrawal` fails
-    // closed on any non-normal claim kind (see UnsupportedClaimKind below). The
-    // former `CLAIM_KIND_ESCAPE` constant advertised a mechanism that does not
-    // exist and has been removed; see "Emergency escape" in the L1 Settlement
-    // and Vault design note for the unimplemented-mechanism record.
 
     IERC20Minimal public immutable token;
     ISybilSettlement public immutable settlement;
     uint64 public immutable deployedAt;
     IOpenVmVerifierAdapter public verifier;
+    IOpenVmVerifierAdapter public escapeVerifier;
 
     uint64 public withdrawalDelay;
     uint64 public escapeTimeout;
@@ -96,8 +89,16 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         string reason
     );
     event EscapeModeActivated(uint64 indexed height, bytes32 indexed stateRoot, uint64 activatedAt);
+    event EscapeClaimed(
+        uint64 indexed accountId,
+        address indexed recipient,
+        uint256 amount,
+        bytes32 stateRoot,
+        bytes32 indexed nullifier
+    );
     event ParameterUpdated(bytes32 indexed key, uint256 oldValue, uint256 newValue);
     event VerifierUpdated(address indexed verifier);
+    event EscapeVerifierUpdated(address indexed verifier);
     event Paused(address indexed admin);
     event Unpaused(address indexed admin);
 
@@ -110,6 +111,10 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     error WithdrawalFinalizedError(bytes32 nullifier);
     error EscapeModeInactive();
     error EscapeModeAlreadyActive();
+    error EscapeClaimStaleRoot(bytes32 providedRoot, bytes32 latestRoot);
+    error EscapeClaimHeightMismatch(uint64 providedHeight, uint64 latestHeight);
+    error EscapeNullifierMismatch(bytes32 providedNullifier, bytes32 expectedNullifier);
+    error EscapeNullifierAlreadyUsed(bytes32 nullifier);
     error AmountZero();
     error TokenUnsupported(address token);
     error ContractPaused();
@@ -122,6 +127,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         IERC20Minimal collateralToken,
         ISybilSettlement settlementContract,
         IOpenVmVerifierAdapter verifierAdapter,
+        IOpenVmVerifierAdapter escapeVerifierAdapter,
         uint64 initialWithdrawalDelay,
         uint64 initialEscapeTimeout,
         uint64 initialAdminActionDelay
@@ -129,11 +135,13 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         if (address(collateralToken) == address(0)) revert ZeroAddress();
         if (address(settlementContract) == address(0)) revert ZeroAddress();
         if (address(verifierAdapter) == address(0)) revert ZeroAddress();
+        if (address(escapeVerifierAdapter) == address(0)) revert ZeroAddress();
 
         token = collateralToken;
         settlement = settlementContract;
         deployedAt = uint64(block.timestamp);
         verifier = verifierAdapter;
+        escapeVerifier = escapeVerifierAdapter;
         withdrawalDelay = initialWithdrawalDelay;
         escapeTimeout = initialEscapeTimeout;
 
@@ -145,6 +153,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         depositRootByCount[0] = currentDepositRoot;
 
         emit VerifierUpdated(address(verifierAdapter));
+        emit EscapeVerifierUpdated(address(escapeVerifierAdapter));
     }
 
     function deposit(
@@ -175,8 +184,8 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         if (paused) revert ContractPaused();
         // OL-3: this entrypoint serves normal withdrawal-leaf claims only. The
         // claimKind is bound into the proof public-input hash, so accepting a
-        // non-normal kind here would advertise the unimplemented escape-cash
-        // path. Fail closed until a dedicated escape entrypoint exists.
+        // non-normal kind here could dispatch it through the wrong verifier.
+        // Escape claims use the dedicated entrypoint and domain below.
         if (inputs.claimKind != CLAIM_KIND_NORMAL) revert UnsupportedClaimKind(inputs.claimKind);
         if (inputs.amount == 0) revert AmountZero();
         if (inputs.token != address(token)) revert TokenUnsupported(inputs.token);
@@ -235,6 +244,50 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         if (!token.transfer(queued.recipient, queued.amount)) revert TransferFailed();
         emit WithdrawalFinalized(
             nullifier, queued.recipient, queued.amount, uint64(block.timestamp), queued.executableAt
+        );
+    }
+
+    function escapeClaim(
+        SybilTypes.EscapeClaimPublicInputs calldata inputs,
+        bytes calldata proof
+    ) external {
+        if (!escapeModeActive) revert EscapeModeInactive();
+
+        // SYB-96 PAUSE EXCEPTION: escape deliberately bypasses BOTH `paused`
+        // and the normal withdrawal delay. A future pause refactor must not
+        // silently re-gate this operator-disappearance recovery path.
+        bytes32 latestRoot = settlement.latestStateRoot();
+        if (inputs.stateRoot != latestRoot) {
+            revert EscapeClaimStaleRoot(inputs.stateRoot, latestRoot);
+        }
+        uint64 latestHeight = settlement.latestHeight();
+        if (inputs.height != latestHeight) {
+            revert EscapeClaimHeightMismatch(inputs.height, latestHeight);
+        }
+
+        bytes32 expectedNullifier = keccak256(
+            abi.encode(
+                "sybil/escape-nullifier/v1",
+                block.chainid,
+                address(this),
+                inputs.accountId,
+                inputs.stateRoot
+            )
+        );
+        if (inputs.nullifier != expectedNullifier) {
+            revert EscapeNullifierMismatch(inputs.nullifier, expectedNullifier);
+        }
+        if (nullifierUsed[expectedNullifier]) {
+            revert EscapeNullifierAlreadyUsed(expectedNullifier);
+        }
+        nullifierUsed[expectedNullifier] = true;
+
+        bytes32 inputHash = escapeClaimPublicInputHash(inputs);
+        if (!escapeVerifier.verify(proof, inputHash)) revert InvalidProof();
+
+        if (!token.transfer(inputs.recipient, inputs.amount)) revert TransferFailed();
+        emit EscapeClaimed(
+            inputs.accountId, inputs.recipient, inputs.amount, inputs.stateRoot, expectedNullifier
         );
     }
 
@@ -306,6 +359,22 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         _consumeTimelock(OP_SET_VERIFIER, abi.encode(newVerifier));
         verifier = newVerifier;
         emit VerifierUpdated(address(newVerifier));
+    }
+
+    function proposeEscapeVerifier(
+        IOpenVmVerifierAdapter newEscapeVerifier
+    ) external onlyAdmin returns (bytes32 id) {
+        if (address(newEscapeVerifier) == address(0)) revert ZeroAddress();
+        return _proposeTimelock(OP_SET_ESCAPE_VERIFIER, abi.encode(newEscapeVerifier));
+    }
+
+    function setEscapeVerifier(
+        IOpenVmVerifierAdapter newEscapeVerifier
+    ) external onlyAdmin {
+        if (address(newEscapeVerifier) == address(0)) revert ZeroAddress();
+        _consumeTimelock(OP_SET_ESCAPE_VERIFIER, abi.encode(newEscapeVerifier));
+        escapeVerifier = newEscapeVerifier;
+        emit EscapeVerifierUpdated(address(newEscapeVerifier));
     }
 
     function proposeWithdrawalDelay(
@@ -384,6 +453,22 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
                 inputs.token,
                 inputs.amount,
                 inputs.claimKind
+            )
+        );
+    }
+
+    function escapeClaimPublicInputHash(
+        SybilTypes.EscapeClaimPublicInputs memory inputs
+    ) public pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                "sybil/openvm/escape-claim/v1",
+                inputs.stateRoot,
+                inputs.height,
+                inputs.accountId,
+                inputs.recipient,
+                inputs.amount,
+                inputs.nullifier
             )
         );
     }

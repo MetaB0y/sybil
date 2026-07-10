@@ -8,6 +8,7 @@ use matching_engine::{
 };
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
+use sha3::Keccak256;
 use sybil_l1_protocol::{
     append_deposit_frontier, deposit_leaf, deposit_prefix_roots, deposit_tree_leaf,
     empty_deposit_frontier, empty_deposit_root, DepositLeaf,
@@ -38,6 +39,7 @@ struct GoldenVectors {
     quarantine_claim_block: QuarantineClaimBlockVector,
     deposits: DepositVectors,
     state_transition_public_inputs: PublicInputVector,
+    escape_claim_public_inputs: EscapeClaimPublicInputVector,
 }
 
 #[derive(Serialize)]
@@ -155,6 +157,26 @@ struct PublicInputVector {
     hash: String,
 }
 
+#[derive(Serialize)]
+struct EscapeClaimPublicInputVector {
+    state_root: String,
+    height: u64,
+    account_id: u64,
+    recipient: String,
+    amount: u64,
+    nullifier: String,
+    hash: String,
+}
+
+struct EscapeClaimPublicInputs {
+    state_root: [u8; 32],
+    height: u64,
+    account_id: u64,
+    recipient: [u8; 20],
+    amount: u64,
+    nullifier: [u8; 32],
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("emit-golden: {error}");
@@ -247,6 +269,14 @@ fn render() -> Result<String, String> {
         deposit_root: prefix_roots[2],
         deposit_count: 3,
     };
+    let escape_claim_inputs = EscapeClaimPublicInputs {
+        state_root: [0x71; 32],
+        height: 42,
+        account_id: 1001,
+        recipient: [0x73; 20],
+        amount: 9_876_543_210,
+        nullifier: [0x72; 32],
+    };
 
     let raw_key = sec1_key(0x02, 0x11);
     let webauthn_key = sec1_key(0x03, 0x22);
@@ -269,7 +299,7 @@ fn render() -> Result<String, String> {
 
     let vectors = GoldenVectors {
         _comment: COMMENT,
-        schema_version: 3,
+        schema_version: 4,
         header: HeaderVector {
             fixture: HeaderFixture {
                 height: witness.header.height,
@@ -396,6 +426,15 @@ fn render() -> Result<String, String> {
             deposit_count: public_inputs.deposit_count,
             hash: hex_bytes(&state_transition_public_input_hash(&public_inputs)),
         },
+        escape_claim_public_inputs: EscapeClaimPublicInputVector {
+            state_root: hex_bytes(&escape_claim_inputs.state_root),
+            height: escape_claim_inputs.height,
+            account_id: escape_claim_inputs.account_id,
+            recipient: hex_bytes(&escape_claim_inputs.recipient),
+            amount: escape_claim_inputs.amount,
+            nullifier: hex_bytes(&escape_claim_inputs.nullifier),
+            hash: hex_bytes(&escape_claim_public_input_hash(&escape_claim_inputs)),
+        },
     };
 
     let mut rendered = serde_json::to_string_pretty(&vectors)
@@ -419,6 +458,55 @@ fn key_event_digest_bytes(tag: u8, key: KeyRecord, block_height: u64) -> Vec<u8>
     bytes.extend_from_slice(&key.capability_mask.to_le_bytes());
     bytes.extend_from_slice(&block_height.to_le_bytes());
     bytes
+}
+
+fn escape_claim_public_input_hash(inputs: &EscapeClaimPublicInputs) -> [u8; 32] {
+    let encoded = abi_encode_domain_and_words(
+        b"sybil/openvm/escape-claim/v1",
+        &[
+            AbiWord::Bytes32(inputs.state_root),
+            AbiWord::Uint(inputs.height),
+            AbiWord::Uint(inputs.account_id),
+            AbiWord::Address(inputs.recipient),
+            AbiWord::Uint(inputs.amount),
+            AbiWord::Bytes32(inputs.nullifier),
+        ],
+    );
+    Keccak256::digest(encoded).into()
+}
+
+enum AbiWord {
+    Uint(u64),
+    Address([u8; 20]),
+    Bytes32([u8; 32]),
+}
+
+fn abi_encode_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Vec<u8> {
+    let head_words = 1 + words.len();
+    let padded_domain_len = domain.len().div_ceil(32) * 32;
+    let mut out = Vec::with_capacity(head_words * 32 + 32 + padded_domain_len);
+    out.extend_from_slice(&abi_u64_word((head_words * 32) as u64));
+    for word in words {
+        match word {
+            AbiWord::Uint(value) => out.extend_from_slice(&abi_u64_word(*value)),
+            AbiWord::Address(address) => {
+                let mut encoded = [0u8; 32];
+                encoded[12..].copy_from_slice(address);
+                out.extend_from_slice(&encoded);
+            }
+            AbiWord::Bytes32(bytes) => out.extend_from_slice(bytes),
+        }
+    }
+    out.extend_from_slice(&abi_u64_word(domain.len() as u64));
+    out.extend_from_slice(domain);
+    out.resize(out.len() + padded_domain_len - domain.len(), 0);
+    out
+}
+
+fn abi_u64_word(value: u64) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    out[24..].copy_from_slice(&value.to_be_bytes());
+    out
 }
 
 fn key_op_witness() -> BlockWitness {

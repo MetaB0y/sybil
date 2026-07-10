@@ -44,6 +44,7 @@ contract SybilVaultDepositHarness is SybilVault {
     address private constant TOKEN_ADDRESS = 0x2222222222222222222222222222222222222222;
     address private constant SETTLEMENT_ADDRESS = 0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB;
     address private constant VERIFIER_ADDRESS = 0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC;
+    address private constant ESCAPE_VERIFIER_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     constructor()
         SybilVault(
@@ -51,6 +52,7 @@ contract SybilVaultDepositHarness is SybilVault {
             IERC20Minimal(TOKEN_ADDRESS),
             ISybilSettlement(SETTLEMENT_ADDRESS),
             IOpenVmVerifierAdapter(VERIFIER_ADDRESS),
+            IOpenVmVerifierAdapter(ESCAPE_VERIFIER_ADDRESS),
             1 days,
             7 days,
             2 days
@@ -187,6 +189,23 @@ contract SybilGoldenVectorsTest {
             settlement.stateTransitionPublicInputHash(inputs)
                 == goldenBytes32(".state_transition_public_inputs.hash"),
             "state public input hash"
+        );
+    }
+
+    function testEscapeClaimPublicInputHashMatchesRustGoldenVector() public view {
+        SybilTypes.EscapeClaimPublicInputs memory inputs = SybilTypes.EscapeClaimPublicInputs({
+            stateRoot: goldenBytes32(".escape_claim_public_inputs.state_root"),
+            height: uint64(goldenUint(".escape_claim_public_inputs.height")),
+            accountId: uint64(goldenUint(".escape_claim_public_inputs.account_id")),
+            recipient: goldenAddress(".escape_claim_public_inputs.recipient"),
+            amount: goldenUint(".escape_claim_public_inputs.amount"),
+            nullifier: goldenBytes32(".escape_claim_public_inputs.nullifier")
+        });
+
+        require(
+            vault.escapeClaimPublicInputHash(inputs)
+                == goldenBytes32(".escape_claim_public_inputs.hash"),
+            "escape public input hash"
         );
     }
 

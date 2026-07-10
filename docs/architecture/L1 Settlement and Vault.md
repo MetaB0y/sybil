@@ -434,44 +434,67 @@ not trapped if the operator disappears pre-genesis. Anyone may activate escape
 mode after the timeout. Governance may also pause first during an incident, but
 pausing alone does not prove the operator is dead.
 
-> **Unimplemented mechanism (status: not shipped).** The proof-backed escape
-> *cash claim* described below does **not** exist in the deployed contracts.
-> Activating escape mode currently only sets the `escapeModeActive` flag and
-> emits `EscapeModeActivated`; there is no `escapeClaim`/`escapeWithdraw`
-> entrypoint. Implementing it soundly requires a **distinct ZK guest program**
-> — one proving `acct`/`acct_resv` membership against the latest accepted root
-> and computing conservative withdrawable cash — which has a different
-> public-input shape and app commitment than the single state-transition/
-> withdrawal guest the `OpenVmVerifierAdapter` is pinned to. That is a new
-> guest plus a `claimKind`-dispatched verifier, out of scope for the contract
-> layer alone. Tracked as SYB-32 / SYB-80 (H14).
->
-> Until it ships the vault **fails closed**: `requestWithdrawal` rejects any
-> `claimKind != CLAIM_KIND_NORMAL` (`UnsupportedClaimKind`), and the
-> `CLAIM_KIND_ESCAPE` constant that previously advertised the absent mechanism
-> has been removed. `claimKind` remains bound into the withdrawal public-input
-> hash so a future escape entrypoint can be added without changing the proof
-> shape of normal withdrawals.
+The vault has a dedicated `escapeClaim` entrypoint and a separately pinned
+`escapeVerifier`. The escape verifier has the same admin-timelocked upgrade
+lifecycle as the normal withdrawal verifier, but the two adapter addresses are
+independent because they pin different OpenVM guest commitments. The contract
+path is implemented; production deployment still depends on the separate
+escape guest and its real pinned adapter.
 
-When implemented, escape claims are intended to be proof-backed cash
-withdrawals from the latest accepted root:
+Escape claims are proof-backed withdrawals from the latest accepted root:
 
 1. User obtains the latest accepted root and state data from DA or their own
    archive.
 2. User proves account ownership plus `acct/{account_id}` and
    `acct_resv/{account_id}` membership against that root.
-3. The ZK proof computes conservative withdrawable cash:
+3. The ZK proof values cash and positions at committed last-clearing prices,
+   subtracts open cash reservations, floors the result at zero, and converts
+   nanos to collateral-token units.
+4. Vault requires both the supplied root and height to equal the settlement's
+   latest root and height at claim time.
+5. Vault recomputes and consumes one escape nullifier per account/root.
+6. Vault verifies the dedicated public-input hash and transfers immediately.
 
 ```text
-withdrawable_cash = max(0, balance - open_cash_reservations)
+escape_nullifier = keccak256(abi.encode(
+    "sybil/escape-nullifier/v1", chain_id, vault_address, account_id, state_root
+))
 ```
 
-4. Vault accepts at most one escape claim per account/root nullifier.
+The nullifier shares the vault's `nullifierUsed` map with normal withdrawals.
+The distinct keccak domains prevent cross-kind collision, and escape never
+creates a queued-withdrawal record that the cancellation path could use to
+clear its nullifier.
 
-This does not recover unresolved positions, resting orders, or claims on
-future market resolutions. That is intentional. Unwinding those on L1 would
-move prediction-market resolution and settlement logic into the vault, which
-is the wrong boundary for a validium.
+Escape deliberately bypasses both `paused` and `withdrawalDelay`. This is the
+SYB-96 pause exception: once liveness failure has activated escape mode, an
+emergency pause must not trap proof-bearing users.
+
+Escape public inputs and their dedicated statement hash are:
+
+```solidity
+struct EscapeClaimPublicInputs {
+    bytes32 stateRoot;
+    uint64 height;
+    uint64 accountId;
+    address recipient;
+    uint256 amount;
+    bytes32 nullifier;
+}
+```
+
+```text
+keccak256(abi.encode(
+    "sybil/openvm/escape-claim/v1", stateRoot, height, accountId,
+    recipient, amount, nullifier
+))
+```
+
+This pays positions at their last committed clearing prices; it does not
+preserve resting orders or claims on future market resolutions. That is
+intentional. Re-running market resolution or order unwinds on L1 would move
+prediction-market logic into the vault, which is the wrong boundary for a
+validium.
 
 The full recovery path is DA-backed operator replacement: reconstruct complete
 typed state, verify it against `stateRoot`, and continue the exchange with a
@@ -558,6 +581,13 @@ event WithdrawalRequested(
 event WithdrawalFinalized(bytes32 indexed nullifier, address indexed recipient, uint256 amount);
 event WithdrawalCanceled(bytes32 indexed nullifier, string reason);
 event EscapeModeActivated(uint64 indexed height, bytes32 indexed stateRoot, uint64 activatedAt);
+event EscapeClaimed(
+    uint64 indexed accountId,
+    address indexed recipient,
+    uint256 amount,
+    bytes32 stateRoot,
+    bytes32 indexed nullifier
+);
 event VerifierUpgraded(uint32 indexed version, address verifier);
 event ParameterUpdated(bytes32 indexed key, uint256 oldValue, uint256 newValue);
 ```
@@ -608,6 +638,7 @@ interface ISybilVault {
 
     function finalizeWithdrawal(bytes32 nullifier) external;
     function activateEscapeMode() external;
+    function escapeClaim(EscapeClaimPublicInputs calldata inputs, bytes calldata proof) external;
 }
 ```
 
@@ -621,15 +652,13 @@ struct WithdrawalPublicInputs {
     address recipient;
     address token;
     uint256 amount;
-    bytes32 claimKind; // normal withdrawal leaf or emergency cash escape
+    bytes32 claimKind; // normal-withdrawal dispatch guard
 }
 ```
 
-`claimKind` separates normal withdrawal leaves from emergency cash exits.
-Those are different ZK programs or different verifier keys even if they share
-the same vault entrypoint. Only `CLAIM_KIND_NORMAL` is implemented today;
-`requestWithdrawal` rejects every other kind (see the unimplemented-mechanism
-note under [Emergency escape](#emergency-escape)).
+`requestWithdrawal` accepts only `CLAIM_KIND_NORMAL`. Emergency exits use the
+dedicated `escapeClaim` entrypoint, verifier, public-input shape, and domain;
+there is deliberately no `CLAIM_KIND_ESCAPE` constant.
 
 ## Interaction with typed state
 

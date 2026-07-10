@@ -29,6 +29,7 @@ contract SybilBridgeTest {
 
     MockUSDC private token;
     MockOpenVmVerifierAdapter private verifier;
+    MockOpenVmVerifierAdapter private escapeVerifier;
     SybilSettlement private settlement;
     SybilVault private vault;
 
@@ -44,12 +45,14 @@ contract SybilBridgeTest {
     function setUp() public {
         token = new MockUSDC();
         verifier = new MockOpenVmVerifierAdapter();
+        escapeVerifier = new MockOpenVmVerifierAdapter();
         settlement = new SybilSettlement(address(this), verifier, ADMIN_TIMELOCK);
         vault = new SybilVault(
             address(this),
             token,
             settlement,
             verifier,
+            escapeVerifier,
             WITHDRAWAL_DELAY,
             ESCAPE_TIMEOUT,
             ADMIN_TIMELOCK
@@ -97,6 +100,7 @@ contract SybilBridgeTest {
 
     function testUnsafeAcceptAllVerifierAcceptsAnyProofThroughSettlement() public {
         UnsafeAcceptAllVerifierAdapter unsafeVerifier = new UnsafeAcceptAllVerifierAdapter();
+        UnsafeAcceptAllVerifierAdapter unsafeEscapeVerifier = new UnsafeAcceptAllVerifierAdapter();
         SybilSettlement unsafeSettlement =
             new SybilSettlement(address(this), unsafeVerifier, ADMIN_TIMELOCK);
         SybilVault unsafeVault = new SybilVault(
@@ -104,6 +108,7 @@ contract SybilBridgeTest {
             token,
             unsafeSettlement,
             unsafeVerifier,
+            unsafeEscapeVerifier,
             WITHDRAWAL_DELAY,
             ESCAPE_TIMEOUT,
             ADMIN_TIMELOCK
@@ -374,7 +379,7 @@ contract SybilBridgeTest {
                 abi.encodeWithSelector(
                     SybilSettlement.submitStateRoot.selector, inputs, bytes("proof")
                 )
-        );
+            );
         require(!ok, "paused root accepted");
     }
 
@@ -423,7 +428,9 @@ contract SybilBridgeTest {
 
         vault.proposeAdminTransfer(newAdmin);
         (bool earlyOk,) = address(vault)
-            .call(abi.encodeWithSelector(bytes4(keccak256("executeAdminTransfer(address)")), newAdmin));
+            .call(
+                abi.encodeWithSelector(bytes4(keccak256("executeAdminTransfer(address)")), newAdmin)
+            );
         require(!earlyOk, "early admin transfer accepted");
 
         vm.warp(block.timestamp + ADMIN_TIMELOCK);
@@ -468,6 +475,205 @@ contract SybilBridgeTest {
         require(vault.escapeModeActive(), "escape active pre-first-root");
     }
 
+    function testEscapeClaimPaysWhileVaultPaused() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+        vault.pause();
+
+        address recipient = address(0xBEEF);
+        uint256 amount = 125_000;
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(stateRoot, settlement.latestHeight(), 41, recipient, amount);
+
+        uint256 recipientBefore = token.balanceOf(recipient);
+        vault.escapeClaim(inputs, "escape-proof");
+
+        require(vault.paused(), "vault unexpectedly unpaused");
+        require(token.balanceOf(recipient) == recipientBefore + amount, "paused escape not paid");
+    }
+
+    function testEscapeClaimRevertsWhenEscapeModeInactive() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(stateRoot, settlement.latestHeight(), 42, address(0xBEEF), 100_000);
+
+        (bool ok,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.escapeClaim.selector, inputs, bytes("proof")));
+
+        require(!ok, "inactive escape claim accepted");
+        require(!vault.nullifierUsed(inputs.nullifier), "inactive claim burned nullifier");
+    }
+
+    function testEscapeClaimRevertsForStaleRoot() public {
+        bytes32 staleRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        // Latest-at-claim semantics remain in force if the operator resumes
+        // root submission after escape activation.
+        bytes32 latestRoot = keccak256("state-2");
+        settlement.submitStateRoot(_nextRootInputs(staleRoot, 1, latestRoot), "proof");
+
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(staleRoot, 1, 43, address(0xBEEF), 100_000);
+        (bool ok,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.escapeClaim.selector, inputs, bytes("proof")));
+
+        require(!ok, "stale-root escape claim accepted");
+        require(!vault.nullifierUsed(inputs.nullifier), "stale claim burned nullifier");
+    }
+
+    function testEscapeClaimRevertsForWrongHeightAtLatestRoot() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(stateRoot, settlement.latestHeight() + 1, 44, address(0xBEEF), 100_000);
+        (bool ok,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.escapeClaim.selector, inputs, bytes("proof")));
+
+        require(!ok, "wrong-height escape claim accepted");
+        require(!vault.nullifierUsed(inputs.nullifier), "wrong-height claim burned nullifier");
+    }
+
+    function testEscapeClaimRevertsForWrongNullifier() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(stateRoot, settlement.latestHeight(), 48, address(0xBEEF), 100_000);
+        inputs.nullifier = keccak256("wrong-escape-nullifier");
+        (bool ok,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.escapeClaim.selector, inputs, bytes("proof")));
+
+        require(!ok, "wrong escape nullifier accepted");
+        require(!vault.nullifierUsed(inputs.nullifier), "wrong nullifier burned");
+    }
+
+    function testEscapeClaimInvalidProofDoesNotBurnNullifier() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+        escapeVerifier.setShouldVerify(false);
+
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(stateRoot, settlement.latestHeight(), 49, address(0xBEEF), 100_000);
+        (bool ok,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.escapeClaim.selector, inputs, bytes("proof")));
+
+        require(!ok, "invalid escape proof accepted");
+        require(!vault.nullifierUsed(inputs.nullifier), "invalid proof burned nullifier");
+    }
+
+    function testEscapeClaimDoubleClaimReverts() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        address recipient = address(0xBEEF);
+        uint256 amount = 100_000;
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(stateRoot, settlement.latestHeight(), 45, recipient, amount);
+        vault.escapeClaim(inputs, "escape-proof");
+        uint256 balanceAfterFirstClaim = token.balanceOf(recipient);
+
+        (bool ok,) = address(vault)
+            .call(
+                abi.encodeWithSelector(
+                    SybilVault.escapeClaim.selector, inputs, bytes("second-proof")
+                )
+            );
+
+        require(!ok, "double escape claim accepted");
+        require(token.balanceOf(recipient) == balanceAfterFirstClaim, "double claim paid");
+    }
+
+    function testEscapeClaimMockVerifierProofPlumbingPaysExactAmount() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        address recipient = address(0xBEEF);
+        uint256 amount = 234_567;
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(stateRoot, settlement.latestHeight(), 46, recipient, amount);
+        bytes32 inputHash = vault.escapeClaimPublicInputHash(inputs);
+        vm.expectCall(
+            address(escapeVerifier),
+            abi.encodeWithSelector(
+                IOpenVmVerifierAdapter.verify.selector, bytes("escape-proof"), inputHash
+            )
+        );
+
+        uint256 recipientBefore = token.balanceOf(recipient);
+        uint256 vaultBefore = token.balanceOf(address(vault));
+        vault.escapeClaim(inputs, "escape-proof");
+
+        require(token.balanceOf(recipient) == recipientBefore + amount, "recipient amount");
+        require(token.balanceOf(address(vault)) == vaultBefore - amount, "vault amount");
+        require(vault.nullifierUsed(inputs.nullifier), "escape nullifier not consumed");
+    }
+
+    function testEscapeAndWithdrawalNullifiersDoNotCollideOrBlockEachOther() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        uint64 accountId = 47;
+        uint64 withdrawalId = 47;
+        address recipient = address(0xBEEF);
+        uint256 amount = 100_000;
+        bytes32 withdrawalNullifier = keccak256(
+            abi.encode(
+                "sybil/withdrawal-nullifier/v1",
+                block.chainid,
+                address(vault),
+                withdrawalId,
+                accountId,
+                recipient,
+                address(token),
+                amount
+            )
+        );
+        SybilTypes.WithdrawalPublicInputs memory withdrawalInputs = SybilTypes.WithdrawalPublicInputs({
+            stateRoot: stateRoot,
+            height: settlement.latestHeight(),
+            nullifier: withdrawalNullifier,
+            recipient: recipient,
+            token: address(token),
+            amount: amount,
+            claimKind: vault.CLAIM_KIND_NORMAL()
+        });
+        SybilTypes.EscapeClaimPublicInputs memory escapeInputs =
+            _escapeInputs(stateRoot, settlement.latestHeight(), accountId, recipient, amount);
+
+        require(withdrawalNullifier != escapeInputs.nullifier, "nullifier domains collided");
+        vault.requestWithdrawal(withdrawalInputs, "withdrawal-proof");
+        vault.escapeClaim(escapeInputs, "escape-proof");
+        require(vault.nullifierUsed(withdrawalNullifier), "withdrawal nullifier not used");
+        require(vault.nullifierUsed(escapeInputs.nullifier), "escape nullifier not used");
+
+        // The only un-spend path applies to an actual queued withdrawal and
+        // must never clear the independently consumed escape nullifier.
+        vault.cancelWithdrawal(withdrawalNullifier, "cross-domain test");
+        require(!vault.nullifierUsed(withdrawalNullifier), "withdrawal nullifier not released");
+        require(vault.nullifierUsed(escapeInputs.nullifier), "escape nullifier released");
+        vault.requestWithdrawal(withdrawalInputs, "withdrawal-proof-2");
+        require(vault.nullifierUsed(withdrawalNullifier), "escape blocked withdrawal requeue");
+    }
+
+    function testVaultEscapeVerifierChangeRequiresTimelock() public {
+        MockOpenVmVerifierAdapter newEscapeVerifier = new MockOpenVmVerifierAdapter();
+
+        vault.proposeEscapeVerifier(newEscapeVerifier);
+        (bool earlyOk,) = address(vault)
+            .call(abi.encodeWithSelector(SybilVault.setEscapeVerifier.selector, newEscapeVerifier));
+        require(!earlyOk, "early escape verifier update accepted");
+
+        vm.warp(block.timestamp + ADMIN_TIMELOCK);
+        vault.setEscapeVerifier(newEscapeVerifier);
+
+        require(
+            address(vault.escapeVerifier()) == address(newEscapeVerifier),
+            "escape verifier not updated"
+        );
+    }
+
     function testRequestWithdrawalRejectsNonNormalClaimKind() public {
         bytes32 stateRoot = _acceptRootWithDeposit();
         SybilTypes.WithdrawalPublicInputs memory inputs = SybilTypes.WithdrawalPublicInputs({
@@ -496,6 +702,33 @@ contract SybilBridgeTest {
         bytes32 stateRoot = keccak256("state-1");
         settlement.submitStateRoot(_nextRootInputs(bytes32(0), 0, stateRoot), "proof");
         return stateRoot;
+    }
+
+    function _activateEscapeMode() internal {
+        vm.warp(block.timestamp + ESCAPE_TIMEOUT + 1);
+        vault.activateEscapeMode();
+    }
+
+    function _escapeInputs(
+        bytes32 stateRoot,
+        uint64 height,
+        uint64 accountId,
+        address recipient,
+        uint256 amount
+    ) internal view returns (SybilTypes.EscapeClaimPublicInputs memory) {
+        bytes32 nullifier = keccak256(
+            abi.encode(
+                "sybil/escape-nullifier/v1", block.chainid, address(vault), accountId, stateRoot
+            )
+        );
+        return SybilTypes.EscapeClaimPublicInputs({
+            stateRoot: stateRoot,
+            height: height,
+            accountId: accountId,
+            recipient: recipient,
+            amount: amount,
+            nullifier: nullifier
+        });
     }
 
     function _nextRootInputs(
