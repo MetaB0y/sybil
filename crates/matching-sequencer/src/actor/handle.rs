@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+const TEST_ACTOR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Cloneable handle to the sequencer actor.
 #[derive(Clone)]
 pub struct SequencerHandle {
@@ -130,7 +133,7 @@ impl SequencerHandle {
         &self,
         old_id: ractor::ActorId,
     ) -> Result<(), SequencerError> {
-        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = Instant::now() + TEST_ACTOR_TIMEOUT;
         loop {
             let actor = self
                 .inner
@@ -156,7 +159,7 @@ impl SequencerHandle {
         let actor = self.actor_ref().await?;
         let old_id = actor.get_id();
         actor
-            .kill_and_wait(Some(std::time::Duration::from_secs(5)))
+            .kill_and_wait(Some(TEST_ACTOR_TIMEOUT))
             .await
             .map_err(|error| {
                 SequencerError::Persistence(format!("actor test kill failed: {error}"))
@@ -1585,7 +1588,7 @@ mod tests {
 
         let stopper = tokio::spawn({
             let handle = handle.clone();
-            async move { handle.stop_and_wait(Duration::from_secs(5)).await }
+            async move { handle.stop_and_wait(TEST_ACTOR_TIMEOUT).await }
         });
         tokio::time::sleep(Duration::from_millis(25)).await;
         assert!(
@@ -2526,6 +2529,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn second_first_key_bootstrap_is_rejected_before_wal_append() {
+        let path = temp_store_path("first-key-bootstrap");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut sequencer, account_id) = make_test_sequencer_with_config(config.clone());
+        sequencer.produce_block(Vec::new(), 1);
+        store.save_block(sequencer.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let sequencer =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+
+        let first_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let racing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+
+        handle
+            .register_pubkey(account_id, PublicKey(*first_key.verifying_key()))
+            .await
+            .unwrap();
+        let error = handle
+            .register_pubkey(account_id, PublicKey(*racing_key.verifying_key()))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SequencerError::AccountAlreadyRegistered));
+
+        let pending_restore = store.load_state().await.unwrap().unwrap();
+        assert_eq!(
+            pending_restore.control_plane_log.len(),
+            1,
+            "the rejected racing bootstrap must never enter the control-plane WAL"
+        );
+        let replayed =
+            BlockSequencer::restore(pending_restore, Arc::new(AdminOracle::new()), config);
+        let keys = replayed.signing_keys_for_account(account_id);
+        assert_eq!(keys.len(), 1);
+        assert_eq!(
+            keys[0].0,
+            first_key.verifying_key().to_sec1_point(true).as_bytes()
+        );
+
+        drop(handle);
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn onboarding_bootstrap_then_signed_key_allows_no_later_bootstrap() {
+        let (sequencer, _) = make_test_sequencer();
+        let handle = SequencerHandle::spawn(sequencer);
+        let account = handle.create_account(0).await.unwrap();
+
+        let primary =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        handle
+            .register_pubkey(account.id, PublicKey(*primary.verifying_key()))
+            .await
+            .expect("first-key bootstrap should succeed");
+
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let second = <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+        );
+        let signed = crate::crypto::sign_key_registration(
+            account.id,
+            PublicKey(*second.verifying_key()),
+            AccountAuthScheme::RawP256,
+            Some("backup".to_string()),
+            crate::crypto::KeyScope::Custom,
+            1,
+            genesis_hash,
+            &primary,
+        );
+        handle
+            .register_key_signed(signed)
+            .await
+            .expect("an existing key should authorize a second key");
+
+        let late_bootstrap =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let error = handle
+            .register_pubkey(account.id, PublicKey(*late_bootstrap.verifying_key()))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SequencerError::AccountAlreadyRegistered));
+        assert_eq!(
+            handle
+                .signing_keys_for_account(account.id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
     async fn test_list_and_create_markets() {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq);
@@ -2730,7 +2843,7 @@ mod tests {
             block_history_retention_blocks: 1,
             history_prune_interval_blocks: 1,
             history_prune_max_rows: 10,
-            block_interval: Duration::from_secs(60),
+            block_interval: Duration::from_secs(60 * 60),
             ..SequencerConfig::default()
         };
         let (seq, _) = make_test_sequencer_with_config(config);

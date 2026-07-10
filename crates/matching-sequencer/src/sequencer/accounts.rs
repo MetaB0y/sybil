@@ -36,6 +36,18 @@ impl BlockSequencer {
         pubkey: crate::crypto::PublicKey,
         mut meta: crate::crypto::RegisteredPubkey,
     ) -> Result<(), SequencerError> {
+        self.can_register_pubkey(account_id, &pubkey)?;
+        meta.account_id = account_id;
+        self.apply_pubkey_registration(account_id, pubkey, meta);
+        Ok(())
+    }
+
+    /// Preflight a signing-key registration without mutating account state.
+    pub fn can_register_pubkey(
+        &self,
+        account_id: AccountId,
+        pubkey: &crate::crypto::PublicKey,
+    ) -> Result<(), SequencerError> {
         if self.accounts.get(account_id).is_none() {
             return Err(SequencerError::Rejected(Rejection {
                 order_id: 0,
@@ -43,17 +55,59 @@ impl BlockSequencer {
                 reason: RejectionReason::AccountNotFound,
             }));
         }
-        if self.pubkey_registry.contains_key(&pubkey) {
+        if self.pubkey_registry.contains_key(pubkey) {
             return Err(SequencerError::AccountAlreadyRegistered);
         }
+        Ok(())
+    }
+
+    /// Preflight the unsigned first-key bootstrap.
+    ///
+    /// This is deliberately stricter than signed key registration: the target
+    /// account must have no signing keys at all. The actor invokes this before
+    /// appending the control-plane WAL command, and the apply method below
+    /// invokes the same preflight again so validation cannot drift.
+    pub fn can_register_first_pubkey(
+        &self,
+        account_id: AccountId,
+        pubkey: &crate::crypto::PublicKey,
+    ) -> Result<(), SequencerError> {
+        self.can_register_pubkey(account_id, pubkey)?;
+        if self
+            .pubkey_registry
+            .values()
+            .any(|registered| registered.account_id == account_id)
+        {
+            return Err(SequencerError::AccountAlreadyRegistered);
+        }
+        Ok(())
+    }
+
+    /// Atomically apply the unsigned first-key bootstrap.
+    pub fn register_first_pubkey_with_meta(
+        &mut self,
+        account_id: AccountId,
+        pubkey: crate::crypto::PublicKey,
+        mut meta: crate::crypto::RegisteredPubkey,
+    ) -> Result<(), SequencerError> {
+        self.can_register_first_pubkey(account_id, &pubkey)?;
         meta.account_id = account_id;
+        self.apply_pubkey_registration(account_id, pubkey, meta);
+        Ok(())
+    }
+
+    fn apply_pubkey_registration(
+        &mut self,
+        account_id: AccountId,
+        pubkey: crate::crypto::PublicKey,
+        meta: crate::crypto::RegisteredPubkey,
+    ) {
         self.pubkey_registry.insert(pubkey, meta);
         crate::digest::refresh_account_keys_digest(
             &mut self.accounts,
             account_id,
             &self.pubkey_registry,
         );
-        Ok(())
     }
 
     /// Revoke a registered signing key (SYB-60).

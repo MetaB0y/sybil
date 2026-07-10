@@ -1482,7 +1482,7 @@ async fn signed_cancel_removes_pending_order() {
 }
 
 #[tokio::test]
-async fn signed_order_and_cancel_replay_return_409() {
+async fn signed_order_replay_returns_409_and_cancel_replay_returns_404() {
     let (app, handle) = test_app(true).await;
 
     let (_, body) = post_json(
@@ -1532,11 +1532,11 @@ async fn signed_order_and_cancel_replay_return_409() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let (status, body) = post_json(app, "/v1/orders/cancel/signed", cancel_payload).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(
-        parse_json(&body)["code"].as_str(),
-        Some("REPLAY_NONCE_STALE")
-    );
+    // Cancel validation runs before replay-nonce validation, so after the first
+    // cancel removes the order, the replay is rejected as not found without
+    // consuming or otherwise consulting the stale nonce.
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(parse_json(&body)["code"].as_str(), Some("NOT_FOUND"));
 }
 
 #[tokio::test]

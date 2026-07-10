@@ -72,24 +72,19 @@ impl SequencerActorState {
         pubkey: PublicKey,
         auth_scheme: AccountAuthScheme,
     ) -> Result<(), SequencerError> {
-        if self.sequencer.accounts.get(account_id).is_none() {
-            return Err(SequencerError::Rejected(Rejection {
-                order_id: 0,
-                account_id,
-                reason: RejectionReason::AccountNotFound,
-            }));
-        }
-        if self.sequencer.lookup_pubkey(&pubkey).is_some() {
-            return Err(SequencerError::AccountAlreadyRegistered);
-        }
+        self.sequencer
+            .can_register_first_pubkey(account_id, &pubkey)?;
         self.persist_control_plane(&ControlPlaneCommand::RegisterPubkey {
             account_id,
             compressed_pubkey: pubkey.compressed_bytes(),
             auth_scheme,
         })
         .await?;
-        self.sequencer
-            .register_pubkey_with_scheme(account_id, pubkey, auth_scheme)
+        self.sequencer.register_first_pubkey_with_meta(
+            account_id,
+            pubkey,
+            RegisteredPubkey::primary(account_id, auth_scheme),
+        )
     }
 
     pub(super) async fn handle_create_market(
@@ -232,16 +227,8 @@ impl SequencerActorState {
         pubkey: PublicKey,
         meta: RegisteredPubkey,
     ) -> Result<(), SequencerError> {
-        if self.sequencer.accounts.get(account_id).is_none() {
-            return Err(SequencerError::Rejected(Rejection {
-                order_id: 0,
-                account_id,
-                reason: RejectionReason::AccountNotFound,
-            }));
-        }
-        if self.sequencer.lookup_pubkey(&pubkey).is_some() {
-            return Err(SequencerError::AccountAlreadyRegistered);
-        }
+        self.sequencer
+            .can_register_first_pubkey(account_id, &pubkey)?;
         self.persist_control_plane(&ControlPlaneCommand::RegisterPubkeyWithMeta {
             account_id,
             compressed_pubkey: pubkey.compressed_bytes(),
@@ -252,7 +239,7 @@ impl SequencerActorState {
         })
         .await?;
         self.sequencer
-            .register_pubkey_with_meta(account_id, pubkey, meta)
+            .register_first_pubkey_with_meta(account_id, pubkey, meta)
     }
 
     /// Register a NEW signing key authorized by an existing account key (SYB-229).
@@ -293,13 +280,8 @@ impl SequencerActorState {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
         // Reject a duplicate registration BEFORE burning the nonce so a rejected
         // request doesn't consume it (mirrors the revoke validation ordering).
-        if self
-            .sequencer
-            .lookup_pubkey(&authenticated.new_pubkey)
-            .is_some()
-        {
-            return Err(SequencerError::AccountAlreadyRegistered);
-        }
+        self.sequencer
+            .can_register_pubkey(authenticated.account_id, &authenticated.new_pubkey)?;
         self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
             .await?;
         let meta = RegisteredPubkey {

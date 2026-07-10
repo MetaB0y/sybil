@@ -30,6 +30,9 @@ use tokio::time::sleep;
 /// crediting a deposit that a reorg later drops or replaces is unrecoverable
 /// (`ingest_l1_deposit` mutates the deposit cursor/root irreversibly).
 const DEFAULT_CONFIRMATIONS: u64 = 2;
+/// Fail-closed minimum when operators omit `SYBIL_L1_MIN_CONFIRMATIONS`.
+/// Local development can still opt out explicitly with `0`.
+const DEFAULT_MIN_CONFIRMATIONS: u64 = 2;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -60,10 +63,15 @@ struct Args {
     /// public/mainnet-like chains. See `DEFAULT_CONFIRMATIONS`.
     #[arg(long, env = "SYBIL_L1_CONFIRMATIONS", default_value_t = DEFAULT_CONFIRMATIONS)]
     confirmations: u64,
-    /// Optional minimum L1 confirmation depth enforced at startup. `0` disables
-    /// the guard. For public/mainnet-like chains, configure a value in the
-    /// recommended 12–32 range.
-    #[arg(long, env = "SYBIL_L1_MIN_CONFIRMATIONS", default_value_t = 0)]
+    /// Minimum L1 confirmation depth enforced at startup. Defaults fail-closed
+    /// at 2; explicit `0` disables the guard for local development. For
+    /// public/mainnet-like chains, configure a value in the recommended 12–32
+    /// range.
+    #[arg(
+        long,
+        env = "SYBIL_L1_MIN_CONFIRMATIONS",
+        default_value_t = DEFAULT_MIN_CONFIRMATIONS
+    )]
     min_confirmations: u64,
     /// Maximum eth_getLogs block span per poll.
     #[arg(long, env = "SYBIL_L1_MAX_BLOCK_SPAN", default_value_t = 1_000)]
@@ -1064,6 +1072,11 @@ mod tests {
                 min_confirmations: 12,
             })
         ));
+    }
+
+    #[test]
+    fn minimum_confirmation_default_fails_closed() {
+        assert_eq!(DEFAULT_MIN_CONFIRMATIONS, 2);
     }
 
     #[test]
