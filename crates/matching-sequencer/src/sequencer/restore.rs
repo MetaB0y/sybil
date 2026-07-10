@@ -174,7 +174,8 @@ impl BlockSequencer {
 
         let expired_on_restore = restored
             .order_book
-            .expire_committed_through(restored.height);
+            .expire_committed_through(restored.height)
+            .expect("restored reservation aggregates were validated before replay");
         if !expired_on_restore.is_empty() {
             metrics::counter!("sybil_restore_expired_resting_orders_total")
                 .increment(expired_on_restore.len() as u64);

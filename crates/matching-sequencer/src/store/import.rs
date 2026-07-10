@@ -225,6 +225,13 @@ fn restored_state_from_witness(
         market_state_from_sidecar(&witness.state_sidecar)?;
     let bridge_state = bridge_state_from_witness(witness)?;
     let resting_orders = resting_orders_from_sidecar(&witness.state_sidecar);
+    validate_restored_reservations(&resting_orders)
+        .map_err(|error| import_err(error.to_string()))?;
+    validate_restored_account_reservations(
+        &resting_orders,
+        &witness.state_sidecar.account_reservations,
+    )
+    .map_err(|error| import_err(error.to_string()))?;
     let order_book = OrderBook::restore(resting_orders.clone(), config.order_ttl_blocks);
     let restored_resting_orders = order_book.snapshot();
     if restored_resting_orders.len() != resting_orders.len() {
@@ -719,6 +726,17 @@ fn resting_orders_from_sidecar(sidecar: &StateSidecarSnapshot) -> Vec<RestingOrd
                 .iter()
                 .map(|&(market, outcome, qty)| ((market, outcome), qty))
                 .collect();
+            // The sidecar does not carry matched provenance (has_been_matched /
+            // original_max_fill). A partially-filled remainder legitimately
+            // carries a proportionally-scaled reservation that may exceed the
+            // admission formula for its remaining size, so infer the matched
+            // flag from that divergence; restore validation then applies the
+            // lower-bound rule instead of falsely rejecting the exact rule.
+            // The original size stays unknown (original_max_fill = current).
+            let has_been_matched = crate::validation::validate_order_shape(&snapshot.order)
+                .and_then(|()| crate::validation::balance_reservation(&snapshot.order))
+                .map(|admission_cost| snapshot.reserved_balance != admission_cost)
+                .unwrap_or(false);
             RestingOrder {
                 order: snapshot.order.clone(),
                 account_id: AccountId(snapshot.account_id),
@@ -726,7 +744,7 @@ fn resting_orders_from_sidecar(sidecar: &StateSidecarSnapshot) -> Vec<RestingOrd
                 expires_at_block: snapshot.expires_at_block,
                 reserved_balance: snapshot.reserved_balance,
                 reserved_positions,
-                has_been_matched: false,
+                has_been_matched,
                 original_max_fill: snapshot.order.max_fill.0,
                 created_at_ms: 0,
             }

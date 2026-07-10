@@ -269,6 +269,10 @@ impl From<matching_sequencer::SequencerError> for AppError {
                 );
                 AppError::internal("Internal sequencer integrity failure")
             }
+            matching_sequencer::SequencerError::ReservationInvariant(ref error) => {
+                tracing::error!(%error, "sequencer reservation invariant failure");
+                AppError::internal("Internal sequencer integrity failure")
+            }
             matching_sequencer::SequencerError::Persistence(ref msg) => {
                 AppError::internal(format!("Persistence error: {msg}"))
             }

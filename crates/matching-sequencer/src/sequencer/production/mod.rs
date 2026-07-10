@@ -414,8 +414,10 @@ impl BlockSequencer {
         let mut derived_view_sidecar = DerivedViewSidecar::default();
 
         // ── Order Book: expire stale, remove orders for resolved markets ──
-        let expired = self.order_book.expire(self.height);
-        let revalidated = self.order_book.revalidate(&self.accounts, &active_markets);
+        let expired = self.order_book.expire(self.height)?;
+        let revalidated = self
+            .order_book
+            .revalidate(&self.accounts, &active_markets)?;
         for ro in &expired {
             derived_view_sidecar
                 .removed_orders
@@ -831,7 +833,7 @@ impl BlockSequencer {
         // Update order book: release filled orders' reservations, adjust partial fills
         let post_solve_removed = self
             .order_book
-            .settle(&fills, &mm_order_ids_set, self.height);
+            .settle(&fills, &mm_order_ids_set, self.height)?;
         for (ro, exit) in &post_solve_removed {
             derived_view_sidecar
                 .removed_orders

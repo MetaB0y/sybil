@@ -116,6 +116,9 @@ pub enum SequencerError {
     /// Order validation failure.
     #[error("order {} rejected: {:?}", .0.order_id, .0.reason)]
     Rejected(Rejection),
+    /// Resting-order reservation aggregates failed a fail-closed invariant.
+    #[error(transparent)]
+    ReservationInvariant(#[from] crate::order_book::ReservationError),
     /// P256 signature check failed.
     #[error("invalid P256 signature")]
     InvalidSignature,

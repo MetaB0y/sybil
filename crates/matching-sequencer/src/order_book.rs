@@ -18,7 +18,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::account::{AccountId, AccountStore};
 use crate::error::RejectionReason;
-use crate::validation::{sell_reservations, validate_order_with_reservation, PositionKey};
+use crate::validation::{
+    balance_reservation, sell_reservations, validate_order_shape, validate_order_with_reservation,
+    PositionKey,
+};
 
 fn default_resting_expires_at_block() -> u64 {
     u64::MAX
@@ -119,6 +122,125 @@ pub struct Accepted {
 pub(crate) enum CancelError {
     NotFound,
     WrongOwner,
+    Reservation(ReservationError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ReservationError {
+    #[error(
+        "reservation balance over-release for account {}: currently reserved {}, attempted release {}",
+        .account_id.0,
+        .currently_reserved,
+        .attempted_release
+    )]
+    BalanceOverRelease {
+        account_id: AccountId,
+        currently_reserved: i64,
+        attempted_release: i64,
+    },
+    #[error(
+        "position reservation over-release for account {} market {} outcome {}: currently reserved {}, attempted release {}",
+        .account_id.0,
+        .market.0,
+        .outcome,
+        .currently_reserved,
+        .attempted_release
+    )]
+    PositionOverRelease {
+        account_id: AccountId,
+        market: MarketId,
+        outcome: u8,
+        currently_reserved: i64,
+        attempted_release: i64,
+    },
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ReservationRestoreError {
+    #[error(
+        "reserved_balance mismatch for account {}: stored {}, recomputed {}",
+        .account_id.0,
+        .stored,
+        .recomputed
+    )]
+    BalanceMismatch {
+        account_id: AccountId,
+        stored: i128,
+        recomputed: i128,
+    },
+    #[error(
+        "reserved position mismatch for account {} market {} outcome {}: stored {}, recomputed {}",
+        .account_id.0,
+        .market.0,
+        .outcome,
+        .stored,
+        .recomputed
+    )]
+    PositionMismatch {
+        account_id: AccountId,
+        market: MarketId,
+        outcome: u8,
+        stored: i128,
+        recomputed: i128,
+    },
+    #[error(
+        "reserved_balance mismatch for account {} order {}: stored {}, recomputed {}",
+        .account_id.0,
+        .order_id,
+        .stored,
+        .recomputed
+    )]
+    OrderBalanceMismatch {
+        account_id: AccountId,
+        order_id: u64,
+        stored: i64,
+        recomputed: i64,
+    },
+    #[error(
+        "reserved_balance below remainder cost for account {} order {}: stored {}, minimum {}",
+        .account_id.0,
+        .order_id,
+        .stored,
+        .minimum
+    )]
+    OrderBalanceBelowMinimum {
+        account_id: AccountId,
+        order_id: u64,
+        stored: i64,
+        minimum: i64,
+    },
+    #[error(
+        "reserved_balance above original admission cost for account {} order {}: stored {}, maximum {}",
+        .account_id.0,
+        .order_id,
+        .stored,
+        .maximum
+    )]
+    OrderBalanceAboveMaximum {
+        account_id: AccountId,
+        order_id: u64,
+        stored: i64,
+        maximum: i64,
+    },
+    #[error(
+        "reserved_positions mismatch for account {} order {}: stored {:?}, recomputed {:?}",
+        .account_id.0,
+        .order_id,
+        .stored,
+        .recomputed
+    )]
+    OrderPositionsMismatch {
+        account_id: AccountId,
+        order_id: u64,
+        stored: Vec<(PositionKey, i64)>,
+        recomputed: Vec<(PositionKey, i64)>,
+    },
+    #[error("cannot recompute reserved_balance for account {} order {}: {reason:?}", .account_id.0, .order_id)]
+    InvalidOrder {
+        account_id: AccountId,
+        order_id: u64,
+        reason: RejectionReason,
+    },
 }
 
 impl OrderBook {
@@ -313,7 +435,7 @@ impl OrderBook {
     fn expire_where(
         &mut self,
         mut should_expire: impl FnMut(&RestingOrder) -> bool,
-    ) -> Vec<RestingOrder> {
+    ) -> Result<Vec<RestingOrder>, ReservationError> {
         let mut removed = Vec::new();
         let mut kept = Vec::with_capacity(self.orders.len());
         for ro in self.orders.drain(..) {
@@ -322,19 +444,19 @@ impl OrderBook {
                     &mut self.balance_reservations,
                     &mut self.position_reservations,
                     &ro,
-                );
+                )?;
                 removed.push(ro);
             } else {
                 kept.push(ro);
             }
         }
         self.orders = kept;
-        removed
+        Ok(removed)
     }
 
     /// Remove orders that are expired at block-start and release reservations.
     /// Returns the orders that were removed (empty when nothing expired).
-    pub fn expire(&mut self, current_height: u64) -> Vec<RestingOrder> {
+    pub fn expire(&mut self, current_height: u64) -> Result<Vec<RestingOrder>, ReservationError> {
         self.expire_where(|ro| current_height > ro.expires_at_block)
     }
 
@@ -343,7 +465,10 @@ impl OrderBook {
     /// Live block commit sweeps orders whose expiry block was just processed
     /// (`current_height >= expires_at_block`) in `settle()`. Restore uses the
     /// same committed-height semantics before replaying WAL rows.
-    pub fn expire_committed_through(&mut self, current_height: u64) -> Vec<RestingOrder> {
+    pub fn expire_committed_through(
+        &mut self,
+        current_height: u64,
+    ) -> Result<Vec<RestingOrder>, ReservationError> {
         self.expire_where(|ro| current_height >= ro.expires_at_block)
     }
 
@@ -358,7 +483,7 @@ impl OrderBook {
         &mut self,
         accounts: &AccountStore,
         active_markets: &HashSet<MarketId>,
-    ) -> Vec<(RestingOrder, RestingRevalidationExit)> {
+    ) -> Result<Vec<(RestingOrder, RestingRevalidationExit)>, ReservationError> {
         // We must re-validate carefully: removing one order releases its reservations,
         // which may make subsequent orders valid again. But for simplicity and safety,
         // we validate conservatively: remove anything that's invalid given current
@@ -425,10 +550,10 @@ impl OrderBook {
                 &mut self.balance_reservations,
                 &mut self.position_reservations,
                 &ro,
-            );
+            )?;
             removed.push((ro, reason));
         }
-        removed
+        Ok(removed)
     }
 
     /// Orders available for the current batch.
@@ -491,13 +616,14 @@ impl OrderBook {
         order_id: u64,
     ) -> Result<RestingOrder, CancelError> {
         let index = self.cancel_index(account_id, order_id)?;
-        let ro = self.orders.remove(index);
+        let ro = self.orders[index].clone();
         Self::release_reservations(
             &mut self.balance_reservations,
             &mut self.position_reservations,
             &ro,
-        );
-        Ok(ro)
+        )
+        .map_err(CancelError::Reservation)?;
+        Ok(self.orders.remove(index))
     }
 
     /// Roll back an order that was just returned by [`Self::accept`].
@@ -530,7 +656,7 @@ impl OrderBook {
         fills: &[Fill],
         mm_order_ids: &HashSet<u64>,
         current_height: u64,
-    ) -> Vec<(RestingOrder, RestingExit)> {
+    ) -> Result<Vec<(RestingOrder, RestingExit)>, ReservationError> {
         // Build fill-qty map
         let mut filled_qty: HashMap<u64, u64> = HashMap::new();
         for f in fills {
@@ -549,7 +675,7 @@ impl OrderBook {
                     &mut self.balance_reservations,
                     &mut self.position_reservations,
                     &ro,
-                );
+                )?;
                 removed.push((ro, RestingExit::Settled));
                 continue;
             }
@@ -565,7 +691,7 @@ impl OrderBook {
                     &mut self.balance_reservations,
                     &mut self.position_reservations,
                     &ro,
-                );
+                )?;
                 removed.push((ro, RestingExit::Settled));
                 continue;
             }
@@ -575,7 +701,7 @@ impl OrderBook {
                     &mut self.balance_reservations,
                     &mut self.position_reservations,
                     &ro,
-                );
+                )?;
                 removed.push((ro, RestingExit::Expired));
                 continue;
             }
@@ -593,6 +719,16 @@ impl OrderBook {
                 // is the SEQ-2 soundness bug. `ceil_mul_ratio` is the shared
                 // consensus-canonical helper. Reservation values are non-negative
                 // by construction (see struct docs), so the `as u64` casts are safe.
+                //
+                // NOTE: the proportional formula is consensus-pinned. The ZK guest
+                // (`sybil_verifier::sidecar::expected_post_resting`) replays the
+                // remainder with the same `ceil_mul_ratio` call, so switching this
+                // to the admission formula (`balance_reservation`) would make any
+                // partial fill whose values diverge fail block verification.
+                // Because repeated proportional rounding is history-dependent, a
+                // matched remainder's reservation is not exactly recomputable from
+                // the snapshot alone; restore validation bounds it instead (see
+                // `validate_restored_reservations`).
                 let remaining = ro.order.max_fill.0 - filled;
                 let max_fill = ro.order.max_fill.0;
 
@@ -601,28 +737,31 @@ impl OrderBook {
                 let released_balance = old_cost - new_cost;
 
                 if released_balance > 0 {
-                    if let Some(v) = self.balance_reservations.get_mut(&ro.account_id) {
-                        *v -= released_balance;
-                    }
+                    Self::release_balance(
+                        &mut self.balance_reservations,
+                        ro.account_id,
+                        released_balance,
+                    )?;
                 }
 
                 // Release proportional position reservations
                 let new_pos_reservations: Vec<(PositionKey, i64)> = ro
                     .reserved_positions
                     .iter()
-                    .map(|&(key, qty)| {
+                    .map(|&(key, qty)| -> Result<_, ReservationError> {
                         let new_qty = ceil_mul_ratio(qty as u64, remaining, max_fill) as i64;
                         let released = qty - new_qty;
                         if released > 0 {
-                            if let Some(v) =
-                                self.position_reservations.get_mut(&(ro.account_id, key))
-                            {
-                                *v -= released;
-                            }
+                            Self::release_position(
+                                &mut self.position_reservations,
+                                ro.account_id,
+                                key,
+                                released,
+                            )?;
                         }
-                        (key, new_qty)
+                        Ok((key, new_qty))
                     })
-                    .collect();
+                    .collect::<Result<_, _>>()?;
 
                 let mut remainder = ro.order.clone();
                 remainder.max_fill = Qty(remaining);
@@ -645,7 +784,7 @@ impl OrderBook {
         }
 
         self.orders = new_orders;
-        removed
+        Ok(removed)
     }
 
     /// Release the reservations held by a resting order.
@@ -653,24 +792,239 @@ impl OrderBook {
         balance_reservations: &mut HashMap<AccountId, i64>,
         position_reservations: &mut HashMap<(AccountId, PositionKey), i64>,
         ro: &RestingOrder,
-    ) {
-        if ro.reserved_balance > 0 {
-            if let Some(v) = balance_reservations.get_mut(&ro.account_id) {
-                *v -= ro.reserved_balance;
-                if *v <= 0 {
-                    balance_reservations.remove(&ro.account_id);
-                }
-            }
+    ) -> Result<(), ReservationError> {
+        let current_balance = balance_reservations
+            .get(&ro.account_id)
+            .copied()
+            .unwrap_or(0);
+        if ro.reserved_balance > current_balance {
+            Self::record_release_tripwire("balance");
+            return Err(ReservationError::BalanceOverRelease {
+                account_id: ro.account_id,
+                currently_reserved: current_balance,
+                attempted_release: ro.reserved_balance,
+            });
         }
         for &(key, qty) in &ro.reserved_positions {
-            if let Some(v) = position_reservations.get_mut(&(ro.account_id, key)) {
-                *v -= qty;
-                if *v <= 0 {
-                    position_reservations.remove(&(ro.account_id, key));
-                }
+            let currently_reserved = position_reservations
+                .get(&(ro.account_id, key))
+                .copied()
+                .unwrap_or(0);
+            if qty > currently_reserved {
+                Self::record_release_tripwire("position");
+                return Err(ReservationError::PositionOverRelease {
+                    account_id: ro.account_id,
+                    market: key.0,
+                    outcome: key.1,
+                    currently_reserved,
+                    attempted_release: qty,
+                });
             }
         }
+
+        if ro.reserved_balance > 0 {
+            Self::release_balance(balance_reservations, ro.account_id, ro.reserved_balance)?;
+        }
+        for &(key, qty) in &ro.reserved_positions {
+            Self::release_position(position_reservations, ro.account_id, key, qty)?;
+        }
+        Ok(())
     }
+
+    fn release_balance(
+        reservations: &mut HashMap<AccountId, i64>,
+        account_id: AccountId,
+        amount: i64,
+    ) -> Result<(), ReservationError> {
+        let currently_reserved = reservations.get(&account_id).copied().unwrap_or(0);
+        if amount > currently_reserved {
+            Self::record_release_tripwire("balance");
+            return Err(ReservationError::BalanceOverRelease {
+                account_id,
+                currently_reserved,
+                attempted_release: amount,
+            });
+        }
+        if amount == currently_reserved {
+            reservations.remove(&account_id);
+        } else if amount > 0 {
+            *reservations
+                .get_mut(&account_id)
+                .expect("positive reservation checked above") -= amount;
+        }
+        Ok(())
+    }
+
+    fn release_position(
+        reservations: &mut HashMap<(AccountId, PositionKey), i64>,
+        account_id: AccountId,
+        key: PositionKey,
+        amount: i64,
+    ) -> Result<(), ReservationError> {
+        let currently_reserved = reservations.get(&(account_id, key)).copied().unwrap_or(0);
+        if amount > currently_reserved {
+            Self::record_release_tripwire("position");
+            return Err(ReservationError::PositionOverRelease {
+                account_id,
+                market: key.0,
+                outcome: key.1,
+                currently_reserved,
+                attempted_release: amount,
+            });
+        }
+        if amount == currently_reserved {
+            reservations.remove(&(account_id, key));
+        } else if amount > 0 {
+            *reservations
+                .get_mut(&(account_id, key))
+                .expect("positive reservation checked above") -= amount;
+        }
+        Ok(())
+    }
+
+    fn record_release_tripwire(kind: &'static str) {
+        metrics::counter!("sybil_reservation_release_tripwire_total", "kind" => kind).increment(1);
+    }
+}
+
+/// Validate persisted per-order reservations against admission math, fail-closed.
+///
+/// The persisted reservation fields are redundant integrity data; a restore
+/// must not trust them blindly. What can be recomputed exactly:
+///
+/// * `reserved_positions` always equal `sell_reservations` at the order's
+///   current `max_fill` — proportional partial-fill scaling is exact for
+///   positions (`qty = -payoff * max_fill`, no rounding).
+/// * `reserved_balance` of a never-matched order equals the admission formula
+///   [`balance_reservation`] exactly.
+/// * A matched remainder's `reserved_balance` is derived by repeated
+///   proportional rounding (`ceil_mul_ratio`, consensus-pinned by the ZK
+///   guest's `expected_post_resting`) and is history-dependent, so it cannot
+///   be recomputed from the snapshot alone. It is bounded instead:
+///   `balance_reservation(current) <= stored <= balance_reservation(original)`.
+///   When the original size is unknown (`original_max_fill <=
+///   order.max_fill`, e.g. after a witness import, which does not carry
+///   matched provenance), only the lower bound — the fund-safety direction,
+///   no under-collateralization — is enforceable.
+///
+/// Any violation aborts the restore with a precise error; corrupted state
+/// must refuse to serve.
+pub(crate) fn validate_restored_reservations(
+    orders: &[RestingOrder],
+) -> Result<(), ReservationRestoreError> {
+    for resting in orders {
+        let invalid = |reason| ReservationRestoreError::InvalidOrder {
+            account_id: resting.account_id,
+            order_id: resting.order.id,
+            reason,
+        };
+        validate_order_shape(&resting.order).map_err(invalid)?;
+        let minimum = balance_reservation(&resting.order).map_err(invalid)?;
+
+        let recomputed_positions = sell_reservations(&resting.order);
+        if resting.reserved_positions != recomputed_positions {
+            return Err(ReservationRestoreError::OrderPositionsMismatch {
+                account_id: resting.account_id,
+                order_id: resting.order.id,
+                stored: resting.reserved_positions.clone(),
+                recomputed: recomputed_positions,
+            });
+        }
+
+        if !resting.has_been_matched {
+            if resting.reserved_balance != minimum {
+                return Err(ReservationRestoreError::OrderBalanceMismatch {
+                    account_id: resting.account_id,
+                    order_id: resting.order.id,
+                    stored: resting.reserved_balance,
+                    recomputed: minimum,
+                });
+            }
+            continue;
+        }
+
+        if resting.reserved_balance < minimum {
+            return Err(ReservationRestoreError::OrderBalanceBelowMinimum {
+                account_id: resting.account_id,
+                order_id: resting.order.id,
+                stored: resting.reserved_balance,
+                minimum,
+            });
+        }
+        if resting.original_max_fill > resting.order.max_fill.0 {
+            let mut original = resting.order.clone();
+            original.max_fill = Qty(resting.original_max_fill);
+            let maximum = validate_order_shape(&original)
+                .and_then(|()| balance_reservation(&original))
+                .map_err(invalid)?;
+            if resting.reserved_balance > maximum {
+                return Err(ReservationRestoreError::OrderBalanceAboveMaximum {
+                    account_id: resting.account_id,
+                    order_id: resting.order.id,
+                    stored: resting.reserved_balance,
+                    maximum,
+                });
+            }
+        }
+        // Matched with original_max_fill <= max_fill: matched provenance was
+        // lost (witness sidecars don't carry it); only the lower bound applies.
+    }
+    Ok(())
+}
+
+/// Validate persisted account-level reservation aggregates against the sum of
+/// the (separately validated, see [`validate_restored_reservations`])
+/// per-order reservations they must equal. Both directions are covered: an
+/// aggregate entry without matching orders and orders without a matching
+/// aggregate entry each produce a mismatch.
+pub(crate) fn validate_restored_account_reservations(
+    orders: &[RestingOrder],
+    persisted: &[sybil_verifier::AccountReservationSnapshot],
+) -> Result<(), ReservationRestoreError> {
+    let mut balance_totals: BTreeMap<u64, (i128, i128)> = BTreeMap::new();
+    let mut position_totals: BTreeMap<(u64, MarketId, u8), (i128, i128)> = BTreeMap::new();
+    for snapshot in persisted {
+        balance_totals.entry(snapshot.account_id).or_default().0 +=
+            i128::from(snapshot.reserved_balance);
+        for &(market, outcome, qty) in &snapshot.reserved_positions {
+            position_totals
+                .entry((snapshot.account_id, market, outcome))
+                .or_default()
+                .0 += i128::from(qty);
+        }
+    }
+    for resting in orders {
+        balance_totals.entry(resting.account_id.0).or_default().1 +=
+            i128::from(resting.reserved_balance);
+        for &((market, outcome), qty) in &resting.reserved_positions {
+            position_totals
+                .entry((resting.account_id.0, market, outcome))
+                .or_default()
+                .1 += i128::from(qty);
+        }
+    }
+
+    for (&account_id, &(stored, recomputed)) in &balance_totals {
+        if stored != recomputed {
+            return Err(ReservationRestoreError::BalanceMismatch {
+                account_id: AccountId(account_id),
+                stored,
+                recomputed,
+            });
+        }
+    }
+    for (&(account_id, market, outcome), &(stored, recomputed)) in &position_totals {
+        if stored != recomputed {
+            return Err(ReservationRestoreError::PositionMismatch {
+                account_id: AccountId(account_id),
+                market,
+                outcome,
+                stored,
+                recomputed,
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn resting_order_snapshots(
@@ -769,8 +1123,8 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use matching_engine::{
-        notional_nanos, notional_nanos_ceil, outcome_buy, shares_to_qty, MarketId, MarketSet,
-        Nanos, Qty, NANOS_PER_DOLLAR,
+        notional_nanos, notional_nanos_ceil, outcome_buy, outcome_sell, shares_to_qty, MarketId,
+        MarketSet, Nanos, Qty, NANOS_PER_DOLLAR,
     };
     use proptest::prelude::*;
 
@@ -837,7 +1191,7 @@ mod tests {
         assert!(book.reserved_balance(aid) > 0);
 
         // Expire at height 5 (TTL=3, created_at=1, 5-1=4 > 3)
-        book.expire(5);
+        book.expire(5).unwrap();
         assert_eq!(book.reserved_balance(aid), 0);
         assert_eq!(book.len(), 0);
     }
@@ -861,7 +1215,7 @@ mod tests {
             fill_price: Nanos(NANOS_PER_DOLLAR / 2),
             account_id: 0,
         }];
-        book.settle(&fills, &HashSet::new(), 1);
+        book.settle(&fills, &HashSet::new(), 1).unwrap();
 
         assert_eq!(book.reserved_balance(aid), 0);
         assert_eq!(book.len(), 0);
@@ -887,7 +1241,7 @@ mod tests {
             fill_price: Nanos(NANOS_PER_DOLLAR / 2),
             account_id: 0,
         }];
-        book.settle(&fills, &HashSet::new(), 1);
+        book.settle(&fills, &HashSet::new(), 1).unwrap();
 
         // Remaining: 6 of 10 = 60%
         assert_eq!(book.len(), 1);
@@ -911,7 +1265,7 @@ mod tests {
         order.expires_at_block = Some(1);
         book.accept(order, aid, account, 0, 0).unwrap();
 
-        book.settle(&[], &HashSet::new(), 1);
+        book.settle(&[], &HashSet::new(), 1).unwrap();
 
         assert_eq!(book.reserved_balance(aid), 0);
         assert_eq!(book.len(), 0);
@@ -928,10 +1282,10 @@ mod tests {
         order.expires_at_block = Some(2);
         book.accept(order, aid, account, 1, 0).unwrap();
 
-        book.expire(2);
+        book.expire(2).unwrap();
         assert_eq!(book.len(), 1);
 
-        book.expire(3);
+        book.expire(3).unwrap();
         assert_eq!(book.len(), 0);
         assert_eq!(book.reserved_balance(aid), 0);
     }
@@ -973,6 +1327,147 @@ mod tests {
     }
 
     #[test]
+    fn restore_validation_rejects_offsetting_per_order_corruption() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(10);
+        for order_id in 1..=2 {
+            book.accept(
+                buy_yes(&markets, order_id, m0, NANOS_PER_DOLLAR / 2, q(1)),
+                aid,
+                accounts.get(aid).unwrap(),
+                1,
+                0,
+            )
+            .unwrap();
+        }
+        let mut snapshot = book.snapshot();
+        snapshot[0].reserved_balance += 1;
+        snapshot[1].reserved_balance -= 1;
+
+        let error = validate_restored_reservations(&snapshot).unwrap_err();
+        assert!(matches!(
+            error,
+            ReservationRestoreError::OrderBalanceMismatch {
+                account_id,
+                order_id: 1,
+                stored,
+                recomputed,
+            } if account_id == aid && stored == recomputed + 1
+        ));
+    }
+
+    /// Matched remainders carry the consensus-pinned proportional reservation,
+    /// which can legitimately exceed the admission formula for the remaining
+    /// quantity. Restore validation must accept the genuine value and reject
+    /// values outside `[balance_reservation(current), balance_reservation(original)]`.
+    #[test]
+    fn restore_validation_bounds_matched_remainder_reservation() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(3);
+        // price 101 nanos x qty 10 (fractional shares): admission reserves
+        // ceil(101 * 10 / SHARE_SCALE) = 2. After filling 1, the proportional
+        // remainder keeps ceil(2 * 9 / 10) = 2, while the admission formula
+        // for the remaining 9 units is ceil(101 * 9 / SHARE_SCALE) = 1.
+        book.accept(
+            buy_yes(&markets, 1, m0, 101, Qty(10)),
+            aid,
+            accounts.get(aid).unwrap(),
+            1,
+            0,
+        )
+        .unwrap();
+        book.settle(
+            &[Fill {
+                order_id: 1,
+                fill_qty: Qty(1),
+                fill_price: Nanos(101),
+                account_id: aid.0,
+            }],
+            &HashSet::new(),
+            1,
+        )
+        .unwrap();
+
+        let snapshot = book.snapshot();
+        assert!(snapshot[0].has_been_matched);
+        let stored = snapshot[0].reserved_balance;
+        let minimum = balance_reservation(&snapshot[0].order).unwrap();
+        assert_eq!(stored, 2);
+        assert_eq!(minimum, 1);
+
+        // The genuine proportional value restores.
+        validate_restored_reservations(&snapshot).unwrap();
+        // So does the lower bound itself (indistinguishable from a legitimate
+        // fill history that rounded less).
+        let mut at_minimum = snapshot.clone();
+        at_minimum[0].reserved_balance = minimum;
+        validate_restored_reservations(&at_minimum).unwrap();
+
+        // Below the remainder's worst-case cost: under-collateralized, reject.
+        let mut too_low = snapshot.clone();
+        too_low[0].reserved_balance = minimum - 1;
+        assert!(matches!(
+            validate_restored_reservations(&too_low).unwrap_err(),
+            ReservationRestoreError::OrderBalanceBelowMinimum {
+                account_id,
+                order_id: 1,
+                stored: 0,
+                minimum: 1,
+            } if account_id == aid
+        ));
+
+        // Above the original admission cost: reject.
+        let mut too_high = snapshot.clone();
+        too_high[0].reserved_balance = stored + 1;
+        assert!(matches!(
+            validate_restored_reservations(&too_high).unwrap_err(),
+            ReservationRestoreError::OrderBalanceAboveMaximum {
+                account_id,
+                order_id: 1,
+                stored: 3,
+                maximum: 2,
+            } if account_id == aid
+        ));
+    }
+
+    #[test]
+    fn restore_validation_recomputes_position_reservations_exactly() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(aid)
+            .unwrap()
+            .positions
+            .insert((m0, 0), q(10).0 as i64);
+        let mut book = OrderBook::new(3);
+        book.accept(
+            outcome_sell(&markets, 1, m0, 0, NANOS_PER_DOLLAR / 2, q(10).0),
+            aid,
+            accounts.get(aid).unwrap(),
+            1,
+            0,
+        )
+        .unwrap();
+
+        let snapshot = book.snapshot();
+        assert!(!snapshot[0].reserved_positions.is_empty());
+        validate_restored_reservations(&snapshot).unwrap();
+
+        let mut doctored = snapshot.clone();
+        doctored[0].reserved_positions[0].1 -= 1;
+        assert!(matches!(
+            validate_restored_reservations(&doctored).unwrap_err(),
+            ReservationRestoreError::OrderPositionsMismatch {
+                account_id,
+                order_id: 1,
+                ..
+            } if account_id == aid
+        ));
+    }
+
+    #[test]
     fn cancel_releases_reservations() {
         let (mut accounts, markets, m0) = setup();
         let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
@@ -987,6 +1482,112 @@ mod tests {
 
         assert_eq!(book.reserved_balance(aid), 0);
         assert_eq!(book.len(), 0);
+    }
+
+    #[test]
+    fn over_release_trips_without_mutating_the_order_book() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(3);
+        let accepted = book
+            .accept(
+                buy_yes(&markets, 1, m0, NANOS_PER_DOLLAR / 2, q(5)),
+                aid,
+                accounts.get(aid).unwrap(),
+                1,
+                0,
+            )
+            .unwrap();
+        let attempted_release = accepted.resting_order.reserved_balance;
+        book.balance_reservations.insert(aid, attempted_release - 1);
+
+        let error = book.cancel(aid, accepted.order.id).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CancelError::Reservation(ReservationError::BalanceOverRelease {
+                account_id,
+                currently_reserved,
+                attempted_release: attempted,
+            }) if account_id == aid
+                && currently_reserved == attempted_release - 1
+                && attempted == attempted_release
+        ));
+        assert_eq!(book.len(), 1);
+    }
+
+    #[test]
+    fn position_over_release_trips_without_mutating_the_order_book() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(NANOS_PER_DOLLAR as i64);
+        accounts
+            .get_mut(aid)
+            .unwrap()
+            .positions
+            .insert((m0, 0), q(10).0 as i64);
+        let mut book = OrderBook::new(3);
+        let accepted = book
+            .accept(
+                outcome_sell(&markets, 1, m0, 0, NANOS_PER_DOLLAR / 2, q(10).0),
+                aid,
+                accounts.get(aid).unwrap(),
+                1,
+                0,
+            )
+            .unwrap();
+        let (key, reserved_qty) = accepted.resting_order.reserved_positions[0];
+        book.position_reservations
+            .insert((aid, key), reserved_qty - 1);
+
+        let error = book.cancel(aid, accepted.order.id).unwrap_err();
+
+        assert!(matches!(
+            error,
+            CancelError::Reservation(ReservationError::PositionOverRelease {
+                account_id,
+                market,
+                outcome,
+                currently_reserved,
+                attempted_release,
+            }) if account_id == aid
+                && market == key.0
+                && outcome == key.1
+                && currently_reserved == reserved_qty - 1
+                && attempted_release == reserved_qty
+        ));
+        assert_eq!(book.len(), 1);
+    }
+
+    #[test]
+    fn partial_fill_then_cancel_releases_remaining_reservation_to_zero() {
+        let (mut accounts, markets, m0) = setup();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(3);
+        let accepted = book
+            .accept(
+                buy_yes(&markets, 1, m0, 333_333_333, q(10)),
+                aid,
+                accounts.get(aid).unwrap(),
+                1,
+                0,
+            )
+            .unwrap();
+        book.settle(
+            &[Fill {
+                order_id: accepted.order.id,
+                fill_qty: q(4),
+                fill_price: Nanos(333_333_333),
+                account_id: aid.0,
+            }],
+            &HashSet::new(),
+            1,
+        )
+        .unwrap();
+
+        assert!(book.reserved_balance(aid) > 0);
+        book.cancel(aid, accepted.order.id).unwrap();
+        assert_eq!(book.reserved_balance(aid), 0);
+        assert!(book.is_empty());
     }
 
     #[test]
@@ -1021,7 +1622,7 @@ mod tests {
         assert_eq!(book.reserved_balance(accepted_owner), 0);
         assert_eq!(book.orders_for_account(expiring_owner), 1);
 
-        let removed = book.settle(&[], &HashSet::new(), 7);
+        let removed = book.settle(&[], &HashSet::new(), 7).unwrap();
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].0.account_id, expiring_owner);
         assert_eq!(removed[0].1, RestingExit::Expired);
@@ -1040,7 +1641,7 @@ mod tests {
             book.accept(order, aid, account, 0, 0).unwrap();
         }
 
-        let removed = book.expire(2);
+        let removed = book.expire(2).unwrap();
         assert_eq!(removed.len(), 3);
         assert_eq!(book.len(), 0);
         assert!(removed.iter().all(|ro| !ro.has_been_matched));
@@ -1065,7 +1666,7 @@ mod tests {
             fill_price: Nanos(NANOS_PER_DOLLAR / 2),
             account_id: 0,
         }];
-        let removed = book.settle(&fills, &HashSet::new(), 1);
+        let removed = book.settle(&fills, &HashSet::new(), 1).unwrap();
         assert_eq!(removed.len(), 1);
         assert!(removed[0].0.has_been_matched);
         assert_eq!(removed[0].0.original_max_fill, q(5).0);
@@ -1084,13 +1685,13 @@ mod tests {
         book.accept(order, aid, account, 1, 0).unwrap();
 
         // One block before expiry: nothing removed.
-        let removed = book.settle(&[], &HashSet::new(), 6);
+        let removed = book.settle(&[], &HashSet::new(), 6).unwrap();
         assert!(removed.is_empty());
         assert_eq!(book.len(), 1);
 
         // At expiry (current_height >= expires_at_block): removed and tagged Expired
         // so the sequencer can emit the HistoryKind::Expired event.
-        let removed = book.settle(&[], &HashSet::new(), 7);
+        let removed = book.settle(&[], &HashSet::new(), 7).unwrap();
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].1, RestingExit::Expired);
         assert!(book.is_empty());
@@ -1157,7 +1758,7 @@ mod tests {
             fill_price: Nanos(NANOS_PER_DOLLAR / 2),
             account_id: 0,
         }];
-        let removed = book.settle(&fills, &HashSet::new(), 1);
+        let removed = book.settle(&fills, &HashSet::new(), 1).unwrap();
         // Partial fill: nothing removed, but the remaining order in the book
         // now carries has_been_matched=true and original_max_fill=10.
         assert!(removed.is_empty());
@@ -1269,6 +1870,65 @@ mod tests {
             }
             prop_assert_eq!(book.len(), accepted_count);
             prop_assert_eq!(book.reserved_balance(aid), balance as i64);
+        }
+
+        #[test]
+        fn random_partial_fill_sequence_then_cancel_stays_consistent(
+            price in 1u64..=NANOS_PER_DOLLAR,
+            qty in 1u64..=shares_to_qty(100).0,
+            fill_draws in proptest::collection::vec(any::<u64>(), 0..32),
+        ) {
+            let (mut accounts, markets, m0) = setup();
+            let required = notional_nanos_ceil(Nanos(price), Qty(qty));
+            let aid = accounts.create_account(required.0 as i64);
+            let mut book = OrderBook::new(100);
+            let accepted = book
+                .accept(
+                    buy_yes(&markets, 1, m0, price, Qty(qty)),
+                    aid,
+                    accounts.get(aid).unwrap(),
+                    1,
+                    0,
+                )
+                .unwrap();
+
+            for draw in fill_draws {
+                let Some((remaining, _)) = book
+                    .resting_orders()
+                    .find(|(order, _)| order.id == accepted.order.id)
+                    .map(|(order, account_id)| (order.max_fill.0, account_id))
+                else {
+                    break;
+                };
+                let fill_qty = draw % (remaining + 1);
+                book.settle(
+                    &[Fill {
+                        order_id: accepted.order.id,
+                        fill_qty: Qty(fill_qty),
+                        fill_price: Nanos(price),
+                        account_id: aid.0,
+                    }],
+                    &HashSet::new(),
+                    1,
+                )
+                .map_err(|error| TestCaseError::fail(error.to_string()))?;
+                validate_restored_reservations(&book.snapshot())
+                    .map_err(|error| TestCaseError::fail(error.to_string()))?;
+                let stored_sum: i64 = book
+                    .snapshot()
+                    .iter()
+                    .filter(|resting| resting.account_id == aid)
+                    .map(|resting| resting.reserved_balance)
+                    .sum();
+                prop_assert_eq!(book.reserved_balance(aid), stored_sum);
+            }
+
+            if book.orders_for_account(aid) != 0 {
+                book.cancel(aid, accepted.order.id)
+                    .map_err(|error| TestCaseError::fail(format!("{error:?}")))?;
+            }
+            prop_assert_eq!(book.reserved_balance(aid), 0);
+            prop_assert!(book.is_empty());
         }
     }
 }

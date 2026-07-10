@@ -278,6 +278,11 @@ impl Store {
             out
         };
 
+        validate_restored_reservations(&resting_orders)
+            .map_err(|error| StoreError::CorruptLayout(error.to_string()))?;
+        validate_restored_reservations(&admit_log)
+            .map_err(|error| StoreError::CorruptLayout(format!("admit log {error}")))?;
+
         let control_plane_log: Vec<ControlPlaneCommand> = {
             let table = txn.open_table(CONTROL_PLANE_LOG)?;
             let mut out = Vec::new();

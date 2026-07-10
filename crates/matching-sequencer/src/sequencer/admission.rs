@@ -393,5 +393,6 @@ fn cancel_error_to_sequencer_error(error: crate::order_book::CancelError) -> Seq
     match error {
         crate::order_book::CancelError::NotFound => SequencerError::OrderNotFound,
         crate::order_book::CancelError::WrongOwner => SequencerError::OrderOwnershipMismatch,
+        crate::order_book::CancelError::Reservation(error) => error.into(),
     }
 }

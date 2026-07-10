@@ -1047,6 +1047,277 @@ async fn test_store_restores_resting_orders() {
 }
 
 #[tokio::test]
+async fn store_restore_rejects_doctored_reserved_balance_high_and_low() {
+    use crate::order_book::OrderBook;
+    use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+
+    for (case, delta) in [("high", 1_i64), ("low", -1_i64), ("correct", 0_i64)] {
+        let path = temp_db_path(&format!("store-reserved-balance-{case}"));
+        let store = Store::open(&path).unwrap();
+        let lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+        let env = TestEnv::new();
+        let mut markets = MarketSet::new();
+        let market_id = markets.add_binary("reservation restore corruption");
+        let mut accounts = AccountStore::new();
+        let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+        let mut book = OrderBook::new(10);
+        book.accept(
+            outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 5),
+            aid,
+            accounts.get(aid).unwrap(),
+            1,
+            0,
+        )
+        .unwrap();
+        let recomputed = book.reserved_balance(aid);
+        let mut doctored = book.snapshot();
+        doctored[0].reserved_balance += delta;
+        let stored = recomputed + delta;
+
+        store
+            .save_block(env.snapshot(
+                &accounts,
+                &markets,
+                &lifecycle,
+                &sample_header(1),
+                2,
+                None,
+                doctored,
+            ))
+            .await
+            .unwrap();
+
+        if delta == 0 {
+            let restored = store.load_state().await.unwrap().unwrap();
+            assert_eq!(restored.resting_orders[0].reserved_balance, recomputed);
+            continue;
+        }
+
+        let error = match store.load_state().await {
+            Err(error) => error,
+            Ok(_) => panic!("doctored reserved_balance unexpectedly restored"),
+        };
+        assert!(matches!(
+            error,
+            StoreError::CorruptLayout(ref message)
+                if message == &format!(
+                    "reserved_balance mismatch for account {} order 1: stored {stored}, recomputed {recomputed}",
+                    aid.0
+                )
+        ));
+    }
+}
+
+/// A partially-filled remainder's reservation is proportionally scaled and can
+/// legitimately exceed the admission formula for its remaining quantity. Both
+/// the store snapshot path and the witness import path must restore such a
+/// book instead of falsely flagging it as corrupt, while still rejecting an
+/// under-collateralized (below remainder cost) value.
+#[tokio::test]
+async fn store_restore_accepts_matched_remainder_and_rejects_under_reservation() {
+    use crate::order_book::OrderBook;
+    use matching_engine::{outcome_buy, Fill, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR};
+    use std::collections::HashSet;
+
+    let lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+    let env = TestEnv::new();
+    let mut markets = MarketSet::new();
+    let market_id = markets.add_binary("matched remainder restore");
+    let mut accounts = AccountStore::new();
+    let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+    let mut book = OrderBook::new(10);
+    // price 101 nanos x qty 10: admission reserves ceil(1010/1000) = 2; after
+    // filling 1 the proportional remainder keeps ceil(2*9/10) = 2 while the
+    // admission formula for the remaining 9 is ceil(909/1000) = 1.
+    book.accept(
+        outcome_buy(&markets, 1, market_id, 0, 101, 10),
+        aid,
+        accounts.get(aid).unwrap(),
+        1,
+        0,
+    )
+    .unwrap();
+    book.settle(
+        &[Fill {
+            order_id: 1,
+            fill_qty: Qty(1),
+            fill_price: Nanos(101),
+            account_id: aid.0,
+        }],
+        &HashSet::new(),
+        1,
+    )
+    .unwrap();
+    let snapshot = book.snapshot();
+    assert!(snapshot[0].has_been_matched);
+    assert_eq!(snapshot[0].reserved_balance, 2);
+
+    // Correct matched remainder restores.
+    let path = temp_db_path("store-matched-remainder-correct");
+    let store = Store::open(&path).unwrap();
+    store
+        .save_block(env.snapshot(
+            &accounts,
+            &markets,
+            &lifecycle,
+            &sample_header(1),
+            2,
+            None,
+            snapshot.clone(),
+        ))
+        .await
+        .unwrap();
+    let restored = store.load_state().await.unwrap().unwrap();
+    assert_eq!(restored.resting_orders[0].reserved_balance, 2);
+
+    // Below the remainder's worst-case cost refuses to serve.
+    let mut under_reserved = snapshot;
+    under_reserved[0].reserved_balance = 0;
+    let path = temp_db_path("store-matched-remainder-low");
+    let store = Store::open(&path).unwrap();
+    store
+        .save_block(env.snapshot(
+            &accounts,
+            &markets,
+            &lifecycle,
+            &sample_header(1),
+            2,
+            None,
+            under_reserved,
+        ))
+        .await
+        .unwrap();
+    let error = match store.load_state().await {
+        Err(error) => error,
+        Ok(_) => panic!("under-reserved matched remainder unexpectedly restored"),
+    };
+    assert!(matches!(
+        error,
+        StoreError::CorruptLayout(ref message)
+            if message == &format!(
+                "reserved_balance below remainder cost for account {} order 1: stored 0, minimum 1",
+                aid.0
+            )
+    ));
+}
+
+#[tokio::test]
+async fn witness_import_rejects_doctored_reserved_balance_high_and_low_and_accepts_correct() {
+    use crate::order_book::OrderBook;
+    use matching_engine::{outcome_buy, Fill, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR};
+    use std::collections::HashSet;
+
+    let lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
+    let env = TestEnv::new();
+    let mut markets = MarketSet::new();
+    let market_id = markets.add_binary("witness reservation corruption");
+    let mut accounts = AccountStore::new();
+    let aid = accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+    let mut book = OrderBook::new(10);
+    book.accept(
+        outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 5),
+        aid,
+        accounts.get(aid).unwrap(),
+        1,
+        0,
+    )
+    .unwrap();
+    // A second order that becomes a matched remainder whose proportional
+    // reservation (2) exceeds the admission formula for its remaining
+    // quantity (1) — the sidecar carries no matched provenance, so import
+    // must infer it rather than falsely reject the witness.
+    book.accept(
+        outcome_buy(&markets, 2, market_id, 0, 101, 10),
+        aid,
+        accounts.get(aid).unwrap(),
+        1,
+        0,
+    )
+    .unwrap();
+    book.settle(
+        &[Fill {
+            order_id: 2,
+            fill_qty: Qty(1),
+            fill_price: Nanos(101),
+            account_id: aid.0,
+        }],
+        &HashSet::new(),
+        1,
+    )
+    .unwrap();
+    let recomputed = book.reserved_balance(aid);
+    let canonical_accounts = crate::canonical_state::CanonicalState::from_accounts(&accounts);
+    let sidecar = state_sidecar_snapshot_from_resting_orders(
+        &env.bridge_state,
+        &book.snapshot(),
+        &markets,
+        &[],
+        &lifecycle,
+    );
+    let state_root = sybil_verifier::block::compute_state_root_with_sidecar(
+        canonical_accounts.as_snapshots(),
+        &sidecar,
+    );
+    let header = BlockHeader {
+        height: 1,
+        parent_hash: [0; 32],
+        state_root,
+        events_root: sybil_verifier::event_commitment::empty_events_root(),
+        order_count: 0,
+        fill_count: 0,
+        timestamp_ms: 1_000,
+    };
+    let mut correct = sample_witness(&header);
+    correct.post_state = canonical_accounts.into_snapshots();
+    correct.state_sidecar = sidecar;
+
+    for (case, delta) in [("high", 1_i64), ("low", -1_i64)] {
+        let mut doctored = correct.clone();
+        doctored.state_sidecar.account_reservations[0].reserved_balance += delta;
+        doctored.header.state_root = sybil_verifier::block::compute_state_root_with_sidecar(
+            &doctored.post_state,
+            &doctored.state_sidecar,
+        );
+        let stored = recomputed + delta;
+        let path = temp_db_path(&format!("witness-reserved-balance-{case}"));
+        let store = Store::open(&path).unwrap();
+
+        let error = store
+            .import_witness_genesis(doctored, None, None, SequencerConfig::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::WitnessImport(ref message)
+                if message == &format!(
+                    "reserved_balance mismatch for account {}: stored {stored}, recomputed {recomputed}",
+                    aid.0
+                )
+        ));
+    }
+
+    let path = temp_db_path("witness-reserved-balance-correct");
+    let store = Store::open(&path).unwrap();
+    store
+        .import_witness_genesis(correct, None, None, SequencerConfig::default())
+        .await
+        .unwrap();
+    let restored = store.load_state().await.unwrap().unwrap();
+    let restored_total: i64 = restored
+        .resting_orders
+        .iter()
+        .map(|resting| resting.reserved_balance)
+        .sum();
+    assert_eq!(restored_total, recomputed);
+    let remainder = restored
+        .resting_orders
+        .iter()
+        .find(|resting| resting.order.id == 2)
+        .unwrap();
+    assert_eq!(remainder.reserved_balance, 2);
+}
+
+#[tokio::test]
 async fn test_store_clears_resting_orders_when_snapshot_empty() {
     use crate::order_book::OrderBook;
     use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
