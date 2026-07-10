@@ -110,12 +110,8 @@ export function BatchDetail({ row }: { row: BatchRow }) {
                 no markets cleared in this batch
               </div>
             )}
-            {visible.map((m, i) => (
-              <MarketRow
-                key={m.marketId}
-                row={m}
-                isLast={i === visible.length - 1}
-              />
+            {visible.map((m) => (
+              <MarketRow key={m.marketId} row={m} />
             ))}
 
             {(remaining > 0 || shown > ROWS_INITIAL) && (
@@ -132,10 +128,12 @@ export function BatchDetail({ row }: { row: BatchRow }) {
                   width: "100%",
                   // Pinned to the bottom of the stretched card so it reads as a
                   // footer of the panel, not as a link trailing the last row.
+                  // No top border: the last market row already draws the one
+                  // divider, and a second one here would bracket the gap the
+                  // stretch leaves between them.
                   marginTop: "auto",
                   background: "transparent",
                   border: 0,
-                  borderTop: "1px solid var(--border-1)",
                   padding: "10px 14px",
                   cursor: "pointer",
                   color: "var(--accent)",
@@ -314,16 +312,7 @@ function sortMarketRows(
   });
 }
 
-function MarketRow({
-  row,
-  isLast,
-}: {
-  row: BatchMarketRow;
-  /** The last row skips its divider: the card stretches to the sidebar's
-   *  height, so that line would otherwise hang in the middle of the empty
-   *  space above the footer, which draws its own top border. */
-  isLast: boolean;
-}) {
+function MarketRow({ row }: { row: BatchMarketRow }) {
   const deltaCents =
     row.deltaNanos == null ? null : Number(row.deltaNanos) / 1e7;
   return (
@@ -334,7 +323,7 @@ function MarketRow({
         gap: GRID_GAP,
         padding: "10px 14px",
         alignItems: "center",
-        borderBottom: isLast ? 0 : "1px solid var(--border-1)",
+        borderBottom: "1px solid var(--border-1)",
       }}
     >
       {/* Title + category dot */}
