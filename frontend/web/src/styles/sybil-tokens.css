@@ -357,17 +357,13 @@ code, kbd, samp, pre {
   font-size: 0.94em;
 }
 
-/* Code-comment annotation — the `// methodology...` Sybil signature */
+/* Muted mono annotation under a title or beside a section heading */
 .text-annotation {
   font-family: var(--font-mono);
   font-size: var(--fs-13);
   line-height: var(--lh-18);
   color: var(--fg-3);
   font-variant-numeric: tabular-nums;
-}
-.text-annotation::before {
-  content: '// ';
-  color: var(--fg-4);
 }
 
 /* Links */

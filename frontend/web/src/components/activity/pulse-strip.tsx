@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 24h pulse strip — five real `last_24h` figures from
+ * 24h pulse strip — four real `last_24h` figures from
  * `GET /v1/activity/overview` (see use-activity-overview.ts), one per cell.
  * Values show "—" until the first response lands.
  */
@@ -36,11 +36,6 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
       label: "Matched orders",
       value: fmtCount(last24h.ordersMatched),
       accent: "var(--yes)",
-    },
-    {
-      label: "Unmatched orders",
-      value: fmtCount(last24h.ordersUnmatched),
-      accent: "var(--fg-2)",
     },
   ];
   return (

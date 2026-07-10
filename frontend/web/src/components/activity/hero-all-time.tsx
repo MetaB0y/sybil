@@ -5,12 +5,12 @@
  * left, 4-cell stat grid on the right.
  *
  * Real (GET /v1/activity/overview, `all_time` bucket): matched volume, active
- * traders, placed / matched / unmatched orders. Also real: `totalBatches`
+ * traders, placed / matched orders. Also real: `totalBatches`
  * (latestBlock.height) and `liveMarkets` (/v1/markets/summary).
  *
  * "Placed orders" = distinct orders admitted (counted once per order at
- * intake), from `orders.placed_distinct` — consistent with matched/unmatched,
- * which are also counted once per order lifetime.
+ * intake), from `orders.placed_distinct` — consistent with `matched`, which is
+ * also counted once per order lifetime.
  */
 
 import { formatCompactInt, formatInt } from "@/lib/format/nanos";
@@ -115,16 +115,6 @@ export function HeroAllTime({
             }
             sub="successfully filled at clear"
             accent="var(--yes)"
-          />
-          <BigKv
-            label="Unmatched orders"
-            value={
-              allTime.ordersUnmatched == null
-                ? "—"
-                : formatCompactInt(allTime.ordersUnmatched)
-            }
-            sub="expired without a fill"
-            accent="var(--fg-2)"
           />
         </div>
       </div>

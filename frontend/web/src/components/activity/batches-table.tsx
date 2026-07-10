@@ -9,6 +9,12 @@
  * Column layout adapts the handoff `activity.html` template: a fixed-width
  * chevron, then weighted `fr` columns so the row stretches edge-to-edge of
  * the table instead of stranding empty space in the last column.
+ *
+ * The tail is FROZEN by default. A table that reorders itself every 10s is
+ * hostile to the thing this page is for — reading a batch — and it makes
+ * pagination meaningless, since page 2 would slide by a row per block. Freezing
+ * pins a `head` height; page N is then a pure function of (head, pageSize), so
+ * nothing moves under the reader. Going Live re-glues `head` to the chain tip.
  */
 
 import { useEffect, useState, Fragment, type ReactNode } from "react";
@@ -17,18 +23,24 @@ import {
   formatCompactDollarsCents,
   formatInt,
 } from "@/lib/format/nanos";
+import { useBatchPage } from "@/lib/activity/use-batches";
+import { selectLatestBlock, useStore } from "@/lib/store";
 import type { BatchRow as BatchRowData } from "@/lib/activity/types";
 
 const GRID = "24px 1fr 1.2fr 0.7fr 1.1fr 1.1fr 0.7fr 1.9fr";
 const GRID_GAP = 28;
 
+// Every option stays under the store's RECENT_BLOCKS_CAP (80) so page 0 is
+// always satisfiable from the store. A window larger than the cap could never
+// be complete, and Live mode would then re-fetch it from the network on every
+// block, since `head` — and with it the `before_height` cursor — moves each
+// time the tip advances.
+const PAGE_SIZES = [30, 60] as const;
+const DEFAULT_PAGE_SIZE = 30;
+
 export function BatchesTable({
-  rows,
-  isBackfilling,
   renderDetail,
 }: {
-  rows: BatchRowData[];
-  isBackfilling: boolean;
   /** Slot for the expanded-row content; called with the row that's open. */
   renderDetail?: (row: BatchRowData) => ReactNode;
 }) {
@@ -37,25 +49,67 @@ export function BatchesTable({
   // otherwise only re-renders on a new batch (~10s) or on interaction.
   useRelativeTimeTick();
 
-  // Live tail vs. frozen. Freezing snapshots the current rows so the user can
-  // expand and inspect a batch without rows shifting as new batches arrive.
-  // The 1s ticker keeps running either way, so "Xs ago" stays live even when
-  // frozen.
-  const [live, setLive] = useState(true);
-  const [frozenRows, setFrozenRows] = useState<BatchRowData[]>([]);
-  const displayRows = live ? rows : frozenRows;
+  const latestHeight = useStore(selectLatestBlock)?.height ?? null;
+  const [live, setLive] = useState(false);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+
+  // Frozen is the default, so the tip at first sight becomes the pin. On a
+  // client-side nav the store usually already holds a block, which the lazy
+  // initializer catches; on a cold load it's empty, and the subscription below
+  // latches the first block to arrive.
+  const [pinnedHead, setPinnedHead] = useState<number | null>(
+    () => useStore.getState().latestBlock?.height ?? null,
+  );
+  useEffect(() => {
+    if (live || pinnedHead != null) return;
+    return useStore.subscribe((s) => {
+      const height = s.latestBlock?.height;
+      if (height != null) setPinnedHead(height);
+    });
+  }, [live, pinnedHead]);
+
+  const head = live ? latestHeight : pinnedHead;
+  const { rows, isLoading, hasOlder } = useBatchPage({ head, page, pageSize });
+
   const newWhileFrozen =
-    !live && rows[0] && frozenRows[0]
-      ? Math.max(0, rows[0].height - frozenRows[0].height)
+    !live && pinnedHead != null && latestHeight != null
+      ? Math.max(0, latestHeight - pinnedHead)
       : 0;
-  const toggleLive = () => {
-    if (live) {
-      setFrozenRows(rows); // freezing → snapshot what's on screen now
-      setLive(false);
-    } else {
-      setLive(true);
-    }
+
+  const goLive = () => {
+    setLive(true);
+    setPage(0);
+    setExpanded(null);
   };
+  const goFrozen = () => {
+    setPinnedHead(latestHeight);
+    setLive(false);
+    setPage(0);
+    setExpanded(null);
+  };
+  // Paging implies freezing: an older page computed off a moving tip would
+  // slide by one row per block.
+  const goOlder = () => {
+    if (live) {
+      setPinnedHead(latestHeight);
+      setLive(false);
+    }
+    setPage((p) => p + 1);
+    setExpanded(null);
+  };
+  const goNewer = () => {
+    setPage((p) => Math.max(0, p - 1));
+    setExpanded(null);
+  };
+  const changePageSize = (n: number) => {
+    setPageSize(n);
+    setPage(0);
+    setExpanded(null);
+  };
+
+  const newest = rows[0]?.height ?? null;
+  const oldest = rows.length > 0 ? rows[rows.length - 1]?.height ?? null : null;
 
   return (
     <section style={{ padding: "26px 24px 40px" }}>
@@ -81,14 +135,14 @@ export function BatchesTable({
           Batches
         </h3>
         <span className="text-annotation" style={{ fontSize: 11 }}>
-          showing last {displayRows.length}
-          {isBackfilling ? " · backfilling…" : ""} · click any row to expand
+          {isLoading ? "loading…" : "click any row to expand"}
         </span>
         <span style={{ marginLeft: "auto" }}>
-          <LiveToggle
+          <TailSwitch
             live={live}
             newWhileFrozen={newWhileFrozen}
-            onToggle={toggleLive}
+            onLive={goLive}
+            onFrozen={goFrozen}
           />
         </span>
       </div>
@@ -103,7 +157,7 @@ export function BatchesTable({
         }}
       >
         <Header />
-        {displayRows.length === 0 && (
+        {rows.length === 0 && (
           <div
             style={{
               padding: "20px 22px",
@@ -112,10 +166,10 @@ export function BatchesTable({
               fontSize: 12,
             }}
           >
-            no batches yet — waiting for hydration
+            {isLoading ? "waiting for hydration" : "no batches on this page"}
           </div>
         )}
-        {displayRows.map((r) => (
+        {rows.map((r) => (
           <Fragment key={r.height}>
             <Row
               row={r}
@@ -128,69 +182,278 @@ export function BatchesTable({
           </Fragment>
         ))}
       </div>
+
+      <Pager
+        page={page}
+        pageSize={pageSize}
+        newest={newest}
+        oldest={oldest}
+        hasOlder={hasOlder}
+        onNewer={goNewer}
+        onOlder={goOlder}
+        onPageSize={changePageSize}
+      />
     </section>
   );
 }
 
 /**
- * Live ⇄ Frozen toggle. Live = table tails new batches; Frozen = rows are held
- * so the user can inspect a batch in peace (relative times still tick). While
- * frozen, shows how many batches have queued up so the jump on resume isn't a
- * surprise.
+ * Frozen ⇄ Live segmented switch. Both states are always on screen with the
+ * active one filled, so the control reads as a switch rather than a status
+ * label — the old single pill toggled on click but looked like a badge.
+ *
+ * Frozen holds the rows still so a batch can be inspected in peace (relative
+ * times keep ticking either way). The count of batches that piled up while
+ * frozen rides on the Live half, which is both the invitation and the target.
  */
-function LiveToggle({
+function TailSwitch({
   live,
   newWhileFrozen,
-  onToggle,
+  onLive,
+  onFrozen,
 }: {
   live: boolean;
   newWhileFrozen: number;
-  onToggle: () => void;
+  onLive: () => void;
+  onFrozen: () => void;
+}) {
+  return (
+    <span
+      role="group"
+      aria-label="Batch tail"
+      style={{
+        display: "inline-flex",
+        gap: 4,
+        padding: 3,
+        background: "var(--bg-2)",
+        border: "1px solid var(--border-1)",
+        borderRadius: 999,
+      }}
+    >
+      <Segment
+        active={!live}
+        onClick={onFrozen}
+        title="Hold the rows still so you can inspect a batch"
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: live ? "var(--fg-4)" : "var(--fg-2)",
+          }}
+        />
+        Frozen
+      </Segment>
+      <Segment
+        active={live}
+        onClick={onLive}
+        title="Follow new batches as they clear"
+        accent={!live && newWhileFrozen > 0}
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: live ? "var(--yes)" : "var(--fg-4)",
+            boxShadow: live
+              ? "0 0 0 3px color-mix(in srgb, var(--yes) 25%, transparent)"
+              : "none",
+          }}
+        />
+        Live
+        {!live && newWhileFrozen > 0 && (
+          <span
+            style={{
+              padding: "1px 5px",
+              borderRadius: 999,
+              background: "color-mix(in srgb, var(--accent) 18%, transparent)",
+              color: "var(--accent)",
+              fontSize: 9,
+            }}
+          >
+            +{formatInt(newWhileFrozen)}
+          </span>
+        )}
+      </Segment>
+    </span>
+  );
+}
+
+function Segment({
+  active,
+  accent,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  accent?: boolean;
+  onClick: () => void;
+  title: string;
+  children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      onClick={onToggle}
-      aria-pressed={live}
-      title={
-        live
-          ? "Pause the live tail to inspect a batch — rows stop updating"
-          : "Resume live updates"
-      }
+      onClick={onClick}
+      aria-pressed={active}
+      title={title}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 6,
         padding: "4px 10px",
         borderRadius: 999,
-        cursor: "pointer",
-        border: `1px solid ${live ? "var(--border-2)" : "var(--accent)"}`,
-        background: live ? "var(--surface-1)" : "color-mix(in srgb, var(--accent) 12%, transparent)",
-        color: live ? "var(--fg-2)" : "var(--accent)",
+        cursor: active ? "default" : "pointer",
+        border: 0,
+        background: active ? "var(--surface-2)" : "transparent",
+        boxShadow: active ? "inset 0 0 0 1px var(--border-2)" : "none",
+        color: active ? "var(--fg-1)" : accent ? "var(--accent)" : "var(--fg-3)",
         fontFamily: "var(--font-mono)",
         fontSize: 10,
         textTransform: "uppercase",
         letterSpacing: "0.05em",
         lineHeight: 1,
+        transition:
+          "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Height-range caption + page controls. There's no total to count against —
+ * history runs back to genesis — so the caption names the heights on screen
+ * instead of a page-of-N that we'd have to fabricate.
+ */
+function Pager({
+  page,
+  pageSize,
+  newest,
+  oldest,
+  hasOlder,
+  onNewer,
+  onOlder,
+  onPageSize,
+}: {
+  page: number;
+  pageSize: number;
+  newest: number | null;
+  oldest: number | null;
+  hasOlder: boolean;
+  onNewer: () => void;
+  onOlder: () => void;
+  onPageSize: (n: number) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        paddingTop: 12,
+        flexWrap: "wrap",
       }}
     >
       <span
-        aria-hidden
         style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: live ? "var(--yes)" : "var(--fg-4)",
-          boxShadow: live
-            ? "0 0 0 3px color-mix(in srgb, var(--yes) 25%, transparent)"
-            : "none",
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          color: "var(--fg-3)",
+          fontVariantNumeric: "tabular-nums",
         }}
-      />
-      {live
-        ? "Live"
-        : newWhileFrozen > 0
-          ? `Frozen · ${newWhileFrozen} new`
-          : "Frozen"}
+      >
+        {oldest != null && newest != null
+          ? `batches #${formatInt(oldest)}–#${formatInt(newest)}`
+          : "—"}
+        <span style={{ color: "var(--fg-4)" }}> · page {page + 1}</span>
+      </span>
+
+      <span style={{ marginLeft: "auto", display: "inline-flex", gap: 14, alignItems: "center" }}>
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            color: "var(--fg-3)",
+          }}
+        >
+          Rows
+          <select
+            value={pageSize}
+            onChange={(e) => onPageSize(Number(e.target.value))}
+            style={{
+              background: "var(--surface-1)",
+              border: "1px solid var(--border-1)",
+              borderRadius: 4,
+              color: "var(--fg-1)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              padding: "3px 6px",
+              cursor: "pointer",
+            }}
+          >
+            {PAGE_SIZES.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <span style={{ display: "inline-flex", gap: 6 }}>
+          <PageButton onClick={onNewer} disabled={page === 0}>
+            ‹ Newer
+          </PageButton>
+          <PageButton onClick={onOlder} disabled={!hasOlder}>
+            Older ›
+          </PageButton>
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function PageButton({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        padding: "5px 12px",
+        borderRadius: 4,
+        border: "1px solid var(--border-1)",
+        background: "var(--surface-1)",
+        color: disabled ? "var(--fg-4)" : "var(--fg-1)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        textTransform: "uppercase",
+        letterSpacing: "0.05em",
+        lineHeight: 1.4,
+      }}
+    >
+      {children}
     </button>
   );
 }

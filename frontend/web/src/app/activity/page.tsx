@@ -7,7 +7,6 @@
  */
 
 import { useActivityOverview } from "@/lib/activity/use-activity-overview";
-import { useBatches } from "@/lib/activity/use-batches";
 import { HeroAllTime } from "@/components/activity/hero-all-time";
 import { PulseStrip } from "@/components/activity/pulse-strip";
 import { BatchesTable } from "@/components/activity/batches-table";
@@ -20,7 +19,6 @@ import { useArenaFeed } from "@/lib/arena/use-arena-feed";
 export default function ActivityPage() {
   const overview = useActivityOverview();
   const bots = useArenaFeed({ limit: 1 });
-  const { rows, isBackfilling } = useBatches(60);
   const botCount =
     bots.data?.db_available === true ? (bots.data.stats?.traders ?? null) : null;
 
@@ -52,11 +50,7 @@ export default function ActivityPage() {
 
       <HeroAllTime allTime={overview.allTime} botCount={botCount} />
       <PulseStrip last24h={overview.last24h} />
-      <BatchesTable
-        rows={rows}
-        isBackfilling={isBackfilling}
-        renderDetail={(r) => <BatchDetail row={r} />}
-      />
+      <BatchesTable renderDetail={(r) => <BatchDetail row={r} />} />
     </main>
   );
 }

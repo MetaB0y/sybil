@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * Expanded panel for a batch row. Top: meta strip (tx hash / block / sequencer
- * / clearing duration / algo — most mocked, see OPEN_QUESTIONS). Body: 2-col
- * grid with a market-row table on the left and a donut + composition KV on
- * the right.
+ * Expanded panel for a batch row. 2-col grid: a market-row table on the left,
+ * and on the right the batch identity (number + proof tx) sitting above the
+ * order stats — donut and composition KV.
  *
  * Data comes from `useBatchDetail(height)`. The per-market rows are real —
  * volume, welfare and placed/matched come from `BlockResponse.by_market`.
@@ -20,7 +19,7 @@ import {
   formatCompactDollarsCents,
   formatInt,
 } from "@/lib/format/nanos";
-import { mockClearingMs, mockTxHash, MOCK_SEQUENCER } from "@/lib/activity/mocks";
+import { mockTxHash } from "@/lib/activity/mocks";
 import { useBatchDetail } from "@/lib/activity/use-batch-detail";
 import type { BatchMarketRow, BatchRow } from "@/lib/activity/types";
 import { DonutOutcome } from "./donut-outcome";
@@ -68,43 +67,6 @@ export function BatchDetail({ row }: { row: BatchRow }) {
         padding: "18px 24px 24px 70px",
       }}
     >
-      {/* Meta strip */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 32,
-          paddingBottom: 16,
-          borderBottom: "1px solid var(--border-1)",
-          marginBottom: 18,
-        }}
-      >
-        <MetaPair
-          label="Tx hash"
-          value={mockTxHash(row.height)}
-          mono
-          link
-          mocked
-          mockHint="tx hash — mock; backend doesn't expose a per-block DA commit hash today"
-        />
-        <MetaPair label="Block" value={`#${formatInt(row.height)}`} mono />
-        <MetaPair
-          label="Sequencer"
-          value={MOCK_SEQUENCER}
-          mono
-          mocked
-          mockHint="sequencer identity — mock; backend doesn't track this"
-        />
-        <MetaPair
-          label="Clearing duration"
-          value={`${mockClearingMs(row.height)} ms`}
-          mono
-          mocked
-          mockHint="clearing duration — not instrumented on backend; deterministic placeholder"
-        />
-        <MetaPair label="Algo" value="uniform clearing · pro-rata" />
-      </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}>
         {/* Left: market rows */}
         <div>
@@ -178,8 +140,9 @@ export function BatchDetail({ row }: { row: BatchRow }) {
           </div>
         </div>
 
-        {/* Right: donut + composition KV */}
+        {/* Right: batch identity, then the order stats it belongs to */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <BatchIdentity height={row.height} />
           <SidebarPanel title="Order outcome">
             <DonutOutcome
               matched={row.ordersMatched}
@@ -490,54 +453,78 @@ function KvRow({
   );
 }
 
-// ── Meta strip helper ─────────────────────────────────────────────────────
+// ── Batch identity ────────────────────────────────────────────────────────
 
-function MetaPair({
+/**
+ * Which batch this panel is about, and the commitment that proves it — the
+ * two facts worth keeping from the old meta strip. Everything else it carried
+ * (sequencer, clearing duration, algo) was either a constant or a mock nobody
+ * could act on.
+ *
+ * The proof tx is still a deterministic function of the height: blocks do seal
+ * a real `events_root` / `state_root`, but nothing anchors them to a chain, so
+ * there is no transaction to link to yet. Hence the mock pill.
+ */
+function BatchIdentity({ height }: { height: number }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <IdentityRow label="Batch">
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 15,
+            color: "var(--fg-1)",
+            fontVariantNumeric: "tabular-nums",
+            letterSpacing: "-0.005em",
+          }}
+        >
+          #{formatInt(height)}
+        </span>
+      </IdentityRow>
+      <IdentityRow label="Proof tx">
+        <MockValue
+          hint="tx hash — mock; blocks seal a real events_root, but nothing anchors it to a chain yet, so there's no transaction to link"
+          variant="pill"
+        >
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--accent)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {mockTxHash(height)}
+          </span>
+        </MockValue>
+      </IdentityRow>
+    </div>
+  );
+}
+
+function IdentityRow({
   label,
-  value,
-  mono,
-  link,
-  color,
-  mocked,
-  mockHint,
+  children,
 }: {
   label: string;
-  value: string;
-  mono?: boolean;
-  link?: boolean;
-  color?: string;
-  mocked?: boolean;
-  mockHint?: string;
+  children: React.ReactNode;
 }) {
-  // When mocked, drop the link underline — the pill is the indicator and a
-  // mock string isn't really clickable anyway.
-  const showLinkUnderline = link && !mocked;
-  const valueEl = (
-    <span
+  return (
+    <div
       style={{
-        fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)",
-        fontSize: 12,
-        color: link ? "var(--accent)" : color ?? "var(--fg-1)",
-        fontVariantNumeric: "tabular-nums",
-        textDecoration: showLinkUnderline ? "underline" : "none",
-        textUnderlineOffset: 2,
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        gap: 10,
       }}
     >
-      {value}
-    </span>
-  );
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <span className="eyebrow" style={{ color: "var(--fg-3)" }}>
+      <span
+        className="eyebrow"
+        style={{ color: "var(--fg-3)", whiteSpace: "nowrap", flexShrink: 0 }}
+      >
         {label}
       </span>
-      {mocked ? (
-        <MockValue hint={mockHint ?? ""} variant="pill">
-          {valueEl}
-        </MockValue>
-      ) : (
-        valueEl
-      )}
+      {children}
     </div>
   );
 }

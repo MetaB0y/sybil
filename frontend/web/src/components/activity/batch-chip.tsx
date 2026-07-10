@@ -3,59 +3,29 @@
 /**
  * Live "batch #N closing in T" chip for the Activity page header.
  *
- * Distinct from the global <BatchPill> in the nav: this one names the
- * specific batch # currently clearing. Lifted from the handoff's right-aligned
- * indicator. At the FBA cadence the remaining seconds tick down — we show
- * a single decimal so the number is at least readable.
+ * Distinct from the global <BatchPill> in the nav: this one names the specific
+ * batch # currently clearing. Lifted from the handoff's right-aligned
+ * indicator.
+ *
+ * The clock comes from the shared `useBatchCountdown` — same source as the Pro
+ * hero gauge and the "queued for batch" timer — so it opens at 9.9 rather than
+ * resting on a static "10.0", and it stays glued to the store's block anchor
+ * instead of restarting on remount.
  */
 
-import { useEffect, useRef, useState } from "react";
-import {
-  selectConnection,
-  selectLatestBlock,
-  useStore,
-} from "@/lib/store";
+import { selectConnection, useStore } from "@/lib/store";
+import { useBatchCountdown } from "@/components/market-rail/use-batch-countdown";
 import { formatBatchSeconds, formatInt } from "@/lib/format/nanos";
-import { BLOCK_INTERVAL_MS } from "@/lib/constants";
-
-const BLOCK_MS = BLOCK_INTERVAL_MS;
 
 export function ActivityBatchChip() {
-  const latest = useStore(selectLatestBlock);
   const connection = useStore(selectConnection);
+  const { secondsLeftPrecise, latestHeight } = useBatchCountdown();
 
-  const [progress, setProgress] = useState(0);
-  const rafRef = useRef<number | null>(null);
-  const anchorRef = useRef<number | null>(null);
-
-  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps -- reset on new block */
-  useEffect(() => {
-    if (latest == null) return;
-    anchorRef.current = performance.now();
-    setProgress(0);
-  }, [latest?.height]);
-  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
-
-  useEffect(() => {
-    const step = () => {
-      if (anchorRef.current != null) {
-        const elapsed = performance.now() - anchorRef.current;
-        setProgress(Math.min(1, elapsed / BLOCK_MS));
-      }
-      rafRef.current = requestAnimationFrame(step);
-    };
-    rafRef.current = requestAnimationFrame(step);
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    };
-  }, []);
-
-  if (latest == null) return null;
+  if (latestHeight == null) return null;
 
   const isLive = connection.state === "live";
-  const remainingSecs = formatBatchSeconds((1 - progress) * (BLOCK_MS / 1000));
-  // The current batch is the *next* one to clear, i.e. latest.height + 1.
-  const currentBatchNum = latest.height + 1;
+  // The current batch is the *next* one to clear, i.e. latestHeight + 1.
+  const currentBatchNum = latestHeight + 1;
 
   return (
     <span
@@ -90,7 +60,7 @@ export function ActivityBatchChip() {
           display: "inline-block",
         }}
       >
-        {remainingSecs}s
+        {formatBatchSeconds(secondsLeftPrecise)}s
       </span>
     </span>
   );

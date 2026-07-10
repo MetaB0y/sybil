@@ -3,25 +3,19 @@
  * pulls from this single module so there's one delete-site as backend
  * coverage lands.
  *
- * - Batch-detail meta strip: sequencer identity, tx hash, clearing duration —
- *   none are tracked on the backend.
+ * - Batch-detail proof tx: blocks seal a real `events_root`, but nothing
+ *   anchors it to a chain, so there's no transaction hash to show.
  */
 
-/** Mocked sequencer identity shown in expanded batch detail. */
-export const MOCK_SEQUENCER = "0x4f2c···7a91";
-
-/** Mocked clearing duration (ms). Range matches the handoff. */
-export function mockClearingMs(height: number): number {
-  // Deterministic for a given height so the value doesn't flicker on rerenders.
-  return 180 + (hash32(height + 17) % 240);
-}
-
-/** Mocked tx hash. Derived from height so two views of the same batch agree. */
+/**
+ * Mocked tx hash, elided head···tail. Derived from height so two views of the
+ * same batch agree. Kept to 8+8 hex so it fits the 280px detail sidebar beside
+ * its label and the `mock` pill.
+ */
 export function mockTxHash(height: number): string {
-  const a = hash32(height * 3 + 1).toString(16).padStart(8, "0");
-  const b = hash32(height * 3 + 2).toString(16).padStart(8, "0");
-  const c = hash32(height * 3 + 3).toString(16).padStart(8, "0");
-  return `0x${a}${b}···${c}`;
+  const head = hash32(height * 3 + 1).toString(16).padStart(8, "0");
+  const tail = hash32(height * 3 + 3).toString(16).padStart(8, "0");
+  return `0x${head}···${tail}`;
 }
 
 /** Cheap 32-bit hash for deterministic mocks. xmur3 variant. */

@@ -528,7 +528,7 @@ textarea {
 
 .activity-pulse-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid var(--border-1);
   border-bottom: 1px solid var(--border-1);
 }
@@ -685,7 +685,7 @@ textarea {
   }
 
   .activity-pulse-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .market-detail-chart-head {

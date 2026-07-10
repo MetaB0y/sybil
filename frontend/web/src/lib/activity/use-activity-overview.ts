@@ -78,7 +78,6 @@ function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
       traders: null,
       ordersPlacedDistinct: null,
       ordersMatched: null,
-      ordersUnmatched: null,
     };
   }
   return {
@@ -89,6 +88,5 @@ function bucketStats(bucket: OverviewBucket | undefined): Last24hStats {
     traders: bucket.unique_traders ?? 0,
     ordersPlacedDistinct: bucket.orders?.placed_distinct ?? 0,
     ordersMatched: bucket.orders?.matched ?? 0,
-    ordersUnmatched: bucket.orders?.unmatched ?? 0,
   };
 }

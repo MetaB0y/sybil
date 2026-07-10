@@ -40,9 +40,14 @@ export type BatchMarketRow = {
 };
 
 /**
- * The five count/volume figures shared by the Activity hero and the 24h
- * pulse strip. Every field is real — `GET /v1/activity/overview` — and
- * reads `"—"` / `null` until the first response lands.
+ * The count/volume figures shared by the Activity hero and the 24h pulse
+ * strip. Every field is real — `GET /v1/activity/overview` — and reads
+ * `"—"` / `null` until the first response lands.
+ *
+ * The bucket also carries `orders.unmatched`, but neither summary shows it:
+ * an order that hasn't filled yet is indistinguishable from one that never
+ * will, so the figure reads as failure when it's mostly just resting depth.
+ * Per-batch unmatched counts (which *are* terminal) live on `BatchRow`.
  */
 export type Last24hStats = {
   matchedVolume: string; // formatted; "—" until loaded
@@ -50,7 +55,6 @@ export type Last24hStats = {
   traders: number | null; // null until loaded
   ordersPlacedDistinct: number | null; // distinct orders placed; null until loaded
   ordersMatched: number | null; // null until loaded
-  ordersUnmatched: number | null; // null until loaded
 };
 
 /**
