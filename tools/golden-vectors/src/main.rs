@@ -16,10 +16,11 @@ use sybil_verifier::commitments::{event_schema, hash_header, state_schema, witne
 use sybil_verifier::{
     account_keys_digest, empty_account_keys_digest, AccountKeyDigestRecord,
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, KeyOpAuth, KeyRecord, MarketGroupSnapshot, MarketSnapshot,
-    MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot,
-    ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
-    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,
+    MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
+    RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
+    StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
+    WitnessRejection,
 };
 use sybil_zk::{state_transition_public_input_hash, witness_root, StateTransitionPublicInputs};
 
@@ -34,6 +35,7 @@ struct GoldenVectors {
     canonical_witness: WitnessVector,
     account_keys: AccountKeysVector,
     key_op_block: KeyOpBlockVector,
+    quarantine_claim_block: QuarantineClaimBlockVector,
     deposits: DepositVectors,
     state_transition_public_inputs: PublicInputVector,
 }
@@ -90,6 +92,16 @@ struct KeyOpBlockVector {
     revoked_event_leaf: String,
     register_events_digest_bytes: String,
     revoke_events_digest_bytes: String,
+    canonical_witness_length: usize,
+    canonical_witness_sha256: String,
+    events_root: String,
+    witness_root: String,
+}
+
+#[derive(Serialize)]
+struct QuarantineClaimBlockVector {
+    quarantined_event_leaf: String,
+    claimed_event_leaf: String,
     canonical_witness_length: usize,
     canonical_witness_sha256: String,
     events_root: String,
@@ -208,6 +220,9 @@ fn render() -> Result<String, String> {
     let witness = byte_identity_witness();
     let key_op_witness = key_op_witness();
     let key_op_witness_bytes = witness_schema::canonical_witness_bytes(&key_op_witness);
+    let quarantine_claim_witness = quarantine_claim_witness();
+    let quarantine_claim_witness_bytes =
+        witness_schema::canonical_witness_bytes(&quarantine_claim_witness);
     let state_leaves = state_schema::state_root_leaves(&witness.post_state, &witness.state_sidecar);
     let witness_bytes = witness_schema::canonical_witness_bytes(&witness);
     let deposits = deposit_fixtures();
@@ -254,7 +269,7 @@ fn render() -> Result<String, String> {
 
     let vectors = GoldenVectors {
         _comment: COMMENT,
-        schema_version: 2,
+        schema_version: 3,
         header: HeaderVector {
             fixture: HeaderFixture {
                 height: witness.header.height,
@@ -327,6 +342,18 @@ fn render() -> Result<String, String> {
             canonical_witness_sha256: hex_bytes(&digest_bytes(&key_op_witness_bytes)),
             events_root: hex_bytes(&key_op_witness.header.events_root),
             witness_root: hex_bytes(&witness_root(&key_op_witness)),
+        },
+        quarantine_claim_block: QuarantineClaimBlockVector {
+            quarantined_event_leaf: hex_bytes(&event_schema::system_event_leaf_value(
+                &quarantine_claim_witness.system_events[0],
+            )),
+            claimed_event_leaf: hex_bytes(&event_schema::system_event_leaf_value(
+                &quarantine_claim_witness.system_events[1],
+            )),
+            canonical_witness_length: quarantine_claim_witness_bytes.len(),
+            canonical_witness_sha256: hex_bytes(&digest_bytes(&quarantine_claim_witness_bytes)),
+            events_root: hex_bytes(&quarantine_claim_witness.header.events_root),
+            witness_root: hex_bytes(&witness_root(&quarantine_claim_witness)),
         },
         deposits: DepositVectors {
             chain_id: deposits[0].chain_id,
@@ -468,6 +495,119 @@ fn key_op_witness() -> BlockWitness {
     witness.header.events_root =
         sybil_zk::compute_events_root(&witness).expect("key-op events root");
     witness
+}
+
+fn quarantine_claim_witness() -> BlockWitness {
+    let account_id = 1001;
+    let key = bridge_account_key(account_id);
+    let amount_token_units = 25_000;
+    let amount = 25_000_000i64;
+    let deposit = DepositLeaf {
+        chain_id: 31_337,
+        vault_address: [0x11; 20],
+        deposit_id: 1,
+        token_address: [0x22; 20],
+        sender: [0x33; 20],
+        sybil_account_key: key,
+        amount_token_units,
+    };
+    let root = deposit_prefix_roots(std::slice::from_ref(&deposit))[0];
+    let deposit = L1DepositWitness {
+        deposit_id: 1,
+        chain_id: deposit.chain_id,
+        vault_address: deposit.vault_address,
+        token_address: deposit.token_address,
+        sender: deposit.sender,
+        sybil_account_key: key,
+        amount_token_units,
+        deposit_root: root,
+    };
+    let pre = AccountSnapshot {
+        id: account_id,
+        balance: 0,
+        total_deposited: 0,
+        positions: vec![],
+        events_digest: [0; 32],
+        keys_digest: empty_account_keys_digest(account_id),
+    };
+    let claim_bytes = {
+        let mut bytes = vec![0x0c];
+        bytes.extend_from_slice(&amount.to_le_bytes());
+        bytes.extend_from_slice(&1u64.to_le_bytes());
+        bytes
+    };
+    let mut digest = blake3::Hasher::new();
+    digest.update(&pre.events_digest);
+    digest.update(&claim_bytes);
+    let post = AccountSnapshot {
+        balance: amount,
+        total_deposited: amount,
+        events_digest: *digest.finalize().as_bytes(),
+        ..pre.clone()
+    };
+    let events = vec![
+        SystemEventWitness::DepositQuarantined {
+            amount,
+            deposit_id: 1,
+            deposit_root: root,
+            sybil_account_key: key,
+        },
+        SystemEventWitness::QuarantineClaimed {
+            account_id,
+            amount,
+            sybil_account_key: key,
+        },
+    ];
+    let mut state_sidecar = StateSidecarSnapshot::default();
+    state_sidecar.bridge.deposit_cursor = 1;
+    state_sidecar.bridge.deposit_root = root;
+    let mut witness = BlockWitness {
+        header: WitnessBlockHeader {
+            height: 1,
+            parent_hash: [0; 32],
+            state_root: [0; 32],
+            events_root: [0; 32],
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: 1_700_000_002_000,
+        },
+        previous_header: None,
+        orders: vec![],
+        rejections: vec![],
+        system_events: events,
+        deposit_accumulator: DepositAccumulatorWitness {
+            pre_frontier: empty_deposit_frontier(),
+            pre_count: 0,
+            new_deposits: vec![deposit],
+        },
+        fills: vec![],
+        clearing_prices: HashMap::new(),
+        total_welfare: 0,
+        minting_cost: 0,
+        mm_constraints: vec![],
+        market_groups: vec![],
+        pre_state: vec![pre],
+        post_system_state: vec![post.clone()],
+        post_state: vec![post],
+        account_keys: vec![],
+        state_sidecar,
+        pre_state_sidecar: StateSidecarSnapshot::default(),
+        resolved_markets: vec![],
+    };
+    witness.header.state_root = sybil_verifier::block::compute_state_root_with_sidecar(
+        &witness.post_state,
+        &witness.state_sidecar,
+    );
+    witness.header.events_root = sybil_zk::compute_events_root(&witness).unwrap();
+    assert!(sybil_verifier::verify_full(&witness, false).valid);
+    witness
+}
+
+fn bridge_account_key(account_id: u64) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"sybil/bridge/account-key/v1");
+    hasher.update(&account_id.to_le_bytes());
+    *hasher.finalize().as_bytes()
 }
 
 fn hex_bytes(bytes: &[u8]) -> String {
@@ -698,6 +838,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 expiry_height: 99,
                 nullifier: [11u8; 32],
             }],
+            quarantine: vec![],
         },
         markets: vec![
             MarketSnapshot {

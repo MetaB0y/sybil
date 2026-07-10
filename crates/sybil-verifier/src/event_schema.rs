@@ -176,6 +176,28 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
             append_key_record(&mut value, key);
             append_key_op_auth(&mut value, authorization);
         }
+        SystemEventWitness::DepositQuarantined {
+            amount,
+            deposit_id,
+            deposit_root,
+            sybil_account_key,
+        } => {
+            value.push(12);
+            value.extend_from_slice(&amount.to_le_bytes());
+            value.extend_from_slice(&deposit_id.to_le_bytes());
+            value.extend_from_slice(deposit_root);
+            value.extend_from_slice(sybil_account_key);
+        }
+        SystemEventWitness::QuarantineClaimed {
+            account_id,
+            amount,
+            sybil_account_key,
+        } => {
+            value.push(13);
+            value.extend_from_slice(&account_id.to_le_bytes());
+            value.extend_from_slice(&amount.to_le_bytes());
+            value.extend_from_slice(sybil_account_key);
+        }
     }
     value
 }
@@ -355,5 +377,22 @@ mod tests {
         expected.extend_from_slice(&9u64.to_le_bytes());
 
         assert_eq!(leaf, expected);
+    }
+
+    #[test]
+    fn quarantine_tags_follow_witness_v6_key_tags() {
+        let quarantined = system_event_leaf_value(&SystemEventWitness::DepositQuarantined {
+            amount: 7,
+            deposit_id: 9,
+            deposit_root: [1; 32],
+            sybil_account_key: [2; 32],
+        });
+        let claimed = system_event_leaf_value(&SystemEventWitness::QuarantineClaimed {
+            account_id: 3,
+            amount: 7,
+            sybil_account_key: [2; 32],
+        });
+        assert_eq!(quarantined[18], 12);
+        assert_eq!(claimed[18], 13);
     }
 }

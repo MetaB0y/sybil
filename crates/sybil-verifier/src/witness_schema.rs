@@ -25,7 +25,7 @@ use crate::types::{
     WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 6;
+pub const WITNESS_FORMAT_VERSION: u8 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -572,6 +572,17 @@ impl<'a> WitnessReader<'a> {
                 key: self.read_key_record()?,
                 authorization: self.read_key_op_auth()?,
             }),
+            12 => Ok(SystemEventWitness::DepositQuarantined {
+                amount: self.read_i64()?,
+                deposit_id: self.read_u64()?,
+                deposit_root: self.read_hash32()?,
+                sybil_account_key: self.read_hash32()?,
+            }),
+            13 => Ok(SystemEventWitness::QuarantineClaimed {
+                account_id: self.read_u64()?,
+                amount: self.read_i64()?,
+                sybil_account_key: self.read_hash32()?,
+            }),
             tag => Err(WitnessDecodeError::InvalidTag {
                 field: "system_event",
                 tag,
@@ -804,6 +815,12 @@ impl<'a> WitnessReader<'a> {
             observed_l1_height: self.read_u64()?,
             next_withdrawal_id: self.read_u64()?,
             withdrawals: self.read_vec("bridge.withdrawals", |reader| reader.read_withdrawal())?,
+            quarantine: self.read_vec("bridge.quarantine", |reader| {
+                Ok(crate::QuarantineEntrySnapshot {
+                    sybil_account_key: reader.read_hash32()?,
+                    amount: reader.read_i64()?,
+                })
+            })?,
         })
     }
 
@@ -1189,7 +1206,7 @@ mod tests {
 
         let bytes = canonical_witness_bytes(&witness);
         assert_eq!(bytes[0], WITNESS_FORMAT_VERSION);
-        assert_eq!(bytes.len(), 1583);
+        assert_eq!(bytes.len(), 1599);
     }
 
     #[test]
@@ -1333,6 +1350,7 @@ mod tests {
                 expiry_height: 99,
                 nullifier: [11u8; 32],
             }],
+            quarantine: vec![],
         };
         let pre_bridge = BridgeStateSnapshot {
             deposit_cursor: 2,
@@ -1344,6 +1362,7 @@ mod tests {
             observed_l1_height: 10,
             next_withdrawal_id: 3,
             withdrawals: vec![],
+            quarantine: vec![],
         };
         let state_sidecar = state_sidecar(accepted_order.clone(), post_bridge);
         let pre_state_sidecar = StateSidecarSnapshot {

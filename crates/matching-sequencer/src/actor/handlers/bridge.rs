@@ -4,7 +4,7 @@ impl SequencerActorState {
     pub(super) async fn handle_l1_deposit(
         &mut self,
         deposit: L1Deposit,
-    ) -> Result<Account, SequencerError> {
+    ) -> Result<crate::bridge::DepositDisposition, SequencerError> {
         self.sequencer.validate_l1_deposit(&deposit)?;
         if let Some(store) = &self.store {
             store
@@ -12,7 +12,14 @@ impl SequencerActorState {
                 .await
                 .map_err(|err| SequencerError::Persistence(err.to_string()))?;
         }
-        self.sequencer.ingest_l1_deposit(deposit)
+        let disposition = self.sequencer.ingest_l1_deposit(deposit)?;
+        let label = match &disposition {
+            crate::bridge::DepositDisposition::Credited(_) => "credited",
+            crate::bridge::DepositDisposition::Quarantined { .. } => "quarantined",
+        };
+        metrics::counter!("sybil_l1_deposit_dispositions_total", "disposition" => label)
+            .increment(1);
+        Ok(disposition)
     }
 
     pub(super) async fn handle_bridge_withdrawal(

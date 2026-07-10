@@ -22,8 +22,8 @@ use crate::block::{
 };
 use crate::bridge::{
     account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
-    BridgeError, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, L1Deposit,
-    L1WithdrawalStatus, WithdrawalLeaf, DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
+    BridgeError, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, DepositDisposition,
+    L1Deposit, L1WithdrawalStatus, WithdrawalLeaf, DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
 };
 use crate::canonical_state::{snapshot_account, CanonicalState};
 use crate::error::{

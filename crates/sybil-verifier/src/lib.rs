@@ -39,6 +39,7 @@ mod header_hash {
 pub mod key_transition;
 pub mod match_verifier;
 pub mod orders;
+pub mod quarantine;
 pub mod settlement;
 pub mod sidecar;
 mod snapshot_schema;
@@ -71,9 +72,9 @@ pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
     ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,
     MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
-    RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
-    StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness, WithdrawalSnapshot,
-    WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    QuarantineEntrySnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
+    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness,
+    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 

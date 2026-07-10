@@ -46,6 +46,8 @@ typed-state qMDB whose active keyspace exactly matches the header root.
 | `order/{order_id}` | active resting order, owner, effective expiry, remaining quantity, and reservation metadata |
 | `sys/deposit_cursor` | highest consumed L1 deposit cursor |
 | `sys/deposit_root` | deposit log root used by the bridge sidecar |
+| `sys/quarantine_digest` | SHA-256 digest of the sorted raw-key quarantine ledger opening |
+| `sys/observed_l1_height` | confirmed L1 height used by bridge expiry transitions |
 | `sys/next_withdrawal_id` | next withdrawal id counter |
 | `withdrawal/{withdrawal_id}` | normal L1 withdrawal claim, recipient, token, amount, expiry, and nullifier |
 
@@ -65,7 +67,7 @@ flowchart LR
         M["market/{id}"]
         G["market_group/{id}"]
         W["withdrawal/{id}"]
-        S["sys/* — deposit cursor · deposit root · next withdrawal id"]
+        S["sys/* — deposit cursor/root · quarantine digest · observed L1 height · next withdrawal id"]
     end
     leaves -->|"insert in bytewise key order"| QMDB["ordered current qMDB<br/>SHA-256"]
     QMDB --> ROOT["state_root"]

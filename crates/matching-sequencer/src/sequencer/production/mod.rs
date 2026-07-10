@@ -343,6 +343,17 @@ impl BlockSequencer {
                     }
                 }
                 SystemEvent::MarketGroupExtended { .. } => {}
+                SystemEvent::DepositQuarantined { .. } => {}
+                SystemEvent::QuarantineClaimed {
+                    account_id, amount, ..
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded =
+                            crate::digest::encode_quarantine_claimed_event(*amount, self.height);
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
                 // Key-op digests are folded at admission so a subsequent key
                 // op in the same block binds to the running digest.
                 SystemEvent::KeyRegistered { .. } | SystemEvent::KeyRevoked { .. } => {}

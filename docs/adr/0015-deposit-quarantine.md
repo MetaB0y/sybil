@@ -112,3 +112,22 @@ Decision 4); (c) indexer retry loop terminates for quarantined deposits
 (d) `SYB-255` stall alarm updated to distinguish "stalled" (bug) from
 "quarantining" (working as designed, but still worth a low-priority
 signal).
+
+## Implementation verification (SYB-272)
+
+- **(a) Frontier fold:** `sidecar.rs` and the guest's direct public-input
+  binding consume the complete `deposit_accumulator.new_deposits` sequence.
+  They require one `L1Deposit` or `DepositQuarantined` disposition per leaf;
+  neither disposition changes the frontier recurrence.
+- **(b) Binding:** `get_bridge_account_id_by_key` is populated by scanning
+  committed account ids and comparing the deterministic bridge key
+  `BLAKE3("sybil/bridge/account-key/v1" || account_id:u64le)`. The guest derives
+  the same value from the claiming account's committed `id`; no account-leaf
+  extension or uncommitted host mapping is needed.
+- **(c) Cursor:** successful credit and successful quarantine both update the
+  durable bridge cursor/root and return success to the indexer. A unit test
+  asserts the confirmed scan range advances after a quarantined deposit.
+- **(d) Observability:** unresolvable-key handling logs
+  `l1.indexer.deposit_quarantining`; actual resolution/submission failures log
+  `l1.indexer.deposit_pipeline_stalled`. Ledger size and amount are gauges, and
+  `DepositQuarantineLedgerGrowing` is the low-severity growth alert.

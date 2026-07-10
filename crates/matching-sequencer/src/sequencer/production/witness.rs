@@ -8,13 +8,17 @@ pub(super) fn bridge_block_data(
     let mut withdrawal_leaves = Vec::new();
     for event in system_events {
         match event {
-            SystemEvent::L1Deposit { deposit, .. } => consumed_deposits.push(deposit.clone()),
+            SystemEvent::L1Deposit { deposit, .. }
+            | SystemEvent::DepositQuarantined { deposit, .. } => {
+                consumed_deposits.push(deposit.clone())
+            }
             SystemEvent::WithdrawalCreated { withdrawal, .. } => {
                 withdrawal_leaves.push(withdrawal.clone());
             }
             SystemEvent::CreateAccount { .. }
             | SystemEvent::KeyRegistered { .. }
             | SystemEvent::KeyRevoked { .. }
+            | SystemEvent::QuarantineClaimed { .. }
             | SystemEvent::Deposit { .. }
             | SystemEvent::WithdrawalRefunded { .. }
             | SystemEvent::WithdrawalFinalized { .. }
@@ -255,6 +259,23 @@ pub(super) fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
             key: *key,
             authorization: authorization.clone(),
         },
+        SystemEvent::DepositQuarantined { amount, deposit } => {
+            SystemEventWitness::DepositQuarantined {
+                amount: *amount,
+                deposit_id: deposit.deposit_id,
+                deposit_root: deposit.deposit_root,
+                sybil_account_key: deposit.sybil_account_key,
+            }
+        }
+        SystemEvent::QuarantineClaimed {
+            account_id,
+            amount,
+            sybil_account_key,
+        } => SystemEventWitness::QuarantineClaimed {
+            account_id: account_id.0,
+            amount: *amount,
+            sybil_account_key: *sybil_account_key,
+        },
     }
 }
 
@@ -295,10 +316,14 @@ impl BlockSequencer {
         let new_deposits = system_events
             .iter()
             .filter_map(|event| match event {
-                SystemEvent::L1Deposit { deposit, .. } => Some(l1_deposit_witness(deposit)),
+                SystemEvent::L1Deposit { deposit, .. }
+                | SystemEvent::DepositQuarantined { deposit, .. } => {
+                    Some(l1_deposit_witness(deposit))
+                }
                 SystemEvent::CreateAccount { .. }
                 | SystemEvent::KeyRegistered { .. }
                 | SystemEvent::KeyRevoked { .. }
+                | SystemEvent::QuarantineClaimed { .. }
                 | SystemEvent::Deposit { .. }
                 | SystemEvent::WithdrawalCreated { .. }
                 | SystemEvent::WithdrawalRefunded { .. }

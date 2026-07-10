@@ -299,6 +299,14 @@ fn append_witness_bridge(out: &mut Vec<u8>, bridge: &BridgeStateSnapshot) {
     for withdrawal in withdrawals {
         append_witness_withdrawal(out, withdrawal);
     }
+
+    let mut quarantine = bridge.quarantine.clone();
+    quarantine.sort_by_key(|entry| entry.sybil_account_key);
+    append_u64(out, quarantine.len() as u64);
+    for entry in quarantine {
+        out.extend_from_slice(&entry.sybil_account_key);
+        append_i64(out, entry.amount);
+    }
 }
 
 pub(crate) fn append_market_id(out: &mut Vec<u8>, market: MarketId) {

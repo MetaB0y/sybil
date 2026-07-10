@@ -71,6 +71,8 @@ pub fn verify_sidecar(witness: &BlockWitness) -> VerificationResult {
     verify_resting_order_transition(witness, &mut violations);
     verify_withdrawal_transition(witness, &mut violations);
     verify_deposit_accumulator(witness, &mut violations);
+    let quarantine = crate::quarantine::verify_quarantine_transition(witness);
+    violations.extend(quarantine.violations);
     verify_market_transition(witness, &mut violations);
     verify_market_group_transition(witness, &mut violations);
 
@@ -634,7 +636,7 @@ fn verify_l1_deposit_events_match_delta(
     prefix_roots: &[[u8; 32]],
     violations: &mut Vec<Violation>,
 ) {
-    let credited_events = witness
+    let disposition_events = witness
         .system_events
         .iter()
         .filter_map(|event| match event {
@@ -645,7 +647,19 @@ fn verify_l1_deposit_events_match_delta(
                 deposit_root,
                 sybil_account_key,
             } => Some((
-                *account_id,
+                Some(*account_id),
+                *amount,
+                *deposit_id,
+                *deposit_root,
+                *sybil_account_key,
+            )),
+            SystemEventWitness::DepositQuarantined {
+                amount,
+                deposit_id,
+                deposit_root,
+                sybil_account_key,
+            } => Some((
+                None,
                 *amount,
                 *deposit_id,
                 *deposit_root,
@@ -655,19 +669,19 @@ fn verify_l1_deposit_events_match_delta(
         })
         .collect::<Vec<_>>();
 
-    if credited_events.len() != witness.deposit_accumulator.new_deposits.len() {
+    if disposition_events.len() != witness.deposit_accumulator.new_deposits.len() {
         violations.push(Violation {
             kind: ViolationKind::SidecarDepositCursorMismatch,
             details: format!(
-                "L1Deposit event count {} != deposit delta length {}",
-                credited_events.len(),
+                "deposit disposition event count {} != deposit delta length {}",
+                disposition_events.len(),
                 witness.deposit_accumulator.new_deposits.len()
             ),
         });
     }
 
     for (index, (account_id, amount, deposit_id, deposit_root, sybil_account_key)) in
-        credited_events.into_iter().enumerate()
+        disposition_events.into_iter().enumerate()
     {
         let Some(deposit) = witness.deposit_accumulator.new_deposits.get(index) else {
             continue;
@@ -691,12 +705,20 @@ fn verify_l1_deposit_events_match_delta(
                 details: format!("L1Deposit event {deposit_id} carries wrong frontier root"),
             });
         }
-        let expected_key = bridge_account_key(account_id);
-        if sybil_account_key != expected_key || deposit.sybil_account_key != expected_key {
+        if deposit.sybil_account_key != sybil_account_key {
             violations.push(Violation {
                 kind: ViolationKind::SidecarDepositRootMismatch,
-                details: format!("L1Deposit event {deposit_id} has wrong account key"),
+                details: format!("deposit disposition event {deposit_id} has wrong account key"),
             });
+        }
+        if let Some(account_id) = account_id {
+            let expected_key = bridge_account_key(account_id);
+            if sybil_account_key != expected_key {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarDepositRootMismatch,
+                    details: format!("L1Deposit event {deposit_id} has wrong account key"),
+                });
+            }
         }
         let Some(expected_amount) = deposit_amount_nanos(deposit) else {
             violations.push(Violation {

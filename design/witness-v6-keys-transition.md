@@ -43,6 +43,11 @@ One validity-schema move (wire `5 → 6`), one guest repin, one fresh genesis.*
 >    trusted boundary. This replaces the earlier text below that described a
 >    synthetic real proof at height 1.
 
+> **Wire successor.** ADR-0015 / SYB-272 builds directly on this replay pattern
+> and moves the canonical witness to v7 with `DepositQuarantined=12`,
+> `QuarantineClaimed=13`, and a single quarantine-ledger digest sys leaf. v6 is
+> retained here as the normative key-transition design, not the current wire byte.
+
 > **Ground truth correction to the roadmap framing.** Roadmap lane 5 described this
 > as "the ZK-1 + witness-schema-v2 combined move." The witness-v2 program is in fact
 > already landed on main: wire **v3** (pre_state_sidecar + deposit frontier,

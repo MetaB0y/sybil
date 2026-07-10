@@ -314,6 +314,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 expiry_height: 99,
                 nullifier: [11u8; 32],
             }],
+            quarantine: vec![],
         },
         markets: vec![
             MarketSnapshot {

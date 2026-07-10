@@ -459,6 +459,7 @@ mod tests {
                 expiry_height: 99,
                 nullifier: [4u8; 32],
             }],
+            quarantine: vec![],
         };
         let mut changed = bridge.clone();
         changed.withdrawals[0].amount_nanos += 1;
@@ -505,6 +506,7 @@ mod tests {
             observed_l1_height: 0,
             next_withdrawal_id: 3,
             withdrawals: vec![first.clone(), second.clone()],
+            quarantine: vec![],
         };
         let bridge_b = BridgeStateSnapshot {
             withdrawals: vec![second, first],

@@ -663,10 +663,13 @@ development path:
 
 - `BridgeState` tracks `deposit_cursor`, the latest consumed `deposit_root`,
   the confirmed `observed_l1_height`, the next withdrawal id, and active
-  withdrawal leaves.
-- L1 deposits are accepted as sequential `L1Deposit` records, credited through
-  `SystemEvent::L1Deposit`, and persisted in a pending-deposit WAL until the
-  next block commit.
+  withdrawal leaves, plus the single raw-key quarantine ledger.
+- L1 deposits are accepted as sequential `L1Deposit` records and always fold
+  the frontier. Resolved keys credit through `SystemEvent::L1Deposit`;
+  unresolved keys dispose through `SystemEvent::DepositQuarantined`. Both are
+  persisted in the pending-deposit WAL until the next block commit. Later key
+  registration automatically emits `QuarantineClaimed` and moves the full
+  accumulated entry into the derived committed account.
 - Withdrawal requests debit available account balance immediately, create a
   `WithdrawalLeaf`, emit `SystemEvent::WithdrawalCreated`, and persist the
   request in a pending-withdrawal WAL until the next block commit.
@@ -691,7 +694,8 @@ The current block header uses the typed qMDB `state_root` from
 [[State Root Schema]], so it commits account leaves, active
 `market/{market_id}` leaves, `market_group/{group_id}` leaves,
 `order/{order_id}` leaves, `acct_resv/{account_id}` leaves,
-`sys/deposit_cursor`, `sys/deposit_root`, `sys/next_withdrawal_id`, and active
+`sys/deposit_cursor`, `sys/deposit_root`, `sys/quarantine_digest`,
+`sys/observed_l1_height`, `sys/next_withdrawal_id`, and active
 `withdrawal/{withdrawal_id}` leaves. Full proof-backed L1 withdrawal
 verification still depends on the ZK proof program and accepted-root
 contracts, plus the typed-state qMDB proof API.

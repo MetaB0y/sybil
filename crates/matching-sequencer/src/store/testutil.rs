@@ -78,7 +78,7 @@ pub(super) fn next_l1_deposit_for(
 ) -> crate::bridge::L1Deposit {
     let mut deposit = crate::bridge::L1Deposit {
         deposit_id: seq.bridge_state().deposit_cursor.saturating_add(1),
-        account_id,
+        account_id: Some(account_id),
         chain_id: 1,
         vault_address: eth_address(0x10),
         token_address: eth_address(0x20),

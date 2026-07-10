@@ -29,8 +29,12 @@ pub struct FundAccountRequest {
 pub struct SubmitL1DepositRequest {
     /// Sequential L1 vault deposit id.
     pub deposit_id: u64,
-    /// Sybil account receiving the credit.
-    pub account_id: u64,
+    /// Sybil account receiving the credit. Must be absent when `quarantine` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<u64>,
+    /// Dispose an unresolvable raw key into the committed system quarantine ledger.
+    #[serde(default)]
+    pub quarantine: bool,
     /// Source chain id.
     pub chain_id: u64,
     /// Hex-encoded vault contract address (20 bytes).

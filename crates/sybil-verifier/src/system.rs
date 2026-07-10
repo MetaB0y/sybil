@@ -191,11 +191,28 @@ fn apply_event(
             let encoded = encode_key_event(0x0b, key, block_height);
             account.events_digest = update_digest(&account.events_digest, &encoded);
         }
+        SystemEventWitness::QuarantineClaimed {
+            account_id, amount, ..
+        } => {
+            let account = account_mut(accounts, *account_id)?;
+            account.balance = checked_add(account.balance, *amount, *account_id)?;
+            account.total_deposited = checked_add(account.total_deposited, *amount, *account_id)?;
+            let encoded = encode_quarantine_claimed_event(*amount, block_height);
+            account.events_digest = update_digest(&account.events_digest, &encoded);
+        }
+        SystemEventWitness::DepositQuarantined { .. } => {}
         SystemEventWitness::WithdrawalFinalized { .. }
         | SystemEventWitness::L1BlockObserved { .. }
         | SystemEventWitness::MarketGroupExtended { .. } => {}
     }
     Ok(())
+}
+
+fn encode_quarantine_claimed_event(amount: i64, block_height: u64) -> Vec<u8> {
+    let mut bytes = encode_fill_prefix(0x0c, 17);
+    bytes.extend_from_slice(&amount.to_le_bytes());
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
 }
 
 fn account_mut(

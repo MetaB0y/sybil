@@ -40,8 +40,10 @@ impl BlockSequencer {
             return Err(SequencerError::FirstKeyMustBeInitial);
         }
         self.can_register_pubkey(account_id, &pubkey)?;
+        self.validate_quarantine_claim_for_account(account_id)?;
         meta.account_id = account_id;
         self.apply_pubkey_registration(account_id, pubkey, meta);
+        self.claim_quarantine_for_account(account_id)?;
         Ok(())
     }
 
@@ -103,6 +105,7 @@ impl BlockSequencer {
         mut meta: crate::crypto::RegisteredPubkey,
     ) -> Result<(), SequencerError> {
         self.can_register_first_pubkey(account_id, &pubkey)?;
+        self.validate_quarantine_claim_for_account(account_id)?;
         meta.account_id = account_id;
         let key = crate::digest::key_record(&pubkey, &meta);
         let pending_create = self
@@ -123,6 +126,7 @@ impl BlockSequencer {
             return Err(SequencerError::FirstKeyMustBeInitial);
         }
         self.apply_pubkey_registration(account_id, pubkey, meta);
+        self.claim_quarantine_for_account(account_id)?;
         Ok(())
     }
 
@@ -136,6 +140,7 @@ impl BlockSequencer {
         authorization: sybil_verifier::KeyOpAuth,
     ) -> Result<(), SequencerError> {
         self.can_register_pubkey(account_id, &pubkey)?;
+        self.validate_quarantine_claim_for_account(account_id)?;
         self.capture_system_account_baseline(account_id);
         meta.account_id = account_id;
         let key = crate::digest::key_record(&pubkey, &meta);
@@ -152,6 +157,7 @@ impl BlockSequencer {
             key,
             authorization,
         });
+        self.claim_quarantine_for_account(account_id)?;
         Ok(())
     }
 

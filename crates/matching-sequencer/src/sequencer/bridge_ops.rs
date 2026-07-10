@@ -124,13 +124,6 @@ impl BlockSequencer {
     }
 
     pub fn validate_l1_deposit(&self, deposit: &L1Deposit) -> Result<i64, SequencerError> {
-        if self.accounts.get(deposit.account_id).is_none() {
-            return Err(SequencerError::Rejected(Rejection {
-                order_id: 0,
-                account_id: deposit.account_id,
-                reason: RejectionReason::AccountNotFound,
-            }));
-        }
         let expected_id = self.bridge.deposit_cursor.saturating_add(1);
         if deposit.deposit_id != expected_id {
             return Err(SequencerError::Bridge(
@@ -141,10 +134,19 @@ impl BlockSequencer {
                 .to_string(),
             ));
         }
-        if deposit.sybil_account_key != account_key(deposit.account_id) {
-            return Err(SequencerError::Bridge(
-                BridgeError::AccountKeyMismatch.to_string(),
-            ));
+        if let Some(account_id) = deposit.account_id {
+            if self.accounts.get(account_id).is_none() {
+                return Err(SequencerError::Rejected(Rejection {
+                    order_id: 0,
+                    account_id,
+                    reason: RejectionReason::AccountNotFound,
+                }));
+            }
+            if deposit.sybil_account_key != account_key(account_id) {
+                return Err(SequencerError::Bridge(
+                    BridgeError::AccountKeyMismatch.to_string(),
+                ));
+            }
         }
         let mut frontier = self.bridge.deposit_frontier;
         let expected_root = crate::bridge::append_deposit_frontier(
@@ -166,21 +168,56 @@ impl BlockSequencer {
             .map_err(|err| SequencerError::Bridge(err.to_string()))
     }
 
-    pub fn ingest_l1_deposit(&mut self, deposit: L1Deposit) -> Result<Account, SequencerError> {
+    pub fn ingest_l1_deposit(
+        &mut self,
+        deposit: L1Deposit,
+    ) -> Result<DepositDisposition, SequencerError> {
         let amount = self.validate_l1_deposit(&deposit)?;
-        let account_id = deposit.account_id;
-        self.capture_system_account_baseline(account_id);
-        let account = self.accounts.get_mut(account_id).ok_or({
-            SequencerError::Rejected(Rejection {
-                order_id: 0,
+        let disposition = if let Some(account_id) = deposit.account_id {
+            self.capture_system_account_baseline(account_id);
+            let account = self.accounts.get_mut(account_id).ok_or({
+                SequencerError::Rejected(Rejection {
+                    order_id: 0,
+                    account_id,
+                    reason: RejectionReason::AccountNotFound,
+                })
+            })?;
+            let balance = account
+                .balance
+                .checked_add(amount)
+                .ok_or_else(|| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
+            let total_deposited = account
+                .total_deposited
+                .checked_add(amount)
+                .ok_or_else(|| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
+            account.balance = balance;
+            account.total_deposited = total_deposited;
+            let updated = account.clone();
+            self.record_system_event(SystemEvent::L1Deposit {
                 account_id,
-                reason: RejectionReason::AccountNotFound,
-            })
-        })?;
-
-        account.balance += amount;
-        account.total_deposited += amount;
-        let updated = account.clone();
+                amount,
+                deposit: deposit.clone(),
+            });
+            self.note_first_deposit(account_id);
+            DepositDisposition::Credited(updated)
+        } else {
+            let entry = self
+                .bridge
+                .quarantine
+                .entry(deposit.sybil_account_key)
+                .or_default();
+            *entry = entry.checked_add(amount).ok_or_else(|| {
+                SequencerError::Bridge(BridgeError::QuarantineOverflow.to_string())
+            })?;
+            self.record_system_event(SystemEvent::DepositQuarantined {
+                amount,
+                deposit: deposit.clone(),
+            });
+            DepositDisposition::Quarantined {
+                sybil_account_key: deposit.sybil_account_key,
+                amount_nanos: amount,
+            }
+        };
         let mut frontier = self.bridge.deposit_frontier;
         let expected_root = crate::bridge::append_deposit_frontier(
             &mut frontier,
@@ -192,13 +229,65 @@ impl BlockSequencer {
         self.bridge.deposit_cursor = deposit.deposit_id;
         self.bridge.deposit_root = deposit.deposit_root;
         self.bridge.deposit_frontier = frontier;
-        self.record_system_event(SystemEvent::L1Deposit {
+        Ok(disposition)
+    }
+
+    pub(super) fn claim_quarantine_for_account(
+        &mut self,
+        account_id: AccountId,
+    ) -> Result<Option<i64>, SequencerError> {
+        let key = account_key(account_id);
+        let Some(amount) = self.bridge.quarantine.get(&key).copied() else {
+            return Ok(None);
+        };
+        self.capture_system_account_baseline(account_id);
+        let account = self.accounts.get_mut(account_id).ok_or_else(|| {
+            SequencerError::Bridge("quarantine claim account is missing".to_string())
+        })?;
+        let balance = account
+            .balance
+            .checked_add(amount)
+            .ok_or_else(|| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
+        let total_deposited = account
+            .total_deposited
+            .checked_add(amount)
+            .ok_or_else(|| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
+        account.balance = balance;
+        account.total_deposited = total_deposited;
+        self.bridge.quarantine.remove(&key);
+        self.record_system_event(SystemEvent::QuarantineClaimed {
             account_id,
             amount,
-            deposit,
+            sybil_account_key: key,
         });
         self.note_first_deposit(account_id);
-        Ok(updated)
+        Ok(Some(amount))
+    }
+
+    pub(super) fn validate_quarantine_claim_for_account(
+        &self,
+        account_id: AccountId,
+    ) -> Result<(), SequencerError> {
+        let Some(amount) = self
+            .bridge
+            .quarantine
+            .get(&account_key(account_id))
+            .copied()
+        else {
+            return Ok(());
+        };
+        let account = self.accounts.get(account_id).ok_or_else(|| {
+            SequencerError::Bridge("quarantine claim account is missing".to_string())
+        })?;
+        account
+            .balance
+            .checked_add(amount)
+            .ok_or_else(|| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
+        account
+            .total_deposited
+            .checked_add(amount)
+            .ok_or_else(|| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
+        Ok(())
     }
 
     pub fn validate_bridge_withdrawal(

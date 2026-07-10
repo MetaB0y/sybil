@@ -1,0 +1,61 @@
+# Prometheus-compatible test for SYB-272's low-severity quarantine-growth signal.
+# Run: promtool test rules deploy/vmalert/tests/deposit-quarantine_test.yml
+
+rule_files:
+  - ../rules.yml
+
+evaluation_interval: 10m
+
+tests:
+  - interval: 10m
+    input_series:
+      - series: 'sybil_quarantine_ledger_size{job="sybil-api",instance="sybil-api:3000"}'
+        values: "0 20 40 60 80 100 120 140 160"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: DepositQuarantineLedgerGrowing
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: DepositQuarantineLedgerGrowing
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-api"
+              instance: "sybil-api:3000"
+              severity: info
+              component: l1-indexer
+            exp_annotations:
+              summary: "Deposit quarantine ledger is growing"
+              description: "More than 100 new unresolved bridge keys accumulated over 1h (growth: 120 entries). Quarantining is working as designed, but sustained growth should be investigated."
+
+  - interval: 10m
+    input_series:
+      - series: 'sybil_quarantine_ledger_size{job="sybil-api",instance="sybil-api:3000"}'
+        values: "5 10 15 20 25 30 35 40 45"
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: DepositQuarantineLedgerGrowing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_http_requests_total{job="sybil-api",instance="sybil-api:3000",path="/v1/bridge/deposits",status="500",method="POST"}'
+        values: "0+0x4 1+0x6"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: L1DepositPipelineStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: l1-indexer
+            exp_annotations:
+              summary: "L1 deposit pipeline is stalled"
+              description: "The service-tier deposit submit path returned a server error. Unlike an unresolved-key 404, this is not a quarantine disposition and the gapless indexer will retry the head deposit."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_http_requests_total{job="sybil-api",instance="sybil-api:3000",path="/v1/bridge/accounts/by-key/{key_hex}",status="404",method="GET"}'
+        values: "0 1 2 3 4 5 6 7"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: L1DepositPipelineStalled
+        exp_alerts: []

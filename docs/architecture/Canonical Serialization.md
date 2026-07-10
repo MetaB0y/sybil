@@ -219,6 +219,7 @@ Implemented key encodings:
 | `order/{order_id}` | `"order/" || order_id:u64_be` |
 | `sys/deposit_cursor` | ASCII literal |
 | `sys/deposit_root` | ASCII literal |
+| `sys/quarantine_digest` | ASCII literal |
 | `sys/observed_l1_height` | ASCII literal |
 | `sys/next_withdrawal_id` | ASCII literal |
 | `withdrawal/{withdrawal_id}` | `"withdrawal/" || withdrawal_id:u64_be` |
@@ -250,8 +251,11 @@ sys_leaf_value =
  || raw_value
 ```
 
-`deposit_cursor` and `next_withdrawal_id` use `raw_value:u64_le`.
-`deposit_root` uses `raw_value:[u8;32]`.
+`deposit_cursor`, `observed_l1_height`, and `next_withdrawal_id` use
+`raw_value:u64_le`. `deposit_root` and `quarantine_digest` use
+`raw_value:[u8;32]`. The quarantine digest is
+`SHA256("sybil/state/deposit-quarantine-digest/v1" || count:u64_le ||
+(raw_key:[u8;32] || amount:i64_le) * count)` with entries sorted by raw key.
 
 `withdrawal` value:
 
@@ -424,8 +428,10 @@ Events are tag-dispatched single-byte sum types. The running
 | `0x07` | WithdrawalCreated | `withdrawal_id:u64 \|\| amount:i64 \|\| nullifier:[u8;32] \|\| block_height:u64` | `encode_withdrawal_created_event` |
 | `0x08` | OrderCancelled | order identity, markets, side, remainder, and block height | `encode_order_cancelled_event` |
 | `0x09` | WithdrawalRefunded | `withdrawal_id:u64 \|\| amount:i64 \|\| reason \|\| block_height:u64` | `encode_withdrawal_refunded_event` |
-| `0x0A` | WithdrawalFinalized | `withdrawal_id:u64 \|\| amount:i64 \|\| block_height:u64` | `encode_withdrawal_finalized_event` |
-| `0x0B` – `0xFE` | reserved for future events | — | — |
+| `0x0A` | KeyRegistered | canonical `KeyRecord` plus block height | `encode_key_registered_event` |
+| `0x0B` | KeyRevoked | canonical `KeyRecord` plus block height | `encode_key_revoked_event` |
+| `0x0C` | QuarantineClaimed | `amount:i64 \|\| block_height:u64` | `encode_quarantine_claimed_event` |
+| `0x0D` – `0xFE` | reserved for future account digest events | — | — |
 | `0xFF` | reserved as sentinel (do not use) | — | — |
 
 Adding an event type consumes the next free tag. Removing or re-tagging

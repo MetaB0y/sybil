@@ -129,6 +129,14 @@ pub fn encode_withdrawal_refunded_event(
     bytes
 }
 
+pub fn encode_quarantine_claimed_event(amount: i64, block_height: u64) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 8 + 8);
+    bytes.push(0x0c);
+    bytes.extend_from_slice(&amount.to_le_bytes());
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
 pub fn encode_resolution_event(
     market_id: MarketId,
     payout_nanos: Nanos,

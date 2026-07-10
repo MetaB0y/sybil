@@ -925,7 +925,7 @@ async fn test_store_restores_pending_bridge_wals() {
 
     let deposit = L1Deposit {
         deposit_id: 1,
-        account_id,
+        account_id: Some(account_id),
         chain_id: 1,
         vault_address: [0x10; 20],
         token_address: [0x20; 20],

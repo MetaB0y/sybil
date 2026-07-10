@@ -633,7 +633,9 @@ impl AnalyticsState {
                 | SystemEvent::OrderCancelled { .. }
                 | SystemEvent::MarketGroupExtended { .. }
                 | SystemEvent::KeyRegistered { .. }
-                | SystemEvent::KeyRevoked { .. } => {}
+                | SystemEvent::KeyRevoked { .. }
+                | SystemEvent::DepositQuarantined { .. }
+                | SystemEvent::QuarantineClaimed { .. } => {}
             }
         }
     }

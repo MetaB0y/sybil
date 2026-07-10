@@ -409,7 +409,10 @@ impl SequencerHandle {
             .await?
     }
 
-    pub async fn submit_l1_deposit(&self, deposit: L1Deposit) -> Result<Account, SequencerError> {
+    pub async fn submit_l1_deposit(
+        &self,
+        deposit: L1Deposit,
+    ) -> Result<crate::bridge::DepositDisposition, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitL1Deposit(deposit, reply))
             .await?
     }

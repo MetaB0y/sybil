@@ -44,8 +44,9 @@ pub use block::{
     RemovedOrderView, SealedBlock,
 };
 pub use bridge::{
-    BridgeBlockData, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, EthAddress,
-    L1Deposit, L1WithdrawalStatus, WithdrawalLeaf, WithdrawalRefundReason,
+    BridgeBlockData, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest,
+    DepositDisposition, EthAddress, L1Deposit, L1WithdrawalStatus, WithdrawalLeaf,
+    WithdrawalRefundReason,
 };
 pub use crypto::{
     api_key_hash, AccountAuthScheme, AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke,

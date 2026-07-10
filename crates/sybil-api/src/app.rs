@@ -255,11 +255,12 @@ async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse 
 }
 
 async fn record_live_market_metrics(state: &AppState) {
-    let (markets, prices, statuses, volumes) = match tokio::try_join!(
+    let (markets, prices, statuses, volumes, bridge) = match tokio::try_join!(
         state.sequencer.list_markets(),
         state.sequencer.get_market_prices(),
         state.sequencer.get_all_market_statuses(),
         state.sequencer.get_all_market_volumes(),
+        state.sequencer.get_bridge_state(),
     ) {
         Ok(values) => values,
         Err(error) => {
@@ -331,6 +332,14 @@ async fn record_live_market_metrics(state: &AppState) {
     } else {
         (now_ms().saturating_sub(updated_at_ms) as f64) / 1000.0
     });
+    metrics::gauge!("sybil_quarantine_ledger_size").set(bridge.quarantine.len() as f64);
+    metrics::gauge!("sybil_quarantined_amount_nanos").set(
+        bridge
+            .quarantine
+            .values()
+            .copied()
+            .fold(0i64, i64::saturating_add) as f64,
+    );
 }
 
 async fn record_bot_metrics(state: &AppState) {

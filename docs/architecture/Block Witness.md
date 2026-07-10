@@ -8,7 +8,7 @@ last_verified: 2026-07-10
 
 # Block Witness Format
 
-`BlockWitness` v6 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v7 is the canonical private audit package for a Sybil block. The
 sequencer persists it, native verification replays it, and the OpenVM guest
 receives it inside `StateTransitionGuestInput`. The proof binds the witness by
 recomputing `witness_root` from canonical witness bytes and including that root
@@ -27,8 +27,11 @@ adding `keys_digest`, SYB-253 moved it to v5 for withdrawal refund/prune events
 plus the committed observed L1 height, and SYB-270 moved it to v6 for proven key
 operations. v6 adds `KeyRegistered`/`KeyRevoked`, `CreateAccount.initial_keys`,
 the full post-block `account_keys` universe, and a second guest qMDB proof that
-authenticates non-genesis pre-state leaves. See
-`design/witness-v6-keys-transition.md`.
+authenticates non-genesis pre-state leaves. SYB-272 then moved the format to v7:
+every deposit has a witnessed credit-or-quarantine disposition, the bridge
+sidecar opens the single quarantine ledger, and claims are guest-replayed per
+ADR-0015. See `design/witness-v6-keys-transition.md` and
+`docs/adr/0015-deposit-quarantine.md`.
 
 ## Encoding
 
@@ -55,11 +58,11 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v6 it is `0x06`.
+The first byte is the format version. For v7 it is `0x07`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x06
+    version:u8 = 0x07
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
@@ -111,7 +114,8 @@ Sections are `count:u64 || item_bytes * count`, except where noted:
 
 `KeyRecord` is `auth_scheme:u8 || pubkey_sec1:[u8;33] ||
 capability_mask:u32le`. System-event tags 10 and 11 commit key registration and
-revocation respectively, including the complete raw-P256 or WebAuthn
+revocation; tags 12 and 13 commit `DepositQuarantined` and
+`QuarantineClaimed`, respectively. Key events include the complete raw-P256 or WebAuthn
 authorization envelope. The guest welds each opened set to the post-state
 `keys_digest`, reverse-folds key events to the authenticated pre-state digest,
 then forward-replays them over a running globally unique key universe.
@@ -139,7 +143,14 @@ deposit_cursor:u64
 || next_withdrawal_id:u64
 || withdrawal_count:u64
 || withdrawal_bytes * withdrawal_count          // sorted by withdrawal_id
+|| quarantine_entry_count:u64
+|| (sybil_account_key:[u8;32] || amount:i64) * quarantine_entry_count
+                                                 // sorted by raw key
 ```
+
+The logical quarantine map is committed as one `sys/quarantine_digest` leaf,
+whose SHA-256 digest covers the sorted entry opening. Raw keys do not create
+qMDB leaves.
 
 ## Deposit Accumulator
 
@@ -179,8 +190,14 @@ Semantics:
   equal `state_sidecar.bridge.deposit_root` and public `deposit_root`.
 - The number of new deposits must advance the post cursor:
   `pre_count + new_deposits.len() == state_sidecar.bridge.deposit_cursor`.
-- Credited `SystemEventWitness::L1Deposit` events must match the delta by id,
-  cumulative root, bridge account key, and token-unit-to-nanos amount.
+- Exactly one disposition event per new deposit must match the delta by id,
+  cumulative root, raw bridge key, and token-unit-to-nanos amount:
+  `L1Deposit` credits a committed account, while `DepositQuarantined` parks the
+  same value in the system ledger. Both dispositions fold the frontier.
+- `QuarantineClaimed` removes the complete accumulated entry and credits the
+  account by exactly that amount. The guest derives the expected bridge key as
+  `BLAKE3("sybil/bridge/account-key/v1" || account_id:u64le)` from the committed
+  account id; no host-side reverse mapping is trusted.
 
 The recurrence is intentionally equivalent to `SybilVault._appendDepositLeaf`.
 Solidity hashes deposit leaves as

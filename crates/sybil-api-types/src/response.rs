@@ -441,6 +441,19 @@ pub enum SystemEventResponse {
         auth_scheme: u8,
         capability_mask: u32,
     },
+    DepositQuarantined {
+        /// Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
+        amount_nanos: i64,
+        deposit_id: u64,
+        deposit_root_hex: String,
+        sybil_account_key_hex: String,
+    },
+    QuarantineClaimed {
+        account_id: u64,
+        /// Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1.
+        amount_nanos: i64,
+        sybil_account_key_hex: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -628,7 +641,8 @@ pub struct BridgeBlockResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BridgeDepositEventResponse {
     pub deposit_id: u64,
-    pub account_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<u64>,
     /// Token base units accepted by the vault, e.g. USDC's 6-decimal units.
     pub amount_token_units: u64,
     pub deposit_root_hex: String,
@@ -650,6 +664,11 @@ pub struct BridgeStatusResponse {
     pub cancelled_withdrawal_count: usize,
     #[serde(default)]
     pub refunded_withdrawal_count: usize,
+    #[serde(default)]
+    pub quarantine_ledger_size: usize,
+    #[serde(default)]
+    /// Sum of parked value. Integer nanodollars; 1_000_000_000 = $1.
+    pub total_quarantined_nanos: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -669,9 +688,13 @@ pub struct BridgeAccountKeyResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BridgeDepositResponse {
-    pub account_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<u64>,
     /// Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
-    pub balance_nanos: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balance_nanos: Option<i64>,
+    /// `credited` or `quarantined`.
+    pub disposition: String,
     pub deposit_id: u64,
     pub deposit_root_hex: String,
 }

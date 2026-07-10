@@ -125,6 +125,23 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
             auth_scheme: key.auth_scheme,
             capability_mask: key.capability_mask,
         },
+        matching_sequencer::SystemEvent::DepositQuarantined { amount, deposit } => {
+            SystemEventResponse::DepositQuarantined {
+                amount_nanos: *amount,
+                deposit_id: deposit.deposit_id,
+                deposit_root_hex: hex::encode(deposit.deposit_root),
+                sybil_account_key_hex: hex::encode(deposit.sybil_account_key),
+            }
+        }
+        matching_sequencer::SystemEvent::QuarantineClaimed {
+            account_id,
+            amount,
+            sybil_account_key,
+        } => SystemEventResponse::QuarantineClaimed {
+            account_id: account_id.0,
+            amount_nanos: *amount,
+            sybil_account_key_hex: hex::encode(sybil_account_key),
+        },
     }
 }
 
@@ -219,7 +236,7 @@ fn bridge_block_to_response(block: &SealedBlock) -> BridgeBlockResponse {
             .iter()
             .map(|deposit| BridgeDepositEventResponse {
                 deposit_id: deposit.deposit_id,
-                account_id: deposit.account_id.0,
+                account_id: deposit.account_id.map(|account_id| account_id.0),
                 amount_token_units: deposit.amount_token_units,
                 deposit_root_hex: hex::encode(deposit.deposit_root),
             })

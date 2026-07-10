@@ -428,11 +428,13 @@ fn event_account_ids(event: &SystemEventWitness) -> Vec<u64> {
         | SystemEventWitness::OrderCancelled { account_id, .. }
         | SystemEventWitness::KeyRegistered { account_id, .. }
         | SystemEventWitness::KeyRevoked { account_id, .. } => vec![*account_id],
+        SystemEventWitness::QuarantineClaimed { account_id, .. } => vec![*account_id],
         SystemEventWitness::MarketResolved {
             affected_accounts, ..
         } => affected_accounts.clone(),
         SystemEventWitness::L1BlockObserved { .. }
-        | SystemEventWitness::MarketGroupExtended { .. } => Vec::new(),
+        | SystemEventWitness::MarketGroupExtended { .. }
+        | SystemEventWitness::DepositQuarantined { .. } => Vec::new(),
     }
 }
 

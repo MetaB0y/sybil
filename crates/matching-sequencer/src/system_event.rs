@@ -74,6 +74,15 @@ pub enum SystemEvent {
         key: KeyRecord,
         authorization: KeyOpAuth,
     },
+    DepositQuarantined {
+        amount: i64,
+        deposit: L1Deposit,
+    },
+    QuarantineClaimed {
+        account_id: AccountId,
+        amount: i64,
+        sybil_account_key: [u8; 32],
+    },
 }
 
 #[cfg(test)]

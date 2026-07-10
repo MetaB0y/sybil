@@ -604,6 +604,13 @@ fn bridge_state_from_witness(witness: &BlockWitness) -> Result<BridgeState, Stor
         observed_l1_height: witness.state_sidecar.bridge.observed_l1_height,
         next_withdrawal_id: witness.state_sidecar.bridge.next_withdrawal_id,
         withdrawals,
+        quarantine: witness
+            .state_sidecar
+            .bridge
+            .quarantine
+            .iter()
+            .map(|entry| (entry.sybil_account_key, entry.amount))
+            .collect(),
     })
 }
 

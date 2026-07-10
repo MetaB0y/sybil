@@ -188,6 +188,17 @@ pub enum SystemEventWitness {
         key: KeyRecord,
         authorization: KeyOpAuth,
     },
+    DepositQuarantined {
+        amount: i64,
+        deposit_id: u64,
+        deposit_root: [u8; 32],
+        sybil_account_key: [u8; 32],
+    },
+    QuarantineClaimed {
+        account_id: u64,
+        amount: i64,
+        sybil_account_key: [u8; 32],
+    },
 }
 
 /// Validity-critical signing-key record committed by `keys_digest` v2.
@@ -434,6 +445,9 @@ pub struct BridgeStateSnapshot {
     pub observed_l1_height: u64,
     pub next_withdrawal_id: u64,
     pub withdrawals: Vec<WithdrawalSnapshot>,
+    /// Canonical opening of the single system quarantine ledger, sorted by key.
+    #[serde(default)]
+    pub quarantine: Vec<QuarantineEntrySnapshot>,
 }
 
 impl Default for BridgeStateSnapshot {
@@ -444,8 +458,15 @@ impl Default for BridgeStateSnapshot {
             observed_l1_height: 0,
             next_withdrawal_id: 0,
             withdrawals: Vec::new(),
+            quarantine: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct QuarantineEntrySnapshot {
+    pub sybil_account_key: [u8; 32],
+    pub amount: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
