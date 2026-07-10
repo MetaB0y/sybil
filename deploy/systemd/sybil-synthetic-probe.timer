@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Sybil synthetic probe every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=15s
+Persistent=true
+Unit=sybil-synthetic-probe.service
+
+[Install]
+WantedBy=timers.target

@@ -1,133 +1,184 @@
-# Runbook: Sequencer store backup & restore
+# Runbook: sequencer store backup and restore
 
-**Owning ticket:** SYB-223 (item 2) ·
-**Components:** `matching-sequencer` (store), `sybil-api`, ops ·
-**Scripts:** `scripts/backup-store.sh`, `scripts/restore-store-drill.sh`
+**Owning ticket:** SYB-223 item 2 · **Components:** `sybil-api`,
+`matching-sequencer`, operations · **Scripts:** `scripts/store-backup.sh`,
+`scripts/store-restore-drill.sh`
 
-The Sybil sequencer persists all durable state under `SYBIL_DATA_DIR`. This
-runbook covers backing that state up safely and drilling that a backup is
-actually restorable.
+This runbook covers a short-freeze hot backup of the single-sequencer store,
+an isolated restore drill, and an emergency production restore. A backup is not
+accepted until the drill serves the exact state recorded in its manifest.
 
----
+## Why the copy uses `docker pause`
 
-## What is on disk
+The store is not one independently copyable redb file. `Store::open` in
+`crates/matching-sequencer/src/store/commit.rs` opens `sybil.redb` and derives
+the sibling `sybil.qmdb/` path with `path.with_extension("qmdb")`. Block commit
+then:
 
-`matching-sequencer/src/store.rs` (`Store::open`) opens **two** objects, both
-inside `SYBIL_DATA_DIR`:
+1. writes the next account snapshot and typed state into the inactive qMDB
+   slot;
+2. checks that typed qMDB's root against the block header;
+3. commits one redb transaction that stores the block and flips the
+   authoritative qMDB fence.
 
-| Path | What | Notes |
-|------|------|-------|
-| `sybil.redb` | single redb v4 file | copy-on-write B-tree, MVCC, **no** separate WAL; the redb commit is the only durability point |
-| `sybil.qmdb/` | qmdb account-state directory | derived as `path.with_extension("qmdb")`, i.e. a sibling of `sybil.redb` |
+Recovery reads only the slot named by the redb fence. An inactive qMDB slot
+written before a crash is ignored if redb never committed the flip. These are
+the explicit transaction and recovery invariants at the top of
+`crates/matching-sequencer/src/store.rs` and in `save_block_inner`.
 
-The redb commit fence is authoritative. There is **no cross-db transaction**
-between redb and qmdb: recovery trusts the redb fence and *requires* the fenced
-qmdb slot to match the committed height and state root (see the "Recovery
-invariants" block in `store.rs`). A backup must therefore capture **both**
-objects at a **single consistent instant**.
+The pinned redb 4.0 crate is an ACID, crash-safe copy-on-write database, but its
+public `Database` API has integrity checking and compaction—not an online
+backup/snapshot API. Pausing only the simulation scheduler is also insufficient:
+production disables `/v1/simulation/pause`, and acknowledged account/order/
+control-plane requests can write redb between blocks.
 
----
+`store-backup.sh` therefore freezes the **whole container** with `docker pause`,
+copies the **whole `SYBIL_DATA_DIR`** while every userspace writer is frozen,
+and unpauses it through an EXIT trap. This produces a stable crash image:
+redb recovers its last ACID commit, and the redb fence selects the matching
+qMDB slot. The API is briefly unresponsive during the copy, but the container
+is not stopped or recreated.
 
-## Copy-safety
+After resuming the source, the script boots the source image against a second,
+throwaway copy with a 24-hour block interval. It records the state that actually
+restores—not a racy API sample taken before the freeze—in `manifest.json`.
 
-redb v4 exposes no online/hot-backup API, and because redb + qmdb are two stores
-with no atomic cross-db snapshot, the safe strategies are:
+## Take a production backup
 
-- **Stopped-copy (always safe, default).** Stop `sybil-api`, then copy the whole
-  data dir. A stopped store has a settled redb fence and a matching qmdb slot.
-- **Atomic filesystem snapshot (safe while running).** An LVM / ZFS / btrfs
-  snapshot of `SYBIL_DATA_DIR` captures redb + qmdb at one instant, preserving
-  the fence↔slot agreement. Snapshot first, then back up *from the snapshot*.
-- **Plain online `cp` of a live store — UNSAFE.** It can capture a torn redb
-  page, or a redb fence that points past what the qmdb copy captured. Such a
-  backup may fail the recovery invariants and be unrestorable. `backup-store.sh`
-  refuses this unless you explicitly assert safety.
-
----
-
-## Taking a backup
-
-```bash
-# Stopped-copy (recommended). Stop sybil-api first, then:
-SYBIL_DATA_DIR=/opt/sybil/data scripts/backup-store.sh --dest /opt/sybil/backups
-
-# Equivalent, explicit:
-scripts/backup-store.sh --data-dir /opt/sybil/data --dest /opt/sybil/backups --assume-stopped
-
-# From an atomic FS snapshot while the service keeps running:
-#   lvcreate -s ...  (or zfs snapshot / btrfs subvolume snapshot), mount it, then:
-scripts/backup-store.sh --data-dir /mnt/snap/sybil/data --dest /opt/sybil/backups --allow-online
-```
-
-Behavior:
-
-- If the source `sybil.redb` still has an open writer (detected via `fuser`,
-  falling back to `lsof`), the script **refuses** unless `--assume-stopped` or
-  `--allow-online` is given. If neither tool is installed it refuses and asks
-  you to confirm with `--assume-stopped`.
-- Output is a timestamped directory `…/sybil-store-<UTC>/` mirroring the data-dir
-  layout (`sybil.redb` + `sybil.qmdb/`) plus a `BACKUP_MANIFEST.txt` recording
-  source dir, timestamp, host, redb size, and the strategy used.
-- The final stdout line is the backup directory path (script-friendly).
-
----
-
-## Restore drill
-
-`restore-store-drill.sh` proves a backup opens and serves, without touching the
-live store or port:
+Run on the deployment host from `/opt/sybil`:
 
 ```bash
-scripts/restore-store-drill.sh /opt/sybil/backups/sybil-store-<UTC>
-# optional: --api-binary /path/to/sybil-api   (skip the cargo build)
-#           --timeout 60                       (health wait, default 30s)
+cd /opt/sybil
+install -d -m 0700 /opt/sybil/.tmp
+TMPDIR=/opt/sybil/.tmp scripts/store-backup.sh --target prod
 ```
 
-The drill:
-
-1. copies the backup into a throwaway `mktemp` dir,
-2. builds (or uses a provided) `sybil-api`,
-3. picks a free ephemeral port and starts the server with
-   `SYBIL_DATA_DIR=<throwaway>`, `SYBIL_PORT=<ephemeral>`, `SYBIL_DEV_MODE=false`,
-4. waits for `/v1/health`,
-5. asserts `/v1/blocks/latest` returns a height and `/v1/state-root` returns a
-   root from the restored state,
-6. kills the server and removes the throwaway dir on exit.
-
-Exit code is non-zero (and the server log tail is dumped) if the store fails to
-open, the server crashes on boot, or health/blocks/state-root do not answer.
-
-### Restoring for real
-
-To restore into production, do the equivalent of the drill's copy step by hand,
-against the *stopped* service:
+Production defaults are compose project `sybil`, container data directory
+`/data`, and destination `/opt/sybil/backups`. Override the destination or
+choose a known account sample when useful:
 
 ```bash
-systemctl stop sybil-api            # or: docker compose stop api
-rm -rf /opt/sybil/data              # or move it aside
-mkdir -p /opt/sybil/data
-cp -a /opt/sybil/backups/sybil-store-<UTC>/. /opt/sybil/data/
-rm -f /opt/sybil/data/BACKUP_MANIFEST.txt
-systemctl start sybil-api
+scripts/store-backup.sh --target prod \
+  --dest /mnt/encrypted-backups/sybil \
+  --account-id 42
 ```
 
----
+The output directory is `sybil-store-<UTC>-<pid>/` and contains:
 
-## What the drill does NOT prove
+- `store/`: the complete copied data directory, including `sybil.redb` and
+  `sybil.qmdb/`;
+- `SHA256SUMS`: checksum for every copied file;
+- `manifest.json`: source provenance, the consistency mechanism, exact block
+  height/state root, and one complete account response.
 
-- **Currency at cutover.** The drill validates *this* backup, not that it is
-  byte-current with production. Recovery replays only the WAL-protected work
-  committed *after* the last block; anything lost before the backup instant is
-  lost. Backup freshness is an operational (RPO) decision, not something the
-  drill can attest.
-- **Historical-serving completeness.** Pruned history (blocks, price points,
-  candles) is not reconstructed; the drill only checks head-of-chain endpoints.
-- **External side-effects.** L1 deposit/withdrawal re-indexing, Polymarket
-  mirror re-sync, and any off-store JSON sidecars (`SYBIL_MARKET_REF_DATA_PATH`,
-  `SYBIL_EVENT_SNAPSHOT_DIR`) are outside `SYBIL_DATA_DIR` and outside this drill.
-- **Cross-binary compatibility.** The store carries a `store_layout_version`; a
-  backup only restores under a binary with a compatible layout. Drill with the
-  binary you intend to restore onto.
-- **An unsafely-taken backup.** A plain online `cp` of a live store may *appear*
-  to pass a drill and still be subtly inconsistent. Only stopped-copy or an
-  atomic FS snapshot are trustworthy sources.
+The script fails and removes an incomplete output if the source cannot be
+unpaused, the files are absent, the copied store cannot boot, or an account
+sample cannot be read. The last stdout line is the completed backup path.
+
+Do not use `docker cp` manually against a live, unpaused container. Do not copy
+only `sybil.redb`; the fenced qMDB slots are required for recovery.
+
+## Take a local itest backup
+
+Target any running project created from `docker-compose.yml` plus
+`docker-compose.itest.yml`:
+
+```bash
+scripts/store-backup.sh --target itest \
+  --project sybil-itest-<id> \
+  --dest ./store-backups
+```
+
+If the container is not compose-managed, use the explicit form:
+
+```bash
+scripts/store-backup.sh --target custom \
+  --container <container-name-or-id> \
+  --data-dir /itest-data \
+  --dest ./store-backups
+```
+
+## Run the restore drill
+
+Run from a checkout containing the binary version intended for restore:
+
+```bash
+TMPDIR=/home/anonymous/.cache/tmp \
+  scripts/store-restore-drill.sh /opt/sybil/backups/sybil-store-<UTC>-<pid>
+```
+
+The drill validates checksums, creates a unique Compose project from the normal
+base file plus the itest overlay, populates only that project's fresh
+`itest-data` volume, builds/boots `sybil-api`, and tears the project down with
+`down -v` on every exit. `--no-build` reuses an existing `sybil-api:itest`
+image; `--port` and `--timeout` tune local execution.
+
+“Restored OK” means all of the following are true:
+
+- redb and the fenced qMDB slot pass startup recovery;
+- `/v1/health` succeeds;
+- `/v1/blocks/latest.height` exactly equals the manifest height;
+- both `/v1/blocks/latest.state_root` and `/v1/state-root` exactly equal the
+  manifest state root;
+- `GET /v1/accounts/<sample>` is structurally equal to the complete account
+  object recorded in the manifest.
+
+Any difference exits nonzero. A 24-hour drill block interval prevents the
+restored node from advancing before those exact comparisons.
+
+## Restore to production
+
+This is a destructive incident procedure. Keep the failed volume until the
+replacement has passed verification.
+
+1. Run `store-restore-drill.sh` against the candidate using the code/image
+   revision you intend to deploy. Stop if it is not `restored OK`.
+2. Take one final hot backup of the current production volume if the API still
+   runs. Copy both candidate and safety backup off the host.
+3. Stop every API writer, then the API:
+
+   ```bash
+   cd /opt/sybil
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+     stop sybil-polymarket sybil-arena sybil-prover-mock sybil-api
+   ```
+
+   Stop the separately managed L1 indexer too, if enabled.
+4. Preserve the failed volume before changing it. The safest approach is a
+   host/volume snapshot. If one is unavailable, copy `/data` from a one-shot
+   container into a separately named archival volume.
+5. Replace only the contents of `sybil-data` with the candidate:
+
+   ```bash
+   docker run --rm \
+     -v sybil-data:/data \
+     -v /opt/sybil/backups/sybil-store-<UTC>-<pid>/store:/restore:ro \
+     --entrypoint sh sybil-api:latest -c \
+     'find /data -mindepth 1 -maxdepth 1 -exec rm -rf {} + && cp -a /restore/. /data/'
+   ```
+
+6. Start `sybil-api` alone, watch its logs, then check health, state root, the
+   manifest account, and that the head begins at or advances from the manifest
+   height. Stop and preserve logs on any recovery/invariant error.
+7. Restart the mirror, arena, mock prover, and L1 indexer. Run
+   `scripts/post-deploy-smoke.sh` and the synthetic probe.
+
+**Never run `just deploy-reset-state CONFIRM` during restore.** That recipe
+removes `sybil-data` (along with several other state volumes) and creates a
+fresh genesis. It is a consensus-redeploy tool, not a restart or restore step.
+
+## Cadence and retention
+
+For the private single-sequencer validium:
+
+- take a backup at least daily and immediately before every deploy, schema
+  change, or intentional state reset;
+- drill the newest backup weekly and before relying on it for a change window;
+- retain at least seven daily and four weekly generations;
+- replicate encrypted copies off-host—backups only on the sequencer host do not
+  protect against disk or host loss;
+- monitor freeze duration and schedule large copies away from peak traffic.
+
+The backup RPO is its creation time. The drill proves internal restorability
+and exact recorded API state; it does not prove off-host replication, L1
+side-effect replay, or compatibility with a different store layout version.

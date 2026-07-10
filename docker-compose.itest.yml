@@ -16,7 +16,7 @@ services:
     environment:
       SYBIL_DEPLOYMENT_PROFILE: "local"
       SYBIL_DEV_MODE: "true"
-      SYBIL_BLOCK_INTERVAL_MS: "1000"
+      SYBIL_BLOCK_INTERVAL_MS: "${SYBIL_ITEST_BLOCK_INTERVAL_MS:-1000}"
       SYBIL_DATA_DIR: "/itest-data"
       SYBIL_ARENA_DB_PATH: ""
       RUST_LOG: "warn,sybil_api=info,matching_sequencer=info"

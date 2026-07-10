@@ -444,10 +444,11 @@ SMOKE_REQUIRE_SIGNER := "0"
 
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
-    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts && touch /opt/sybil/arena.env'
+    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib && touch /opt/sybil/arena.env'
     scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
-    scp scripts/ops-smoke.sh {{SERVER}}:/opt/sybil/scripts/
+    scp scripts/ops-smoke.sh scripts/store-backup.sh scripts/store-restore-drill.sh scripts/synthetic-probe.sh {{SERVER}}:/opt/sybil/scripts/
+    scp scripts/lib/smoke-common.sh {{SERVER}}:/opt/sybil/scripts/lib/
 
 deploy-prod-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f .env && grep -q "^GF_SECURITY_ADMIN_PASSWORD=." .env && grep -q "^CADDY_OPS_AUTH_USER=." .env && grep -q "^CADDY_OPS_AUTH_HASH=." .env && grep -q "^SYBIL_SERVICE_TOKEN=." .env && grep -q "^SYBIL_WEBAUTHN_RP_ID=." .env && grep -q "^SYBIL_WEBAUTHN_ORIGIN=." .env'

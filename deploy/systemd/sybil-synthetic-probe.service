@@ -1,0 +1,14 @@
+[Unit]
+Description=Sybil external synthetic probe
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sybil
+RuntimeDirectory=sybil-synthetic-probe
+Environment=TMPDIR=/run/sybil-synthetic-probe
+Environment=SYBIL_COMPOSE_PROJECT=sybil
+ExecStart=/opt/sybil/scripts/synthetic-probe.sh --base-url https://172-104-31-54.nip.io --app-origin https://app.172-104-31-54.nip.io --block-interval 10
+TimeoutStartSec=120
+NoNewPrivileges=true

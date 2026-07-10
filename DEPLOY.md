@@ -143,6 +143,12 @@ Check public API health:
 curl https://172-104-31-54.nip.io/v1/health
 ```
 
+Store backup/restore and the five-minute synthetic monitor have dedicated
+operator runbooks:
+
+- `docs/runbooks/store-backup-restore.md`
+- `docs/runbooks/synthetic-monitoring.md`
+
 Reset app state only when intentional:
 
 ```bash

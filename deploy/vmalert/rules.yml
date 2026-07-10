@@ -231,6 +231,26 @@ groups:
           summary: "No blocks produced in the last 2m"
           description: "sybil-api is up but has not produced any blocks for 2m — block production may be stalled."
 
+      - alert: SyntheticProbeFailed
+        expr: last_over_time(sybil_synthetic_probe_failure{job="sybil-synthetic"}[10m]) == 1
+        for: 0m
+        labels:
+          severity: critical
+          component: synthetic-monitor
+        annotations:
+          summary: "External Sybil synthetic probe failed"
+          description: "The five-minute read-only probe failed for {{ $labels.instance }}. Health, block advancement, markets, CORS, or container health is broken; inspect the systemd journal for the one-line cause."
+
+      - alert: SyntheticProbeMissing
+        expr: absent_over_time(sybil_synthetic_probe_failure{job="sybil-synthetic"}[15m]) == 1
+        for: 0m
+        labels:
+          severity: warning
+          component: synthetic-monitor
+        annotations:
+          summary: "Sybil synthetic probe has stopped reporting"
+          description: "No synthetic result reached VictoriaMetrics for 15m. Check the sybil-synthetic-probe timer, Docker access, and VictoriaMetrics ingestion."
+
       - alert: ActorMailboxQueueHigh
         expr: max_over_time(sybil_actor_queue_depth[2m]) > 1000
         for: 2m

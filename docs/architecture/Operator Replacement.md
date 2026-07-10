@@ -179,7 +179,7 @@ consensus-touching batch comes next — not its own commitment move.
 ## 6. Implementation increments
 
 - **OR-1 (with SYB-222/R0):** genesis-from-witness importer — decoded payload
-  → fresh store; drill wired into `restore-store-drill.sh`.
+  → fresh store; drill wired into `store-restore-drill.sh`.
 - **OR-2 (next consensus batch):** `genesis_hash` in order/cancel canonical
   bytes (§4 fix 1). Rides a batched commitment move, never alone.
 - **OR-3 (pre-testnet, after §3 ratified):** payload encryption + Shamir
