@@ -876,6 +876,34 @@ mod tests {
     const MAX_KEY_BYTES: usize = 64;
     const MAX_VALUE_BYTES: usize = 1 << 20;
 
+    fn golden_vectors() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../golden/golden-vectors.json"))
+            .expect("committed golden-vectors.json must be valid JSON")
+    }
+
+    fn golden_bytes32(pointer: &str) -> [u8; 32] {
+        let vectors = golden_vectors();
+        let encoded = vectors
+            .pointer(pointer)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("golden vector {pointer} must be a hex string"));
+        let encoded = encoded
+            .strip_prefix("0x")
+            .unwrap_or_else(|| panic!("golden vector {pointer} must start with 0x"));
+        assert_eq!(
+            encoded.len(),
+            64,
+            "golden vector {pointer} must encode 32 bytes"
+        );
+
+        let mut out = [0u8; 32];
+        for (index, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&encoded[index * 2..index * 2 + 2], 16)
+                .unwrap_or_else(|_| panic!("golden vector {pointer} contains invalid hex"));
+        }
+        out
+    }
+
     type TestStateDb = OrderedVariableDb<
         MmrFamily,
         deterministic::Context,
@@ -970,10 +998,8 @@ mod tests {
 
         assert_eq!(
             hash_header(&header),
-            [
-                237, 2, 52, 82, 23, 11, 241, 36, 196, 211, 229, 155, 159, 99, 198, 162, 76, 210,
-                68, 96, 104, 0, 3, 235, 39, 53, 0, 15, 146, 163, 93, 242,
-            ],
+            golden_bytes32("/header/hash"),
+            "header hash differs from committed golden vector"
         );
     }
 
@@ -1484,8 +1510,8 @@ mod tests {
 
     #[test]
     fn state_transition_public_input_hash_solidity_golden_vector() {
-        // Twin: contracts/test/SybilGoldenVectors.t.sol. Keep these constants
-        // byte-for-byte aligned with the Solidity suite.
+        // Twin: contracts/test/SybilGoldenVectors.t.sol. Both suites consume
+        // the generator-owned repo-root JSON rather than maintaining literals.
         let inputs = StateTransitionPublicInputs {
             previous_height: 41,
             new_height: 42,
@@ -1495,19 +1521,14 @@ mod tests {
             events_root: [0x40; 32],
             witness_root: [0x50; 32],
             da_commitment: [0x60; 32],
-            deposit_root: [
-                93, 155, 73, 65, 157, 237, 20, 180, 127, 175, 15, 148, 49, 152, 195, 54, 71, 192,
-                22, 189, 55, 249, 152, 177, 217, 25, 107, 16, 58, 207, 236, 218,
-            ],
+            deposit_root: golden_bytes32("/state_transition_public_inputs/deposit_root"),
             deposit_count: 3,
         };
 
         assert_eq!(
             state_transition_public_input_hash(&inputs),
-            [
-                66, 25, 125, 13, 255, 123, 194, 248, 106, 110, 53, 159, 24, 122, 221, 161, 99, 252,
-                155, 79, 250, 160, 231, 207, 185, 132, 85, 97, 187, 116, 72, 48,
-            ]
+            golden_bytes32("/state_transition_public_inputs/hash"),
+            "Solidity public-input hash differs from committed golden vector"
         );
     }
 

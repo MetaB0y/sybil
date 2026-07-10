@@ -20,6 +20,14 @@ fmt:
 fmt-check:
     cargo fmt --all -- --check
 
+# Regenerate the single Rust/Solidity canonical golden-vector artifact.
+golden-write:
+    cargo run -p sybil-golden-vectors --bin emit-golden -- --write
+
+# Fail if canonical encoders no longer reproduce the committed artifact.
+golden-check:
+    cargo run -p sybil-golden-vectors --bin emit-golden -- --check
+
 # Quick simulation with detailed output (~50 orders)
 sim-quick:
     cargo run --bin matching-sim --release -- --preset quick -v

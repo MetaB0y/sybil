@@ -186,6 +186,9 @@ jobs:
       - name: Guest commitment staleness gate
         run: scripts/zk-guest-fingerprint.sh --check
 
+      - name: Canonical golden-vector staleness gate
+        run: cargo run -p sybil-golden-vectors --bin emit-golden -- --check
+
       # Host-side encoder (not consensus surface). Full check + clippy.
       - name: Check openvm-tools
         working-directory: zk/openvm-tools

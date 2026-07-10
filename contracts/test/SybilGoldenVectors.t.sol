@@ -13,6 +13,30 @@ interface GoldenVectorVm {
         address target,
         bytes calldata newRuntimeBytecode
     ) external;
+
+    function readFile(
+        string calldata path
+    ) external view returns (string memory data);
+
+    function parseJsonAddress(
+        string calldata json,
+        string calldata key
+    ) external pure returns (address value);
+
+    function parseJsonBytes(
+        string calldata json,
+        string calldata key
+    ) external pure returns (bytes memory value);
+
+    function parseJsonBytes32(
+        string calldata json,
+        string calldata key
+    ) external pure returns (bytes32 value);
+
+    function parseJsonUint(
+        string calldata json,
+        string calldata key
+    ) external pure returns (uint256 value);
 }
 
 contract SybilVaultDepositHarness is SybilVault {
@@ -61,67 +85,17 @@ contract SybilGoldenVectorsTest {
     GoldenVectorVm private constant vm =
         GoldenVectorVm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
-    uint256 private constant CHAIN_ID = 31_337;
     address private constant VAULT_ADDRESS = 0x1111111111111111111111111111111111111111;
     address private constant VERIFIER_ADDRESS = 0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC;
 
-    address private constant SENDER_1 = 0x3333333333333333333333333333333333333333;
-    address private constant SENDER_2 = 0x5555555555555555555555555555555555555555;
-    address private constant SENDER_3 = 0x7777777777777777777777777777777777777777;
-    address private constant SENDER_HIGH = 0x9999999999999999999999999999999999999999;
-    bytes32 private constant KEY_1 =
-        0x4444444444444444444444444444444444444444444444444444444444444444;
-    bytes32 private constant KEY_2 =
-        0x6666666666666666666666666666666666666666666666666666666666666666;
-    bytes32 private constant KEY_3 =
-        0x8888888888888888888888888888888888888888888888888888888888888888;
-    bytes32 private constant KEY_HIGH =
-        0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
-    uint64 private constant HIGH_DEPOSIT_ID = 0xfedcba9876543210;
-    uint256 private constant MAX_U64_AMOUNT = type(uint64).max;
-
-    bytes32 private constant EMPTY_DEPOSIT_ROOT =
-        0x7c1d0e8a93ea9c09cc13b91ead8f72de66a33cb695c30934dc2d75bffac1248e;
-    bytes32 private constant DEPOSIT_1_LEAF =
-        0x10348417835957783f646308469b0c1a7d42fcb7e8a67cc0774b969cd3bc4e78;
-    bytes32 private constant DEPOSIT_1_TREE_LEAF =
-        0xcab93c3c5e862aa9e8fc0cff679d4d6febdf3305c81f65207871cea439975d5f;
-    bytes32 private constant DEPOSIT_1_ROOT =
-        0x2e7fc1c1f7494f98b453f8be88ee3b99b47321b95425faf6853c3e59618de440;
-    bytes32 private constant DEPOSIT_2_LEAF =
-        0xaf7bae1be80d057d1c48f70e9786a8466e1c8b858fef8d5ecbb9e10bcba40776;
-    bytes32 private constant DEPOSIT_2_TREE_LEAF =
-        0x2da1b7553fc86717d219e442f9abbee77ccaf81f2a8c9487aa08da89a8dbe9ba;
-    bytes32 private constant DEPOSIT_2_ROOT =
-        0xbf00beb7a033f95b583dfb040f9f962db5f538c56e11cb9b3fa303b69d820b1f;
-    bytes32 private constant DEPOSIT_3_LEAF =
-        0x2c380522f079cfb922808acb18d9677576ad3bf4c0dc61de79a88edb0840b939;
-    bytes32 private constant DEPOSIT_3_TREE_LEAF =
-        0x4ddbf4504459403a113a894bd821e6e0ad9ee8ac9cca1ddba7a91ff9413bab75;
-    bytes32 private constant DEPOSIT_3_ROOT =
-        0x5d9b49419ded14b47faf0f943198c33647c016bd37f998b1d9196b103acfecda;
-    bytes32 private constant DEPOSIT_FRONTIER_AFTER_2_LEVEL_1 =
-        0xe167afbeb71311d09d4353dca2b4d7cd1c44431e6bbee2305720c27a9a8059e0;
-    bytes32 private constant HIGH_DEPOSIT_LEAF =
-        0x0e0fe498f14aa8310467572c634bc13d6617573ca1fe7587c1fd642fbad168a1;
-    bytes32 private constant HIGH_DEPOSIT_TREE_LEAF =
-        0xf7f3a6aeef19f4464f11bdfe4358124d745de1295dd03a116cccb1ab7ff2e90f;
-    bytes32 private constant STATE_TRANSITION_PUBLIC_INPUT_HASH =
-        0x42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830;
-    bytes32 private constant EMPTY_KEYS_DIGEST_1001 =
-        0x9e5f1a28d987dbf4bc4d34b061f899be884a1eb7eb2be71b0c852f8e6d6a0c15;
-    bytes32 private constant TWO_KEYS_DIGEST_1001 =
-        0xb489313967b16dd08f597a83f844eae79507421faef6f7bede9b4e6c51c47e03;
     bytes private constant ACCOUNT_KEYS_DIGEST_DOMAIN = "sybil/state/account-keys-digest/v1";
-    bytes private constant RAW_P256_KEY =
-        hex"021111111111111111111111111111111111111111111111111111111111111111";
-    bytes private constant WEBAUTHN_KEY =
-        hex"032222222222222222222222222222222222222222222222222222222222222222";
 
     SybilVaultDepositHarness private vault;
     SybilSettlement private settlement;
+    string private golden;
 
     function setUp() public {
+        golden = vm.readFile("../golden/golden-vectors.json");
         SybilVaultDepositHarness template = new SybilVaultDepositHarness();
         vm.etch(VAULT_ADDRESS, address(template).code);
         vault = SybilVaultDepositHarness(VAULT_ADDRESS);
@@ -131,75 +105,147 @@ contract SybilGoldenVectorsTest {
     }
 
     function testDepositLeafAndPrefixRootsMatchRustGoldenVectors() public {
-        // Twin: crates/sybil-l1-protocol/src/lib.rs. Keep these constants
-        // byte-for-byte aligned with the Rust suite.
-        require(block.chainid == CHAIN_ID, "chain id");
-        require(vault.depositRootByCount(0) == EMPTY_DEPOSIT_ROOT, "empty root");
+        // Twin: crates/sybil-l1-protocol/src/lib.rs. Both suites read the same
+        // generator-owned repo-root JSON.
+        require(block.chainid == goldenUint(".deposits.chain_id"), "chain id");
+        require(vault.depositRootByCount(0) == goldenBytes32(".deposits.empty_root"), "empty root");
 
-        (bytes32 leaf1, bytes32 treeLeaf1, bytes32 root1) =
-            vault.appendDepositForTest(1, SENDER_1, KEY_1, 1_000_000);
-        require(leaf1 == DEPOSIT_1_LEAF, "deposit 1 leaf");
-        require(treeLeaf1 == DEPOSIT_1_TREE_LEAF, "deposit 1 tree leaf");
-        require(root1 == DEPOSIT_1_ROOT, "deposit 1 root");
-        require(vault.depositRootByCount(1) == DEPOSIT_1_ROOT, "depositRootByCount 1");
-        require(vault.filledSubtrees(0) == DEPOSIT_1_TREE_LEAF, "frontier 1 level 0");
+        (bytes32 leaf1, bytes32 treeLeaf1, bytes32 root1) = vault.appendDepositForTest(
+            uint64(goldenUint(".deposits.entries[0].deposit_id")),
+            goldenAddress(".deposits.entries[0].sender"),
+            goldenBytes32(".deposits.entries[0].sybil_account_key"),
+            goldenUint(".deposits.entries[0].amount_token_units")
+        );
+        require(leaf1 == goldenBytes32(".deposits.entries[0].leaf"), "deposit 1 leaf");
+        require(treeLeaf1 == goldenBytes32(".deposits.entries[0].tree_leaf"), "deposit 1 tree leaf");
+        require(root1 == goldenBytes32(".deposits.entries[0].prefix_root"), "deposit 1 root");
+        require(vault.depositRootByCount(1) == root1, "depositRootByCount 1");
+        require(vault.filledSubtrees(0) == treeLeaf1, "frontier 1 level 0");
 
-        (bytes32 leaf2, bytes32 treeLeaf2, bytes32 root2) =
-            vault.appendDepositForTest(2, SENDER_2, KEY_2, 2_500_000);
-        require(leaf2 == DEPOSIT_2_LEAF, "deposit 2 leaf");
-        require(treeLeaf2 == DEPOSIT_2_TREE_LEAF, "deposit 2 tree leaf");
-        require(root2 == DEPOSIT_2_ROOT, "deposit 2 root");
-        require(vault.depositRootByCount(2) == DEPOSIT_2_ROOT, "depositRootByCount 2");
-        require(vault.filledSubtrees(1) == DEPOSIT_FRONTIER_AFTER_2_LEVEL_1, "frontier 2 level 1");
+        (bytes32 leaf2, bytes32 treeLeaf2, bytes32 root2) = vault.appendDepositForTest(
+            uint64(goldenUint(".deposits.entries[1].deposit_id")),
+            goldenAddress(".deposits.entries[1].sender"),
+            goldenBytes32(".deposits.entries[1].sybil_account_key"),
+            goldenUint(".deposits.entries[1].amount_token_units")
+        );
+        require(leaf2 == goldenBytes32(".deposits.entries[1].leaf"), "deposit 2 leaf");
+        require(treeLeaf2 == goldenBytes32(".deposits.entries[1].tree_leaf"), "deposit 2 tree leaf");
+        require(root2 == goldenBytes32(".deposits.entries[1].prefix_root"), "deposit 2 root");
+        require(vault.depositRootByCount(2) == root2, "depositRootByCount 2");
+        require(
+            vault.filledSubtrees(1) == goldenBytes32(".deposits.frontier_after_two_level_1"),
+            "frontier 2 level 1"
+        );
 
-        (bytes32 leaf3, bytes32 treeLeaf3, bytes32 root3) =
-            vault.appendDepositForTest(3, SENDER_3, KEY_3, 42_000_001);
-        require(leaf3 == DEPOSIT_3_LEAF, "deposit 3 leaf");
-        require(treeLeaf3 == DEPOSIT_3_TREE_LEAF, "deposit 3 tree leaf");
-        require(root3 == DEPOSIT_3_ROOT, "deposit 3 root");
-        require(vault.depositRootByCount(3) == DEPOSIT_3_ROOT, "depositRootByCount 3");
-        require(vault.filledSubtrees(0) == DEPOSIT_3_TREE_LEAF, "frontier 3 level 0");
-        require(vault.filledSubtrees(1) == DEPOSIT_FRONTIER_AFTER_2_LEVEL_1, "frontier 3 level 1");
+        (bytes32 leaf3, bytes32 treeLeaf3, bytes32 root3) = vault.appendDepositForTest(
+            uint64(goldenUint(".deposits.entries[2].deposit_id")),
+            goldenAddress(".deposits.entries[2].sender"),
+            goldenBytes32(".deposits.entries[2].sybil_account_key"),
+            goldenUint(".deposits.entries[2].amount_token_units")
+        );
+        require(leaf3 == goldenBytes32(".deposits.entries[2].leaf"), "deposit 3 leaf");
+        require(treeLeaf3 == goldenBytes32(".deposits.entries[2].tree_leaf"), "deposit 3 tree leaf");
+        require(root3 == goldenBytes32(".deposits.entries[2].prefix_root"), "deposit 3 root");
+        require(vault.depositRootByCount(3) == root3, "depositRootByCount 3");
+        require(vault.filledSubtrees(0) == treeLeaf3, "frontier 3 level 0");
+        require(
+            vault.filledSubtrees(1) == goldenBytes32(".deposits.frontier_after_two_level_1"),
+            "frontier 3 level 1"
+        );
 
-        bytes32 highLeaf = vault.depositLeaf(HIGH_DEPOSIT_ID, SENDER_HIGH, KEY_HIGH, MAX_U64_AMOUNT);
+        bytes32 highLeaf = vault.depositLeaf(
+            uint64(goldenUint(".deposits.high_id_max_amount.deposit_id")),
+            goldenAddress(".deposits.high_id_max_amount.sender"),
+            goldenBytes32(".deposits.high_id_max_amount.sybil_account_key"),
+            goldenUint(".deposits.high_id_max_amount.amount_token_units")
+        );
         bytes32 highTreeLeaf = vault.hashDepositLeaf(highLeaf);
-        require(highLeaf == HIGH_DEPOSIT_LEAF, "high deposit leaf");
-        require(highTreeLeaf == HIGH_DEPOSIT_TREE_LEAF, "high deposit tree leaf");
+        require(highLeaf == goldenBytes32(".deposits.high_id_max_amount.leaf"), "high deposit leaf");
+        require(
+            highTreeLeaf == goldenBytes32(".deposits.high_id_max_amount.tree_leaf"),
+            "high deposit tree leaf"
+        );
     }
 
     function testStateTransitionPublicInputHashMatchesRustGoldenVector() public view {
-        // Twin: crates/sybil-zk/src/lib.rs. Keep these constants byte-for-byte
-        // aligned with the Rust suite.
+        // Twin: crates/sybil-zk/src/lib.rs. Both suites read the same
+        // generator-owned repo-root JSON.
         SybilTypes.StateTransitionPublicInputs memory inputs = SybilTypes.StateTransitionPublicInputs({
-            previousHeight: 41,
-            newHeight: 42,
-            previousStateRoot: 0x1010101010101010101010101010101010101010101010101010101010101010,
-            newStateRoot: 0x2020202020202020202020202020202020202020202020202020202020202020,
-            blockHash: 0x3030303030303030303030303030303030303030303030303030303030303030,
-            eventsRoot: 0x4040404040404040404040404040404040404040404040404040404040404040,
-            witnessRoot: 0x5050505050505050505050505050505050505050505050505050505050505050,
-            daCommitment: 0x6060606060606060606060606060606060606060606060606060606060606060,
-            depositRoot: DEPOSIT_3_ROOT,
-            depositCount: 3
+            previousHeight: uint64(goldenUint(".state_transition_public_inputs.previous_height")),
+            newHeight: uint64(goldenUint(".state_transition_public_inputs.new_height")),
+            previousStateRoot: goldenBytes32(".state_transition_public_inputs.previous_state_root"),
+            newStateRoot: goldenBytes32(".state_transition_public_inputs.new_state_root"),
+            blockHash: goldenBytes32(".state_transition_public_inputs.block_hash"),
+            eventsRoot: goldenBytes32(".state_transition_public_inputs.events_root"),
+            witnessRoot: goldenBytes32(".state_transition_public_inputs.witness_root"),
+            daCommitment: goldenBytes32(".state_transition_public_inputs.da_commitment"),
+            depositRoot: goldenBytes32(".state_transition_public_inputs.deposit_root"),
+            depositCount: uint64(goldenUint(".state_transition_public_inputs.deposit_count"))
         });
 
         require(
-            settlement.stateTransitionPublicInputHash(inputs) == STATE_TRANSITION_PUBLIC_INPUT_HASH,
+            settlement.stateTransitionPublicInputHash(inputs)
+                == goldenBytes32(".state_transition_public_inputs.hash"),
             "state public input hash"
         );
     }
 
-    function testAccountKeysDigestMatchesRustGoldenVector() public pure {
-        // Twin: crates/sybil-verifier/src/byte_identity.rs. Keep the domain,
-        // little-endian integer fields, and sorted records byte-for-byte aligned
-        // with the Rust suite.
-        require(accountKeysDigest(1001, 0, hex"") == EMPTY_KEYS_DIGEST_1001, "empty keys digest");
-        require(EMPTY_KEYS_DIGEST_1001 != bytes32(0), "empty keys digest nonzero");
+    function testAccountKeysDigestMatchesRustGoldenVector() public view {
+        // Twin: crates/sybil-verifier/src/byte_identity.rs. The domain and
+        // encoding stay independent; the expected values come from one JSON.
+        uint64 accountId = uint64(goldenUint(".account_keys.account_id"));
+        bytes32 emptyDigest = goldenBytes32(".account_keys.empty_digest");
+        require(accountKeysDigest(accountId, 0, hex"") == emptyDigest, "empty keys digest");
+        require(emptyDigest != bytes32(0), "empty keys digest nonzero");
 
-        bytes memory sortedRecords = bytes.concat(hex"00", RAW_P256_KEY, hex"01", WEBAUTHN_KEY);
-        require(
-            accountKeysDigest(1001, 2, sortedRecords) == TWO_KEYS_DIGEST_1001, "two keys digest"
+        bytes memory sortedRecords = bytes.concat(
+            hex"00",
+            goldenBytes(".account_keys.raw_p256_key"),
+            hex"01",
+            goldenBytes(".account_keys.webauthn_key")
         );
+        require(
+            accountKeysDigest(accountId, 2, sortedRecords)
+                == goldenBytes32(".account_keys.two_keys_digest"),
+            "two keys digest"
+        );
+    }
+
+    function testCanonicalWitnessBytesHaveExplicitSolidityParityCheck() public view {
+        bytes memory witnessBytes = goldenBytes(".canonical_witness.bytes");
+        require(
+            witnessBytes.length == goldenUint(".canonical_witness.length"),
+            "canonical witness length parity"
+        );
+        require(
+            sha256(bytes.concat(le64(uint64(witnessBytes.length)), witnessBytes))
+                == goldenBytes32(".canonical_witness.length_prefixed_sha256"),
+            "canonical witness digest parity"
+        );
+    }
+
+    function goldenAddress(
+        string memory path
+    ) private view returns (address) {
+        return vm.parseJsonAddress(golden, path);
+    }
+
+    function goldenBytes(
+        string memory path
+    ) private view returns (bytes memory) {
+        return vm.parseJsonBytes(golden, path);
+    }
+
+    function goldenBytes32(
+        string memory path
+    ) private view returns (bytes32) {
+        return vm.parseJsonBytes32(golden, path);
+    }
+
+    function goldenUint(
+        string memory path
+    ) private view returns (uint256) {
+        return vm.parseJsonUint(golden, path);
     }
 
     function accountKeysDigest(

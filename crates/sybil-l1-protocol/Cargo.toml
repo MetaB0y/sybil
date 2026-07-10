@@ -11,6 +11,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 hex = "0.4"
+serde_json = "1"
 
 [lints.clippy]
 # f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,

@@ -768,8 +768,8 @@ mod tests {
 
     #[test]
     fn deposit_leaf_and_prefix_roots_golden_vector() {
-        // Twin: contracts/test/SybilGoldenVectors.t.sol. Keep these constants
-        // byte-for-byte aligned with the Solidity suite.
+        // Twin: contracts/test/SybilGoldenVectors.t.sol. Both suites consume
+        // the generator-owned repo-root JSON rather than maintaining literals.
         let deposits = [
             DepositLeaf {
                 chain_id: 31_337,
@@ -877,27 +877,31 @@ mod tests {
         );
 
         assert_eq!(
-            hex::encode(deposit_leaf(&deposits[0])),
-            "10348417835957783f646308469b0c1a7d42fcb7e8a67cc0774b969cd3bc4e78"
+            prefixed_hex(&deposit_leaf(&deposits[0])),
+            golden_hex("/deposits/entries/0/leaf"),
+            "deposit 1 leaf differs from committed golden vector"
         );
         assert_eq!(
-            hex::encode(deposit_tree_leaf(&deposits[0])),
-            "cab93c3c5e862aa9e8fc0cff679d4d6febdf3305c81f65207871cea439975d5f"
+            prefixed_hex(&deposit_tree_leaf(&deposits[0])),
+            golden_hex("/deposits/entries/0/tree_leaf"),
+            "deposit 1 tree leaf differs from committed golden vector"
         );
         assert_eq!(
-            hex::encode(empty_deposit_root()),
-            "7c1d0e8a93ea9c09cc13b91ead8f72de66a33cb695c30934dc2d75bffac1248e"
+            prefixed_hex(&empty_deposit_root()),
+            golden_hex("/deposits/empty_root"),
+            "empty deposit root differs from committed golden vector"
         );
         assert_eq!(
             deposit_prefix_roots(&deposits)
                 .into_iter()
-                .map(hex::encode)
+                .map(|root| prefixed_hex(&root))
                 .collect::<Vec<_>>(),
             vec![
-                "2e7fc1c1f7494f98b453f8be88ee3b99b47321b95425faf6853c3e59618de440",
-                "bf00beb7a033f95b583dfb040f9f962db5f538c56e11cb9b3fa303b69d820b1f",
-                "5d9b49419ded14b47faf0f943198c33647c016bd37f998b1d9196b103acfecda",
-            ]
+                golden_hex("/deposits/entries/0/prefix_root"),
+                golden_hex("/deposits/entries/1/prefix_root"),
+                golden_hex("/deposits/entries/2/prefix_root"),
+            ],
+            "deposit prefix roots differ from committed golden vectors"
         );
         assert_eq!(
             deposit_frontier_prefix_roots(&empty_deposit_frontier(), 0, &deposits)
@@ -921,32 +925,54 @@ mod tests {
             Some(deposit_prefix_roots(&deposits)[2])
         );
         assert_eq!(
-            hex::encode(frontier_after_one[0]),
-            "cab93c3c5e862aa9e8fc0cff679d4d6febdf3305c81f65207871cea439975d5f"
+            prefixed_hex(&frontier_after_one[0]),
+            golden_hex("/deposits/entries/0/tree_leaf"),
+            "deposit frontier after one differs from committed golden vector"
         );
         assert_eq!(
-            hex::encode(frontier_after_two[1]),
-            "e167afbeb71311d09d4353dca2b4d7cd1c44431e6bbee2305720c27a9a8059e0"
+            prefixed_hex(&frontier_after_two[1]),
+            golden_hex("/deposits/frontier_after_two_level_1"),
+            "deposit frontier after two differs from committed golden vector"
         );
         assert_eq!(
-            hex::encode(frontier_after_three[0]),
-            "4ddbf4504459403a113a894bd821e6e0ad9ee8ac9cca1ddba7a91ff9413bab75"
+            prefixed_hex(&frontier_after_three[0]),
+            golden_hex("/deposits/entries/2/tree_leaf"),
+            "deposit frontier after three level 0 differs from committed golden vector"
         );
         assert_eq!(
-            hex::encode(frontier_after_three[1]),
-            "e167afbeb71311d09d4353dca2b4d7cd1c44431e6bbee2305720c27a9a8059e0"
+            prefixed_hex(&frontier_after_three[1]),
+            golden_hex("/deposits/frontier_after_two_level_1"),
+            "deposit frontier after three level 1 differs from committed golden vector"
         );
         assert_eq!(
-            hex::encode(deposit_root_from_prefix(&deposits)),
-            "5d9b49419ded14b47faf0f943198c33647c016bd37f998b1d9196b103acfecda"
+            prefixed_hex(&deposit_root_from_prefix(&deposits)),
+            golden_hex("/deposits/entries/2/prefix_root"),
+            "final deposit root differs from committed golden vector"
         );
         assert_eq!(
-            hex::encode(deposit_leaf(&high_id_max_amount)),
-            "0e0fe498f14aa8310467572c634bc13d6617573ca1fe7587c1fd642fbad168a1"
+            prefixed_hex(&deposit_leaf(&high_id_max_amount)),
+            golden_hex("/deposits/high_id_max_amount/leaf"),
+            "high-id deposit leaf differs from committed golden vector"
         );
         assert_eq!(
-            hex::encode(deposit_tree_leaf(&high_id_max_amount)),
-            "f7f3a6aeef19f4464f11bdfe4358124d745de1295dd03a116cccb1ab7ff2e90f"
+            prefixed_hex(&deposit_tree_leaf(&high_id_max_amount)),
+            golden_hex("/deposits/high_id_max_amount/tree_leaf"),
+            "high-id deposit tree leaf differs from committed golden vector"
         );
+    }
+
+    fn golden_hex(pointer: &str) -> String {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../../../golden/golden-vectors.json"))
+                .expect("committed golden-vectors.json must be valid JSON");
+        vectors
+            .pointer(pointer)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("golden vector {pointer} must be a hex string"))
+            .to_string()
+    }
+
+    fn prefixed_hex(bytes: &[u8]) -> String {
+        format!("0x{}", hex::encode(bytes))
     }
 }

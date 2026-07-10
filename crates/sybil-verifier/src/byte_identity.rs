@@ -21,32 +21,57 @@ use crate::{account_keys_digest, empty_account_keys_digest, AccountKeyDigestReco
 #[test]
 fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     let witness = byte_identity_witness();
-
     let state_leaves = state_schema::state_root_leaves(&witness.post_state, &witness.state_sidecar);
     let witness_bytes = witness_schema::canonical_witness_bytes(&witness);
 
-    assert_eq!(state_leaves.len(), 12);
-    assert_eq!(witness_bytes.len(), 3873);
-    assert_eq!(
-        hash_header(&witness.header),
-        [
-            237, 2, 52, 82, 23, 11, 241, 36, 196, 211, 229, 155, 159, 99, 198, 162, 76, 210, 68,
-            96, 104, 0, 3, 235, 39, 53, 0, 15, 146, 163, 93, 242,
-        ],
+    assert_golden_usize("state leaf count", state_leaves.len(), "/state/leaf_count");
+    assert_golden_hex("header hash", &hash_header(&witness.header), "/header/hash");
+    assert_golden_hex(
+        "framed state-leaf digest",
+        &digest_state_leaves(&state_leaves),
+        "/state/framed_sha256",
     );
+
+    let golden = golden_vectors();
+    let expected_leaves = golden["state"]["leaves"]
+        .as_array()
+        .expect("golden state.leaves must be an array");
     assert_eq!(
-        digest_state_leaves(&state_leaves),
-        [
-            88, 41, 248, 10, 43, 93, 201, 135, 216, 170, 251, 57, 76, 26, 162, 11, 109, 112, 141,
-            51, 43, 124, 229, 28, 163, 71, 116, 27, 106, 160, 7, 176,
-        ],
+        state_leaves.len(),
+        expected_leaves.len(),
+        "state leaf vector count: regenerated={}, committed={}",
+        state_leaves.len(),
+        expected_leaves.len()
     );
-    assert_eq!(
-        digest_bytes(&witness_bytes),
-        [
-            84, 245, 62, 148, 226, 121, 24, 123, 3, 234, 72, 86, 92, 54, 2, 178, 10, 249, 147, 9,
-            105, 68, 90, 146, 221, 230, 142, 91, 90, 156, 223, 241,
-        ],
+    for (index, ((key, value), expected)) in
+        state_leaves.iter().zip(expected_leaves.iter()).enumerate()
+    {
+        assert_eq!(
+            hex_bytes(key),
+            expected["key"].as_str().expect("golden state leaf key"),
+            "state leaf {index} key differs from golden vector"
+        );
+        assert_eq!(
+            hex_bytes(value),
+            expected["value"].as_str().expect("golden state leaf value"),
+            "state leaf {index} value differs from golden vector"
+        );
+    }
+
+    assert_golden_usize(
+        "canonical witness length",
+        witness_bytes.len(),
+        "/canonical_witness/length",
+    );
+    assert_golden_hex(
+        "canonical witness digest",
+        &digest_bytes(&witness_bytes),
+        "/canonical_witness/length_prefixed_sha256",
+    );
+    assert_golden_hex(
+        "canonical witness bytes",
+        &witness_bytes,
+        "/canonical_witness/bytes",
     );
 }
 
@@ -63,17 +88,16 @@ fn golden_vectors_pin_account_keys_digest() {
         0x22, 0x22, 0x22,
     ];
 
-    assert_eq!(
-        empty_account_keys_digest(1001),
-        [
-            158, 95, 26, 40, 217, 135, 219, 244, 188, 77, 52, 176, 97, 248, 153, 190, 136, 74, 30,
-            183, 235, 43, 231, 27, 12, 133, 47, 142, 109, 106, 12, 21,
-        ],
+    assert_golden_hex(
+        "empty account-keys digest",
+        &empty_account_keys_digest(1001),
+        "/account_keys/empty_digest",
     );
     assert_ne!(empty_account_keys_digest(1001), [0u8; 32]);
 
-    assert_eq!(
-        account_keys_digest(
+    assert_golden_hex(
+        "two-key account-keys digest",
+        &account_keys_digest(
             1001,
             [
                 AccountKeyDigestRecord {
@@ -86,11 +110,48 @@ fn golden_vectors_pin_account_keys_digest() {
                 },
             ],
         ),
-        [
-            180, 137, 49, 57, 103, 177, 109, 208, 143, 89, 122, 131, 248, 68, 234, 231, 149, 7, 66,
-            31, 174, 246, 247, 190, 222, 155, 78, 108, 81, 196, 126, 3,
-        ],
+        "/account_keys/two_keys_digest",
     );
+}
+
+fn golden_vectors() -> serde_json::Value {
+    serde_json::from_str(include_str!("../../../golden/golden-vectors.json"))
+        .expect("committed golden-vectors.json must be valid JSON")
+}
+
+fn assert_golden_hex(name: &str, actual: &[u8], pointer: &str) {
+    let golden = golden_vectors();
+    let expected = golden
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| panic!("golden vector {pointer} must be a hex string"));
+    let actual = hex_bytes(actual);
+    assert_eq!(
+        actual, expected,
+        "{name} differs from committed golden vector at {pointer}"
+    );
+}
+
+fn assert_golden_usize(name: &str, actual: usize, pointer: &str) {
+    let golden = golden_vectors();
+    let expected = golden
+        .pointer(pointer)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_else(|| panic!("golden vector {pointer} must be an unsigned integer"));
+    assert_eq!(
+        actual as u64, expected,
+        "{name} differs from committed golden vector at {pointer}"
+    );
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(2 + bytes.len() * 2);
+    out.push_str("0x");
+    for byte in bytes {
+        use std::fmt::Write as _;
+        write!(out, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    out
 }
 
 fn byte_identity_witness() -> BlockWitness {
