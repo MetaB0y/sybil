@@ -141,6 +141,20 @@ pub enum SystemEventWitness {
         expiry_height: u64,
         nullifier: [u8; 32],
     },
+    WithdrawalRefunded {
+        account_id: u64,
+        withdrawal_id: u64,
+        amount: i64,
+        reason: WithdrawalRefundReasonWitness,
+    },
+    WithdrawalFinalized {
+        account_id: u64,
+        withdrawal_id: u64,
+        amount: i64,
+    },
+    L1BlockObserved {
+        height: u64,
+    },
     MarketResolved {
         market_id: MarketId,
         payout_nanos: Nanos,
@@ -159,6 +173,12 @@ pub enum SystemEventWitness {
         group_id: u64,
         market_id: MarketId,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum WithdrawalRefundReasonWitness {
+    L1Cancelled,
+    L1Expired { observed_l1_height: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -292,6 +312,8 @@ pub enum OracleSourceSnapshot {
 pub struct BridgeStateSnapshot {
     pub deposit_cursor: u64,
     pub deposit_root: [u8; 32],
+    #[serde(default)]
+    pub observed_l1_height: u64,
     pub next_withdrawal_id: u64,
     pub withdrawals: Vec<WithdrawalSnapshot>,
 }
@@ -301,6 +323,7 @@ impl Default for BridgeStateSnapshot {
         Self {
             deposit_cursor: 0,
             deposit_root: sybil_l1_protocol::empty_deposit_root(),
+            observed_l1_height: 0,
             next_withdrawal_id: 0,
             withdrawals: Vec::new(),
         }

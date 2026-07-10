@@ -447,6 +447,7 @@ mod tests {
         let bridge = BridgeStateSnapshot {
             deposit_cursor: 1,
             deposit_root: [1u8; 32],
+            observed_l1_height: 0,
             next_withdrawal_id: 3,
             withdrawals: vec![WithdrawalSnapshot {
                 withdrawal_id: 2,
@@ -501,6 +502,7 @@ mod tests {
         let bridge_a = BridgeStateSnapshot {
             deposit_cursor: 1,
             deposit_root: [1u8; 32],
+            observed_l1_height: 0,
             next_withdrawal_id: 3,
             withdrawals: vec![first.clone(), second.clone()],
         };

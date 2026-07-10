@@ -211,6 +211,9 @@ impl Actor for SequencerActor {
             SequencerMsg::ApplyBridgeWithdrawalL1Event(event, reply) => {
                 let _ = reply.send(state.handle_bridge_withdrawal_l1_event(event).await);
             }
+            SequencerMsg::ObserveBridgeL1Height(height, reply) => {
+                let _ = reply.send(state.handle_observe_bridge_l1_height(height).await);
+            }
             SequencerMsg::RegisterPubkey(account_id, pubkey, auth_scheme, reply) => {
                 let _ = reply.send(
                     state

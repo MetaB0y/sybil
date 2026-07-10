@@ -232,6 +232,7 @@ fn restored_state_with_resting_orders(
         control_plane_log: Vec::new(),
         pending_l1_deposits: Vec::new(),
         pending_bridge_withdrawals: Vec::new(),
+        pending_bridge_l1_inputs: Vec::new(),
         bridge_state: seq.bridge_state().clone(),
         admit_log: Vec::new(),
         analytics: restored_analytics_from(seq),
@@ -495,11 +496,18 @@ fn bridge_withdrawal_l1_event_replay_is_idempotent() {
         event_at_unix: 1_700_000_000,
         executable_at_unix: Some(1_700_086_400),
         tx_hash: Some([0xAB; 32]),
+        l1_block_height: 5,
     };
 
-    let first_leaf = seq.apply_bridge_withdrawal_l1_event(event.clone()).unwrap();
+    let first_leaf = seq
+        .apply_bridge_withdrawal_l1_event(event.clone())
+        .unwrap()
+        .unwrap();
     let balance_after_first_apply = seq.accounts.get(aid).unwrap().balance;
-    let second_leaf = seq.apply_bridge_withdrawal_l1_event(event).unwrap();
+    let second_leaf = seq
+        .apply_bridge_withdrawal_l1_event(event)
+        .unwrap()
+        .unwrap();
 
     assert_eq!(first_leaf.l1_status, L1WithdrawalStatus::Queued);
     assert_eq!(first_leaf.l1_requested_at_unix, Some(1_700_000_000));
@@ -512,6 +520,224 @@ fn bridge_withdrawal_l1_event_replay_is_idempotent() {
         balance_after_request
     );
     assert_eq!(seq.accounts.total_balance(), total_balance_after_request);
+}
+
+fn test_withdrawal_request(account_id: AccountId, expiry_height: u64) -> BridgeWithdrawalRequest {
+    BridgeWithdrawalRequest {
+        account_id,
+        chain_id: 1,
+        vault_address: eth_address(0x10),
+        recipient: eth_address(0x40),
+        token_address: eth_address(0x20),
+        amount_token_units: 4_000,
+        expiry_height,
+    }
+}
+
+fn test_withdrawal_event(
+    withdrawal: &WithdrawalLeaf,
+    status: L1WithdrawalStatus,
+    l1_block_height: u64,
+) -> BridgeWithdrawalL1Event {
+    BridgeWithdrawalL1Event {
+        nullifier: withdrawal.nullifier,
+        status,
+        event_at_unix: 1_700_000_000 + l1_block_height,
+        executable_at_unix: None,
+        tx_hash: Some([status as u8; 32]),
+        l1_block_height,
+    }
+}
+
+#[test]
+fn cancelled_withdrawal_refunds_exactly_once_and_prunes_with_valid_witness() {
+    let (mut seq, aid) = make_sequencer(10_000_000);
+    let withdrawal = seq
+        .request_bridge_withdrawal(test_withdrawal_request(aid, 10))
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+    assert_eq!(seq.accounts.get(aid).unwrap().balance, 6_000_000);
+
+    let event = test_withdrawal_event(&withdrawal, L1WithdrawalStatus::Cancelled, 5);
+    let first = seq
+        .apply_bridge_withdrawal_l1_event(event.clone())
+        .unwrap()
+        .unwrap();
+    let second = seq
+        .apply_bridge_withdrawal_l1_event(event)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.l1_status, L1WithdrawalStatus::Refunded);
+    assert_eq!(second, first);
+    assert_eq!(seq.accounts.get(aid).unwrap().balance, 10_000_000);
+
+    let refunded_block = seq.produce_block(vec![], 2_000);
+    assert!(!seq
+        .bridge_state()
+        .withdrawals
+        .contains_key(&withdrawal.withdrawal_id));
+    assert!(seq
+        .apply_bridge_withdrawal_l1_event(test_withdrawal_event(
+            &withdrawal,
+            L1WithdrawalStatus::Cancelled,
+            5,
+        ))
+        .unwrap()
+        .is_none());
+    assert_eq!(seq.accounts.get(aid).unwrap().balance, 10_000_000);
+    let verification = sybil_verifier::verify_full(&refunded_block.witness, false);
+    assert!(verification.valid, "{:?}", verification.violations);
+    let mut omitted_credit = refunded_block.witness.clone();
+    omitted_credit
+        .post_system_state
+        .iter_mut()
+        .find(|account| account.id == aid.0)
+        .unwrap()
+        .balance -= withdrawal.amount_nanos as i64;
+    assert!(!sybil_verifier::verify_system(&omitted_credit).valid);
+}
+
+#[test]
+fn expiry_and_cancel_observations_are_commutative_for_refund() {
+    for cancel_first in [false, true] {
+        let (mut seq, aid) = make_sequencer(10_000_000);
+        let withdrawal = seq
+            .request_bridge_withdrawal(test_withdrawal_request(aid, 10))
+            .unwrap();
+        seq.produce_block(vec![], 1_000);
+        let cancelled = test_withdrawal_event(&withdrawal, L1WithdrawalStatus::Cancelled, 5);
+
+        if cancel_first {
+            seq.apply_bridge_withdrawal_l1_event(cancelled.clone())
+                .unwrap();
+            seq.observe_bridge_l1_height(11).unwrap();
+        } else {
+            seq.observe_bridge_l1_height(11).unwrap();
+            seq.apply_bridge_withdrawal_l1_event(cancelled).unwrap();
+        }
+
+        assert_eq!(seq.accounts.get(aid).unwrap().balance, 10_000_000);
+        assert_eq!(
+            seq.bridge_withdrawal(withdrawal.withdrawal_id)
+                .unwrap()
+                .l1_status,
+            L1WithdrawalStatus::Refunded
+        );
+        let block = seq.produce_block(vec![], 2_000);
+        assert!(seq.bridge_state().withdrawals.is_empty());
+        let verification = sybil_verifier::verify_full(&block.witness, false);
+        assert!(verification.valid, "{:?}", verification.violations);
+    }
+}
+
+#[test]
+fn unrelated_confirmed_l1_event_still_advances_expiry_clock() {
+    let (mut seq, aid) = make_sequencer(10_000_000);
+    let withdrawal = seq
+        .request_bridge_withdrawal(test_withdrawal_request(aid, 10))
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    let unrelated = BridgeWithdrawalL1Event {
+        nullifier: [0xEE; 32],
+        status: L1WithdrawalStatus::Queued,
+        event_at_unix: 1_700_000_011,
+        executable_at_unix: None,
+        tx_hash: Some([0xAA; 32]),
+        l1_block_height: 11,
+    };
+    assert!(seq
+        .apply_bridge_withdrawal_l1_event(unrelated)
+        .unwrap()
+        .is_none());
+    assert_eq!(seq.bridge_state().observed_l1_height, 11);
+    assert_eq!(seq.accounts.get(aid).unwrap().balance, 10_000_000);
+    assert_eq!(
+        seq.bridge_withdrawal(withdrawal.withdrawal_id)
+            .unwrap()
+            .l1_status,
+        L1WithdrawalStatus::Refunded
+    );
+
+    let block = seq.produce_block(vec![], 2_000);
+    assert!(seq.bridge_state().withdrawals.is_empty());
+    let verification = sybil_verifier::verify_full(&block.witness, false);
+    assert!(verification.valid, "{:?}", verification.violations);
+}
+
+#[test]
+fn finalized_withdrawal_never_refunds_and_is_pruned() {
+    let (mut seq, aid) = make_sequencer(10_000_000);
+    let withdrawal = seq
+        .request_bridge_withdrawal(test_withdrawal_request(aid, 10))
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    let finalized = test_withdrawal_event(&withdrawal, L1WithdrawalStatus::Finalized, 11);
+    seq.apply_bridge_withdrawal_l1_event(finalized).unwrap();
+    seq.observe_bridge_l1_height(12).unwrap();
+    assert_eq!(seq.accounts.get(aid).unwrap().balance, 6_000_000);
+
+    let block = seq.produce_block(vec![], 2_000);
+    assert!(seq.bridge_state().withdrawals.is_empty());
+    let verification = sybil_verifier::verify_full(&block.witness, false);
+    assert!(verification.valid, "{:?}", verification.violations);
+}
+
+#[test]
+fn terminal_withdrawal_map_stays_bounded_across_many_lifecycles() {
+    let lifecycle_count = 128u64;
+    let (mut seq, aid) = make_sequencer(10_000_000);
+    for index in 0..lifecycle_count {
+        let withdrawal = seq
+            .request_bridge_withdrawal(test_withdrawal_request(aid, 1_000 + index))
+            .unwrap();
+        seq.apply_bridge_withdrawal_l1_event(test_withdrawal_event(
+            &withdrawal,
+            L1WithdrawalStatus::Cancelled,
+            index + 1,
+        ))
+        .unwrap();
+        let block = seq.produce_block(vec![], 1_000 + index);
+        assert!(seq.bridge_state().withdrawals.is_empty());
+        let verification = sybil_verifier::verify_full(&block.witness, false);
+        assert!(verification.valid, "{:?}", verification.violations);
+    }
+    assert_eq!(seq.accounts.get(aid).unwrap().balance, 10_000_000);
+    assert_eq!(seq.bridge_state().next_withdrawal_id, lifecycle_count + 1);
+}
+
+#[test]
+fn pending_l1_cancel_replay_restores_refund_once_after_crash() {
+    let (mut seq, aid) = make_sequencer(10_000_000);
+    let withdrawal = seq
+        .request_bridge_withdrawal(test_withdrawal_request(aid, 10))
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+    let event = test_withdrawal_event(&withdrawal, L1WithdrawalStatus::Cancelled, 5);
+
+    let mut restored_state = restored_state_with_resting_orders(&seq, MarketSet::new(), vec![]);
+    restored_state.pending_bridge_l1_inputs =
+        vec![crate::bridge::BridgeL1Input::WithdrawalEvent(event.clone())];
+    let mut restored = BlockSequencer::restore(
+        restored_state,
+        Arc::new(AdminOracle::new()),
+        SequencerConfig::default(),
+    );
+    assert_eq!(restored.accounts.get(aid).unwrap().balance, 10_000_000);
+    assert_eq!(
+        restored
+            .apply_bridge_withdrawal_l1_event(event)
+            .unwrap()
+            .unwrap()
+            .l1_status,
+        L1WithdrawalStatus::Refunded
+    );
+    assert_eq!(restored.accounts.get(aid).unwrap().balance, 10_000_000);
+
+    let block = restored.produce_block(vec![], 2_000);
+    assert!(restored.bridge_state().withdrawals.is_empty());
+    assert!(sybil_verifier::verify_full(&block.witness, false).valid);
 }
 
 #[test]
@@ -1285,6 +1511,7 @@ fn test_resting_orders_survive_restart_and_match() {
         control_plane_log: Vec::new(),
         pending_l1_deposits: Vec::new(),
         pending_bridge_withdrawals: Vec::new(),
+        pending_bridge_l1_inputs: Vec::new(),
         bridge_state: BridgeState::default(),
         admit_log: Vec::new(),
         analytics: crate::store::AnalyticsRestoredState {
@@ -1404,6 +1631,7 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
         control_plane_log: Vec::new(),
         pending_l1_deposits: Vec::new(),
         pending_bridge_withdrawals: Vec::new(),
+        pending_bridge_l1_inputs: Vec::new(),
         bridge_state: BridgeState::default(),
         admit_log: vec![replayed_admit],
         analytics: crate::store::AnalyticsRestoredState {
@@ -1511,6 +1739,7 @@ fn restored_pending_bundle_revalidates_against_replayed_admit_reservations() {
         control_plane_log: Vec::new(),
         pending_l1_deposits: Vec::new(),
         pending_bridge_withdrawals: Vec::new(),
+        pending_bridge_l1_inputs: Vec::new(),
         bridge_state: BridgeState::default(),
         admit_log: vec![replayed_admit],
         analytics: crate::store::AnalyticsRestoredState {

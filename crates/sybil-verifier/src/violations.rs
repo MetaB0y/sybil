@@ -64,6 +64,8 @@ pub enum ViolationKind {
     FillAccountMismatch,
     /// Account present in post-state but not in pre-state (or vice versa).
     SettlementAccountMismatch,
+    /// `pre_state + system_events` does not reproduce `post_system_state`.
+    SystemStateMismatch,
     /// Position imbalance exists but no clearing price for the market.
     /// MINT cannot be priced without clearing prices.
     MintingWithoutClearingPrice,

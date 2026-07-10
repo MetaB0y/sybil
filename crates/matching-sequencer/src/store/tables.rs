@@ -134,6 +134,11 @@ pub(super) const PENDING_L1_DEPOSITS: TableDefinition<u64, &[u8]> =
 pub(super) const PENDING_BRIDGE_WITHDRAWALS: TableDefinition<u64, &[u8]> =
     TableDefinition::new("pending_bridge_withdrawals");
 
+/// Confirmed L1 withdrawal events/cursor observations acknowledged after the
+/// last block. Replayed on restart and cleared with the committing block.
+pub(super) const PENDING_BRIDGE_L1_INPUTS: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("pending_bridge_l1_inputs");
+
 /// Trader tracker snapshot — one row keyed "snapshot" holding the full
 /// `TraderTrackerSnapshot` payload. Off-block sidecar; missing table on
 /// load yields `Default::default()` (cold start until activity accumulates).

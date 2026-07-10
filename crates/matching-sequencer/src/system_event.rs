@@ -1,7 +1,7 @@
 use matching_engine::{MarketId, Nanos, OrderDirection};
 
 use crate::account::AccountId;
-use crate::bridge::{L1Deposit, WithdrawalLeaf};
+use crate::bridge::{L1Deposit, WithdrawalLeaf, WithdrawalRefundReason};
 
 /// System state changes applied outside the matching pipeline.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -23,6 +23,21 @@ pub enum SystemEvent {
         account_id: AccountId,
         amount: i64,
         withdrawal: WithdrawalLeaf,
+    },
+    WithdrawalRefunded {
+        account_id: AccountId,
+        withdrawal_id: u64,
+        amount: i64,
+        reason: WithdrawalRefundReason,
+    },
+    WithdrawalFinalized {
+        account_id: AccountId,
+        withdrawal_id: u64,
+        amount: i64,
+    },
+    /// Monotonic confirmed L1 scan height used as the withdrawal-expiry clock.
+    L1BlockObserved {
+        height: u64,
     },
     MarketResolved {
         market_id: MarketId,

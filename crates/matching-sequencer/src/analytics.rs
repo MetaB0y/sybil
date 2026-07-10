@@ -592,6 +592,18 @@ impl AnalyticsState {
                     event.amount_nanos = Some(-*amount);
                     self.record_history(event);
                 }
+                SystemEvent::WithdrawalRefunded {
+                    account_id, amount, ..
+                } => {
+                    let mut event = HistoryEvent::new(
+                        *account_id,
+                        HistoryKind::Withdrawal,
+                        height,
+                        timestamp_ms,
+                    );
+                    event.amount_nanos = Some(*amount);
+                    self.record_history(event);
+                }
                 SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -616,7 +628,10 @@ impl AnalyticsState {
                         self.record_history(event);
                     }
                 }
-                SystemEvent::OrderCancelled { .. } | SystemEvent::MarketGroupExtended { .. } => {}
+                SystemEvent::WithdrawalFinalized { .. }
+                | SystemEvent::L1BlockObserved { .. }
+                | SystemEvent::OrderCancelled { .. }
+                | SystemEvent::MarketGroupExtended { .. } => {}
             }
         }
     }

@@ -55,6 +55,8 @@ pub struct RestoredState {
     pub pending_l1_deposits: Vec<L1Deposit>,
     /// Bridge withdrawals durably accepted after the last committed block.
     pub pending_bridge_withdrawals: Vec<BridgeWithdrawalRequest>,
+    /// Confirmed bridge L1 inputs durably accepted after the last block.
+    pub pending_bridge_l1_inputs: Vec<BridgeL1Input>,
 }
 
 impl Store {
@@ -317,6 +319,16 @@ impl Store {
             out
         };
 
+        let pending_bridge_l1_inputs: Vec<BridgeL1Input> = {
+            let table = txn.open_table(PENDING_BRIDGE_L1_INPUTS)?;
+            let mut out = Vec::new();
+            for entry in table.iter()? {
+                let (_, value) = entry?;
+                out.push(rmp_serde::from_slice(value.value())?);
+            }
+            out
+        };
+
         if latest_witness_exists {
             let Some(header) = last_header.as_ref() else {
                 return Err(StoreError::CorruptLayout(format!(
@@ -467,6 +479,7 @@ impl Store {
             bridge_deposit_cursor = bridge_state.deposit_cursor,
             pending_l1_deposits = pending_l1_deposits.len(),
             pending_bridge_withdrawals = pending_bridge_withdrawals.len(),
+            pending_bridge_l1_inputs = pending_bridge_l1_inputs.len(),
             "state restored from store"
         );
 
@@ -505,6 +518,7 @@ impl Store {
             bridge_state,
             pending_l1_deposits,
             pending_bridge_withdrawals,
+            pending_bridge_l1_inputs,
         }))
     }
 

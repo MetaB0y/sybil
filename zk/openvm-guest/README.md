@@ -53,7 +53,7 @@ weekly `zk-rebuild` CI lane exists.
 Rebuild is **deterministic**: two independent `just openvm-commit` runs
 produce identical commitments (measured 2026-07-03). The committed
 `commit.json` + lock now carry the **current-source** commitments
-(`app_exe_commit 0x0094ea7a…`). The **deployed** OpenVmVerifierAdapter pin
+(`app_exe_commit 0x000b608f…`, `app_vm_commit 0x007a02fc…`). The **deployed** OpenVmVerifierAdapter pin
 still carries the **May-2026** build (`0x00796a20…`) — consensus bytes are
 golden-vector-identical (SYB-170), but the artifact differs, so the next
 devnet redeploy MUST update the adapter constructor args to the committed

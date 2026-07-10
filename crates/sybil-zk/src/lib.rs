@@ -316,6 +316,7 @@ pub fn verify_state_transition_input(
         &input.state_root_proof,
     )?;
     ensure_valid("match", sybil_verifier::verify_match(&input.witness, false))?;
+    ensure_valid("system", sybil_verifier::verify_system(&input.witness))?;
     ensure_valid(
         "settlement",
         sybil_verifier::verify_settlement(&input.witness),
@@ -687,6 +688,9 @@ fn verify_l1_deposit_checkpoint(
             SystemEventWitness::CreateAccount { .. }
             | SystemEventWitness::Deposit { .. }
             | SystemEventWitness::WithdrawalCreated { .. }
+            | SystemEventWitness::WithdrawalRefunded { .. }
+            | SystemEventWitness::WithdrawalFinalized { .. }
+            | SystemEventWitness::L1BlockObserved { .. }
             | SystemEventWitness::MarketResolved { .. }
             | SystemEventWitness::OrderCancelled { .. }
             | SystemEventWitness::MarketGroupExtended { .. } => None,
@@ -1063,6 +1067,7 @@ mod tests {
             bridge: BridgeStateSnapshot {
                 deposit_cursor: 5,
                 deposit_root: l1_deposits.last().expect("non-empty prefix").deposit_root,
+                observed_l1_height: 17,
                 next_withdrawal_id: 5,
                 withdrawals: vec![withdrawal],
             },
@@ -1208,6 +1213,20 @@ mod tests {
         let mut deposits = l1_deposit_prefix(1, account_id);
         let deposit = deposits.pop().expect("one deposit");
         let amount = deposit_amount_nanos(&deposit).expect("small deposit amount");
+        let pre_account = AccountSnapshot {
+            id: account_id,
+            balance: 0,
+            total_deposited: 0,
+            positions: vec![],
+            events_digest: [0; 32],
+            keys_digest: sybil_verifier::empty_account_keys_digest(account_id),
+        };
+        let mut post_account = pre_account.clone();
+        post_account.balance = amount;
+        post_account.total_deposited = amount;
+        input.witness.pre_state = vec![pre_account];
+        input.witness.post_system_state = vec![post_account.clone()];
+        input.witness.post_state = vec![post_account];
         input.witness.system_events = vec![SystemEventWitness::L1Deposit {
             account_id,
             amount,
@@ -1245,6 +1264,20 @@ mod tests {
 
         let deposit = deposits[2].clone();
         let amount = deposit_amount_nanos(&deposit).expect("small deposit amount");
+        let pre_account = AccountSnapshot {
+            id: account_id,
+            balance: 0,
+            total_deposited: 0,
+            positions: vec![],
+            events_digest: [0; 32],
+            keys_digest: sybil_verifier::empty_account_keys_digest(account_id),
+        };
+        let mut post_account = pre_account.clone();
+        post_account.balance = amount;
+        post_account.total_deposited = amount;
+        input.witness.pre_state = vec![pre_account];
+        input.witness.post_system_state = vec![post_account.clone()];
+        input.witness.post_state = vec![post_account];
         input.witness.pre_state_sidecar.bridge.deposit_cursor = 2;
         input.witness.pre_state_sidecar.bridge.deposit_root = prefix_roots[1];
         input.witness.system_events = vec![SystemEventWitness::L1Deposit {
@@ -1443,8 +1476,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                64, 57, 123, 28, 177, 17, 224, 212, 38, 229, 155, 66, 90, 206, 225, 133, 166, 21,
-                63, 166, 234, 180, 190, 245, 236, 115, 36, 141, 224, 191, 63, 80,
+                96, 246, 144, 226, 198, 64, 221, 168, 213, 64, 75, 64, 232, 123, 92, 56, 177, 149,
+                232, 21, 175, 201, 12, 110, 13, 146, 132, 209, 81, 213, 142, 105,
             ]
         );
     }

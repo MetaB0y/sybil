@@ -49,6 +49,36 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
             withdrawal_id: withdrawal.withdrawal_id,
             nullifier_hex: hex::encode(withdrawal.nullifier),
         },
+        matching_sequencer::SystemEvent::WithdrawalRefunded {
+            account_id,
+            withdrawal_id,
+            amount,
+            reason,
+        } => SystemEventResponse::WithdrawalRefunded {
+            account_id: account_id.0,
+            amount_nanos: *amount,
+            withdrawal_id: *withdrawal_id,
+            reason: match reason {
+                matching_sequencer::WithdrawalRefundReason::L1Cancelled => {
+                    "l1_cancelled".to_string()
+                }
+                matching_sequencer::WithdrawalRefundReason::L1Expired { .. } => {
+                    "l1_expired".to_string()
+                }
+            },
+        },
+        matching_sequencer::SystemEvent::WithdrawalFinalized {
+            account_id,
+            withdrawal_id,
+            amount,
+        } => SystemEventResponse::WithdrawalFinalized {
+            account_id: account_id.0,
+            amount_nanos: *amount,
+            withdrawal_id: *withdrawal_id,
+        },
+        matching_sequencer::SystemEvent::L1BlockObserved { height } => {
+            SystemEventResponse::L1BlockObserved { height: *height }
+        }
         matching_sequencer::SystemEvent::MarketResolved {
             market_id,
             payout_nanos,
@@ -157,6 +187,7 @@ fn l1_withdrawal_status_to_response(
         matching_sequencer::L1WithdrawalStatus::Queued => ApiBridgeWithdrawalL1Status::Queued,
         matching_sequencer::L1WithdrawalStatus::Finalized => ApiBridgeWithdrawalL1Status::Finalized,
         matching_sequencer::L1WithdrawalStatus::Cancelled => ApiBridgeWithdrawalL1Status::Cancelled,
+        matching_sequencer::L1WithdrawalStatus::Refunded => ApiBridgeWithdrawalL1Status::Refunded,
     }
 }
 

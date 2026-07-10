@@ -18,11 +18,12 @@ use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::request::{
     AuthScheme, BridgeWithdrawalL1Status as ApiBridgeWithdrawalL1Status,
-    CreateBridgeWithdrawalRequest, CreateSignedBridgeWithdrawalRequest, SubmitL1DepositRequest,
-    SubmitL1WithdrawalEventRequest,
+    CreateBridgeWithdrawalRequest, CreateSignedBridgeWithdrawalRequest, ObserveL1HeightRequest,
+    SubmitL1DepositRequest, SubmitL1WithdrawalEventRequest,
 };
 use crate::types::response::{
-    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse, BridgeWithdrawalResponse,
+    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse,
+    BridgeWithdrawalL1EventResponse, BridgeWithdrawalResponse, ObserveL1HeightResponse,
 };
 use crate::webauthn;
 
@@ -80,6 +81,7 @@ fn sequencer_l1_withdrawal_status(status: ApiBridgeWithdrawalL1Status) -> L1With
         ApiBridgeWithdrawalL1Status::Queued => L1WithdrawalStatus::Queued,
         ApiBridgeWithdrawalL1Status::Finalized => L1WithdrawalStatus::Finalized,
         ApiBridgeWithdrawalL1Status::Cancelled => L1WithdrawalStatus::Cancelled,
+        ApiBridgeWithdrawalL1Status::Refunded => L1WithdrawalStatus::Refunded,
     }
 }
 
@@ -139,14 +141,21 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<BridgeStatusRe
         .values()
         .filter(|withdrawal| withdrawal.l1_status == L1WithdrawalStatus::Cancelled)
         .count();
+    let refunded_withdrawal_count = bridge
+        .withdrawals
+        .values()
+        .filter(|withdrawal| withdrawal.l1_status == L1WithdrawalStatus::Refunded)
+        .count();
     Ok(Json(BridgeStatusResponse {
         deposit_cursor: bridge.deposit_cursor,
         deposit_root_hex: hex::encode(bridge.deposit_root),
+        observed_l1_height: bridge.observed_l1_height,
         next_withdrawal_id: bridge.next_withdrawal_id,
         withdrawal_count: bridge.withdrawals.len(),
         queued_withdrawal_count,
         finalized_withdrawal_count,
         cancelled_withdrawal_count,
+        refunded_withdrawal_count,
     }))
 }
 
@@ -351,7 +360,7 @@ pub async fn create_signed_withdrawal(
     path = "/v1/bridge/withdrawals/l1-events",
     request_body = SubmitL1WithdrawalEventRequest,
     responses(
-        (status = 200, description = "L1 withdrawal queue status applied", body = BridgeWithdrawalResponse),
+        (status = 200, description = "L1 withdrawal queue status applied or idempotently ignored", body = BridgeWithdrawalL1EventResponse),
         (status = 400, description = "Invalid L1 withdrawal event"),
         (status = 404, description = "Withdrawal not found")
     )
@@ -359,7 +368,12 @@ pub async fn create_signed_withdrawal(
 pub async fn submit_l1_withdrawal_event(
     State(state): State<AppState>,
     Json(req): Json<SubmitL1WithdrawalEventRequest>,
-) -> Result<Json<BridgeWithdrawalResponse>, AppError> {
+) -> Result<Json<BridgeWithdrawalL1EventResponse>, AppError> {
+    if req.status == ApiBridgeWithdrawalL1Status::Refunded {
+        return Err(AppError::bad_request(
+            "refunded is a Sybil terminal state, not an L1 event status",
+        ));
+    }
     let event = BridgeWithdrawalL1Event {
         nullifier: parse_hex_array::<32>(&req.nullifier_hex, "nullifier_hex")?,
         status: sequencer_l1_withdrawal_status(req.status),
@@ -370,12 +384,40 @@ pub async fn submit_l1_withdrawal_event(
             .as_deref()
             .map(|value| parse_hex_array::<32>(value, "tx_hash_hex"))
             .transpose()?,
+        l1_block_height: req.l1_block_height,
     };
     let withdrawal = state
         .sequencer
         .apply_bridge_withdrawal_l1_event(event)
         .await?;
-    Ok(Json(bridge_withdrawal_to_response(&withdrawal)))
+    Ok(Json(BridgeWithdrawalL1EventResponse {
+        active_withdrawal_found: withdrawal.is_some(),
+        withdrawal: withdrawal.as_ref().map(bridge_withdrawal_to_response),
+    }))
+}
+
+/// POST /v1/bridge/l1-height
+#[utoipa::path(
+    post,
+    path = "/v1/bridge/l1-height",
+    request_body = ObserveL1HeightRequest,
+    responses((status = 200, description = "Confirmed L1 height applied", body = ObserveL1HeightResponse))
+)]
+pub async fn observe_l1_height(
+    State(state): State<AppState>,
+    Json(req): Json<ObserveL1HeightRequest>,
+) -> Result<Json<ObserveL1HeightResponse>, AppError> {
+    let refunded = state
+        .sequencer
+        .observe_bridge_l1_height(req.l1_block_height)
+        .await?;
+    Ok(Json(ObserveL1HeightResponse {
+        observed_l1_height: req.l1_block_height,
+        refunded_withdrawal_ids: refunded
+            .into_iter()
+            .map(|withdrawal| withdrawal.withdrawal_id)
+            .collect(),
+    }))
 }
 
 /// GET /v1/bridge/withdrawals/{id}

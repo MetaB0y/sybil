@@ -1,24 +1,25 @@
 {
-  "app_exe_commit": "0x00392988ee8905fcf146389074905f0fe23754de4c28f3d39a70d49c7aef676e",
+  "app_exe_commit": "0x000b608ff7e5a7d8a76d080353224d431d4361fdcb531d07ef99f4cc59e8fef7",
   "memory_dimensions": {
     "addr_space_height": 3,
     "address_height": 26
   },
+  "num_user_pvs": 32,
   "app_vk_commit": {
-    "cached_commit": "0x0027fe3a19be40cdc4655c20f76364a5a217d0428ef15315bd9eb12373a502d6",
-    "vk_pre_hash": "0x0054bd009621e9dea2105fb303d583fb6483a4645ab5e50654a73ef4618002f9"
+    "cached_commit": "0x0004c5a9dd984c7dd870f01839a4d41dfc6d0d41f25a234339f32308a0e04a88",
+    "vk_pre_hash": "0x009435d5adaf747735ab19f3924d370d7ff4a18b64a239444cc894cc4ac84ef7"
   },
   "leaf_vk_commit": {
-    "cached_commit": "0x008599567fbdaea961b441d572cb4bc7e86c6281ffd2d892a538d07950751c3a",
-    "vk_pre_hash": "0x0072039f5164092443c88c2ae9be544477057b8739b240eff4c2adabc8d42c56"
+    "cached_commit": "0x003360bfe728c5de7711ca54d57ed84902e0d5ef3629753b7ce9552f1351082c",
+    "vk_pre_hash": "0x0011b6af8b5af73f76ed31e003311c456f5f798f71e9d47011a7d9e1f6058e01"
   },
   "internal_for_leaf_vk_commit": {
-    "cached_commit": "0x008df36a16e989e99c507bc783c209f45b5dafaff20424a390ab3f80e398d24b",
-    "vk_pre_hash": "0x008dbd5c520fc0c1f00cec9515ada09a329b29f0f308ae4c0de75a76b0173527"
+    "cached_commit": "0x003419ea244000a540e3019c3613c309af637d9e00b16f805f5322d82a0d767d",
+    "vk_pre_hash": "0x006a750d43f73be6a503b9ee9fc7d75bc75f4ae2695e06344fd418e035cf2678"
   },
   "internal_recursive_vk_commit": {
-    "cached_commit": "0x0048ee646aef35581602f03bae5e75a2fc7de7642a6925e98fc3ab59a0772119",
-    "vk_pre_hash": "0x003d7a4379313a1fca303a1df96196202605faa2cbb696483a19cb132840f8ac"
+    "cached_commit": "0x0077ff0c720c495f2998c5b9ba87414db004a29787bb43f6fffa76049b75fd17",
+    "vk_pre_hash": "0x0082a0cb4bdde6422848a41c7e000b67072ef65d2742389ef0392c4705ad7b1d"
   },
   "expected_def_hook_commit": null
 }

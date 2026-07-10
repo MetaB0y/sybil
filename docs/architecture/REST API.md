@@ -12,6 +12,13 @@ The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs**
 
 Bridge deposit ingestion is scaffolding for [[L1 Settlement and Vault]] rather than a completed trust boundary. `POST /v1/bridge/deposits` is service-only and credits the sequencer through the existing `pending_l1_deposits` WAL, but today it trusts the operator/indexer-supplied L1 event fields. `POST /v1/bridge/withdrawals/signed` verifies a P256 signature over the canonical withdrawal payload against the account key registry before using the existing `pending_bridge_withdrawals` WAL; `POST /v1/bridge/withdrawals` remains a service-only operator path. SYB-178/SYB-188 still need proof-backed L1 deposit inclusion/finality and vault withdrawal authorization before these paths are production trust-complete.
 
+The service-gated indexer advances `POST /v1/bridge/l1-height` after each fully
+processed confirmed scan range. That existing scan cursor is the withdrawal
+expiry clock. Crossing `expiry_height` emits a refund event, restores the
+account balance exactly once, and retires the leaf in the same committed block.
+`refunded` is exposed as a withdrawal status while the terminal event is
+pending; replays after pruning are accepted as no-ops.
+
 Order quantity fields (`quantity`, `max_fill`, `fill_qty`,
 `remaining_quantity`, `original_quantity`, and position `quantity`) are protocol
 [[Fractional Quantities|share-units]], not display shares. `1000` units equals

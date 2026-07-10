@@ -12,7 +12,7 @@ This note is the concept introduction. For the byte-level normative spec and the
 
 The **state root** is the compact commitment to post-settlement state. It is a
 SHA-256 qMDB root over typed leaves: account snapshots, bridge sidecar leaves
-needed for normal withdrawals, active resting orders, aggregate reservations,
+needed for normal withdrawals (including the confirmed L1-height expiry cursor), active resting orders, aggregate reservations,
 market definitions/lifecycle, and market groups. The current verifier
 recomputes that qMDB root from the witness. The next storage cleanup is to
 make the persisted typed-state qMDB root exactly match the block header root.

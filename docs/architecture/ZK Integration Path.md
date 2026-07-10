@@ -2,7 +2,7 @@
 tags: [zk]
 layer: verification
 status: planned
-last_verified: 2026-07-03
+last_verified: 2026-07-10
 ---
 
 Sybil is designed for a Validium architecture: off-chain data, on-chain proofs. The exchange runs off-chain for performance, but every batch's correctness is attested by an OpenVM proof posted to Ethereum L1. The [[L1 Settlement and Vault|on-chain contracts]] store accepted [[State Root and Parent Hash|state roots]], custody collateral, and process proof-backed withdrawals — they never see individual orders, fills, or account balances.
@@ -146,7 +146,8 @@ With the fix, rebuilds are **deterministic** (two independent
 `just openvm-commit` runs → identical commitments), so the `zk-rebuild` CI
 lane (below) is a **hard gate**: regenerated commits must equal the committed
 `commit.json`. The committed `commit.json` + lock now carry the
-**current-source** commitment (`app_exe_commit 0x0094ea7a…`); the **deployed**
+**current-source** commitments (`app_exe_commit 0x000b608f…`,
+`app_vm_commit 0x007a02fc…`); the **deployed**
 adapter still pins the **May-2026** build (`0x00796a20…`). Consensus bytes are
 golden-vector-identical, but the artifact differs — the next devnet redeploy
 must update the adapter constructor args to the committed values (freshly

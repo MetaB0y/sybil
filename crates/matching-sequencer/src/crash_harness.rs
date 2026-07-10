@@ -907,6 +907,7 @@ fn has_uncommitted_wal(restored: &RestoredState) -> bool {
         || !restored.control_plane_log.is_empty()
         || !restored.pending_l1_deposits.is_empty()
         || !restored.pending_bridge_withdrawals.is_empty()
+        || !restored.pending_bridge_l1_inputs.is_empty()
 }
 
 fn signing_key_for(seed: u64, account_id: AccountId) -> SigningKey {
@@ -1055,6 +1056,7 @@ async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart(
         deposit_cursor: u64::MAX,
         deposit_root: [u8::MAX; 32],
         deposit_frontier: [[u8::MAX; 32]; sybil_l1_protocol::DEPOSIT_TREE_DEPTH],
+        observed_l1_height: u64::MAX,
         next_withdrawal_id: u64::MAX,
         withdrawals: Default::default(),
     })

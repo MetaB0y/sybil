@@ -75,7 +75,8 @@ use crate::aggregates::{
 };
 use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader, SealedBlock};
 use crate::bridge::{
-    BridgeState, BridgeWithdrawalRequest, L1Deposit, L1WithdrawalStatus, WithdrawalLeaf,
+    BridgeL1Input, BridgeState, BridgeWithdrawalRequest, L1Deposit, L1WithdrawalStatus,
+    WithdrawalLeaf,
 };
 use crate::market_info::{
     AccountFillCursor, AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage, PricePoint,

@@ -276,6 +276,39 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
+                SystemEvent::WithdrawalRefunded {
+                    account_id,
+                    withdrawal_id,
+                    amount,
+                    reason,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded = crate::digest::encode_withdrawal_refunded_event(
+                            *withdrawal_id,
+                            *amount,
+                            *reason,
+                            self.height,
+                        );
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
+                SystemEvent::WithdrawalFinalized {
+                    account_id,
+                    withdrawal_id,
+                    amount,
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded = crate::digest::encode_withdrawal_finalized_event(
+                            *withdrawal_id,
+                            *amount,
+                            self.height,
+                        );
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
+                SystemEvent::L1BlockObserved { .. } => {}
                 SystemEvent::MarketResolved {
                     market_id,
                     payout_nanos,
@@ -313,6 +346,19 @@ impl BlockSequencer {
                     }
                 }
                 SystemEvent::MarketGroupExtended { .. } => {}
+            }
+        }
+        // A terminal leaf remains addressable until the block carrying its
+        // terminal event is prepared. The event and deletion therefore enter
+        // the same atomic state transition and cannot be observed separately.
+        for event in &system_events {
+            let withdrawal_id = match event {
+                SystemEvent::WithdrawalRefunded { withdrawal_id, .. }
+                | SystemEvent::WithdrawalFinalized { withdrawal_id, .. } => Some(*withdrawal_id),
+                _ => None,
+            };
+            if let Some(withdrawal_id) = withdrawal_id {
+                self.bridge.withdrawals.remove(&withdrawal_id);
             }
         }
         let bridge = bridge_block_data(&system_events, &self.bridge);

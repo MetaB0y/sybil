@@ -59,7 +59,10 @@ async fn test_service_app_with_store() -> (axum::Router, SequencerHandle) {
             service_token: SERVICE_TOKEN.to_string(),
             ..ApiConfig::default()
         },
-        SequencerConfig::default(),
+        SequencerConfig {
+            block_interval: Duration::from_secs(60 * 60),
+            ..SequencerConfig::default()
+        },
     )
     .await
 }

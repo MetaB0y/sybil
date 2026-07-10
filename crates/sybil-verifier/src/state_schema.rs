@@ -34,6 +34,10 @@ pub fn state_root_leaves(
         sys_bytes32_leaf_value(b"deposit_root", &sidecar.bridge.deposit_root),
     ));
     leaves.push((
+        b"sys/observed_l1_height".to_vec(),
+        sys_u64_leaf_value(b"observed_l1_height", sidecar.bridge.observed_l1_height),
+    ));
+    leaves.push((
         b"sys/next_withdrawal_id".to_vec(),
         sys_u64_leaf_value(b"next_withdrawal_id", sidecar.bridge.next_withdrawal_id),
     ));

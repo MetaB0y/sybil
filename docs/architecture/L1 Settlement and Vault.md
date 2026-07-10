@@ -2,7 +2,7 @@
 tags: [contracts, bridge, validium, spec]
 layer: verification
 status: planned
-last_verified: 2026-07-03
+last_verified: 2026-07-10
 ---
 
 # L1 Settlement and Vault
@@ -372,8 +372,11 @@ The proof statement is:
 > a valid Sybil state transition.
 
 The vault records `nullifier` as used when the withdrawal is requested. The
-withdrawal leaf should remain in off-chain state until the sequencer observes
-the L1 request/finalization and retires it in a later block. That keeps
+withdrawal leaf remains in off-chain state until the sequencer observes a
+terminal outcome. Finalization retires it without a credit. L1 cancellation or
+the confirmed L1 scan cursor advancing past `expiry_height` refunds the exact
+debited nanos to the owner once. The terminal event and leaf deletion commit in
+the same block, and later duplicate/crossed observations are no-ops. That keeps
 normal withdrawals replay-safe without letting users withdraw from stale raw
 balances while continuing to trade.
 
@@ -659,13 +662,24 @@ The sequencer now has a bridge sidecar in
 development path:
 
 - `BridgeState` tracks `deposit_cursor`, the latest consumed `deposit_root`,
-  the next withdrawal id, and created withdrawal leaves.
+  the confirmed `observed_l1_height`, the next withdrawal id, and active
+  withdrawal leaves.
 - L1 deposits are accepted as sequential `L1Deposit` records, credited through
   `SystemEvent::L1Deposit`, and persisted in a pending-deposit WAL until the
   next block commit.
 - Withdrawal requests debit available account balance immediately, create a
   `WithdrawalLeaf`, emit `SystemEvent::WithdrawalCreated`, and persist the
   request in a pending-withdrawal WAL until the next block commit.
+- Confirmed withdrawal events and the indexer's confirmed scan height are
+  durably recorded in `pending_bridge_l1_inputs` before they mutate live state.
+  `Cancelled`, or a scan height strictly beyond `expiry_height`, transitions an
+  active leaf to `Refunded`, credits the owner exactly once, and emits
+  `SystemEvent::WithdrawalRefunded`. `Finalized` and `Refunded` are absorbing
+  terminal states.
+- The block carrying a terminal refund/finalization event also removes that
+  withdrawal leaf from the post-state sidecar. The verifier replays the account
+  credit and requires the same deterministic deletion, bounding active bridge
+  state without retaining consensus tombstones.
 - Blocks expose `BridgeBlockData` with consumed deposits and withdrawal leaves
   so proof-generation jobs can see the bridge transition data.
 - The HTTP surface exposes bridge status, account bridge keys, deposit

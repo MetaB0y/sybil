@@ -6,10 +6,14 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sybil_api_types::request::{
-    BridgeWithdrawalL1Status, SubmitL1DepositRequest, SubmitL1WithdrawalEventRequest,
+    BridgeWithdrawalL1Status, ObserveL1HeightRequest, SubmitL1DepositRequest,
+    SubmitL1WithdrawalEventRequest,
 };
+#[cfg(test)]
+use sybil_api_types::response::BridgeWithdrawalResponse;
 use sybil_api_types::response::{
-    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse, BridgeWithdrawalResponse,
+    BridgeAccountKeyResponse, BridgeDepositResponse, BridgeStatusResponse,
+    BridgeWithdrawalL1EventResponse, ObserveL1HeightResponse,
 };
 use sybil_client::SybilClient;
 use sybil_l1_protocol::{
@@ -275,7 +279,11 @@ trait DepositSink {
     async fn submit_l1_withdrawal_event(
         &self,
         req: &SubmitL1WithdrawalEventRequest,
-    ) -> Result<BridgeWithdrawalResponse>;
+    ) -> Result<BridgeWithdrawalL1EventResponse>;
+    async fn observe_l1_height(
+        &self,
+        req: &ObserveL1HeightRequest,
+    ) -> Result<ObserveL1HeightResponse>;
 }
 
 struct HttpL1Rpc {
@@ -368,8 +376,15 @@ impl DepositSink for SybilClient {
     async fn submit_l1_withdrawal_event(
         &self,
         req: &SubmitL1WithdrawalEventRequest,
-    ) -> Result<BridgeWithdrawalResponse> {
+    ) -> Result<BridgeWithdrawalL1EventResponse> {
         Ok(SybilClient::submit_l1_withdrawal_event(self, req).await?)
+    }
+
+    async fn observe_l1_height(
+        &self,
+        req: &ObserveL1HeightRequest,
+    ) -> Result<ObserveL1HeightResponse> {
+        Ok(SybilClient::observe_l1_height(self, req).await?)
     }
 }
 
@@ -543,17 +558,25 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
     }
 
     for event in withdrawal_events {
-        let request = withdrawal_event_request(&event);
+        let request = withdrawal_event_request(&event)?;
         let response = sink.submit_l1_withdrawal_event(&request).await?;
         tracing::info!(
-            withdrawal_id = response.withdrawal_id,
-            nullifier = response.nullifier_hex,
+            withdrawal_id = response.withdrawal.as_ref().map(|withdrawal| withdrawal.withdrawal_id),
+            nullifier = request.nullifier_hex,
             l1_status = ?request.status,
             executable_at_unix = request.executable_at_unix,
             tx = event.log.transaction_hash.as_deref().unwrap_or_default(),
             "l1.indexer.withdrawal_status_ingested"
         );
     }
+
+    // The existing confirmed scan cursor is the bridge clock. Advance it only
+    // after every log in the range was accepted, so a failed refund/observation
+    // causes the whole range to be retried.
+    sink.observe_l1_height(&ObserveL1HeightRequest {
+        l1_block_height: to,
+    })
+    .await?;
 
     Ok(Some(to.saturating_add(1)))
 }
@@ -685,7 +708,9 @@ fn sort_withdrawal_events(events: &mut [IndexedWithdrawalEvent]) {
     });
 }
 
-fn withdrawal_event_request(event: &IndexedWithdrawalEvent) -> SubmitL1WithdrawalEventRequest {
+fn withdrawal_event_request(
+    event: &IndexedWithdrawalEvent,
+) -> Result<SubmitL1WithdrawalEventRequest> {
     let (nullifier, status, event_at_unix, executable_at_unix) = match &event.event {
         WithdrawalEvent::Queued(queued) => (
             queued.nullifier,
@@ -706,13 +731,20 @@ fn withdrawal_event_request(event: &IndexedWithdrawalEvent) -> SubmitL1Withdrawa
             Some(cancelled.executable_at_unix),
         ),
     };
-    SubmitL1WithdrawalEventRequest {
+    let l1_block_height = event
+        .log
+        .block_number
+        .as_deref()
+        .ok_or(IndexerError::MissingRpcResult)
+        .and_then(|value| parse_quantity(value, "blockNumber"))?;
+    Ok(SubmitL1WithdrawalEventRequest {
         nullifier_hex: hex::encode(nullifier),
         status,
         event_at_unix,
         executable_at_unix,
         tx_hash_hex: event.transaction_hash_hex(),
-    }
+        l1_block_height,
+    })
 }
 
 impl IndexedWithdrawalEvent {
@@ -969,6 +1001,7 @@ mod tests {
         withdrawal_statuses: Mutex<Vec<(String, BridgeWithdrawalL1Status)>>,
         fail_deposit_submit: bool,
         fail_withdrawal_submit: bool,
+        observed_heights: Mutex<Vec<u64>>,
     }
 
     impl DepositSink for FakeSink {
@@ -976,11 +1009,13 @@ mod tests {
             Ok(BridgeStatusResponse {
                 deposit_cursor: self.cursor,
                 deposit_root_hex: String::new(),
+                observed_l1_height: 0,
                 next_withdrawal_id: 0,
                 withdrawal_count: 0,
                 queued_withdrawal_count: 0,
                 finalized_withdrawal_count: 0,
                 cancelled_withdrawal_count: 0,
+                refunded_withdrawal_count: 0,
             })
         }
 
@@ -1010,7 +1045,7 @@ mod tests {
         async fn submit_l1_withdrawal_event(
             &self,
             req: &SubmitL1WithdrawalEventRequest,
-        ) -> Result<BridgeWithdrawalResponse> {
+        ) -> Result<BridgeWithdrawalL1EventResponse> {
             self.withdrawal_statuses
                 .lock()
                 .unwrap()
@@ -1018,24 +1053,41 @@ mod tests {
             if self.fail_withdrawal_submit {
                 return Err(IndexerError::MissingRpcResult);
             }
-            Ok(BridgeWithdrawalResponse {
-                withdrawal_id: 7,
-                account_id: 42,
-                recipient_hex: String::new(),
-                token_hex: String::new(),
-                amount_token_units: 1_000_000,
-                amount_nanos: 1_000_000_000,
-                expiry_height: 100,
-                nullifier_hex: req.nullifier_hex.clone(),
-                withdrawal_leaf_hex: String::new(),
-                withdrawal_leaf_digest_hex: String::new(),
-                created_at_height: 1,
-                l1_status: req.status,
-                l1_requested_at_unix: Some(req.event_at_unix),
-                l1_executable_at_unix: req.executable_at_unix,
-                l1_finalized_at_unix: None,
-                l1_cancelled_at_unix: None,
-                l1_tx_hash_hex: req.tx_hash_hex.clone(),
+            Ok(BridgeWithdrawalL1EventResponse {
+                active_withdrawal_found: true,
+                withdrawal: Some(BridgeWithdrawalResponse {
+                    withdrawal_id: 7,
+                    account_id: 42,
+                    recipient_hex: String::new(),
+                    token_hex: String::new(),
+                    amount_token_units: 1_000_000,
+                    amount_nanos: 1_000_000_000,
+                    expiry_height: 100,
+                    nullifier_hex: req.nullifier_hex.clone(),
+                    withdrawal_leaf_hex: String::new(),
+                    withdrawal_leaf_digest_hex: String::new(),
+                    created_at_height: 1,
+                    l1_status: req.status,
+                    l1_requested_at_unix: Some(req.event_at_unix),
+                    l1_executable_at_unix: req.executable_at_unix,
+                    l1_finalized_at_unix: None,
+                    l1_cancelled_at_unix: None,
+                    l1_tx_hash_hex: req.tx_hash_hex.clone(),
+                }),
+            })
+        }
+
+        async fn observe_l1_height(
+            &self,
+            req: &ObserveL1HeightRequest,
+        ) -> Result<ObserveL1HeightResponse> {
+            self.observed_heights
+                .lock()
+                .unwrap()
+                .push(req.l1_block_height);
+            Ok(ObserveL1HeightResponse {
+                observed_l1_height: req.l1_block_height,
+                refunded_withdrawal_ids: Vec::new(),
             })
         }
     }

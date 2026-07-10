@@ -441,8 +441,16 @@ impl SequencerHandle {
     pub async fn apply_bridge_withdrawal_l1_event(
         &self,
         event: BridgeWithdrawalL1Event,
-    ) -> Result<WithdrawalLeaf, SequencerError> {
+    ) -> Result<Option<WithdrawalLeaf>, SequencerError> {
         self.rpc(|reply| SequencerMsg::ApplyBridgeWithdrawalL1Event(event, reply))
+            .await?
+    }
+
+    pub async fn observe_bridge_l1_height(
+        &self,
+        height: u64,
+    ) -> Result<Vec<WithdrawalLeaf>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::ObserveBridgeL1Height(height, reply))
             .await?
     }
 
@@ -1146,6 +1154,7 @@ impl SequencerHandle {
 mod tests {
     use super::*;
     use crate::account::AccountStore;
+    use crate::bridge::L1WithdrawalStatus;
     use crate::crypto::sign_cancel;
     use crate::market_info::ResolutionConfig;
     use crate::sequencer::SequencerConfig;
@@ -2162,6 +2171,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn acknowledged_withdrawal_cancel_refund_survives_actor_crash_before_block() {
+        let path = temp_store_path("bridge-l1-refund-wal");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
+        baseline.produce_block(Vec::new(), 1);
+        store.save_block(baseline.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+        let withdrawal = handle
+            .create_bridge_withdrawal(BridgeWithdrawalRequest {
+                account_id: aid,
+                chain_id: 1,
+                vault_address: [0x10; 20],
+                recipient: [0x40; 20],
+                token_address: [0x20; 20],
+                amount_token_units: 10_000_000,
+                expiry_height: 100,
+            })
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().balance,
+            90 * NANOS_PER_DOLLAR as i64
+        );
+
+        let cancelled = BridgeWithdrawalL1Event {
+            nullifier: withdrawal.nullifier,
+            status: L1WithdrawalStatus::Cancelled,
+            event_at_unix: 1_700_000_005,
+            executable_at_unix: None,
+            tx_hash: Some([0xAB; 32]),
+            l1_block_height: 5,
+        };
+        let refunded = handle
+            .apply_bridge_withdrawal_l1_event(cancelled.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(refunded.l1_status, L1WithdrawalStatus::Refunded);
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64
+        );
+        let pre_crash = store.load_state().await.unwrap().unwrap();
+        assert_eq!(pre_crash.pending_bridge_l1_inputs.len(), 1);
+
+        handle.crash_actor_for_test().await.unwrap();
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64,
+            "WAL replay must restore the refund exactly once"
+        );
+        assert_eq!(
+            handle
+                .get_bridge_state()
+                .await
+                .unwrap()
+                .withdrawals
+                .get(&withdrawal.withdrawal_id)
+                .unwrap()
+                .l1_status,
+            L1WithdrawalStatus::Refunded
+        );
+
+        let duplicate = handle
+            .apply_bridge_withdrawal_l1_event(cancelled)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(duplicate.l1_status, L1WithdrawalStatus::Refunded);
+        assert_eq!(
+            handle.get_account(aid).await.unwrap().unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64,
+            "duplicate cancellation after restore must not double-credit"
+        );
+
+        let committed = handle.produce_block().await.unwrap();
+        assert_eq!(
+            committed
+                .canonical
+                .system_events
+                .iter()
+                .filter(|event| matches!(event, SystemEvent::WithdrawalRefunded { withdrawal_id, .. } if *withdrawal_id == withdrawal.withdrawal_id))
+                .count(),
+            1
+        );
+        let after_commit = store.load_state().await.unwrap().unwrap();
+        assert!(after_commit.pending_bridge_l1_inputs.is_empty());
+        assert!(after_commit.bridge_state.withdrawals.is_empty());
+        assert_eq!(
+            after_commit.accounts.get(aid).unwrap().balance,
+            100 * NANOS_PER_DOLLAR as i64
+        );
+        assert!(handle.stop_and_wait(Duration::from_secs(5)).await);
+    }
+
+    #[tokio::test]
     async fn test_fund_nonexistent_account() {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq);
@@ -2421,7 +2534,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_signed_cancel_replay_is_rejected_by_validation_first() {
+    async fn test_signed_cancel_replay_is_rejected_as_stale_nonce() {
         let (seq, aid) = make_test_sequencer();
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
@@ -2469,7 +2582,14 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert!(matches!(replay_error, SequencerError::OrderNotFound));
+        assert!(matches!(
+            replay_error,
+            SequencerError::ReplayNonceStale {
+                account_id,
+                nonce: 1,
+                last_nonce: 1,
+            } if account_id == aid
+        ));
         assert_eq!(
             handle.get_account(aid).await.unwrap().unwrap().last_nonce,
             1

@@ -70,4 +70,4 @@ redeploy.
 
 **Follow-ups:** exercise the in-place migration fallback on a throwaway
 deployment before mainnet; keep `devnet-redeploy.md` turnkey (current pins:
-exe `0x00392988`, vm `0x0026ab66`).
+exe `0x000b608f`, vm `0x007a02fc`).

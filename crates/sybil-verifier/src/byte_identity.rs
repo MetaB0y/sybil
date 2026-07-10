@@ -25,8 +25,8 @@ fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     let state_leaves = state_schema::state_root_leaves(&witness.post_state, &witness.state_sidecar);
     let witness_bytes = witness_schema::canonical_witness_bytes(&witness);
 
-    assert_eq!(state_leaves.len(), 11);
-    assert_eq!(witness_bytes.len(), 3857);
+    assert_eq!(state_leaves.len(), 12);
+    assert_eq!(witness_bytes.len(), 3873);
     assert_eq!(
         hash_header(&witness.header),
         [
@@ -37,15 +37,15 @@ fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
     assert_eq!(
         digest_state_leaves(&state_leaves),
         [
-            154, 146, 55, 187, 52, 65, 220, 208, 80, 111, 54, 63, 77, 138, 244, 103, 10, 41, 235,
-            108, 210, 176, 0, 197, 39, 31, 143, 244, 142, 143, 13, 246,
+            88, 41, 248, 10, 43, 93, 201, 135, 216, 170, 251, 57, 76, 26, 162, 11, 109, 112, 141,
+            51, 43, 124, 229, 28, 163, 71, 116, 27, 106, 160, 7, 176,
         ],
     );
     assert_eq!(
         digest_bytes(&witness_bytes),
         [
-            208, 47, 137, 188, 23, 4, 226, 81, 108, 122, 196, 17, 54, 40, 0, 71, 110, 232, 179,
-            209, 159, 192, 2, 124, 233, 210, 246, 197, 140, 150, 16, 118,
+            84, 245, 62, 148, 226, 121, 24, 123, 3, 234, 72, 86, 92, 54, 2, 178, 10, 249, 147, 9,
+            105, 68, 90, 146, 221, 230, 142, 91, 90, 156, 223, 241,
         ],
     );
 }
@@ -238,6 +238,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
         bridge: BridgeStateSnapshot {
             deposit_cursor: 14,
             deposit_root: [8u8; 32],
+            observed_l1_height: 15,
             next_withdrawal_id: 4,
             withdrawals: vec![WithdrawalSnapshot {
                 withdrawal_id: 3,
