@@ -22,7 +22,6 @@ import {
   type PortfolioTab,
 } from "@/components/portfolio/portfolio-tabs";
 import { PositionsList } from "@/components/portfolio/positions-list";
-import { RealizedPnlPanel } from "@/components/portfolio/realized-pnl-panel";
 import { RangeTabs } from "@/components/portfolio/range-tabs";
 import { WithdrawalEtas } from "@/components/portfolio/withdrawal-etas";
 import {
@@ -43,6 +42,7 @@ import {
 import { usePnlSplit } from "@/lib/account/use-pnl-split";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import { parseNanos } from "@/lib/format/nanos";
+import { useEventQuestions } from "@/lib/markets/use-event-raw";
 import { useMarketsList } from "@/lib/markets/use-markets";
 
 const FILLS_PAGE = 200;
@@ -94,7 +94,9 @@ function Connected({
   const markets = useMarketsList();
 
   const fillsData = fills.data ?? [];
-  const ordersData = orders.data ?? [];
+  // Memoized: `?? []` mints a new array each render, and `touchedMarketIds`
+  // below depends on it.
+  const ordersData = useMemo(() => orders.data ?? [], [orders.data]);
   const portfolioData = portfolio.data ?? null;
   const pnlSplit = usePnlSplit(portfolioData);
 
@@ -103,6 +105,45 @@ function Connected({
     [markets.bundle],
   );
   const history = useAccountHistory(accountId);
+
+  // Every market this account touches, across all four tabs.
+  const touchedMarketIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of portfolioData?.positions ?? []) ids.add(p.market_id);
+    for (const o of ordersData) ids.add(o.market_id);
+    for (const e of history.events) if (e.marketId != null) ids.add(e.marketId);
+    return ids;
+  }, [portfolioData, ordersData, history.events]);
+
+  // A grouped (NegRisk) market's `MarketResponse.name` is the terse
+  // "{event_title}: {group_item_title}" — e.g. "Which company has best AI model
+  // end of 2026?: OpenAI". The natural question ("Will OpenAI have the best AI
+  // model at the end of December 2026?") only exists in the raw Polymarket event
+  // snapshot, joined on `polymarket_condition_id`. Fetch just the events this
+  // account touches (shared react-query cache with the cards + ticker) and fall
+  // back to `name` for Sybil-native markets, which have no snapshot.
+  const eventIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const id of touchedMarketIds) {
+      const m = marketsById.get(id);
+      if (m?.event_id && m.polymarket_condition_id) ids.add(m.event_id);
+    }
+    return [...ids];
+  }, [touchedMarketIds, marketsById]);
+
+  const questionByCondition = useEventQuestions(eventIds);
+
+  const titleByMarket = useMemo(() => {
+    const out = new Map<number, string>();
+    for (const id of touchedMarketIds) {
+      const m = marketsById.get(id);
+      const question = m?.polymarket_condition_id
+        ? questionByCondition.get(m.polymarket_condition_id)
+        : undefined;
+      out.set(id, question ?? m?.name ?? `#${id}`);
+    }
+    return out;
+  }, [touchedMarketIds, marketsById, questionByCondition]);
 
   const [range, setRange] = useState<EquityRange>("ALL");
   const [tab, setTab] = useState<PortfolioTab>("positions");
@@ -141,7 +182,6 @@ function Connected({
     positions: portfolioData?.positions.length ?? 0,
     orders: ordersData.length,
     trades: tradesCount,
-    pnl: 0, // badge hidden for P&L (chart tab, not a row count)
     history: history.events.length,
   };
 
@@ -165,8 +205,6 @@ function Connected({
           portfolio={portfolioData}
           pnlSplit={pnlSplit}
           curve={curve}
-          tradeCount={tradesCount}
-          tradeCountCapped={history.hasMore}
           rangeLabel={RANGE_COPY[range]}
         />
 
@@ -186,6 +224,7 @@ function Connected({
           positions={portfolioData?.positions ?? []}
           fills={fillsData}
           marketsById={marketsById}
+          titleByMarket={titleByMarket}
         />
       )}
       {tab === "orders" && (
@@ -196,6 +235,7 @@ function Connected({
           orders={ordersData}
           fillsByOrder={fillsByOrder}
           marketsById={marketsById}
+          titleByMarket={titleByMarket}
         />
       )}
       {tab === "trades" && (
@@ -203,16 +243,15 @@ function Connected({
           tabs={tabsStrip}
           events={history.events}
           marketsById={marketsById}
+          titleByMarket={titleByMarket}
         />
-      )}
-      {tab === "pnl" && (
-        <RealizedPnlPanel tabs={tabsStrip} events={history.events} />
       )}
       {tab === "history" && (
         <HistoryFeed
           tabs={tabsStrip}
           events={history.events}
           marketsById={marketsById}
+          titleByMarket={titleByMarket}
           isMock={history.isMock}
         />
       )}

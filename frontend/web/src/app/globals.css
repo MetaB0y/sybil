@@ -469,6 +469,34 @@ textarea {
   gap: 2px;
 }
 
+/* Portfolio table search — deliberately the same shell as `.nav-search-shell`
+   above: same height, same squared radius, same surface/border, same quiet
+   focus-brighten. The input suppresses the global cyan `:focus-visible` ring
+   (`sybil-tokens.css`), which otherwise fired on every tap. */
+.portfolio-search-shell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  width: 240px;
+  max-width: 100%;
+  padding: 0 var(--space-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+.portfolio-search-shell:focus-within {
+  border-color: var(--border-3);
+}
+
+.portfolio-search-shell input:focus,
+.portfolio-search-shell input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .markets-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

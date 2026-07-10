@@ -21,7 +21,7 @@ import {
   type HistoryEventType,
 } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
-import { notionalNanosCeil } from "@/lib/account/quantity";
+import { formatShareUnits, notionalNanosCeil } from "@/lib/account/quantity";
 import type { components } from "@/lib/api/schema";
 import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
@@ -34,6 +34,8 @@ interface Props {
   tabs: React.ReactNode;
   events: HistoryEvent[];
   marketsById: Map<number, Market>;
+  /** market_id → natural question title (see `portfolio/page.tsx`). */
+  titleByMarket: Map<number, string>;
   isMock?: boolean;
 }
 
@@ -132,7 +134,13 @@ function compareBy(a: HistoryRow, b: HistoryRow, key: SortKey): number {
   }
 }
 
-export function HistoryFeed({ tabs, events, marketsById, isMock }: Props) {
+export function HistoryFeed({
+  tabs,
+  events,
+  marketsById,
+  titleByMarket,
+  isMock,
+}: Props) {
   const [category, setCategory] = useState<HistoryCategory>("all");
   const [type, setType] = useState<HistoryEventType | "all">("all");
   const [marketId, setMarketId] = useState<number | "all">("all");
@@ -145,13 +153,18 @@ export function HistoryFeed({ tabs, events, marketsById, isMock }: Props) {
     const ids = new Map<number, string>();
     for (const e of events) {
       if (e.marketId != null && !ids.has(e.marketId)) {
-        ids.set(e.marketId, marketsById.get(e.marketId)?.name ?? `#${e.marketId}`);
+        ids.set(
+          e.marketId,
+          titleByMarket.get(e.marketId) ??
+            marketsById.get(e.marketId)?.name ??
+            `#${e.marketId}`,
+        );
       }
     }
     return [...ids.entries()]
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [events, marketsById]);
+  }, [events, marketsById, titleByMarket]);
 
   const rows = useMemo<HistoryRow[]>(() => {
     const q = query.trim().toLowerCase();
@@ -166,7 +179,9 @@ export function HistoryFeed({ tabs, events, marketsById, isMock }: Props) {
       event: e,
       marketName:
         e.marketId != null
-          ? marketsById.get(e.marketId)?.name ?? `#${e.marketId}`
+          ? titleByMarket.get(e.marketId) ??
+            marketsById.get(e.marketId)?.name ??
+            `#${e.marketId}`
           : "",
     }));
     if (q) {
@@ -177,7 +192,17 @@ export function HistoryFeed({ tabs, events, marketsById, isMock }: Props) {
     }
     const factor = sort.dir === "asc" ? 1 : -1;
     return decorated.sort((a, b) => compareBy(a, b, sort.key) * factor);
-  }, [events, marketsById, category, type, marketId, side, query, sort]);
+  }, [
+    events,
+    marketsById,
+    titleByMarket,
+    category,
+    type,
+    marketId,
+    side,
+    query,
+    sort,
+  ]);
 
   const paged = usePaged(rows, PORTFOLIO_PAGE_SIZE);
 
@@ -324,7 +349,9 @@ function EventRow({ row }: { row: HistoryRow }) {
       </span>
       <ActionCell side={event.side} />
       <span>{event.outcome ? <SidePill outcome={event.outcome} /> : <Muted>—</Muted>}</span>
-      <RightCell mono>{event.qty ?? "—"}</RightCell>
+      {/* `qty` is in SHARE_SCALE units (1000 = 1 share) — printing it raw showed
+          a 12.5-share fill as "12500". */}
+      <RightCell mono>{event.qty == null ? "—" : formatShareUnits(event.qty)}</RightCell>
       <RightCell mono>{priceLabel(event)}</RightCell>
       <AmountCell event={event} />
       <RightCell mono>
@@ -412,30 +439,28 @@ function AmountCell({ event }: { event: HistoryEvent }) {
   );
 }
 
-/** Date over wall-clock time, like the closed-orders close stamp. */
+/** Wall-clock time then a faded short date, on one line — the same stamp the
+ *  market-detail closed-orders list uses. Full timestamp on hover. */
 function TimeCell({ ms }: { ms: number }) {
   const d = new Date(ms);
   const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
   return (
     <span
+      title={d.toLocaleString()}
       style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        gap: 1,
         fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        color: "var(--fg-2)",
+        whiteSpace: "nowrap",
       }}
     >
-      <span style={{ fontSize: 11, color: "var(--fg-2)" }}>{date}</span>
-      <span
-        style={{
-          fontSize: 9.5,
-          color: "var(--fg-4)",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {time}
-      </span>
+      {time}
+      <span style={{ color: "var(--fg-4)" }}>{` ${date}`}</span>
     </span>
   );
 }
@@ -587,8 +612,9 @@ function Chip({
 function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
+    // Time is 96px: it holds "14:42 Jul 10" on one line rather than stacked.
     gridTemplateColumns:
-      "64px 84px minmax(0, 1fr) 52px 44px 50px 56px 92px 84px",
+      "96px 84px minmax(0, 1fr) 52px 44px 56px 56px 92px 84px",
     gap: 10,
     alignItems: "center",
     padding: "9px 14px",

@@ -78,15 +78,19 @@ export function useEventRaw(eventId: string | undefined, enabled: boolean) {
 
 /**
  * Resolve the full Polymarket `question` for many events at once, keyed by
- * `conditionId`. Used by the clearing ticker so a grouped (NegRisk) outcome —
- * whose `name` is the terse "{event}: {outcome}" — can show its natural
- * question ("Will xAI have the best AI model…?") instead. Reuses the same
- * cache entries as `useEventRaw`, so cards and the ticker share one fetch per
- * event. Events without a raw snapshot (Sybil-native) simply contribute
- * nothing and the caller falls back to `name`.
+ * `conditionId`. Used by the clearing ticker and the portfolio tables so a
+ * grouped (NegRisk) outcome — whose `name` is the terse "{event}: {outcome}" —
+ * can show its natural question ("Will xAI have the best AI model…?") instead.
+ * Reuses the same cache entries as `useEventRaw`, so cards, the ticker and the
+ * portfolio share one fetch per event. Events without a raw snapshot
+ * (Sybil-native) simply contribute nothing and the caller falls back to `name`.
+ *
+ * Built through `combine` so the returned Map keeps a stable identity between
+ * renders — callers depend on it from `useMemo`, and a fresh Map every render
+ * would make those memos churn on every block tick.
  */
 export function useEventQuestions(eventIds: string[]): Map<string, string> {
-  const results = useQueries({
+  return useQueries({
     queries: eventIds.filter(hasRawSnapshot).map((id) => ({
       queryKey: ["event-raw", id],
       staleTime: RAW_STALE_MS,
@@ -94,15 +98,16 @@ export function useEventQuestions(eventIds: string[]): Map<string, string> {
       retry: 1,
       queryFn: () => fetchEventRawMap(id),
     })),
+    combine: (results) => {
+      const byCondition = new Map<string, string>();
+      for (const r of results) {
+        if (!r.data) continue;
+        for (const [conditionId, rm] of r.data) {
+          const q = rm.question?.trim();
+          if (q) byCondition.set(conditionId, q);
+        }
+      }
+      return byCondition;
+    },
   });
-
-  const byCondition = new Map<string, string>();
-  for (const r of results) {
-    if (!r.data) continue;
-    for (const [conditionId, rm] of r.data) {
-      const q = rm.question?.trim();
-      if (q) byCondition.set(conditionId, q);
-    }
-  }
-  return byCondition;
 }

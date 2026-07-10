@@ -36,7 +36,11 @@ export interface EquityPoint {
 }
 
 export interface EquityCurve {
+  /** The range the user has selected. */
   range: EquityRange;
+  /** The range `points` actually belong to. Differs from `range` only while a
+   *  swap is in flight, when the previous range's series is still on screen. */
+  drawnRange: EquityRange;
   points: EquityPoint[]; // real samples, oldest-first (+ a live tip at "now")
   baseline: number; // net deposits (dollars) — the dashed floor
   startEquity: number;
@@ -45,6 +49,10 @@ export interface EquityCurve {
   deltaPct: number; // delta / startEquity
   isLoading: boolean;
   isEmpty: boolean; // fewer than 2 points → nothing to draw
+  /** True while a newly-picked range is still in flight and `points` are still
+   *  the previous range's. The chart holds them, blurred, instead of flashing
+   *  an empty box — see `EquityChart`. */
+  isSwapping: boolean;
 }
 
 export function useEquityCurve(args: {
@@ -73,8 +81,17 @@ export function useEquityCurve(args: {
         },
       });
       if (error || !data) throw new Error("fetch equity series failed");
-      return data;
+      // Tag the payload with its range: when `placeholderData` hands back the
+      // previous range's result, this is what tells the chart which series is
+      // actually on screen.
+      return { range, points: data.points };
     },
+    // Hold the previous range's series while the newly-picked one loads, so the
+    // chart can crossfade between two drawn curves instead of collapsing to
+    // "no equity history yet" and snapping back. Only a *key* change (a new
+    // range) yields placeholder data; the per-block refetch below already has
+    // data for its key and never flags as placeholder.
+    placeholderData: (prev) => prev,
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
@@ -102,6 +119,7 @@ export function useEquityCurve(args: {
 
     return {
       range,
+      drawnRange: q.data?.range ?? range,
       points,
       baseline: baselineDepositsDollars,
       startEquity,
@@ -110,10 +128,12 @@ export function useEquityCurve(args: {
       deltaPct,
       isLoading: q.isPending,
       isEmpty: points.length < 2,
+      isSwapping: q.isPlaceholderData,
     };
   }, [
     q.data,
     q.isPending,
+    q.isPlaceholderData,
     range,
     currentValueDollars,
     baselineDepositsDollars,
