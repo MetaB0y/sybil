@@ -77,9 +77,10 @@ Unsigned `POST /v1/orders` is a service route: in production it requires the
 service token; dev mode skips that service bearer for local workflows. It is not
 a public production trading path.
 
-Signed bridge withdrawal creation is also service-gated scaffolding. The final
-L1 release remains proof/root/nullifier controlled; an API signature alone does
-not move vault funds.
+Signed bridge withdrawal creation is also genesis-bound and nonce-protected,
+but remains service-gated scaffolding. The final L1 release remains
+proof/root/nullifier controlled; an API signature alone does not move vault
+funds.
 
 ## WebAuthn details
 

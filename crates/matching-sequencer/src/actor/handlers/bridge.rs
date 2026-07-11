@@ -77,7 +77,11 @@ impl SequencerActorState {
         &mut self,
         signed: SignedBridgeWithdrawal,
     ) -> Result<WithdrawalLeaf, SequencerError> {
-        verify_signed_bridge_withdrawal(&signed)?;
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        verify_signed_bridge_withdrawal(&signed, genesis_hash)?;
         self.handle_authenticated_bridge_withdrawal(AuthenticatedBridgeWithdrawal {
             request: signed.request,
             nonce: signed.nonce,

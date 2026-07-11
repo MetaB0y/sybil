@@ -126,8 +126,10 @@ struct ApiKeyRevoke {
     nonce: u64,
 }
 
-/// Canonical, stable byte layout of a bridge withdrawal request. This mirrors
-/// `matching_sequencer::bridge::BridgeWithdrawalRequest` without importing it.
+/// Canonical, stable logical fields of a bridge withdrawal request. The signed
+/// bytes wrap this value with `genesis_hash`, matching orders and cancellations.
+/// This mirrors `matching_sequencer::bridge::BridgeWithdrawalRequest` without
+/// importing it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct BridgeWithdrawalRequest {
     pub account_id: u64,
@@ -138,6 +140,12 @@ pub struct BridgeWithdrawalRequest {
     pub amount_token_units: u64,
     pub expiry_height: u64,
     pub nonce: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+struct BridgeWithdrawalSigningRequest {
+    genesis_hash: GenesisHash,
+    request: BridgeWithdrawalRequest,
 }
 
 /// Canonical, stable byte layout of a resolution attestation. Mirrors
@@ -177,8 +185,15 @@ pub fn canonical_attestation_bytes(att: &ResolutionAttestation) -> Vec<u8> {
     borsh::to_vec(att).expect("canonical attestation serialization should not fail")
 }
 
-pub fn canonical_bridge_withdrawal_bytes(request: &BridgeWithdrawalRequest) -> Vec<u8> {
-    borsh::to_vec(request).expect("canonical bridge withdrawal serialization should not fail")
+pub fn canonical_bridge_withdrawal_bytes(
+    request: &BridgeWithdrawalRequest,
+    genesis_hash: GenesisHash,
+) -> Vec<u8> {
+    borsh::to_vec(&BridgeWithdrawalSigningRequest {
+        genesis_hash,
+        request: request.clone(),
+    })
+    .expect("canonical bridge withdrawal serialization should not fail")
 }
 
 /// Canonical bytes for a signed account-profile update (SYB-60).
@@ -360,7 +375,7 @@ mod tests {
         };
         insta::assert_snapshot!(
             "bridge_withdrawal",
-            hex::encode(canonical_bridge_withdrawal_bytes(&request))
+            hex::encode(canonical_bridge_withdrawal_bytes(&request, GENESIS_HASH))
         );
     }
 

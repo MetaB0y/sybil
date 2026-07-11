@@ -346,6 +346,9 @@ pass "real MockUSDC deposit -> confirmed indexer -> exact Sybil credit"
 BRIDGE_WITHDRAW_UNITS=2000000
 BRIDGE_L1_HEIGHT="$(cast block-number --rpc-url "$ANVIL_RPC")"
 BRIDGE_EXPIRY_HEIGHT="$((BRIDGE_L1_HEIGHT + 1000))"
+http_json GET /v1/health "$WORK/bridge-health.json" 200
+BRIDGE_GENESIS_HASH="$(jget "$WORK/bridge-health.json" genesis_hash)"
+[[ "$BRIDGE_GENESIS_HASH" =~ ^[0-9a-f]{64}$ ]]
 target/debug/examples/smoke_sign withdrawal \
     --priv "$BRIDGE_PRIVATE_KEY" \
     --account "$BRIDGE_ACCOUNT" \
@@ -355,7 +358,8 @@ target/debug/examples/smoke_sign withdrawal \
     --token "$BRIDGE_TOKEN" \
     --amount "$BRIDGE_WITHDRAW_UNITS" \
     --expiry "$BRIDGE_EXPIRY_HEIGHT" \
-    --nonce 1 >"$WORK/bridge-withdraw-signature.json"
+    --nonce 1 \
+    --genesis-hash "$BRIDGE_GENESIS_HASH" >"$WORK/bridge-withdraw-signature.json"
 BRIDGE_WITHDRAW_BODY="$(python3 - \
     "$WORK/bridge-withdraw-signature.json" "$BRIDGE_ACCOUNT" "$BRIDGE_VAULT" \
     "$ANVIL_ADMIN" "$BRIDGE_TOKEN" "$BRIDGE_WITHDRAW_UNITS" "$BRIDGE_EXPIRY_HEIGHT" <<'PY'

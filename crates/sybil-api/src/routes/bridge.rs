@@ -382,6 +382,11 @@ pub async fn create_signed_withdrawal(
         .ok_or_else(|| AppError::bad_request("nonce is required for signed bridge withdrawals"))?;
     let request = withdrawal_request_from_api(&req.withdrawal, expiry_height)?;
     let signer = parse_signer_public_key(&req.signer_pubkey_hex)?;
+    let genesis_hash = state
+        .sequencer
+        .get_genesis_hash()
+        .await?
+        .ok_or(matching_sequencer::SequencerError::GenesisHashUnavailable)?;
 
     // TODO(SYB-188/SYB-178): this authenticates the Sybil account intent and
     // burns off-chain balance, but L1 release still needs proof-backed vault
@@ -405,7 +410,7 @@ pub async fn create_signed_withdrawal(
             let assertion = req.webauthn_assertion.as_ref().ok_or_else(|| {
                 AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
             })?;
-            let canonical = canonical_bridge_withdrawal_bytes(&request, nonce);
+            let canonical = canonical_bridge_withdrawal_bytes(&request, nonce, genesis_hash);
             webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
                 |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
             )?;
