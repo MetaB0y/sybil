@@ -691,9 +691,7 @@ function HoldingRow({ holding }: { holding: Holding }) {
       >
         {label}
       </span>
-      <span>
-        <SidePill outcome={outcome} />
-      </span>
+      <SidePill outcome={outcome} />
       <Right mono>{formatShareUnits(quantity, 1)}</Right>
       <Right mono>
         {avgNanos == null ? (

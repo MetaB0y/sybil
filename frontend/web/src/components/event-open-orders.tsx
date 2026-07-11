@@ -330,9 +330,7 @@ function OrderRow({
       >
         {action}
       </span>
-      <span>
-        <SidePill outcome={outcome} />
-      </span>
+      <SidePill outcome={outcome} />
       <Right mono>
         {placed === 0 ? (
           <>{formatShareUnits(order.remaining_quantity, 1)}</>

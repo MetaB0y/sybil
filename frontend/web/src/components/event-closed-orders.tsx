@@ -47,7 +47,7 @@ import {
   formatDollarsRounded,
 } from "@/lib/format/nanos";
 import { Pager, usePaged } from "@/components/event-list-pager";
-import { SidePill } from "@/components/portfolio/side-pill";
+import { SidePill, valueChipStyle } from "@/components/portfolio/side-pill";
 import { Glossary } from "@/components/glossary";
 
 type Status = "FILLED" | "PARTIAL" | "CANCELLED" | "EXPIRED" | "REJECTED";
@@ -441,7 +441,7 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
       >
         {isBuy ? "BUY" : isSell ? "SELL" : "—"}
       </span>
-      <span>{order.outcome ? <SidePill outcome={order.outcome} /> : <Muted>—</Muted>}</span>
+      {order.outcome ? <SidePill outcome={order.outcome} /> : <Muted>—</Muted>}
       <Right>
         <StatusBadge status={order.status} />
       </Right>
@@ -524,12 +524,13 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
   const positive = welfareNanos > 0n;
   const negative = welfareNanos < 0n;
   const tone = positive ? "var(--yes)" : negative ? "var(--no)" : "var(--fg-3)";
-  const bg =
-    positive
-      ? "color-mix(in srgb, var(--yes) 16%, transparent)"
-      : negative
-        ? "color-mix(in srgb, var(--no) 14%, transparent)"
-        : "transparent";
+  const bg = positive
+    ? "color-mix(in srgb, var(--yes) 14%, transparent)"
+    : negative
+      ? "color-mix(in srgb, var(--no) 14%, transparent)"
+      : "var(--fill-subtle)";
+  // A small tinted chip matching the side pill; the value is bold as the one
+  // intended difference from the side chip.
   return (
     <span
       title={
@@ -539,31 +540,8 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
             ? "Filled at a worse edge than your limit"
             : "Filled exactly at your limit"
       }
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "flex-end",
-        gap: 3,
-        padding: positive || negative ? "1px 6px" : 0,
-        borderRadius: 3,
-        background: bg,
-        color: tone,
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        fontWeight: positive || negative ? 600 : 400,
-        whiteSpace: "nowrap",
-      }}
+      style={valueChipStyle({ color: tone, bg, bold: true })}
     >
-      {positive && (
-        <span aria-hidden style={{ fontSize: 8, lineHeight: 1 }}>
-          ▲
-        </span>
-      )}
-      {negative && (
-        <span aria-hidden style={{ fontSize: 8, lineHeight: 1 }}>
-          ▼
-        </span>
-      )}
       {formatDollars(welfareNanos, { decimals: 2, sign: true })}
     </span>
   );

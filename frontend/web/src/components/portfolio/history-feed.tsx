@@ -347,7 +347,7 @@ function EventRow({ row }: { row: HistoryRow }) {
         {marketName || "—"}
       </span>
       <ActionCell side={event.side} />
-      <span>{event.outcome ? <SidePill outcome={event.outcome} /> : <Muted>—</Muted>}</span>
+      {event.outcome ? <SidePill outcome={event.outcome} /> : <Muted>—</Muted>}
       {/* `qty` is in SHARE_SCALE units (1000 = 1 share) — printing it raw showed
           a 12.5-share fill as "12500". */}
       <RightCell mono>{event.qty == null ? "—" : formatShareUnits(event.qty)}</RightCell>

@@ -48,7 +48,7 @@ import type { components } from "@/lib/api/schema";
 import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
-import { SidePill } from "./side-pill";
+import { SidePill, valueChipStyle } from "./side-pill";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -685,10 +685,10 @@ function PriceCell({
 }
 
 /**
- * Welfare cell — highlights how much better than your limit the order filled.
- * A positive surplus reads as a green pill, a negative one as a red pill; an
- * exact-limit fill or unknown welfare stays muted and flat. The signed $ amount
- * answers "how much better".
+ * Welfare cell — how much better than your limit the order filled, as a small
+ * tinted chip that matches the side pill (green surplus / red shortfall / muted
+ * exact-fill), with the value in bold as the one intended difference from the
+ * side chip. The signed $ answers "how much better".
  */
 function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
   if (welfareNanos == null) {
@@ -698,10 +698,10 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
   const negative = welfareNanos < 0n;
   const tone = positive ? "var(--yes)" : negative ? "var(--no)" : "var(--fg-3)";
   const bg = positive
-    ? "color-mix(in srgb, var(--yes) 16%, transparent)"
+    ? "color-mix(in srgb, var(--yes) 14%, transparent)"
     : negative
       ? "color-mix(in srgb, var(--no) 14%, transparent)"
-      : "transparent";
+      : "var(--fill-subtle)";
   return (
     <span
       title={
@@ -711,31 +711,8 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
             ? "Filled at a worse edge than your limit"
             : "Filled exactly at your limit"
       }
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "flex-end",
-        gap: 3,
-        padding: positive || negative ? "1px 6px" : 0,
-        borderRadius: 3,
-        background: bg,
-        color: tone,
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        fontWeight: positive || negative ? 600 : 400,
-        whiteSpace: "nowrap",
-      }}
+      style={valueChipStyle({ color: tone, bg, bold: true })}
     >
-      {positive && (
-        <span aria-hidden style={{ fontSize: 8, lineHeight: 1 }}>
-          ▲
-        </span>
-      )}
-      {negative && (
-        <span aria-hidden style={{ fontSize: 8, lineHeight: 1 }}>
-          ▼
-        </span>
-      )}
       {formatDollars(welfareNanos, { decimals: 2, sign: true })}
     </span>
   );
