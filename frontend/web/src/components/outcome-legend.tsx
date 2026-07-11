@@ -176,11 +176,6 @@ export function OutcomeLegend({
               onClick={() => {
                 if (!isHighlight) selectOutcome(o.marketId);
               }}
-              title={
-                isHighlight
-                  ? `${o.label} — current outcome`
-                  : `${o.label} — switch to this outcome`
-              }
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -231,11 +226,6 @@ export function OutcomeLegend({
                   isHighlight
                     ? `Remove ${o.label} and switch outcome`
                     : `Remove ${o.label} from chart`
-                }
-                title={
-                  isHighlight
-                    ? `${o.label} — remove & switch to another outcome`
-                    : `${o.label} — remove from chart`
                 }
                 style={{
                   display: "inline-flex",
@@ -354,7 +344,6 @@ export function OutcomeLegend({
                         fontSize: 13,
                         color: "var(--fg-1)",
                       }}
-                      title={o.label}
                     >
                       {o.shortLabel}
                     </span>

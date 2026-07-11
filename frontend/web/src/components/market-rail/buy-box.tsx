@@ -521,7 +521,6 @@ export function BuyBox({
               whiteSpace: "nowrap",
               minWidth: 0,
             }}
-            title={outcome.label}
           >
             {outcome.shortLabel}
           </span>

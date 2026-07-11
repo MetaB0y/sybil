@@ -950,7 +950,6 @@ function OutcomeKey({ outcomes }: { outcomes: EventOutcome[] }) {
       {outcomes.map((o, i) => (
         <span
           key={o.marketId}
-          title={o.label}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -1036,7 +1035,6 @@ function OutcomeFilter({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="Filter by outcome"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -1122,7 +1120,6 @@ function OutcomeFilter({
             <OutcomeOption
               key={o.marketId}
               label={o.shortLabel}
-              title={o.label}
               color={colorForOutcome(o, i)}
               selected={selected === o.marketId}
               onClick={() => pick(o.marketId)}
@@ -1136,13 +1133,11 @@ function OutcomeFilter({
 
 function OutcomeOption({
   label,
-  title,
   color,
   selected,
   onClick,
 }: {
   label: string;
-  title?: string;
   color?: string;
   selected: boolean;
   onClick: () => void;
@@ -1153,7 +1148,6 @@ function OutcomeOption({
       role="option"
       aria-selected={selected}
       onClick={onClick}
-      title={title ?? label}
       style={{
         display: "flex",
         alignItems: "center",
