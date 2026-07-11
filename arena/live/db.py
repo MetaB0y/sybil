@@ -33,6 +33,8 @@ class DecisionDB:
                 ("decisions", "fair_value_age_s", "REAL"),
                 ("decisions", "confidence", "REAL"),
                 ("decisions", "countercase", "TEXT"),
+                # SYB-114 Stage 1: resolution-criteria comprehension guard.
+                ("decisions", "restate", "TEXT"),
                 # SYB-114 Stage 0: explain every no-order sizing decision and
                 # retain market classification for category calibration.
                 ("decisions", "rejection_reason", "TEXT"),
@@ -83,6 +85,7 @@ class DecisionDB:
                     fair_value_age_s REAL,
                     confidence REAL,
                     countercase TEXT,
+                    restate TEXT,
                     rejection_reason TEXT,
                     market_category TEXT,
                     market_tags TEXT
@@ -175,6 +178,7 @@ class DecisionDB:
         fair_value_age_s: float | None = None,
         confidence: float | None = None,
         countercase: str = "",
+        restate: str = "",
         rejection_reason: str | None = None,
         market_category: str = "",
         market_tags: list[str] | None = None,
@@ -190,9 +194,9 @@ class DecisionDB:
                     article_urls, analysis, fair_value, market_price, orders,
                     motivation, raw_llm_response, llm_duration_s, balance,
                     yes_pos, no_pos, raw_fair_value, effective_fair_value,
-                    fair_value_age_s, confidence, countercase, rejection_reason,
-                    market_category, market_tags)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    fair_value_age_s, confidence, countercase, restate,
+                    rejection_reason, market_category, market_tags)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     market_id,
@@ -215,6 +219,7 @@ class DecisionDB:
                     fair_value_age_s,
                     confidence,
                     countercase,
+                    restate,
                     rejection_reason,
                     market_category,
                     json.dumps(market_tags or []),

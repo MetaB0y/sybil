@@ -42,6 +42,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_PARSE_CONFIDENCE = 0.5
 DEFAULT_COUNTERCASE = "No countercase supplied; treat this estimate cautiously."
+DEFAULT_RESTATE = ""
 DEDUP_SIMILARITY_THRESHOLD = 0.82
 
 
@@ -66,6 +67,7 @@ Key principles:
 - Only revise significantly for DIRECT evidence — tangential news warrants at most 1-2 cent
   adjustment
 - Official actions > direct quotes > analysis > speculation > rumors
+- Prefer original primary sources or wire reporting; discount aggregator and SEO-driven summaries
 - Most events have genuine uncertainty — avoid extreme probabilities unless evidence is
   extraordinary
 
@@ -75,6 +77,7 @@ Always respond in English regardless of article language."""
 @dataclass(frozen=True)
 class ParsedFairValue:
     fair_value: float
+    restate: str
     motivation: str
     analysis: str
     countercase: str
@@ -413,6 +416,7 @@ Recent estimates:
 
 Analyze and respond in this EXACT format:
 
+RESTATE: [1 sentence — paraphrase exactly what must happen for this market to resolve YES]
 FAIR_VALUE: [Your probability estimate, 0.01-0.99]
 COUNTERCASE: [1 sentence — strongest reason this estimate could be wrong]
 CONFIDENCE: [0.0-1.0 confidence in this fair value; lower for indirect, stale, duplicated, or conflicting evidence]
@@ -435,6 +439,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             "FAIR_VALUE",
             "MOTIVATION",
             "ORDERS",
+            "RESTATE",
         )
         keyword_pattern = "|".join(labels)
         match = re.search(
@@ -474,6 +479,13 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             return DEFAULT_COUNTERCASE
         return countercase
 
+    def _parse_restate(self, text: str) -> str:
+        restate = self._extract_section(text, "RESTATE")
+        if not restate:
+            self._record_parse_fallback("restate_missing")
+            return DEFAULT_RESTATE
+        return restate
+
     def _parse_fair_value(self, text: str) -> ParsedFairValue | None:
         fv_match = re.search(r"FAIR_VALUE:\s*([\d.]+)", text, re.IGNORECASE)
         if not fv_match:
@@ -496,6 +508,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
         return ParsedFairValue(
             fair_value=fair_value,
+            restate=self._parse_restate(text),
             motivation=motivation,
             analysis=analysis,
             countercase=countercase,
@@ -606,6 +619,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
                 market_id=market_id,
                 persona_key=self.persona_key,
                 fair_value=fair_value,
+                restate=parsed.restate,
                 motivation=motivation,
                 analysis=analysis,
                 countercase=parsed.countercase,

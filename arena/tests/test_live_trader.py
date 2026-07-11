@@ -62,6 +62,7 @@ def test_record_trade_logs_orders_to_db():
         orders=[order],
         motivation="Kelly rebalance to target position",
         analysis="",
+        restate="YES resolves if the named event occurs.",
         raw_llm_response="",
         llm_duration_s=0.0,
         market_price=0.55,
@@ -73,6 +74,7 @@ def test_record_trade_logs_orders_to_db():
     db.log_decision.assert_called_once()
     payload = db.log_decision.call_args.kwargs
     assert payload["market_id"] == 7
+    assert payload["restate"] == "YES resolves if the named event occurs."
     assert payload["orders"] == [
         {
             "market_id": 7,
@@ -165,7 +167,7 @@ def test_db_persists_and_reattaches_bot_account(tmp_path):
         db.close()
 
 
-def test_decision_db_migrates_old_decisions_table_with_rejection_reason(tmp_path):
+def test_decision_db_migrates_old_decisions_table_with_stage_metadata(tmp_path):
     from live.db import DecisionDB
     import sqlite3
 
@@ -183,6 +185,7 @@ def test_decision_db_migrates_old_decisions_table_with_rejection_reason(tmp_path
     try:
         columns = {row[1] for row in db.conn.execute("PRAGMA table_info(decisions)")}
         assert "rejection_reason" in columns
+        assert "restate" in columns
     finally:
         db.close()
 
@@ -251,6 +254,7 @@ async def test_rebalance_records_no_order_rejection_reason(
             fair_value=fair_value,
             motivation="fixture",
             analysis="fixture analysis",
+            restate="YES resolves if the fixture event occurs.",
             ts=now - timedelta(seconds=age_s),
         )
     )
@@ -260,3 +264,6 @@ async def test_rebalance_records_no_order_rejection_reason(
     assert orders == []
     assert db.log_decision.call_args.kwargs["rejection_reason"] == expected
     assert db.log_decision.call_args.kwargs["orders"] == []
+    assert db.log_decision.call_args.kwargs["restate"] == (
+        "YES resolves if the fixture event occurs."
+    )

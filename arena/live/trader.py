@@ -62,6 +62,7 @@ class TradeRecord:
     effective_fair_value: float | None
     fair_value_age_s: float | None
     confidence: float | None
+    restate: str
     countercase: str
     rejection_reason: str | None
     orders: list[OrderSpec]
@@ -82,6 +83,7 @@ class FairValueDecisionContext:
     age_s: float | None
     freshness_factor: float
     confidence: float | None
+    restate: str
     countercase: str
 
 
@@ -182,6 +184,7 @@ class LiveLlmTrader(BaseAgent):
         self.fair_values: dict[int, float] = {}
         self.fair_value_timestamps: dict[int, datetime] = {}
         self.fair_value_confidences: dict[int, float | None] = {}
+        self.fair_value_restates: dict[int, str] = {}
         self.fair_value_countercases: dict[int, str] = {}
         self._latest_rebalance_context: dict[int, FairValueDecisionContext] = {}
         self._latest_rejection_reasons: dict[int, str | None] = {}
@@ -216,6 +219,7 @@ class LiveLlmTrader(BaseAgent):
         effective_fair_value: float | None = None,
         fair_value_age_s: float | None = None,
         confidence: float | None = None,
+        restate: str = "",
         countercase: str = "",
         rejection_reason: str | None = None,
     ) -> None:
@@ -234,6 +238,7 @@ class LiveLlmTrader(BaseAgent):
             effective_fair_value=effective_fair_value,
             fair_value_age_s=fair_value_age_s,
             confidence=confidence,
+            restate=restate,
             countercase=countercase,
             rejection_reason=rejection_reason,
             orders=orders,
@@ -281,6 +286,7 @@ class LiveLlmTrader(BaseAgent):
                 effective_fair_value=effective_fair_value,
                 fair_value_age_s=fair_value_age_s,
                 confidence=confidence,
+                restate=restate,
                 countercase=countercase,
                 rejection_reason=rejection_reason,
                 market_category=market_category,
@@ -316,12 +322,14 @@ class LiveLlmTrader(BaseAgent):
         self.fair_values[update.market_id] = update.fair_value
         self.fair_value_timestamps[update.market_id] = update.ts or observed_at
         self.fair_value_confidences[update.market_id] = update.confidence
+        self.fair_value_restates[update.market_id] = update.restate
         self.fair_value_countercases[update.market_id] = update.countercase
 
     def _forget_fair_value(self, market_id: int) -> None:
         self.fair_values.pop(market_id, None)
         self.fair_value_timestamps.pop(market_id, None)
         self.fair_value_confidences.pop(market_id, None)
+        self.fair_value_restates.pop(market_id, None)
         self.fair_value_countercases.pop(market_id, None)
         self._latest_updates.pop(market_id, None)
 
@@ -356,6 +364,7 @@ class LiveLlmTrader(BaseAgent):
             age_s=fresh_fv.age_s if fresh_fv else None,
             freshness_factor=fresh_fv.freshness_factor if fresh_fv else 0.0,
             confidence=self.fair_value_confidences.get(market_id),
+            restate=self.fair_value_restates.get(market_id, ""),
             countercase=self.fair_value_countercases.get(market_id, ""),
         )
 
@@ -542,6 +551,7 @@ class LiveLlmTrader(BaseAgent):
                     "effective_fair_value": effective_fv,
                     "fair_value_age_s": context.age_s if context else None,
                     "confidence": context.confidence if context else None,
+                    "restate": context.restate if context else "",
                     "countercase": context.countercase if context else "",
                     "orders": market_orders,
                     "motivation": motivation,
@@ -569,6 +579,7 @@ class LiveLlmTrader(BaseAgent):
                     effective_fair_value=entry["effective_fair_value"],
                     fair_value_age_s=entry["fair_value_age_s"],
                     confidence=entry["confidence"],
+                    restate=entry["restate"],
                     countercase=entry["countercase"],
                     rejection_reason=entry["rejection_reason"],
                 )

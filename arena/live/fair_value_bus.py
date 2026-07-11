@@ -42,6 +42,7 @@ class FairValueUpdate:
     fair_value: float
     motivation: str
     analysis: str
+    restate: str = ""
     countercase: str = ""
     confidence: float | None = None
     articles: list[LiveArticle] = field(default_factory=list)
