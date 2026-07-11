@@ -33,12 +33,9 @@ sybil/
 ├── contracts/                     # Solidity + Foundry L1 settlement/vault contracts
 ├── viz/                           # Python: Streamlit visualization dashboard (Rust solver)
 ├── fuzz/                          # Cargo-fuzz targets (separate workspace)
-├── design/                        # Historical design notes (superseded by docs/architecture/)
-│   ├── architecture.md            #   [superseded] Solver design, key abstractions
-│   ├── architecture-diagrams.md   #   [superseded] System overview diagrams
-│   ├── solver-benchmarks.md       #   Comparative solver evaluation
-│   └── welfare-vs-volume.md       #   Optimization objective tradeoffs (deep-dive)
-├── docs/architecture/             # Canonical architecture vault, grouped into numbered sections
+├── design/                        # Proposals, proofs, research, and historical archive
+├── docs/                          # Current spec, ADRs, runbooks, security/custody guides
+│   └── architecture/              # Canonical architecture vault, grouped by system flow
 ├── scripts/check-vault.sh         # Vault validation (links, frontmatter, staleness)
 ├── AGENTS.md                      # This file
 ├── justfile                       # Task runner (run `just` to see all commands)
@@ -131,11 +128,11 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 ## Architecture Knowledge Base
 
-An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~48 interlinked notes covering every major concept. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
+An Obsidian vault at `docs/architecture/` is the canonical architectural spec. Its 51 interlinked notes cover the major concepts. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
 
 **Entry point**: `docs/architecture/Sybil Architecture.md`
 
-**Linear walkthrough**: `docs/SPEC.md` is a single connected document covering the whole system (domain model → solvers → sequencer → verification → ZK → contracts → API → arena → ops → invariants). Read it for orientation; use the vault for per-concept depth. `design/architecture-review-2026-07.md` tracks simplification proposals and known doc drift.
+**Linear walkthrough**: `docs/SPEC.md` is a single connected document covering the whole system (domain model → solvers → sequencer → verification → ZK → contracts → API → arena → ops → invariants). Read it for orientation; use the vault for per-concept depth. `design/` is proposal/research material and `design/archive/` is historical, not current-state guidance.
 
 **When to read**: Before modifying any crate, read the notes listed in that crate's AGENTS.md under "Architecture Notes". This gives you the design context and invariants you need to preserve.
 
@@ -149,7 +146,7 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~
 | Solvers | Solver Landscape, LP Solver, EG Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
 | Sequencer | Block Lifecycle, Order Admission, Settlement, Pending Orders and TTL |
 | API | REST API, SSE Block Stream, P256 Authentication |
-| Oracle | Oracle Lifecycle, Market Resolution |
+| Oracle | Market Resolution |
 | Verification | Four-Layer Verification, Block Witness, ZK Integration Path |
 | Economics | Welfare Maximization, Welfare vs Volume, MM Budget Constraint, LP Duality and Clearing Prices, Minting |
 | Arena | Bot Framework, LLM Trader, Python SDK |
@@ -174,9 +171,9 @@ just docs-verify "LP Solver"   # Set last_verified to today (needs notesmd-cli)
 
 ```bash
 just deploy-api                    # Build + deploy sybil-api + polymarket mirror
-just deploy-arena $OPENROUTER_KEY  # Build + deploy arena bots
-just deploy-dashboard              # Deploy Streamlit dashboard
-just deploy-all $OPENROUTER_KEY    # Everything at once
+just deploy-arena                  # Build + deploy arena bots/dashboard
+just deploy-web                    # Build + deploy Next.js frontend
+just deploy-all                    # Deploy the full stack
 
 just deploy-logs                   # Tail sybil-api logs
 just deploy-logs sybil-polymarket  # Tail polymarket mirror logs
@@ -186,8 +183,9 @@ just deploy-shell                  # SSH into server
 
 ### Dashboards
 
-- `https://172-104-31-54.nip.io/dev` — web UI dev console (Next.js): markets, MM state, live blocks, aggregates, bot decisions. (Replaced the old Alpine.js static console served by `sybil-api` at `/`, deleted in SYB-174.)
-- `http://172.104.31.54:8501/` — Streamlit: arena bot decisions, PnL, news feed
+- `https://172-104-31-54.nip.io/` — public web UI and API
+- `https://arena.172-104-31-54.nip.io/` — authenticated Streamlit arena dashboard
+- `https://grafana.172-104-31-54.nip.io/` — authenticated operations dashboard
 
 ## Development Notes
 

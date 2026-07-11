@@ -8,7 +8,7 @@ date: 2026-07-07
 # Possibility Space — features & design elements worth wanting
 
 A forward brainstorm, deliberately *beyond* the finish-what's-started backlog in
-`docs/review/30-roadmap.md`. The organizing principle is Ousterhout's: the
+the historical audit's `30-roadmap.md`. The organizing principle is Ousterhout's: the
 **deepest** opportunities exploit structure Sybil already has rather than bolt on
 against it. Sybil's three structural assets are unusual in combination:
 

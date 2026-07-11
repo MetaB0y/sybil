@@ -96,4 +96,4 @@ Core resolution is `ResolutionPolicy::Immediate`: one registered feed signs a pa
 - [[Data Availability]]
 - [[L1 Settlement and Vault]]
 - [[Operator Replacement]]
-- [Do-not-break invariants](../../review/40-do-not-break.md)
+- [Consolidated invariants](../../SPEC.md#11-consolidated-invariants)

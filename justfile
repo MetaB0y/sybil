@@ -431,9 +431,10 @@ arena-demo-quick:
 
 # ── Architecture Vault ───────────────────────────────────────────────────────
 
-# Validate vault (links, frontmatter, staleness, orphans)
+# Validate vault metadata/paths and build the full documentation site strictly.
 docs-check:
     ./scripts/check-vault.sh
+    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build --strict
 
 # List notes with last_verified > 90 days
 docs-stale:
@@ -647,7 +648,7 @@ docs-serve:
 
 # Build the static docs site into ./site
 docs-build:
-    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build
+    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build --strict
 
 # ── Contracts ───────────────────────────────────────────────────────────────
 

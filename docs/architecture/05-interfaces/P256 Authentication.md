@@ -71,7 +71,7 @@ Signed bridge withdrawals are scaffolding for [[L1 Settlement and Vault]] rather
 - Unsigned path available for dev mode
 - Hardware-compatible: Secure Enclave, StrongBox, FIDO2 keys
 - ZK-friendly: efficient P256 verification circuits exist
-- Recovery: register a second passkey while one existing account key still works; see `docs/passkey-recovery.md`
+- Recovery: register a second passkey while one existing account key still works; see [Passkey recovery](../../passkey-recovery.md)
 
 ## Where This Lives
 > `crates/sybil-api/src/routes/` — signed order and bridge-withdrawal endpoints

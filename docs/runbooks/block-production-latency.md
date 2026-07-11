@@ -92,7 +92,9 @@ and `_count` for the average. **There is no `_bucket` series** — use the
 - **Dev only:** `POST /v1/simulation/pause` and `/v1/simulation/resume` gate block
   production (dev-mode only, 403 in prod) — useful to stabilise while inspecting.
 - **Host saturation:** shed load; if the host is in the zombie state, reboot the
-  Linode (see `docs/review/18-ops-deployment.md` for the death-detection plan).
+  deployment host; use the external checks in
+  [`synthetic-monitoring.md`](synthetic-monitoring.md) so host failure is not
+  mistaken for a healthy quiet system.
 
 ---
 

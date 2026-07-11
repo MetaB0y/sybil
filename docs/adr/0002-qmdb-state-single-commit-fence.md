@@ -71,4 +71,4 @@ recovery is load-bearing and fail-closed.
 
 **Follow-ups:** the single-sequenced WAL that rides this fence is
 [ADR-0010](0010-acknowledged-write-wal.md); `store.rs` decomposition keeps the
-fence whole (`docs/review/god-module-decomposition.md` §2).
+fence whole (historical [decomposition review](https://github.com/MetaB0y/sybil/blob/main/design/archive/review-2026-07-02/god-module-decomposition.md) §2).

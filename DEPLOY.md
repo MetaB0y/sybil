@@ -32,6 +32,8 @@ Create `/opt/sybil/.env` on the deploy host before running prod compose commands
 
 ```bash
 SYBIL_SERVICE_TOKEN=<strong random bearer token for service/operator routes>
+SYBIL_WEBAUTHN_RP_ID=172-104-31-54.nip.io
+SYBIL_WEBAUTHN_ORIGIN=https://172-104-31-54.nip.io
 GF_SECURITY_ADMIN_PASSWORD=<strong grafana admin password>
 CADDY_OPS_AUTH_USER=ops
 CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
@@ -41,6 +43,11 @@ CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 `sybil-arena`. In prod, service routes fail closed when it is missing. Optional
 `SYBIL_CORS_ORIGINS` may be set to a comma-separated browser-origin allowlist;
 empty/unset keeps CORS same-origin only.
+
+`SYBIL_WEBAUTHN_RP_ID` is the hostname only; `SYBIL_WEBAUTHN_ORIGIN` is the
+exact browser origin including `https://`. Both must match the hostname baked
+into the web image via `NEXT_PUBLIC_WEBAUTHN_RP_ID`; changing them invalidates
+the expected WebAuthn ceremony origin and requires a frontend rebuild.
 
 Generate the Caddy hash with:
 

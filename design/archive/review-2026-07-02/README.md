@@ -1,4 +1,10 @@
-# Sybil Architecture Review — 2026-07
+# Sybil Architecture Review — 2026-07 (historical)
+
+> **Archived:** this audit describes the repository as inspected on 2026-07-02.
+> Many findings and proposed deletions were subsequently addressed or made
+> obsolete. Preserve it for rationale and regression archaeology, but use
+> [`../../../docs/SPEC.md`](../../../docs/SPEC.md), current architecture notes,
+> ADRs, code, and tests for present behavior.
 
 This directory is a full, code-grounded architectural review of the Sybil monorepo. It was produced by deep-reading every subsystem (Rust workspace, Python arena, Solidity contracts, ZK stack, frontends, docs, and ops) and cross-checking the load-bearing findings against the source. It is written for implementers: every finding cites files and lines, states the failure precisely, and gives a concrete fix.
 

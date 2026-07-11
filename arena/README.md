@@ -1,84 +1,75 @@
-# Sybil Arena
+# Sybil arena
 
-AI Agent Trading Competition for Sybil Prediction Markets.
+The Python client, simulation framework, and live agent system that trade
+through the same public API as any other Sybil participant. The arena is a
+consumer of the exchange, not part of the matching or validity boundary.
 
-## Quick Start
+## Two ways to use it
 
-### 1. Start Sybil API Server
+| Mode | Entry point | Purpose |
+|---|---|---|
+| Deterministic competition/simulation | `examples/`, `sim/` | Develop bots and replay controlled scenarios |
+| Live arena | `python -m live.runner` | Run analyst/sizer agents, synthetic flow, metrics, and decision logging against an API |
 
-```bash
-# From repo root
-cargo run --release -p sybil-api -- --dev-mode --port 3000
+```mermaid
+flowchart LR
+    NEWS["News and synthetic feeds"] --> ANALYST["Analysts / strategies"]
+    ANALYST --> CLIENT["Python SybilClient"]
+    CLIENT -->|"signed REST + WS/SSE"| API["sybil-api"]
+    API --> BLOCKS["Blocks and fills"]
+    BLOCKS --> CLIENT
+    ANALYST --> DB["Decision SQLite"]
+    DB --> DASH["Streamlit dashboard"]
 ```
 
-### 2. Install Python Dependencies
+## Quick start
+
+Start a development API from the repository root:
+
+```bash
+cargo run --release -p sybil-api -- --dev-mode --port 3001
+```
+
+Then install and run a local competition:
 
 ```bash
 cd arena
-uv sync  # or: pip install -e .
+uv sync
+uv run python examples/full_competition.py
 ```
 
-### 3. Run a Test Competition
+For the live LLM arena, provide secrets through the environment and inspect all
+options with `--help`:
 
 ```bash
-python examples/simple_test.py
+OPENROUTER_API_KEY=... uv run python -m live.runner --help
 ```
 
-## Architecture
+Do not put provider keys in source, command examples committed with real
+values, or process arguments on a deployed host. The deployment path reads the
+key from `/opt/sybil/arena.env`.
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Bot 1     │     │   Bot 2     │     │   Bot N     │
-│  (Python)   │     │  (Python)   │     │  (Python)   │
-└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
-       │                   │                   │
-       └───────────────────┼───────────────────┘
-                           │
-                  ┌────────▼────────┐
-                  │  sybil-client   │
-                  │  (Python SDK)   │
-                  └────────┬────────┘
-                           │ HTTP/SSE
-                  ┌────────▼────────┐
-                  │   sybil-api     │
-                  │  (Rust server)  │
-                  └─────────────────┘
-```
+## Layout
 
-## Components
+| Path | Responsibility |
+|---|---|
+| `sybil_client/` | Hand-written async SDK over a generated OpenAPI substrate |
+| `bots/` | Generic competition agents |
+| `sim/` | Clock, LLM trader, replay runner, and results |
+| `live/` | Production-style analysts, sizing, market selection, metrics, and decision DB |
+| `markets/` | Market-specific personas, sources, configuration, and local datasets |
+| `feeds/` | Test/synthetic feeds |
+| `scripts/` | Calibration, outcome recording, and orchestration utilities |
+| `viz/` | Streamlit analysis views |
+| `tests/` | Python tests |
 
-- **sybil_client/**: Python SDK for sybil-api
-- **bots/**: Trading bot implementations
-- **feeds/**: Data feed integrations (sports, crypto)
-- **scripts/**: Competition orchestration
-- **examples/**: Example competitions
+## Checks and generated code
 
-## Creating a Bot
-
-```python
-from sybil_client import SybilClient
-from bots.base import BaseAgent
-
-class MyBot(BaseAgent):
-    async def on_block(self, block):
-        # Your trading logic here
-        orders = []
-        for market_id, prices in block.clearing_prices.items():
-            if self.should_trade(market_id, prices):
-                orders.append(self.make_order(market_id, prices))
-        return orders
+```bash
+just arena-check       # ruff + pytest, from repo root
+just arena-sdk-regen   # regenerate sybil_client/_generated from live OpenAPI
 ```
 
-## Running a Competition
-
-```python
-from scripts.run_competition import run_competition
-
-standings = await run_competition(
-    bots=[bot1, bot2, bot3],
-    duration_seconds=300,
-    resolve_callback=resolve_markets
-)
-```
-
-See [PLAN.md](PLAN.md) for detailed implementation plan.
+Never hand-edit `sybil_client/_generated/`; see
+[`sybil_client/README.md`](sybil_client/README.md). Architecture and invariants
+are summarized in [`docs/architecture/06-agents/`](../docs/architecture/06-agents/).

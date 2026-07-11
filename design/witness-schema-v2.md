@@ -23,8 +23,9 @@ Accepted rationale: the unproven set is historical/derived (candles, PnL curves,
 scores) — non-essential, and a sequencer has no incentive to lie about data it cannot
 monetize; every balance, position, reservation, and fill remains proven.
 
-Companion reads: `docs/review/02-cross-cutting-themes.md` (Theme 2, "verify don't log"),
-`docs/review/15-verification-zk.md` (H4, ZK-9), `design/architecture-review-2026-07.md`
+Companion historical reads: `design/archive/review-2026-07-02/02-cross-cutting-themes.md`
+(Theme 2, "verify don't log") and `design/archive/review-2026-07-02/15-verification-zk.md`
+(H4, ZK-9); also `design/architecture-review-2026-07.md`.
 (§P1 kernel/views split). Ground truth for the current encoding:
 `crates/sybil-verifier/src/witness_schema.rs`, `crates/sybil-verifier/src/snapshot_schema.rs`,
 `crates/sybil-verifier/src/sidecar.rs`, `crates/sybil-zk/src/lib.rs`.

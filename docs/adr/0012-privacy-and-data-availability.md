@@ -20,7 +20,7 @@ superseded_by: []
 > key*, stored at blinded slots in a mirrorable bucket, with a one-word-per-block
 > L1 DA-commitment + availability challenge, and self-custody demoted to an
 > optional robustness cache so **users need not self-custody anything** — is
-> specified in [`design/data-availability-design.md`](../../design/data-availability-design.md).
+> specified in [`design/data-availability-design.md`](https://github.com/MetaB0y/sybil/blob/main/design/data-availability-design.md).
 > Cost: ~1 hash/block on-chain + ~300 MB static storage at 1 M accounts.
 
 ## Context
@@ -69,7 +69,7 @@ account's actual balance/positions) is secret.
      operator is gone is stuck.
    - **Decision (resolved 2026-07-07): encrypted-per-account DA**, concretely the
      three-layer HPKE-to-view-key scheme in
-     [`design/data-availability-design.md`](../../design/data-availability-design.md).
+     [`design/data-availability-design.md`](https://github.com/MetaB0y/sybil/blob/main/design/data-availability-design.md).
      Self-custody is retained only as **Layer 1** (an optional local cache), *not*
      the exit requirement — the operator-hosted encrypted blobs let a user on a
      fresh device re-fetch-and-decrypt with nothing kept. Phased:
@@ -100,7 +100,7 @@ sealed to a user-derivable key), but it is new crypto + key-management; (c) the
 matching engine still *sees* all orders to clear a batch — this ADR makes the
 data private **at rest and in transit**, not from the operator; operator-blind
 batches are a separate, later step
-([sealed-bid-batch-auctions](../../design/sealed-bid-batch-auctions.md)).
+([sealed-bid-batch-auctions](https://github.com/MetaB0y/sybil/blob/main/design/sealed-bid-batch-auctions.md)).
 
 **Follow-ups:** SYB-60 (auth-gate reads), SYB-120 (encrypted DA); update
 [ADR-0006](0006-witness-v3-full-snapshot.md) framing; the escape guest

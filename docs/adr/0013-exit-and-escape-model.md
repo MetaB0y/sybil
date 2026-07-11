@@ -33,7 +33,7 @@ oracle resolve on L1, or 50/50, or last batch price?*
    **No L1 oracle; no 50/50.** The last clearing price is the market's most recent
    batch price — the fairest oracle-free estimate of a position's worth.
 3. **L1 never resolves markets.** Resolution stays off-chain in the sequencer
-   ([[Oracle Lifecycle]]); escape never needs an outcome, only a price.
+   ([[Market Resolution]]); escape never needs an outcome, only a price.
 
 ## Why last-clearing-price is safe (and simple)
 
@@ -73,6 +73,6 @@ now *valued* in escape, not only recovered via replacement — replacement remai
 the path to *continue trading*, not to exit).
 
 **Follow-ups:** commit `last_clearing_price` per market leaf; the escape-claim
-guest ([escape-claim-guest](../../design/escape-claim-guest.md)) computes the
+guest ([escape-claim-guest](https://github.com/MetaB0y/sybil/blob/main/design/escape-claim-guest.md)) computes the
 formula above; escape-mode UX may be rough but must be tested rigorously
 ([ADR-0011](0011-validium-stance-no-backcompat.md)).

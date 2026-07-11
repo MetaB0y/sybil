@@ -49,16 +49,14 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
 
-# Keep tooling debris and Obsidian internals out of the built site
+# Keep Obsidian internals out of the built site
 exclude_docs: |
   node_modules/
-  package.json
-  package-lock.json
   .obsidian/
 
 # Nav is auto-generated from the docs/ tree (README.md acts as the index).
-# Directories (architecture/, adr/, review/, runbooks/, strategy/) become
-# sections; keeping this implicit avoids nav churn as docs move.
+# Directories (architecture/, adr/, runbooks/) become sections; keeping this
+# implicit avoids nav churn as current documentation moves.
 
 validation:
   links:

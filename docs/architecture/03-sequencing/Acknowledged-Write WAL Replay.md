@@ -22,7 +22,8 @@ scope here except where replay interacts with it.
 
 ## Landed context this analysis assumes
 
-Read `docs/review/40-do-not-break.md` first. The relevant invariants:
+Read the [consolidated system invariants](../../SPEC.md#11-consolidated-invariants)
+first. The relevant persistence invariants are:
 
 - **Block-boundary persistence (inv. 9).** The block is the transactional unit;
   no event sourcing. WAL rows are *not* an event log — they are a between-block

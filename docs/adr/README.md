@@ -12,9 +12,8 @@ Sybil is a single-operator validium: many of its choices are **load-bearing and
 expensive to reverse** (they're baked into the guest commitment, the state-root
 schema, or the L1 contracts). When a future change proposes to touch one of
 these, the first question is always *"why is it this way?"* — and today that
-answer is scattered across math proofs (`design/*.typ`), vault notes
-(`docs/architecture/*`), and the code review (`docs/review/*`). An ADR is the
-single place that answer lives.
+answer may begin in math proofs (`design/*.typ`), architecture notes, or a dated
+review. An ADR is the stable place the accepted answer lives.
 
 A good ADR is **short** (one page), **honest about trade-offs** (every decision
 costs something), and **immutable once accepted**. We do not edit an accepted

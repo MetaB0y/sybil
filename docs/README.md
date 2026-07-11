@@ -2,15 +2,15 @@
 tags: [moc, guide]
 layer: core
 status: current
-last_verified: 2026-07-07
+last_verified: 2026-07-11
 ---
 
 # Sybil — Documentation & Architecture Guide
 
-> **Sybil is a verifiable prediction-market exchange.** Traders bet on
+> **Sybil is a validity-oriented prediction-market exchange.** Traders bet on
 > outcomes ("Will X happen?"); every block, all pending orders clear
-> *together* at one fair price; and every block is *proven correct* so nobody —
-> not even the operator — has to be trusted to run it honestly.
+> *together* at one uniform price; and the system is built so every state
+> transition can be independently checked and proven.
 
 This is the front door. It gives you the whole system in one read, then points
 you to the right depth. If you read nothing else, read the **six ideas** below —
@@ -26,11 +26,12 @@ exchange takes every eligible order and clears them **all at once** with a welfa
 no first-mover advantage, everyone in the batch gets the same price. The result
 (fills, prices, new balances) is sealed into a **block** with a cryptographic
 **state root**. A **verifier** re-derives that block from first principles, and a
-**ZK prover** turns that check into a succinct proof posted to Ethereum. Because
-the full state is published, anyone can reconstruct it — so if the operator ever
-misbehaves or disappears, users can **replace the operator or withdraw their
-cash on L1 without permission**. On top of all this runs an **arena** of trading
-bots that compete through the same public API.
+**ZK prover** turns that check into a succinct proof for Ethereum. Ethereum
+anchors collateral and accepted roots; retained witness data supports auditing
+and disaster recovery. Conservative cash escape is implemented, while
+production data availability and hostile-operator replacement still require an
+operational/governance policy. On top of this runs an **arena** of trading bots
+that compete through the same public API.
 
 ```mermaid
 graph LR
@@ -45,7 +46,7 @@ graph LR
     BLOCK -->|WS| T
     BLOCK -->|"witness"| VER["Verifier<br/>(4 layers)"]
     VER --> PROVER["ZK prover<br/>(OpenVM)"] --> L1["Ethereum<br/>vault + roots"]
-    BLOCK -.->|"published state"| ESCAPE["Escape / operator<br/>replacement"]
+    BLOCK -.->|"retained witness / DA"| ESCAPE["Recovery / conservative<br/>cash escape"]
     ESCAPE -.-> L1
 ```
 
@@ -54,7 +55,7 @@ graph LR
 ## Six ideas that explain the whole system
 
 Read these in order — each builds on the last. Each links to the deep note and,
-where relevant, the decision record (**[ADR](adr/)**) that says *why*.
+where relevant, the decision record (**[ADR](adr/README.md)**) that says *why*.
 
 **1. Frequent Batch Auctions — time doesn't buy you a better price.**
 Instead of a continuous order book where the fastest trader wins, Sybil collects
@@ -85,11 +86,10 @@ production prover and verifier-adapter deployment are still operational work. �
 [[Four-Layer Verification]], [ADR-0003](adr/0003-guest-host-crate-split.md),
 [ADR-0006](adr/0006-witness-v3-full-snapshot.md)
 
-**5. The architecture has conservative recovery and escape paths.**
-Because every block publishes enough data to rebuild the full state, a
-replacement tooling can rebuild the last good root, and the escape-claim path
+**5. Validity is not availability — recovery needs both code and retained data.**
+Canonical witnesses can rebuild the last good state, and the escape-claim path
 can prove a conservative cash floor on L1. Disaster recovery is implemented;
-hostile-operator replacement still needs governance and production DA. → [[L1 Settlement and Vault]],
+hostile-operator replacement still needs governance and production DA. → [[Data Availability]], [[L1 Settlement and Vault]],
 [ADR-0005](adr/0005-escape-via-operator-replacement.md)
 
 **6. Bots are first-class — the exchange is an agent arena.**
@@ -131,31 +131,32 @@ discipline is [ADR-0007](adr/0007-canonical-bytes-domain-separation.md).
 
 ## The documentation map — where things live and why
 
-Sybil's docs are five trees with five different jobs. Use the right one:
+Sybil separates current reference material from design work and history:
 
 | Tree | Question it answers | When to read |
 |---|---|---|
 | **[`architecture/`](architecture/Sybil%20Architecture.md)** (the MOC) | *How does it work today?* | Understanding a subsystem |
-| **[`adr/`](adr/)** | *Why is it this way?* | Before changing a load-bearing decision |
-| **[`../design/`](../design/)** | *Where is it going?* (specs, proofs, brainstorm) | Planning new work |
-| **[`review/`](review/00-executive-summary.md)** | *What's the honest state?* (bugs, debt, do-not-break) | Before touching validity-critical code |
-| **[`runbooks/`](runbooks/)** | *How do I operate it?* | Deploying / on-call |
+| **[`adr/`](adr/README.md)** | *Why is it this way?* | Before changing a load-bearing decision |
+| **[`SPEC.md`](SPEC.md)** | *How does the whole system connect?* | Orientation and cross-cutting invariants |
+| **[`runbooks/`](deployment.md#choose-the-right-procedure)** | *How do I operate it?* | Deploying / on-call |
+| **[`design/`](https://github.com/MetaB0y/sybil/blob/main/design/README.md)** | *What are we considering or researching?* | Planning; verify status against code |
 
 **Reading paths:**
 - *New to Sybil* → the six ideas above → [[Frequent Batch Auctions]] →
   [[Block Lifecycle]] → [architecture MOC](architecture/Sybil%20Architecture.md).
-- *Changing validity-critical code* → [`review/40-do-not-break.md`](review/40-do-not-break.md)
-  → the relevant ADR → [[Block Witness]] / [[State Root Schema]].
+- *Changing validity-critical code* → [consolidated invariants](SPEC.md#11-consolidated-invariants)
+  → the relevant ADR → [[Threat Model]] / [[Block Witness]] / [[State Root Schema]].
 - *Operating a deployment* → [[Deployment Profiles]] →
-  [`runbooks/devnet-redeploy.md`](runbooks/devnet-redeploy.md).
+  [deployment index](deployment.md) → the relevant runbook.
 - *Building a trading bot* → [[REST API]] → [[P256 Authentication]] →
   [[Bot Framework]] → [[Python SDK]].
 
 > **Status legend.** Notes carry a `status:` in their frontmatter — `current`
 > (built & verified) or a planned/draft marker. When a note describes something
-> not yet built, it says so. The **[review](review/00-executive-summary.md)** tree
-> is the ground truth for built-vs-aspirational; the **[design](../design/)** tree
-> is deliberately forward-looking.
+> not yet built, it says so. The implementation and tests are final truth;
+> `SPEC.md` and `architecture/` are the maintained explanation. `design/` is
+> deliberately forward-looking and `design/archive/` is historical evidence,
+> not current guidance.
 
 ---
 

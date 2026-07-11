@@ -9,8 +9,9 @@ date: 2026-07-07
 
 The concrete "crisp boundaries" deliverable: turn the diagnosed duplicated
 validity-critical encodings into a single owning module. This is not a re-diagnosis —
-`design/architecture-review-2026-07.md` (P5) and `docs/review/02-cross-cutting-
-themes.md` (Theme 6) already found the problem; this says exactly what to build.
+`design/architecture-review-2026-07.md` (P5) and the archived review's
+`02-cross-cutting-themes.md` (Theme 6) already found the problem; this says
+exactly what to build.
 
 ## The problem, in one sentence
 

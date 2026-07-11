@@ -40,6 +40,7 @@ arena/markets/*/datasets/
 arena/*/datasets/
 design/*.pdf
 docs/architecture/.obsidian/
+site/
 polymarket_mapping.json
 .kamal/secrets
 lean/.lake/

@@ -10,7 +10,7 @@ last_verified: 2026-07-07
 The integration layer over today's design work: **given all the specs, in what
 order does it happen, and why.** This sequences by *dependency*, not wish — it
 points into the detailed docs rather than repeating them. Complements the
-finding-level [`../docs/review/30-roadmap.md`](../docs/review/30-roadmap.md); this
+finding-level [historical audit roadmap](archive/review-2026-07-02/30-roadmap.md); this
 is the founder's-eye execution spine.
 
 The organizing spine is the **trust-minimization sequence** from the
@@ -75,7 +75,7 @@ Low-risk, unblock everything else. Can run in parallel (codex).
 
 | Do | Why now | Ref |
 |---|---|---|
-| **God-split** (`actor`→`store`→`sequencer`) | keys_digest should build on clean boundaries; pure relocation, low risk | SYB-232 · [god-module-decomposition](../docs/review/god-module-decomposition.md) |
+| **God-split** (`actor`→`store`→`sequencer`) | keys_digest should build on clean boundaries; pure relocation, low risk | SYB-232 · [historical decomposition plan](archive/review-2026-07-02/god-module-decomposition.md) |
 | **Guest-rebuild as a scoped merge gate** | a silent reproducibility break during the redeploy would be worst-case | SYB-233 · [testing-strategy](testing-strategy-2026-07.md) |
 | **Golden-vector single-source generator** | kills Rust↔Solidity drift *before* the redeploy adds vectors | SYB-234 |
 | **OL-2 market_id binding** | latent wrong-market settlement bug; prereq for propose/challenge | SYB-235 |

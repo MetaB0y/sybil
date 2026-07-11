@@ -30,8 +30,8 @@ handled, in order:
 
 **Devnet policy is fresh-genesis redeploy — there is no migration path.** No
 state-migration tooling exists in the repo; state is reset by removing the
-`sybil-data` volume and letting `sybil-api` re-genesis. `docs/deployment.md`
-("Persistence") and `DEPLOY.md` ("Reset app state") are the authoritative
+`sybil-data` volume and letting `sybil-api` re-genesis. The root `DEPLOY.md`
+("Deployment Profile Guardrail" and "Operations") is the authoritative
 statement of this policy. Do **not** attempt to carry old state forward.
 
 Work the steps below top to bottom: **contracts → state reset → services →
@@ -128,7 +128,7 @@ the new images (see the `deploy-reset-state` recipe in the `justfile`).
 - `SYBIL_EVENT_SNAPSHOT_DIR=/data/event_snapshots` persists **under** the
   `sybil-data` volume, so it is wiped by this reset — that is correct for a
   fresh genesis. The "do not wipe `/data`" guidance in
-  `docs/architecture/Deployment Profiles.md` and `docs/deployment.md` applies to
+  `docs/architecture/Deployment Profiles.md` and the root `DEPLOY.md` apply to
   **routine restarts only**, not to an intentional consensus redeploy.
 - Never use `deploy-reset-state` as a restart step. It is only for a deliberate
   fresh devnet.
