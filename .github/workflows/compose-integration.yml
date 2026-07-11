@@ -1,8 +1,8 @@
 name: Compose Integration
 
+# SYB-251: schedule removed while Actions billing is off (see ci.yml).
+# Re-add the nightly cron ("23 3 * * *") when billing returns.
 on:
-  schedule:
-    - cron: "23 3 * * *"
   workflow_dispatch:
 
 permissions:

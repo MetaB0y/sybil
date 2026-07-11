@@ -61,6 +61,10 @@ impl<'a> SnapshotByteVisitor<'a> {
         self.append_market_status(&market.status);
         self.out.extend_from_slice(&market.metadata_digest);
         append_string(self.out, &market.resolution_template);
+        append_u64(self.out, market.last_clearing_prices.len() as u64);
+        for price in &market.last_clearing_prices {
+            append_u64(self.out, price.0);
+        }
     }
 
     fn append_market_group_fields(&mut self, group: &MarketGroupSnapshot) {
@@ -298,6 +302,14 @@ fn append_witness_bridge(out: &mut Vec<u8>, bridge: &BridgeStateSnapshot) {
     append_u64(out, withdrawals.len() as u64);
     for withdrawal in withdrawals {
         append_witness_withdrawal(out, withdrawal);
+    }
+
+    let mut quarantine = bridge.quarantine.clone();
+    quarantine.sort_by_key(|entry| entry.sybil_account_key);
+    append_u64(out, quarantine.len() as u64);
+    for entry in quarantine {
+        out.extend_from_slice(&entry.sybil_account_key);
+        append_i64(out, entry.amount);
     }
 }
 

@@ -53,9 +53,17 @@ contract UnsafeAnvilSmoke {
 
         MockUSDC token = new MockUSDC();
         UnsafeAcceptAllVerifierAdapter verifier = new UnsafeAcceptAllVerifierAdapter();
+        UnsafeAcceptAllVerifierAdapter escapeVerifier = new UnsafeAcceptAllVerifierAdapter();
         SybilSettlement settlement = new SybilSettlement(admin, verifier, ADMIN_TIMELOCK);
         SybilVault vault = new SybilVault(
-            admin, token, settlement, verifier, WITHDRAWAL_DELAY, ESCAPE_TIMEOUT, ADMIN_TIMELOCK
+            admin,
+            token,
+            settlement,
+            verifier,
+            escapeVerifier,
+            WITHDRAWAL_DELAY,
+            ESCAPE_TIMEOUT,
+            ADMIN_TIMELOCK
         );
         settlement.setVault(vault);
 

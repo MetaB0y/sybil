@@ -18,6 +18,7 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
         matching_sequencer::SystemEvent::CreateAccount {
             account_id,
             initial_balance,
+            ..
         } => SystemEventResponse::CreateAccount {
             account_id: account_id.0,
             initial_balance_nanos: *initial_balance,
@@ -107,6 +108,39 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
         } => SystemEventResponse::MarketGroupExtended {
             group_id: *group_id,
             market_id: market_id.0,
+        },
+        matching_sequencer::SystemEvent::KeyRegistered {
+            account_id, key, ..
+        } => SystemEventResponse::KeyRegistered {
+            account_id: account_id.0,
+            public_key_hex: hex::encode(key.pubkey_sec1),
+            auth_scheme: key.auth_scheme,
+            capability_mask: key.capability_mask,
+        },
+        matching_sequencer::SystemEvent::KeyRevoked {
+            account_id, key, ..
+        } => SystemEventResponse::KeyRevoked {
+            account_id: account_id.0,
+            public_key_hex: hex::encode(key.pubkey_sec1),
+            auth_scheme: key.auth_scheme,
+            capability_mask: key.capability_mask,
+        },
+        matching_sequencer::SystemEvent::DepositQuarantined { amount, deposit } => {
+            SystemEventResponse::DepositQuarantined {
+                amount_nanos: *amount,
+                deposit_id: deposit.deposit_id,
+                deposit_root_hex: hex::encode(deposit.deposit_root),
+                sybil_account_key_hex: hex::encode(deposit.sybil_account_key),
+            }
+        }
+        matching_sequencer::SystemEvent::QuarantineClaimed {
+            account_id,
+            amount,
+            sybil_account_key,
+        } => SystemEventResponse::QuarantineClaimed {
+            account_id: account_id.0,
+            amount_nanos: *amount,
+            sybil_account_key_hex: hex::encode(sybil_account_key),
         },
     }
 }
@@ -202,7 +236,7 @@ fn bridge_block_to_response(block: &SealedBlock) -> BridgeBlockResponse {
             .iter()
             .map(|deposit| BridgeDepositEventResponse {
                 deposit_id: deposit.deposit_id,
-                account_id: deposit.account_id.0,
+                account_id: deposit.account_id.map(|account_id| account_id.0),
                 amount_token_units: deposit.amount_token_units,
                 deposit_root_hex: hex::encode(deposit.deposit_root),
             })

@@ -30,7 +30,9 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
-use sybil_api::app::{RouteMount, DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE};
+use sybil_api::app::{
+    RouteMount, DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE,
+};
 use sybil_api::config::ApiConfig;
 use sybil_api::webauthn::WebAuthnVerifierConfig;
 use tower::ServiceExt;
@@ -38,14 +40,6 @@ use tower::ServiceExt;
 use common::test_app_with_config;
 
 const TOKEN: &str = "config-contract-token";
-
-/// Public routes that gate on a *read-scoped bearer token* (SYB-60), not the
-/// service token. These legitimately 401 without a token, so they are excluded
-/// from the "no service-gate 401" sweep and pinned by their own assertion.
-const BEARER_GATED_PUBLIC: &[RouteMount] = &[RouteMount {
-    method: "GET",
-    path: "/v1/accounts/{id}/private-summary",
-}];
 
 fn method_of(method: &str) -> Method {
     match method {
@@ -196,18 +190,10 @@ fn table_contains(table: &[RouteMount], method: &str, path: &str) -> bool {
 /// A future tier move breaks this before it can reach a deploy.
 #[test]
 fn onboarding_is_public_and_fund_is_service_gated() {
-    for (method, path) in [("POST", "/v1/accounts"), ("POST", "/v1/accounts/{id}/keys")] {
-        assert!(
-            table_contains(PUBLIC_ROUTE_TABLE, method, path),
-            "{method} {path} must be PUBLIC (browser passkey onboarding)"
-        );
-        assert!(
-            !table_contains(SERVICE_ROUTE_TABLE, method, path),
-            "{method} {path} must NOT be service-token-gated"
-        );
-    }
+    assert!(table_contains(PUBLIC_ROUTE_TABLE, "POST", "/v1/accounts"));
 
     for (method, path) in [
+        ("POST", "/v1/accounts/{id}/keys"),
         ("POST", "/v1/accounts/{id}/fund"),
         ("GET", "/v1/da/{height}/payload"),
         ("GET", "/v1/proofs/state/{leaf_key_hex}"),
@@ -237,6 +223,11 @@ fn route_tiers_are_disjoint() {
             "{mount:?} is in both PUBLIC and DEV tiers"
         );
     }
+    for mount in OWNER_ROUTE_TABLE {
+        assert!(!PUBLIC_ROUTE_TABLE.contains(mount));
+        assert!(!SERVICE_ROUTE_TABLE.contains(mount));
+        assert!(!DEV_ROUTE_TABLE.contains(mount));
+    }
     for mount in SERVICE_ROUTE_TABLE {
         assert!(
             !DEV_ROUTE_TABLE.contains(mount),
@@ -254,7 +245,9 @@ fn route_tiers_are_disjoint() {
 async fn every_public_route_is_reachable_without_service_token() {
     let app = prod_app().await;
     for mount in PUBLIC_ROUTE_TABLE {
-        if BEARER_GATED_PUBLIC.contains(mount) {
+        // `/v1/accounts` is a hybrid contract: atomic create-with-key is
+        // public, while the deprecated bare `{}` payload is service-only.
+        if mount.method == "POST" && mount.path == "/v1/accounts" {
             continue;
         }
         let uri = concretize(mount.path);
@@ -269,12 +262,11 @@ async fn every_public_route_is_reachable_without_service_token() {
     }
 }
 
-/// Bearer-gated public reads (SYB-60) 401 without a read-scoped token. Pinned
-/// here so the exclusion above is intentional, not an accidental blind spot.
+/// Owner-gated reads 401 without a read-scoped token.
 #[tokio::test]
 async fn bearer_gated_public_reads_are_401_without_a_token() {
     let app = prod_app().await;
-    for mount in BEARER_GATED_PUBLIC {
+    for mount in OWNER_ROUTE_TABLE {
         let uri = concretize(mount.path);
         let (status, body) = request_full(app.clone(), method_of(mount.method), &uri, None).await;
         assert_eq!(

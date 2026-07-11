@@ -557,22 +557,28 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
             });
         }
 
-        // The no-gap deposit cursor means this event cannot be skipped. The
-        // vault integration must guarantee that a depositor's Sybil account key
-        // is registered before accepting a deposit; otherwise account resolution
-        // can never succeed and this deposit intentionally blocks all later ones.
-        let ingestion = async {
-            let account = resolve_bridge_account(sink, deposit.event.sybil_account_key).await?;
-            submit_deposit(
-                sink,
-                args.chain_id,
-                vault_address,
-                &deposit,
-                account.account_id,
-            )
-            .await
-        }
-        .await;
+        let account_id = match resolve_bridge_account(sink, deposit.event.sybil_account_key).await {
+            Ok(account) => Some(account.account_id),
+            Err(error) if is_unresolvable_key(&error) => {
+                tracing::warn!(
+                    deposit_id = deposit.event.deposit_id,
+                    sybil_account_key = %hex::encode(deposit.event.sybil_account_key),
+                    "l1.indexer.deposit_quarantining"
+                );
+                None
+            }
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    deposit_id = deposit.event.deposit_id,
+                    sybil_account_key = %hex::encode(deposit.event.sybil_account_key),
+                    "l1.indexer.deposit_pipeline_stalled"
+                );
+                return Err(error);
+            }
+        };
+        let ingestion =
+            submit_deposit(sink, args.chain_id, vault_address, &deposit, account_id).await;
         let response = match ingestion {
             Ok(response) => response,
             Err(error) => {
@@ -580,7 +586,7 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
                     %error,
                     deposit_id = deposit.event.deposit_id,
                     sybil_account_key = %hex::encode(deposit.event.sybil_account_key),
-                    "deposit pipeline stalled; refusing to skip the next required deposit"
+                    "l1.indexer.deposit_pipeline_stalled"
                 );
                 return Err(error);
             }
@@ -589,6 +595,7 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
             deposit_id = response.deposit_id,
             account_id = response.account_id,
             balance_nanos = response.balance_nanos,
+            disposition = response.disposition,
             tx = deposit.log.transaction_hash.as_deref().unwrap_or_default(),
             "l1.indexer.deposit_ingested"
         );
@@ -652,12 +659,19 @@ async fn resolve_bridge_account<S: DepositSink>(
     sink.bridge_account_by_key(&hex::encode(key)).await
 }
 
+fn is_unresolvable_key(error: &IndexerError) -> bool {
+    matches!(
+        error,
+        IndexerError::SybilApi(sybil_client::Error::Api { status: 404, .. })
+    )
+}
+
 async fn submit_deposit<S: DepositSink>(
     sink: &S,
     chain_id: u64,
     vault_address: EthAddress,
     deposit: &IndexedDeposit,
-    account_id: u64,
+    account_id: Option<u64>,
 ) -> Result<BridgeDepositResponse> {
     // TODO(SYB-188/SYB-178): this dev indexer trusts eth_getLogs from its RPC
     // and does not prove receipt inclusion/finality. The confirmation-depth +
@@ -669,6 +683,7 @@ async fn submit_deposit<S: DepositSink>(
     let body = SubmitL1DepositRequest {
         deposit_id: deposit.event.deposit_id,
         account_id,
+        quarantine: account_id.is_none(),
         chain_id,
         vault_address_hex: hex::encode(vault_address),
         token_address_hex: hex::encode(deposit.event.token_address),
@@ -1060,6 +1075,8 @@ mod tests {
         fail_deposit_submit: bool,
         fail_withdrawal_submit: bool,
         observed_heights: Mutex<Vec<u64>>,
+        unresolvable_key: bool,
+        quarantine_submitted: AtomicBool,
     }
 
     impl DepositSink for FakeSink {
@@ -1074,10 +1091,18 @@ mod tests {
                 finalized_withdrawal_count: 0,
                 cancelled_withdrawal_count: 0,
                 refunded_withdrawal_count: 0,
+                quarantine_ledger_size: 0,
+                total_quarantined_nanos: 0,
             })
         }
 
         async fn bridge_account_by_key(&self, _key_hex: &str) -> Result<BridgeAccountKeyResponse> {
+            if self.unresolvable_key {
+                return Err(IndexerError::SybilApi(sybil_client::Error::Api {
+                    status: 404,
+                    body: "bridge key not found".to_string(),
+                }));
+            }
             Ok(BridgeAccountKeyResponse {
                 account_id: 42,
                 sybil_account_key_hex: String::new(),
@@ -1089,12 +1114,20 @@ mod tests {
             req: &SubmitL1DepositRequest,
         ) -> Result<BridgeDepositResponse> {
             self.submitted.lock().unwrap().push(req.deposit_id);
+            if req.quarantine {
+                self.quarantine_submitted.store(true, Ordering::SeqCst);
+            }
             if self.fail_deposit_submit {
                 return Err(IndexerError::MissingRpcResult);
             }
             Ok(BridgeDepositResponse {
                 account_id: req.account_id,
-                balance_nanos: 0,
+                balance_nanos: Some(0),
+                disposition: if req.quarantine {
+                    "quarantined".to_string()
+                } else {
+                    "credited".to_string()
+                },
                 deposit_id: req.deposit_id,
                 deposit_root_hex: req.deposit_root_hex.clone(),
             })
@@ -1356,8 +1389,33 @@ mod tests {
         assert_eq!(next_from, 0);
         let logs = logs.contents();
         assert!(logs.contains("ERROR"));
-        assert!(
-            logs.contains("deposit pipeline stalled; refusing to skip the next required deposit")
+        assert!(logs.contains("l1.indexer.deposit_pipeline_stalled"));
+    }
+
+    #[tokio::test]
+    async fn unresolvable_deposit_is_quarantined_and_scan_cursor_advances_without_retry() {
+        let vault = [0x10; 20];
+        let root = [0x55; 32];
+        let l1 = FakeL1 {
+            latest: 10,
+            logs: vec![deposit_log(1, 2, root, 1_000_000)],
+            onchain_roots: [(1u64, root)].into_iter().collect(),
+            ..Default::default()
+        };
+        let sink = FakeSink {
+            unresolvable_key: true,
+            ..Default::default()
+        };
+        let args = test_args(2);
+
+        let next = run_once(&l1, &sink, &args, vault, 0).await.unwrap();
+
+        assert_eq!(sink.submitted.lock().unwrap().as_slice(), &[1]);
+        assert!(sink.quarantine_submitted.load(Ordering::SeqCst));
+        assert_eq!(
+            next,
+            Some(9),
+            "successful quarantine disposes the deposit and advances the scan cursor"
         );
     }
 

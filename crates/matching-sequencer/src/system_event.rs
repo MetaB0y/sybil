@@ -2,6 +2,7 @@ use matching_engine::{MarketId, Nanos, OrderDirection};
 
 use crate::account::AccountId;
 use crate::bridge::{L1Deposit, WithdrawalLeaf, WithdrawalRefundReason};
+use sybil_verifier::{KeyOpAuth, KeyRecord};
 
 /// System state changes applied outside the matching pipeline.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -9,6 +10,7 @@ pub enum SystemEvent {
     CreateAccount {
         account_id: AccountId,
         initial_balance: i64,
+        initial_keys: Vec<KeyRecord>,
     },
     Deposit {
         account_id: AccountId,
@@ -61,6 +63,25 @@ pub enum SystemEvent {
     MarketGroupExtended {
         group_id: u64,
         market_id: MarketId,
+    },
+    KeyRegistered {
+        account_id: AccountId,
+        key: KeyRecord,
+        authorization: KeyOpAuth,
+    },
+    KeyRevoked {
+        account_id: AccountId,
+        key: KeyRecord,
+        authorization: KeyOpAuth,
+    },
+    DepositQuarantined {
+        amount: i64,
+        deposit: L1Deposit,
+    },
+    QuarantineClaimed {
+        account_id: AccountId,
+        amount: i64,
+        sybil_account_key: [u8; 32],
     },
 }
 

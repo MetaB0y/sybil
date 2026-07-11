@@ -17,8 +17,9 @@ mod header_hash {
 
 pub use guest_commitments::{
     compute_events_root, events_root_from_event_bytes, verify_qmdb_key_value_proof,
-    verify_qmdb_state_root, QmdbStateExclusionProof, QmdbStateKeyValueProof,
-    QmdbStateOperationProof, QmdbStateRangeProof, QmdbStateRootProof, QMDB_STATE_CHUNK_SIZE,
+    verify_qmdb_state_root, verify_qmdb_state_root_for, QmdbStateExclusionProof,
+    QmdbStateKeyValueProof, QmdbStateOperationProof, QmdbStateRangeProof, QmdbStateRootProof,
+    QMDB_STATE_CHUNK_SIZE,
 };
 pub use header_hash::hash_header;
 
@@ -62,6 +63,7 @@ pub struct StateTransitionGuestInput {
     pub witness: BlockWitness,
     pub da_provider_refs: Vec<Vec<u8>>,
     pub state_root_proof: QmdbStateRootProof,
+    pub pre_state_root_proof: QmdbStateRootProof,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -315,6 +317,22 @@ pub fn verify_state_transition_input(
         &input.witness,
         &input.state_root_proof,
     )?;
+    if input.witness.previous_header.is_some() {
+        let pre_leaves = sybil_verifier::state_schema::state_root_leaves(
+            &input.witness.pre_state,
+            &input.witness.pre_state_sidecar,
+        );
+        verify_qmdb_state_root_for(
+            &input.public_inputs.previous_state_root,
+            &pre_leaves,
+            &input.pre_state_root_proof,
+        )?;
+    } else if !input.pre_state_root_proof.leaf_proofs.is_empty() {
+        return Err(ZkTransitionError::StateRootProofCountMismatch {
+            expected: 0,
+            actual: input.pre_state_root_proof.leaf_proofs.len(),
+        });
+    }
     ensure_valid("match", sybil_verifier::verify_match(&input.witness, false))?;
     ensure_valid("system", sybil_verifier::verify_system(&input.witness))?;
     ensure_valid(
@@ -668,7 +686,7 @@ fn verify_l1_deposit_checkpoint(
         }
     }
 
-    let credited_events = witness
+    let disposition_events = witness
         .system_events
         .iter()
         .filter_map(|event| match event {
@@ -679,7 +697,19 @@ fn verify_l1_deposit_checkpoint(
                 deposit_root,
                 sybil_account_key,
             } => Some((
-                *account_id,
+                Some(*account_id),
+                *amount,
+                *deposit_id,
+                *deposit_root,
+                *sybil_account_key,
+            )),
+            SystemEventWitness::DepositQuarantined {
+                amount,
+                deposit_id,
+                deposit_root,
+                sybil_account_key,
+            } => Some((
+                None,
                 *amount,
                 *deposit_id,
                 *deposit_root,
@@ -693,19 +723,22 @@ fn verify_l1_deposit_checkpoint(
             | SystemEventWitness::L1BlockObserved { .. }
             | SystemEventWitness::MarketResolved { .. }
             | SystemEventWitness::OrderCancelled { .. }
-            | SystemEventWitness::MarketGroupExtended { .. } => None,
+            | SystemEventWitness::MarketGroupExtended { .. }
+            | SystemEventWitness::KeyRegistered { .. }
+            | SystemEventWitness::KeyRevoked { .. }
+            | SystemEventWitness::QuarantineClaimed { .. } => None,
         })
         .collect::<Vec<_>>();
 
-    if credited_events.len() != accumulator.new_deposits.len() {
+    if disposition_events.len() != accumulator.new_deposits.len() {
         return Err(ZkTransitionError::DepositDeltaLengthMismatch {
             expected: accumulator.new_deposits.len() as u64,
-            actual: credited_events.len(),
+            actual: disposition_events.len(),
         });
     }
 
     for (event_index, (account_id, amount, deposit_id, deposit_root, sybil_account_key)) in
-        credited_events.into_iter().enumerate()
+        disposition_events.into_iter().enumerate()
     {
         let expected_id = accumulator.pre_count + event_index as u64 + 1;
         if deposit_id != expected_id {
@@ -727,20 +760,22 @@ fn verify_l1_deposit_checkpoint(
             });
         }
 
-        let expected_key = bridge_account_key(account_id);
-        if sybil_account_key != expected_key {
+        if deposit.sybil_account_key != sybil_account_key {
             return Err(ZkTransitionError::DepositEventAccountKeyMismatch {
-                account_id,
-                expected: expected_key,
-                actual: sybil_account_key,
-            });
-        }
-        if deposit.sybil_account_key != expected_key {
-            return Err(ZkTransitionError::DepositEventAccountKeyMismatch {
-                account_id,
-                expected: expected_key,
+                account_id: account_id.unwrap_or_default(),
+                expected: sybil_account_key,
                 actual: deposit.sybil_account_key,
             });
+        }
+        if let Some(account_id) = account_id {
+            let expected_key = bridge_account_key(account_id);
+            if sybil_account_key != expected_key {
+                return Err(ZkTransitionError::DepositEventAccountKeyMismatch {
+                    account_id,
+                    expected: expected_key,
+                    actual: sybil_account_key,
+                });
+            }
         }
 
         let expected_amount =
@@ -865,8 +900,9 @@ mod tests {
     use sybil_verifier::{
         commitments::{event_schema, state_schema},
         AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot,
-        DepositAccumulatorWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
-        StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot, WitnessBlockHeader,
+        DepositAccumulatorWitness, KeyOpAuth, KeyRecord, MarketGroupSnapshot, MarketSnapshot,
+        MarketStatusSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
+        WitnessBlockHeader,
     };
 
     const PAGE_SIZE: u16 = 4096;
@@ -1034,6 +1070,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state: vec![],
+            account_keys: vec![],
             state_sidecar,
             pre_state_sidecar,
             resolved_markets: vec![],
@@ -1044,6 +1081,7 @@ mod tests {
             witness,
             da_provider_refs: vec![],
             state_root_proof,
+            pre_state_root_proof: QmdbStateRootProof::default(),
         }
     }
 
@@ -1063,6 +1101,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: state_schema::market_metadata_digest(b"metadata"),
             resolution_template: "yes/no".to_string(),
+            last_clearing_prices: vec![],
         };
         let market_group = MarketGroupSnapshot {
             group_id: 2,
@@ -1096,6 +1135,7 @@ mod tests {
                 observed_l1_height: 17,
                 next_withdrawal_id: 5,
                 withdrawals: vec![withdrawal],
+                quarantine: vec![],
             },
             markets: vec![market],
             market_groups: vec![market_group],
@@ -1145,6 +1185,7 @@ mod tests {
             pre_state: post_state.clone(),
             post_system_state: post_state.clone(),
             post_state,
+            account_keys: vec![],
             state_sidecar,
             pre_state_sidecar,
             resolved_markets: vec![],
@@ -1155,6 +1196,7 @@ mod tests {
             witness,
             da_provider_refs: vec![],
             state_root_proof,
+            pre_state_root_proof: QmdbStateRootProof::default(),
         }
     }
 
@@ -1199,6 +1241,7 @@ mod tests {
             pre_state: post_state.clone(),
             post_system_state: post_state.clone(),
             post_state,
+            account_keys: vec![],
             state_sidecar,
             pre_state_sidecar,
             resolved_markets: vec![],
@@ -1210,6 +1253,150 @@ mod tests {
             witness,
             da_provider_refs: vec![],
             state_root_proof,
+            pre_state_root_proof: QmdbStateRootProof::default(),
+        }
+    }
+
+    fn test_key(byte: u8) -> KeyRecord {
+        let mut pubkey_sec1 = [byte; 33];
+        pubkey_sec1[0] = 0x02;
+        KeyRecord {
+            auth_scheme: 0,
+            pubkey_sec1,
+            capability_mask: KeyRecord::FULL_CAPABILITY_MASK,
+        }
+    }
+
+    fn test_key_auth(signer: KeyRecord) -> KeyOpAuth {
+        KeyOpAuth::RawP256 {
+            signer_pubkey: signer.pubkey_sec1,
+            signature: [0u8; 64],
+        }
+    }
+
+    fn fold_key_event_digest(current: [u8; 32], tag: u8, key: KeyRecord, height: u64) -> [u8; 32] {
+        let mut event = Vec::with_capacity(47);
+        event.push(tag);
+        event.push(key.auth_scheme);
+        event.extend_from_slice(&key.pubkey_sec1);
+        event.extend_from_slice(&key.capability_mask.to_le_bytes());
+        event.extend_from_slice(&height.to_le_bytes());
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&current);
+        hasher.update(&event);
+        *hasher.finalize().as_bytes()
+    }
+
+    fn fold_l1_deposit_digest(
+        current: [u8; 32],
+        deposit_id: u64,
+        amount: i64,
+        deposit_root: [u8; 32],
+        height: u64,
+    ) -> [u8; 32] {
+        let mut event = Vec::with_capacity(57);
+        event.push(0x06);
+        event.extend_from_slice(&deposit_id.to_le_bytes());
+        event.extend_from_slice(&amount.to_le_bytes());
+        event.extend_from_slice(&deposit_root);
+        event.extend_from_slice(&height.to_le_bytes());
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&current);
+        hasher.update(&event);
+        *hasher.finalize().as_bytes()
+    }
+
+    fn fold_quarantine_claim_digest(current: [u8; 32], amount: i64, height: u64) -> [u8; 32] {
+        let mut event = Vec::with_capacity(17);
+        event.push(0x0c);
+        event.extend_from_slice(&amount.to_le_bytes());
+        event.extend_from_slice(&height.to_le_bytes());
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&current);
+        hasher.update(&event);
+        *hasher.finalize().as_bytes()
+    }
+
+    fn keyed_transition_input(
+        height: u64,
+        pre_keys: &[KeyRecord],
+        post_keys: &[KeyRecord],
+        pre_events_digest: [u8; 32],
+        post_events_digest: [u8; 32],
+        system_events: Vec<SystemEventWitness>,
+    ) -> StateTransitionGuestInput {
+        let account_id = 7;
+        let pre_account = AccountSnapshot {
+            id: account_id,
+            balance: 0,
+            total_deposited: 0,
+            positions: Vec::new(),
+            events_digest: pre_events_digest,
+            keys_digest: sybil_verifier::account_keys_digest(account_id, pre_keys.iter().copied()),
+        };
+        let post_account = AccountSnapshot {
+            events_digest: post_events_digest,
+            keys_digest: sybil_verifier::account_keys_digest(account_id, post_keys.iter().copied()),
+            ..pre_account.clone()
+        };
+        let pre_state_sidecar = empty_state_sidecar();
+        let state_sidecar = empty_state_sidecar();
+        let pre_leaves =
+            state_schema::state_root_leaves(std::slice::from_ref(&pre_account), &pre_state_sidecar);
+        let (pre_root, pre_state_root_proof) = state_root_and_proof(&pre_leaves);
+        let post_leaves =
+            state_schema::state_root_leaves(std::slice::from_ref(&post_account), &state_sidecar);
+        let (state_root, state_root_proof) = state_root_and_proof(&post_leaves);
+        let previous_header = WitnessBlockHeader {
+            height: height - 1,
+            parent_hash: [0u8; 32],
+            state_root: pre_root,
+            events_root: events_root_from_event_bytes(&[]).expect("empty events root"),
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: 1_000,
+        };
+        let event_bytes = event_schema::event_leaf_values(&system_events, &[], &[], &[]);
+        let events_root = events_root_from_event_bytes(&event_bytes).expect("events root");
+        let witness = BlockWitness {
+            header: WitnessBlockHeader {
+                height,
+                parent_hash: hash_header(&previous_header),
+                state_root,
+                events_root,
+                order_count: 0,
+                fill_count: 0,
+                timestamp_ms: 2_000,
+            },
+            previous_header: Some(previous_header),
+            orders: Vec::new(),
+            rejections: Vec::new(),
+            system_events,
+            deposit_accumulator: DepositAccumulatorWitness::default(),
+            fills: Vec::new(),
+            clearing_prices: Default::default(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: Vec::new(),
+            market_groups: Vec::new(),
+            pre_state: vec![pre_account],
+            post_system_state: vec![post_account.clone()],
+            post_state: vec![post_account],
+            account_keys: if post_keys.is_empty() {
+                Vec::new()
+            } else {
+                vec![(account_id, post_keys.to_vec())]
+            },
+            state_sidecar,
+            pre_state_sidecar,
+            resolved_markets: Vec::new(),
+        };
+        StateTransitionGuestInput {
+            public_inputs: public_inputs_from_witness(&witness),
+            witness,
+            da_provider_refs: Vec::new(),
+            state_root_proof,
+            pre_state_root_proof,
         }
     }
 
@@ -1250,6 +1437,13 @@ mod tests {
         let mut post_account = pre_account.clone();
         post_account.balance = amount;
         post_account.total_deposited = amount;
+        post_account.events_digest = fold_l1_deposit_digest(
+            pre_account.events_digest,
+            deposit.deposit_id,
+            amount,
+            deposit.deposit_root,
+            input.witness.header.height,
+        );
         input.witness.pre_state = vec![pre_account];
         input.witness.post_system_state = vec![post_account.clone()];
         input.witness.post_state = vec![post_account];
@@ -1263,6 +1457,68 @@ mod tests {
         input.witness.deposit_accumulator = deposit_accumulator_from_prefix(vec![deposit.clone()]);
         input.witness.state_sidecar.bridge.deposit_cursor = deposit.deposit_id;
         input.witness.state_sidecar.bridge.deposit_root = deposit.deposit_root;
+        recompute_roots_and_public_inputs(&mut input);
+        input
+    }
+
+    fn quarantined_deposit_guest_input() -> StateTransitionGuestInput {
+        let mut input = l1_deposit_guest_input();
+        let deposit = input.witness.deposit_accumulator.new_deposits[0].clone();
+        let amount = deposit_amount_nanos(&deposit).unwrap();
+        let pre = input.witness.pre_state[0].clone();
+        input.witness.post_system_state = vec![pre.clone()];
+        input.witness.post_state = vec![pre];
+        input.witness.system_events = vec![SystemEventWitness::DepositQuarantined {
+            amount,
+            deposit_id: deposit.deposit_id,
+            deposit_root: deposit.deposit_root,
+            sybil_account_key: deposit.sybil_account_key,
+        }];
+        input.witness.state_sidecar.bridge.quarantine =
+            vec![sybil_verifier::QuarantineEntrySnapshot {
+                sybil_account_key: deposit.sybil_account_key,
+                amount,
+            }];
+        recompute_roots_and_public_inputs(&mut input);
+        input
+    }
+
+    fn quarantine_claim_guest_input(amount: i64) -> StateTransitionGuestInput {
+        let account_id = 7;
+        let signing_key = test_key(1);
+        let bridge_key = bridge_account_key(account_id);
+        let digest = fold_quarantine_claim_digest([0; 32], amount, 2);
+        let mut input = keyed_transition_input(
+            2,
+            &[signing_key],
+            &[signing_key],
+            [0; 32],
+            digest,
+            vec![SystemEventWitness::QuarantineClaimed {
+                account_id,
+                amount,
+                sybil_account_key: bridge_key,
+            }],
+        );
+        input.witness.post_system_state[0].balance = amount;
+        input.witness.post_system_state[0].total_deposited = amount;
+        input.witness.post_state[0].balance = amount;
+        input.witness.post_state[0].total_deposited = amount;
+        input.witness.pre_state_sidecar.bridge.quarantine =
+            vec![sybil_verifier::QuarantineEntrySnapshot {
+                sybil_account_key: bridge_key,
+                amount,
+            }];
+
+        let pre_leaves = state_schema::state_root_leaves(
+            &input.witness.pre_state,
+            &input.witness.pre_state_sidecar,
+        );
+        let (pre_root, pre_proof) = state_root_and_proof(&pre_leaves);
+        input.witness.previous_header.as_mut().unwrap().state_root = pre_root;
+        input.witness.header.parent_hash =
+            hash_header(input.witness.previous_header.as_ref().unwrap());
+        input.pre_state_root_proof = pre_proof;
         recompute_roots_and_public_inputs(&mut input);
         input
     }
@@ -1301,6 +1557,13 @@ mod tests {
         let mut post_account = pre_account.clone();
         post_account.balance = amount;
         post_account.total_deposited = amount;
+        post_account.events_digest = fold_l1_deposit_digest(
+            pre_account.events_digest,
+            deposit.deposit_id,
+            amount,
+            deposit.deposit_root,
+            input.witness.header.height,
+        );
         input.witness.pre_state = vec![pre_account];
         input.witness.post_system_state = vec![post_account.clone()];
         input.witness.post_state = vec![post_account];
@@ -1502,8 +1765,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                96, 246, 144, 226, 198, 64, 221, 168, 213, 64, 75, 64, 232, 123, 92, 56, 177, 149,
-                232, 21, 175, 201, 12, 110, 13, 146, 132, 209, 81, 213, 142, 105,
+                130, 23, 104, 223, 232, 254, 38, 192, 210, 191, 213, 219, 176, 14, 84, 158, 3, 13,
+                223, 114, 95, 71, 15, 88, 93, 64, 223, 17, 168, 232, 101, 249,
             ]
         );
     }
@@ -1777,5 +2040,221 @@ mod tests {
             verify_state_transition_input(&input),
             Err(ZkTransitionError::StateRootNextKeyMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn guest_rejects_keys_digest_swap_without_witnessed_event() {
+        let victim = test_key(1);
+        let attacker = test_key(2);
+        let input = keyed_transition_input(2, &[victim], &[attacker], [0; 32], [0; 32], vec![]);
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::VerificationLayerFailed {
+                layer: "system",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn guest_accepts_quarantined_deposit_frontier_and_ledger_transition() {
+        assert!(verify_state_transition_input(&quarantined_deposit_guest_input()).is_ok());
+    }
+
+    #[test]
+    fn guest_rejects_unwitnessed_quarantine_ledger_mutation() {
+        let mut input = empty_guest_input();
+        input.witness.state_sidecar.bridge.quarantine =
+            vec![sybil_verifier::QuarantineEntrySnapshot {
+                sybil_account_key: [9; 32],
+                amount: 1,
+            }];
+        recompute_roots_and_public_inputs(&mut input);
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::VerificationLayerFailed {
+                layer: "sidecar",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn guest_rejects_claim_key_not_matching_committed_account() {
+        let mut input = quarantine_claim_guest_input(100);
+        let wrong_key = [0x55; 32];
+        input.witness.pre_state_sidecar.bridge.quarantine[0].sybil_account_key = wrong_key;
+        let SystemEventWitness::QuarantineClaimed {
+            sybil_account_key, ..
+        } = &mut input.witness.system_events[0]
+        else {
+            unreachable!()
+        };
+        *sybil_account_key = wrong_key;
+        let pre_leaves = state_schema::state_root_leaves(
+            &input.witness.pre_state,
+            &input.witness.pre_state_sidecar,
+        );
+        let (pre_root, pre_proof) = state_root_and_proof(&pre_leaves);
+        input.witness.previous_header.as_mut().unwrap().state_root = pre_root;
+        input.witness.header.parent_hash =
+            hash_header(input.witness.previous_header.as_ref().unwrap());
+        input.pre_state_root_proof = pre_proof;
+        recompute_roots_and_public_inputs(&mut input);
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::VerificationLayerFailed {
+                layer: "sidecar",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn guest_rejects_quarantine_claim_amount_mismatch_and_double_claim() {
+        let mut mismatched = quarantine_claim_guest_input(100);
+        let SystemEventWitness::QuarantineClaimed { amount, .. } =
+            &mut mismatched.witness.system_events[0]
+        else {
+            unreachable!()
+        };
+        *amount = 99;
+        let digest = fold_quarantine_claim_digest([0; 32], 99, 2);
+        for account in mismatched
+            .witness
+            .post_system_state
+            .iter_mut()
+            .chain(mismatched.witness.post_state.iter_mut())
+        {
+            account.balance = 99;
+            account.total_deposited = 99;
+            account.events_digest = digest;
+        }
+        recompute_roots_and_public_inputs(&mut mismatched);
+        assert!(verify_state_transition_input(&mismatched).is_err());
+
+        let mut doubled = quarantine_claim_guest_input(100);
+        let claim = doubled.witness.system_events[0].clone();
+        doubled.witness.system_events.push(claim);
+        let digest =
+            fold_quarantine_claim_digest(fold_quarantine_claim_digest([0; 32], 100, 2), 100, 2);
+        for account in doubled
+            .witness
+            .post_system_state
+            .iter_mut()
+            .chain(doubled.witness.post_state.iter_mut())
+        {
+            account.balance = 200;
+            account.total_deposited = 200;
+            account.events_digest = digest;
+        }
+        recompute_roots_and_public_inputs(&mut doubled);
+        assert!(verify_state_transition_input(&doubled).is_err());
+    }
+
+    #[test]
+    fn guest_rejects_fabricated_pre_state_used_to_launder_key_swap() {
+        let victim = test_key(1);
+        let attacker = test_key(2);
+        let mut input = keyed_transition_input(2, &[victim], &[victim], [0; 32], [0; 32], vec![]);
+        input.witness.pre_state[0].keys_digest = sybil_verifier::account_keys_digest(7, [attacker]);
+        input.witness.post_system_state[0].keys_digest =
+            sybil_verifier::account_keys_digest(7, [attacker]);
+        input.witness.post_state[0].keys_digest =
+            sybil_verifier::account_keys_digest(7, [attacker]);
+        input.witness.account_keys = vec![(7, vec![attacker])];
+        recompute_roots_and_public_inputs(&mut input);
+
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::StateRootProofVerificationFailed { .. })
+        ));
+    }
+
+    #[test]
+    fn guest_rejects_key_event_stream_not_matching_claimed_digest() {
+        let primary = test_key(1);
+        let claimed = test_key(2);
+        let witnessed = test_key(3);
+        let events_digest = fold_key_event_digest([0; 32], 0x0a, witnessed, 2);
+        let input = keyed_transition_input(
+            2,
+            &[primary],
+            &[primary, claimed],
+            [0; 32],
+            events_digest,
+            vec![SystemEventWitness::KeyRegistered {
+                account_id: 7,
+                key: witnessed,
+                authorization: test_key_auth(primary),
+            }],
+        );
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::VerificationLayerFailed {
+                layer: "system",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn guest_rejects_key_event_for_unopened_account() {
+        let primary = test_key(1);
+        let added = test_key(2);
+        let input = keyed_transition_input(
+            2,
+            &[primary],
+            &[primary],
+            [0; 32],
+            [0; 32],
+            vec![SystemEventWitness::KeyRegistered {
+                account_id: 8,
+                key: added,
+                authorization: test_key_auth(primary),
+            }],
+        );
+        assert!(matches!(
+            verify_state_transition_input(&input),
+            Err(ZkTransitionError::VerificationLayerFailed {
+                layer: "system",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn guest_accepts_register_then_revoke_across_blocks() {
+        let primary = test_key(1);
+        let agent = test_key(2);
+        let after_register = fold_key_event_digest([0; 32], 0x0a, agent, 2);
+        let register = keyed_transition_input(
+            2,
+            &[primary],
+            &[primary, agent],
+            [0; 32],
+            after_register,
+            vec![SystemEventWitness::KeyRegistered {
+                account_id: 7,
+                key: agent,
+                authorization: test_key_auth(primary),
+            }],
+        );
+        assert!(verify_state_transition_input(&register).is_ok());
+
+        let after_revoke = fold_key_event_digest(after_register, 0x0b, primary, 3);
+        let revoke = keyed_transition_input(
+            3,
+            &[primary, agent],
+            &[agent],
+            after_register,
+            after_revoke,
+            vec![SystemEventWitness::KeyRevoked {
+                account_id: 7,
+                key: primary,
+                authorization: test_key_auth(agent),
+            }],
+        );
+        assert!(verify_state_transition_input(&revoke).is_ok());
     }
 }

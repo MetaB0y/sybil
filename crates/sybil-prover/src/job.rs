@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sybil_verifier::{commitments::state_schema, BlockWitness};
 
-pub const STATE_TRANSITION_PROOF_JOB_VERSION: u8 = 1;
+pub const STATE_TRANSITION_PROOF_JOB_VERSION: u8 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StateTransitionProofJob {
@@ -11,12 +11,14 @@ pub struct StateTransitionProofJob {
     pub state_root: [u8; 32],
     pub witness: BlockWitness,
     pub state_leaf_proofs: Vec<StateTransitionStateLeafProof>,
+    pub pre_state_leaf_proofs: Vec<StateTransitionStateLeafProof>,
 }
 
 impl StateTransitionProofJob {
     pub fn new(
         witness: BlockWitness,
         state_leaf_proofs: Vec<StateTransitionStateLeafProof>,
+        pre_state_leaf_proofs: Vec<StateTransitionStateLeafProof>,
     ) -> Self {
         let block_height = witness.header.height;
         let block_hash = sybil_zk::hash_header(&witness.header);
@@ -28,6 +30,7 @@ impl StateTransitionProofJob {
             state_root,
             witness,
             state_leaf_proofs,
+            pre_state_leaf_proofs,
         }
     }
 
@@ -103,11 +106,50 @@ pub fn build_state_transition_guest_input(
     sybil_zk::verify_qmdb_state_root(&job.state_root, &job.witness, &state_root_proof)
         .map_err(ProofJobError::StateRootProofFailed)?;
 
+    let pre_state_root_proof = if let Some(previous) = &job.witness.previous_header {
+        let pre_leaves =
+            state_schema::state_root_leaves(&job.witness.pre_state, &job.witness.pre_state_sidecar);
+        if job.pre_state_leaf_proofs.len() != pre_leaves.len() {
+            return Err(ProofJobError::ProofJobLeafCountMismatch {
+                expected: pre_leaves.len(),
+                actual: job.pre_state_leaf_proofs.len(),
+            });
+        }
+        for (index, ((expected_key, expected_value), proof)) in pre_leaves
+            .iter()
+            .zip(&job.pre_state_leaf_proofs)
+            .enumerate()
+        {
+            if &proof.key != expected_key || &proof.value != expected_value {
+                return Err(ProofJobError::WitnessLeafMismatch { index });
+            }
+        }
+        let proof = sybil_zk::QmdbStateRootProof {
+            leaf_proofs: job
+                .pre_state_leaf_proofs
+                .iter()
+                .map(|leaf| leaf.proof.clone())
+                .collect(),
+        };
+        sybil_zk::verify_qmdb_state_root_for(&previous.state_root, &pre_leaves, &proof)
+            .map_err(ProofJobError::StateRootProofFailed)?;
+        proof
+    } else {
+        if !job.pre_state_leaf_proofs.is_empty() {
+            return Err(ProofJobError::ProofJobLeafCountMismatch {
+                expected: 0,
+                actual: job.pre_state_leaf_proofs.len(),
+            });
+        }
+        sybil_zk::QmdbStateRootProof::default()
+    };
+
     Ok(sybil_zk::StateTransitionGuestInput {
         public_inputs: sybil_zk::public_inputs_from_witness(&job.witness),
         witness: job.witness,
         da_provider_refs: vec![],
         state_root_proof,
+        pre_state_root_proof,
     })
 }
 
@@ -167,11 +209,12 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state: vec![],
+            account_keys: vec![],
             state_sidecar: StateSidecarSnapshot::default(),
             pre_state_sidecar: StateSidecarSnapshot::default(),
             resolved_markets: vec![],
         };
-        StateTransitionProofJob::new(witness, vec![])
+        StateTransitionProofJob::new(witness, vec![], vec![])
     }
 
     #[test]

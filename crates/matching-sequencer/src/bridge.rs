@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use sha3::{Digest, Keccak256};
 use sybil_l1_protocol::DepositLeaf;
 
-use crate::account::AccountId;
+use crate::account::{Account, AccountId};
 
 pub type Bytes32 = [u8; 32];
 pub type EthAddress = [u8; 20];
@@ -20,7 +20,9 @@ const DEPOSIT_TREE_DEPTH: usize = 32;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct L1Deposit {
     pub deposit_id: u64,
-    pub account_id: AccountId,
+    /// Resolved destination. `None` means the raw bridge key is deliberately
+    /// disposed into the committed quarantine ledger.
+    pub account_id: Option<AccountId>,
     pub chain_id: u64,
     pub vault_address: EthAddress,
     pub token_address: EthAddress,
@@ -191,6 +193,9 @@ pub struct BridgeState {
     pub observed_l1_height: u64,
     pub next_withdrawal_id: u64,
     pub withdrawals: BTreeMap<u64, WithdrawalLeaf>,
+    /// One system ledger keyed by the raw L1 `sybilAccountKey`.
+    #[serde(default)]
+    pub quarantine: BTreeMap<Bytes32, i64>,
 }
 
 impl Default for BridgeState {
@@ -202,8 +207,18 @@ impl Default for BridgeState {
             observed_l1_height: 0,
             next_withdrawal_id: 1,
             withdrawals: BTreeMap::new(),
+            quarantine: BTreeMap::new(),
         }
     }
+}
+
+#[derive(Clone)]
+pub enum DepositDisposition {
+    Credited(Account),
+    Quarantined {
+        sybil_account_key: Bytes32,
+        amount_nanos: i64,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -220,6 +235,8 @@ pub enum BridgeError {
     AmountZero,
     #[error("amount overflows nanos")]
     AmountOverflow,
+    #[error("quarantine ledger amount overflow")]
+    QuarantineOverflow,
     #[error("account bridge key mismatch")]
     AccountKeyMismatch,
     #[error("non-sequential deposit id: expected {expected}, got {actual}")]
@@ -380,6 +397,16 @@ pub fn bridge_state_snapshot(state: &BridgeState) -> sybil_verifier::BridgeState
         observed_l1_height: state.observed_l1_height,
         next_withdrawal_id: state.next_withdrawal_id,
         withdrawals,
+        quarantine: state
+            .quarantine
+            .iter()
+            .map(
+                |(sybil_account_key, amount)| sybil_verifier::QuarantineEntrySnapshot {
+                    sybil_account_key: *sybil_account_key,
+                    amount: *amount,
+                },
+            )
+            .collect(),
     }
 }
 
@@ -455,7 +482,7 @@ mod tests {
     fn deposit_leaf_hash_is_stable() {
         let deposit = L1Deposit {
             deposit_id: 1,
-            account_id: AccountId(4),
+            account_id: Some(AccountId(4)),
             chain_id: 31_337,
             vault_address: address(1),
             token_address: address(2),

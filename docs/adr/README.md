@@ -56,6 +56,7 @@ relevant, not replaced).
 | [0012](0012-privacy-and-data-availability.md) | Privacy & DA model — public root+proof, private contents | Accepted | Yes |
 | [0013](0013-exit-and-escape-model.md) | Exit & escape — sell-for-cash; escape values positions at last clearing price | Accepted | Yes |
 | [0014](0014-webauthn-first-auth.md) | WebAuthn / passkeys primary, verified in-guest | Accepted | Yes |
+| [0015](0015-deposit-quarantine.md) | Deposit quarantine — unresolvable keys park in committed ledger, frontier never skips | Accepted | Yes |
 
 > These first ten are **backfilled** from decisions already made and already in
 > production; their rationale was reconstructed from the design/review estate

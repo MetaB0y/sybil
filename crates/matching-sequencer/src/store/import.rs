@@ -47,6 +47,7 @@ impl Store {
             snapshot.markets,
             snapshot.market_groups,
             snapshot.lifecycle,
+            snapshot.analytics.last_clearing_prices,
         );
         let rebuilt_accounts =
             crate::canonical_state::CanonicalState::from_accounts(snapshot.accounts);
@@ -220,10 +221,25 @@ fn restored_state_from_witness(
     genesis_hash: [u8; 32],
 ) -> Result<RestoredState, StoreError> {
     let accounts = account_store_from_witness(&witness.post_state)?;
+    let pubkey_registry = pubkey_registry_from_witness(witness, &accounts)?;
     let (markets, market_statuses, market_metadata, market_groups) =
         market_state_from_sidecar(&witness.state_sidecar)?;
+    let last_clearing_prices = witness
+        .state_sidecar
+        .markets
+        .iter()
+        .filter(|market| !market.last_clearing_prices.is_empty())
+        .map(|market| (market.market_id, market.last_clearing_prices.clone()))
+        .collect::<HashMap<_, _>>();
     let bridge_state = bridge_state_from_witness(witness)?;
     let resting_orders = resting_orders_from_sidecar(&witness.state_sidecar);
+    validate_restored_reservations(&resting_orders)
+        .map_err(|error| import_err(error.to_string()))?;
+    validate_restored_account_reservations(
+        &resting_orders,
+        &witness.state_sidecar.account_reservations,
+    )
+    .map_err(|error| import_err(error.to_string()))?;
     let order_book = OrderBook::restore(resting_orders.clone(), config.order_ttl_blocks);
     let restored_resting_orders = order_book.snapshot();
     if restored_resting_orders.len() != resting_orders.len() {
@@ -252,6 +268,7 @@ fn restored_state_from_witness(
         &markets,
         &market_groups,
         &lifecycle,
+        &last_clearing_prices,
     );
     let rebuilt_root = sybil_verifier::block::compute_state_root_with_sidecar(
         crate::canonical_state::CanonicalState::from_accounts(&accounts).as_snapshots(),
@@ -275,19 +292,84 @@ fn restored_state_from_witness(
         last_header: Some(block_header_from_witness(&witness.header)),
         genesis_hash,
         next_order_id: next_order_id_from_witness(witness)?,
-        pubkey_registry: HashMap::new(),
+        pubkey_registry,
         resting_orders: restored_resting_orders,
         data_feeds: Vec::new(),
         resolution_templates: Vec::new(),
         pending_bundles: Vec::new(),
         admit_log: Vec::new(),
         control_plane_log: Vec::new(),
-        analytics: empty_import_analytics(),
+        analytics: empty_import_analytics(last_clearing_prices),
         bridge_state,
         pending_l1_deposits: Vec::new(),
         pending_bridge_withdrawals: Vec::new(),
         pending_bridge_l1_inputs: Vec::new(),
     })
+}
+
+fn pubkey_registry_from_witness(
+    witness: &BlockWitness,
+    accounts: &AccountStore,
+) -> Result<HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>, StoreError> {
+    let mut sets: HashMap<u64, Vec<sybil_verifier::KeyRecord>> = HashMap::new();
+    for (account_id, keys) in &witness.account_keys {
+        if sets.insert(*account_id, keys.clone()).is_some() {
+            return Err(import_err(format!(
+                "duplicate account {account_id} in witness.account_keys"
+            )));
+        }
+    }
+
+    let mut registry = HashMap::new();
+    for (account_id, account) in accounts.iter() {
+        let keys = sets.remove(&account_id.0).unwrap_or_default();
+        if keys.len() > sybil_verifier::MAX_KEYS_PER_ACCOUNT {
+            return Err(import_err(format!(
+                "account {} exceeds MAX_KEYS_PER_ACCOUNT",
+                account_id.0
+            )));
+        }
+        let digest = sybil_verifier::account_keys_digest(account_id.0, keys.iter().copied());
+        if digest != account.keys_digest {
+            return Err(import_err(format!(
+                "account {} key set does not match committed keys_digest",
+                account_id.0
+            )));
+        }
+        for key in keys {
+            if key.capability_mask != sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK {
+                return Err(import_err("unsupported non-full key capability mask"));
+            }
+            let auth_scheme = match key.auth_scheme {
+                0 => crate::crypto::AccountAuthScheme::RawP256,
+                1 => crate::crypto::AccountAuthScheme::WebAuthn,
+                other => {
+                    return Err(import_err(format!(
+                        "unsupported account key auth scheme {other}"
+                    )))
+                }
+            };
+            let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&key.pubkey_sec1)
+                .ok_or_else(|| import_err("invalid compressed P256 key in witness.account_keys"))?;
+            if registry
+                .insert(
+                    pubkey,
+                    crate::crypto::RegisteredPubkey::primary(*account_id, auth_scheme),
+                )
+                .is_some()
+            {
+                return Err(import_err(
+                    "duplicate pubkey across witness.account_keys accounts",
+                ));
+            }
+        }
+    }
+    if let Some(account_id) = sets.keys().next() {
+        return Err(import_err(format!(
+            "witness.account_keys references unknown account {account_id}"
+        )));
+    }
+    Ok(registry)
 }
 
 fn account_store_from_witness(accounts: &[AccountSnapshot]) -> Result<AccountStore, StoreError> {
@@ -538,6 +620,13 @@ fn bridge_state_from_witness(witness: &BlockWitness) -> Result<BridgeState, Stor
         observed_l1_height: witness.state_sidecar.bridge.observed_l1_height,
         next_withdrawal_id: witness.state_sidecar.bridge.next_withdrawal_id,
         withdrawals,
+        quarantine: witness
+            .state_sidecar
+            .bridge
+            .quarantine
+            .iter()
+            .map(|entry| (entry.sybil_account_key, entry.amount))
+            .collect(),
     })
 }
 
@@ -646,6 +735,17 @@ fn resting_orders_from_sidecar(sidecar: &StateSidecarSnapshot) -> Vec<RestingOrd
                 .iter()
                 .map(|&(market, outcome, qty)| ((market, outcome), qty))
                 .collect();
+            // The sidecar does not carry matched provenance (has_been_matched /
+            // original_max_fill). A partially-filled remainder legitimately
+            // carries a proportionally-scaled reservation that may exceed the
+            // admission formula for its remaining size, so infer the matched
+            // flag from that divergence; restore validation then applies the
+            // lower-bound rule instead of falsely rejecting the exact rule.
+            // The original size stays unknown (original_max_fill = current).
+            let has_been_matched = crate::validation::validate_order_shape(&snapshot.order)
+                .and_then(|()| crate::validation::balance_reservation(&snapshot.order))
+                .map(|admission_cost| snapshot.reserved_balance != admission_cost)
+                .unwrap_or(false);
             RestingOrder {
                 order: snapshot.order.clone(),
                 account_id: AccountId(snapshot.account_id),
@@ -653,7 +753,7 @@ fn resting_orders_from_sidecar(sidecar: &StateSidecarSnapshot) -> Vec<RestingOrd
                 expires_at_block: snapshot.expires_at_block,
                 reserved_balance: snapshot.reserved_balance,
                 reserved_positions,
-                has_been_matched: false,
+                has_been_matched,
                 original_max_fill: snapshot.order.max_fill.0,
                 created_at_ms: 0,
             }
@@ -701,9 +801,11 @@ fn next_order_id_from_witness(witness: &BlockWitness) -> Result<u64, StoreError>
     }
 }
 
-fn empty_import_analytics() -> AnalyticsRestoredState {
+fn empty_import_analytics(
+    last_clearing_prices: HashMap<MarketId, Vec<Nanos>>,
+) -> AnalyticsRestoredState {
     AnalyticsRestoredState {
-        last_clearing_prices: HashMap::new(),
+        last_clearing_prices,
         market_volumes: HashMap::new(),
         account_fills: Vec::new(),
         trader_tracker: Default::default(),

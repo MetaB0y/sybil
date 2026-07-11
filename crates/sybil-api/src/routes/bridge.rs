@@ -1,4 +1,5 @@
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::Json;
 
 use matching_sequencer::crypto::{
@@ -156,6 +157,12 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<BridgeStatusRe
         finalized_withdrawal_count,
         cancelled_withdrawal_count,
         refunded_withdrawal_count,
+        quarantine_ledger_size: bridge.quarantine.len(),
+        total_quarantined_nanos: bridge
+            .quarantine
+            .values()
+            .copied()
+            .fold(0i64, i64::saturating_add),
     }))
 }
 
@@ -166,13 +173,18 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<BridgeStatusRe
     params(("id" = u64, Path, description = "Account ID")),
     responses(
         (status = 200, description = "Account bridge key", body = BridgeAccountKeyResponse),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account"),
         (status = 404, description = "Account not found")
-    )
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn account_key(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
 ) -> Result<Json<BridgeAccountKeyResponse>, AppError> {
+    crate::routes::accounts::authorize_account_read(&state, &headers, AccountId(id)).await?;
     let key = state
         .sequencer
         .get_bridge_account_key(AccountId(id))
@@ -227,14 +239,28 @@ pub async fn submit_l1_deposit(
     // TODO(SYB-188/SYB-178): this service-gated scaffold trusts the operator's
     // submitted L1 event fields. Production deposit soundness must verify L1
     // inclusion/finality against the vault deposit root before crediting.
-    let account_id = AccountId(req.account_id);
+    if req.quarantine == req.account_id.is_some() {
+        return Err(AppError::bad_request(
+            "exactly one deposit disposition is required: account_id or quarantine=true",
+        ));
+    }
+    let account_id = req.account_id.map(AccountId);
     let sybil_account_key = match req.sybil_account_key_hex {
         Some(value) => parse_hex_array::<32>(&value, "sybil_account_key_hex")?,
-        None => state
-            .sequencer
-            .get_bridge_account_key(account_id)
-            .await?
-            .ok_or_else(|| AppError::not_found(format!("Account {} not found", req.account_id)))?,
+        None => match account_id {
+            Some(account_id) => state
+                .sequencer
+                .get_bridge_account_key(account_id)
+                .await?
+                .ok_or_else(|| {
+                    AppError::not_found(format!("Account {} not found", account_id.0))
+                })?,
+            None => {
+                return Err(AppError::bad_request(
+                    "quarantined deposits require sybil_account_key_hex",
+                ))
+            }
+        },
     };
     let deposit_root = parse_hex_array::<32>(&req.deposit_root_hex, "deposit_root_hex")?;
     let deposit = SequencerL1Deposit {
@@ -248,10 +274,17 @@ pub async fn submit_l1_deposit(
         amount_token_units: req.amount_token_units,
         deposit_root,
     };
-    let account = state.sequencer.submit_l1_deposit(deposit).await?;
+    let disposition = state.sequencer.submit_l1_deposit(deposit).await?;
+    let (account_id, balance_nanos, disposition) = match disposition {
+        matching_sequencer::DepositDisposition::Credited(account) => {
+            (Some(account.id.0), Some(account.balance), "credited")
+        }
+        matching_sequencer::DepositDisposition::Quarantined { .. } => (None, None, "quarantined"),
+    };
     Ok(Json(BridgeDepositResponse {
-        account_id: account.id.0,
-        balance_nanos: account.balance,
+        account_id,
+        balance_nanos,
+        disposition: disposition.to_string(),
         deposit_id: req.deposit_id,
         deposit_root_hex: hex::encode(deposit_root),
     }))

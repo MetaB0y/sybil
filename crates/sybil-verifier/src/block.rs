@@ -459,6 +459,7 @@ mod tests {
                 expiry_height: 99,
                 nullifier: [4u8; 32],
             }],
+            quarantine: vec![],
         };
         let mut changed = bridge.clone();
         changed.withdrawals[0].amount_nanos += 1;
@@ -505,6 +506,7 @@ mod tests {
             observed_l1_height: 0,
             next_withdrawal_id: 3,
             withdrawals: vec![first.clone(), second.clone()],
+            quarantine: vec![],
         };
         let bridge_b = BridgeStateSnapshot {
             withdrawals: vec![second, first],
@@ -620,6 +622,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: [1u8; 32],
             resolution_template: "admin_immediate".to_string(),
+            last_clearing_prices: vec![],
         };
         let mut resolved = market.clone();
         resolved.status = MarketStatusSnapshot::Resolved {
@@ -646,6 +649,13 @@ mod tests {
             compute_state_root_with_sidecar(&accounts, &before),
             compute_state_root_with_sidecar(&accounts, &after)
         );
+
+        let mut repriced = before.clone();
+        repriced.markets[0].last_clearing_prices = vec![Nanos(600_000_000), Nanos(400_000_000)];
+        assert_ne!(
+            compute_state_root_with_sidecar(&accounts, &before),
+            compute_state_root_with_sidecar(&accounts, &repriced)
+        );
     }
 
     #[test]
@@ -658,6 +668,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: [2u8; 32],
             resolution_template: "admin_immediate".to_string(),
+            last_clearing_prices: vec![],
         };
         let second_market = MarketSnapshot {
             market_id: MarketId::new(1),
@@ -666,6 +677,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: [1u8; 32],
             resolution_template: "admin_immediate".to_string(),
+            last_clearing_prices: vec![],
         };
         let first_group = MarketGroupSnapshot {
             group_id: 1,
@@ -722,6 +734,7 @@ mod tests {
             pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -760,6 +773,7 @@ mod tests {
             pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -803,6 +817,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
             pre_state_sidecar: Default::default(),
             resolved_markets: vec![],
@@ -857,6 +872,7 @@ mod tests {
             pre_state: post_state.clone(),
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -886,6 +902,7 @@ mod tests {
                 status: MarketStatusSnapshot::Active,
                 metadata_digest: [7u8; 32],
                 resolution_template: "admin".to_string(),
+                last_clearing_prices: vec![],
             }],
             ..StateSidecarSnapshot::default()
         };
@@ -920,6 +937,7 @@ mod tests {
             pre_state,
             post_system_state: post_state.clone(),
             post_state,
+            account_keys: vec![],
             state_sidecar,
             pre_state_sidecar,
             resolved_markets: vec![],
@@ -971,6 +989,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),

@@ -36,9 +36,14 @@ impl BlockSequencer {
         pubkey: crate::crypto::PublicKey,
         mut meta: crate::crypto::RegisteredPubkey,
     ) -> Result<(), SequencerError> {
+        if self.height != 0 {
+            return Err(SequencerError::FirstKeyMustBeInitial);
+        }
         self.can_register_pubkey(account_id, &pubkey)?;
+        self.validate_quarantine_claim_for_account(account_id)?;
         meta.account_id = account_id;
         self.apply_pubkey_registration(account_id, pubkey, meta);
+        self.claim_quarantine_for_account(account_id)?;
         Ok(())
     }
 
@@ -57,6 +62,15 @@ impl BlockSequencer {
         }
         if self.pubkey_registry.contains_key(pubkey) {
             return Err(SequencerError::AccountAlreadyRegistered);
+        }
+        if self
+            .pubkey_registry
+            .values()
+            .filter(|registered| registered.account_id == account_id)
+            .count()
+            >= sybil_verifier::MAX_KEYS_PER_ACCOUNT
+        {
+            return Err(SequencerError::SigningKeyLimit);
         }
         Ok(())
     }
@@ -91,8 +105,59 @@ impl BlockSequencer {
         mut meta: crate::crypto::RegisteredPubkey,
     ) -> Result<(), SequencerError> {
         self.can_register_first_pubkey(account_id, &pubkey)?;
+        self.validate_quarantine_claim_for_account(account_id)?;
         meta.account_id = account_id;
+        let key = crate::digest::key_record(&pubkey, &meta);
+        let pending_create = self
+            .pending_system_events
+            .iter_mut()
+            .rev()
+            .find_map(|event| match event {
+                SystemEvent::CreateAccount {
+                    account_id: created_id,
+                    initial_keys,
+                    ..
+                } if *created_id == account_id => Some(initial_keys),
+                _ => None,
+            });
+        if let Some(initial_keys) = pending_create {
+            initial_keys.push(key);
+        } else if self.height != 0 {
+            return Err(SequencerError::FirstKeyMustBeInitial);
+        }
         self.apply_pubkey_registration(account_id, pubkey, meta);
+        self.claim_quarantine_for_account(account_id)?;
+        Ok(())
+    }
+
+    /// Apply an existing-key-authorized registration and stage the exact v6
+    /// system event for the next block.
+    pub fn register_pubkey_with_meta_authorized(
+        &mut self,
+        account_id: AccountId,
+        pubkey: crate::crypto::PublicKey,
+        mut meta: crate::crypto::RegisteredPubkey,
+        authorization: sybil_verifier::KeyOpAuth,
+    ) -> Result<(), SequencerError> {
+        self.can_register_pubkey(account_id, &pubkey)?;
+        self.validate_quarantine_claim_for_account(account_id)?;
+        self.capture_system_account_baseline(account_id);
+        meta.account_id = account_id;
+        let key = crate::digest::key_record(&pubkey, &meta);
+        self.apply_pubkey_registration(account_id, pubkey, meta);
+        let account = self
+            .accounts
+            .get_mut(account_id)
+            .expect("key-registration preflight requires the account");
+        let encoded =
+            crate::digest::encode_key_registered_event(&key, self.height.saturating_add(1));
+        account.events_digest = crate::digest::update_digest(&account.events_digest, &encoded);
+        self.record_system_event(SystemEvent::KeyRegistered {
+            account_id,
+            key,
+            authorization,
+        });
+        self.claim_quarantine_for_account(account_id)?;
         Ok(())
     }
 
@@ -123,14 +188,33 @@ impl BlockSequencer {
         &mut self,
         account_id: AccountId,
         target: &crate::crypto::PublicKey,
+        authorization: sybil_verifier::KeyOpAuth,
     ) -> Result<(), SequencerError> {
         self.can_revoke_signing_key(account_id, target)?;
+        self.capture_system_account_baseline(account_id);
+        let registered = self
+            .pubkey_registry
+            .get(target)
+            .expect("revocation preflight requires the target key")
+            .clone();
+        let key = crate::digest::key_record(target, &registered);
         self.pubkey_registry.remove(target);
         crate::digest::refresh_account_keys_digest(
             &mut self.accounts,
             account_id,
             &self.pubkey_registry,
         );
+        let account = self
+            .accounts
+            .get_mut(account_id)
+            .expect("revocation preflight requires the account");
+        let encoded = crate::digest::encode_key_revoked_event(&key, self.height.saturating_add(1));
+        account.events_digest = crate::digest::update_digest(&account.events_digest, &encoded);
+        self.record_system_event(SystemEvent::KeyRevoked {
+            account_id,
+            key,
+            authorization,
+        });
         Ok(())
     }
 
@@ -361,6 +445,7 @@ impl BlockSequencer {
         self.record_system_event(SystemEvent::CreateAccount {
             account_id,
             initial_balance,
+            initial_keys: Vec::new(),
         });
         {
             use crate::aggregates::{HistoryEvent, HistoryKind};

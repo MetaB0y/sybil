@@ -63,7 +63,8 @@ The first guest boundary is intentionally narrow:
   verifies that each qMDB `next_key` pointer forms the exact sorted key ring,
   recomputes the keyless-qMDB `events_root` from canonical event leaf bytes,
   reconstructs the L1 deposit checkpoint root from the private deposit-log
-  prefix and checks credited L1 deposit events against included leaves,
+  frontier delta and checks every credited-or-quarantined disposition against
+  included leaves, replays the committed quarantine ledger and automatic claims,
   recomputes `witness_root = BLAKE3("sybil/witness" || witness_bytes)`,
   then verifies the match, settlement, and order-validation layers through
   `sybil-verifier` with qMDB block-runtime features disabled. The guest uses
@@ -182,22 +183,22 @@ just openvm-setup-evm-download
 just openvm-commit
 just zk-smoke
 just zk-smoke true
-just witgen-smoke-job /tmp/sybil-smoke.redb /tmp/job.msgpack
+just witgen-smoke-job target/sybil-smoke.redb /tmp/job.msgpack
 just witgen-export-latest data/sybil.redb /tmp/job.msgpack
 just prover-inspect /tmp/job.msgpack
 just prover-prepare /tmp/job.msgpack
-just prover-prepare-file-da /tmp/job.msgpack /tmp/sybil-guest-input.msgpack /tmp/sybil-da /tmp/sybil-da-manifest.json /tmp/sybil-public-input-hash.hex
-just prover-publish-da /tmp/sybil-guest-input.msgpack /tmp/sybil-da-witness.bin /tmp/sybil-da-manifest.json
-just prover-worker-once /tmp/sybil-prover-jobs /tmp/sybil-prover-artifacts
-just prover-worker /tmp/sybil-prover-jobs /tmp/sybil-prover-artifacts
-just prover-serve /tmp/sybil-prover-artifacts /tmp/sybil-prover-jobs 127.0.0.1:3002
-just openvm-input /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm-input.json
-just openvm-run /tmp/sybil-openvm-input.json
-just openvm-prove-app /tmp/sybil-openvm-input.json /tmp/sybil-openvm.app.proof
-just openvm-verify-app /tmp/sybil-openvm.app.proof
-just openvm-prove-evm /tmp/sybil-openvm-input.json /tmp/sybil-openvm.evm.proof
-just openvm-verify-evm /tmp/sybil-openvm.evm.proof
-just prover-submit-state-root 0xYourSettlement /tmp/sybil-guest-input.msgpack /tmp/sybil-openvm.app.proof
+just prover-prepare-file-da /tmp/job.msgpack target/sybil-guest-input.msgpack target/sybil-da target/sybil-da-manifest.json target/sybil-public-input-hash.hex
+just prover-publish-da target/sybil-guest-input.msgpack target/sybil-da-witness.bin target/sybil-da-manifest.json
+just prover-worker-once target/sybil-prover-jobs target/sybil-prover-artifacts
+just prover-worker target/sybil-prover-jobs target/sybil-prover-artifacts
+just prover-serve target/sybil-prover-artifacts target/sybil-prover-jobs 127.0.0.1:3002
+just openvm-input target/sybil-guest-input.msgpack target/sybil-openvm-input.json
+just openvm-run target/sybil-openvm-input.json
+just openvm-prove-app target/sybil-openvm-input.json target/sybil-openvm.app.proof
+just openvm-verify-app target/sybil-openvm.app.proof
+just openvm-prove-evm target/sybil-openvm-input.json target/sybil-openvm.evm.proof
+just openvm-verify-evm target/sybil-openvm.evm.proof
+just prover-submit-state-root 0xYourSettlement target/sybil-guest-input.msgpack target/sybil-openvm.app.proof
 just prover-submit-state-root-rpc 0xYourSettlement 0xYourSender
 just prover-submit-state-root-evm-rpc 0xYourSettlement 0xYourSender
 ```

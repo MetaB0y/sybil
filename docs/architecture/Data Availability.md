@@ -106,7 +106,7 @@ The host tooling can prepare a proof-bound file-backed DA publication directly
 from a proof job:
 
 ```bash
-just prover-prepare-file-da /tmp/job.msgpack /tmp/sybil-guest-input.msgpack /tmp/sybil-da /tmp/sybil-da-manifest.json /tmp/sybil-public-input-hash.hex
+just prover-prepare-file-da /tmp/job.msgpack target/sybil-guest-input.msgpack target/sybil-da target/sybil-da-manifest.json target/sybil-public-input-hash.hex
 ```
 
 `sybil-prover prepare-file-da` validates the proof job, writes a

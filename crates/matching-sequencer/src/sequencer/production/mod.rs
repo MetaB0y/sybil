@@ -172,6 +172,7 @@ impl BlockSequencer {
             prepared.next_sequencer.markets(),
             prepared.next_sequencer.market_groups(),
             prepared.next_sequencer.market_lifecycle(),
+            prepared.next_sequencer.analytics().last_clearing_prices(),
         );
         let block_state_root = prepared.production.block.header.state_root;
         if prepared_state_root != block_state_root {
@@ -219,7 +220,17 @@ impl BlockSequencer {
         tracing::Span::current().record("height", self.height);
         let pre_state_sidecar = self.committed_state_sidecar.clone();
         let pre_deposit_frontier = self.committed_deposit_frontier;
-        let system_events = std::mem::take(&mut self.pending_system_events);
+        let mut system_events = std::mem::take(&mut self.pending_system_events);
+        // Phase 0: account creation/key mutations precede all other system
+        // events. Stable sorting preserves admission order within each phase.
+        system_events.sort_by_key(|event| {
+            !matches!(
+                event,
+                SystemEvent::CreateAccount { .. }
+                    | SystemEvent::KeyRegistered { .. }
+                    | SystemEvent::KeyRevoked { .. }
+            )
+        });
         let system_account_baselines = std::mem::take(&mut self.pending_system_account_baselines);
 
         for event in &system_events {
@@ -227,6 +238,7 @@ impl BlockSequencer {
                 SystemEvent::CreateAccount {
                     account_id,
                     initial_balance,
+                    ..
                 } => {
                     if let Some(account) = self.accounts.get_mut(*account_id) {
                         let encoded = crate::digest::encode_create_account_event(
@@ -293,21 +305,7 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
-                SystemEvent::WithdrawalFinalized {
-                    account_id,
-                    withdrawal_id,
-                    amount,
-                } => {
-                    if let Some(account) = self.accounts.get_mut(*account_id) {
-                        let encoded = crate::digest::encode_withdrawal_finalized_event(
-                            *withdrawal_id,
-                            *amount,
-                            self.height,
-                        );
-                        account.events_digest =
-                            crate::digest::update_digest(&account.events_digest, &encoded);
-                    }
-                }
+                SystemEvent::WithdrawalFinalized { .. } => {}
                 SystemEvent::L1BlockObserved { .. } => {}
                 SystemEvent::MarketResolved {
                     market_id,
@@ -346,6 +344,20 @@ impl BlockSequencer {
                     }
                 }
                 SystemEvent::MarketGroupExtended { .. } => {}
+                SystemEvent::DepositQuarantined { .. } => {}
+                SystemEvent::QuarantineClaimed {
+                    account_id, amount, ..
+                } => {
+                    if let Some(account) = self.accounts.get_mut(*account_id) {
+                        let encoded =
+                            crate::digest::encode_quarantine_claimed_event(*amount, self.height);
+                        account.events_digest =
+                            crate::digest::update_digest(&account.events_digest, &encoded);
+                    }
+                }
+                // Key-op digests are folded at admission so a subsequent key
+                // op in the same block binds to the running digest.
+                SystemEvent::KeyRegistered { .. } | SystemEvent::KeyRevoked { .. } => {}
             }
         }
         // A terminal leaf remains addressable until the block carrying its
@@ -403,8 +415,10 @@ impl BlockSequencer {
         let mut derived_view_sidecar = DerivedViewSidecar::default();
 
         // ── Order Book: expire stale, remove orders for resolved markets ──
-        let expired = self.order_book.expire(self.height);
-        let revalidated = self.order_book.revalidate(&self.accounts, &active_markets);
+        let expired = self.order_book.expire(self.height)?;
+        let revalidated = self
+            .order_book
+            .revalidate(&self.accounts, &active_markets)?;
         for ro in &expired {
             derived_view_sidecar
                 .removed_orders
@@ -820,7 +834,7 @@ impl BlockSequencer {
         // Update order book: release filled orders' reservations, adjust partial fills
         let post_solve_removed = self
             .order_book
-            .settle(&fills, &mm_order_ids_set, self.height);
+            .settle(&fills, &mm_order_ids_set, self.height)?;
         for (ro, exit) in &post_solve_removed {
             derived_view_sidecar
                 .removed_orders

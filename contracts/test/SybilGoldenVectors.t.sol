@@ -44,6 +44,7 @@ contract SybilVaultDepositHarness is SybilVault {
     address private constant TOKEN_ADDRESS = 0x2222222222222222222222222222222222222222;
     address private constant SETTLEMENT_ADDRESS = 0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB;
     address private constant VERIFIER_ADDRESS = 0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC;
+    address private constant ESCAPE_VERIFIER_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     constructor()
         SybilVault(
@@ -51,6 +52,7 @@ contract SybilVaultDepositHarness is SybilVault {
             IERC20Minimal(TOKEN_ADDRESS),
             ISybilSettlement(SETTLEMENT_ADDRESS),
             IOpenVmVerifierAdapter(VERIFIER_ADDRESS),
+            IOpenVmVerifierAdapter(ESCAPE_VERIFIER_ADDRESS),
             1 days,
             7 days,
             2 days
@@ -88,7 +90,7 @@ contract SybilGoldenVectorsTest {
     address private constant VAULT_ADDRESS = 0x1111111111111111111111111111111111111111;
     address private constant VERIFIER_ADDRESS = 0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC;
 
-    bytes private constant ACCOUNT_KEYS_DIGEST_DOMAIN = "sybil/state/account-keys-digest/v1";
+    bytes private constant ACCOUNT_KEYS_DIGEST_DOMAIN = "sybil/state/account-keys-digest/v2";
 
     SybilVaultDepositHarness private vault;
     SybilSettlement private settlement;
@@ -190,6 +192,23 @@ contract SybilGoldenVectorsTest {
         );
     }
 
+    function testEscapeClaimPublicInputHashMatchesRustGoldenVector() public view {
+        SybilTypes.EscapeClaimPublicInputs memory inputs = SybilTypes.EscapeClaimPublicInputs({
+            stateRoot: goldenBytes32(".escape_claim_public_inputs.state_root"),
+            height: uint64(goldenUint(".escape_claim_public_inputs.height")),
+            accountId: uint64(goldenUint(".escape_claim_public_inputs.account_id")),
+            recipient: goldenAddress(".escape_claim_public_inputs.recipient"),
+            amount: goldenUint(".escape_claim_public_inputs.amount"),
+            nullifier: goldenBytes32(".escape_claim_public_inputs.nullifier")
+        });
+
+        require(
+            vault.escapeClaimPublicInputHash(inputs)
+                == goldenBytes32(".escape_claim_public_inputs.hash"),
+            "escape public input hash"
+        );
+    }
+
     function testAccountKeysDigestMatchesRustGoldenVector() public view {
         // Twin: crates/sybil-verifier/src/byte_identity.rs. The domain and
         // encoding stay independent; the expected values come from one JSON.
@@ -201,8 +220,10 @@ contract SybilGoldenVectorsTest {
         bytes memory sortedRecords = bytes.concat(
             hex"00",
             goldenBytes(".account_keys.raw_p256_key"),
+            hex"ffffffff",
             hex"01",
-            goldenBytes(".account_keys.webauthn_key")
+            goldenBytes(".account_keys.webauthn_key"),
+            hex"ffffffff"
         );
         require(
             accountKeysDigest(accountId, 2, sortedRecords)

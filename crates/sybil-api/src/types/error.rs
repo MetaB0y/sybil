@@ -204,6 +204,12 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::AccountAlreadyRegistered => {
                 AppError::conflict("Public key already registered to an account")
             }
+            matching_sequencer::SequencerError::FirstKeyMustBeInitial => {
+                AppError::conflict(format!("{err}"))
+            }
+            matching_sequencer::SequencerError::SigningKeyLimit => {
+                AppError::conflict(format!("{err}"))
+            }
             matching_sequencer::SequencerError::KeyNotFound => {
                 AppError::not_found("Signing key not found")
             }
@@ -261,6 +267,10 @@ impl From<matching_sequencer::SequencerError> for AppError {
                     failures = ?failures,
                     "sequencer block invariant failure"
                 );
+                AppError::internal("Internal sequencer integrity failure")
+            }
+            matching_sequencer::SequencerError::ReservationInvariant(ref error) => {
+                tracing::error!(%error, "sequencer reservation invariant failure");
                 AppError::internal("Internal sequencer integrity failure")
             }
             matching_sequencer::SequencerError::Persistence(ref msg) => {

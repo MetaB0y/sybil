@@ -59,6 +59,14 @@ pub fn verify_qmdb_state_root(
     proof: &QmdbStateRootProof,
 ) -> Result<(), ZkTransitionError> {
     let leaves = state_schema::state_root_leaves(&witness.post_state, &witness.state_sidecar);
+    verify_qmdb_state_root_for(root, &leaves, proof)
+}
+
+pub fn verify_qmdb_state_root_for(
+    root: &[u8; 32],
+    leaves: &[(Vec<u8>, Vec<u8>)],
+    proof: &QmdbStateRootProof,
+) -> Result<(), ZkTransitionError> {
     if proof.leaf_proofs.len() != leaves.len() {
         return Err(ZkTransitionError::StateRootProofCountMismatch {
             expected: leaves.len(),

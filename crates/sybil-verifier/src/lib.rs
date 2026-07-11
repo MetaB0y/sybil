@@ -36,8 +36,10 @@ mod header_hash {
         "/../sybil-zk/src/header_hash_impl.rs"
     ));
 }
+pub mod key_transition;
 pub mod match_verifier;
 pub mod orders;
+pub mod quarantine;
 pub mod settlement;
 pub mod sidecar;
 mod snapshot_schema;
@@ -61,16 +63,18 @@ pub mod commitments {
 }
 
 pub use account_keys::{
-    account_keys_digest, empty_account_keys_digest, AccountKeyDigestRecord,
-    ACCOUNT_KEYS_DIGEST_DOMAIN,
+    account_keys_digest, canonical_key_registration_bytes, canonical_key_revocation_bytes,
+    empty_account_keys_digest, AccountKeyDigestRecord, ACCOUNT_KEYS_DIGEST_DOMAIN,
+    MAX_KEYS_PER_ACCOUNT, MAX_KEY_OPS_PER_BLOCK, MAX_WEBAUTHN_AUTHENTICATOR_DATA_BYTES,
+    MAX_WEBAUTHN_CLIENT_DATA_JSON_BYTES,
 };
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, DepositAccumulatorWitness, L1DepositWitness, MarketGroupSnapshot,
-    MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason,
-    ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
-    StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness, WithdrawalSnapshot,
-    WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,
+    MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
+    QuarantineEntrySnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
+    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness,
+    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
@@ -91,7 +95,9 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
 /// Verify that authenticated pre-state plus system events reproduces the
 /// account-value fields in post-system state.
 pub fn verify_system(witness: &BlockWitness) -> VerificationResult {
-    system::verify_system_transition(witness)
+    let mut result = system::verify_system_transition(witness);
+    result.merge(key_transition::verify_key_transitions(witness));
+    result
 }
 
 /// Verify block header integrity (state root, parent hash, height, counts).

@@ -406,6 +406,7 @@ impl Harness {
             seq.markets(),
             seq.market_groups(),
             seq.market_lifecycle(),
+            seq.analytics().last_clearing_prices(),
         );
         if !has_uncommitted_wal {
             assert_eq!(
@@ -645,7 +646,7 @@ impl Harness {
         let deposit_id = bridge_state.deposit_cursor.saturating_add(1);
         let mut deposit = L1Deposit {
             deposit_id,
-            account_id,
+            account_id: Some(account_id),
             chain_id: 1,
             vault_address: eth_address(self.seed, self.op_index, 1),
             token_address: eth_address(self.seed, self.op_index, 2),
@@ -1059,6 +1060,7 @@ async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart(
         observed_l1_height: u64::MAX,
         next_withdrawal_id: u64::MAX,
         withdrawals: Default::default(),
+        quarantine: Default::default(),
     })
     .unwrap()
     .len();
@@ -1066,7 +1068,7 @@ async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart(
     for deposit_id in 1..=DEPOSIT_COUNT {
         let mut deposit = L1Deposit {
             deposit_id,
-            account_id,
+            account_id: Some(account_id),
             chain_id: 1,
             vault_address: eth_address(0x266b, deposit_id, 1),
             token_address: eth_address(0x266b, deposit_id, 2),
@@ -1116,6 +1118,7 @@ async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart(
         restored_seq.markets(),
         restored_seq.market_groups(),
         restored_seq.market_lifecycle(),
+        restored_seq.analytics().last_clearing_prices(),
     );
     assert_eq!(restarted_root, committed_root);
 }

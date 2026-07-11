@@ -116,6 +116,9 @@ pub enum SequencerError {
     /// Order validation failure.
     #[error("order {} rejected: {:?}", .0.order_id, .0.reason)]
     Rejected(Rejection),
+    /// Resting-order reservation aggregates failed a fail-closed invariant.
+    #[error(transparent)]
+    ReservationInvariant(#[from] crate::order_book::ReservationError),
     /// P256 signature check failed.
     #[error("invalid P256 signature")]
     InvalidSignature,
@@ -161,6 +164,14 @@ pub enum SequencerError {
     /// A public key is already registered to an account.
     #[error("public key already registered to an account")]
     AccountAlreadyRegistered,
+    /// First keys are validity-bound to the account-creation event.
+    #[error(
+        "the first signing key must be attached before the account's creation block is sealed"
+    )]
+    FirstKeyMustBeInitial,
+    /// Per-account validity key cap reached.
+    #[error("account signing-key limit reached")]
+    SigningKeyLimit,
     /// The signing key targeted for revocation is not registered (SYB-60).
     #[error("signing key not found")]
     KeyNotFound,

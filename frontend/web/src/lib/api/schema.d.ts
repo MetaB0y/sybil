@@ -13,7 +13,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/accounts */
+        /**
+         * POST /v1/accounts — create an account with its initial signing key.
+         * @description Public onboarding must provide `initial_key`; account allocation and
+         *     first-key registration are serialized as one API operation. The legacy
+         *     bare request shape (no `initial_key`) is deprecated and service-tier only.
+         */
         post: operations["create_account"];
         delete?: never;
         options?: never;
@@ -171,7 +176,15 @@ export interface paths {
         /** GET /v1/accounts/{id}/keys — list registered signing keys with metadata */
         get: operations["list_account_keys"];
         put?: never;
-        /** POST /v1/accounts/{id}/keys */
+        /**
+         * POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
+         * @description SYB-229: public unsigned key registration is a critical auth hole — anyone
+         *     could attach their own key to any account and then sign as it. This endpoint
+         *     is service-token gated (like account creation) and accepts an UNSIGNED
+         *     registration ONLY when the account has zero registered keys. Once an account
+         *     has a key, every subsequent key must be added via the SIGNED path
+         *     (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
+         */
         post: operations["register_key"];
         delete?: never;
         options?: never;
@@ -188,7 +201,16 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/accounts/{id}/keys/register — register an additional signing key (signed) (SYB-229) */
+        /**
+         * POST /v1/accounts/{id}/keys/register — register an additional signing key,
+         *     authorized by a signature from an existing account key (SYB-229).
+         * @description Mirrors the SYB-60 revoke shape: canonical bytes cover the account, the new
+         *     key (scheme + compressed SEC1), the signer, and a replay nonce, and are
+         *     domain-separated by `genesis_hash` (SYB-224). The `raw_p256` signer path
+         *     hands a `SignedKeyRegistration` to the sequencer (which re-verifies and burns
+         *     the nonce); the `webauthn` signer path verifies the assertion at the edge and
+         *     hands an already-authenticated intent.
+         */
         post: operations["register_signed_key"];
         delete?: never;
         options?: never;
@@ -297,6 +319,67 @@ export interface paths {
         get: operations["get_activity_overview"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/auto-resolutions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/admin/auto-resolutions — list every recorded proposal. */
+        get: operations["list_auto_resolutions"];
+        put?: never;
+        /**
+         * POST /v1/admin/auto-resolutions — record (or refresh) an auto-resolution
+         *     proposal. Never settles a market.
+         */
+        post: operations["submit_auto_resolution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/auto-resolutions/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST /v1/admin/auto-resolutions/{id}/approve — approve a proposal so the
+         *     resolver finalizes it on its next poll (does not settle here).
+         */
+        post: operations["approve_auto_resolution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/auto-resolutions/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * POST /v1/admin/auto-resolutions/{id}/reject — veto a proposal. Terminal: the
+         *     resolver will never finalize it.
+         */
+        post: operations["reject_auto_resolution"];
         delete?: never;
         options?: never;
         head?: never;
@@ -470,6 +553,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bridge/l1-height": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/bridge/l1-height */
+        post: operations["observe_l1_height"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/bridge/status": {
         parameters: {
             query?: never;
@@ -547,6 +647,46 @@ export interface paths {
         };
         /** GET /v1/bridge/withdrawals/{id} */
         get: operations["get_withdrawal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/da/{height}/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /v1/da/{height}/manifest
+         * @description Typed DA manifest for a retained canonical witness payload. Retention follows the store-backed block-history window: with SYBIL_DATA_DIR unset there are no retained DA artifacts; with pruning disabled rows are retained until the store is reset. Clients MUST verify the SYB-80 section 3 binding chain themselves: payload_root -> witness_root -> da_commitment -> L1 RootRecord, and must not trust this server.
+         */
+        get: operations["get_da_manifest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/da/{height}/payload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * GET /v1/da/{height}/payload
+         * @description Canonical witness payload bytes for a retained height, served as application/octet-stream with Content-Length. Retention follows the store-backed block-history window: with SYBIL_DATA_DIR unset there are no retained DA artifacts; with pruning disabled rows are retained until the store is reset. Clients MUST verify the SYB-80 section 3 binding chain themselves: payload_root -> witness_root -> da_commitment -> L1 RootRecord, and must not trust this server.
+         */
+        get: operations["get_da_payload"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1106,32 +1246,32 @@ export interface components {
         AccountResponse: {
             /** Format: int64 */
             account_id: number;
+            /**
+             * Format: int64
+             * @description Spendable account balance after live-order reservations. Integer
+             *     nanodollars; 1_000_000_000 = $1.
+             */
+            available_balance_nanos: string;
             /** @description Optional deterministic identicon seed (SYB-60). */
             avatar_seed?: string | null;
             /**
              * Format: int64
-             * @description Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+             * @description Total (gross) account balance; see `available_balance_nanos` for spendable
+             *     funds. Integer nanodollars; 1_000_000_000 = $1.
              */
             balance_nanos: string;
-            /**
-             * Format: int64
-             * @description Spendable balance = total minus cash reserved by open/resting
-             *     orders. Optional: older API builds omit it — fall back to
-             *     `balance_nanos`.
-             */
-            available_balance_nanos?: string;
-            /**
-             * Format: int64
-             * @description Cash reserved by open/resting orders. Optional: older API
-             *     builds omit it.
-             */
-            reserved_balance_nanos?: string;
             /**
              * @description Optional opt-in display name (SYB-60). Not yet used for leaderboard
              *     labels — that flip is a deliberate follow-up.
              */
             display_name?: string | null;
             positions?: components["schemas"]["PositionResponse"][];
+            /**
+             * Format: int64
+             * @description Balance reserved by live resting orders. Integer nanodollars;
+             *     1_000_000_000 = $1.
+             */
+            reserved_balance_nanos: string;
         };
         /** @description Response shape for `GET /v1/activity/overview`. All-time + 24h slices. */
         ActivityOverviewResponse: {
@@ -1171,6 +1311,63 @@ export interface components {
         };
         /** @enum {string} */
         AuthScheme: "raw_p256" | "webauthn";
+        /**
+         * @description Which confidence tier a proposed automated resolution (SYB-48) landed in.
+         *     Mirrors the resolver-side confidence policy so the review board can render
+         *     and gate each entry consistently.
+         * @enum {string}
+         */
+        AutoResolutionActionDto: "propose" | "review" | "escalate";
+        /** @description One entry on the automated-resolution review board (SYB-48). */
+        AutoResolutionEntryResponse: {
+            /**
+             * @description Confidence tier the resolver assigned (`propose` | `review` |
+             *     `escalate`).
+             */
+            action: components["schemas"]["AutoResolutionActionDto"];
+            /**
+             * Format: double
+             * @description Model confidence in [0, 1].
+             */
+            confidence: number;
+            /**
+             * Format: int64
+             * @description When an operator approved/rejected, if they did. Unix milliseconds.
+             */
+            decided_at_ms?: number | null;
+            /**
+             * Format: int64
+             * @description Auto-finalize deadline for `propose` entries. Unix milliseconds.
+             */
+            eta_ms?: number | null;
+            /** @description Short verbatim excerpts from the fetched source. */
+            evidence_excerpts?: string[];
+            /** Format: int32 */
+            market_id: number;
+            /**
+             * Format: int64
+             * @description Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
+             *     Payouts are per-share probabilities in [0, 1e9].
+             */
+            payout_nanos: string;
+            /**
+             * Format: int64
+             * @description When the proposal was first recorded. Unix milliseconds.
+             */
+            proposed_at_ms: number;
+            /** @description Model's free-text justification. */
+            reasoning: string;
+            /**
+             * @description Display status derived at read time from the operator decision AND the
+             *     market's live on-chain state: one of `pending`, `needs_review`,
+             *     `escalated`, `approved`, `rejected`, `resolved`.
+             */
+            status: string;
+        };
+        /** @description Response body of `GET /v1/admin/auto-resolutions` (SYB-48). */
+        AutoResolutionListResponse: {
+            entries: components["schemas"]["AutoResolutionEntryResponse"][];
+        };
         /**
          * @description Nested per-market sidecar on `BlockResponse.by_market`. Grows append-only
          *     across steps (each new field carries `#[serde(default)]` so partial
@@ -1252,6 +1449,7 @@ export interface components {
             orders_filled: number;
             parent_hash: string;
             rejections?: components["schemas"]["RejectionResponse"][];
+            /** @description Post-block state root. Hex-encoded 32-byte qMDB root. */
             state_root: string;
             system_events?: components["schemas"]["SystemEventResponse"][];
             /** Format: int64 */
@@ -1303,12 +1501,12 @@ export interface components {
             /** Format: double */
             market_price?: number | null;
             motivation?: string | null;
-            /** Format: int64 */
+            /** Format: double */
             no_pos?: number | null;
             orders: unknown;
             timestamp?: string | null;
             trader_name: string;
-            /** Format: int64 */
+            /** Format: double */
             yes_pos?: number | null;
         };
         BotEquityPointResponse: {
@@ -1425,11 +1623,22 @@ export interface components {
             finalized_withdrawal_count?: number;
             /** Format: int64 */
             next_withdrawal_id: number;
+            /** Format: int64 */
+            observed_l1_height: number;
             queued_withdrawal_count?: number;
+            refunded_withdrawal_count?: number;
             withdrawal_count: number;
         };
+        BridgeWithdrawalL1EventResponse: {
+            /**
+             * @description False when the terminal withdrawal was already pruned; the observation
+             *     is still accepted as an idempotent no-op.
+             */
+            active_withdrawal_found: boolean;
+            withdrawal?: null | components["schemas"]["BridgeWithdrawalResponse"];
+        };
         /** @enum {string} */
-        BridgeWithdrawalL1Status: "not_requested" | "queued" | "finalized" | "cancelled";
+        BridgeWithdrawalL1Status: "not_requested" | "queued" | "finalized" | "cancelled" | "refunded";
         BridgeWithdrawalResponse: {
             /** Format: int64 */
             account_id: number;
@@ -1503,6 +1712,7 @@ export interface components {
              * @example 100000000000
              */
             initial_balance_nanos: string;
+            initial_key?: null | components["schemas"]["RegisterKeyRequest"];
         };
         /**
          * @description Signed request to create a read-scoped bearer API key (SYB-60).
@@ -1517,7 +1727,12 @@ export interface components {
             /** Format: int64 */
             nonce: number;
             signature_hex?: string | null;
-            signer_pubkey_hex: string;
+            /**
+             * @description Hex-encoded signer key. WebAuthn login bootstrap may omit this field;
+             *     the server identifies the matching registered WebAuthn key by verifying
+             *     the assertion against the account's active WebAuthn keys.
+             */
+            signer_pubkey_hex?: string | null;
             webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
         };
         /**
@@ -1530,6 +1745,12 @@ export interface components {
             /** Format: int64 */
             id: number;
             label?: string | null;
+            /**
+             * @description The active signing key that authorized creation. This is especially
+             *     useful during discoverable WebAuthn login, where the browser assertion
+             *     does not itself expose the credential public key.
+             */
+            signer_pubkey_hex: string;
             /** @description The bearer token. Store it now — the server keeps only its blake3 hash. */
             token: string;
         };
@@ -1551,7 +1772,7 @@ export interface components {
             chain_id: number;
             /**
              * Format: int64
-             * @description Last Sybil block height at which this withdrawal leaf is valid.
+             * @description Last L1 block height at which this withdrawal leaf is valid.
              */
             expiry_height?: number | null;
             /**
@@ -1618,6 +1839,57 @@ export interface components {
             webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
             /** @description Withdrawal payload covered by the P256 signature. */
             withdrawal: components["schemas"]["CreateBridgeWithdrawalRequest"];
+        };
+        /**
+         * @description Typed DA manifest for retained witness payloads. SYB-120 will add encrypted
+         *     DA fields such as ciphertext hashes and key-custody metadata here, so this
+         *     must stay a structured DTO rather than ad-hoc JSON.
+         */
+        DaManifestResponse: {
+            /** @description Block hash bound into the state-transition public input. Hex-encoded 32-byte digest. */
+            block_hash: string;
+            /**
+             * @description DA commitment bound into the ZK public inputs and L1 RootRecord.
+             *     Hex-encoded 32-byte digest.
+             */
+            da_commitment: string;
+            /** Format: int64 */
+            height: number;
+            payload_encoding: string;
+            payload_kind: string;
+            /** Format: int64 */
+            payload_len: number;
+            /**
+             * @description Payload root = BLAKE3("sybil/da/witness-payload/v1" || len || bytes).
+             *     Hex-encoded 32-byte digest.
+             */
+            payload_root: string;
+            provider_refs?: components["schemas"]["DaProviderRefResponse"][];
+            provider_refs_encoding: string;
+            /** @description Hash of the canonical provider-reference byte list. Hex-encoded 32-byte digest. */
+            provider_refs_hash: string;
+            /** @description State-transition public input hash. Hex-encoded 32-byte digest. */
+            public_input_hash: string;
+            /** @description State root bound by the DA commitment. Hex-encoded 32-byte qMDB root. */
+            state_root: string;
+            /** Format: int32 */
+            version: number;
+            /** @description Witness root = BLAKE3("sybil/witness" || payload bytes). Hex-encoded 32-byte digest. */
+            witness_root: string;
+        };
+        DaProviderRefResponse: {
+            /** @description Hex-encoded canonical provider-reference bytes, 0x-prefixed. */
+            bytes: string;
+            encoding: string;
+            kind: string;
+            /** Format: int64 */
+            payload_len?: number | null;
+            /**
+             * @description Payload root repeated when the provider ref is content-addressed.
+             *     Hex-encoded 32-byte digest.
+             */
+            payload_root?: string | null;
+            uri?: string | null;
         };
         DerivedViewSidecarResponse: {
             /**
@@ -2109,6 +2381,18 @@ export interface components {
              */
             yes_price_nanos?: string | null;
         };
+        ObserveL1HeightRequest: {
+            /**
+             * Format: int64
+             * @description Highest fully scanned and confirmed L1 block.
+             */
+            l1_block_height: number;
+        };
+        ObserveL1HeightResponse: {
+            /** Format: int64 */
+            observed_l1_height: number;
+            refunded_withdrawal_ids: number[];
+        };
         /**
          * @description Response shape for `GET /v1/markets/{id}/open-batch`. B1 populates
          *     `unique_placers`; indicative fields stub `None`/`0` until C2.
@@ -2139,11 +2423,8 @@ export interface components {
         };
         OrderAcceptedResponse: {
             accepted: boolean;
-            /**
-             * @description Sequencer-assigned IDs for the admitted orders, in request
-             *     order. Optional: older API builds omit it.
-             */
-            order_ids?: number[];
+            /** @description Sequencer-assigned IDs for the admitted orders, in request order. */
+            order_ids: number[];
         };
         /**
          * @description Tagged enum representing public order types.
@@ -2299,22 +2580,16 @@ export interface components {
             account_id: number;
             /**
              * Format: int64
-             * @description Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+             * @description Spendable account balance after live-order reservations. Integer
+             *     nanodollars; 1_000_000_000 = $1.
+             */
+            available_balance_nanos: string;
+            /**
+             * Format: int64
+             * @description Total (gross) account balance; see `available_balance_nanos` for spendable
+             *     funds. Integer nanodollars; 1_000_000_000 = $1.
              */
             balance_nanos: string;
-            /**
-             * Format: int64
-             * @description Spendable balance = total minus cash reserved by open/resting
-             *     orders. Optional: older API builds omit it — fall back to
-             *     `balance_nanos`.
-             */
-            available_balance_nanos?: string;
-            /**
-             * Format: int64
-             * @description Cash reserved by open/resting orders. Optional: older API
-             *     builds omit it.
-             */
-            reserved_balance_nanos?: string;
             /**
              * Format: int64
              * @description First-deposit timestamp in ms since epoch (B8). `0` for accounts
@@ -2342,6 +2617,12 @@ export interface components {
              *     `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
              */
             realized_pnl_nanos?: string;
+            /**
+             * Format: int64
+             * @description Balance reserved by live resting orders. Integer nanodollars;
+             *     1_000_000_000 = $1.
+             */
+            reserved_balance_nanos: string;
             /**
              * Format: int64
              * @description Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
@@ -2525,35 +2806,22 @@ export interface components {
              */
             yes_price_nanos: string;
         };
-        /**
-         * @description Private account summary served behind a read-scoped bearer token (SYB-60).
-         *
-         *     This is the template for bearer-gated private reads: it exposes the same
-         *     data the public account/portfolio endpoints already do, but demonstrates the
-         *     `Authorization: Bearer` gating pattern on a NEW endpoint. Gating the existing
-         *     public endpoints is a deliberate future breaking change, not done here.
-         */
+        /** @description Private account summary served behind owner-or-service read auth (SYB-60/237). */
         PrivateAccountSummaryResponse: {
             /** Format: int64 */
             account_id: number;
             /**
              * Format: int64
-             * @description Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+             * @description Spendable account balance after live-order reservations. Integer
+             *     nanodollars; 1_000_000_000 = $1.
+             */
+            available_balance_nanos: string;
+            /**
+             * Format: int64
+             * @description Total (gross) account balance; see `available_balance_nanos` for spendable
+             *     funds. Integer nanodollars; 1_000_000_000 = $1.
              */
             balance_nanos: string;
-            /**
-             * Format: int64
-             * @description Spendable balance = total minus cash reserved by open/resting
-             *     orders. Optional: older API builds omit it — fall back to
-             *     `balance_nanos`.
-             */
-            available_balance_nanos?: string;
-            /**
-             * Format: int64
-             * @description Cash reserved by open/resting orders. Optional: older API
-             *     builds omit it.
-             */
-            reserved_balance_nanos?: string;
             display_name?: string | null;
             /**
              * Format: int64
@@ -2566,6 +2834,12 @@ export interface components {
              */
             portfolio_value_nanos: string;
             positions?: components["schemas"]["PositionResponse"][];
+            /**
+             * Format: int64
+             * @description Balance reserved by live resting orders. Integer nanodollars;
+             *     1_000_000_000 = $1.
+             */
+            reserved_balance_nanos: string;
             /**
              * Format: int64
              * @description Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
@@ -2630,32 +2904,6 @@ export interface components {
              *     cannot trade).
              */
             scope?: components["schemas"]["KeyScope"];
-            webauthn_registration?: null | components["schemas"]["WebAuthnRegistration"];
-        };
-        /** @description Signed request to register a NEW signing key on an account (SYB-229). */
-        SignedRegisterKeyRequest: {
-            /** @description Authentication scheme of the NEW key. Defaults to `raw_p256`. */
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /** @description Base64url credential id for a WebAuthn new key. */
-            credential_id_b64url?: string | null;
-            /** @description Optional human label for the new key, e.g. "agent:pricer". */
-            label?: string | null;
-            /**
-             * Format: int64
-             * @description Per-account replay nonce (strictly increasing).
-             */
-            nonce: number;
-            /** @description Hex-encoded compressed P256 public key (33 bytes) of the NEW key. */
-            public_key_hex: string;
-            /** @description Scope tag for the new key. Defaults to `primary`. */
-            scope?: components["schemas"]["KeyScope"];
-            /** @description Hex-encoded raw P256 ECDSA signature over the canonical registration payload. */
-            signature_hex?: string | null;
-            /** @description Authentication scheme of the SIGNER. Defaults to `raw_p256`. */
-            signer_auth_scheme?: components["schemas"]["AuthScheme"];
-            /** @description Hex-encoded compressed P256 public key of the SIGNER — an existing active key on this account. */
-            signer_pubkey_hex: string;
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
             webauthn_registration?: null | components["schemas"]["WebAuthnRegistration"];
         };
         /** @description Registered data feed view, returned by GET/POST /v1/feeds. */
@@ -2920,6 +3168,52 @@ export interface components {
             /** @description Payoff vector. */
             payoffs: number[];
         };
+        /**
+         * @description Signed request to register a NEW signing key on an account (SYB-229).
+         *
+         *     Required whenever the account already has at least one registered key. The
+         *     first key is bootstrapped over the service tier (`POST /v1/accounts/{id}/keys`);
+         *     every subsequent key must be authorized by a signature from an existing
+         *     account key. Like orders/cancels, the canonical payload is domain-separated
+         *     by the chain `genesis_hash` (SYB-224).
+         */
+        SignedRegisterKeyRequest: {
+            /**
+             * @description Authentication scheme of the NEW key. Defaults to `raw_p256`. When
+             *     `webauthn`, `webauthn_registration` must prove possession of the new key.
+             */
+            auth_scheme?: components["schemas"]["AuthScheme"];
+            /** @description Base64url credential id for a WebAuthn new key. */
+            credential_id_b64url?: string | null;
+            /** @description Optional human label for the new key, e.g. "agent:pricer". */
+            label?: string | null;
+            /**
+             * Format: int64
+             * @description Per-account replay nonce (strictly increasing).
+             */
+            nonce: number;
+            /**
+             * @description Hex-encoded compressed P256 public key (33 bytes) of the NEW key.
+             * @example 02a1b2c3...
+             */
+            public_key_hex: string;
+            /** @description Scope tag for the new key. Defaults to `primary`. */
+            scope?: components["schemas"]["KeyScope"];
+            /**
+             * @description Hex-encoded raw P256 ECDSA signature over the canonical registration
+             *     payload. Required when `signer_auth_scheme` is `raw_p256`.
+             */
+            signature_hex?: string | null;
+            /** @description Authentication scheme of the SIGNER. Defaults to `raw_p256`. */
+            signer_auth_scheme?: components["schemas"]["AuthScheme"];
+            /**
+             * @description Hex-encoded compressed P256 public key of the SIGNER — an existing active
+             *     key on this account authorizing the registration.
+             */
+            signer_pubkey_hex: string;
+            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+            webauthn_registration?: null | components["schemas"]["WebAuthnRegistration"];
+        };
         StateProofResponse: {
             /** Format: int64 */
             block_height: number;
@@ -2930,12 +3224,52 @@ export interface components {
             leaf_value_hex?: string | null;
             proof_format: string;
             proof_kind: string;
+            /** @description State root this proof is anchored to. Hex-encoded 32-byte qMDB root. */
             state_root: string;
             state_slot: string;
             verified: boolean;
         };
         StateRootResponse: {
+            /** @description Current state root. Hex-encoded 32-byte qMDB root. */
             state_root: string;
+        };
+        /**
+         * @description Body of `POST /v1/admin/auto-resolutions` (SYB-48). The auto-resolution
+         *     resolver (sybil-polymarket) submits one of these per market it has
+         *     evaluated with an LLM. This route NEVER settles a market: it only records a
+         *     reviewable proposal. Finalization always flows back through the existing
+         *     signed `POST /v1/markets/{id}/resolve` money path.
+         */
+        SubmitAutoResolutionRequest: {
+            /** @description Confidence tier the resolver's policy assigned. */
+            action: components["schemas"]["AutoResolutionActionDto"];
+            /**
+             * Format: double
+             * @description Model confidence in [0, 1].
+             */
+            confidence: number;
+            /**
+             * Format: int64
+             * @description Wall-clock deadline after which a `propose` entry may auto-finalize.
+             *     Unix milliseconds. Required for `propose`; ignored otherwise.
+             */
+            eta_ms?: number | null;
+            /** @description Short verbatim excerpts from the fetched source the model relied on. */
+            evidence_excerpts?: string[];
+            /**
+             * Format: int32
+             * @description Market the proposal is for.
+             */
+            market_id: number;
+            /**
+             * Format: int64
+             * @description Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
+             *     Payouts are per-share probabilities in [0, 1e9].
+             * @example 1000000000
+             */
+            payout_nanos: string;
+            /** @description Model's free-text justification. Stored verbatim for review. */
+            reasoning: string;
         };
         SubmitL1DepositRequest: {
             /**
@@ -2980,6 +3314,11 @@ export interface components {
              * @description Finalization ETA emitted by the vault, in Unix seconds.
              */
             executable_at_unix?: number | null;
+            /**
+             * Format: int64
+             * @description Confirmed L1 block number carrying the event.
+             */
+            l1_block_height: number;
             /** @description Withdrawal nullifier emitted by SybilVault. */
             nullifier_hex: string;
             /** @description Queue state observed from the vault event. */
@@ -3086,6 +3425,36 @@ export interface components {
             /** Format: int64 */
             withdrawal_id: number;
         } | {
+            /** Format: int64 */
+            account_id: number;
+            /**
+             * Format: int64
+             * @description Refunded account credit. Integer nanodollars; 1_000_000_000 = $1.
+             */
+            amount_nanos: string;
+            reason: string;
+            /** @enum {string} */
+            type: "withdrawal_refunded";
+            /** Format: int64 */
+            withdrawal_id: number;
+        } | {
+            /** Format: int64 */
+            account_id: number;
+            /**
+             * Format: int64
+             * @description Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
+             */
+            amount_nanos: string;
+            /** @enum {string} */
+            type: "withdrawal_finalized";
+            /** Format: int64 */
+            withdrawal_id: number;
+        } | {
+            /** Format: int64 */
+            height: number;
+            /** @enum {string} */
+            type: "l1_block_observed";
+        } | {
             affected_accounts: number[];
             /** Format: int32 */
             market_id: number;
@@ -3174,7 +3543,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Account created */
+            /** @description Account and initial signing key created */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3183,7 +3552,21 @@ export interface operations {
                     "application/json": components["schemas"]["AccountResponse"];
                 };
             };
-            /** @description Dev mode required */
+            /** @description Invalid initial balance or key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bare creation requires the service token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid service token */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3212,6 +3595,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AccountResponse"];
                 };
+            };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Account not found */
             404: {
@@ -3242,6 +3639,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiKeyResponse"][];
                 };
+            };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3374,6 +3785,20 @@ export interface operations {
                     "application/json": components["schemas"]["BridgeAccountKeyResponse"];
                 };
             };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Account not found */
             404: {
                 headers: {
@@ -3407,6 +3832,20 @@ export interface operations {
                     "application/json": components["schemas"]["EquitySeriesResponse"];
                 };
             };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     get_account_history: {
@@ -3436,6 +3875,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HistoryEventResponse"][];
                 };
+            };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3471,6 +3924,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AccountFillResponse"][];
                 };
+            };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3536,6 +4003,20 @@ export interface operations {
                     "application/json": components["schemas"]["AccountKeyResponse"][];
                 };
             };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     register_key: {
@@ -3554,7 +4035,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Key registered */
+            /** @description First key registered */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3711,6 +4192,20 @@ export interface operations {
                     "application/json": components["schemas"]["PendingOrderResponse"][];
                 };
             };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     get_portfolio: {
@@ -3733,6 +4228,20 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PortfolioResponse"];
                 };
+            };
+            /** @description Missing/invalid bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token belongs to a different account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Account not found */
             404: {
@@ -3859,6 +4368,145 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ActivityOverviewResponse"];
                 };
+            };
+        };
+    };
+    list_auto_resolutions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending auto-resolutions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoResolutionListResponse"];
+                };
+            };
+            /** @description Service token required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    submit_auto_resolution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitAutoResolutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Proposal recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoResolutionEntryResponse"];
+                };
+            };
+            /** @description Invalid proposal */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service token required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    approve_auto_resolution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Market ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proposal approved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoResolutionEntryResponse"];
+                };
+            };
+            /** @description Service token required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No proposal for this market */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reject_auto_resolution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Market ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proposal rejected */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoResolutionEntryResponse"];
+                };
+            };
+            /** @description Service token required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No proposal for this market */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -4100,6 +4748,30 @@ export interface operations {
             };
         };
     };
+    observe_l1_height: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObserveL1HeightRequest"];
+            };
+        };
+        responses: {
+            /** @description Confirmed L1 height applied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObserveL1HeightResponse"];
+                };
+            };
+        };
+    };
     status: {
         parameters: {
             query?: never;
@@ -4164,13 +4836,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description L1 withdrawal queue status applied */
+            /** @description L1 withdrawal queue status applied or idempotently ignored */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BridgeWithdrawalResponse"];
+                    "application/json": components["schemas"]["BridgeWithdrawalL1EventResponse"];
                 };
             };
             /** @description Invalid L1 withdrawal event */
@@ -4264,6 +4936,80 @@ export interface operations {
             };
             /** @description Withdrawal not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_da_manifest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Retained block height */
+                height: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DA manifest */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaManifestResponse"];
+                };
+            };
+            /** @description DA artifact not retained or unavailable for this height */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stored DA artifact failed integrity verification */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_da_payload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Retained block height */
+                height: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Canonical witness payload bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description DA artifact not retained or unavailable for this height */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stored DA artifact failed integrity verification */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

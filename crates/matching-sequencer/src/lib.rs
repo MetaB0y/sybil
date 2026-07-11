@@ -44,8 +44,9 @@ pub use block::{
     RemovedOrderView, SealedBlock,
 };
 pub use bridge::{
-    BridgeBlockData, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, EthAddress,
-    L1Deposit, L1WithdrawalStatus, WithdrawalLeaf, WithdrawalRefundReason,
+    BridgeBlockData, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest,
+    DepositDisposition, EthAddress, L1Deposit, L1WithdrawalStatus, WithdrawalLeaf,
+    WithdrawalRefundReason,
 };
 pub use crypto::{
     api_key_hash, AccountAuthScheme, AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke,
@@ -70,6 +71,7 @@ pub use store::{
     DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
     DA_PROVIDER_REFS_ENCODING_BYTES,
 };
+pub use sybil_verifier::{KeyOpAuth, KeyRecord};
 pub use system_event::SystemEvent;
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)

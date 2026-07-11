@@ -32,7 +32,7 @@ pub struct SubmitStateRootArgs {
     #[arg(long)]
     pub settlement: String,
     /// Output path for hex calldata accepted by `cast send --data`.
-    #[arg(long, default_value = "/tmp/sybil-submit-state-root.calldata")]
+    #[arg(long, default_value = "target/sybil-submit-state-root.calldata")]
     pub calldata: PathBuf,
     /// Optional output path for an eth_sendTransaction JSON-RPC request.
     #[arg(long)]

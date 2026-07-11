@@ -4,8 +4,8 @@ use matching_engine::Fill;
 
 use crate::canonical::append_order;
 use crate::types::{
-    RejectionReason, SystemEventWitness, WithdrawalRefundReasonWitness, WitnessOrder,
-    WitnessRejection,
+    KeyOpAuth, KeyRecord, RejectionReason, SystemEventWitness, WithdrawalRefundReasonWitness,
+    WitnessOrder, WitnessRejection,
 };
 
 /// Return canonical event leaf bytes in the section order committed by `events_root`.
@@ -36,10 +36,12 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
         SystemEventWitness::CreateAccount {
             account_id,
             initial_balance,
+            initial_keys,
         } => {
             value.push(0);
             value.extend_from_slice(&account_id.to_le_bytes());
             value.extend_from_slice(&initial_balance.to_le_bytes());
+            append_key_records(&mut value, initial_keys);
         }
         SystemEventWitness::Deposit { account_id, amount } => {
             value.push(1);
@@ -154,8 +156,92 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
             value.push(9);
             value.extend_from_slice(&height.to_le_bytes());
         }
+        SystemEventWitness::KeyRegistered {
+            account_id,
+            key,
+            authorization,
+        } => {
+            value.push(10);
+            value.extend_from_slice(&account_id.to_le_bytes());
+            append_key_record(&mut value, key);
+            append_key_op_auth(&mut value, authorization);
+        }
+        SystemEventWitness::KeyRevoked {
+            account_id,
+            key,
+            authorization,
+        } => {
+            value.push(11);
+            value.extend_from_slice(&account_id.to_le_bytes());
+            append_key_record(&mut value, key);
+            append_key_op_auth(&mut value, authorization);
+        }
+        SystemEventWitness::DepositQuarantined {
+            amount,
+            deposit_id,
+            deposit_root,
+            sybil_account_key,
+        } => {
+            value.push(12);
+            value.extend_from_slice(&amount.to_le_bytes());
+            value.extend_from_slice(&deposit_id.to_le_bytes());
+            value.extend_from_slice(deposit_root);
+            value.extend_from_slice(sybil_account_key);
+        }
+        SystemEventWitness::QuarantineClaimed {
+            account_id,
+            amount,
+            sybil_account_key,
+        } => {
+            value.push(13);
+            value.extend_from_slice(&account_id.to_le_bytes());
+            value.extend_from_slice(&amount.to_le_bytes());
+            value.extend_from_slice(sybil_account_key);
+        }
     }
     value
+}
+
+pub(crate) fn append_key_record(value: &mut Vec<u8>, key: &KeyRecord) {
+    value.push(key.auth_scheme);
+    value.extend_from_slice(&key.pubkey_sec1);
+    value.extend_from_slice(&key.capability_mask.to_le_bytes());
+}
+
+pub(crate) fn append_key_records(value: &mut Vec<u8>, keys: &[KeyRecord]) {
+    let mut keys = keys.to_vec();
+    keys.sort_by_key(KeyRecord::canonical_sort_key);
+    value.extend_from_slice(&(keys.len() as u64).to_le_bytes());
+    for key in &keys {
+        append_key_record(value, key);
+    }
+}
+
+fn append_key_op_auth(value: &mut Vec<u8>, authorization: &KeyOpAuth) {
+    match authorization {
+        KeyOpAuth::RawP256 {
+            signer_pubkey,
+            signature,
+        } => {
+            value.push(0);
+            value.extend_from_slice(signer_pubkey);
+            value.extend_from_slice(signature);
+        }
+        KeyOpAuth::WebAuthn {
+            signer_pubkey,
+            authenticator_data,
+            client_data_json,
+            signature,
+        } => {
+            value.push(1);
+            value.extend_from_slice(signer_pubkey);
+            value.extend_from_slice(&(authenticator_data.len() as u64).to_le_bytes());
+            value.extend_from_slice(authenticator_data);
+            value.extend_from_slice(&(client_data_json.len() as u64).to_le_bytes());
+            value.extend_from_slice(client_data_json);
+            value.extend_from_slice(signature);
+        }
+    }
 }
 
 pub fn order_accepted_leaf_value(event: &WitnessOrder) -> Vec<u8> {
@@ -291,5 +377,22 @@ mod tests {
         expected.extend_from_slice(&9u64.to_le_bytes());
 
         assert_eq!(leaf, expected);
+    }
+
+    #[test]
+    fn quarantine_tags_follow_witness_v6_key_tags() {
+        let quarantined = system_event_leaf_value(&SystemEventWitness::DepositQuarantined {
+            amount: 7,
+            deposit_id: 9,
+            deposit_root: [1; 32],
+            sybil_account_key: [2; 32],
+        });
+        let claimed = system_event_leaf_value(&SystemEventWitness::QuarantineClaimed {
+            account_id: 3,
+            amount: 7,
+            sybil_account_key: [2; 32],
+        });
+        assert_eq!(quarantined[18], 12);
+        assert_eq!(claimed[18], 13);
     }
 }

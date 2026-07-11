@@ -12,8 +12,15 @@ impl BlockSequencer {
         let order_book = OrderBook::new(config.order_ttl_blocks);
         let bridge = BridgeState::default();
         let lifecycle = crate::market_lifecycle::MarketLifecycle::new(oracle);
-        let committed_state_sidecar =
-            state_sidecar_snapshot(&bridge, &order_book, &markets, &market_groups, &lifecycle);
+        let last_clearing_prices = HashMap::new();
+        let committed_state_sidecar = state_sidecar_snapshot(
+            &bridge,
+            &order_book,
+            &markets,
+            &market_groups,
+            &lifecycle,
+            &last_clearing_prices,
+        );
         let committed_deposit_frontier = bridge.deposit_frontier;
         Self {
             accounts,
@@ -107,6 +114,7 @@ impl BlockSequencer {
             &state.markets,
             &state.market_groups,
             &lifecycle,
+            &state.analytics.last_clearing_prices,
         );
         let committed_deposit_frontier = state.bridge_state.deposit_frontier;
         let mut order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
@@ -174,7 +182,8 @@ impl BlockSequencer {
 
         let expired_on_restore = restored
             .order_book
-            .expire_committed_through(restored.height);
+            .expire_committed_through(restored.height)
+            .expect("restored reservation aggregates were validated before replay");
         if !expired_on_restore.is_empty() {
             metrics::counter!("sybil_restore_expired_resting_orders_total")
                 .increment(expired_on_restore.len() as u64);
@@ -298,7 +307,11 @@ impl BlockSequencer {
                             "invalid pubkey in control-plane WAL".to_string(),
                         )
                     })?;
-                self.register_pubkey_with_scheme(account_id, pubkey, auth_scheme)
+                self.register_first_pubkey_with_meta(
+                    account_id,
+                    pubkey,
+                    crate::crypto::RegisteredPubkey::primary(account_id, auth_scheme),
+                )
             }
             ControlPlaneCommand::AdvanceReplayNonce { account_id, nonce } => {
                 self.advance_replay_nonce(account_id, nonce)
@@ -364,7 +377,7 @@ impl BlockSequencer {
                             "invalid pubkey in control-plane WAL".to_string(),
                         )
                     })?;
-                self.register_pubkey_with_meta(
+                self.register_first_pubkey_with_meta(
                     account_id,
                     pubkey,
                     crate::crypto::RegisteredPubkey {
@@ -376,9 +389,14 @@ impl BlockSequencer {
                     },
                 )
             }
-            ControlPlaneCommand::RevokeSigningKey {
+            ControlPlaneCommand::RegisterPubkeyAuthorized {
                 account_id,
                 compressed_pubkey,
+                auth_scheme,
+                label,
+                scope,
+                created_at_ms,
+                authorization,
             } => {
                 let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&compressed_pubkey)
                     .ok_or_else(|| {
@@ -386,7 +404,31 @@ impl BlockSequencer {
                             "invalid pubkey in control-plane WAL".to_string(),
                         )
                     })?;
-                self.revoke_signing_key(account_id, &pubkey)
+                self.register_pubkey_with_meta_authorized(
+                    account_id,
+                    pubkey,
+                    crate::crypto::RegisteredPubkey {
+                        account_id,
+                        auth_scheme,
+                        label,
+                        scope,
+                        created_at_ms,
+                    },
+                    authorization,
+                )
+            }
+            ControlPlaneCommand::RevokeSigningKey {
+                account_id,
+                compressed_pubkey,
+                authorization,
+            } => {
+                let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&compressed_pubkey)
+                    .ok_or_else(|| {
+                        SequencerError::Persistence(
+                            "invalid pubkey in control-plane WAL".to_string(),
+                        )
+                    })?;
+                self.revoke_signing_key(account_id, &pubkey, authorization)
             }
             ControlPlaneCommand::SetProfile {
                 account_id,

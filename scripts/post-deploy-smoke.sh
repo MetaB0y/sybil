@@ -86,6 +86,7 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/lib/smoke-common.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -106,32 +107,7 @@ section() { echo; echo "== $* =="; }
 # stdin actually reaches json.load — `python3 - <<EOF` would consume stdin for
 # the program source instead.
 jget() {
-    python3 -c '
-import sys, json
-path = sys.argv[1]
-try:
-    cur = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for seg in (path.split(".") if path else []):
-    if seg == "":
-        continue
-    try:
-        if isinstance(cur, list):
-            cur = cur[int(seg)]
-        elif isinstance(cur, dict):
-            cur = cur.get(seg)
-        else:
-            cur = None
-    except Exception:
-        cur = None
-    if cur is None:
-        break
-if isinstance(cur, bool):
-    print("true" if cur else "false")
-elif cur is not None:
-    print(cur)
-' "$1"
+    smoke_jget "$1"
 }
 
 # ── HTTP helper: sets HTTP_CODE and HTTP_BODY ───────────────────────────────
@@ -152,7 +128,7 @@ http() {
     HTTP_BODY="$(cat "$TMP/body" 2>/dev/null || true)"
 }
 
-is_2xx() { [[ "$1" =~ ^2[0-9][0-9]$ ]]; }
+is_2xx() { smoke_is_2xx "$1"; }
 
 # ── 1. Service health ───────────────────────────────────────────────────────
 HEAD_HEIGHT=0
@@ -199,46 +175,11 @@ check_liveness() {
 
 # Container health for every compose service. Local docker, or over ssh.
 docker_run() {
-    if [[ -n "$DOCKER_SSH" ]]; then
-        ssh -o BatchMode=yes -o ConnectTimeout=10 "$DOCKER_SSH" "$*" 2>/dev/null
-    else
-        eval "$*" 2>/dev/null
-    fi
+    smoke_docker_run "$DOCKER_SSH" "$*"
 }
 check_services() {
     section "1b. Container health (compose project '$COMPOSE_PROJECT')"
-    local docker_ok=1
-    if [[ -n "$DOCKER_SSH" ]]; then
-        docker_run "command -v docker" >/dev/null || docker_ok=0
-    else
-        command -v docker >/dev/null 2>&1 || docker_ok=0
-    fi
-    if [[ "$docker_ok" -ne 1 ]]; then
-        skip "docker unavailable ($([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local)); container-health matrix needs an on-box run (SYBIL_SMOKE_DOCKER_SSH)"
-        return
-    fi
-
-    # One line per container: "<name> <status> <health|none>". Kept as a single
-    # pipeline so IDs never travel through the (ssh) command string.
-    local rows; rows="$(docker_run "docker ps -aq --filter label=com.docker.compose.project=$COMPOSE_PROJECT | xargs -r docker inspect --format '{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'")"
-    if [[ -z "$rows" ]]; then
-        fail "no containers found for compose project '$COMPOSE_PROJECT'"
-        return
-    fi
-    local saw_api=0
-    while read -r name status health; do
-        [[ -z "$name" ]] && continue
-        name="${name#/}"
-        [[ "$name" == *sybil-api* ]] && saw_api=1
-        if [[ "$status" == "running" && ( "$health" == "none" || "$health" == "healthy" ) ]]; then
-            pass "service $name: $status/$health"
-        else
-            fail "service $name: $status/$health (not running-and-healthy)"
-        fi
-    done <<< "$rows"
-    if [[ "$saw_api" -ne 1 ]]; then
-        fail "required service sybil-api not found in project '$COMPOSE_PROJECT'"
-    fi
+    smoke_check_compose_services "$DOCKER_SSH" "$COMPOSE_PROJECT" pass fail skip
 }
 
 # ── 2. CORS preflight from the app origin ───────────────────────────────────
@@ -271,31 +212,13 @@ check_cors() {
     fi
 }
 
-# ── 3. Passkey onboarding (unauthenticated create + first-key bootstrap) ─────
-# These MUST be hard assertions: the shipped regression made these 401.
-check_onboarding() {
-    section "3. Passkey onboarding (no service token)"
-
-    # 3a. create account WITHOUT any token -> 200
-    http POST /v1/accounts '{"initial_balance_nanos":1000000000000}' none
-    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
-    if is_2xx "$HTTP_CODE" && [[ -n "$acct" ]]; then
-        pass "POST /v1/accounts (no token) -> $HTTP_CODE, account_id=$acct"
-    else
-        fail "POST /v1/accounts (no token) -> $HTTP_CODE: $HTTP_BODY (passkey onboarding gated?)"
-        return
-    fi
-
-    # 3b. over-cap initial_balance_nanos (> 5_000_000_000_000) -> 400
-    http POST /v1/accounts '{"initial_balance_nanos":5000000000001}' none
-    if [[ "$HTTP_CODE" == "400" ]]; then
-        pass "over-cap initial_balance_nanos -> 400 (demo cap enforced)"
-    else
-        fail "over-cap initial_balance_nanos -> $HTTP_CODE (expected 400): $HTTP_BODY"
-    fi
-
-    # 3c. first-key bootstrap: register a fresh P256 key on a fresh account -> 200
-    local pub; pub="$(python3 - <<'PY'
+# ── 3. Passkey onboarding (atomic create-with-initial-key) ───────────────────
+# SYB-237/271 shipped the atomic onboarding model: public onboarding is
+# `POST /v1/accounts` WITH `initial_key` (create + first key in one request);
+# the deprecated bare create and the unsigned first-key endpoint are now
+# service-tier only. These are hard assertions.
+mint_p256_pub() {
+    python3 - <<'PY'
 try:
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives import serialization
@@ -306,33 +229,50 @@ try:
 except Exception:
     pass
 PY
-)"
+}
+check_onboarding() {
+    section "3. Passkey onboarding (atomic create-with-initial-key)"
+
+    local pub; pub="$(mint_p256_pub)"
     if [[ -z "$pub" ]]; then
-        skip "python 'cryptography' not available; cannot mint a P256 key for the key-bootstrap check"
+        skip "python 'cryptography' unavailable; cannot mint a P256 key for onboarding checks"
         return
     fi
-    http POST "/v1/accounts/$acct/keys" "{\"public_key_hex\":\"$pub\"}" none
-    if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget success)" == "true" ]]; then
-        pass "first-key bootstrap POST /v1/accounts/$acct/keys -> $HTTP_CODE"
+
+    # 3a. atomic create WITH initial_key, no token -> 200 (public onboarding path)
+    http POST /v1/accounts "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
+    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
+    if is_2xx "$HTTP_CODE" && [[ -n "$acct" ]]; then
+        pass "atomic POST /v1/accounts + initial_key (no token) -> $HTTP_CODE, account_id=$acct"
     else
-        fail "first-key bootstrap -> $HTTP_CODE: $HTTP_BODY"
+        fail "atomic POST /v1/accounts + initial_key (no token) -> $HTTP_CODE: $HTTP_BODY (onboarding broken?)"
+        return
     fi
 
-    # 3d. second key must be rejected: first-key-only bootstrap -> 409
-    local pub2; pub2="$(python3 - <<'PY'
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import serialization
-k = ec.generate_private_key(ec.SECP256R1())
-print(k.public_key().public_bytes(
-    serialization.Encoding.X962,
-    serialization.PublicFormat.UncompressedPoint).hex())
-PY
-)"
-    http POST "/v1/accounts/$acct/keys" "{\"public_key_hex\":\"$pub2\"}" none
-    if [[ "$HTTP_CODE" == "409" ]]; then
-        pass "second key bootstrap -> 409 (first-key-only enforced)"
+    # 3b. over-cap initial_balance_nanos (> 5_000_000_000_000) -> 400
+    local pubb; pubb="$(mint_p256_pub)"
+    http POST /v1/accounts "{\"initial_balance_nanos\":5000000000001,\"initial_key\":{\"public_key_hex\":\"$pubb\"}}" none
+    if [[ "$HTTP_CODE" == "400" ]]; then
+        pass "over-cap initial_balance_nanos -> 400 (demo cap enforced)"
     else
-        fail "second key bootstrap -> $HTTP_CODE (expected 409): $HTTP_BODY"
+        fail "over-cap initial_balance_nanos -> $HTTP_CODE (expected 400): $HTTP_BODY"
+    fi
+
+    # 3c. deprecated bare create (no initial_key), no token -> 401 (service-tiered, SYB-271)
+    http POST /v1/accounts '{"initial_balance_nanos":1000000000000}' none
+    if [[ "$HTTP_CODE" == "401" ]]; then
+        pass "bare create (no initial_key, no token) -> 401 (deprecated path service-tiered)"
+    else
+        fail "bare create (no initial_key, no token) -> $HTTP_CODE (expected 401): $HTTP_BODY"
+    fi
+
+    # 3d. unsigned bare first-key endpoint, no token -> 401 (service-tiered, SYB-237)
+    local pubd; pubd="$(mint_p256_pub)"
+    http POST "/v1/accounts/$acct/keys" "{\"public_key_hex\":\"$pubd\"}" none
+    if [[ "$HTTP_CODE" == "401" ]]; then
+        pass "unsigned first-key POST (no token) -> 401 (service-tiered)"
+    else
+        fail "unsigned first-key POST (no token) -> $HTTP_CODE (expected 401): $HTTP_BODY"
     fi
 }
 
@@ -542,16 +482,15 @@ check_signed_order() {
         return
     fi
 
-    # Fresh account + registered key, then a signed resting order.
-    http POST /v1/accounts '{"initial_balance_nanos":1000000000000}' none
-    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
+    # Fresh account created atomically with the signing key as initial_key.
     local kp priv pub
     kp="$("$SIGN_BIN" keygen 2>/dev/null)"
     priv="$(echo "$kp" | jget private_key_hex)"
     pub="$(echo "$kp" | jget public_key_hex)"
-    http POST "/v1/accounts/$acct/keys" "{\"public_key_hex\":\"$pub\"}" none
-    if ! is_2xx "$HTTP_CODE"; then
-        fail "signed-order prep: key register -> $HTTP_CODE: $HTTP_BODY"; return
+    http POST /v1/accounts "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
+    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
+    if ! is_2xx "$HTTP_CODE" || [[ -z "$acct" ]]; then
+        fail "signed-order prep: atomic create -> $HTTP_CODE: $HTTP_BODY"; return
     fi
 
     local nonce osig ospk ossig obody
@@ -600,16 +539,15 @@ check_signed_cancel_lifecycle() {
         return
     fi
 
-    # Fresh funded account + registered key.
-    http POST /v1/accounts '{"initial_balance_nanos":1000000000000}' none
-    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
+    # Fresh funded account created atomically with the signing key as initial_key.
     local kp priv pub
     kp="$("$SIGN_BIN" keygen 2>/dev/null)"
     priv="$(echo "$kp" | jget private_key_hex)"
     pub="$(echo "$kp" | jget public_key_hex)"
-    http POST "/v1/accounts/$acct/keys" "{\"public_key_hex\":\"$pub\"}" none
-    if ! is_2xx "$HTTP_CODE"; then
-        fail "cancel-lifecycle prep: key register -> $HTTP_CODE: $HTTP_BODY"; return
+    http POST /v1/accounts "{\"initial_balance_nanos\":1000000000000,\"initial_key\":{\"public_key_hex\":\"$pub\"}}" none
+    local acct; acct="$(echo "$HTTP_BODY" | jget account_id)"
+    if ! is_2xx "$HTTP_CODE" || [[ -z "$acct" ]]; then
+        fail "cancel-lifecycle prep: atomic create -> $HTTP_CODE: $HTTP_BODY"; return
     fi
 
     # Deep out-of-market resting BuyYes at $0.01 so it never crosses (stays cancellable).
@@ -634,14 +572,23 @@ PY
     fi
     pass "cancel-lifecycle: signed order accepted (acct $acct, order $oid)"
 
-    # Order visible + reservation held.
-    http GET "/v1/accounts/$acct/orders" none
-    if echo "$HTTP_BODY" | python3 -c "import sys,json; sys.exit(0 if any(o.get('order_id')==$oid for o in json.load(sys.stdin)) else 1)" 2>/dev/null; then
+    # Order visible + reservation held. Visibility is eventually-consistent with
+    # block production (~10s), so poll rather than assume a single-shot read
+    # lands after the placing block commits.
+    local seen=no i
+    for i in 1 2 3 4 5 6; do
+        http GET "/v1/accounts/$acct/orders" "" token
+        if echo "$HTTP_BODY" | python3 -c "import sys,json; sys.exit(0 if any(o.get('order_id')==$oid for o in json.load(sys.stdin)) else 1)" 2>/dev/null; then
+            seen=yes; break
+        fi
+        sleep "$INTERVAL"
+    done
+    if [[ "$seen" == "yes" ]]; then
         pass "cancel-lifecycle: resting order visible in account orders"
     else
         fail "cancel-lifecycle: order $oid not visible after placement"; return
     fi
-    http GET "/v1/accounts/$acct" none
+    http GET "/v1/accounts/$acct" "" token
     local reserved_held; reserved_held="$(echo "$HTTP_BODY" | jget reserved_balance_nanos)"
     if [[ -n "$reserved_held" && "$reserved_held" != "0" ]]; then
         pass "cancel-lifecycle: reservation held (reserved=$reserved_held)"
@@ -671,7 +618,7 @@ PY
     # Order gone + reservation released.
     local gone=no i
     for i in 1 2 3 4 5 6; do
-        http GET "/v1/accounts/$acct/orders" none
+        http GET "/v1/accounts/$acct/orders" "" token
         if echo "$HTTP_BODY" | python3 -c "import sys,json; sys.exit(0 if all(o.get('order_id')!=$oid for o in json.load(sys.stdin)) else 1)" 2>/dev/null; then
             gone=yes; break
         fi
@@ -682,7 +629,7 @@ PY
     else
         fail "cancel-lifecycle: order $oid still present after cancel"; return
     fi
-    http GET "/v1/accounts/$acct" none
+    http GET "/v1/accounts/$acct" "" token
     local reserved_after; reserved_after="$(echo "$HTTP_BODY" | jget reserved_balance_nanos)"
     if [[ "$reserved_after" == "0" ]]; then
         pass "cancel-lifecycle: reservation released (reserved=0 after cancel)"

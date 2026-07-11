@@ -34,6 +34,13 @@ pub fn state_root_leaves(
         sys_bytes32_leaf_value(b"deposit_root", &sidecar.bridge.deposit_root),
     ));
     leaves.push((
+        b"sys/quarantine_digest".to_vec(),
+        sys_bytes32_leaf_value(
+            b"quarantine_digest",
+            &crate::quarantine::quarantine_ledger_digest(&sidecar.bridge.quarantine),
+        ),
+    ));
+    leaves.push((
         b"sys/observed_l1_height".to_vec(),
         sys_u64_leaf_value(b"observed_l1_height", sidecar.bridge.observed_l1_height),
     ));

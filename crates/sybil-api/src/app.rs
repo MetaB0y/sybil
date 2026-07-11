@@ -255,11 +255,12 @@ async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse 
 }
 
 async fn record_live_market_metrics(state: &AppState) {
-    let (markets, prices, statuses, volumes) = match tokio::try_join!(
+    let (markets, prices, statuses, volumes, bridge) = match tokio::try_join!(
         state.sequencer.list_markets(),
         state.sequencer.get_market_prices(),
         state.sequencer.get_all_market_statuses(),
         state.sequencer.get_all_market_volumes(),
+        state.sequencer.get_bridge_state(),
     ) {
         Ok(values) => values,
         Err(error) => {
@@ -331,6 +332,14 @@ async fn record_live_market_metrics(state: &AppState) {
     } else {
         (now_ms().saturating_sub(updated_at_ms) as f64) / 1000.0
     });
+    metrics::gauge!("sybil_quarantine_ledger_size").set(bridge.quarantine.len() as f64);
+    metrics::gauge!("sybil_quarantined_amount_nanos").set(
+        bridge
+            .quarantine
+            .values()
+            .copied()
+            .fold(0i64, i64::saturating_add) as f64,
+    );
 }
 
 async fn record_bot_metrics(state: &AppState) {
@@ -491,18 +500,6 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/accounts",
     },
     RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/keys",
-    },
-    RouteMount {
-        method: "POST",
-        path: "/v1/accounts/{id}/keys",
-    },
-    RouteMount {
         method: "POST",
         path: "/v1/accounts/{id}/keys/register",
     },
@@ -515,44 +512,12 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/accounts/{id}/profile",
     },
     RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/api-keys",
-    },
-    RouteMount {
         method: "POST",
         path: "/v1/accounts/{id}/api-keys",
     },
     RouteMount {
         method: "POST",
         path: "/v1/accounts/{id}/api-keys/revoke",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/private-summary",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/portfolio",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/fills",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/equity",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/events",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/bridge-key",
-    },
-    RouteMount {
-        method: "GET",
-        path: "/v1/accounts/{id}/orders",
     },
     RouteMount {
         method: "GET",
@@ -648,6 +613,50 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
 ];
 
+/// Per-account reads that accept either an owner read key or the service token.
+pub const OWNER_ROUTE_TABLE: &[RouteMount] = &[
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/portfolio",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/fills",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/equity",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/events",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/orders",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/keys",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/api-keys",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/bridge-key",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/accounts/{id}/private-summary",
+    },
+];
+
 pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     RouteMount {
         method: "POST",
@@ -664,6 +673,10 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     RouteMount {
         method: "POST",
         path: "/v1/accounts/{id}/fund",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/accounts/{id}/keys",
     },
     RouteMount {
         method: "GET",
@@ -758,7 +771,7 @@ pub const DEV_ROUTE_TABLE: &[RouteMount] = &[
     },
 ];
 
-fn public_routes() -> Router<AppState> {
+fn public_routes(state: &AppState) -> Router<AppState> {
     Router::new()
         // OpenAPI spec
         .route("/openapi.json", axum::routing::get(openapi_json))
@@ -789,11 +802,10 @@ fn public_routes() -> Router<AppState> {
             axum::routing::get(routes::da::get_da_manifest),
         )
         // Accounts
-        // Self-service onboarding is PUBLIC: a fresh browser/passkey user creates
-        // a (demo-capped) account and bootstraps its FIRST signing key without a
-        // service token. `create_account` clamps the mint in non-dev mode and
-        // `register_key` is first-key-only (409 once a key exists, per SYB-229),
-        // so neither path can drain or hijack an established account.
+        // Self-service onboarding is PUBLIC only in its atomic form: a fresh
+        // browser creates a demo-capped account with `initial_key` in the same
+        // request. The deprecated bare body and unsigned first-key endpoint
+        // enforce service auth inside their handlers.
         .route(
             "/v1/accounts",
             axum::routing::post(routes::accounts::create_account),
@@ -804,8 +816,10 @@ fn public_routes() -> Router<AppState> {
         )
         .route(
             "/v1/accounts/{id}/keys",
-            axum::routing::get(routes::accounts::list_account_keys)
-                .post(routes::accounts::register_key),
+            axum::routing::get(routes::accounts::list_account_keys).merge(
+                axum::routing::post(routes::accounts::register_key)
+                    .route_layer(middleware::from_fn_with_state(state.clone(), service_auth)),
+            ),
         )
         .route(
             "/v1/accounts/{id}/keys/register",
@@ -1107,6 +1121,28 @@ pub(crate) fn request_has_valid_service_token(
     constant_time_eq(actual.as_bytes(), expected.as_bytes())
 }
 
+/// Apply the service-tier bearer policy to a handler-level hybrid route.
+/// Dev mode mirrors `service_auth`; production distinguishes missing (401)
+/// from invalid (403) credentials.
+pub(crate) fn require_service_token(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<(), AppError> {
+    if state.dev_mode {
+        return Ok(());
+    }
+    let Some(expected) = state.service_token.as_deref() else {
+        return Err(AppError::unauthorized("Service token is not configured"));
+    };
+    let Some(actual) = bearer_token_from_headers(headers) else {
+        return Err(AppError::unauthorized("Missing service bearer token"));
+    };
+    if !constant_time_eq(actual.as_bytes(), expected.as_bytes()) {
+        return Err(AppError::forbidden("Invalid service bearer token"));
+    }
+    Ok(())
+}
+
 async fn service_auth(
     State(state): State<AppState>,
     req: Request<axum::body::Body>,
@@ -1143,7 +1179,7 @@ fn cors_layer(state: &AppState) -> CorsLayer {
 }
 
 pub fn create_router(state: AppState) -> Router {
-    let mut app = public_routes().merge(
+    let mut app = public_routes(&state).merge(
         service_routes().route_layer(middleware::from_fn_with_state(state.clone(), service_auth)),
     );
     if state.dev_mode {

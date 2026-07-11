@@ -60,6 +60,7 @@ pub(super) fn sample_witness(header: &BlockHeader) -> BlockWitness {
         pre_state: Vec::new(),
         post_system_state: Vec::new(),
         post_state: Vec::new(),
+        account_keys: vec![],
         state_sidecar: sybil_verifier::StateSidecarSnapshot::default(),
         pre_state_sidecar: sybil_verifier::StateSidecarSnapshot::default(),
         resolved_markets: Vec::new(),
@@ -77,7 +78,7 @@ pub(super) fn next_l1_deposit_for(
 ) -> crate::bridge::L1Deposit {
     let mut deposit = crate::bridge::L1Deposit {
         deposit_id: seq.bridge_state().deposit_cursor.saturating_add(1),
-        account_id,
+        account_id: Some(account_id),
         chain_id: 1,
         vault_address: eth_address(0x10),
         token_address: eth_address(0x20),
@@ -120,8 +121,14 @@ pub(super) fn coherent_header_and_witness(
     bridge_state: &BridgeState,
 ) -> (BlockHeader, BlockWitness) {
     let canonical_accounts = crate::canonical_state::CanonicalState::from_accounts(accounts);
-    let state_sidecar =
-        state_sidecar_snapshot_from_resting_orders(bridge_state, &[], markets, &[], lifecycle);
+    let state_sidecar = state_sidecar_snapshot_from_resting_orders(
+        bridge_state,
+        &[],
+        markets,
+        &[],
+        lifecycle,
+        &HashMap::new(),
+    );
     let state_root = sybil_verifier::block::compute_state_root_with_sidecar(
         canonical_accounts.as_snapshots(),
         &state_sidecar,

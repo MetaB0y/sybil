@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use matching_engine::{ceil_mul_ratio, MarketId, Order, Qty, NANOS_PER_DOLLAR};
 use sybil_l1_protocol::DepositLeaf;
 
+use crate::match_verifier::price_is_in_protocol_range;
 use crate::types::{
     AccountReservationSnapshot, BlockWitness, L1DepositWitness, MarketGroupSnapshot,
     MarketSnapshot, MarketStatusSnapshot, RestingOrderSnapshot, SystemEventWitness,
@@ -71,6 +72,8 @@ pub fn verify_sidecar(witness: &BlockWitness) -> VerificationResult {
     verify_resting_order_transition(witness, &mut violations);
     verify_withdrawal_transition(witness, &mut violations);
     verify_deposit_accumulator(witness, &mut violations);
+    let quarantine = crate::quarantine::verify_quarantine_transition(witness);
+    violations.extend(quarantine.violations);
     verify_market_transition(witness, &mut violations);
     verify_market_group_transition(witness, &mut violations);
 
@@ -634,7 +637,7 @@ fn verify_l1_deposit_events_match_delta(
     prefix_roots: &[[u8; 32]],
     violations: &mut Vec<Violation>,
 ) {
-    let credited_events = witness
+    let disposition_events = witness
         .system_events
         .iter()
         .filter_map(|event| match event {
@@ -645,7 +648,19 @@ fn verify_l1_deposit_events_match_delta(
                 deposit_root,
                 sybil_account_key,
             } => Some((
-                *account_id,
+                Some(*account_id),
+                *amount,
+                *deposit_id,
+                *deposit_root,
+                *sybil_account_key,
+            )),
+            SystemEventWitness::DepositQuarantined {
+                amount,
+                deposit_id,
+                deposit_root,
+                sybil_account_key,
+            } => Some((
+                None,
                 *amount,
                 *deposit_id,
                 *deposit_root,
@@ -655,19 +670,19 @@ fn verify_l1_deposit_events_match_delta(
         })
         .collect::<Vec<_>>();
 
-    if credited_events.len() != witness.deposit_accumulator.new_deposits.len() {
+    if disposition_events.len() != witness.deposit_accumulator.new_deposits.len() {
         violations.push(Violation {
             kind: ViolationKind::SidecarDepositCursorMismatch,
             details: format!(
-                "L1Deposit event count {} != deposit delta length {}",
-                credited_events.len(),
+                "deposit disposition event count {} != deposit delta length {}",
+                disposition_events.len(),
                 witness.deposit_accumulator.new_deposits.len()
             ),
         });
     }
 
     for (index, (account_id, amount, deposit_id, deposit_root, sybil_account_key)) in
-        credited_events.into_iter().enumerate()
+        disposition_events.into_iter().enumerate()
     {
         let Some(deposit) = witness.deposit_accumulator.new_deposits.get(index) else {
             continue;
@@ -691,12 +706,20 @@ fn verify_l1_deposit_events_match_delta(
                 details: format!("L1Deposit event {deposit_id} carries wrong frontier root"),
             });
         }
-        let expected_key = bridge_account_key(account_id);
-        if sybil_account_key != expected_key || deposit.sybil_account_key != expected_key {
+        if deposit.sybil_account_key != sybil_account_key {
             violations.push(Violation {
                 kind: ViolationKind::SidecarDepositRootMismatch,
-                details: format!("L1Deposit event {deposit_id} has wrong account key"),
+                details: format!("deposit disposition event {deposit_id} has wrong account key"),
             });
+        }
+        if let Some(account_id) = account_id {
+            let expected_key = bridge_account_key(account_id);
+            if sybil_account_key != expected_key {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarDepositRootMismatch,
+                    details: format!("L1Deposit event {deposit_id} has wrong account key"),
+                });
+            }
         }
         let Some(expected_amount) = deposit_amount_nanos(deposit) else {
             violations.push(Violation {
@@ -759,6 +782,61 @@ fn verify_market_transition(witness: &BlockWitness, violations: &mut Vec<Violati
                     details: format!("market {:?} status was silently edited", market_id),
                 }),
                 None => {}
+            }
+        }
+
+        for (&market_id, prices) in &witness.clearing_prices {
+            match post_markets.get(&market_id) {
+                Some(post_market) if post_market.last_clearing_prices == *prices => {}
+                Some(post_market) => violations.push(Violation {
+                    kind: ViolationKind::SidecarMarketStatusMismatch,
+                    details: format!(
+                        "market {:?} committed last clearing prices {:?} != witnessed prices {:?}",
+                        market_id, post_market.last_clearing_prices, prices
+                    ),
+                }),
+                None => violations.push(Violation {
+                    kind: ViolationKind::SidecarMarketStatusMismatch,
+                    details: format!(
+                        "market {:?} has witnessed clearing prices but no committed market leaf",
+                        market_id
+                    ),
+                }),
+            }
+        }
+
+        for (&market_id, pre_market) in &pre_markets {
+            if witness.clearing_prices.contains_key(&market_id) {
+                continue;
+            }
+            let Some(post_market) = post_markets.get(&market_id) else {
+                continue;
+            };
+            if post_market.last_clearing_prices != pre_market.last_clearing_prices {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarMarketStatusMismatch,
+                    details: format!(
+                        "market {:?} last clearing prices changed without a witnessed clearing entry",
+                        market_id
+                    ),
+                });
+            }
+        }
+
+        // A newly introduced market with no clearing entry has no prior price
+        // state to carry, so it must begin in the never-cleared representation.
+        for (&market_id, post_market) in &post_markets {
+            if !pre_markets.contains_key(&market_id)
+                && !witness.clearing_prices.contains_key(&market_id)
+                && !post_market.last_clearing_prices.is_empty()
+            {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarMarketStatusMismatch,
+                    details: format!(
+                        "new market {:?} has last clearing prices without a witnessed clearing entry",
+                        market_id
+                    ),
+                });
             }
         }
     }
@@ -957,6 +1035,27 @@ fn keyed_markets<'a>(
 ) -> BTreeMap<MarketId, &'a MarketSnapshot> {
     let mut out = BTreeMap::new();
     for market in markets {
+        let price_count = market.last_clearing_prices.len();
+        if price_count != 0 && price_count != usize::from(market.num_outcomes) {
+            violations.push(Violation {
+                kind: ViolationKind::SidecarMarketStatusMismatch,
+                details: format!(
+                    "market {:?} last clearing price count {} is neither zero nor num_outcomes {}",
+                    market.market_id, price_count, market.num_outcomes
+                ),
+            });
+        }
+        for (outcome, price) in market.last_clearing_prices.iter().copied().enumerate() {
+            if !price_is_in_protocol_range(price) {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarMarketStatusMismatch,
+                    details: format!(
+                        "market {:?} outcome {} last clearing price {} exceeds NANOS_PER_DOLLAR {}",
+                        market.market_id, outcome, price, NANOS_PER_DOLLAR
+                    ),
+                });
+            }
+        }
         if out.insert(market.market_id, market).is_some() {
             violations.push(Violation {
                 kind: ViolationKind::SidecarMarketStatusMismatch,
@@ -1124,6 +1223,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state: vec![],
+            account_keys: vec![],
             state_sidecar: sidecar,
             pre_state_sidecar: empty_sidecar(),
             resolved_markets: vec![],
@@ -1153,6 +1253,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state: vec![],
+            account_keys: vec![],
             state_sidecar,
             pre_state_sidecar,
             resolved_markets: vec![],
@@ -1253,6 +1354,7 @@ mod tests {
             },
             metadata_digest: [5u8; 32],
             resolution_template: "admin".to_string(),
+            last_clearing_prices: vec![],
         }
     }
 
@@ -1264,6 +1366,7 @@ mod tests {
             status: MarketStatusSnapshot::Active,
             metadata_digest: [market_id.0 as u8; 32],
             resolution_template: "admin".to_string(),
+            last_clearing_prices: vec![],
         }
     }
 
@@ -1419,6 +1522,89 @@ mod tests {
 
         let result = verify_sidecar(&witness_with_pre_post_sidecars(pre, post));
 
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch));
+    }
+
+    #[test]
+    fn sidecar_cleared_market_price_must_match_witness() {
+        let market_id = MarketId::new(11);
+        let mut pre = empty_sidecar();
+        pre.markets = vec![active_market(market_id)];
+        let mut post = pre.clone();
+        post.markets[0].last_clearing_prices = vec![Nanos(600_000_000), Nanos(400_000_000)];
+        let mut witness = witness_with_pre_post_sidecars(pre, post);
+        witness
+            .clearing_prices
+            .insert(market_id, vec![Nanos(550_000_000), Nanos(450_000_000)]);
+
+        let result = verify_sidecar(&witness);
+
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch));
+    }
+
+    #[test]
+    fn sidecar_market_price_cannot_mutate_without_clearing_entry() {
+        let market_id = MarketId::new(11);
+        let mut pre = empty_sidecar();
+        let mut market = active_market(market_id);
+        market.last_clearing_prices = vec![Nanos(550_000_000), Nanos(450_000_000)];
+        pre.markets = vec![market];
+        let mut post = pre.clone();
+        post.markets[0].last_clearing_prices = vec![Nanos(600_000_000), Nanos(400_000_000)];
+
+        let result = verify_sidecar(&witness_with_pre_post_sidecars(pre, post));
+
+        assert!(!result.valid);
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch));
+    }
+
+    #[test]
+    fn sidecar_honest_market_price_transitions_are_accepted() {
+        let cleared_id = MarketId::new(11);
+        let carried_id = MarketId::new(12);
+        let mut cleared = active_market(cleared_id);
+        cleared.last_clearing_prices = vec![Nanos(500_000_000), Nanos(500_000_000)];
+        let mut carried = active_market(carried_id);
+        carried.last_clearing_prices = vec![Nanos(300_000_000), Nanos(700_000_000)];
+        let mut pre = empty_sidecar();
+        pre.markets = vec![cleared, carried];
+        let mut post = pre.clone();
+        let new_prices = vec![Nanos(550_000_000), Nanos(450_000_000)];
+        post.markets[0].last_clearing_prices = new_prices.clone();
+        let mut witness = witness_with_pre_post_sidecars(pre, post);
+        witness.clearing_prices.insert(cleared_id, new_prices);
+
+        let result = verify_sidecar(&witness);
+
+        assert!(result.valid, "violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn sidecar_market_price_shape_fails_closed() {
+        let market_id = MarketId::new(11);
+        let mut wrong_count = empty_sidecar();
+        let mut market = active_market(market_id);
+        market.last_clearing_prices = vec![Nanos(500_000_000)];
+        wrong_count.markets = vec![market];
+        let result = verify_sidecar(&witness_with_sidecar(wrong_count));
+        assert!(!result.valid);
+
+        let mut out_of_range = empty_sidecar();
+        let mut market = active_market(market_id);
+        market.last_clearing_prices = vec![Nanos(NANOS_PER_DOLLAR + 1), Nanos(0)];
+        out_of_range.markets = vec![market];
+        let result = verify_sidecar(&witness_with_sidecar(out_of_range));
         assert!(!result.valid);
         assert!(result
             .violations

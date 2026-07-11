@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{Fill, MarketId, Order, NANOS_PER_DOLLAR};
+use matching_engine::{Fill, MarketId, Nanos, Order, NANOS_PER_DOLLAR};
 
 use crate::arithmetic::{checked_price_qty, checked_welfare};
 use crate::types::BlockWitness;
@@ -422,10 +422,14 @@ fn verify_uniform_clearing_prices(
 }
 
 /// Check 11: Price complementarity — YES + NO = $1 per binary market.
+pub(crate) fn price_is_in_protocol_range(price: Nanos) -> bool {
+    price.0 <= NANOS_PER_DOLLAR
+}
+
 fn verify_price_complementarity(witness: &BlockWitness, violations: &mut Vec<Violation>) {
     for (&market, prices) in &witness.clearing_prices {
         for (outcome, price) in prices.iter().enumerate() {
-            if price.0 > NANOS_PER_DOLLAR {
+            if !price_is_in_protocol_range(*price) {
                 violations.push(Violation {
                     kind: ViolationKind::SettlementOverflow,
                     details: format!(
@@ -620,6 +624,7 @@ mod tests {
             pre_state: vec![],
             post_system_state: vec![],
             post_state: vec![],
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),

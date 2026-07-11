@@ -48,14 +48,20 @@ fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
     }
 }
 
-/// POST /v1/accounts
+/// POST /v1/accounts — create an account with its initial signing key.
+///
+/// Public onboarding must provide `initial_key`; account allocation and
+/// first-key registration are serialized as one API operation. The legacy
+/// bare request shape (no `initial_key`) is deprecated and service-tier only.
 #[utoipa::path(
     post,
     path = "/v1/accounts",
     request_body = CreateAccountRequest,
     responses(
-        (status = 200, description = "Account created", body = AccountResponse),
-        (status = 400, description = "initial_balance_nanos exceeds the public demo limit")
+        (status = 200, description = "Account and initial signing key created", body = AccountResponse),
+        (status = 400, description = "Invalid initial balance or key"),
+        (status = 401, description = "Bare creation requires the service token"),
+        (status = 403, description = "Invalid service token")
     )
 )]
 pub async fn create_account(
@@ -69,14 +75,14 @@ pub async fn create_account(
             req.initial_balance_nanos
         ))
     })?;
-    // The onboarding route lives on the PUBLIC tier, so anonymous browser users
-    // could otherwise mint an arbitrary play-money balance — cap them here.
-    // Trusted service infra (e.g. the arena bots) hits this same endpoint while
-    // presenting a valid `Authorization: Bearer <SYBIL_SERVICE_TOKEN>`; such a
-    // caller is uncapped, exactly as it was before this route moved public. The
-    // token is validated against the same source of truth and constant-time
-    // comparison the `service_auth` middleware uses; a missing/invalid header
-    // just leaves the caller capped.
+    // The deprecated bare-account variant is retained for operator/dev tooling,
+    // but is no longer a public onboarding path.
+    if req.initial_key.is_none() {
+        crate::app::require_service_token(&state, &headers)?;
+    }
+
+    // Anonymous atomic onboarding remains demo-capped. Trusted service callers
+    // may create larger operational accounts.
     let service_authed = crate::app::request_has_valid_service_token(&state, &headers);
     if !state.dev_mode && !service_authed && balance_nanos > MAX_PUBLIC_DEMO_BALANCE_NANOS {
         return Err(AppError::bad_request(format!(
@@ -84,7 +90,52 @@ pub async fn create_account(
             req.initial_balance_nanos, MAX_PUBLIC_DEMO_BALANCE_NANOS
         )));
     }
+    // Validate all caller-controlled key material before allocating an account.
+    let initial_key = req
+        .initial_key
+        .as_ref()
+        .map(|key| {
+            parse_new_key(
+                &state,
+                &key.public_key_hex,
+                key.auth_scheme,
+                key.webauthn_registration.as_ref(),
+            )
+            .map(|pubkey| (key, pubkey))
+        })
+        .transpose()?;
+
+    let _bootstrap_guard = state.account_bootstrap_lock.lock().await;
+    if let Some((_, pubkey)) = &initial_key {
+        if state
+            .sequencer
+            .lookup_registered_pubkey(pubkey.clone())
+            .await?
+            .is_some()
+        {
+            return Err(AppError::conflict(
+                "Initial signing key is already registered",
+            ));
+        }
+    }
+
     let account = state.sequencer.create_account(balance_nanos).await?;
+    if let Some((key, pubkey)) = initial_key {
+        state
+            .sequencer
+            .register_pubkey_with_meta(
+                account.id,
+                pubkey,
+                RegisteredPubkey {
+                    account_id: account.id,
+                    auth_scheme: sequencer_auth_scheme(key.auth_scheme),
+                    label: key.label.clone(),
+                    scope: sequencer_key_scope(key.scope),
+                    created_at_ms: now_ms(),
+                },
+            )
+            .await?;
+    }
     Ok(Json(account_to_response(&account, 0)))
 }
 
@@ -130,13 +181,18 @@ pub async fn fund_account(
     params(("id" = u64, Path, description = "Account ID")),
     responses(
         (status = 200, description = "Account details", body = AccountResponse),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account"),
         (status = 404, description = "Account not found")
-    )
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn get_account(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
 ) -> Result<Json<AccountResponse>, AppError> {
+    authorize_account_read(&state, &headers, AccountId(id)).await?;
     let (account, reserved_balance) = state
         .sequencer
         .get_account_with_reserved_balance(AccountId(id))
@@ -201,8 +257,11 @@ fn parse_new_key(
 pub async fn register_key(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
     Json(req): Json<RegisterKeyRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    crate::app::require_service_token(&state, &headers)?;
+    let _bootstrap_guard = state.account_bootstrap_lock.lock().await;
     let account_id = AccountId(id);
     // First-key bootstrap only: refuse if the account already has a key so this
     // unsigned service endpoint can never overwrite/append to an established
@@ -309,6 +368,11 @@ pub async fn register_signed_key(
             );
             verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
                 .await?;
+            let authorization = webauthn::key_op_authorization(
+                &signer.0,
+                req.webauthn_assertion.as_ref().expect("verified above"),
+            )
+            .map_err(|err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")))?;
             state
                 .sequencer
                 .register_key_authenticated(AuthenticatedKeyRegistration {
@@ -319,6 +383,7 @@ pub async fn register_signed_key(
                     scope,
                     nonce: req.nonce,
                     signer,
+                    authorization,
                 })
                 .await?;
         }
@@ -447,13 +512,18 @@ fn validate_profile_fields(
     params(("id" = u64, Path, description = "Account ID")),
     responses(
         (status = 200, description = "Portfolio summary", body = PortfolioResponse),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account"),
         (status = 404, description = "Account not found")
-    )
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn get_portfolio(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
 ) -> Result<Json<PortfolioResponse>, AppError> {
+    authorize_account_read(&state, &headers, AccountId(id)).await?;
     let (portfolio, reserved_balance) = state
         .sequencer
         .get_portfolio_with_reserved_balance(AccountId(id))
@@ -507,14 +577,19 @@ pub async fn get_portfolio(
         ("offset" = Option<usize>, Query, deprecated, description = "Deprecated offset-from-newest pagination. Ignored when `after` is present."),
     ),
     responses(
-        (status = 200, description = "Account fill history", body = Vec<AccountFillResponse>)
-    )
+        (status = 200, description = "Account fill history", body = Vec<AccountFillResponse>),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account")
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn get_account_fills(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
     Query(params): Query<AccountFillParams>,
 ) -> Result<Json<Vec<AccountFillResponse>>, AppError> {
+    authorize_account_read(&state, &headers, AccountId(id)).await?;
     let market_id = params.market_id.map(MarketId::new);
     let limit = account_fill_query_limit(params.limit);
     let fills = if let Some(after) = params.after.as_deref() {
@@ -586,14 +661,19 @@ fn parse_cursor(s: &str) -> Option<(u64, u64)> {
         ("category" = Option<String>, Query, description = "trades | funding | settlement"),
     ),
     responses(
-        (status = 200, description = "Account history feed, newest-first", body = [HistoryEventResponse])
-    )
+        (status = 200, description = "Account history feed, newest-first", body = [HistoryEventResponse]),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account")
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn get_account_history(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
     Query(params): Query<HistoryParams>,
 ) -> Result<Json<Vec<HistoryEventResponse>>, AppError> {
+    authorize_account_read(&state, &headers, AccountId(id)).await?;
     let limit = params.limit.unwrap_or(50).min(500);
     let before = params.before.as_deref().and_then(parse_cursor);
     let events = state
@@ -654,14 +734,19 @@ pub struct EquityRangeParams {
         ("range" = Option<String>, Query, description = "Time range: 24h | 7d | 30d | all (default all)"),
     ),
     responses(
-        (status = 200, description = "Per-account equity series", body = EquitySeriesResponse)
-    )
+        (status = 200, description = "Per-account equity series", body = EquitySeriesResponse),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account")
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn get_equity(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
     Query(params): Query<EquityRangeParams>,
 ) -> Result<Json<EquitySeriesResponse>, AppError> {
+    authorize_account_read(&state, &headers, AccountId(id)).await?;
     let now_ms = now_ms();
     let since_ms = match params.range.as_deref() {
         Some("24h") => now_ms.saturating_sub(24 * 3_600_000),
@@ -757,12 +842,19 @@ pub async fn set_profile(
     get,
     path = "/v1/accounts/{id}/keys",
     params(("id" = u64, Path, description = "Account ID")),
-    responses((status = 200, description = "Registered signing keys", body = [AccountKeyResponse]))
+    responses(
+        (status = 200, description = "Registered signing keys", body = [AccountKeyResponse]),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account")
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn list_account_keys(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<AccountKeyResponse>>, AppError> {
+    authorize_account_read(&state, &headers, AccountId(id)).await?;
     let keys = state
         .sequencer
         .signing_keys_for_account(AccountId(id))
@@ -833,6 +925,11 @@ pub async fn revoke_key(
                 canonical_key_revocation_bytes(account_id, &target_bytes, req.nonce, genesis_hash);
             verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
                 .await?;
+            let authorization = webauthn::key_op_authorization(
+                &signer.0,
+                req.webauthn_assertion.as_ref().expect("verified above"),
+            )
+            .map_err(|err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")))?;
             state
                 .sequencer
                 .revoke_signing_key_authenticated(AuthenticatedKeyRevocation {
@@ -840,6 +937,7 @@ pub async fn revoke_key(
                     target_pubkey: target_bytes,
                     nonce: req.nonce,
                     signer,
+                    authorization,
                 })
                 .await?;
         }
@@ -852,12 +950,19 @@ pub async fn revoke_key(
     get,
     path = "/v1/accounts/{id}/api-keys",
     params(("id" = u64, Path, description = "Account ID")),
-    responses((status = 200, description = "Read API keys", body = [ApiKeyResponse]))
+    responses(
+        (status = 200, description = "Read API keys", body = [ApiKeyResponse]),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account")
+    ),
+    security(("bearer_read" = []))
 )]
 pub async fn list_api_keys(
     State(state): State<AppState>,
     Path(id): Path<u64>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<ApiKeyResponse>>, AppError> {
+    authorize_account_read(&state, &headers, AccountId(id)).await?;
     let keys = state.sequencer.api_keys_for_account(AccountId(id)).await?;
     let out = keys
         .into_iter()
@@ -894,8 +999,36 @@ pub async fn create_api_key(
 ) -> Result<Json<CreateApiKeyResponse>, AppError> {
     let account_id = AccountId(id);
     let label = req.label.clone().filter(|s| !s.is_empty());
-    let signer = parse_signer(&req.signer_pubkey_hex)?;
     let canonical = canonical_api_key_create_bytes(account_id, label.as_deref(), req.nonce);
+
+    let signer = match req.auth_scheme {
+        AuthScheme::RawP256 => {
+            parse_signer(req.signer_pubkey_hex.as_deref().ok_or_else(|| {
+                AppError::bad_request("signer_pubkey_hex is required for raw_p256 requests")
+            })?)?
+        }
+        AuthScheme::WebAuthn => {
+            if let Some(signer_hex) = req.signer_pubkey_hex.as_deref() {
+                let signer = parse_signer(signer_hex)?;
+                verify_webauthn_intent(
+                    &state,
+                    &signer,
+                    &canonical,
+                    req.webauthn_assertion.as_ref(),
+                )
+                .await?;
+                signer
+            } else {
+                resolve_webauthn_login_signer(
+                    &state,
+                    account_id,
+                    &canonical,
+                    req.webauthn_assertion.as_ref(),
+                )
+                .await?
+            }
+        }
+    };
 
     // Generate the token server-side (256 bits of CSPRNG entropy). The plaintext
     // is returned once below and never persisted; only blake3(token) is stored.
@@ -904,6 +1037,7 @@ pub async fn create_api_key(
         .map_err(|_| AppError::internal("Failed to generate API key entropy"))?;
     let token = format!("sybk_{}", hex::encode(raw));
     let token_hash = api_key_hash(token.as_bytes());
+    let signer_pubkey_hex = hex::encode(signer.compressed_bytes());
 
     let key_id = match req.auth_scheme {
         AuthScheme::RawP256 => {
@@ -918,8 +1052,6 @@ pub async fn create_api_key(
             state.sequencer.create_api_key_signed(signed).await?
         }
         AuthScheme::WebAuthn => {
-            verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
-                .await?;
             state
                 .sequencer
                 .create_api_key_authenticated(AuthenticatedApiKeyCreate {
@@ -937,7 +1069,36 @@ pub async fn create_api_key(
         token,
         label,
         created_at_ms: now_ms(),
+        signer_pubkey_hex,
     }))
+}
+
+/// Resolve the signer during discoverable passkey login without exposing the
+/// owner-gated key list. The API-key canonical payload does not include the
+/// signer key, so one assertion can be checked against each active WebAuthn key
+/// on the claimed account. Only the matching key is returned to the caller.
+async fn resolve_webauthn_login_signer(
+    state: &AppState,
+    account_id: AccountId,
+    canonical: &[u8],
+    assertion: Option<&WebAuthnAssertion>,
+) -> Result<PublicKey, AppError> {
+    let assertion = assertion.ok_or_else(|| {
+        AppError::bad_request("webauthn_assertion is required for webauthn signed requests")
+    })?;
+    let keys = state.sequencer.signing_keys_for_account(account_id).await?;
+    for (compressed, meta) in keys {
+        if meta.auth_scheme != AccountAuthScheme::WebAuthn {
+            continue;
+        }
+        let signer = parse_signer(&hex::encode(compressed))?;
+        if webauthn::verify_assertion(&state.webauthn, &signer.0, canonical, assertion).is_ok() {
+            return Ok(signer);
+        }
+    }
+    Err(AppError::unauthorized(
+        "Passkey is not registered for this account",
+    ))
 }
 
 /// POST /v1/accounts/{id}/api-keys/revoke — revoke a read API key (signed)
@@ -992,12 +1153,7 @@ pub async fn revoke_api_key(
 }
 
 /// Extract and authenticate a read-scoped bearer token from `Authorization`.
-///
-/// Returns the account the token belongs to (active keys only). This is the
-/// reusable gating primitive for private read endpoints. It is applied to ONE
-/// new endpoint (`private-summary`) as the template — existing public endpoints
-/// are intentionally left ungated, because gating them is a breaking change and
-/// a deliberate future step.
+/// Returns the account the active token belongs to.
 async fn bearer_account(state: &AppState, headers: &HeaderMap) -> Result<AccountId, AppError> {
     let header = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -1014,6 +1170,31 @@ async fn bearer_account(state: &AppState, headers: &HeaderMap) -> Result<Account
         .lookup_api_key(token_hash)
         .await?
         .ok_or_else(|| AppError::unauthorized("Invalid or revoked API key"))
+}
+
+/// Authorize a per-account read for either the account owner or trusted service
+/// infrastructure. Owner mismatches are deliberately 403; absent, malformed,
+/// invalid, and revoked read keys are 401.
+pub(crate) async fn authorize_account_read(
+    state: &AppState,
+    headers: &HeaderMap,
+    requested: AccountId,
+) -> Result<(), AppError> {
+    // Dev mode mirrors the service-route middleware: local tools and legacy
+    // integration flows run as the trusted operator without a bearer token.
+    if state.dev_mode {
+        return Ok(());
+    }
+    if crate::app::request_has_valid_service_token(state, headers) {
+        return Ok(());
+    }
+    let authed = bearer_account(state, headers).await?;
+    if authed != requested {
+        return Err(AppError::forbidden(
+            "Bearer token does not grant access to this account",
+        ));
+    }
+    Ok(())
 }
 
 /// GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
@@ -1038,12 +1219,7 @@ pub async fn get_private_summary(
     Path(id): Path<u64>,
     headers: HeaderMap,
 ) -> Result<Json<PrivateAccountSummaryResponse>, AppError> {
-    let authed = bearer_account(&state, &headers).await?;
-    if authed != AccountId(id) {
-        return Err(AppError::forbidden(
-            "Bearer token does not grant access to this account",
-        ));
-    }
+    authorize_account_read(&state, &headers, AccountId(id)).await?;
     let (account, portfolio, reserved_balance) = state
         .sequencer
         .get_account_summary_with_reserved_balance(AccountId(id))

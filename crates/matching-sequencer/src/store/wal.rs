@@ -75,10 +75,20 @@ pub enum ControlPlaneCommand {
         #[serde(default)]
         created_at_ms: u64,
     },
+    RegisterPubkeyAuthorized {
+        account_id: AccountId,
+        compressed_pubkey: Vec<u8>,
+        auth_scheme: crate::crypto::AccountAuthScheme,
+        label: Option<String>,
+        scope: crate::crypto::KeyScope,
+        created_at_ms: u64,
+        authorization: sybil_verifier::KeyOpAuth,
+    },
     /// Revoke a registered signing key (SYB-60).
     RevokeSigningKey {
         account_id: AccountId,
         compressed_pubkey: Vec<u8>,
+        authorization: sybil_verifier::KeyOpAuth,
     },
     /// Set/clear an account's opt-in profile (SYB-60).
     SetProfile {

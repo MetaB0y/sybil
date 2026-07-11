@@ -66,7 +66,10 @@ pub enum SequencerMsg {
         i64,
         RpcReplyPort<Result<Account, SequencerError>>,
     ),
-    SubmitL1Deposit(L1Deposit, RpcReplyPort<Result<Account, SequencerError>>),
+    SubmitL1Deposit(
+        L1Deposit,
+        RpcReplyPort<Result<crate::bridge::DepositDisposition, SequencerError>>,
+    ),
     CreateBridgeWithdrawal(
         BridgeWithdrawalRequest,
         RpcReplyPort<Result<WithdrawalLeaf, SequencerError>>,

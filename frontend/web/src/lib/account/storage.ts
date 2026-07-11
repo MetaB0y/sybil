@@ -15,6 +15,7 @@ export const STORAGE_KEYS = {
   AUTH_SCHEME: "sybil:auth:auth_scheme",
   JWK: "sybil:auth:private_key_jwk",
   CREDENTIAL_ID: "sybil:auth:credential_id_b64url",
+  READ_API_KEY: "sybil:auth:read_api_key",
 } as const;
 
 export type AccountAuthScheme = "raw_p256" | "webauthn";
@@ -25,6 +26,7 @@ export interface StoredAccount {
   authScheme: AccountAuthScheme;
   jwk?: JsonWebKey;
   credentialIdB64url?: string;
+  readApiKey: string;
 }
 
 export function readStoredAccount(): StoredAccount | null {
@@ -34,7 +36,8 @@ export function readStoredAccount(): StoredAccount | null {
   const authSchemeRaw = window.localStorage.getItem(STORAGE_KEYS.AUTH_SCHEME);
   const jwkRaw = window.localStorage.getItem(STORAGE_KEYS.JWK);
   const credentialIdB64url = window.localStorage.getItem(STORAGE_KEYS.CREDENTIAL_ID);
-  if (!idRaw || !pubHex) return null;
+  const readApiKey = window.localStorage.getItem(STORAGE_KEYS.READ_API_KEY);
+  if (!idRaw || !pubHex || !readApiKey) return null;
   try {
     const accountId = Number.parseInt(idRaw, 10);
     if (!Number.isFinite(accountId)) return null;
@@ -42,11 +45,11 @@ export function readStoredAccount(): StoredAccount | null {
       authSchemeRaw === "webauthn" ? "webauthn" : "raw_p256";
     if (authScheme === "webauthn") {
       if (!credentialIdB64url) return null;
-      return { accountId, publicKeyHex: pubHex, authScheme, credentialIdB64url };
+      return { accountId, publicKeyHex: pubHex, authScheme, credentialIdB64url, readApiKey };
     }
     if (!jwkRaw) return null;
     const jwk = JSON.parse(jwkRaw) as JsonWebKey;
-    return { accountId, publicKeyHex: pubHex, authScheme, jwk };
+    return { accountId, publicKeyHex: pubHex, authScheme, jwk, readApiKey };
   } catch {
     return null;
   }
@@ -56,6 +59,7 @@ export function writeStoredAccount(s: StoredAccount): void {
   window.localStorage.setItem(STORAGE_KEYS.ACCOUNT_ID, String(s.accountId));
   window.localStorage.setItem(STORAGE_KEYS.PUBKEY, s.publicKeyHex);
   window.localStorage.setItem(STORAGE_KEYS.AUTH_SCHEME, s.authScheme);
+  window.localStorage.setItem(STORAGE_KEYS.READ_API_KEY, s.readApiKey);
   if (s.authScheme === "webauthn") {
     if (!s.credentialIdB64url) throw new Error("missing WebAuthn credential id");
     window.localStorage.setItem(
@@ -76,4 +80,10 @@ export function clearStoredAccount(): void {
   window.localStorage.removeItem(STORAGE_KEYS.AUTH_SCHEME);
   window.localStorage.removeItem(STORAGE_KEYS.JWK);
   window.localStorage.removeItem(STORAGE_KEYS.CREDENTIAL_ID);
+  window.localStorage.removeItem(STORAGE_KEYS.READ_API_KEY);
+}
+
+export function readStoredReadApiKey(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(STORAGE_KEYS.READ_API_KEY);
 }

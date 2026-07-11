@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 use matching_engine::{
     compute_fill_settlement_checked, derive_minting_checked,
-    minting_cost_from_incremental_adjustments_checked, Fill, MarketId, Nanos, NANOS_PER_DOLLAR,
+    minting_cost_from_incremental_adjustments_checked, Fill, MarketId, MintAdjustment, Nanos,
+    NANOS_PER_DOLLAR,
 };
 
 use crate::types::{AccountSnapshot, BlockWitness, WitnessOrder};
@@ -16,7 +17,9 @@ use crate::violations::{VerificationResult, VerificationStats, Violation, Violat
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct DerivedAccountState {
     balance: i64,
+    total_deposited: i64,
     positions: HashMap<(MarketId, u8), i64>,
+    events_digest: [u8; 32],
 }
 
 #[derive(Clone, Debug, Default)]
@@ -33,6 +36,7 @@ fn derive_post_state(
     orders: &[WitnessOrder],
     fills: &[Fill],
     clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
+    block_height: u64,
 ) -> DerivedSettlement {
     let mut result = DerivedSettlement::default();
 
@@ -50,7 +54,9 @@ fn derive_post_state(
             snap.id,
             DerivedAccountState {
                 balance: snap.balance,
+                total_deposited: snap.total_deposited,
                 positions: pos_map,
+                events_digest: snap.events_digest,
             },
         );
         result.accounts_checked += 1;
@@ -169,6 +175,13 @@ fn derive_post_state(
                     };
                     *entry = updated;
                 }
+                let event = encode_fill_event(
+                    fill.order_id,
+                    fill.fill_qty.0,
+                    fill.fill_price.0,
+                    block_height,
+                );
+                account.events_digest = update_digest(&account.events_digest, &event);
             }
             Ok(None) => {}
             Err(error) => {
@@ -191,7 +204,7 @@ fn derive_post_state(
     {
         const MINT_ID: u64 = u64::MAX;
         // Collect all markets with any positions after applying fills.
-        let all_markets: std::collections::HashSet<MarketId> = result
+        let all_markets: std::collections::BTreeSet<MarketId> = result
             .accounts
             .values()
             .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
@@ -282,6 +295,8 @@ fn derive_post_state(
                 };
                 mint.balance = updated_balance;
             }
+            let event = encode_mint_event(&adjustments, block_height);
+            mint.events_digest = update_digest(&mint.events_digest, &event);
         }
     }
 
@@ -291,7 +306,7 @@ fn derive_post_state(
 fn market_totals_from_accounts(
     accounts: &HashMap<u64, DerivedAccountState>,
 ) -> Result<Vec<(MarketId, i64, i64)>, String> {
-    let all_markets: std::collections::HashSet<MarketId> = accounts
+    let all_markets: std::collections::BTreeSet<MarketId> = accounts
         .values()
         .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
         .collect();
@@ -324,6 +339,37 @@ fn push_overflow(violations: &mut Vec<Violation>, details: String) {
     });
 }
 
+fn update_digest(current: &[u8; 32], event_bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(current);
+    hasher.update(event_bytes);
+    *hasher.finalize().as_bytes()
+}
+
+fn encode_fill_event(order_id: u64, fill_qty: u64, fill_price: u64, block_height: u64) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 8 * 4);
+    bytes.push(0x01);
+    bytes.extend_from_slice(&order_id.to_le_bytes());
+    bytes.extend_from_slice(&fill_qty.to_le_bytes());
+    bytes.extend_from_slice(&fill_price.to_le_bytes());
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
+fn encode_mint_event(adjustments: &[MintAdjustment], block_height: u64) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + 8 + adjustments.len() * (4 + 1 + 8 + 8));
+    bytes.push(0x05);
+    bytes.extend_from_slice(&(adjustments.len() as u64).to_le_bytes());
+    for adjustment in adjustments {
+        bytes.extend_from_slice(&adjustment.market_id.0.to_le_bytes());
+        bytes.push(adjustment.outcome);
+        bytes.extend_from_slice(&adjustment.position_delta.to_le_bytes());
+        bytes.extend_from_slice(&adjustment.balance_delta.to_le_bytes());
+    }
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
+}
+
 /// Verify that `post_system_state + fills → post_state`.
 pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
     let mut violations = Vec::new();
@@ -333,6 +379,7 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
         &witness.orders,
         &witness.fills,
         &witness.clearing_prices,
+        witness.header.height,
     );
     stats.accounts_checked = derived.accounts_checked;
     violations.extend(derived.violations.clone());
@@ -404,6 +451,27 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
                         account_id, derived_balance, claimed.balance
                     ),
                 });
+            }
+
+            if let Some(derived_account) = derived_account {
+                if derived_account.total_deposited != claimed.total_deposited {
+                    violations.push(Violation {
+                        kind: ViolationKind::SettlementAccountMismatch,
+                        details: format!(
+                            "Account {}: derived total_deposited {} != claimed total_deposited {}",
+                            account_id, derived_account.total_deposited, claimed.total_deposited
+                        ),
+                    });
+                }
+                if derived_account.events_digest != claimed.events_digest {
+                    violations.push(Violation {
+                        kind: ViolationKind::SettlementAccountMismatch,
+                        details: format!(
+                            "Account {}: derived events_digest does not match claimed events_digest",
+                            account_id
+                        ),
+                    });
+                }
             }
 
             // Check positions
@@ -503,15 +571,39 @@ mod tests {
                     snapshot.id,
                     DerivedAccountState {
                         balance: snapshot.balance,
+                        total_deposited: snapshot.total_deposited,
                         positions: snapshot
                             .positions
                             .iter()
                             .map(|&(market, outcome, qty)| ((market, outcome), qty))
                             .collect(),
+                        events_digest: snapshot.events_digest,
                     },
                 )
             })
             .collect()
+    }
+
+    fn bind_post_value_commitments(witness: &mut BlockWitness) {
+        let derived = derive_post_state(
+            &witness.post_system_state,
+            &witness.orders,
+            &witness.fills,
+            &witness.clearing_prices,
+            witness.header.height,
+        );
+        for account in &mut witness.post_state {
+            if let Some(expected) = derived.accounts.get(&account.id) {
+                account.total_deposited = expected.total_deposited;
+                account.events_digest = expected.events_digest;
+            }
+        }
+    }
+
+    fn verify_with_bound_post_value_commitments(witness: &BlockWitness) -> VerificationResult {
+        let mut witness = witness.clone();
+        bind_post_value_commitments(&mut witness);
+        verify_settlement(&witness)
     }
 
     fn q(shares: u64) -> u64 {
@@ -581,6 +673,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -588,8 +681,18 @@ mod tests {
             resolved_markets: vec![],
         };
 
+        let mut witness = witness;
+        bind_post_value_commitments(&mut witness);
         let result = verify_settlement(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
+
+        let mut forged_total = witness.clone();
+        forged_total.post_state[0].total_deposited = 1;
+        assert!(!verify_settlement(&forged_total).valid);
+
+        let mut forged_events = witness;
+        forged_events.post_state[0].events_digest = [1u8; 32];
+        assert!(!verify_settlement(&forged_events).valid);
     }
 
     #[test]
@@ -674,12 +777,13 @@ mod tests {
             pre_state: post_system_state.clone(),
             post_system_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
             pre_state_sidecar: Default::default(),
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
         assert!(result
             .violations
@@ -725,12 +829,13 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state.clone(),
             post_state: pre_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
             pre_state_sidecar: Default::default(),
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
         assert!(result
             .violations
@@ -799,6 +904,7 @@ mod tests {
             pre_state: vec![],
             post_system_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -806,7 +912,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
     }
 
@@ -873,6 +979,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -880,7 +987,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
     }
 
@@ -934,6 +1041,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -941,7 +1049,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
         assert!(result
             .violations
@@ -977,6 +1085,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -984,7 +1093,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
     }
 
@@ -1040,6 +1149,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -1047,7 +1157,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
         assert!(result
             .violations
@@ -1106,6 +1216,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -1113,7 +1224,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
         assert!(result
             .violations
@@ -1197,6 +1308,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -1204,7 +1316,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
     }
 
@@ -1272,6 +1384,7 @@ mod tests {
             pre_state: vec![],
             post_system_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -1279,7 +1392,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(result.valid, "Violations: {:?}", result.violations);
     }
 
@@ -1358,6 +1471,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -1365,7 +1479,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
         assert!(result
             .violations
@@ -1446,6 +1560,7 @@ mod tests {
             pre_state: pre_state.clone(),
             post_system_state: pre_state,
             post_state,
+            account_keys: vec![],
             state_sidecar: Default::default(),
 
             pre_state_sidecar: Default::default(),
@@ -1453,7 +1568,7 @@ mod tests {
             resolved_markets: vec![],
         };
 
-        let result = verify_settlement(&witness);
+        let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
         assert!(result
             .violations
@@ -1479,7 +1594,7 @@ mod tests {
                 })
                 .collect();
 
-            let derived = derive_post_state(&post_system_state, &[], &[], &HashMap::new());
+            let derived = derive_post_state(&post_system_state, &[], &[], &HashMap::new(), 1);
             prop_assert_eq!(derived.accounts, derived_from_snapshots(&post_system_state));
             prop_assert!(derived.violations.is_empty());
         }
@@ -1516,6 +1631,7 @@ mod tests {
                 &[witness_order],
                 &[fill],
                 &HashMap::new(),
+                1,
             );
             prop_assert_eq!(derived.accounts, derived_from_snapshots(&post_system_state));
             prop_assert!(derived.violations.is_empty());
@@ -1573,12 +1689,14 @@ mod tests {
                 &orders,
                 &[fill_a.clone(), fill_b.clone()],
                 &clearing_prices,
+                1,
             );
             let derived_ba = derive_post_state(
                 &post_system_state,
                 &orders,
                 &[fill_b, fill_a],
                 &clearing_prices,
+                1,
             );
 
             prop_assert_eq!(derived_ab.accounts, derived_ba.accounts);

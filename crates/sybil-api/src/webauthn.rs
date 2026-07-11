@@ -154,6 +154,35 @@ pub fn verify_assertion(
         .map_err(|_| WebAuthnError::SignatureInvalid)
 }
 
+pub fn key_op_authorization(
+    verifying_key: &VerifyingKey,
+    assertion: &WebAuthnAssertion,
+) -> Result<matching_sequencer::KeyOpAuth, WebAuthnError> {
+    let authenticator_data = decode_b64url(
+        "webauthn_assertion.authenticator_data_b64url",
+        &assertion.authenticator_data_b64url,
+    )?;
+    let client_data_json = decode_b64url(
+        "webauthn_assertion.client_data_json_b64url",
+        &assertion.client_data_json_b64url,
+    )?;
+    let signature_bytes = decode_b64url(
+        "webauthn_assertion.signature_b64url",
+        &assertion.signature_b64url,
+    )?;
+    let signature =
+        Signature::from_der(&signature_bytes).map_err(|_| WebAuthnError::BadSignatureEncoding)?;
+    let compressed = verifying_key.to_sec1_point(true);
+    let mut signer_pubkey = [0u8; 33];
+    signer_pubkey.copy_from_slice(compressed.as_bytes());
+    Ok(matching_sequencer::KeyOpAuth::WebAuthn {
+        signer_pubkey,
+        authenticator_data,
+        client_data_json,
+        signature: signature.to_bytes().into(),
+    })
+}
+
 /// Parse and validate a WebAuthn registration payload, returning the compressed
 /// SEC1 P256 public key extracted from the attested COSE EC2 key.
 pub fn public_key_from_registration(

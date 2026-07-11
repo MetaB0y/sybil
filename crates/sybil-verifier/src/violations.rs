@@ -66,6 +66,8 @@ pub enum ViolationKind {
     SettlementAccountMismatch,
     /// `pre_state + system_events` does not reproduce `post_system_state`.
     SystemStateMismatch,
+    /// Witnessed key operations do not reproduce the committed signing-key set.
+    KeyTransitionMismatch,
     /// Position imbalance exists but no clearing price for the market.
     /// MINT cannot be priced without clearing prices.
     MintingWithoutClearingPrice,

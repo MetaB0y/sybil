@@ -404,7 +404,7 @@ fn eth_address(byte: u8) -> [u8; 20] {
 fn l1_deposit(account_id: AccountId, deposit_id: u64, amount_token_units: u64) -> L1Deposit {
     let mut deposit = L1Deposit {
         deposit_id,
-        account_id,
+        account_id: Some(account_id),
         chain_id: 1,
         vault_address: eth_address(0x10),
         token_address: eth_address(0x20),
@@ -424,7 +424,7 @@ fn next_l1_deposit(
 ) -> L1Deposit {
     let mut deposit = L1Deposit {
         deposit_id: seq.bridge_state().deposit_cursor + 1,
-        account_id,
+        account_id: Some(account_id),
         chain_id: 1,
         vault_address: eth_address(0x10),
         token_address: eth_address(0x20),
@@ -447,7 +447,11 @@ fn next_l1_deposit(
 fn bridge_deposit_and_withdrawal_emit_block_sidecar() {
     let (mut seq, aid) = make_sequencer(0);
 
-    let account = seq.ingest_l1_deposit(l1_deposit(aid, 1, 10_000)).unwrap();
+    let DepositDisposition::Credited(account) =
+        seq.ingest_l1_deposit(l1_deposit(aid, 1, 10_000)).unwrap()
+    else {
+        panic!("resolved deposit must be credited");
+    };
     assert_eq!(account.balance, 10_000_000);
 
     let withdrawal = seq
@@ -745,11 +749,68 @@ fn bridge_deposit_requires_next_l1_cursor() {
     let (mut seq, aid) = make_sequencer(0);
     match seq.ingest_l1_deposit(l1_deposit(aid, 2, 10_000)) {
         Err(SequencerError::Bridge(_)) => {}
-        other => panic!(
-            "expected bridge error, got {:?}",
-            other.map(|account| account.id)
-        ),
+        _ => panic!("expected bridge error"),
     }
+}
+
+#[test]
+fn quarantined_deposit_is_auto_claimed_on_witnessed_key_registration_across_blocks() {
+    let (mut seq, aid) = make_sequencer(0);
+    let primary = fresh_public_key();
+    seq.register_pubkey_with_scheme(
+        aid,
+        primary.clone(),
+        crate::crypto::AccountAuthScheme::RawP256,
+    )
+    .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    let mut deposit = next_l1_deposit(&seq, aid, 25_000);
+    deposit.account_id = None;
+    assert!(matches!(
+        seq.ingest_l1_deposit(deposit),
+        Ok(DepositDisposition::Quarantined {
+            amount_nanos: 25_000_000,
+            ..
+        })
+    ));
+    assert_eq!(seq.bridge_state().deposit_cursor, 1);
+    assert_eq!(
+        seq.bridge_state().quarantine.get(&account_key(aid)),
+        Some(&25_000_000)
+    );
+    let quarantine_block = seq.produce_block(vec![], 2_000);
+    assert!(sybil_verifier::verify_full(&quarantine_block.witness, false).valid);
+
+    let added = fresh_public_key();
+    let mut signer_pubkey = [0u8; 33];
+    signer_pubkey.copy_from_slice(&primary.compressed_bytes());
+    seq.register_pubkey_with_meta_authorized(
+        aid,
+        added,
+        crate::crypto::RegisteredPubkey::primary(aid, crate::crypto::AccountAuthScheme::RawP256),
+        sybil_verifier::KeyOpAuth::RawP256 {
+            signer_pubkey,
+            signature: [0; 64],
+        },
+    )
+    .unwrap();
+    assert!(seq.bridge_state().quarantine.is_empty());
+    assert_eq!(seq.accounts.get(aid).unwrap().balance, 25_000_000);
+
+    let claim_block = seq.produce_block(vec![], 3_000);
+    assert!(matches!(
+        claim_block.witness.system_events.as_slice(),
+        [
+            SystemEventWitness::KeyRegistered { .. },
+            SystemEventWitness::QuarantineClaimed {
+                account_id,
+                amount: 25_000_000,
+                ..
+            }
+        ] if *account_id == aid.0
+    ));
+    assert!(sybil_verifier::verify_full(&claim_block.witness, false).valid);
 }
 
 #[test]
@@ -1876,7 +1937,7 @@ fn restore_drops_invalid_bridge_and_deposit_wal_rows() {
 
     let invalid_deposit = L1Deposit {
         deposit_id: 2,
-        account_id: aid,
+        account_id: Some(aid),
         chain_id: 1,
         vault_address: [0x10; 20],
         token_address: [0x20; 20],
@@ -2127,7 +2188,17 @@ fn key_registry_mutations_refresh_account_keys_digest() {
     assert_eq!(seq.accounts.get(aid).unwrap().keys_digest, two_key_digest);
     assert_ne!(two_key_digest, one_key_digest);
 
-    seq.revoke_signing_key(aid, &raw_key).unwrap();
+    let mut signer_pubkey = [0u8; 33];
+    signer_pubkey.copy_from_slice(&raw_key.compressed_bytes());
+    seq.revoke_signing_key(
+        aid,
+        &raw_key,
+        sybil_verifier::KeyOpAuth::RawP256 {
+            signer_pubkey,
+            signature: [0u8; 64],
+        },
+    )
+    .unwrap();
     let remaining_key_digest = crate::digest::account_keys_digest(aid, seq.pubkey_registry());
     assert_eq!(
         seq.accounts.get(aid).unwrap().keys_digest,
@@ -2589,6 +2660,7 @@ fn test_witness_includes_untouched_accounts() {
             seq.markets(),
             seq.market_groups(),
             seq.market_lifecycle(),
+            seq.analytics().last_clearing_prices(),
         )
     );
 }
@@ -2650,6 +2722,19 @@ fn admin_resolution_shrinks_three_market_group_and_survivors_stay_coherent() {
     );
     assert_eq!(bp.witness.market_groups.len(), 1);
     assert_eq!(bp.witness.market_groups[0].markets, vec![m0, m1]);
+    for market_id in [m0, m1] {
+        let snapshot = bp
+            .witness
+            .state_sidecar
+            .markets
+            .iter()
+            .find(|market| market.market_id == market_id)
+            .expect("cleared market snapshot");
+        assert_eq!(
+            Some(&snapshot.last_clearing_prices),
+            bp.block.clearing_prices.get(&market_id)
+        );
+    }
 
     let verification = sybil_verifier::verify_full(&bp.witness, false);
     assert!(
@@ -3412,6 +3497,7 @@ fn stp_undo_preserves_other_accounts_same_block_expired_history_and_state_root()
             seq.markets(),
             seq.market_groups(),
             seq.market_lifecycle(),
+            seq.analytics().last_clearing_prices(),
         )
     );
     let verification = sybil_verifier::verify_full(&production.witness, false);

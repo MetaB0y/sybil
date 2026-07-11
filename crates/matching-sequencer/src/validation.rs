@@ -34,6 +34,26 @@ fn checked_sell_qty_i64(payoff: i8, max_fill: u64) -> Option<i64> {
     i64::try_from(qty).ok()
 }
 
+/// Compute the balance reservation implied by an order at admission.
+///
+/// This is also the canonical restore-time derivation for never-matched
+/// resting orders: their persisted `reserved_balance` is redundant integrity
+/// data and must agree with this value exactly. Matched remainders carry a
+/// proportionally-scaled reservation instead (see `OrderBook::settle`), for
+/// which this formula is a lower bound — the exact worst-case cost of the
+/// remaining quantity.
+pub(crate) fn balance_reservation(order: &Order) -> Result<i64, RejectionReason> {
+    let num_states = order.num_states as usize;
+    let has_positive = order.payoffs[..num_states].iter().any(|&p| p > 0);
+    let has_negative = order.payoffs[..num_states].iter().any(|&p| p < 0);
+
+    if has_positive && !has_negative {
+        checked_notional_ceil_i64(order.limit_price.0, order.max_fill.0)
+    } else {
+        Ok(0)
+    }
+}
+
 /// Validate an order against account state (used for pending order re-validation).
 pub fn validate_order(
     order: &Order,
@@ -64,7 +84,7 @@ pub fn validate_order_with_reservation(
 
     if has_positive && !has_negative {
         // Pure buy: check balance covers worst-case cost (minus already reserved)
-        let max_cost = checked_notional_ceil_i64(order.limit_price.0, order.max_fill.0)?;
+        let max_cost = balance_reservation(order)?;
         let available = account.balance - reserved_balance;
         if max_cost > available {
             return Err(RejectionReason::InsufficientBalance {

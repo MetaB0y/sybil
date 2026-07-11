@@ -103,10 +103,12 @@ fn golden_vectors_pin_account_keys_digest() {
                 AccountKeyDigestRecord {
                     auth_scheme: 1,
                     pubkey_sec1: webauthn_key,
+                    capability_mask: crate::KeyRecord::FULL_CAPABILITY_MASK,
                 },
                 AccountKeyDigestRecord {
                     auth_scheme: 0,
                     pubkey_sec1: raw_key,
+                    capability_mask: crate::KeyRecord::FULL_CAPABILITY_MASK,
                 },
             ],
         ),
@@ -228,6 +230,7 @@ fn byte_identity_witness() -> BlockWitness {
         pre_state: vec![account_snapshot(1002), account_snapshot(1001)],
         post_system_state: vec![account_snapshot(1001), account_snapshot(1002)],
         post_state: vec![account_snapshot(1002), account_snapshot(1001)],
+        account_keys: vec![],
         state_sidecar: state_sidecar(accepted_order),
         pre_state_sidecar: Default::default(),
         resolved_markets: vec![market_b, market_a],
@@ -311,6 +314,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 expiry_height: 99,
                 nullifier: [11u8; 32],
             }],
+            quarantine: vec![],
         },
         markets: vec![
             MarketSnapshot {
@@ -329,6 +333,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 },
                 metadata_digest: [12u8; 32],
                 resolution_template: "admin_immediate".to_string(),
+                last_clearing_prices: vec![Nanos(410_000_000), Nanos(590_000_000)],
             },
             MarketSnapshot {
                 market_id: MarketId::new(3),
@@ -340,6 +345,7 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
                 },
                 metadata_digest: [13u8; 32],
                 resolution_template: "data_feed".to_string(),
+                last_clearing_prices: vec![Nanos(610_000_000), Nanos(390_000_000)],
             },
         ],
         market_groups: vec![MarketGroupSnapshot {

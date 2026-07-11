@@ -262,11 +262,19 @@ pub fn compute_complete_state_root(
     markets: &MarketSet,
     market_groups: &[MarketGroup],
     lifecycle: &MarketLifecycle,
+    last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> [u8; 32] {
     let accounts = CanonicalState::from_accounts(accounts);
     sybil_verifier::block::compute_state_root_with_sidecar(
         accounts.as_snapshots(),
-        &state_sidecar_snapshot(bridge, order_book, markets, market_groups, lifecycle),
+        &state_sidecar_snapshot(
+            bridge,
+            order_book,
+            markets,
+            market_groups,
+            lifecycle,
+            last_clearing_prices,
+        ),
     )
 }
 
@@ -276,6 +284,7 @@ pub fn state_sidecar_snapshot(
     markets: &MarketSet,
     market_groups: &[MarketGroup],
     lifecycle: &MarketLifecycle,
+    last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> sybil_verifier::StateSidecarSnapshot {
     state_sidecar_snapshot_from_resting_orders(
         bridge,
@@ -283,6 +292,7 @@ pub fn state_sidecar_snapshot(
         markets,
         market_groups,
         lifecycle,
+        last_clearing_prices,
     )
 }
 
@@ -292,10 +302,11 @@ pub(crate) fn state_sidecar_snapshot_from_resting_orders(
     markets: &MarketSet,
     market_groups: &[MarketGroup],
     lifecycle: &MarketLifecycle,
+    last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> sybil_verifier::StateSidecarSnapshot {
     sybil_verifier::StateSidecarSnapshot {
         bridge: bridge_state_snapshot(bridge),
-        markets: market_snapshots(markets, lifecycle),
+        markets: market_snapshots(markets, lifecycle, last_clearing_prices),
         market_groups: market_group_snapshots(market_groups),
         resting_orders: resting_order_snapshots(resting_orders),
         account_reservations: reservation_snapshots_from_resting_orders(resting_orders),
@@ -305,6 +316,7 @@ pub(crate) fn state_sidecar_snapshot_from_resting_orders(
 fn market_snapshots(
     markets: &MarketSet,
     lifecycle: &MarketLifecycle,
+    last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> Vec<sybil_verifier::MarketSnapshot> {
     let mut snapshots: Vec<_> = markets
         .iter()
@@ -317,6 +329,10 @@ fn market_snapshots(
                 status: market_status_snapshot(lifecycle.market_status(market.id)),
                 metadata_digest: market_metadata_digest(metadata),
                 resolution_template: lifecycle.template_for_market(market.id).to_string(),
+                last_clearing_prices: last_clearing_prices
+                    .get(&market.id)
+                    .cloned()
+                    .unwrap_or_default(),
             }
         })
         .collect();
@@ -644,6 +660,7 @@ mod tests {
         let mut markets = MarketSet::new();
         let market_id = markets.add_binary("Rain tomorrow");
         let groups = Vec::new();
+        let prices = HashMap::new();
         let mut lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
 
         let active_root = compute_complete_state_root(
@@ -653,6 +670,7 @@ mod tests {
             &markets,
             &groups,
             &lifecycle,
+            &prices,
         );
 
         lifecycle.set_market_metadata(
@@ -669,6 +687,7 @@ mod tests {
             &markets,
             &groups,
             &lifecycle,
+            &prices,
         );
         assert_ne!(active_root, metadata_root);
 
@@ -692,6 +711,7 @@ mod tests {
             &markets,
             &groups,
             &lifecycle,
+            &prices,
         );
         assert_ne!(metadata_root, resolved_root);
     }

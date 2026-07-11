@@ -278,6 +278,11 @@ impl Store {
             out
         };
 
+        validate_restored_reservations(&resting_orders)
+            .map_err(|error| StoreError::CorruptLayout(error.to_string()))?;
+        validate_restored_reservations(&admit_log)
+            .map_err(|error| StoreError::CorruptLayout(format!("admit log {error}")))?;
+
         let control_plane_log: Vec<ControlPlaneCommand> = {
             let table = txn.open_table(CONTROL_PLANE_LOG)?;
             let mut out = Vec::new();
@@ -345,6 +350,7 @@ impl Store {
                 &market_metadata,
                 &resting_orders,
                 &bridge_state,
+                &last_clearing_prices,
                 header,
             )
             .await?;
@@ -533,6 +539,7 @@ impl Store {
         market_metadata: &HashMap<MarketId, MarketMetadata>,
         resting_orders: &[RestingOrder],
         bridge_state: &BridgeState,
+        last_clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
         header: &BlockHeader,
     ) -> Result<(), StoreError> {
         let state_root = self
@@ -566,6 +573,7 @@ impl Store {
             markets,
             market_groups,
             &lifecycle,
+            last_clearing_prices,
         );
 
         self.account_state_store

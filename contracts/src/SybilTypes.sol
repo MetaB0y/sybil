@@ -38,4 +38,13 @@ library SybilTypes {
         uint256 amount;
         bytes32 claimKind;
     }
+
+    struct EscapeClaimPublicInputs {
+        bytes32 stateRoot;
+        uint64 height;
+        uint64 accountId;
+        address recipient;
+        uint256 amount;
+        bytes32 nullifier;
+    }
 }

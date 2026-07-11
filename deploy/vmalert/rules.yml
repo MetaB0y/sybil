@@ -231,6 +231,60 @@ groups:
           summary: "No blocks produced in the last 2m"
           description: "sybil-api is up but has not produced any blocks for 2m — block production may be stalled."
 
+      - alert: DepositQuarantineLedgerGrowing
+        expr: increase(sybil_quarantine_ledger_size[1h]) > 100
+        for: 10m
+        labels:
+          severity: info
+          component: l1-indexer
+        annotations:
+          summary: "Deposit quarantine ledger is growing"
+          description: "More than 100 new unresolved bridge keys accumulated over 1h (growth: {{ $value }} entries). Quarantining is working as designed, but sustained growth should be investigated."
+
+      - alert: L1DepositPipelineStalled
+        expr: |
+          sum(increase(sybil_http_requests_total{
+            path="/v1/bridge/deposits",
+            status=~"5.."
+          }[10m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: l1-indexer
+        annotations:
+          summary: "L1 deposit pipeline is stalled"
+          description: "The service-tier deposit submit path returned a server error. Unlike an unresolved-key 404, this is not a quarantine disposition and the gapless indexer will retry the head deposit."
+
+      - alert: SyntheticProbeFailed
+        expr: last_over_time(sybil_synthetic_probe_failure{job="sybil-synthetic"}[10m]) == 1
+        for: 0m
+        labels:
+          severity: critical
+          component: synthetic-monitor
+        annotations:
+          summary: "External Sybil synthetic probe failed"
+          description: "The five-minute read-only probe failed for {{ $labels.instance }}. Health, block advancement, markets, CORS, or container health is broken; inspect the systemd journal for the one-line cause."
+
+      - alert: SyntheticProbeMissing
+        expr: absent_over_time(sybil_synthetic_probe_failure{job="sybil-synthetic"}[15m]) == 1
+        for: 0m
+        labels:
+          severity: warning
+          component: synthetic-monitor
+        annotations:
+          summary: "Sybil synthetic probe has stopped reporting"
+          description: "No synthetic result reached VictoriaMetrics for 15m. Check the sybil-synthetic-probe timer, Docker access, and VictoriaMetrics ingestion."
+
+      - alert: SyntheticProofLagHigh
+        expr: last_over_time(sybil_synthetic_proof_lag_blocks{job="sybil-synthetic"}[15m]) > 30
+        for: 10m
+        labels:
+          severity: warning
+          component: prover
+        annotations:
+          summary: "Proof pipeline is lagging the chain head"
+          description: "The synthetic probe measured /proofs/latest more than 30 blocks behind /v1/blocks/latest for {{ $labels.instance }} (current lag: {{ $value }} blocks). The prover or mock-prover pipeline is likely wedged; see the proof-lag section of the synthetic-monitoring runbook."
+
       - alert: ActorMailboxQueueHigh
         expr: max_over_time(sybil_actor_queue_depth[2m]) > 1000
         for: 2m

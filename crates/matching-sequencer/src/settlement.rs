@@ -458,8 +458,10 @@ mod tests {
             apply_minting(mint, &mint_adjustments, 7);
             let post_state = snapshot_accounts(&accounts);
 
+            let mut header = empty_header();
+            header.height = 7;
             let witness = BlockWitness {
-                header: empty_header(),
+                header,
                 previous_header: None,
                 orders: vec![witness_order],
                 rejections: vec![],
@@ -474,6 +476,7 @@ mod tests {
                 pre_state: post_system_state.clone(),
                     post_system_state,
                     post_state,
+                    account_keys: vec![],
                     state_sidecar: Default::default(),
                     pre_state_sidecar: Default::default(),
 

@@ -16,6 +16,20 @@ registration payload, the API extracts the COSE EC2 P256 public key, and the
 registered public key is tagged as WebAuthn. Multiple keys can be registered
 for operational flexibility and backup passkeys.
 
+New self-service accounts register their first key in `POST /v1/accounts` via
+the `initial_key` field. The legacy bare create and unsigned first-key bootstrap
+forms are service-only. Browser passkey onboarding uses a short-lived raw P256
+bootstrap key because the discoverable WebAuthn user handle contains the newly
+allocated account id; it registers the passkey through the signed additional-key
+flow and then revokes the bootstrap key.
+
+Account reads use a separate read-scoped bearer. Passkey login signs the
+existing API-key-creation canonical payload, receives a one-time bearer token,
+and stores it with the browser session. Discoverable login may omit the signer
+public key: the API verifies the assertion against the claimed account's active
+WebAuthn keys and returns the matching public key without exposing the gated key
+list.
+
 For raw P256, clients sign the canonical payload directly. For WebAuthn, the
 assertion challenge is `base64url(SHA-256(canonical_payload_bytes))`, where the
 canonical payload is the same order, cancel, or withdrawal byte string used by
@@ -30,9 +44,13 @@ Signed orders go to `POST /v1/orders/signed`; signed cancellations go to `POST
 `POST /v1/bridge/withdrawals/signed`. The raw signed path still verifies inside
 the sequencer exactly as before. The WebAuthn path verifies the envelope at the
 API boundary, then uses the same registered-key lookup, durable nonce advance,
-admission, cancellation, or bridge WAL machinery. The block witness and OpenVM
-guest do not contain WebAuthn envelopes or raw signatures; they continue to
-verify accepted orders, rejections, fills, events, and state transitions.
+admission, cancellation, or bridge WAL machinery. The v6 block witness contains
+WebAuthn envelopes or raw signatures for `KeyRegistered` and `KeyRevoked`
+events so the authorization bytes are commitment-bound. The current OpenVM
+guest checks envelope caps and that the declared signer is an active
+scheme-matching key in the running key set, but cryptographic guest verification
+remains deferred to the separate P256 acceleration ticket. Admission-time
+verification remains mandatory.
 
 Every signed order, signed cancellation, and signed bridge withdrawal carries a per-account `nonce: u64` covered by the canonical P256 payload. The sequencer stores each account's highest accepted signed-action nonce and requires strict increase; gaps are allowed. Stale or duplicate nonces are rejected at the API boundary as `409 REPLAY_NONCE_STALE`. The nonce advance is durably logged before the signed action becomes live, so a process restart cannot reopen the replay window for an already acknowledged signed payload.
 

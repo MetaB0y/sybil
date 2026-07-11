@@ -83,7 +83,10 @@ use crate::market_info::{
     ResolutionConfig,
 };
 use crate::market_lifecycle::MarketLifecycle;
-use crate::order_book::{reservation_snapshots_from_resting_orders, OrderBook, RestingOrder};
+use crate::order_book::{
+    reservation_snapshots_from_resting_orders, validate_restored_account_reservations,
+    validate_restored_reservations, OrderBook, RestingOrder,
+};
 use crate::price_tracker::{PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot};
 use crate::sequencer::{BlockSequencer, SequencerConfig};
 

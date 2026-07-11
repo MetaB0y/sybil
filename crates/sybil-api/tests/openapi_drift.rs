@@ -10,7 +10,9 @@
 
 use std::collections::BTreeSet;
 
-use sybil_api::app::{ApiDoc, DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE};
+use sybil_api::app::{
+    ApiDoc, DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE,
+};
 use utoipa::OpenApi;
 
 /// Mounted route templates that are deliberately absent from the OpenAPI spec.
@@ -24,7 +26,7 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
     "/metrics",
 ];
 
-const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 130;
+const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 133;
 
 /// Unique path templates across all three mount tables, minus the non-API
 /// exemptions. `MatchedPath`/utoipa both key on the path template (not the
@@ -32,6 +34,7 @@ const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 130;
 fn documented_route_templates() -> BTreeSet<String> {
     PUBLIC_ROUTE_TABLE
         .iter()
+        .chain(OWNER_ROUTE_TABLE)
         .chain(SERVICE_ROUTE_TABLE)
         .chain(DEV_ROUTE_TABLE)
         .map(|mount| mount.path)
@@ -179,6 +182,7 @@ fn openapi_documents_every_mounted_route() {
 fn openapi_exemptions_are_mounted_and_undocumented() {
     let mounted_all: BTreeSet<&str> = PUBLIC_ROUTE_TABLE
         .iter()
+        .chain(OWNER_ROUTE_TABLE)
         .chain(SERVICE_ROUTE_TABLE)
         .chain(DEV_ROUTE_TABLE)
         .map(|mount| mount.path)
