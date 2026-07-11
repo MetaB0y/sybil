@@ -331,6 +331,24 @@ impl SequencerHandle {
         .await
     }
 
+    /// Read the committed height and chain identity from one actor snapshot.
+    ///
+    /// Readiness callers must not combine separate mailbox reads: the actor
+    /// could become unavailable between them and expose a height without the
+    /// genesis domain required by signed actions.
+    pub async fn get_chain_status(
+        &self,
+    ) -> Result<(Option<u64>, Option<[u8; 32]>), SequencerError> {
+        self.read_query(|state| {
+            let height = state.sequencer.height();
+            (
+                (height > 0).then_some(height),
+                state.sequencer.genesis_hash(),
+            )
+        })
+        .await
+    }
+
     pub async fn get_account(
         &self,
         account_id: AccountId,
@@ -1590,11 +1608,18 @@ mod tests {
         let (seq, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(seq);
 
-        handle.produce_block().await.unwrap();
+        let produced = handle.produce_block().await.unwrap();
 
         let block = handle.get_latest_block().await.unwrap();
         assert!(block.is_some());
         assert_eq!(block.unwrap().canonical.header.height, 1);
+
+        let (height, genesis_hash) = handle.get_chain_status().await.unwrap();
+        assert_eq!(height, Some(1));
+        assert_eq!(
+            genesis_hash,
+            Some(crate::block::hash_header(&produced.canonical.header))
+        );
     }
 
     #[tokio::test]

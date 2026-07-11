@@ -2077,12 +2077,37 @@ async fn fills_paginated_correctly() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn health_endpoint() {
-    let (app, _) = test_app(true).await;
-    let (status, body) = get(app, "/v1/health").await;
+async fn health_endpoint_is_an_atomic_chain_snapshot_and_fails_closed() {
+    let (app, handle) = test_app(true).await;
+
+    let (status, body) = get(app.clone(), "/v1/health").await;
+    assert_eq!(status, StatusCode::OK);
+    let resp = parse_json(&body);
+    assert_eq!(resp["status"].as_str(), Some("ok"));
+    assert!(resp["height"].is_null());
+    assert!(resp["genesis_hash"].is_null());
+
+    let produced = handle.produce_block().await.unwrap();
+    let (status, body) = get(app.clone(), "/v1/health").await;
     assert_eq!(status, StatusCode::OK);
     let resp = parse_json(&body);
     assert_eq!(resp["status"].as_str().unwrap(), "ok");
+    assert_eq!(resp["height"].as_u64(), Some(1));
+    let expected_genesis = hex::encode(matching_sequencer::block::hash_header(
+        &produced.canonical.header,
+    ));
+    assert_eq!(
+        resp["genesis_hash"].as_str(),
+        Some(expected_genesis.as_str())
+    );
+
+    assert!(handle.stop_and_wait(Duration::from_secs(5)).await);
+    let (status, body) = get(app, "/v1/health").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let resp = parse_json(&body);
+    assert_eq!(resp["status"].as_str(), Some("unhealthy"));
+    assert!(resp["height"].is_null());
+    assert!(resp["genesis_hash"].is_null());
 }
 
 #[tokio::test]

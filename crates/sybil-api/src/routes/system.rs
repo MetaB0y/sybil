@@ -30,33 +30,42 @@ pub async fn attestation() -> Json<AttestationResponse> {
 
 /// GET /v1/health
 ///
-/// Returns 200 when the sequencer is running, 503 when it is unavailable.
+/// Returns 200 when one atomic sequencer snapshot is available, 503 when it is
+/// unavailable. Height and genesis hash are never assembled from separate
+/// mailbox reads.
 /// Downstream services and Docker healthchecks should treat any non-200 as
 /// unhealthy and stop routing traffic.
 #[utoipa::path(
     get,
     path = "/v1/health",
     responses(
-        (status = 200, description = "Sequencer healthy", body = HealthResponse),
-        (status = 503, description = "Sequencer unavailable", body = HealthResponse),
+        (status = 200, description = "Atomic sequencer health and chain-identity snapshot", body = HealthResponse),
+        (status = 503, description = "Sequencer unavailable or chain identity inconsistent", body = HealthResponse),
     )
 )]
 pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
-    match state.sequencer.get_committed_height().await {
-        Ok(height) => {
-            let genesis_hash = match state.sequencer.get_genesis_hash().await {
-                Ok(hash) => hash.map(hex::encode),
-                Err(err) => {
-                    tracing::warn!(error = %err, "health check: genesis hash unavailable");
-                    None
-                }
-            };
+    match state.sequencer.get_chain_status().await {
+        Ok((height @ None, genesis_hash @ None))
+        | Ok((height @ Some(_), genesis_hash @ Some(_))) => (
+            StatusCode::OK,
+            Json(HealthResponse {
+                status: "ok".to_string(),
+                height,
+                genesis_hash: genesis_hash.map(hex::encode),
+            }),
+        ),
+        Ok((height, genesis_hash)) => {
+            tracing::error!(
+                ?height,
+                ?genesis_hash,
+                "health check: inconsistent chain identity"
+            );
             (
-                StatusCode::OK,
+                StatusCode::SERVICE_UNAVAILABLE,
                 Json(HealthResponse {
-                    status: "ok".to_string(),
-                    height,
-                    genesis_hash,
+                    status: "unhealthy".to_string(),
+                    height: None,
+                    genesis_hash: None,
                 }),
             )
         }
