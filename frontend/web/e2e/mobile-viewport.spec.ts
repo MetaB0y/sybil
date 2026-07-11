@@ -67,6 +67,33 @@ test.describe("mobile viewport smoke", () => {
       await expectTouchButtons(page, path);
     }
   });
+
+  test("connect dialog owns focus and restores the page on close", async ({
+    page,
+  }) => {
+    await proxyApiForLocalRun(page);
+    await page.goto("/");
+
+    const connect = page.getByRole("button", { name: "connect", exact: true });
+    await expect(connect).toBeVisible();
+    await connect.focus();
+    await connect.click();
+
+    const dialog = page.getByRole("dialog", { name: "Connect" });
+    await expect(dialog).toBeVisible();
+    const close = dialog.getByRole("button", { name: "Close" });
+    await expect(close).toBeFocused();
+    await expect
+      .poll(() => page.evaluate(() => document.body.style.overflow))
+      .toBe("hidden");
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(connect).toBeFocused();
+    await expect
+      .poll(() => page.evaluate(() => document.body.style.overflow))
+      .toBe("");
+  });
 });
 
 test.describe("compact desktop nav boundary", () => {

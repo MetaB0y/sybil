@@ -10,7 +10,7 @@
  * to `document.body` so z-index is independent of nav layout.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   AccountError,
@@ -39,14 +39,34 @@ type Tab = "create" | "passkey" | "import";
 export function ConnectModal() {
   const open = useConnectModalOpen();
   const setOpen = useSetConnectModalOpen();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+        ? document.activeElement
+        : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
+
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+      }
     }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
   }, [open, setOpen]);
 
   // Modal only opens after a client-side interaction, so `document` is
@@ -58,7 +78,7 @@ export function ConnectModal() {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Connect account"
+      aria-labelledby="connect-modal-title"
       onClick={(e) => {
         if (e.target === e.currentTarget) setOpen(false);
       }}
@@ -75,13 +95,22 @@ export function ConnectModal() {
         padding: "var(--space-5)",
       }}
     >
-      <ConnectModalBody onClose={() => setOpen(false)} />
+      <ConnectModalBody
+        closeButtonRef={closeButtonRef}
+        onClose={() => setOpen(false)}
+      />
     </div>,
     document.body,
   );
 }
 
-function ConnectModalBody({ onClose }: { onClose: () => void }) {
+function ConnectModalBody({
+  closeButtonRef,
+  onClose,
+}: {
+  closeButtonRef: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+}) {
   const [tab, setTab] = useState<Tab>("create");
 
   return (
@@ -108,6 +137,7 @@ function ConnectModalBody({ onClose }: { onClose: () => void }) {
         }}
       >
         <div
+          id="connect-modal-title"
           style={{
             fontFamily: "var(--font-display)",
             fontWeight: 700,
@@ -120,6 +150,7 @@ function ConnectModalBody({ onClose }: { onClose: () => void }) {
           Connect
         </div>
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onClose}
           aria-label="Close"
