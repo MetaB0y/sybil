@@ -11,7 +11,10 @@
  */
 
 import { useMemo, useState } from "react";
-import { TradesList, tradeOrderCount } from "@/components/portfolio/trades-list";
+import {
+  TradesList,
+  tradeOrderCount,
+} from "@/components/portfolio/trades-list";
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryFeed } from "@/components/portfolio/history-feed";
 import { IdentityHeader } from "@/components/portfolio/identity-header";
@@ -25,6 +28,10 @@ import { PositionsList } from "@/components/portfolio/positions-list";
 import { RealizedPnlPanel } from "@/components/portfolio/realized-pnl-panel";
 import { RangeTabs } from "@/components/portfolio/range-tabs";
 import { WithdrawalEtas } from "@/components/portfolio/withdrawal-etas";
+import {
+  AuthenticatedReadState,
+  authenticatedReadStatus,
+} from "@/components/portfolio/authenticated-read-state";
 import {
   useAccountHydrated,
   useAccountSession,
@@ -137,6 +144,58 @@ function Connected({
     [history.events],
   );
 
+  const privateReadStatus = authenticatedReadStatus([
+    portfolio,
+    orders,
+    fills,
+    history,
+    { isPending: curve.isLoading, error: curve.error },
+  ]);
+  const privateReadsRetrying =
+    portfolio.isFetching ||
+    orders.isFetching ||
+    fills.isFetching ||
+    history.isFetching ||
+    curve.isFetching;
+
+  const retryPrivateReads = () => {
+    void Promise.all([
+      portfolio.refetch(),
+      orders.refetch(),
+      fills.refetch(),
+      history.refetch(),
+      curve.refetch(),
+    ]);
+  };
+
+  if (privateReadStatus === "loading") {
+    return (
+      <>
+        <IdentityHeader publicKeyHex={publicKeyHex} />
+        <AuthenticatedReadState
+          status="loading"
+          title="Loading your portfolio"
+          message="Checking your private balances, positions, orders, and account history."
+        />
+      </>
+    );
+  }
+
+  if (privateReadStatus === "error") {
+    return (
+      <>
+        <IdentityHeader publicKeyHex={publicKeyHex} />
+        <AuthenticatedReadState
+          status="error"
+          title="Portfolio unavailable"
+          message="We could not load all of your private account data. Balances and activity are hidden instead of being shown as zero."
+          onRetry={retryPrivateReads}
+          retrying={privateReadsRetrying}
+        />
+      </>
+    );
+  }
+
   const counts: Record<PortfolioTab, number> = {
     positions: portfolioData?.positions.length ?? 0,
     orders: ordersData.length,
@@ -155,11 +214,7 @@ function Connected({
     <>
       <IdentityHeader publicKeyHex={publicKeyHex} />
 
-      <section
-        className="portfolio-hero-grid"
-        style={{
-        }}
-      >
+      <section className="portfolio-hero-grid" style={{}}>
         {/* Left: portfolio hero. */}
         <PortfolioHero
           portfolio={portfolioData}

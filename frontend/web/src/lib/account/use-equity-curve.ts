@@ -44,6 +44,9 @@ export interface EquityCurve {
   deltaAbs: number; // endEquity − startEquity over the range
   deltaPct: number; // delta / startEquity
   isLoading: boolean;
+  isFetching: boolean;
+  error: Error | null;
+  refetch: () => Promise<unknown>;
   isEmpty: boolean; // fewer than 2 points → nothing to draw
 }
 
@@ -109,11 +112,17 @@ export function useEquityCurve(args: {
       deltaAbs,
       deltaPct,
       isLoading: q.isPending,
+      isFetching: q.isFetching,
+      error: q.error,
+      refetch: q.refetch,
       isEmpty: points.length < 2,
     };
   }, [
     q.data,
+    q.isFetching,
     q.isPending,
+    q.error,
+    q.refetch,
     range,
     currentValueDollars,
     baselineDepositsDollars,

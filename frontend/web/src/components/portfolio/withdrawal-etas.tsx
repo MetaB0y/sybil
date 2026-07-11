@@ -11,6 +11,7 @@ import {
 } from "@/lib/account/withdrawals";
 import { formatDollars, parseNanos } from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
+import { AuthenticatedReadState } from "./authenticated-read-state";
 
 export function WithdrawalEtas({ accountId }: { accountId: number }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -30,10 +31,9 @@ export function WithdrawalEtas({ accountId }: { accountId: number }) {
   const q = useQuery({
     queryKey: ["account", accountId, "withdrawals"],
     queryFn: async (): Promise<BridgeWithdrawal[]> => {
-      const { data, error } = await api.GET(
-        "/v1/accounts/{id}/withdrawals",
-        { params: { path: { id: accountId } } },
-      );
+      const { data, error } = await api.GET("/v1/accounts/{id}/withdrawals", {
+        params: { path: { id: accountId } },
+      });
       if (error || !data) throw new Error("fetch active withdrawals failed");
       return data;
     },
@@ -48,6 +48,28 @@ export function WithdrawalEtas({ accountId }: { accountId: number }) {
       ),
     [q.data, nowMs],
   );
+
+  if (q.isPending) {
+    return (
+      <AuthenticatedReadState
+        status="loading"
+        title="Loading withdrawal status"
+        message="Checking the current bridge status for this account."
+      />
+    );
+  }
+
+  if (q.error) {
+    return (
+      <AuthenticatedReadState
+        status="error"
+        title="Withdrawal status unavailable"
+        message="We could not verify your active withdrawals. They are hidden instead of being shown as an empty list."
+        onRetry={() => void q.refetch()}
+        retrying={q.isFetching}
+      />
+    );
+  }
 
   if (rows.length === 0) return null;
 
@@ -169,7 +191,11 @@ function WithdrawalRow({
   );
 }
 
-function StatePill({ state }: { state: ReturnType<typeof withdrawalCancelState> }) {
+function StatePill({
+  state,
+}: {
+  state: ReturnType<typeof withdrawalCancelState>;
+}) {
   const color =
     state === "cancel-window-open"
       ? "var(--warn)"
