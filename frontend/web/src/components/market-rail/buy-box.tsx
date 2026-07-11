@@ -954,6 +954,9 @@ export function BuyBox({
                     fontSize: 12,
                     padding: 0,
                     outline: "none",
+                    // Kill the global :focus-visible cyan ring on this inline field
+                    // (inline box-shadow beats the stylesheet rule).
+                    boxShadow: "none",
                   }}
                 />
                 <span style={{ fontSize: 10, color: "var(--fg-3)" }}>
