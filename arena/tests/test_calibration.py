@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from scripts.calibration import analyze_decisions_db, format_report
+from scripts.calibration import _parse_market_ids, analyze_decisions_db, format_report
 
 
 def _fixture_db(path):
@@ -200,3 +200,32 @@ def test_calibration_window_reason_counterfactuals_categories_and_surprises(tmp_
     acted = analyze_decisions_db(str(db_path), until="2026-01-01T00:01:00Z", top_n=1)
     assert acted["surprises"][0]["market_id"] == 1
     assert acted["surprises"][0]["absolute_error"] == 0.25
+
+
+def test_calibration_pins_and_reports_exact_market_cohort(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+
+    result = analyze_decisions_db(str(db_path), market_ids={2})
+
+    assert result["cohort"] == {
+        "requested_market_ids": [2],
+        "scored_market_ids": [2],
+    }
+    assert result["overall"]["n"] == 1
+    assert [persona["persona"] for persona in result["personas"]] == ["Alice"]
+    assert result["surprises"] == []
+    assert result["portfolio_pnl_scope"] == "all_trader_positions"
+    report = format_report(result)
+    assert "Pinned forecast cohort: 2" in report
+    assert "Portfolio PnL scope: all trader positions" in report
+
+
+def test_market_id_filter_parser_is_strict_and_deduplicates():
+    assert _parse_market_ids(None) is None
+    assert _parse_market_ids("") is None
+    assert _parse_market_ids("2, 1,2") == frozenset({1, 2})
+    with pytest.raises(ValueError, match="comma-separated integers"):
+        _parse_market_ids("1,two")
+    with pytest.raises(ValueError, match="non-negative"):
+        _parse_market_ids("-1,2")

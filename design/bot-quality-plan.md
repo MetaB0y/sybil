@@ -169,7 +169,10 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
 ## 5. Measurement protocol (before/after, ticket Done criterion)
 
 - **Shared market set**: freeze the selected market-id list at experiment start (runner
-  `--market-ids`); all variants trade exactly that set.
+  `--market-ids`); all variants trade exactly that set. Pass the same comma-separated list to
+  `calibration.py --market-ids` so forecast scoring cannot drift to a different cohort. This
+  filter does not reconstruct per-market PnL: portfolio PnL remains the whole trader account,
+  so the runner-level cohort pin is still required for the PnL comparison.
 - **A/B harness already exists**: the FairValueBus fan-out (SYB-192/210) guarantees identical
   news inputs. For each experiment, run the *same persona* twice — control analyst vs variant
   analyst (technique on) — each with its own bus + Flat sizer, same feed. Flat arm is the

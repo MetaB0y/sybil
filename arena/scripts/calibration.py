@@ -4,6 +4,7 @@ Usage:
     cd arena
     uv run python -m scripts.calibration --db live/decisions.db
     uv run python -m scripts.calibration --db live/decisions.db --json-out calibration.json
+    uv run python -m scripts.calibration --db live/decisions.db --market-ids 1,2,3
 """
 
 from __future__ import annotations
@@ -153,6 +154,20 @@ def _parse_iso_timestamp(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _parse_market_ids(value: str | None) -> frozenset[int] | None:
+    if value is None or not value.strip():
+        return None
+    try:
+        market_ids = frozenset(int(part.strip()) for part in value.split(",") if part.strip())
+    except ValueError as exc:
+        raise ValueError("market IDs must be comma-separated integers") from exc
+    if not market_ids:
+        return None
+    if any(market_id < 0 for market_id in market_ids):
+        raise ValueError("market IDs must be non-negative")
+    return market_ids
 
 
 def _select_decisions(
@@ -440,6 +455,7 @@ def analyze_decisions_db(
     since: str | None = None,
     until: str | None = None,
     top_n: int = 10,
+    market_ids: frozenset[int] | set[int] | None = None,
 ) -> dict[str, Any]:
     if bins <= 0:
         raise ValueError("bins must be positive")
@@ -449,6 +465,9 @@ def analyze_decisions_db(
         raise ValueError("top_n must be non-negative")
     since_dt = _parse_iso_timestamp(since)
     until_dt = _parse_iso_timestamp(until)
+    cohort = frozenset(int(market_id) for market_id in market_ids) if market_ids else None
+    if cohort is not None and any(market_id < 0 for market_id in cohort):
+        raise ValueError("market IDs must be non-negative")
     if since_dt is not None and until_dt is not None and since_dt >= until_dt:
         raise ValueError("since must be earlier than until")
 
@@ -457,7 +476,10 @@ def analyze_decisions_db(
         outcomes, outcome_source = load_outcomes(conn, resolved_threshold)
         rows: list[dict[str, Any]] = []
         for row in _select_decisions(conn, since_dt, until_dt):
-            outcome = outcomes.get(int(row["market_id"]))
+            market_id = int(row["market_id"])
+            if cohort is not None and market_id not in cohort:
+                continue
+            outcome = outcomes.get(market_id)
             forecast = _forecast(row)
             market_forecast = _clamp_probability(row["market_price"])
             if outcome is None or forecast is None or market_forecast is None:
@@ -467,7 +489,7 @@ def analyze_decisions_db(
                     "id": int(row["id"]),
                     "persona": _persona_name(str(row["trader_name"])),
                     "trader_name": str(row["trader_name"]),
-                    "market_id": int(row["market_id"]),
+                    "market_id": market_id,
                     "market_name": str(row["market_name"] or ""),
                     "timestamp": str(row["timestamp"] or ""),
                     "forecast": forecast,
@@ -540,6 +562,10 @@ def analyze_decisions_db(
                 "until": until_dt.isoformat() if until_dt is not None else None,
                 "semantics": "since inclusive, until exclusive",
             },
+            "cohort": {
+                "requested_market_ids": sorted(cohort) if cohort is not None else None,
+                "scored_market_ids": sorted({row["market_id"] for row in rows}),
+            },
             "outcomes": {
                 "source": outcome_source,
                 "count": len(outcomes),
@@ -554,6 +580,7 @@ def analyze_decisions_db(
                 "native_noise_trader_pnl": portfolio_pnl["native_noise"],
             },
             "portfolio_pnl": portfolio_pnl,
+            "portfolio_pnl_scope": "all_trader_positions",
             "overall": {
                 "n": len(rows),
                 "brier": _brier(all_forecast_pairs),
@@ -575,14 +602,27 @@ def _fmt(value: Any, precision: int = 4) -> str:
 
 
 def format_report(result: dict[str, Any]) -> str:
-    lines = [
-        "Calibration by persona",
-        (
-            "persona                         n    brier  market   delta  "
-            "reject  acted_b  reject_b  conf"
-        ),
-        "-" * 89,
-    ]
+    lines = []
+    requested_market_ids = result.get("cohort", {}).get("requested_market_ids")
+    if requested_market_ids is not None:
+        lines.extend(
+            [
+                "Pinned forecast cohort: "
+                + ",".join(str(market_id) for market_id in requested_market_ids),
+                "Portfolio PnL scope: all trader positions; pin the same cohort in the runner",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Calibration by persona",
+            (
+                "persona                         n    brier  market   delta  "
+                "reject  acted_b  reject_b  conf"
+            ),
+            "-" * 89,
+        ]
+    )
     for persona in result["personas"]:
         brier = persona["brier"]
         market = persona["market_price_brier"]
@@ -675,6 +715,11 @@ def main() -> None:
     parser.add_argument(
         "--top-n", type=int, default=10, help="Number of submitted-order surprises to show"
     )
+    parser.add_argument(
+        "--market-ids",
+        default=None,
+        help="Comma-separated market IDs for an exact before/after cohort",
+    )
     args = parser.parse_args()
 
     result = analyze_decisions_db(
@@ -684,6 +729,7 @@ def main() -> None:
         since=args.since,
         until=args.until,
         top_n=args.top_n,
+        market_ids=_parse_market_ids(args.market_ids),
     )
     print(format_report(result))
     json_text = json.dumps(result, indent=2, sort_keys=True)
