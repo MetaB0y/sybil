@@ -80,7 +80,6 @@ def assert_summary(summary: dict[str, Any]) -> None:
             "health": 1,
             "create_market": 1,
             "create_account": 2,
-            "register_key": 2,
             "fund_account": 2,
             "submit_signed_order": 2,
         }
@@ -236,8 +235,6 @@ def self_test() -> None:
                 "create_market",
                 "create_account",
                 "create_account",
-                "register_key",
-                "register_key",
                 "fund_account",
                 "fund_account",
                 "submit_signed_order",

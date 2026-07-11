@@ -25,7 +25,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-COMPOSE_CMD=${COMPOSE_CMD:-docker compose}
+if [[ -n "${COMPOSE_CMD:-}" ]]; then
+    : # Explicit operator/CI override.
+elif docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD="docker-compose"
+else
+    echo "error: neither 'docker compose' nor 'docker-compose' is available" >&2
+    exit 2
+fi
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.prod.yml)
 
 pass() { printf "  \033[32m✓\033[0m %s\n" "$1"; }
@@ -51,15 +60,28 @@ for service in sybil-api sybil-polymarket sybil-prover sybil-prover-mock; do
 done
 pass "default compose config includes core devnet services"
 
+# Compose v2 filters `config --services` by active profiles; legacy
+# docker-compose 1.29 lists every declared service even when its profile is
+# inactive. Prefer the stronger runtime-config assertion when available, and
+# fall back to checking the parsed source boundary on v1.
 if contains_service "$default_services" sybil-prover-worker; then
-    fail "default compose config unexpectedly includes sybil-prover-worker"
+    worker_block=$(
+        awk '
+            /^  sybil-prover-worker:/ { in_service = 1; next }
+            in_service && /^  [[:alnum:]_-]+:/ { exit }
+            in_service { print }
+        ' docker-compose.yml
+    )
+    grep -Eq 'profiles:[[:space:]]*\["prover-worker"\]' <<<"$worker_block" \
+        || fail "sybil-prover-worker is not gated by the prover-worker profile"
+    pass "prover-worker is profile-gated (legacy Compose static check)"
+else
+    pass "default compose config excludes sybil-prover-worker"
+    profile_services=$(COMPOSE_PROFILES=prover-worker compose config --services)
+    contains_service "$profile_services" sybil-prover-worker \
+        || fail "prover-worker profile does not include sybil-prover-worker"
+    pass "prover-worker profile includes sybil-prover-worker"
 fi
-pass "default compose config excludes sybil-prover-worker"
-
-profile_services=$(COMPOSE_PROFILES=prover-worker compose config --services)
-contains_service "$profile_services" sybil-prover-worker \
-    || fail "prover-worker profile does not include sybil-prover-worker"
-pass "prover-worker profile includes sybil-prover-worker"
 
 compose config --quiet
 COMPOSE_PROFILES=prover-worker compose config --quiet
@@ -107,6 +129,38 @@ expected_retention_env=$(printf '%s\n' \
     || fail "production compose does not pin the seven-day history retention policy"
 pass "production compose pins seven-day block/DA, raw-price, and candle retention"
 
+local_webauthn=$(
+    unset SYBIL_WEBAUTHN_RP_ID SYBIL_WEBAUTHN_ORIGIN
+    # Intentionally allow COMPOSE_CMD to contain a command plus arguments.
+    # shellcheck disable=SC2086
+    $COMPOSE_CMD -f docker-compose.yml -f docker-compose.override.yml config \
+        | python3 -c '
+import re
+import sys
+
+environment = {}
+in_api = False
+for line in sys.stdin:
+    if line.rstrip() == "  sybil-api:":
+        in_api = True
+        continue
+    if in_api and re.match(r"^  [^ ]", line):
+        break
+    if in_api:
+        match = re.match(r"^      (SYBIL_WEBAUTHN_(?:RP_ID|ORIGIN)): (.*)$", line.rstrip())
+        if match:
+            environment[match.group(1)] = match.group(2).strip("\"\047")
+for key in ("SYBIL_WEBAUTHN_RP_ID", "SYBIL_WEBAUTHN_ORIGIN"):
+    print(f"{key}={environment.get(key)}")
+'
+)
+expected_local_webauthn=$(printf '%s\n' \
+    'SYBIL_WEBAUTHN_RP_ID=localhost' \
+    'SYBIL_WEBAUTHN_ORIGIN=http://localhost:3005')
+[[ "$local_webauthn" == "$expected_local_webauthn" ]] \
+    || fail "local Compose WebAuthn RP/origin do not match the published web app"
+pass "local Compose passkeys use the published localhost:3005 web origin"
+
 # `deploy-all` builds every application image locally. Keep its save/load stream
 # in lockstep so the host cannot silently restart an older image after a build.
 deploy_all_save=$(
@@ -125,6 +179,17 @@ done
 grep -Fq '| ssh {{SERVER}} docker load' <<<"$deploy_all_save" \
     || fail "deploy-all does not stream its images to the remote Docker daemon"
 pass "deploy-all transfers every locally built application image"
+
+deploy_verify_recipe=$(
+    awk '
+        /^deploy-verify:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+grep -Fq 'post-deploy-smoke.sh --require-signer' <<<"$deploy_verify_recipe" \
+    || fail "deploy-verify does not require the signed order/cancel smoke helper"
+pass "deploy-verify fails closed when signed order/cancel smoke cannot run"
 
 grep -Eq '^COPY[[:space:]]+scripts/[[:space:]]+scripts/$' arena/Dockerfile \
     || fail "arena image does not include offline calibration scripts"

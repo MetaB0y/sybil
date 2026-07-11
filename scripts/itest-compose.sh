@@ -142,10 +142,10 @@ import json, sys
 s = json.load(open(sys.argv[1], encoding="utf-8"))
 assert s["schema"] == "sybil.seed_book.v1"
 assert s["fixture_version"] == "SYB-247-v1:0"
-assert len(s["http_steps"]) == 10
+assert len(s["http_steps"]) == 8
 assert all(step["status"] == 200 for step in s["http_steps"])
 ' "$WORK/summary.json"
-pass "create account -> register key -> fund -> signed orders: ten exact HTTP 200 responses"
+pass "atomic account + key -> fund -> signed orders: eight exact HTTP 200 responses"
 
 http_json POST /v1/simulation/resume "$WORK/resume.json" 200
 [[ "$(jget "$WORK/resume.json" status)" == "resumed" ]]

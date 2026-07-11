@@ -39,8 +39,9 @@
 #                                        seconds between health probes (default 2)
 #   --require-signer / SYBIL_SMOKE_REQUIRE_SIGNER=1
 #                                        FAIL (not SKIP) if the signed-order
-#                                        signer is unavailable. Set this in the
-#                                        deploy image where the signer ships.
+#                                        signer is unavailable. Deploy recipes
+#                                        always set this because they run from
+#                                        a source checkout with Cargo available.
 #
 #   SYBIL_SMOKE_DOCKER_SSH   run the container-health probe over this ssh target
 #                            (e.g. root@172.104.31.54) instead of local docker.
@@ -151,10 +152,28 @@ http() {
         args+=(-H 'Content-Type: application/json' --data "$body")
     fi
     HTTP_CODE="$(curl "${args[@]}" 2>/dev/null || echo 000)"
-    HTTP_BODY="$(cat "$TMP/body" 2>/dev/null || true)"
+    HTTP_BODY="$(read_http_body "$TMP/body" 2>/dev/null || true)"
 }
 
 is_2xx() { smoke_is_2xx "$1"; }
+
+# Bash variables cannot contain NUL bytes. Most smoke responses are JSON, but
+# an authorized DA payload is binary; decoding that file through command
+# substitution used to emit a noisy "ignored null byte" warning. Preserve text
+# bodies verbatim for assertions and represent binary bodies with a safe size
+# marker (the gating matrix only needs their HTTP status).
+read_http_body() {
+    python3 -c '
+from pathlib import Path
+import sys
+
+body = Path(sys.argv[1]).read_bytes()
+if b"\0" in body:
+    print(f"<binary body: {len(body)} bytes>")
+else:
+    print(body.decode("utf-8", errors="replace"), end="")
+' "$1"
+}
 
 # ── 1. Service health ───────────────────────────────────────────────────────
 HEAD_HEIGHT=0
@@ -513,7 +532,7 @@ check_signed_order() {
     setup_signing
     if [[ -z "$SIGN_BIN" ]]; then
         if [[ "$REQUIRE_SIGNER" == "1" ]]; then
-            fail "signer unavailable but --require-signer set (ship smoke_sign in the deploy image)"
+            fail "signer unavailable but --require-signer set (build smoke_sign in the deploy checkout)"
         else
             skip "signer (smoke_sign) unavailable; set SYBIL_SMOKE_REQUIRE_SIGNER=1 in the deploy gate to make this a hard check"
         fi
@@ -570,7 +589,7 @@ check_signed_cancel_lifecycle() {
     setup_signing
     if [[ -z "$SIGN_BIN" ]]; then
         if [[ "$REQUIRE_SIGNER" == "1" ]]; then
-            fail "signer unavailable but --require-signer set (ship smoke_sign in the deploy image)"
+            fail "signer unavailable but --require-signer set (build smoke_sign in the deploy checkout)"
         else
             skip "signer (smoke_sign) unavailable; cancel-lifecycle check skipped"
         fi

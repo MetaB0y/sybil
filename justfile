@@ -84,9 +84,16 @@ build:
 openvm-install:
     cargo +1.91 install --locked --git https://github.com/openvm-org/openvm.git --tag v2.0.0 cargo-openvm
 
-# Check the OpenVM guest crate with the normal host compiler
+# Host-check the OpenVM guest from a clean checkout. The generated init include
+# is only for host compilation; the real guest target remains openvm-guest-build.
 openvm-guest-check:
-    cargo check --manifest-path zk/openvm-guest/Cargo.toml
+    ./scripts/generate-openvm-init.py zk/openvm-guest
+    cargo check --locked --all-targets --manifest-path zk/openvm-guest/Cargo.toml
+
+# Host-check the independent escape guest from a clean checkout.
+openvm-escape-guest-check:
+    ./scripts/generate-openvm-init.py zk/openvm-escape-guest
+    cargo check --locked --all-targets --manifest-path zk/openvm-escape-guest/Cargo.toml
 
 # Build and transpile the Sybil OpenVM guest
 openvm-guest-build:
@@ -569,13 +576,10 @@ COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod
 # Post-deploy verification gate (SYB-248). `deploy-verify` runs the fail-closed
 # smoke gate against the LIVE stack as the FINAL step of every deploy recipe.
 #
-# TODO(SYB-248): flip SMOKE_REQUIRE_SIGNER to "1" once the `smoke_sign` signing
-# helper ships in the deploy image AND the live /v1/orders/signed path is
-# confirmed green. Requiring the signer today would red-fail every deploy while
-# the signer is not guaranteed present in the image, so the signed-order check
-# stays advisory (SKIP, not FAIL) for now. Every other core flow is already a
-# hard, fail-closed assertion regardless of this knob.
-SMOKE_REQUIRE_SIGNER := "0"
+# The deploy is orchestrated from this source checkout, where post-deploy smoke
+# builds (or reuses) the canonical `smoke_sign` helper locally. Signed order and
+# cancel are core private-devnet flows, so every deploy requires the signer and
+# fails closed if it is unavailable or either lifecycle check regresses.
 
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
@@ -654,7 +658,7 @@ deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && dep
 # automatically as the final step of deploy-api / deploy-web / deploy-arena /
 # deploy-all; can also be invoked directly.
 deploy-verify:
-    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} SYBIL_SMOKE_REQUIRE_SIGNER={{SMOKE_REQUIRE_SIGNER}} scripts/post-deploy-smoke.sh --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Restart-resilience gate (SYB-267): restarts the live sybil-api container and
 # fails on OOM-kill / boot-loop / unhealthy-after-timeout. OPT-IN — ~20s API

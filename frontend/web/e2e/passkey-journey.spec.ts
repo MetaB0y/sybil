@@ -139,7 +139,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   //    available the "Create demo" tab defaults its key mode to Passkey, so the
   //    primary button reads "Create with passkey" — clicking it runs a real
   //    registration ceremony through the virtual authenticator.
-  const connectDialog = page.getByRole("dialog", { name: "Connect account" });
+  const connectDialog = page.getByRole("dialog", { name: "Connect" });
   await expect(connectDialog).toBeVisible();
   const createBtn = connectDialog.getByRole("button", {
     name: "Create with passkey",
