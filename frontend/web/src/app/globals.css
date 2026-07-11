@@ -1096,11 +1096,14 @@ textarea {
     flex: 1 0 100%;
   }
 
-  .portfolio-toolbar-search,
-  .portfolio-toolbar-actions {
+  .portfolio-toolbar-controls {
     flex: 1 0 100%;
     justify-content: flex-start !important;
     margin-left: 0 !important;
+  }
+
+  .portfolio-toolbar-search {
+    flex: 1 0 100%;
   }
 
   .portfolio-toolbar-search > * {

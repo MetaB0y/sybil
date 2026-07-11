@@ -595,7 +595,8 @@ function Chip({
         padding: "4px 12px",
         background: active ? "var(--accent)" : "transparent",
         border: active ? 0 : "1px solid var(--border-1)",
-        borderRadius: 999,
+        // Rectangular (radius-sm) to match the markets filter buttons, not a pill.
+        borderRadius: "var(--radius-sm)",
         color: active ? "var(--bg-1)" : "var(--fg-3)",
         fontFamily: "var(--font-mono)",
         fontSize: 11,
