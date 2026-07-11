@@ -129,6 +129,25 @@ values are baked into `sybil-web`, export any overrides before running either
 `/opt/sybil/arena.env`. The recipes check only for the presence of required variable
 names; they do not print or pass secret values in command arguments.
 
+### Local build fast path
+
+Build deployable images on the native Linux/amd64 development machine, never on
+the 2 GB Linode. The deploy recipes then stream the locally built images through
+`docker save | ssh docker load`; the server only loads and starts them.
+
+Measured on the development machine on 2026-07-10, a full-stack build with warm
+cargo-chef/BuildKit caches took about one minute. A workspace-membership change
+that invalidated the cold Rust dependency recipe took about nine minutes. The
+former 80+ minute path was an Apple-Silicon-to-amd64 emulated build and is not a
+supported deploy path. The cargo-chef recipe is manifest-driven, so adding Cargo
+examples, benches, or binaries does not require maintaining dummy source files.
+
+For routine work, batch several changes before deploying and use the narrowest
+recipe that covers them (`deploy-web`, `deploy-arena`, or `deploy-api`). Use
+`deploy-all` only when the complete stack changed. Preserve BuildKit's local
+cache between deploys; a cold recipe rebuild is expected after dependency or
+workspace-manifest changes.
+
 The arena image also carries its offline quality-report tools. After resolved
 markets exist, preview and persist their conflict-checked outcome labels, then
 print the live calibration report from the shared arena volume:
