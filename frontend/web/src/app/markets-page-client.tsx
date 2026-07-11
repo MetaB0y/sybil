@@ -37,7 +37,7 @@ function MarketsPageInner({
 }: {
   initialMarkets: Market[] | undefined;
 }) {
-  const { bundle, isPending, error } = useMarketsList(initialMarkets);
+  const { bundle, isPending, error, refetch } = useMarketsList(initialMarkets);
   const prices = useStore(selectPricesByMarketId);
 
   // The clearing ticker is an active-board readout — exclude closed markets,
@@ -170,7 +170,9 @@ function MarketsPageInner({
         />
 
         {isPending && <Placeholder>loading markets…</Placeholder>}
-        {error && <Placeholder error>error: {String(error)}</Placeholder>}
+        {error && !bundle && (
+          <MarketsLoadError onRetry={() => void refetch()} />
+        )}
 
         {filtered && filtered.length === 0 && (
           <Placeholder>
@@ -351,6 +353,56 @@ function Placeholder({
       }}
     >
       {children}
+    </div>
+  );
+}
+
+function MarketsLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      role="alert"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 12,
+        padding: "var(--space-7) var(--space-5)",
+        border: "1px solid color-mix(in srgb, var(--no) 35%, var(--border-1))",
+        borderRadius: "var(--radius-lg)",
+        background: "color-mix(in srgb, var(--no) 5%, var(--surface-1))",
+        textAlign: "center",
+      }}
+    >
+      <strong
+        style={{
+          color: "var(--fg-1)",
+          fontFamily: "var(--font-sans)",
+          fontSize: 15,
+        }}
+      >
+        Markets are temporarily unavailable
+      </strong>
+      <span className="text-annotation">
+        The live feed did not respond. Your account and orders are unaffected.
+      </span>
+      <button
+        type="button"
+        onClick={onRetry}
+        style={{
+          minHeight: 40,
+          padding: "0 16px",
+          border: "1px solid var(--border-2)",
+          borderRadius: "var(--radius-md)",
+          background: "var(--surface-2)",
+          color: "var(--fg-1)",
+          fontFamily: "var(--font-sans)",
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        Try again
+      </button>
     </div>
   );
 }
