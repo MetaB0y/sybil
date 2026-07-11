@@ -17,9 +17,12 @@ const { getMock, postMock } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/client", () => ({ api: { GET: getMock, POST: postMock } }));
 
-import { canonicalOrderBytes } from "@/lib/auth/canonical";
+import {
+  canonicalCancelBytes,
+  canonicalOrderBytes,
+} from "@/lib/auth/canonical";
 import { exportPublicKeyCompressedHex, generateKeyPair } from "@/lib/auth/p256";
-import { submitSignedOrder } from "./orders";
+import { cancelSignedOrder, submitSignedOrder } from "./orders";
 import { setKeyHandle } from "./store";
 
 const ACCOUNT_ID = 42;
@@ -49,10 +52,10 @@ beforeEach(async () => {
   setKeyHandle(ACCOUNT_ID, kp.privateKey);
 });
 
-function bodyOf(): Record<string, unknown> {
+function bodyOf(path = "/v1/orders/signed"): Record<string, unknown> {
   expect(postMock).toHaveBeenCalledTimes(1);
   const call = postMock.mock.calls[0]!;
-  expect(call[0]).toBe("/v1/orders/signed");
+  expect(call[0]).toBe(path);
   return (call[1] as { body: Record<string, unknown> }).body;
 }
 
@@ -199,5 +202,63 @@ describe("submitSignedOrder", () => {
         nonce: 2n,
       }),
     ).rejects.toThrow(/HTTP 409/);
+  });
+});
+
+describe("cancelSignedOrder", () => {
+  it("posts the exact cancel body with account, order, and nonce covered by the signature", async () => {
+    const orderId = 987;
+    const nonce = 1_234_567_890n;
+    postMock.mockResolvedValue({
+      data: { cancelled: true },
+      error: undefined,
+      response: { status: 200 },
+    });
+
+    const res = await cancelSignedOrder({
+      accountId: ACCOUNT_ID,
+      publicKeyHex: pubHex,
+      orderId,
+      nonce,
+    });
+    expect(res).toEqual({ cancelled: true });
+
+    const body = bodyOf("/v1/orders/cancel/signed");
+    expect(body).toEqual({
+      account_id: ACCOUNT_ID,
+      order_id: orderId,
+      signer_pubkey_hex: pubHex,
+      nonce: Number(nonce),
+      signature_hex: expect.any(String),
+    });
+
+    await assertSignatureCovers(
+      body.signature_hex as string,
+      canonicalCancelBytes(
+        BigInt(ACCOUNT_ID),
+        BigInt(orderId),
+        nonce,
+        GENESIS_HASH,
+      ),
+    );
+  });
+
+  it("surfaces a cancel rejection with status and server detail", async () => {
+    postMock.mockResolvedValue({
+      data: undefined,
+      error: { message: "pending order not found" },
+      response: { status: 404 },
+    });
+
+    await expect(
+      cancelSignedOrder({
+        accountId: ACCOUNT_ID,
+        publicKeyHex: pubHex,
+        orderId: 404,
+        nonce: 99n,
+      }),
+    ).rejects.toThrow(
+      "cancel_signed failed (HTTP 404): pending order not found",
+    );
   });
 });

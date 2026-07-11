@@ -51,6 +51,12 @@ interface Portfolio {
   positions?: unknown[];
 }
 
+interface PendingOrder {
+  order_id: number;
+  market_id: number;
+  limit_price_nanos: number | string;
+}
+
 /**
  * Attach a Chromium virtual authenticator (ctap2 / internal transport, resident
  * key + user verification, presence auto-simulated) so `navigator.credentials`
@@ -103,9 +109,7 @@ async function getJson<T>(
   readToken?: string,
 ): Promise<T> {
   const res = await request.get(url, {
-    ...(readToken
-      ? { headers: { authorization: `Bearer ${readToken}` } }
-      : {}),
+    ...(readToken ? { headers: { authorization: `Bearer ${readToken}` } } : {}),
   });
   expect(res.ok(), `GET ${url} → ${res.status()}`).toBeTruthy();
   return (await res.json()) as T;
@@ -336,8 +340,12 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   ).toBeGreaterThan(0n);
 
   // 8. Open a market that has a price.
-  const { priced } = await pickMarkets(request);
+  const { priced, nullPrice } = await pickMarkets(request);
   expect(priced, "need an active market with a price").toBeTruthy();
+  expect(
+    nullPrice,
+    "need an active never-traded market for deterministic cancel coverage",
+  ).toBeTruthy();
   const market = priced!;
   await page.goto(`/m/${market.market_id}`);
 
@@ -354,7 +362,9 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
 
   // 9. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
   //    Clicking the CTA runs a WebAuthn assertion → POST /v1/orders/signed.
-  const cta = orderDialog.getByRole("button", { name: /review buy|queue buy/i });
+  const cta = orderDialog.getByRole("button", {
+    name: /review buy|queue buy/i,
+  });
   await expect(cta).toBeVisible();
   await cta.click();
   const confirm = orderDialog.getByRole("button", { name: /confirm buy/i });
@@ -396,22 +406,6 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   }
   await expect(acceptedStatus).toBeVisible();
 
-  // The UI must never surface a WebAuthn origin / rp-id mismatch.
-  const bodyText = await page.locator("body").innerText();
-  expect(bodyText, "UI surfaced a WebAuthn origin/rp-id mismatch").not.toMatch(
-    /OriginMismatch|RpIdHashMismatch/i,
-  );
-
-  // No console error / uncaught exception referencing the passkey/order path.
-  const criticalConsole = consoleErrors.filter((e) => CRITICAL.test(e));
-  expect(
-    criticalConsole,
-    `console errors on the passkey/order path:\n${criticalConsole.join("\n")}`,
-  ).toEqual([]);
-  expect(pageErrors, `uncaught page errors:\n${pageErrors.join("\n")}`).toEqual(
-    [],
-  );
-
   // 11. Within ~2 blocks (10s each), the order must leave a trace: a pending
   //    order, a fill, a position, or a reserved-balance decrease. Any of these
   //    proves the signature verified server-side.
@@ -442,6 +436,110 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
       "signed order left no trace (no pending / fill / position / balance change) — signature likely failed verify",
     ).toBeTruthy();
   }).toPass({ timeout: 30_000, intervals: [1_000, 2_000, 3_000] });
+
+  // 12. Create a deliberately non-crossing GTC order on the never-traded
+  //     market. The first priced order above may fill immediately, so it cannot
+  //     provide deterministic cancel coverage. A 1c BUY YES on a null-price
+  //     market stays resting and gives the UI an authoritative order id to
+  //     cancel with a second WebAuthn assertion.
+  const cancelMarket = nullPrice!;
+  await page.goto(`/m/${cancelMarket.market_id}`);
+  const cancelMarketPlaceOrder = page
+    .getByRole("button", { name: "Place order" })
+    .first();
+  await expect(cancelMarketPlaceOrder).toBeVisible({ timeout: 20_000 });
+  await cancelMarketPlaceOrder.click();
+
+  const cancelOrderDialog = page.getByRole("dialog", { name: "Place order" });
+  await expect(cancelOrderDialog).toContainText(/seed the book/i);
+  const limitSlider = cancelOrderDialog.getByRole("slider");
+  await limitSlider.focus();
+  await limitSlider.press("Home");
+  await expect(limitSlider).toHaveValue("1");
+
+  const queueCancelCandidate = cancelOrderDialog.getByRole("button", {
+    name: /review buy|queue buy/i,
+  });
+  await queueCancelCandidate.click();
+  const confirmCancelCandidate = cancelOrderDialog.getByRole("button", {
+    name: /confirm buy/i,
+  });
+  if (await confirmCancelCandidate.isVisible().catch(() => false)) {
+    await confirmCancelCandidate.click();
+  }
+  await expect(
+    cancelOrderDialog
+      .getByRole("status")
+      .filter({ hasText: /order accepted/i }),
+  ).toBeVisible({ timeout: 30_000 });
+
+  let cancelOrderId: number | undefined;
+  await expect(async () => {
+    const orders = await getJson<PendingOrder[]>(
+      request,
+      `${API_BASE}/v1/accounts/${accountId}/orders`,
+      readToken!,
+    );
+    const resting = orders.find(
+      (order) =>
+        order.market_id === cancelMarket.market_id &&
+        BigInt(order.limit_price_nanos) === 10_000_000n,
+    );
+    expect(
+      resting,
+      "1c GTC order should be resting before cancellation",
+    ).toBeTruthy();
+    cancelOrderId = resting!.order_id;
+  }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
+  expect(cancelOrderId).toBeDefined();
+
+  // 13. Cancel through the real portfolio UI. The remaining backup passkey
+  //     signs `/v1/orders/cancel/signed`; the row should disappear immediately
+  //     from the shared cache, then the API must confirm it is no longer open.
+  await page.goto("/portfolio");
+  await page.getByRole("tab", { name: /open orders/i }).click();
+  const cancelRow = page.locator(`a[href="/m/${cancelMarket.market_id}"]`);
+  await expect(cancelRow).toBeVisible({ timeout: 20_000 });
+  const cancelResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/v1/orders/cancel/signed") &&
+      response.request().method() === "POST",
+  );
+  await cancelRow.getByRole("button", { name: "Cancel" }).click();
+  const cancelResponse = await cancelResponsePromise;
+  expect(
+    cancelResponse.ok(),
+    `signed cancel should succeed: HTTP ${cancelResponse.status()}`,
+  ).toBeTruthy();
+  expect(await cancelResponse.json()).toMatchObject({ cancelled: true });
+  await expect(cancelRow).toHaveCount(0, { timeout: 10_000 });
+
+  await expect(async () => {
+    const orders = await getJson<PendingOrder[]>(
+      request,
+      `${API_BASE}/v1/accounts/${accountId}/orders`,
+      readToken!,
+    );
+    expect(
+      orders.some((order) => order.order_id === cancelOrderId),
+      "cancelled order must be absent from authoritative open-order state",
+    ).toBe(false);
+  }).toPass({ timeout: 20_000, intervals: [500, 1_000, 2_000] });
+
+  // The full create → recover → order → cancel path must never surface a
+  // WebAuthn origin/rp-id mismatch or an uncaught browser error.
+  const bodyText = await page.locator("body").innerText();
+  expect(bodyText, "UI surfaced a WebAuthn origin/rp-id mismatch").not.toMatch(
+    /OriginMismatch|RpIdHashMismatch/i,
+  );
+  const criticalConsole = consoleErrors.filter((e) => CRITICAL.test(e));
+  expect(
+    criticalConsole,
+    `console errors on the passkey/order path:\n${criticalConsole.join("\n")}`,
+  ).toEqual([]);
+  expect(pageErrors, `uncaught page errors:\n${pageErrors.join("\n")}`).toEqual(
+    [],
+  );
 });
 
 test("never-traded market does not fabricate a 50c quote", async ({

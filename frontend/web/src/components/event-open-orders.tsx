@@ -207,10 +207,16 @@ export function EventOpenOrders({
   // Cancellation refresh: the resting-orders feed (useAccountOrders) self-
   // refetches per block, but invalidate immediately so the row drops as soon as
   // the cancel is acknowledged rather than on the next batch.
-  function onCancelled() {
-    qc.invalidateQueries({ queryKey: ["account", accountId, "orders"] });
-    qc.invalidateQueries({ queryKey: ["account", accountId, "portfolio"] });
-    qc.invalidateQueries({ queryKey: ["orders", "pending"] });
+  function onCancelled(orderId: number) {
+    qc.setQueryData<AccountOrder[]>(
+      ["account", accountId, "orders"],
+      (current) => current?.filter((order) => order.order_id !== orderId),
+    );
+    void Promise.allSettled([
+      qc.invalidateQueries({ queryKey: ["account", accountId, "orders"] }),
+      qc.invalidateQueries({ queryKey: ["account", accountId, "portfolio"] }),
+      qc.invalidateQueries({ queryKey: ["orders", "pending"] }),
+    ]);
   }
 
   if (orders.length === 0) {
@@ -259,7 +265,7 @@ function OrderRow({
   nowMs: number | null;
   accountId: number;
   publicKeyHex: string;
-  onCancelled: () => void;
+  onCancelled: (orderId: number) => void;
 }) {
   const {
     order,
@@ -293,7 +299,8 @@ function OrderRow({
           limitPriceNanos: String(order.limit_price_nanos),
         },
       });
-      onCancelled();
+      onCancelled(order.order_id);
+      setCancelling(false);
     } catch (e) {
       setCancelError(e instanceof Error ? e.message : String(e));
       setCancelling(false);
@@ -356,7 +363,7 @@ function OrderRow({
           type="button"
           onClick={onCancel}
           disabled={cancelling}
-          title={cancelError ?? "Cancel order"}
+          title="Cancel order"
           style={{
             padding: "3px 8px",
             background: "transparent",
@@ -374,6 +381,20 @@ function OrderRow({
           {cancelling ? "…" : "Cancel"}
         </button>
       </Right>
+      {cancelError && (
+        <span
+          role="alert"
+          style={{
+            gridColumn: "1 / -1",
+            color: "var(--no)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            lineHeight: 1.4,
+          }}
+        >
+          Couldn&apos;t cancel order: {cancelError}
+        </span>
+      )}
     </Row>
   );
 }

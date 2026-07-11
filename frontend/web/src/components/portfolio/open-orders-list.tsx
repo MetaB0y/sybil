@@ -19,6 +19,7 @@
  */
 
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { cancelSignedOrder } from "@/lib/account/orders";
 import { formatShareUnits, notionalNanosCeil } from "@/lib/account/quantity";
@@ -146,7 +147,20 @@ export function OpenOrdersList({
 }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [query, setQuery] = useState("");
+  const qc = useQueryClient();
   const nowMs = useStore(selectLatestBlock)?.timestamp_ms ?? null;
+
+  function onCancelled(orderId: number) {
+    qc.setQueryData<AccountOrder[]>(
+      ["account", accountId, "orders"],
+      (current) => current?.filter((order) => order.order_id !== orderId),
+    );
+    void Promise.allSettled([
+      qc.invalidateQueries({ queryKey: ["account", accountId, "orders"] }),
+      qc.invalidateQueries({ queryKey: ["account", accountId, "portfolio"] }),
+      qc.invalidateQueries({ queryKey: ["orders", "pending"] }),
+    ]);
+  }
 
   const rows = useMemo<OpenRow[]>(() => {
     const decorated = orders.map((o) => {
@@ -234,6 +248,7 @@ export function OpenOrdersList({
               nowMs={nowMs}
               accountId={accountId}
               publicKeyHex={publicKeyHex}
+              onCancelled={onCancelled}
             />
           ))}
           <div style={{ padding: "0 14px" }}>
@@ -250,11 +265,13 @@ function OrderRow({
   nowMs,
   accountId,
   publicKeyHex,
+  onCancelled,
 }: {
   row: OpenRow;
   nowMs: number | null;
   accountId: number;
   publicKeyHex: string;
+  onCancelled: (orderId: number) => void;
 }) {
   const { order, market, action, outcome, placed, filled, remaining } = row;
   const isBuy = action === "BUY";
@@ -278,6 +295,8 @@ function OrderRow({
           limitPriceNanos: String(order.limit_price_nanos),
         },
       });
+      onCancelled(order.order_id);
+      setCancelling(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setCancelling(false);
@@ -345,7 +364,7 @@ function OrderRow({
           type="button"
           onClick={onCancel}
           disabled={cancelling}
-          title={error ?? "Cancel order"}
+          title="Cancel order"
           style={{
             padding: "3px 9px",
             background: "transparent",
@@ -362,6 +381,20 @@ function OrderRow({
           {cancelling ? "…" : "Cancel"}
         </button>
       </RightCell>
+      {error && (
+        <span
+          role="alert"
+          style={{
+            gridColumn: "1 / -1",
+            color: "var(--no)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            lineHeight: 1.4,
+          }}
+        >
+          Couldn&apos;t cancel order: {error}
+        </span>
+      )}
     </Link>
   );
 }
