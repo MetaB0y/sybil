@@ -587,23 +587,8 @@ function StatusBadge({
         : status === "REJECTED"
           ? { fg: "var(--no)", bg: "color-mix(in srgb, var(--no) 14%, transparent)" }
           : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
-  return (
-    <span
-      style={{
-        padding: "1px 7px",
-        background: tone.bg,
-        color: tone.fg,
-        borderRadius: 3,
-        fontFamily: "var(--font-mono)",
-        fontSize: 9.5,
-        fontWeight: 600,
-        letterSpacing: "var(--track-wide)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {status}
-    </span>
-  );
+  // Same chip as the side pill / welfare (regular weight); only the tone differs.
+  return <span style={valueChipStyle({ color: tone.fg, bg: tone.bg })}>{status}</span>;
 }
 
 /** Close time — wall-clock first, then the short date faded after it, on one
@@ -703,7 +688,7 @@ function Row({
         // the slack on wide screens). qty needs a touch more width for values
         // like "234.375".
         gridTemplateColumns:
-          "minmax(0, 1fr) 52px 46px 62px 62px 74px 78px 54px 52px 80px",
+          "minmax(0, 1fr) 52px 46px 82px 62px 74px 78px 54px 52px 80px",
         gap: 18,
         alignItems: "center",
         padding: "9px 0",

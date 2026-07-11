@@ -26,7 +26,7 @@ import type { components } from "@/lib/api/schema";
 import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
-import { SidePill } from "./side-pill";
+import { SidePill, valueChipStyle } from "./side-pill";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -482,21 +482,9 @@ function TypeBadge({
     muted: { fg: "var(--fg-3)", bg: "var(--fill-subtle)" },
   };
   const c = palette[tone]!;
+  // Same chip as the side pill / status badge (regular weight), left-aligned.
   return (
-    <span
-      style={{
-        justifySelf: "start",
-        padding: "1px 7px",
-        background: c.bg,
-        color: c.fg,
-        borderRadius: 3,
-        fontFamily: "var(--font-mono)",
-        fontSize: 9.5,
-        fontWeight: 600,
-        letterSpacing: "var(--track-wide)",
-        whiteSpace: "nowrap",
-      }}
-    >
+    <span style={{ ...valueChipStyle({ color: c.fg, bg: c.bg }), justifySelf: "start" }}>
       {label}
     </span>
   );
