@@ -4748,6 +4748,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-custody"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hex",
+ "matching-engine",
+ "p256 0.13.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "reqwest",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "sha3",
+ "sybil-api-types",
+ "sybil-escape-claim",
+ "sybil-verifier",
+ "sybil-zk",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "sybil-escape-claim"
 version = "0.1.0"
 dependencies = [

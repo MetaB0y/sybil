@@ -23,18 +23,19 @@ esac
 [[ $# -le 1 ]] || { echo "unexpected arguments: ${*:2}" >&2; exit 2; }
 
 for file in docker-compose.yml docker-compose.itest.yml \
-    crates/sybil-client/examples/seed_book.rs scripts/assert-seed-book.py; do
+    crates/sybil-client/examples/seed_book.rs crates/sybil-custody/src/main.rs \
+    contracts/script/UnsafeAnvilEscapeSetup.s.sol scripts/assert-seed-book.py; do
     [[ -f "$file" ]] || { echo "missing required harness file: $file" >&2; exit 1; }
 done
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     python3 scripts/assert-seed-book.py --self-test
     printf 'dry-run: docker compose -p <isolated-project> -f docker-compose.yml -f docker-compose.itest.yml up -d --build sybil-api\n'
-    printf 'dry-run: wait health -> pause -> seed_book -> resume -> assert exact block/fills/accounts -> down -v\n'
+    printf 'dry-run: wait health -> seed -> snapshot/reconstruct -> unsafe Anvil fixture claim/payout -> down -v\n'
     exit 0
 fi
 
-for tool in docker curl python3 cargo; do
+for tool in docker curl python3 cargo anvil forge cast; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required" >&2; exit 2; }
 done
 # Compose v2 plugin (docker compose) on CI, standalone v1 (docker-compose) on
@@ -65,6 +66,10 @@ compose() { "${COMPOSE[@]}" "$@"; }
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
+    if [[ -n "${ANVIL_PID:-}" ]]; then
+        kill "$ANVIL_PID" >/dev/null 2>&1 || true
+        wait "$ANVIL_PID" >/dev/null 2>&1 || true
+    fi
     if [[ "$status" -ne 0 ]]; then
         compose logs --no-color >"$LOG_FILE" 2>&1 || true
         echo "compose integration failed; container logs: $LOG_FILE" >&2
@@ -177,5 +182,101 @@ python3 scripts/assert-seed-book.py \
     --yes-fills "$WORK/yes-fills.json" \
     --no-fills "$WORK/no-fills.json"
 pass "matched_volume=1000, YES/NO prices=500000000, marked balance conserved exactly"
+
+step "Run the anyone-can-prove custody escape fixture drill"
+http_json POST /v1/simulation/pause "$WORK/escape-pause.json" 200
+[[ "$(jget "$WORK/escape-pause.json" status)" == "paused" ]]
+
+http_json GET /v1/blocks/latest "$WORK/escape-block.json" 200
+ESCAPE_HEIGHT="$(jget "$WORK/escape-block.json" height)"
+http_json GET "/v1/da/$ESCAPE_HEIGHT/manifest" "$WORK/escape-manifest-api.json" 200
+
+ANVIL_PORT="${SYBIL_ITEST_ANVIL_PORT:-18545}"
+ANVIL_RPC="http://127.0.0.1:$ANVIL_PORT"
+ANVIL_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+ANVIL_ADMIN="0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+anvil --silent --port "$ANVIL_PORT" >"$WORK/anvil.log" 2>&1 &
+ANVIL_PID=$!
+for _ in $(seq 1 30); do
+    cast chain-id --rpc-url "$ANVIL_RPC" >/dev/null 2>&1 && break
+    sleep 1
+done
+cast chain-id --rpc-url "$ANVIL_RPC" >/dev/null
+
+export PRIVATE_KEY="$ANVIL_KEY"
+export ROOT_HEIGHT="$ESCAPE_HEIGHT"
+export STATE_ROOT="0x$(jget "$WORK/escape-manifest-api.json" state_root)"
+export BLOCK_HASH="0x$(jget "$WORK/escape-manifest-api.json" block_hash)"
+export WITNESS_ROOT="0x$(jget "$WORK/escape-manifest-api.json" witness_root)"
+export DA_COMMITMENT="0x$(jget "$WORK/escape-manifest-api.json" da_commitment)"
+(cd contracts && forge script script/UnsafeAnvilEscapeSetup.s.sol:UnsafeAnvilEscapeSetup \
+    --rpc-url "$ANVIL_RPC" --broadcast) >"$WORK/escape-setup.log"
+
+BROADCAST="contracts/broadcast/UnsafeAnvilEscapeSetup.s.sol/31337/run-latest.json"
+[[ -f "$BROADCAST" ]] || { echo "escape setup broadcast artifact missing" >&2; exit 1; }
+read -r TOKEN SETTLEMENT VAULT < <(python3 - "$BROADCAST" <<'PY'
+import json, sys
+txs = json.load(open(sys.argv[1], encoding="utf-8"))["transactions"]
+created = {tx.get("contractName"): tx.get("contractAddress") for tx in txs if tx.get("contractAddress")}
+print(created["MockUSDC"], created["SybilSettlement"], created["SybilVault"])
+PY
+)
+
+cargo build -p sybil-custody
+target/debug/sybil-custody snapshot \
+    --api-url "$BASE" \
+    --account-id "$YES_ACCOUNT" \
+    --rpc-url "$ANVIL_RPC" \
+    --settlement "$SETTLEMENT" \
+    --proof-out "$WORK/custody-proof.json" \
+    --manifest-out "$WORK/custody-manifest.json" >"$WORK/custody-snapshot-result.json"
+python3 -c 'import json,sys; x=json.load(open(sys.argv[1])); assert x["l1_authenticated"] is True' \
+    "$WORK/custody-snapshot-result.json"
+pass "custody snapshot wrote same-height own-leaf proofs + L1-authenticated DA manifest"
+
+target/debug/sybil-custody reconstruct \
+    --api-url "$BASE" \
+    --height "$ESCAPE_HEIGHT" \
+    --account-id "$YES_ACCOUNT" \
+    --snapshot "$WORK/custody-proof.json" \
+    --manifest "$WORK/custody-manifest.json" \
+    --rpc-url "$ANVIL_RPC" \
+    --settlement "$SETTLEMENT" >"$WORK/custody-reconstruct.json"
+python3 -c 'import json,sys; x=json.load(open(sys.argv[1])); assert x["withdrawable_token_units"] > 0' \
+    "$WORK/custody-reconstruct.json"
+pass "custody reconstruct verified payload -> witness -> DA commitment -> L1 root and valued account"
+
+cast rpc --rpc-url "$ANVIL_RPC" evm_increaseTime 2 >/dev/null
+cast rpc --rpc-url "$ANVIL_RPC" evm_mine >/dev/null
+cast send "$VAULT" "activateEscapeMode()" \
+    --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
+
+USER_BEFORE="$(cast call "$TOKEN" "balanceOf(address)(uint256)" "$ANVIL_ADMIN" --rpc-url "$ANVIL_RPC")"
+VAULT_BEFORE="$(cast call "$TOKEN" "balanceOf(address)(uint256)" "$VAULT" --rpc-url "$ANVIL_RPC")"
+USER_BEFORE="$(cast to-dec "${USER_BEFORE%% *}")"
+VAULT_BEFORE="$(cast to-dec "${VAULT_BEFORE%% *}")"
+P256_KEY="$(printf '%064x' 1)"
+target/debug/sybil-custody escape-claim \
+    --snapshot "$WORK/custody-proof.json" \
+    --rpc-url "$ANVIL_RPC" \
+    --settlement "$SETTLEMENT" \
+    --vault "$VAULT" \
+    --recipient "$ANVIL_ADMIN" \
+    --p256-private-key "$P256_KEY" \
+    --work-dir "$WORK/custody-work" \
+    --fixture-proof \
+    --submit \
+    --eth-private-key "$ANVIL_KEY" >"$WORK/custody-claim.log"
+USER_AFTER="$(cast call "$TOKEN" "balanceOf(address)(uint256)" "$ANVIL_ADMIN" --rpc-url "$ANVIL_RPC")"
+VAULT_AFTER="$(cast call "$TOKEN" "balanceOf(address)(uint256)" "$VAULT" --rpc-url "$ANVIL_RPC")"
+USER_AFTER="$(cast to-dec "${USER_AFTER%% *}")"
+VAULT_AFTER="$(cast to-dec "${VAULT_AFTER%% *}")"
+python3 - "$USER_BEFORE" "$USER_AFTER" "$VAULT_BEFORE" "$VAULT_AFTER" <<'PY'
+import sys
+user_before, user_after, vault_before, vault_after = map(int, sys.argv[1:])
+assert user_after > user_before, (user_before, user_after)
+assert user_after - user_before == vault_before - vault_after
+PY
+pass "escape activation -> fixture adapter proof -> custody calldata submission paid exact claim"
 
 step "Compose integration passed"

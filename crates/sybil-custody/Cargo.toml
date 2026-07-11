@@ -1,0 +1,33 @@
+[package]
+name = "sybil-custody"
+version = "0.1.0"
+edition = "2021"
+description = "User-side Sybil custody snapshots, reconstruction, and escape claims"
+default-run = "sybil-custody"
+
+[[bin]]
+name = "sybil-custody"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive", "env"] }
+hex = "0.4"
+matching-engine = { path = "../matching-engine" }
+p256 = { version = "0.13", features = ["ecdsa"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rmp-serde = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha3 = "0.10"
+sybil-api-types = { path = "../sybil-api-types" }
+sybil-escape-claim = { path = "../sybil-escape-claim" }
+sybil-verifier = { path = "../sybil-verifier" }
+sybil-zk = { path = "../sybil-zk" }
+tokio = { version = "1", features = ["macros", "process", "rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.clippy]
+disallowed_types = "allow"
