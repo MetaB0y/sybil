@@ -218,6 +218,9 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  max-height: calc(100dvh - var(--nav-height));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-4) var(--space-5) var(--space-5);
   background: var(--surface-1);
   border-bottom: 1px solid var(--border-2);
