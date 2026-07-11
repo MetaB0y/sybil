@@ -26,6 +26,7 @@ import {
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
 import { isWebAuthnAvailable } from "@/lib/auth/webauthn";
+import { trapTabFocus } from "@/lib/accessibility/focus-trap";
 
 const BALANCE_OPTIONS: Array<{ label: string; nanos: bigint }> = [
   { label: "$100", nanos: 100_000_000_000n },
@@ -54,16 +55,8 @@ export function ConnectModal() {
       closeButtonRef.current?.focus();
     });
 
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-      }
-    }
-    window.addEventListener("keydown", onKey);
     return () => {
       window.cancelAnimationFrame(focusFrame);
-      window.removeEventListener("keydown", onKey);
       document.body.style.overflow = previousOverflow;
       if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
@@ -79,6 +72,16 @@ export function ConnectModal() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="connect-modal-title"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          return;
+        }
+        trapTabFocus(event.nativeEvent, event.currentTarget);
+      }}
       onClick={(e) => {
         if (e.target === e.currentTarget) setOpen(false);
       }}
