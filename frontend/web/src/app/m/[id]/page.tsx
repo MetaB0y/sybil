@@ -82,6 +82,8 @@ export default function MarketDetailPage({
   // Place-order modal (SYB-54) — launched from the header CTA, renders the
   // shared BuyBox for the currently-selected outcome.
   const [orderOpen, setOrderOpen] = useState(false);
+  const openOrder = useCallback(() => setOrderOpen(true), []);
+  const closeOrder = useCallback(() => setOrderOpen(false), []);
 
   return (
     <SelectOutcomeProvider value={selectOutcome}>
@@ -106,7 +108,7 @@ export default function MarketDetailPage({
                 market={market}
                 {...(market.closed === true
                   ? {}
-                  : { onPlaceOrder: () => setOrderOpen(true) })}
+                  : { onPlaceOrder: openOrder })}
               />
             </div>
 
@@ -128,7 +130,7 @@ export default function MarketDetailPage({
             <PlaceOrderModal
               marketId={marketId}
               open={orderOpen}
-              onClose={() => setOrderOpen(false)}
+              onClose={closeOrder}
             />
           </>
         )}

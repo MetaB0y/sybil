@@ -48,6 +48,8 @@ test.describe("mobile viewport smoke", () => {
 
     const dialog = page.getByRole("dialog", { name: "Place order" });
     await expect(dialog).toBeVisible();
+    const closeOrder = dialog.getByRole("button", { name: "Close" });
+    await expect(closeOrder).toBeFocused();
     const sheet = dialog.locator(".place-order-sheet");
     await expect(sheet).toBeVisible();
     const bottomGap = await sheet.evaluate(
@@ -57,8 +59,9 @@ test.describe("mobile viewport smoke", () => {
     await expectNoDocumentOverflow(page, href!);
     await expectTouchButtons(page, `${href!} order sheet`);
 
-    await dialog.getByRole("button", { name: "Close" }).click();
+    await closeOrder.click();
     await expect(dialog).toBeHidden();
+    await expect(placeOrder).toBeFocused();
 
     for (const path of ["/portfolio", "/activity", "/arena"]) {
       await page.goto(path);
