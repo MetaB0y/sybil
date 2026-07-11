@@ -101,9 +101,9 @@ just deploy-monitoring
 just deploy-caddy
 ```
 
-`deploy-api`, `deploy-web`, and `deploy-arena` run the post-deploy gate. The
-current `deploy-all` recipe does not transfer the freshly built `sybil-web`
-image, so do not rely on it alone for a frontend-bearing fresh-genesis release.
+`deploy-api`, `deploy-web`, `deploy-arena`, and `deploy-all` run the post-deploy
+gate. `deploy-all` builds all application images locally, transfers the API,
+arena, and web images to the host, and starts the complete Compose stack.
 
 ## 5. Verify before reopening
 

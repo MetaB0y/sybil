@@ -623,7 +623,7 @@ deploy-caddy: deploy-sync deploy-prod-env-check
 # Deploy everything
 deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
-    docker save sybil-api:latest sybil-arena:latest | ssh {{SERVER}} docker load
+    docker save sybil-api:latest sybil-arena:latest sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Post-deploy smoke GATE against the LIVE stack (SYB-248). Fail-closed: exits

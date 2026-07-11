@@ -6,6 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+export SYBIL_SERVICE_TOKEN="${SYBIL_SERVICE_TOKEN:-compose-smoke-service-token}"
+export SYBIL_WEBAUTHN_RP_ID="${SYBIL_WEBAUTHN_RP_ID:-app.example.test}"
+export SYBIL_WEBAUTHN_ORIGIN="${SYBIL_WEBAUTHN_ORIGIN:-https://app.example.test}"
 export GF_SECURITY_ADMIN_PASSWORD="${GF_SECURITY_ADMIN_PASSWORD:-compose-smoke-grafana-password}"
 export CADDY_OPS_AUTH_USER="${CADDY_OPS_AUTH_USER:-ops}"
 export CADDY_OPS_AUTH_HASH="${CADDY_OPS_AUTH_HASH:-compose-smoke-caddy-hash}"
@@ -61,3 +64,22 @@ pass "prover-worker profile includes sybil-prover-worker"
 compose config --quiet
 COMPOSE_PROFILES=prover-worker compose config --quiet
 pass "compose config parses with and without prover-worker profile"
+
+# `deploy-all` builds every application image locally. Keep its save/load stream
+# in lockstep so the host cannot silently restart an older image after a build.
+deploy_all_save=$(
+    awk '
+        /^deploy-all:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe && /docker save / { print; exit }
+    ' justfile
+)
+[[ -n "$deploy_all_save" ]] || fail "deploy-all has no docker save command"
+
+for image in sybil-api:latest sybil-arena:latest sybil-web:latest; do
+    grep -Eq "(^|[[:space:]])${image}([[:space:]]|$)" <<<"$deploy_all_save" \
+        || fail "deploy-all does not transfer $image"
+done
+grep -Fq '| ssh {{SERVER}} docker load' <<<"$deploy_all_save" \
+    || fail "deploy-all does not stream its images to the remote Docker daemon"
+pass "deploy-all transfers every locally built application image"

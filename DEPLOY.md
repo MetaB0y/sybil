@@ -101,9 +101,10 @@ just deploy-caddy
 just deploy-all
 ```
 
-`deploy-all` currently transfers the API and arena images but not the freshly
-built `sybil-web` image. Run `just deploy-web` whenever frontend source or its
-baked `NEXT_PUBLIC_*` configuration changed.
+`deploy-all` builds the API, arena, and web images locally, transfers all three
+to the host, and starts the complete Compose stack. Because `NEXT_PUBLIC_*`
+values are baked into `sybil-web`, export any overrides before running either
+`just deploy-web` or `just deploy-all`.
 
 `deploy-arena` and `deploy-all` require `OPENROUTER_API_KEY` in
 `/opt/sybil/arena.env`. The recipes check only for the presence of required variable
