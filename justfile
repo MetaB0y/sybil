@@ -352,10 +352,13 @@ frontend-check:
 check-fast: rust-workspaces-check fmt-check workspace-check lint
 
 # Consensus/protocol gate: shared vectors, guest inputs, deployment coordination,
-# and generated protocol documentation must all agree.
+# an explicit validity deployment boundary, and generated protocol documentation
+# must all agree.
 check-consensus: golden-check
     ./scripts/zk-guest-fingerprint.sh --check
     ./scripts/update-validity-pins.py --check
+    ./scripts/test-validity-boundary.py
+    ./scripts/check-validity-boundary.py --check
     ./scripts/update-protocol-pins.py --check
 
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
@@ -445,6 +448,23 @@ validity-pins-write:
 
 validity-pins-check:
     ./scripts/update-validity-pins.py --check
+
+# Bind the current validity artifacts to a reviewed fresh-genesis or migration
+# decision. Environment variables avoid embedding review text in shell source.
+validity-boundary-write:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${VALIDITY_BOUNDARY_ACTION:?set VALIDITY_BOUNDARY_ACTION}"
+    : "${VALIDITY_BOUNDARY_REASON:?set VALIDITY_BOUNDARY_REASON}"
+    args=(--write --action "$VALIDITY_BOUNDARY_ACTION" --reason "$VALIDITY_BOUNDARY_REASON")
+    if [[ -n "${VALIDITY_BOUNDARY_REFERENCE:-}" ]]; then
+        args+=(--reference "$VALIDITY_BOUNDARY_REFERENCE")
+    fi
+    ./scripts/check-validity-boundary.py "${args[@]}"
+
+validity-boundary-check:
+    ./scripts/test-validity-boundary.py
+    ./scripts/check-validity-boundary.py --check
 
 # Check workspace/design inventories against current repository structure.
 docs-sync:

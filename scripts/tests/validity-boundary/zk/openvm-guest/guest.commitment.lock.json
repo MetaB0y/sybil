@@ -1,0 +1,6 @@
+{
+  "openvm_tag": "v2.0.0",
+  "source_sha256": "main-source",
+  "app_exe_commit": "main-exe",
+  "app_vm_commit": "main-vm"
+}

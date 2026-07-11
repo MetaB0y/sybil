@@ -43,6 +43,13 @@ Precedent: `design/archive/implemented/witness-schema-v2.md` (canonical-witness 
 guest repin + fresh genesis in devnet); runbook
 `docs/runbooks/fresh-genesis-redeploy.md`.
 
+The lightweight deployment-boundary gate records this decision per exact
+validity-artifact fingerprint in `deploy/validity-boundary.json`. Canonical
+vectors, desired pins, guest fingerprints/commitments, or resolved Commonware
+changes cannot pass `just check-consensus` until the new fingerprint explicitly
+declares `fresh_genesis` (this ADR/runbook) or references a reviewed migration
+plan. The record requires the decision; it does not claim deployment occurred.
+
 ## Alternatives considered
 
 - **In-place migration block** (freeze writes, rewrite every account leaf,

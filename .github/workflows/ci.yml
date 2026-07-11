@@ -234,6 +234,12 @@ jobs:
       - name: Deployment validity-pin coordination gate
         run: ./scripts/update-validity-pins.py --check
 
+      - name: Validity deployment-boundary fixture tests
+        run: ./scripts/test-validity-boundary.py
+
+      - name: Validity deployment-boundary declaration gate
+        run: ./scripts/check-validity-boundary.py --check
+
       # Host-side encoder (not consensus surface). Full check + clippy.
       - name: Check openvm-tools
         working-directory: zk/openvm-tools

@@ -108,7 +108,9 @@ For any canonical byte change:
 3. update one owner, its decoder bounds, negative tests, and shared vectors;
 4. run `just golden-write`, review the diff, then `just golden-check`;
 5. rebuild/fingerprint affected guests and update [protocol pins](../../protocol-pins.md);
-6. repin adapters and follow the fresh-genesis runbook when validity changed.
+6. declare the exact new validity fingerprint as `fresh_genesis` or reference a
+   reviewed migration with the `validity-boundary-write` recipe;
+7. repin adapters and follow the fresh-genesis runbook when validity changed.
 
 Never update golden output merely to make a failing test green. Explain which
 logical byte change caused every vector difference.
