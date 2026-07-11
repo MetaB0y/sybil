@@ -1,11 +1,14 @@
 ---
 tags: [arena, bots, calibration, research, terminator2]
-status: accepted (orchestrator review 2026-07-10; stages 0-1 implementable now, 2+ after first calibration window)
+status: proposal-needs-revalidation
 date: 2026-07-10
 ticket: SYB-114
 ---
 
 # SYB-114 research: terminator2-agent techniques for the live arena bots
+
+> **Status note (2026-07-11):** research input, not the current arena backlog.
+> Resurvey the live bot pipeline and calibration data before executing a stage.
 
 Implementation is gated on the first calibration window (Valery runs `scripts/calibration.py`
 after ~a day of post-genesis trading; genesis was 2026-07-10, so data lands 2026-07-11).

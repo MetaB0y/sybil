@@ -2,7 +2,7 @@
 
 /**
  * Expanded panel for a batch row. Top: meta strip (tx hash / block / sequencer
- * / clearing duration / algo — most mocked, see OPEN_QUESTIONS). Body: 2-col
+ * / clearing duration / algorithm; placeholders are visibly labelled). Body: 2-col
  * grid with a market-row table on the left and a donut + composition KV on
  * the right.
  *

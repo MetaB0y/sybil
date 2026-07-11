@@ -8,7 +8,7 @@ for how the guest fits the validium proof pipeline.
 
 The compiled guest yields two commitment hashes — `app_exe_commit` and
 `app_vm_commit` — that `contracts/src/OpenVmVerifierAdapter.sol` pins at deploy
-time. This directory is **consensus surface**: changing the guest source — or
+time. This directory is **validity surface**: changing the guest source — or
 any crate in its path-dependency closure (`crates/sybil-zk` →
 `crates/sybil-verifier` → `crates/matching-engine`, plus
 `crates/sybil-l1-protocol`, all compiled by path) —
@@ -18,7 +18,7 @@ changes those hashes and requires an on-chain redeploy.
 
 | Record | Path | Role | Authority |
 | --- | --- | --- | --- |
-| Deployed pin | `OpenVmVerifierAdapter` constructor args (on-chain) | What the chain enforces | **Authoritative for consensus** |
+| Deployed pin | `OpenVmVerifierAdapter` constructor args (on-chain) | What the chain enforces | **Authoritative for validity** |
 | `commit.json` | `openvm/release/sybil-openvm-guest.commit.json` (committed) | Reviewable, diff-able record of the commitment | Source of truth for the hashes in-repo |
 | Lock file | `guest.commitment.lock.json` (committed) | SHA-256 fingerprint of the guest build recipe/compiler wrapper and **source tree + its path-dependency closure** (`crates/sybil-zk`, `crates/sybil-verifier`, `crates/matching-engine`, `crates/sybil-l1-protocol`), SHA-256 pins for the untracked OpenVM key material, and a copy of the commitment hashes | Staleness detector for build inputs, source, and key material |
 
@@ -97,5 +97,5 @@ Then:
    deployment.
 4. Confirm `scripts/zk-guest-fingerprint.sh --check` is green before merging.
 
-The guest is consensus surface: never regenerate the artifact in the fast CI
+The guest is validity surface: never regenerate the artifact in the fast CI
 path — only host-check that the source is unchanged.

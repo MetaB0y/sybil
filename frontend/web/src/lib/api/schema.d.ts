@@ -1434,7 +1434,7 @@ export interface components {
     BlockResponse: {
       bridge?: components["schemas"]["BridgeBlockResponse"];
       /**
-       * @description Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
+       * @description Nested per-market block scalars. Each
        *     `BlockMarketStats` carries the per-market splits for this block. Old
        *     clients ignore it; new clients consume what they recognise.
        */

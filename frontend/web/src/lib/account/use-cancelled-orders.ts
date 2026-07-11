@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * localStorage-backed log of orders this browser has cancelled. The backend
- * doesn't emit an `OrderCancelled` system event (OPEN_QUESTIONS #15), so we
- * can't reconstruct the Activity tab's CANCELLED rows from the wire. For
- * now we record our own cancels here; the page reads them back.
+ * localStorage-backed immediate overlay for orders this browser cancelled.
+ * The backend emits a committed `OrderCancelled` event in the next block;
+ * this cache lets interaction-specific UI settle before that event arrives.
  *
  * Bounded ring of the last 100 cancels per account. Reactivity comes from
  * a tiny Zustand store; mutations flush to localStorage on every write.

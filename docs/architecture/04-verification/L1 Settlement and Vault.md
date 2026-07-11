@@ -1,16 +1,18 @@
 ---
 tags: [contracts, bridge, validium, spec]
 layer: verification
-status: planned
-last_verified: 2026-07-10
+status: current
+last_verified: 2026-07-11
 ---
 
 # L1 Settlement and Vault
 
-This note defines the Ethereum contract surface for Sybil before production
-Solidity exists. The goal is to make the bridge ambitious but narrow: L1
-custodies collateral, accepts validity-proven state roots, and releases funds
-only when a proof says the off-chain state permits it.
+This note specifies the implemented Ethereum boundary and the remaining
+production-deployment gap. L1 custodies collateral, accepts validity-proven
+state roots, and releases funds only when a proof says the off-chain state
+permits it. The Solidity contracts, Rust hash twins, escape guest, and
+user-side custody CLI exist; real verifier deployment and production DA remain
+operational work.
 
 L1 does not run the prediction market. It does not solve auctions, resolve
 markets, replay the order book, or verify qmdb proofs directly in Solidity.
@@ -308,10 +310,9 @@ L1 deposit, so honest witness generation and crash recovery use the same
 prefix the guest proves.
 
 Remaining bridge hardening is narrower: the sidecar/indexer still owns L1
-log finality/reorg policy, and cross-language golden vectors should add the
-Solidity side of `deposit_leaf`/root/public-input hashes. The Rust-Rust vector
-coverage lives in `sybil-l1-protocol` and the OpenVM guest imports those
-guest-clean primitives directly.
+log finality/reorg policy. Shared golden JSON is exercised by Rust and
+`SybilGoldenVectors.t.sol` for deposit leaves/roots plus transition and escape
+public-input hashes; the OpenVM guests import the same guest-clean primitives.
 
 ### Normal withdrawals
 
@@ -515,134 +516,31 @@ The only safe variants are:
 - a normal withdrawal leaf already created by the sequencer;
 - full operator replacement from available state data.
 
-## Roles and governance
+## Authority and contract surface
 
-Initial testnet roles:
+Both contracts have one `admin` through `SybilAccessControl`; the granular
+OpenZeppelin-style roles from the original design were not implemented.
+Pause/unpause and vault withdrawal cancellation are immediate admin actions.
+Verifier, vault, delay, and admin changes use propose/wait/execute timelocks.
+Anyone may activate escape mode after `escapeTimeout`, and `escapeClaim`
+deliberately bypasses pause and the normal withdrawal delay. See the
+[administrator runbook](../../runbooks/admin-keys.md) for exact operations.
 
-| Role | Contract | Capability |
-|---|---|---|
-| `DEFAULT_ADMIN` | both | configure roles; held by multisig |
-| `PAUSER` | both | pause root submission, deposits, withdrawal requests, or finalization |
-| `VERIFIER_ADMIN` | settlement | schedule verifier adapter upgrade |
-| `PARAMETER_ADMIN` | vault | tune `withdrawalDelay` and `escapeTimeout` within caps |
-| `GUARDIAN` | vault | cancel queued withdrawals during pause with reason |
+| Contract | Implemented public surface |
+|---|---|
+| `SybilSettlement` | submit/inspect accepted roots, initial or timelocked vault assignment, timelocked verifier rotation, pause/unpause |
+| `SybilVault` | deposit, request/finalize/cancel withdrawal, activate escape, prove escape claim, timelocked normal/escape verifiers and delays, pause/unpause |
+| `SybilAccessControl` | proposal ids, propose/execute/cancel timelocks, admin transfer, admin-delay change |
 
-Testnet decision: use a Safe multisig, granular pause, and no timelock while
-the verifier adapter and public-input encoding are still changing.
+The contracts emit typed events for deposits, roots, queued/finalized/cancelled
+withdrawals, escape activation/claims, verifier/parameter updates, pause state,
+and timelock/admin changes. Custom errors fail closed on invalid proofs, stale
+roots/heights, deposit checkpoint mismatch, reused nullifiers, invalid claim
+kinds, premature/cancelled withdrawals, unsupported tokens, and authority or
+timelock violations. Exact ABI, event, and error names live in
+`contracts/src/`; this note does not duplicate the full interfaces.
 
-Production decision: verifier upgrades, `withdrawalDelay`, and
-`escapeTimeout` changes go through a timelock. Emergency pause may remain
-immediate, but unpause should require multisig review.
-
-Pausing should be granular:
-
-- pause deposits;
-- pause root submissions;
-- pause new withdrawal requests;
-- pause withdrawal finalization.
-
-Granular pauses avoid freezing unrelated user paths during a narrow incident.
-
-## Events
-
-Minimum events:
-
-```solidity
-event DepositReceived(
-    uint64 indexed depositId,
-    address indexed sender,
-    bytes32 indexed sybilAccountKey,
-    address token,
-    uint256 amount,
-    bytes32 depositRoot
-);
-
-event StateRootVerified(
-    uint64 indexed height,
-    bytes32 indexed stateRoot,
-    bytes32 previousStateRoot,
-    bytes32 blockHash,
-    bytes32 daCommitment,
-    bytes32 depositRoot,
-    uint64 depositCount,
-    uint32 verifierVersion
-);
-
-event WithdrawalRequested(
-    bytes32 indexed nullifier,
-    address indexed recipient,
-    address token,
-    uint256 amount,
-    bytes32 stateRoot,
-    uint64 height,
-    uint64 executableAt
-);
-
-event WithdrawalFinalized(bytes32 indexed nullifier, address indexed recipient, uint256 amount);
-event WithdrawalCanceled(bytes32 indexed nullifier, string reason);
-event EscapeModeActivated(uint64 indexed height, bytes32 indexed stateRoot, uint64 activatedAt);
-event EscapeClaimed(
-    uint64 indexed accountId,
-    address indexed recipient,
-    uint256 amount,
-    bytes32 stateRoot,
-    bytes32 indexed nullifier
-);
-event VerifierUpgraded(uint32 indexed version, address verifier);
-event ParameterUpdated(bytes32 indexed key, uint256 oldValue, uint256 newValue);
-```
-
-## Errors
-
-Minimum custom errors:
-
-```solidity
-error InvalidProof();
-error UnsupportedClaimKind(bytes32 claimKind);
-error UnknownStateRoot(bytes32 stateRoot);
-error NonMonotonicHeight(uint64 expectedPrevious, uint64 providedPrevious);
-error DepositRootMismatch(bytes32 expectedRoot, bytes32 providedRoot);
-error WithdrawalAlreadyUsed(bytes32 nullifier);
-error WithdrawalNotReady(bytes32 nullifier, uint64 executableAt);
-error WithdrawalCanceled(bytes32 nullifier);
-error EscapeModeInactive();
-error EscapeModeAlreadyActive();
-error AmountZero();
-error TokenUnsupported(address token);
-```
-
-## Public interfaces
-
-Sketch only; exact ABI lands with the Foundry skeleton.
-
-```solidity
-interface ISybilSettlement {
-    function submitStateRoot(
-        StateTransitionPublicInputs calldata inputs,
-        bytes calldata proof
-    ) external;
-
-    function isAcceptedRoot(bytes32 stateRoot) external view returns (bool);
-    function latestHeight() external view returns (uint64);
-    function latestStateRoot() external view returns (bytes32);
-    function rootAt(uint64 height) external view returns (RootRecord memory);
-}
-
-interface ISybilVault {
-    function deposit(uint256 amount, bytes32 sybilAccountKey) external;
-
-    function requestWithdrawal(
-        WithdrawalPublicInputs calldata inputs,
-        bytes calldata proof
-    ) external returns (bytes32 nullifier);
-
-    function finalizeWithdrawal(bytes32 nullifier) external;
-    function activateEscapeMode() external;
-    function escapeClaim(EscapeClaimPublicInputs calldata inputs, bytes calldata proof) external;
-}
-```
-
-Withdrawal public inputs:
+Normal withdrawal public inputs are:
 
 ```solidity
 struct WithdrawalPublicInputs {
@@ -662,7 +560,7 @@ there is deliberately no `CLAIM_KIND_ESCAPE` constant.
 
 ## Interaction with typed state
 
-The L1 contract design assumes these typed leaves exist or will exist under
+The proof and contract path consumes these typed leaves under
 [[State Root Schema]]:
 
 | Key family | L1 relevance |
@@ -711,13 +609,13 @@ development path:
 - The block carrying a terminal refund/finalization event also removes that
   withdrawal leaf from the post-state sidecar. The verifier replays the account
   credit and requires the same deterministic deletion, bounding active bridge
-  state without retaining consensus tombstones.
+  state without retaining validity tombstones.
 - Blocks expose `BridgeBlockData` with consumed deposits and withdrawal leaves
   so proof-generation jobs can see the bridge transition data.
 - The HTTP surface exposes bridge status, account bridge keys, deposit
   ingestion, withdrawal creation, and withdrawal lookup under `/v1/bridge/*`.
-  Bridge writes are currently dev/internal endpoints; production ingress
-  should come from an L1 indexer and authenticated account flow.
+  Bridge writes are service/internal endpoints; production ingress comes from
+  the L1 indexer and authenticated account flow.
 
 The current block header uses the typed qMDB `state_root` from
 [[State Root Schema]], so it commits account leaves, active
@@ -725,63 +623,30 @@ The current block header uses the typed qMDB `state_root` from
 `order/{order_id}` leaves, `acct_resv/{account_id}` leaves,
 `sys/deposit_cursor`, `sys/deposit_root`, `sys/quarantine_digest`,
 `sys/observed_l1_height`, `sys/next_withdrawal_id`, and active
-`withdrawal/{withdrawal_id}` leaves. Full proof-backed L1 withdrawal
-verification still depends on the ZK proof program and accepted-root
-contracts, plus the typed-state qMDB proof API.
+`withdrawal/{withdrawal_id}` leaves.
 
-This does not solve complete validium recovery yet: DA publication, retained
-state reconstruction, and operator replacement are still outside the current
-root subset.
+## Recovery and custody tooling
 
-## Development sequence
+The accepted-root contracts, typed qMDB proof API, transition/escape guests,
+reconstruction tooling, and calldata encoders exist. `sybil-custody` lets a
+user retain own-leaf proofs, authenticate and decode a full DA payload, compute
+the withdrawable floor, produce a real OpenVM escape proof, ABI-wrap it, and
+optionally submit `escapeClaim`. A compact own-leaf snapshot is self-insurance
+for escape; it is not enough to reconstruct the full exchange.
 
-1. **RFC**: this note.
-2. **Foundry skeleton**: contracts, interfaces, events, custom errors, mock
-   verifier, mock ERC20, and state-machine tests. No real proof system.
-3. **Sequencer bridge hooks**: consume L1 deposits in order; create withdrawal
-  leaves; expose proof-generation data. Implemented with a bridge sidecar and
-  committed in the typed `state_root`.
-4. **Verifier integration**: plug in the chosen ZK verifier adapter and
-   public-input hash. The local `OpenVmVerifierAdapter` boundary is
-   implemented; deployment still requires generated OpenVM Halo2 verifier
-   artifacts and the Sybil app commitments.
-5. **DA/operator replacement**: bind `daCommitment` to the chosen DA layer and
-   implement reconstruction tooling.
-6. **Sepolia deployment**: real deployment, monitoring, pause runbook, and
-   frontend withdrawal countdown.
-
-This sequencing keeps current exchange development loose. The immediate code
-surface after this RFC can be a contract sandbox with mocks; Rust crates do
-not need to depend on Solidity until deposit consumption and withdrawal leaves
-are implemented.
+The missing production layer is operational: deploy real pinned verifier
+adapters, retain/decrypt DA independently of the operator, exercise the proof
+and payout path outside unsafe Anvil fixtures, and define hostile-successor
+governance.
 
 ## Open questions
 
-1. **OpenVM SDK deployment.** The adapter ABI is pinned, but deployment still
+1. **OpenVM verifier deployment.** The adapter ABI is pinned, but deployment still
    needs the generated `OpenVmHalo2Verifier` bytecode/address and the Sybil
    app executable and VM commitments from `cargo openvm commit`.
-2. **Withdrawal leaf expiry.** Normal withdrawal leaves should expire if never
-   requested on L1, but expiry must be long enough for delayed proof
-   generation and DA retrieval.
-3. **Account-to-recipient binding.** The withdrawal proof must bind a Sybil
-   account to an Ethereum recipient. The exact key path depends on the account
-   authentication model in [[P256 Authentication]] and any future wallet-link
-   flow.
-4. **Escape-mode deactivation.** Decide whether a new valid root can
+2. **Escape-mode deactivation.** Decide whether a new valid root can
    automatically leave escape mode or whether governance must explicitly
    resume.
-
-## Related Linear tickets
-
-- SYB-30: on-chain verifier contract.
-- SYB-31: deposit/withdraw Solidity contracts.
-- SYB-32: escape hatch.
-- SYB-76: DA commitment design.
-- SYB-80: escape-hatch data reconstruction.
-- SYB-95: Sepolia deployment with DA cadence.
-- SYB-96: pause and admin-key governance.
-- SYB-97: withdrawal queue and delay parameters.
-- SYB-116: operator replacement and emergency state disclosure.
 
 ## See also
 
@@ -792,3 +657,4 @@ are implemented.
 - [[Block Witness]] - private/public proof input split.
 - [[Settlement]] - off-chain balance and position mutation.
 - [[P256 Authentication]] - user key model that withdrawal proofs bind to.
+- [[Operator Replacement]] - recovery mechanics and the remaining governance/DA gap.

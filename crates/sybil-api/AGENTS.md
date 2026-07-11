@@ -1,95 +1,50 @@
-# AGENTS.md
+# `sybil-api`
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this crate.
+Axum transport and operations layer around `SequencerHandle`. It owns routing,
+OpenAPI, deployment preflight, CORS/rate limits, WebAuthn ceremonies, realtime
+streams, proof/DA endpoints, and conversion to shared `sybil-api-types`. It does
+not own exchange mutation or settlement rules.
 
-## Purpose
+## Read first
 
-The **sybil-api** crate is an HTTP API server exposing the prediction market matching engine to external clients. Built with Axum and OpenAPI documentation.
+- [[REST API]], [[WebSocket Block Stream]], and [[SSE Block Stream]]
+- [[P256 Authentication]]
+- [[Deployment Profiles]]
 
-## Architecture Notes
+## Sources of truth
 
-Before modifying this crate, read these vault notes (`docs/architecture/`):
-- [[REST API]] — endpoint design, request/response contracts
-- [[SSE Block Stream]] — server-sent events for real-time block updates
-- [[P256 Authentication]] — signed order submission flow
+Do not maintain an endpoint list here:
 
-## Endpoints
+- runtime schema: `GET /openapi.json`;
+- route policy and mounted tables: `src/app.rs` plus route-policy tests;
+- shared DTOs: `crates/sybil-api-types`;
+- handlers: `src/routes/`.
 
-Do not maintain a hand-written endpoint list here. The source of truth is:
+## Trust boundaries
 
-- Runtime schema: `GET /openapi.json`
-- Mounted route tables in `src/app.rs`: `PUBLIC_ROUTE_TABLE`, `SERVICE_ROUTE_TABLE`, and `DEV_ROUTE_TABLE`
-- Handler-level request/response docs in `src/routes/*.rs`
+- Public, service, and dev route groups are explicit. Production service routes
+  require `SYBIL_SERVICE_TOKEN`; dev-only routes are not mounted in prod.
+- Production preflight fails closed on dev mode, missing service auth,
+  persistence, or invalid WebAuthn configuration.
+- Browser CORS is same-origin unless an explicit allowlist is configured.
+- Public trading accepts only supported single-market `OrderSpec` shapes.
+- First-key bootstrap is service-gated and zero-key-only. Additional key
+  registration/revocation is state-bound and signed by an active key.
+- Signed actions bind the genesis domain and strictly increasing account nonce;
+  WebAuthn additionally binds RP ID, origin, challenge, and UV/UP policy.
+- Read API keys can authorize reads only.
 
-## Order Types (OrderSpec)
+## Code map
 
-```rust
-enum OrderSpec {
-    BuyYes { market_id, limit_price_nanos, qty },
-    BuyNo { market_id, limit_price_nanos, qty },
-    SellYes { market_id, limit_price_nanos, qty },
-    SellNo { market_id, limit_price_nanos, qty },
-}
-```
+| Area | Location |
+|---|---|
+| Router/OpenAPI/policy | `app.rs` |
+| Config/preflight | `config.rs`, `preflight.rs`, `main.rs` |
+| App state/off-block ref data | `state.rs` |
+| REST handlers | `routes/` |
+| WebAuthn | `webauthn.rs`, account routes |
+| Realtime | `ws.rs`, `sse.rs` |
+| Admin CLI | `bin/sybil_admin.rs` |
 
-Public API admission only accepts single-market binary one-hot orders. The core
-`matching-engine` payoff-vector helpers remain available for research and tests,
-but spreads, bundles, and custom payoff vectors are not exposed through
-`OrderSpec`.
-
-## Service and Dev Mode
-
-Production operator/service endpoints are mounted in all modes but require:
-
-```text
-Authorization: Bearer $SYBIL_SERVICE_TOKEN
-```
-
-when `dev_mode=false`. If `SYBIL_SERVICE_TOKEN` is unset in production, these
-routes fail closed. In `dev_mode=true`, the bearer check is skipped so local
-workflows and plain `docker compose up` remain convenient.
-
-`dev_mode` is deliberately narrow:
-- Permissive CORS
-- Simulation pause/resume
-- Diagnostic pending-order and market orderbook listings
-
-Production deployments disable dev routes entirely and use restrictive,
-env-configured CORS (`SYBIL_CORS_ORIGINS`, comma-separated; empty means
-same-origin only).
-
-## Architecture
-
-```
-ApiConfig (port, dev_mode, service_token, cors_origins, block_interval_ms)
-    ↓
-AppState (SequencerHandle + dev_mode + service_token + cors_origins)
-    ↓
-Axum Router (public/service/dev route tiers, CORS, tracing)
-    ↓
-SequencerActor (message passing)
-```
-
-## Module Map
-
-| Module | Purpose |
-|--------|---------|
-| `app.rs` | Router creation, OpenAPI schema |
-| `config.rs` | ApiConfig parsing |
-| `state.rs` | AppState with sequencer handle |
-| `convert.rs` | API ↔ engine type conversions |
-| `sse.rs` | Server-sent events streaming |
-| `routes/*.rs` | Endpoint handlers |
-| `types/*.rs` | Request/response DTOs |
-
-## Units
-
-All prices and balances in nanos (u64):
-- 1 dollar = 1,000,000,000 nanos
-- Binary market: YES + NO prices = $1
-
-## Signed Orders
-
-P256 ECDSA signatures for authenticated order submission:
-1. Register public key via `POST /accounts/{id}/keys`
-2. Submit signed order via `POST /orders/signed`
+When the API surface changes, regenerate/check both frontend and Python clients
+and run the OpenAPI drift/route-policy tests.

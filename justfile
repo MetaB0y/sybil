@@ -436,6 +436,11 @@ docs-check:
     ./scripts/check-vault.sh
     uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build --strict
 
+# Check public links in maintained Markdown. Confirmed 404/410 responses fail;
+# authentication, rate limits, and transient network errors are warnings.
+docs-links:
+    ./scripts/check-external-links.py
+
 # List notes with last_verified > 90 days
 docs-stale:
     @find docs/architecture -type f -name '*.md' -print | sort | while IFS= read -r f; do \

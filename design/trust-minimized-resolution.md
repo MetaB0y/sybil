@@ -10,7 +10,7 @@ date: 2026-07-07
 Expands brainstorm idea #13 ([[possibility-space-2026-07]]) and closes the
 biggest remaining **trusted** surface for user funds — resolution — flagged as
 gap #6 on the [[Threat Model]]. Operationalizes the roadmap already sketched in
-[[Oracle System]].
+[[Market Resolution]].
 
 ## The intuition
 

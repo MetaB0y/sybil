@@ -145,10 +145,9 @@ export interface DegenSnapshot {
   orderOpen?: boolean | null;
   /**
    * True when this bet's order was cancelled out-of-band — e.g. the user hit
-   * Cancel in the open-orders table or in the progress card. The backend
-   * doesn't emit an `OrderCancelled` event ([[use-cancelled-orders]]), so this
-   * is sourced from the local cancel store rather than `events`. A `cancelled`
-   * row in `events` (should the backend ever emit one) is honoured too.
+   * Cancel in the open-orders table or in the progress card. The local cancel
+   * overlay can arrive before the next block commits the authoritative
+   * `OrderCancelled` account event; either source is honoured.
    */
   cancelled?: boolean;
 }

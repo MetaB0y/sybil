@@ -7,66 +7,71 @@ last_verified: 2026-07-11
 
 # Design workspace
 
-> **Executive summary:** `design/` contains proofs, proposals, research, and
-> planning inputs. It explains where Sybil may go, not necessarily what ships
-> today. For current behavior start with [`docs/README.md`](../docs/README.md),
-> [`docs/SPEC.md`](../docs/SPEC.md), and the implementation/tests.
+> **Executive summary:** only durable research and genuinely open proposals live
+> here. Completed implementation plans, superseded architecture, dated roadmaps,
+> reviews, and editorial material live under [`archive/`](archive/README.md).
+> Nothing in `design/` overrides the current spec, ADRs, code, or tests.
 
-## How to read a design document
+## Status vocabulary
 
-Before implementing from anything here, check:
+- **reference** — durable explanation or dated empirical result; not a backlog.
+- **exploratory / proposed** — unratified possibility.
+- **proposal-needs-revalidation** — potentially useful, but written against an
+  older implementation and must be resurveyed before work begins.
+- **current** — only for an index that is actively maintained.
 
-1. Is the proposal reflected in a current ADR?
-2. Does the architecture note describe it as implemented or planned?
-3. Do the named types, schemas, and tests still exist?
-4. Has a newer document or code change superseded it?
+An accepted decision belongs in `docs/adr/`; implemented behavior belongs in
+`docs/architecture/` and `docs/SPEC.md`. A completed plan belongs in the
+archive.
 
-Plans are allowed to become stale; current reference docs are not. When a plan
-has served its purpose, move it to [`archive/`](archive/README.md) instead of
-leaving it in the current documentation site.
+## Foundations and reference
 
-## Foundations and durable research
+| Document | Status | Use |
+|---|---|---|
+| [`problem-statement.md`](problem-statement.md) | reference | Self-contained mathematical matching problem |
+| [`math-papers.md`](math-papers.md) | current index | Canonical external proof-repository map |
+| [`welfare-vs-volume.md`](welfare-vs-volume.md) | reference | Objective trade-off analysis |
+| [`solver-benchmarks.md`](solver-benchmarks.md) | dated reference | Methodology and historical results; rerun before quoting |
+| [`eg-conic.typ`](eg-conic.typ) | draft research | Quasi-linear EG conic reformulation |
+| [`mint-pnl.typ`](mint-pnl.typ) | draft research | MINT-account accounting analysis |
 
-- [`problem-statement.md`](problem-statement.md) — the matching problem Sybil is solving.
-- [`math-papers.md`](math-papers.md) — index to the canonical Fisher-market proofs.
-- [`welfare-vs-volume.md`](welfare-vs-volume.md) — why the objective is welfare rather than raw trade count.
-- [`eg-conic.typ`](eg-conic.typ) and [`mint-pnl.typ`](mint-pnl.typ) — mathematical deep dives.
-- [`solver-benchmarks.md`](solver-benchmarks.md) — benchmark methodology and dated results; rerun before quoting.
+## Open mechanism and product proposals
 
-## Architecture and simplification
+| Document | Status |
+|---|---|
+| [`conditional-combinatorial-markets.md`](conditional-combinatorial-markets.md) | exploratory |
+| [`sealed-bid-batch-auctions.md`](sealed-bid-batch-auctions.md) | exploratory |
+| [`data-availability-design.md`](data-availability-design.md) | proposed construction under ADR-0012 |
+| [`trust-minimized-resolution.md`](trust-minimized-resolution.md) | exploratory |
+| [`proof-of-reserves.md`](proof-of-reserves.md) | exploratory |
+| [`capability-mask-keys.md`](capability-mask-keys.md) | exploratory; the committed field exists, scoped enforcement does not |
+| [`user-cli-plan.md`](user-cli-plan.md) | proposed |
+| [`possibility-space-2026-07.md`](possibility-space-2026-07.md) | brainstorm, not backlog |
 
-- [`architecture-review-2026-07.md`](architecture-review-2026-07.md) — simplification proposals; compare each proposal with current code before acting.
-- [`general-advice-2026-07.md`](general-advice-2026-07.md) — cross-cutting engineering guidance.
-- [`architecture-diagrams.md`](architecture-diagrams.md) — older diagram collection; current diagrams live in `docs/architecture/`.
-- [`sybil-commitments-consolidation.md`](sybil-commitments-consolidation.md) — canonical-encoding consolidation proposal.
-- [`testing-strategy-2026-07.md`](testing-strategy-2026-07.md) and [`observability-otel-2026-07.md`](observability-otel-2026-07.md) — quality/observability strategy.
+## Strategies requiring a fresh survey
 
-## Custody, validity, and data availability
+These remain visible because their direction may still matter, but their
+inventories, counts, and execution stages are not current:
 
-- [`keys-and-escape-ratification.md`](keys-and-escape-ratification.md) — consolidated custody decisions; ADRs own accepted outcomes.
-- [`escape-claim-plan.md`](escape-claim-plan.md), [`escape-claim-guest.md`](escape-claim-guest.md), and [`escape-hatch-reconstruction.md`](escape-hatch-reconstruction.md) — escape/recovery design lineage.
-- [`account-keys-digest.md`](account-keys-digest.md), [`openvm-p256-integration.md`](openvm-p256-integration.md), and [`capability-mask-keys.md`](capability-mask-keys.md) — authorization designs.
-- [`data-availability-design.md`](data-availability-design.md) and [`proof-of-reserves.md`](proof-of-reserves.md) — availability and solvency proposals.
-- [`witness-schema-v2.md`](witness-schema-v2.md) and [`witness-v6-keys-transition.md`](witness-v6-keys-transition.md) — historical schema inputs; the current witness is in [`docs/SPEC.md`](../docs/SPEC.md#6-blocks-state-and-witness-v9).
+- [`sybil-commitments-consolidation.md`](sybil-commitments-consolidation.md)
+- [`testing-strategy-2026-07.md`](testing-strategy-2026-07.md)
+- [`observability-otel-2026-07.md`](observability-otel-2026-07.md)
+- [`bot-quality-plan.md`](bot-quality-plan.md)
+- [`settlement-aggregation-swirl.md`](settlement-aggregation-swirl.md)
 
-## Future product and mechanism space
+Resurvey the named code and issue state before turning any of these into work.
 
-- [`possibility-space-2026-07.md`](possibility-space-2026-07.md) — scored possibility map.
-- [`conditional-combinatorial-markets.md`](conditional-combinatorial-markets.md) — conditional/bundle-market direction.
-- [`sealed-bid-batch-auctions.md`](sealed-bid-batch-auctions.md) — private-order-flow exploration.
-- [`trust-minimized-resolution.md`](trust-minimized-resolution.md) — challenge-based resolution proposal.
-- [`user-cli-plan.md`](user-cli-plan.md) and [`bot-quality-plan.md`](bot-quality-plan.md) — client/agent plans.
+## Historical design lineage
 
-## Time-sensitive planning
+- [`archive/implemented/`](archive/implemented/README.md) — plans/specs whose
+  essential work landed (witness/key transitions, WebAuthn guest verification,
+  escape claims, recovery).
+- [`archive/superseded/`](archive/superseded/README.md) — architecture replaced
+  by the canonical vault.
+- [`archive/planning/`](archive/planning/README.md) — dated reviews, roadmaps,
+  and execution-order snapshots.
+- [`archive/review-2026-07-02/`](archive/review-2026-07-02/README.md) — original
+  full-code audit.
 
-Files named `roadmap-*`, `execution-order-*`, or `*-plan` are dated coordination
-artifacts. Their ordering and status can expire quickly. Use the issue tracker
-and current code for live execution state; archive a file when it stops being
-useful.
-
-## Archive
-
-[`archive/`](archive/README.md) preserves old audits, editorial drafts,
-applications, pitches, and strategy snapshots. It is intentionally outside the
-built documentation site and must never be cited as current implementation
-truth.
+For current behavior start with [`docs/README.md`](../docs/README.md) and
+[`docs/SPEC.md`](../docs/SPEC.md).

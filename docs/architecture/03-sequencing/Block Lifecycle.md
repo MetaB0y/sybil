@@ -29,7 +29,7 @@ Settlement applies shared integer primitives, derives MINT adjustments, updates 
 
 Two artifacts leave the kernel:
 
-- `SealedBlock`: canonical block plus explicitly non-consensus derived views for REST/WebSocket/SSE.
+- `SealedBlock`: canonical block plus explicitly non-validity derived views for REST/WebSocket/SSE.
 - `BlockWitness` v9: transition-complete private material for native verification, proving, DA, and recovery.
 
 ## Invariants

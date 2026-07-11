@@ -24,8 +24,18 @@ sybil/
 │   ├── matching-sequencer/        # Multi-batch block sequencer (production lib; linked by sybil-api)
 │   ├── sequencer-sim/             # Dev-only agent-based simulation driving the sequencer (bin: sybil-sim)
 │   ├── sybil-api/                 # HTTP API server for agent trading
+│   ├── sybil-api-types/           # Shared REST/WebSocket DTOs and OpenAPI schema
+│   ├── sybil-client/              # Shared Rust HTTP/SSE client
+│   ├── sybil-signing/             # Canonical client-action signing bytes
 │   ├── sybil-oracle/              # Oracle/resolution service
-│   └── sybil-verifier/            # ZK-ready block verification
+│   ├── sybil-verifier/            # Native canonical witness/state verification
+│   ├── sybil-zk/                  # Guest-safe transition/public-input verification
+│   ├── sybil-prover/              # Proof jobs, DA artifacts, calldata/submission
+│   ├── sybil-escape-claim/         # Guest-safe conservative escape statement
+│   ├── sybil-custody/              # User snapshots, reconstruction, escape proving CLI
+│   ├── sybil-l1-protocol/          # Shared Rust/Solidity bridge hash and ABI domains
+│   ├── sybil-l1-indexer/           # L1 deposit/withdrawal lifecycle sidecar
+│   └── sybil-polymarket/           # External market mirror and MM integration
 ├── arena/                         # Python: trading bots, client SDK, simulation framework (has its own AGENTS.md)
 │   ├── sim/                       #   Generic simulation framework (clock, news_trader, runner)
 │   ├── markets/                   #   Per-market config (iran/ with personas, sources, datasets)
@@ -173,7 +183,7 @@ just docs-verify "LP Solver"   # Set last_verified to today (needs notesmd-cli)
 just deploy-api                    # Build + deploy sybil-api + polymarket mirror
 just deploy-arena                  # Build + deploy arena bots/dashboard
 just deploy-web                    # Build + deploy Next.js frontend
-just deploy-all                    # Deploy the full stack
+just deploy-all                    # Deploy API/arena/ops; run deploy-web for a changed frontend image
 
 just deploy-logs                   # Tail sybil-api logs
 just deploy-logs sybil-polymarket  # Tail polymarket mirror logs

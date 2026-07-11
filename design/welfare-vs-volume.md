@@ -1,3 +1,9 @@
+---
+tags: [matching, economics, reference]
+status: reference
+last_verified: 2026-07-11
+---
+
 # Welfare vs Volume: Analysis of the Matching Solver
 
 This document analyzes how the matching solver balances welfare maximization against volume maximization.

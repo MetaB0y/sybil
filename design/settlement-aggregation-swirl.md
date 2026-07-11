@@ -1,6 +1,6 @@
 ---
 tags: [zk, settlement, aggregation, hardware, syb-119, syb-126, openvm]
-status: accepted (orchestrator review 2026-07-10; epoch-guest implementation tracked in SYB-119)
+status: proposal-needs-revalidation
 date: 2026-07-10
 ticket: SYB-119
 author: research lane (Fable), 2026-07-10 evening
@@ -8,6 +8,9 @@ sources: OpenVM v2.0.0 docs (tag v2.0.0), blog.openvm.dev, SWIRL paper, repo @ 2
 ---
 
 # SYB-119: Aggregation vs monolithic settlement proofs under OpenVM 2.0.0 (SWIRL)
+
+> **Status note (2026-07-11):** this is a dated research recommendation, not a
+> statement that an epoch guest or aggregation pipeline exists in `main`.
 
 **TL;DR.** SWIRL did change the economics, but not where we expected. The EVM leg is still
 a Halo2/KZG wrapper (~316K gas to verify on-chain), and per-block L1 submission is still
@@ -186,7 +189,7 @@ one EVM wrap per epoch. Honest assessment:
   strictly more proving work than (c); **SDK-only** (no CLI support for deferrals) — our
   entire toolchain (justfile, zk-rebuild CI gate, fingerprint lock, commit.json) is built
   on `cargo openvm`; needs the `v2.0-deferral` verifier variant on L1 and a second
-  consensus-pinned guest (the aggregator), i.e. two commitment sets to manage; the deferral
+  validity-pinned guest (the aggregator), i.e. two commitment sets to manage; the deferral
   key material (verify-stark circuit keys) is the one artifact class that is *not*
   prebuilt/downloadable.
 - This is the right long-term shape **if** we later need parallel multi-box proving or

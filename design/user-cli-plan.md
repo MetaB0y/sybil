@@ -1,3 +1,9 @@
+---
+tags: [client, cli, proposal]
+status: proposed
+last_verified: 2026-07-11
+---
+
 # User CLI Plan
 
 ## Goal

@@ -59,8 +59,8 @@ tests:
               severity: critical
               component: sequencer
             exp_annotations:
-              summary: "Block-production p99 latency is half the block budget"
-              description: "p99 solve time has stayed above 250ms for 5m (current p99: 400ms) — over half the 500ms block interval. Block cadence and the redb commit backlog are at risk. See docs/runbooks/block-production-latency.md."
+              summary: "Block-production p99 latency is above the critical threshold"
+              description: "p99 solve time has stayed above 250ms for 5m (current p99: 400ms). Cadence and the redb commit backlog may be at risk on faster deployment profiles. See docs/runbooks/block-production-latency.md."
 
   # 2. Healthy baseline: p99 at 50ms keeps the SLA alerts silent.
   - interval: 1m

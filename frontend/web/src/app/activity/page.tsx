@@ -1,9 +1,8 @@
 "use client";
 
 /**
- * Activity page — the live dashboard for everything happening on Sybil.
- * See `frontend/ACTIVITY_PLAN.md` for the architecture; mocked fields are
- * tracked in `frontend/OPEN_QUESTIONS.md` items #3-#6.
+ * Activity page — the live dashboard for committed block activity and the
+ * persisted aggregate read models exposed by `sybil-api`.
  */
 
 import { useActivityOverview } from "@/lib/activity/use-activity-overview";

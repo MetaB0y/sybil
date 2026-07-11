@@ -1,87 +1,37 @@
-# AGENTS.md
+# `sybil-oracle`
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this crate.
+Resolution authorization and lifecycle policy. It verifies/represents who may
+attest to a payout; the sequencer performs irreversible settlement. This crate
+does not fetch external data, move balances, or implement bond escrow.
 
-## Purpose
+## Read first
 
-The **sybil-oracle** crate provides a pluggable resolution system for prediction markets. It makes authorization and lifecycle decisions — the sequencer executes them. It does NOT perform settlement, fetch external data, or handle bond escrow.
+- [[Market Resolution]]
+- [[Threat Model]]
 
-## Architecture Notes
+## Current implementation
 
-Before modifying this crate, read these vault notes (`docs/architecture/`):
-- [[Market Resolution]] — resolution flow: propose, challenge, finalize
-- [[Market Resolution]] — payout model and fractional resolution
+`ResolutionPolicy` currently has one executable variant:
+`Immediate { feed_id }`. A registered feed signs a market-bound payout
+attestation; signature/feed/market/payout/state checks succeed, then the market
+settles immediately. `AdminOracle` is a compatibility facade over the same
+immediate state transition for dev/tests.
 
-## Market Lifecycle
+`MarketStatus::Proposed`, `Challenged`, and `Voided`, plus the `Oracle`
+challenge/finalization methods, are reserved extensibility—not evidence that an
+optimistic/quorum adjudication system exists. Resolver-side review windows in
+`sybil-polymarket` do not change this core trust boundary.
 
-```
-Active → Proposed (challenge window) → Challenged (L1 adjudication) → Resolved
-                                    → Resolved (unchallenged)
-```
+## Modules
 
-## Oracle Trait
+| Module | Owns |
+|---|---|
+| `attestation.rs`, `feed.rs` | Signed payout attestations and feed identities |
+| `registry.rs`, `template.rs` | Feed/template registration |
+| `policy.rs` | Executable immediate policy |
+| `types.rs` | Lifecycle records and reserved states |
+| `traits.rs`, `admin.rs` | Compatibility oracle interface/facade |
 
-```rust
-trait Oracle {
-    fn resolve(&self, market_id, payout_nanos, source) -> ResolutionAction;
-    fn challenge(&self, proposal_id, challenger, bond, alt_payout) -> ChallengeAction;
-    fn check_finalization(&self, market_id, current_time_ms) -> Option<ResolutionAction>;
-}
-```
-
-**ResolutionAction:**
-- `SettleNow` — immediate resolution (admin/L0)
-- `Propose { challenge_window_ms }` — initiate challenge period
-- `Reject { reason }` — refuse resolution
-
-**ChallengeAction:**
-- `Escalate` — escalate to L1 adjudication
-- `Reject { reason }` — refuse challenge
-
-## Oracle Sources
-
-| Source | Purpose |
-|--------|---------|
-| `Admin` | Dev mode, governance multisig |
-| `AutomatedL0` | Future: price feeds, API oracles |
-| `AdjudicationL1` | Human adjudication panel |
-
-## Key Types
-
-| Type | Purpose |
-|------|---------|
-| `MarketStatus` | Active, Proposed, Challenged, Resolved, Voided |
-| `ResolutionProposal` | Proposed payout + source + timestamp + reason |
-| `Challenge` | Challenger + bond + alternative payout + reason |
-| `ResolutionRecord` | Immutable record of completed resolution |
-| `ProposalId` / `ChallengeId` | Unique identifiers (u64 newtypes) |
-
-## Payout Model
-
-All payouts in nanos (1B = $1):
-- YES shares receive `payout_nanos`
-- NO shares receive `NANOS_PER_DOLLAR - payout_nanos`
-- Fractional resolution supported (e.g., 70%/30%)
-
-## AdminOracle
-
-Reference implementation for dev/testing:
-- Immediately settles (no challenge window)
-- Validates payouts within [0, NANOS_PER_DOLLAR]
-- Rejects already-resolved markets
-- Does not support challenges
-
-```rust
-let oracle = AdminOracle::new();
-let action = oracle.resolve(market_id, payout_nanos, OracleSource::Admin);
-// → ResolutionAction::SettleNow { ... }
-```
-
-## Module Map
-
-| Module | Purpose |
-|--------|---------|
-| `types.rs` | MarketStatus, proposals, challenges, records |
-| `traits.rs` | Oracle trait and action enums |
-| `admin.rs` | AdminOracle implementation |
-| `error.rs` | OracleError variants |
+Payouts are nanodollars in `[0, 1_000_000_000]`; NO receives the complement.
+Resolution is irreversible at the sequencer boundary. Run
+`cargo test -p sybil-oracle` and the API/oracle integration tests.

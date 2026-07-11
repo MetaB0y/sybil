@@ -108,11 +108,11 @@ deploy time. Because the compiled artifacts under `zk/openvm-guest/openvm/` are
 large binaries, there are **three** records of these hashes, with distinct
 roles and authority (SYB-208):
 
-1. **Deployed pin (authoritative for consensus).** The `appExeCommit` /
+1. **Deployed pin (authoritative for validity).** The `appExeCommit` /
    `appVmCommit` constructor args baked into the deployed
    `OpenVmVerifierAdapter`. This is what the chain actually enforces. It is the
-   ground truth; everything else is a record *of* it. The current pin is the
-   May-2026 build.
+   ground truth; everything else is a record *of* it. Query the deployed
+   adapter rather than copying a pin from documentation.
 2. **Committed `commit.json` (reviewable source of truth).**
    `zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json` (plus
    `…baseline.json`) is now committed — the small, human-reviewable JSON that

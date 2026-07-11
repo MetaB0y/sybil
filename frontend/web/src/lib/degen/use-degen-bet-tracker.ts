@@ -78,9 +78,8 @@ export function useDegenBetTracker(
   active: DegenActive | null,
 ): DegenTracking | null {
   const { data: rawEvents } = useAccountEvents(active?.accountId ?? null);
-  // Local cancel log — the bridge that lets a cancel from anywhere (the
-  // open-orders table or this card) flip the bet to its terminal state, since
-  // the backend emits no OrderCancelled event ([[use-cancelled-orders]]).
+  // Local cancel overlay — lets a cancel from this browser settle the card
+  // immediately, before the next block exposes the committed account event.
   const trackedCancels = useTrackedCancels(active?.accountId ?? null);
   const latestHeight = useStore(selectLatestHeight);
 

@@ -13,7 +13,7 @@
 | Caddy operations credentials | Protects operator-facing HTTP surfaces | `/opt/sybil/.env` |
 | WebAuthn RP/origin configuration | Binds browser assertions to the deployed origin | `/opt/sybil/.env` |
 | OpenRouter provider key | Allows arena agents to call configured LLMs | `/opt/sybil/arena.env` |
-| Contract/feed signing keys | Controls privileged on-chain or resolution actions | Operator custody; see [Admin keys](runbooks/Admin%20Keys.md) |
+| Contract/feed signing keys | Controls privileged on-chain or resolution actions | Operator custody; see [Admin keys](runbooks/admin-keys.md) |
 
 The authoritative required-variable list and deployment checks live in
 [`DEPLOY.md`](https://github.com/MetaB0y/sybil/blob/main/DEPLOY.md). Compose and the `justfile` should fail before a

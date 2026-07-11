@@ -1,7 +1,6 @@
 /**
  * Domain types for the specific-market page. Money fields are bigint nanos
- * (1 unit = 1e9 nanos). Counts are plain numbers. See OPEN_QUESTIONS #1-#3,
- * #5-#9 for what's currently mocked.
+ * (1 unit = 1e9 nanos). Counts are plain numbers.
  */
 
 import type { components } from "../api/schema";
@@ -14,11 +13,11 @@ export type MarketStats = {
   marketId: number;
   /** Lifetime cumulative volume (real). */
   totalVolumeNanos: bigint;
-  /** Last 24h volume (mocked — OPEN_QUESTIONS #3). */
+  /** Last 24h volume from the persisted aggregate read model. */
   volume24hNanos: bigint;
-  /** Lifetime unique traders (mocked — OPEN_QUESTIONS #2). */
+  /** Lifetime unique traders from the persisted aggregate read model. */
   traders: number;
-  /** Liquidity proxy in nanos (mocked — OPEN_QUESTIONS #1). */
+  /** Last-ten-batch liquidity aggregate in nanos. */
   liquidityNanos: bigint;
   /**
    * Market age in milliseconds — `latestBlock.timestamp_ms − created_at_ms`.
@@ -38,7 +37,7 @@ export type OpenBatchSnapshot = {
   marketId: number;
   /** The latest committed block's height — the batch that's open is height+1. */
   latestHeight: number | null;
-  /** Traders that have placed orders in the open batch (mocked — OPEN_QUESTIONS #7). */
+  /** Traders in the open batch (mocked on the legacy diagnostic route). */
   tradersInBatch: number;
   /** Indicative clearing YES price in nanos, if the batch closed now (mocked — #7). */
   indicativeYesPriceNanos: bigint;

@@ -38,7 +38,7 @@ core:
 
 `matching-engine` is the pure leaf every crate depends on; the guest imports the
 core and nothing else. Source: `docs/architecture/Crate Dependency Map.md` (Key
-Properties), `design/architecture-review-2026-07.md` P7/§1.
+Properties), historical `design/archive/planning/architecture-review-2026-07.md` P7/§1.
 
 ## Alternatives considered
 

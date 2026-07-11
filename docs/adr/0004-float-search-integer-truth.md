@@ -32,7 +32,7 @@ Split the pipeline into a **float search** and an **integer truth**:
   floats are a *proposal*, never the record.
 
 Conventions: `docs/architecture/Nanos and Integer Arithmetic.md`, the
-"integer truth" framing in `design/architecture-review-2026-07.md` §1, and the
+"integer truth" framing in historical `design/archive/planning/architecture-review-2026-07.md` §1, and the
 AGENTS.md all-integer convention.
 
 ## Alternatives considered

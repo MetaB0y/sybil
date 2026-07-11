@@ -1,6 +1,16 @@
-# Runbook: Block-production latency SLA
+---
+tags: [runbook, sequencing, latency]
+status: current
+last_verified: 2026-07-11
+---
 
-**Owning ticket:** SYB-42 · **Component:** `matching-sequencer` / `sybil-api`
+# Block-production latency
+
+> **Executive summary:** page immediately if blocks stop. If p99 pipeline time
+> rises while blocks still advance, first distinguish solver load from storage
+> and host saturation; shed nonessential mirror/arena load before restarting,
+> and preserve diagnostics before touching persistent state.
+
 **Alerts:** `BlockProductionP99LatencyHigh`, `BlockProductionP99LatencyCritical`,
 `BlockProductionStalled`, `SolveTimeHigh`
 **Rules:** `deploy/vmalert/block-production.yml`, `deploy/vmalert/rules.yml`
@@ -17,8 +27,8 @@ default 500ms; the prod/dev compose set 10000ms) or blocks slip.
 - **Warning** — `BlockProductionP99LatencyHigh`: p99 > 100ms for 5m. The tail is
   eating into the block budget; still producing, but headroom is shrinking.
 - **Critical** — `BlockProductionP99LatencyCritical`: p99 > 250ms for 5m. Solve
-  now eats a large share of the solve budget; cadence and the redb commit
-  backlog are at risk.
+  has breached the critical operating threshold; cadence and the redb commit
+  backlog may be at risk on faster deployment profiles.
 - **Critical / top signal** — `BlockProductionStalled`: no blocks produced for 2m
   while the API is up. Production has fully stopped — page immediately.
 - `SolveTimeHigh` (legacy, in `deploy/vmalert/rules.yml`) pages on the *average*
@@ -27,7 +37,8 @@ default 500ms; the prod/dev compose set 10000ms) or blocks slip.
 
 ### Metric shape (important)
 
-`sybil_solve_time_seconds` is recorded in `crates/matching-sequencer/src/actor.rs`
+`sybil_solve_time_seconds` is recorded in
+`crates/matching-sequencer/src/actor/production.rs`
 as a metrics-rs `histogram!`. The Prometheus exporter
 (`metrics-exporter-prometheus`) is installed with no custom buckets, so it renders
 **summaries**: p99 is published directly as
@@ -39,8 +50,10 @@ and `_count` for the average. **There is no `_bucket` series** — use the
 
 ## First diagnostics
 
-1. **Confirm scope in Grafana / VictoriaMetrics** (`:3001` dev, `:8428` VM API,
-   vmalert `:8880`):
+1. **Confirm scope in Grafana / VictoriaMetrics.** In production use the
+   authenticated Grafana vhost or query from inside the host/Docker network;
+   local Compose exposes Grafana on `127.0.0.1:3001`, VictoriaMetrics on
+   `127.0.0.1:8428`, and vmalert on `127.0.0.1:8880`:
    - `sequencer:solve_time_seconds:p99` — how far over SLA, and trending?
    - `sequencer:solve_time_seconds:avg5m` vs p99 — is the whole distribution slow
      (mean high) or just the tail (mean fine, p99 high)?

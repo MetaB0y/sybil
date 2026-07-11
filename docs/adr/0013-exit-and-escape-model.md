@@ -73,6 +73,6 @@ now *valued* in escape, not only recovered via replacement — replacement remai
 the path to *continue trading*, not to exit).
 
 **Follow-ups:** commit `last_clearing_price` per market leaf; the escape-claim
-guest ([escape-claim-guest](https://github.com/MetaB0y/sybil/blob/main/design/escape-claim-guest.md)) computes the
+guest ([historical escape-claim design](https://github.com/MetaB0y/sybil/blob/main/design/archive/implemented/escape-claim-guest.md)) computes the
 formula above; escape-mode UX may be rough but must be tested rigorously
 ([ADR-0011](0011-validium-stance-no-backcompat.md)).

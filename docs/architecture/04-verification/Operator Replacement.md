@@ -1,77 +1,70 @@
 ---
-tags: [validium, recovery, design]
+tags: [validium, recovery, data-availability]
 layer: verification
-crate: sybil-l1-protocol
-status: planned
-last_verified: 2026-07-06
+crate: matching-sequencer
+status: current
+last_verified: 2026-07-11
 ---
 
-# Operator Replacement & Emergency State Disclosure
+# Operator replacement and disaster recovery
 
-Status: **DRAFT — for ratification** (SYB-116)
-Author: Claude (Fable 5), 2026-07-06. Companion to
-`design/escape-hatch-reconstruction.md` (SYB-80, drafted same day) — that doc
-owns the reconstruction *mechanics*; this one owns *who runs them, when, and
-under what disclosure model*. Cross-refs: SYB-32 (escape claim), SYB-120
-(encrypted DA), SYB-222 (witness/DA API exposure).
+> [!summary] In one paragraph
+> Rebuilding the exchange from a retained canonical witness is implemented and
+> tested: a fresh store can import one full-state witness, verify its root, and
+> continue producing child blocks. Replacing a lost machine under the same
+> operator is therefore real. Replacing a malicious or permanently absent
+> operator is not trustless yet because production witness availability,
+> emergency disclosure, and successor appointment remain governance/operations
+> decisions.
 
-## 1. Honest framing for the current trust phase
+## Two different promises
 
-Today Sybil has one operator, one admin key, and the same human behind both.
-"Operator replacement" therefore means two different things, and conflating
-them produces fake security:
+| Scenario | Current status | Missing piece |
+|---|---|---|
+| **Disaster recovery:** same operator loses disk/host/region | Implemented and drillable when a retained payload exists | Off-host retention and regular drills |
+| **Hostile/absent operator replacement:** another party continues without cooperation | Data/import mechanics exist | Production DA/disclosure plus authority to appoint/recognize a successor |
+| **Cash escape:** users claim a conservative cash floor on L1 | Guest, vault, and anyone-can-prove CLI implemented | Real verifier deployment, independently retained inputs, operational drill |
 
-- **R-A: Disaster recovery** (real, buildable now): the operator's *infra* dies
-  — box lost, store corrupted, region gone — and the SAME party restarts the
-  exchange from DA-reconstructed state. No adversary; the problem is data and
-  procedure.
-- **R-B: Trustless replacement** (not real yet): the operator is malicious or
-  permanently absent and a DIFFERENT party takes over against the operator's
-  will. This requires an appointment mechanism L1 currently does not have (the
-  admin appoints; if the admin IS the failed operator, there is no one to
-  appoint a successor). R-B is gated on a governance decision that is
-  explicitly out of scope until there is more than one operator in practice.
+Validity proves that a supplied transition is correct. It does not force an
+operator to publish the private witness, keep producing blocks, or hand control
+to a successor.
 
-This doc fully specifies R-A, and shapes every artifact so R-B needs only the
-appointment layer added — no new data paths.
+```mermaid
+flowchart LR
+    ROOT["Accepted L1 root"] --> MANIFEST["DA manifest"]
+    MANIFEST --> PAYLOAD["Canonical full-state witness"]
+    PAYLOAD --> VERIFY["Decode · verify root · verify witness"]
+    VERIFY --> IMPORT["Import into empty redb/qMDB store"]
+    IMPORT --> CHILD["Produce height H+1 linked to H"]
+    ROOT --> ESCAPE["Timeout / escape mode"]
+    ESCAPE --> CASH["Conservative cash claim"]
+    GOV["Successor governance<br/>not implemented"] -.-> CHILD
+```
 
-## 2. Replacement flow (R-A, normative)
+## What one payload restores
 
-Preconditions: L1 intact (`SybilSettlement` roots, `SybilVault` funds), at
-least one retrievable DA payload for an accepted root (SYB-80 §5 retention).
+The canonical witness contains the complete post-block state needed to
+continue: accounts and committed key digests, markets and last clearing prices,
+groups/lifecycle, resting orders and reservations, bridge frontier/quarantine,
+withdrawals/claims, counters, and the authenticated header. Derived analytics
+and history are not validity state and may be rebuilt or lost.
 
-1. **Choose the recovery root**: newest accepted root whose payload is
-   retrievable (SYB-80 §3 walk-back). Call it height H. Everything after H is
-   the at-risk delta — bounded by DA retention lag, alertable (SYB-223 item 3).
-2. **Reconstruct**: run the SYB-80 §3 procedure. Output: complete typed state
-   at H — accounts, positions, reservations, resting orders, withdrawals,
-   markets, groups, lifecycle/status, deposit frontier, `sys/` counters. Every
-   family is in the witness payload; nothing needs the dead operator's disks.
-3. **Boot a fresh sequencer from the snapshot** ("genesis-from-witness"): a
-   boot path that imports the decoded state instead of empty genesis. The
-   store already persists/restores every one of these families (they round-trip
-   through it in normal operation); the missing piece is only the importer
-   that populates a fresh store from a decoded witness. Ticketed as an R-A
-   implementation increment (§6).
-4. **Re-arm L1**: the new sequencer's prover continues from H. `parent` linkage
-   and the deposit frontier make the first new block verifiable against the
-   old chain; the settlement contract does not care who runs the prover — only
-   that proofs verify against the pinned guest commitments.
-5. **Reconcile the L1 bridge edge**: deposits that landed on L1 after H are
-   picked up by the indexer from the vault log (frontier catches up
-   naturally). Withdrawals already queued on L1 are unaffected (finalization
-   is permissionless). Withdrawal leaves created between H and the outage are
-   the one loss class: those users' funds are still accounted in their
-   balances at H (leaf creation debits at creation — if the leaf is post-H it
-   never existed at H, so the balance still contains the money). Net: **no
-   fund loss at H; in-flight intents after H must be re-submitted.**
-6. **Users**: nothing to do. Keys unchanged, balances at H proven. In-flight
-   orders after H are gone (batch-auction orders are short-lived by design).
+The import path is `Store::import_witness_genesis` in
+`crates/matching-sequencer/src/store/import.rs`, exposed by `sybil-api
+--import-witness`. It refuses a non-empty store, decodes canonical bytes,
+recomputes the post-state root, verifies the optional expected root, restores
+the committed head, and is covered by a child-block continuation drill.
 
-### Recovery drill
+Replay nonces are deliberately not proven state. Import starts a fresh nonce
+space, while the preserved `genesis_hash` keeps previously captured signatures
+in their original chain domain. For a witness that does not carry the genesis
+header as its previous header, the operator must supply the known genesis hash
+explicitly; `/v1/health` exposes it on the source chain.
 
-Run this against a retained DA height from the source operator, then import into
-a brand-new data directory:
+## Recovery drill
+
+Choose a retained height whose manifest/root you have independently matched to
+the intended accepted chain:
 
 ```bash
 H=12345
@@ -79,109 +72,93 @@ SRC=https://172-104-31-54.nip.io
 
 curl -fsS "$SRC/v1/da/$H" -o "da-$H.json"
 curl -fsS "$SRC/v1/da/$H/payload" -o "witness-$H.bin"
+curl -fsS "$SRC/v1/health" -o source-health.json
+
 EXPECT_STATE_ROOT=$(jq -r '.state_root' "da-$H.json")
+GENESIS_HASH=$(jq -r '.genesis_hash' source-health.json)
 
 SYBIL_DATA_DIR=/var/lib/sybil-recovered \
   sybil-api --import-witness \
   --payload "witness-$H.bin" \
-  --expect-state-root "$EXPECT_STATE_ROOT"
-
-SYBIL_DATA_DIR=/var/lib/sybil-recovered sybil-api --port 3000
+  --expect-state-root "$EXPECT_STATE_ROOT" \
+  --genesis-hash "$GENESIS_HASH"
 ```
 
-The import command refuses a non-empty store, decodes the canonical witness
-payload, recomputes the post-state root from `post_state + state_sidecar`, and
-persists H as the latest block header/witness so block H+1 links to H's header.
-Replay nonces are reset by design in this recovery path (SYB-224); signed
-orders/cancels from before replacement must be re-signed for the recovered
-operator.
+Then start the recovered service against that data directory, keep external
+writes disabled, and verify:
 
-### What survives, family by family (SYB-116 acceptance item)
+1. head height/state root equal the manifest;
+2. representative accounts, markets, groups, orders, reservations, bridge, and
+   withdrawal state match the source;
+3. block H+1 can be produced and verified against H;
+4. new deposits after H can be replayed from the L1 log;
+5. post-H off-chain intents are re-submitted rather than guessed.
 
-| Family | Source at recovery | Fidelity |
-|---|---|---|
-| Balances, positions | `post_state` accounts in payload | exact at H |
-| Reservations | `acct_resv` in sidecar | exact at H |
-| Resting orders | sidecar `resting_orders` | exact at H |
-| Markets, groups, status/lifecycle | sidecar | exact at H |
-| Pending withdrawals | `withdrawal/` leaves | exact at H |
-| Deposit cursor/frontier | `sys/` + frontier | exact; L1 log replays the gap |
-| Replay nonces | **NOT in proven state** | ⚠ gap — §4 |
-| Analytics/history (candles, fills, equity) | derived views / unproven | lost beyond payload; acceptable (unproven by design, SYB-216) |
+The routine store backup drill is separate: it restores redb/qMDB bytes. This
+drill proves recovery from the canonical DA artifact alone.
 
-## 3. Disclosure model recommendation (SYB-116 acceptance item)
+## User-side custody and cash escape
 
-**Devnet (now): plaintext DA payloads are acceptable and already flagged as
-scaffolding** (`Data Availability.md`). Dev funds, house bots, no user privacy
-to protect yet.
+The `sybil-custody` binary provides three user-operated paths:
 
-**Before real users (public testnet): encrypt payloads; do NOT ship plaintext
-full state.** Recommended shape (aligned with the SYB-80 §6 reservation so it
-is purely additive):
+- `snapshot` saves the account/reservation openings and matching DA manifest,
+  optionally authenticating the accepted `RootRecord` from L1;
+- `reconstruct` authenticates and decodes a complete canonical witness from a
+  saved file or the DA API and reports the conservative withdrawable amount;
+- `escape-claim` assembles the Form-L guest input, runs OpenVM EVM prove and
+  verify, wraps the adapter proof, prints vault calldata, and can submit it.
 
-- Payload encrypted with a per-era content key K. `da_commitment` keeps
-  binding the PLAINTEXT bytes; the manifest gains `ciphertext_hash` and key
-  metadata. Nothing about proofs or the guest changes.
-- **Key custody, recommended for the single-operator phase**: K is escrowed as
-  a 2-of-3 Shamir split — Valery + two independent holders (people or a
-  KMS/HSM under separate credentials). Disclosure rule: shares may be combined
-  ONLY when `escapeModeActive` is true on L1 (publicly checkable), which the
-  vault already gates on root-staleness timeout. This gives R-A recovery even
-  if the operator is incapacitated, without making state public in normal
-  operation, and without threshold-cryptography engineering (Shamir on one
-  32-byte key is a lunch-break implementation).
-- Rejected for now: MPC/threshold-decryption networks (heavy, premature),
-  TEE-held keys (TEE track is parked), pure governance delay (no governance
-  exists), per-user encrypted leaves (breaks the one-payload reconstruction
-  property and multiplies key management by user count).
+The P256 scalar authorizes the escape statement; it is not the Ethereum
+transaction key. Default tests use an explicit unsafe fixture-proof path for
+Anvil, while real proving is gated and must be exercised operationally. An
+own-leaf snapshot is sufficient input for the user's escape claim, but not for
+full operator replacement: exchange continuation still needs the complete DA
+payload.
 
-**Trigger** (SYB-116 acceptance item): reuse the existing, already-deployed
-condition — `activateEscapeMode()`'s root-staleness timeout — as THE single
-emergency trigger for both escape claims and disclosure. One trigger, one
-clock, already on chain, callable by anyone. No second mechanism until R-B.
+## Availability and disclosure boundary
 
-## 4. Gaps found while writing this (both verified in code)
+Current per-height API/storage support provides a typed manifest and canonical
+payload, with hashes bound through `payload_root`, `witness_root`, and
+`da_commitment`. The checked-in file provider is proof-pipeline scaffolding; it
+does not guarantee that an independent provider retained the payload.
 
-1. **Cross-genesis replay of signed orders/cancels.** `canonical_order_bytes`
-   (and cancels) include the SYB-191 nonce but NO chain/genesis/operator-epoch
-   identifier — only bridge withdrawals carry `chain_id`
-   (`crates/matching-sequencer/src/crypto.rs:149,173`). Nonces reset on every
-   fresh genesis (they are not in the state root — see 2), so an order signed
-   before a fresh-genesis redeploy verifies again after it. Devnet impact:
-   trivial. Real-funds impact: an old captured order re-executes against the
-   victim's re-funded account. **Fix: fold a `genesis_hash` (or operator-epoch
-   id) into the canonical signed bytes of orders and cancels — a deliberate
-   canonical-bytes change to batch with the NEXT guest-commitment move.**
-2. **Replay nonces are unproven state.** `acct/` leaves carry balance,
-   deposits, positions, events digest — no nonce
-   (`crates/sybil-verifier/src/state_schema.rs`). A replacement operator
-   restores nonces from nothing (reset) or from unproven store data. With fix
-   1 in place this is merely cosmetic (fresh epoch = fresh nonce space,
-   cross-epoch replay dead by domain); WITHOUT fix 1 it is the enabler of the
-   replay above. Decision: take fix 1; do NOT put nonces in the state root
-   (they'd bloat every account leaf for a value fix 1 makes epoch-local).
+Plaintext full-state publication is incompatible with the private-validium
+goal. Before real users, the project must ratify and operate an encrypted
+retention/disclosure scheme that survives operator loss. The cryptographic
+envelope is provider-neutral, but no particular external DA provider, key
+escrow arrangement, retention SLO, or emergency release authority is currently
+the production standard.
 
-Both are ticketed (§6). Fix 1 is cheap insurance and should ride whatever
-consensus-touching batch comes next — not its own commitment move.
+## Remaining hostile-replacement gap
 
-## 5. Unresolved before public testnet (SYB-116 acceptance item)
+Even with the bytes available, L1 does not yet define who becomes the successor
+operator or how that authority is recognized when the existing administrator
+is the failed party. Do not describe witness import as trustless operator
+replacement until both are true:
 
-- Ratify the disclosure model (§3) — including WHO the two non-Valery share
-  holders are. This is a people decision, not a code decision.
-- R-B appointment mechanism: deliberately unspecified; unblock = "more than
-  one credible operator exists."
-- Retention SLO constants (shared open question with SYB-80 §8).
-- The genesis-from-witness importer must exist and be DRILLED (restore drill
-  extension of SYB-223) before we claim R-A works.
-- Fix 1 (§4) must land before any deployment where signed orders move real
-  value across a genesis boundary.
+1. an independent party can obtain/decrypt a recent accepted payload under a
+   public, tested policy; and
+2. a ratified governance/contract mechanism can authorize continuation without
+   cooperation from the old operator.
 
-## 6. Implementation increments
+Cash escape reduces the consequence of this gap but does not provide exchange
+continuity or unwind positions.
 
-- **OR-1 (with SYB-222/R0):** genesis-from-witness importer — decoded payload
-  → fresh store; drill wired into `store-restore-drill.sh`.
-- **OR-2 (next consensus batch):** `genesis_hash` in order/cancel canonical
-  bytes (§4 fix 1). Rides a batched commitment move, never alone.
-- **OR-3 (pre-testnet, after §3 ratified):** payload encryption + Shamir
-  escrow + escape-gated disclosure procedure (implements SYB-120's decision).
-- **OR-4 (parked):** R-B appointment layer.
+## Operational checklist
+
+- Retain canonical payloads off-host and monitor their age/coverage.
+- Run both byte-backup restore and witness-import continuation drills.
+- Record genesis hash, accepted root/height, main/escape verifier pins, and
+  contract addresses outside the failed host.
+- Never mix artifacts across genesis domains.
+- State clearly whether a deployment uses mock/unsafe or real verifier adapters.
+- Preserve L1 logs so deposits after the recovery root can be reconciled.
+
+## See also
+
+- [[Data Availability]]
+- [[Block Witness]]
+- [[L1 Settlement and Vault]]
+- [[Threat Model]]
+- [Store backup and restore](../../runbooks/store-backup-restore.md)
+- [Fresh-genesis redeploy](../../runbooks/fresh-genesis-redeploy.md)

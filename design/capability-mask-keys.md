@@ -8,7 +8,7 @@ date: 2026-07-07
 # Capability-masked keys — scoped delegated authority
 
 Expands brainstorm idea #9 ([[possibility-space-2026-07]]) and the deferred
-ratification decision **D1** ([`keys-and-escape-ratification.md`](keys-and-escape-ratification.md)).
+ratification decision **D1** ([historical packet](archive/implemented/keys-and-escape-ratification.md)).
 The small feature that makes the **agent arena** (idea #8) and managed accounts
 *safe*: a key that can trade but not withdraw.
 
@@ -47,7 +47,7 @@ MANAGE_KEYS  = 1 << 3   // register / revoke keys
 
 The mask has to be **committed**, or a malicious operator could ignore
 it. So it's digested into `keys_digest` alongside the key: extend the
-`key_record` in [`account-keys-digest.md`](account-keys-digest.md) from
+`key_record` in the [historical keys-digest design](archive/implemented/account-keys-digest.md) from
 `auth_scheme:u8 || pubkey_sec1[33]` to
 `auth_scheme:u8 || capability_mask:u32 || pubkey_sec1[33]`. Then escape and
 operator-replacement recover the mask with the key, and the guest can enforce it.

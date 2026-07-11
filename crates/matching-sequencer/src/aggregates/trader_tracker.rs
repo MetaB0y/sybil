@@ -2,7 +2,7 @@
 //! platform-wide. Sidecar — does not enter `state_root` / `events_root` /
 //! `BlockWitness`.
 //!
-//! Inclusion rules (decision Q-table in BACKEND_DATA_PLAN.md):
+//! Inclusion rules:
 //! - MM-constrained submissions excluded (liquidity provider, not trader).
 //! - `AccountId::MINT` excluded (system account).
 //! - Multi-market orders credit each active market; the platform set

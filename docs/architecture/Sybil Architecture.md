@@ -51,17 +51,18 @@ flowchart TB
 
     subgraph validity["Validity, availability, and L1"]
         VERIFY["sybil-verifier<br/>match · settlement · block · orders · sidecar"]
-        GUEST["sybil-zk OpenVM guest<br/>signatures + exact transition"]
+        GUEST["sybil-zk OpenVM guest<br/>key-op signatures + exact transition"]
         PROVER["sybil-prover<br/>artifacts · DA · submission"]
         DA["Per-height DA manifest<br/>canonical witness payload"]
         L1["Ethereum<br/>SybilSettlement + SybilVault"]
-        ESCAPE["Recovery / escape<br/>cash floor + operator replacement"]
+        ESCAPE["Witness import + sybil-custody<br/>snapshot · reconstruct · escape claim"]
 
         WIT --> VERIFY --> GUEST --> PROVER
         PROVER -.-> DA
         PROVER -.->|"proof + public inputs"| L1
         DA -.-> ESCAPE
         L1 -.-> ESCAPE
+        ESCAPE -.->|"proof-backed claim"| L1
     end
 
     WEB --> API
@@ -98,12 +99,12 @@ sequenceDiagram
     A-->>C: Acknowledge only after durable boundary
 
     Note over A,O: Configured block interval fires
-    A->>O: Apply system events; expire/revalidate; collect batch
+    A->>O: Apply system events, expire/revalidate, collect batch
     A->>S: Supported Problem + MM constraints
     S-->>A: Floating candidate allocation and dual prices
     A->>A: Integer landing, settle, derive minting
     A->>P: Write inactive qMDB slot and redb transaction
-    P-->>A: Root checked; commit fence flipped
+    P-->>A: Root checked, commit fence flipped
     A-->>C: Publish committed SealedBlock
     A->>V: Persist/export BlockWitness v9
     V->>V: Recompute commitments and transition rules
@@ -124,7 +125,8 @@ If persistence fails, the prepared state is discarded and acknowledged inputs re
 | WAL plus single commit fence | A successful acknowledgement must survive a crash | Persist before live mutation/publication; recovery follows the fence, never “newest wins” |
 | Canonical block, witness, derived sidecar | Validity and product consumers need different data | Analytics stay outside roots; the witness remains transition-complete |
 | Verifier-owned bytes | Soundness cannot depend on hand-synchronized encoders | Native, guest, state, event, witness, and signing domains have explicit owners and vectors |
-| State-bound P256/WebAuthn keys | A valid transition must also reflect user intent | Key operations, replay protection, and signatures are committed and checked in the guest |
+| State-bound P256/WebAuthn key mutations | The active signing-key set must change only with user authority | Key operations and their signatures are committed and checked in the guest |
+| Genesis-bound ordinary signed actions | Captured orders/cancels must not cross chain domains | Admission verifies signatures and durable monotonic nonces; ordinary envelopes are not yet guest-proven |
 | Validium with two exit paths | Correctness, availability, and recovery are different problems | Proofs anchor roots; DA enables reconstruction; escape claims provide a conservative cash floor |
 
 ## Current versus forward-looking
@@ -135,8 +137,8 @@ The vault frontmatter is authoritative about document status: `current` means im
 
 - Single-market binary clearing, six solver implementations, one trusted verifier, and one net-of-minting welfare definition.
 - Direct admission plus deferred atomic submissions, resting reservations, deterministic settlement, and group-preserving resolution.
-- redb/qMDB fence-based persistence, acknowledged-write replay, durable history, retention semantics, backup/restore, and witness import/recovery tooling.
-- WebAuthn/P256 authentication, per-account replay nonces, committed key operations, and in-guest signature verification.
+- redb/qMDB fence-based persistence, acknowledged-write replay, durable history, retention semantics, backup/restore, witness import, and user-side custody/reconstruction/escape tooling.
+- WebAuthn/P256 admission, durable per-account replay nonces, and committed/in-guest-verified key operations. Ordinary order/cancel envelopes are not yet guest-proven.
 - Witness v9, committed last clearing prices, deposit quarantine, exact-keyspace proofs, and guest/native commitment agreement.
 - REST, resumable WebSocket, convenience SSE, OpenAPI, shared Rust client, Python agents, and the Polymarket integration.
 

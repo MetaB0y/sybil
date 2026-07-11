@@ -166,7 +166,7 @@ before pending bridge withdrawals are replayed.
 
 The separate WAL tables preserve state correctness but do not preserve exact
 cross-subsystem system-event ordering. If event interleaving becomes
-consensus-sensitive, migrate these acknowledged-write paths into one globally
+validity-sensitive, migrate these acknowledged-write paths into one globally
 sequenced WAL rather than adding more pairwise replay rules.
 
 Resolution templates are also persisted in the committed snapshot. A WAL alone

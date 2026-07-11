@@ -1,60 +1,44 @@
-# AGENTS.md
+# `matching-solver`
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this crate.
+Optimization implementations for the supported welfare-clearing problem. The
+production-supported core is a convex/linear clearing problem; do not describe
+the whole crate as NP-hard merely because the optional MILP reference route can
+model harder variants.
 
-## Purpose
+## Read first
 
-The **matching-solver** crate is the core optimization engine for welfare-maximizing order matching in Frequent Batch Auctions (FBA). It solves an NP-hard problem via convex programs.
+- [[Solver Landscape]] and [[The LP Core]]
+- [[Welfare Maximization]] and [[LP Duality and Clearing Prices]]
+- [[MM Budget Constraint]]
+- The focused note for the solver being changed
 
-**Key metric**: `welfare = Σ (limit_price - clearing_price) × fill_qty`
+## Implementations
 
-## Architecture Notes
+| Type | Backend / role |
+|---|---|
+| `LpSolver` | HiGHS; production default plus budget-linearized re-solve |
+| `IterLpSolver` | Damped fixed-point LP |
+| `EgSolver` | Eisenberg–Gale / Frank–Wolfe reference |
+| `ConicSolver` | Clarabel Linear/Fisher/QuasiFisher reference |
+| `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
+| `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |
 
-Before modifying this crate, read these vault notes (`docs/architecture/`):
-- [[Solver Landscape]] — comparison of all solver approaches
-- [[LP Solver]] / [[EG Solver]] / [[Conic Solver]] / [[MILP Solver]] / [[Decomposed Solver]] — per-solver design
-- [[The LP Core]] — the LP formulation all solvers build on
-- [[MM Budget Constraint]] — how market maker budgets interact with solving
-- [[LP Duality and Clearing Prices]] — dual variables as clearing prices
-- [[Welfare Maximization]] — objective function design and tradeoffs
+## Invariants
 
-## Solver Types
+- Solvers may search in floating point; landed fills/prices and trusted welfare
+  are integers.
+- All implementations return `PipelineResult`, but `sybil-verifier` owns
+  correctness and the net-of-minting welfare definition.
+- Distinguish a MILP incumbent/timeout from a proven optimum.
+- Unsupported multi-market shapes must not become production-executable merely
+  because a solver can represent them.
+- Preserve uniform-price, quantity/limit, group, MM-budget, rounding, and
+  integer-landing behavior across solvers.
 
-| Solver | File | Feature | Purpose |
-|--------|------|---------|---------|
-| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS with single-pass SLP MM budget shading. Production default. |
-| **EgSolver** | `eg_solver.rs` | `lp` | Eisenberg-Gale / Fisher market formulation. |
-| **ConicSolver** | `conic_solver.rs` | `conic` | Conic EG via Clarabel. |
-| **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Iterative LP with EG μ-boosted MM weights. |
-| **MilpSolver** | `milp.rs` | `milp` | MIQCQP via SCIP (russcip). Exact optimal with timeout. |
-| **DecomposedSolver** | `decomposed.rs` | `lp` (+`parallel`) | Per-market-group decomposition with proportional-response budget coordination. Wraps any `Solver`. |
-
-All solvers return a `PipelineResult` which contains `MatchingResult` (fills + welfare), clearing prices, and timing data.
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `lib.rs` | Crate root, `MatchingResult` type |
-| `result.rs` | `PipelineResult`, `PriceDiscoveryResult`, timing/stats types |
-| `lp_solver.rs` | LP-based solver via HiGHS |
-| `eg_solver.rs` | Eisenberg-Gale solver |
-| `conic_solver.rs` | Conic solver via Clarabel |
-| `milp.rs` | SCIP-based MIQCQP solver |
-| `decomposed.rs` | Per-market-group decomposition with rayon parallelism (`parallel` feature) |
-| `viz.rs` | Visualization snapshots and ASCII output |
-
-## Testing
+Main files are `solver.rs`, `result.rs`, each `*_solver.rs`, `milp.rs`, and
+`decomposed.rs`; `viz.rs` is reporting support.
 
 ```bash
-cargo test -p matching-solver                           # Basic tests
-cargo test -p matching-solver --features lp,conic,milp  # All solvers
+cargo test -p matching-solver
+cargo test -p matching-solver --features lp,conic,milp
 ```
-
-## Design Principles
-
-- **Integer protocol output**: Solvers search in floating point; landed prices/quantities and trusted welfare use integers
-- **Payoff vectors**: Orders are payoff vectors over market states (single-market binary for now)
-- **Welfare maximization**: Objective is `Σ (limit_price - clearing_price) * fill_qty`
-- **Group minting**: LP/EG/Conic handle cross-market arbitrage via gmint variables
-- **Verification**: `sybil-verifier` is the single trusted verifier and owns the net-of-minting welfare definition

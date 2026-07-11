@@ -151,7 +151,7 @@ occurs in production.
 **Separate tables + the documented, tested replay order are sufficient today.
 Do not migrate to a single sequenced WAL now.** Reasoning:
 
-1. **Ordering is not consensus-sensitive.** Replayed WAL rows never emit their
+1. **Ordering is not validity-sensitive.** Replayed WAL rows never emit their
    own block header, `events_root`, or `state_root`. They mutate in-memory state
    that is then re-committed by the *next* block's ordinary solve, which
    re-derives every commitment deterministically. The exact cross-subsystem
@@ -170,11 +170,11 @@ Do not migrate to a single sequenced WAL now.** Reasoning:
 This verdict is conditional. Revisit — and adopt the contingency design below —
 the moment **any** of these triggers fires:
 
-- **T1 — Ordering becomes consensus-sensitive.** Any replayed acknowledged-write
+- **T1 — Ordering becomes validity-sensitive.** Any replayed acknowledged-write
   begins contributing to a committed/hashed artifact (block header, `events_root`,
   `state_root`, a witness) whose bytes depend on cross-subsystem event
   interleaving. This is the invariant-9 boundary; crossing it makes per-table
-  order a consensus bug surface.
+  order a validity bug surface.
 - **T2 — A replay step finalizes state per-row.** If replay stops "folding into
   the next block's fresh solve" and a single WAL row can itself commit/witness a
   block, the fresh-solve safety net is gone and exact global order is required.
@@ -274,5 +274,5 @@ checked at open in `crates/matching-sequencer/src/store.rs`):
 - [[L1 Settlement and Vault]] — the bridge deposits/withdrawals two of these WALs protect
 - [[Pending Orders and TTL]] — resting-order reservations and expiry, the cancel→withdrawal edge
 - [[Market Resolution]] — resolution as a control-plane command replayed against the restored book
-- [[State Root Schema]] — the committed leaves; why replay order is not yet consensus-sensitive
+- [[State Root Schema]] — the committed leaves; why replay order is not yet validity-sensitive
 - [[Testing Strategy]] — the restart-harness ladder the replay-order tests extend

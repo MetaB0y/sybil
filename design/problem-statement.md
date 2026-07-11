@@ -1,3 +1,9 @@
+---
+tags: [matching, math, reference]
+status: reference
+last_verified: 2026-07-11
+---
+
 # Welfare-Maximizing Matching in Frequent Batch Auctions
 
 ## Self-Contained Problem Statement

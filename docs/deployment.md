@@ -42,11 +42,11 @@ design document.
 |---|---|
 | Normal deploy, secrets, smoke checks, logs | [`DEPLOY.md`](https://github.com/MetaB0y/sybil/blob/main/DEPLOY.md) |
 | Deployment profiles and trust posture | [[Deployment Profiles]] |
-| Consensus-breaking devnet redeploy | [Devnet redeploy](runbooks/devnet-redeploy.md) |
+| Validity-breaking devnet redeploy | [Fresh-genesis redeploy](runbooks/fresh-genesis-redeploy.md) |
 | Backup and restore drill | [Store backup and restore](runbooks/store-backup-restore.md) |
 | Synthetic checks and alert delivery | [Synthetic monitoring](runbooks/synthetic-monitoring.md) |
 | Block-production latency incident | [Block-production latency](runbooks/block-production-latency.md) |
-| Contract authority and key rotation | [Admin keys](runbooks/Admin%20Keys.md) |
+| Contract authority and key rotation | [Admin keys](runbooks/admin-keys.md) |
 
 ## Non-negotiable production checks
 

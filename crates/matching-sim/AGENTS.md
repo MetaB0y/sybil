@@ -38,7 +38,8 @@ Run `--help` for the current preset and flag list; do not duplicate clap's compl
 - Compare integer landed outputs and recomputed welfare, not raw floating objectives.
 - Treat a timeout/incumbent separately from a proven MILP optimum.
 - Keep scenario generation in `matching-scenarios`; keep reporting/export in this crate.
-- Full-sequencer behavior belongs in `matching-sequencer`'s simulation path or API restart tests.
+- Full-sequencer simulations belong in `sequencer-sim`; durability/restart
+  behavior belongs in `matching-sequencer` and API integration tests.
 
 ## Testing
 
@@ -46,4 +47,3 @@ Run `--help` for the current preset and flag list; do not duplicate clap's compl
 cargo test -p matching-sim
 cargo run --release -p matching-sim -- --preset quick --solver all
 ```
-

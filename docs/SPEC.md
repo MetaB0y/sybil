@@ -4,7 +4,7 @@
 
 This is the connected implementation guide. Start with the [Architecture Guide](README.md) for intuition and [Sybil Architecture](architecture/Sybil%20Architecture.md) for the full map and reading paths. Per-concept notes and ADRs own detailed rationale. Code, canonical schemas, and tests are the final source of truth.
 
-Status snapshot: **2026-07-11**, based on `main` through witness v9 and the escape-claim guest work.
+Status snapshot: **2026-07-11**, based on `main` through witness v9 and the user-side custody CLI.
 
 ---
 
@@ -15,7 +15,7 @@ Sybil rests on five commitments:
 1. **Frequent batch auctions.** Eligible orders clear together at one uniform price per market; arrival nanoseconds do not create queue priority.
 2. **Welfare maximization.** The allocation maximizes trader surplus net of minting, rather than maximizing raw volume.
 3. **Float search, integer truth.** Numerical solvers may search in `f64`; protocol fills, prices, settlement, commitments, and verification use deterministic integers.
-4. **Authenticated intent and state.** P256/WebAuthn keys, replay nonces, key digests, canonical bytes, qMDB roots, and witnesses bind both user authorization and the state transition.
+4. **Authenticated keys, with a split intent boundary.** Key mutations and active-key digests are validity-checked; ordinary signed actions use genesis-bound canonical bytes and durable admission nonces that are not yet re-proved by the guest.
 5. **Validity plus availability.** OpenVM proves correctness; L1 anchors collateral and accepted roots; witness/DA publication supplies the data required for audit and recovery.
 
 ```mermaid
@@ -112,7 +112,7 @@ The block is prepared on a clone. Persistence precedes live-state swap and publi
 
 Two products leave the transition:
 
-- `SealedBlock`: canonical block plus a non-consensus `DerivedViewSidecar` for product consumers.
+- `SealedBlock`: canonical block plus a non-validity `DerivedViewSidecar` for product consumers.
 - `BlockWitness`: private transition package for verification, proving, DA, and recovery.
 
 ## 5. Persistence, history, and recovery
@@ -125,7 +125,7 @@ Sybil uses block snapshots plus small acknowledged-write WALs—not event sourci
 
 Between blocks, separate WAL tables protect direct admits, deferred bundles, control-plane commands, deposits, withdrawals, and L1 lifecycle inputs. Replay order is fixed and tested: committed snapshot/book → admit rows/id advance → control plane/expiry → deposits → withdrawal creation → L1 lifecycle inputs; deferred bundles wait for the next normal solve.
 
-History tables—full blocks, fills, account events, raw prices, candles, and aggregates—are derived from committed blocks. They support bounded pagination, explicit retention floors, WebSocket replay, restart tests, and backup/restore drills. They never become consensus inputs.
+History tables—full blocks, fills, account events, raw prices, candles, and aggregates—are derived from committed blocks. They support bounded pagination, explicit retention floors, WebSocket replay, restart tests, and backup/restore drills. They never become validity inputs.
 
 Canonical witness import can initialize a fresh store at a verified height. This is the implemented disaster-recovery basis for operator replacement.
 
@@ -133,7 +133,7 @@ Canonical witness import can initialize a fresh store at a verified height. This
 
 `BlockHeader` commits height, parent hash, typed `state_root`, `events_root`, counts, and timestamp. Public transition inputs additionally bind witness/DA and bridge fields.
 
-`state_root` covers the complete state required to continue safely: accounts, balances, positions, deposited totals, event/key digests, markets and last clearing prices, groups, resting orders/reservations, replay/system counters, bridge deposit frontier/quarantine, and withdrawal/claim state. Analytics and display metadata are excluded.
+`state_root` covers the committed state required to continue safely: accounts, balances, positions, deposited totals, event/key digests, markets and last clearing prices, groups, resting orders/reservations, system counters, bridge deposit frontier/quarantine, and withdrawal/claim state. Per-account ordinary-action replay nonces are durable sequencer state but are not validity leaves. Analytics and display metadata are excluded.
 
 `BlockWitness` v9 contains the accepted/rejected instructions, system events, fills/prices/constraints, authenticated pre/post account state, pre/post sidecars, account-key universe and key operations, deposit dispositions, bridge state, and the signature-bound `genesis_hash`. Canonical witness bytes—not MessagePack/serde transport bytes—determine `witness_root` and DA binding.
 
@@ -152,7 +152,7 @@ Canonical encoding is owned by `sybil-verifier`; signing bytes are owned by `syb
 | System/sidecar | Deposits, withdrawals, resolution, order book/reservations, market/bridge transition |
 | Keys/intent | Key universe/digests, register/revoke, uniqueness/last-key rules, RawP256/WebAuthn signatures |
 
-Authorization begins at admission and is re-proved in the guest. Ordinary signed actions use a strictly increasing per-account nonce. Key operations bind current `keys_digest` and `events_digest`. WebAuthn assertions bind the same canonical action bytes as raw P256 while additionally checking RP/origin/challenge and user-presence/verification requirements.
+Authorization has two boundaries. Key operations bind current `keys_digest` and `events_digest`; their RawP256/WebAuthn envelopes are carried in the witness and re-proved by the guest. Ordinary signed orders/cancels use a strictly increasing per-account nonce and genesis-bound canonical bytes checked at API/sequencer admission. Their signature envelopes and previous cross-block nonce are not currently guest inputs. WebAuthn uses the same canonical action bytes as raw P256 while additionally checking RP/origin/challenge and user-presence/verification requirements.
 
 ## 8. ZK, DA, L1, and escape
 
@@ -160,12 +160,19 @@ The host/guest boundary has two main Rust homes:
 
 - `sybil-zk`: guest-safe transition and escape-claim verification plus public-input binding.
 - `sybil-prover`: proof jobs, optional sequencer-store export, preparation, artifacts/API, DA publication, and L1 calldata/submission support.
+- `sybil-custody`: user-side own-leaf snapshots, full-payload reconstruction,
+  Form-L proving, adapter wrapping, and optional `escapeClaim` submission.
 
 OpenVM guest/tool workspaces remain separately pinned. Local guest execution, proof smoke paths, canonical inputs, contracts, and calldata exist. Production proving and real verifier deployment are operational requirements; unsafe/mock adapters are development-only.
 
 `SybilVault` custodies collateral and builds the deposit tree. `SybilSettlement` accepts consecutive proven roots bound to the vault checkpoint and pinned guest commitments. Normal withdrawals use typed leaves, proofs, nullifiers, and a queue.
 
-The escape path proves a conservative cash floor; it does not unwind positions. DA manifests and canonical witness payloads are served per height, and witness import supports disaster recovery. Production provider retention, emergency-disclosure policy, and hostile-operator successor governance remain planned.
+The escape path proves a conservative cash floor; it does not unwind positions.
+DA manifests and canonical witness payloads are served per height, witness
+import supports disaster recovery, and the custody CLI lets a user retain
+openings and independently construct/submit an escape claim. Production
+provider retention, emergency-disclosure policy, real verifier deployment, and
+hostile-operator successor governance remain incomplete.
 
 ## 9. API, oracle, mirrors, and agents
 
@@ -191,11 +198,11 @@ Before real value, operators must deploy the pinned real verifier, eliminate moc
 4. Landed fills respect quantity, limits, uniform prices, groups, and MM budgets.
 5. Welfare is net of minting and has one verifier-owned definition.
 6. `post_state` and sidecar equal exact replay of authenticated pre-state, system events, key operations, fills, and minting.
-7. P256/WebAuthn signatures and replay/state bindings are checked at admission and in the guest.
+7. Key-operation P256/WebAuthn signatures and state bindings are checked at admission and in the guest; ordinary signed-action replay protection remains an admission/WAL guarantee.
 8. The header roots equal canonical typed state/events; public inputs bind witness, DA, bridge, height, and parent transition.
 9. Acknowledged writes survive restart; no block is published before the redb fence commits it.
 10. Recovery reads only the fenced qMDB slot and follows the fixed WAL replay order.
-11. Derived analytics/history never affect consensus.
+11. Derived analytics/history never affect validity.
 12. Resolution is irreversible; resolved markets cannot trade and groups retain only valid unresolved structure.
 13. L1 roots are consecutive, deposit-checkpoint bound, verifier-gated, and withdrawal/escape claims are nullifier-protected.
 14. Availability and hostile-operator governance are not implied by validity alone.
@@ -212,6 +219,7 @@ Before real value, operators must deploy the pinned real verifier, eliminate moc
 | Native witness and canonical verification | `crates/sybil-verifier` |
 | Guest-safe verification and public inputs | `crates/sybil-zk` |
 | Proof jobs, DA, artifacts, submission | `crates/sybil-prover`, `zk/` |
+| User custody, reconstruction, escape proving | `crates/sybil-custody`, `crates/sybil-escape-claim` |
 | L1 protocol/indexing and contracts | `crates/sybil-l1-*`, `contracts/` |
 | External mirror | `crates/sybil-polymarket` |
 | Agents and clients | `arena/`, `frontend/web/`, `crates/sybil-client` |

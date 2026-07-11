@@ -152,7 +152,7 @@ Sybil separates current reference material from design work and history:
   [[Bot Framework]] → [[Python SDK]].
 
 > **Status legend.** Notes carry a `status:` in their frontmatter — `current`
-> (built & verified) or a planned/draft marker. When a note describes something
+> (built and verified), `planned`, or `deprecated`. When a note describes something
 > not yet built, it says so. The implementation and tests are final truth;
 > `SPEC.md` and `architecture/` are the maintained explanation. `design/` is
 > deliberately forward-looking and `design/archive/` is historical evidence,
@@ -162,4 +162,5 @@ Sybil separates current reference material from design work and history:
 
 *This guide is intentionally high-level and drift-resistant — it avoids exact
 counts (checks, solvers, cadence) that change over time. For precise current
-numbers, follow the links. The vault linter is `just docs-check`.*
+numbers, follow the links. Run `just docs-check` for the vault and strict site
+build; run `just docs-links` for maintained external links.*

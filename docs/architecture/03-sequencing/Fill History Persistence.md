@@ -49,7 +49,7 @@ Fill history is committed inside the same redb transaction as the block header, 
 - If a block is committed, its fill history is committed.
 - If a block is not committed, its fill history is ignored with the rest of the uncommitted block.
 
-The table is derived, not consensus-critical. It must match committed blocks, but account balances and positions remain authoritative in qmdb/redb state.
+The table is derived, not validity-critical. It must match committed blocks, but account balances and positions remain authoritative in qmdb/redb state.
 
 ## Non-Goals
 

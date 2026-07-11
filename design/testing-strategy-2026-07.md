@@ -1,11 +1,14 @@
 ---
 tags: [design, testing, quality, strategy]
 layer: core
-status: strategy
+status: proposal-needs-revalidation
 date: 2026-07-07
 ---
 
 # Bulletproof Testing — strategy
+
+> **Status note (2026-07-11):** test counts and named gaps are dated. The
+> architectural principles remain useful; rebuild the inventory before acting.
 
 Companion to the descriptive vault note [[Testing Strategy]]. That note says what
 exists; this says **how testing becomes bulletproof for a validity-critical system** and

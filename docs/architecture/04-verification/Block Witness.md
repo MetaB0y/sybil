@@ -34,7 +34,7 @@ ADR-0015. SYB-32 Stage 1a moved the format to v8 by appending committed
 `last_clearing_prices` to every market snapshot. Stage 1b moved it to v9 by
 adding the signature-bound chain `genesis_hash` needed for in-guest key-op
 verification. See
-`design/witness-v6-keys-transition.md` and
+the historical `design/archive/implemented/witness-v6-keys-transition.md` and
 `docs/adr/0015-deposit-quarantine.md`.
 
 ## Encoding
@@ -348,14 +348,14 @@ pin.
 
 | Pin | Current value | Test or artifact |
 |---|---:|---|
-| Witness format byte | `6` | `witness_schema::WITNESS_FORMAT_VERSION` |
-| Empty canonical witness length | `1583` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
-| Byte-identity canonical witness length | `3907` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
-| Byte-identity witness SHA-256 length-prefixed digest | `2cc74a0d572c4519b1dcd06e8b230e1cc1b5af488f93324e3297ee8478d8c1f5` | same byte-identity test |
+| Witness format byte | `9` | `witness_schema::WITNESS_FORMAT_VERSION` |
+| Empty canonical witness length | `1631` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
+| Byte-identity canonical witness length | `4003` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
+| Byte-identity witness SHA-256 length-prefixed digest | `b37ef5be6703feddaf24ac8075851e62701c236464c0cf9a72bf5d41fc299a13` | `golden/golden-vectors.json` |
 | Empty public-input hash | `3c2b17b07142b39b143af5ced9497325248be056cc96ff2daf8845b52cc76c46` | `public_input_hash_golden` |
 | OL-4 Solidity/Rust public-input hash vector | `42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` | Rust test plus `contracts/test/SybilGoldenVectors.t.sol` |
-| Current `app_exe_commit` | `0x0076542058598596578aaf9144911bbbda347b9bacd8c16fa644c02f005c9e72` | committed OpenVM `commit.json` and lock |
-| Current `app_vm_commit` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` | committed OpenVM `commit.json` and lock |
+| Current main `app_exe_commit` | `0x0076542058598596578aaf9144911bbbda347b9bacd8c16fa644c02f005c9e72` | committed main-guest `commit.json` and lock |
+| Current main `app_vm_commit` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` | committed main-guest `commit.json` and lock |
 
 The L1 deposit leaf/root vectors live in both
 `crates/sybil-l1-protocol/src/lib.rs` and
@@ -363,48 +363,20 @@ The L1 deposit leaf/root vectors live in both
 equivalence for deposit leaves, tree leaves, prefix roots, and selected
 frontier slots.
 
-## Sources Appendix
+## Implementation map
 
-Concrete claims above were cross-checked against these source ranges:
+Exact line numbers are intentionally omitted because this format evolves. Use:
 
-| Claim area | Source |
+| Concern | Source of truth |
 |---|---|
-| `BlockWitness` field set and v5 `deposit_accumulator`/`pre_state_sidecar` fields | `crates/sybil-verifier/src/types.rs:16-60` |
-| `DepositAccumulatorWitness` field semantics and default depth | `crates/sybil-verifier/src/types.rs:176-194` |
-| Format version byte `5` and first-byte placement | `crates/sybil-verifier/src/witness_schema.rs:16-30` |
-| Exact top-level field order | `crates/sybil-verifier/src/witness_schema.rs:18-74` |
-| Header byte order | `crates/sybil-verifier/src/witness_schema.rs:77-85`; `crates/sybil-zk/src/header_hash_impl.rs:1-10` |
-| Clearing-price map encoding | `crates/sybil-verifier/src/witness_schema.rs:87-98` |
-| MM constraint encoding and sort | `crates/sybil-verifier/src/witness_schema.rs:100-132` |
-| Market-group encoding and sort | `crates/sybil-verifier/src/witness_schema.rs:134-163` |
-| Account sections sorted by id | `crates/sybil-verifier/src/witness_schema.rs:165-172` |
-| Deposit-accumulator byte layout | `crates/sybil-verifier/src/witness_schema.rs:174-192` |
-| Empty witness length `1549` | `crates/sybil-verifier/src/witness_schema.rs` test `canonical_witness_bytes_are_stable_for_empty_witness` |
-| Snapshot sidecar domains and sort rules | `crates/sybil-verifier/src/snapshot_schema.rs:244-300` |
-| Primitive LE append helpers | `crates/sybil-verifier/src/snapshot_schema.rs:302-340` |
-| Event section order and leaf encodings | `crates/sybil-verifier/src/event_schema.rs:8-21`, `29-151` |
-| Native event root is keyless qMDB over section-order event bytes | `crates/sybil-verifier/src/event_commitment.rs:1-5`, `43-67`, `86-105` |
-| Pre-state sidecar authentication | `crates/sybil-verifier/src/block.rs:90-117` |
-| Post-state root authentication | `crates/sybil-verifier/src/block.rs:63-75` |
-| Genesis parent/height rule | `crates/sybil-verifier/src/block.rs:129-146` |
-| Native deposit accumulator verification | `crates/sybil-verifier/src/sidecar.rs:370-483` |
-| Guest public input binding and deposit checkpoint checks | `crates/sybil-zk/src/lib.rs:496-580`, `585-758` |
-| `witness_root`, DA payload root, provider-ref hash, and `da_commitment` formulas | `crates/sybil-zk/src/lib.rs:346-466` |
-| Public-input hash formula and field order | `crates/sybil-zk/src/lib.rs:328-344` |
-| Public inputs derived from witness | `crates/sybil-zk/src/lib.rs:468-493` |
-| OpenVM guest consumes `StateTransitionGuestInput` and reveals public-input hash | `zk/openvm-guest/src/main.rs:4-26` |
-| MessagePack/OpenVM transport distinction | `zk/openvm-tools/src/main.rs:22-30`, `92-113`; `crates/matching-sequencer/src/store.rs:112-115`, `874-875` |
-| `sybil-signing` Borsh signable payloads | `crates/sybil-signing/src/lib.rs:1-4`, `75-94` |
-| `DerivedViewSidecar` outside witness/root/DA/guest | `crates/matching-sequencer/src/block.rs:78-88`, `147-163` |
-| L1 deposit domain, tree depth, frontier alias, leaf/node hashing, and frontier fold | `crates/sybil-l1-protocol/src/lib.rs:11-22`, `133-153`, `156-260` |
-| Solidity vault deposit append recurrence | `contracts/src/SybilVault.sol:43-52`, `140-158`, `298-328`, `348-363` |
-| Solidity/Rust deposit and public-input golden vectors | `contracts/test/SybilGoldenVectors.t.sol:82-109`, `122-179`; `crates/sybil-l1-protocol/src/lib.rs:481-659`; `crates/sybil-zk/src/lib.rs:1450-1477` |
-| Public-input and DA tests | `crates/sybil-zk/src/lib.rs:1439-1545` |
-| Byte-identity witness length and digest | `crates/sybil-verifier/src/byte_identity.rs:20-50` |
-| Current OpenVM commitment values | `zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json:1-4`; `zk/openvm-guest/guest.commitment.lock.json:1-7` |
-| Guest source fingerprint and repin workflow | `scripts/zk-guest-fingerprint.sh:1-43`, `123-168`, `171-229`; `zk/openvm-guest/README.md:16-35`, `63-83` |
-| Fresh-genesis policy | `docs/runbooks/devnet-redeploy.md:31-38`, `76-93`, `116-134` |
-| SYB-216 rationale: derived-view outside witness, frontier not MMR, no dual decoders | `design/witness-schema-v2.md:73-103`, `300-327`, `340-376`, `422-443`, `462-476` |
+| Witness fields and system/key events | `crates/sybil-verifier/src/types.rs` |
+| Version, encode/decode, section order | `crates/sybil-verifier/src/witness_schema.rs` |
+| State/event leaf encodings | `state_schema.rs`, `snapshot_schema.rs`, `event_schema.rs` |
+| Native verification | `crates/sybil-verifier/src/lib.rs` and verifier modules |
+| Guest/public-input/DA binding | `crates/sybil-zk/src/lib.rs` |
+| Rust/Solidity shared inputs | `crates/sybil-l1-protocol`, `contracts/test/SybilGoldenVectors.t.sol` |
+| Byte identity | `golden/golden-vectors.json`, `byte_identity.rs` |
+| Guest pins | main and escape `commit.json` plus fingerprint locks |
 
 ## See Also
 

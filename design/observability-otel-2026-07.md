@@ -1,11 +1,14 @@
 ---
 tags: [design, observability, telemetry, otel, strategy]
 layer: core
-status: strategy
+status: proposal-needs-revalidation
 date: 2026-07-07
 ---
 
 # Observability (OpenTelemetry / OTLP) — strategy
+
+> **Status note (2026-07-11):** the inventory and counts below are dated.
+> Resurvey the deployed metrics/tracing pipeline before using this as a plan.
 
 How Sybil should see itself. Grounded in an inventory of what exists today:
 `tracing` everywhere, ~64 Prometheus metrics, a VictoriaMetrics → vmalert →

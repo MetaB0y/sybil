@@ -1,8 +1,17 @@
-# Runbook: sequencer store backup and restore
+---
+tags: [runbook, persistence, recovery]
+status: current
+last_verified: 2026-07-11
+---
 
-**Owning ticket:** SYB-223 item 2 · **Components:** `sybil-api`,
-`matching-sequencer`, operations · **Scripts:** `scripts/store-backup.sh`,
-`scripts/store-restore-drill.sh`
+# Sequencer store backup and restore
+
+> **Executive summary:** a valid backup contains the entire data directory and
+> is not trusted until an isolated restore reproduces the recorded height,
+> state root, and sample account. The script briefly freezes the whole API
+> container so redb and both qMDB slots are copied as one crash-consistent unit.
+
+**Scripts:** `scripts/store-backup.sh`, `scripts/store-restore-drill.sh`
 
 This runbook covers a short-freeze hot backup of the single-sequencer store,
 an isolated restore drill, and an emergency production restore. A backup is not
@@ -165,7 +174,7 @@ replacement has passed verification.
 
 **Never run `just deploy-reset-state CONFIRM` during restore.** That recipe
 removes `sybil-data` (along with several other state volumes) and creates a
-fresh genesis. It is a consensus-redeploy tool, not a restart or restore step.
+fresh genesis. It is a validity-domain reset tool, not a restart or restore step.
 
 ## Cadence and retention
 

@@ -1,4 +1,13 @@
+---
+tags: [solver, benchmark, reference]
+status: dated-reference
+last_verified: 2026-07-11
+---
+
 # Solver Benchmarks
+
+> These results are historical and workload-specific. Rerun the benchmark on
+> the revision and hardware you intend to quote.
 
 Internal reference for experimental evaluation of the EG/Fisher market clearing solvers.
 These results validate the theory in `lmsr-proof.typ` but are implementation-specific

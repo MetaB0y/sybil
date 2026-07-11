@@ -40,7 +40,7 @@ Two stores, **one commit authority**:
 The redb and QMDB paths are **not redundant** — QMDB authenticates, redb
 persists — and the fence makes them agree by construction. Sources:
 `docs/architecture/Persistence.md`, the fence discussion in
-`design/architecture-review-2026-07.md` §1.
+historical `design/archive/planning/architecture-review-2026-07.md` §1.
 
 ## Alternatives considered
 

@@ -139,12 +139,12 @@ echo "$PORTFOLIO" | grep -q "positions" && pass "GET /v1/accounts/$ACCT_ID/portf
 FILLS=$(curl -sf "$API/v1/accounts/$ACCT_ID/fills")
 echo "$FILLS" | grep -q "fill_qty" && pass "GET /v1/accounts/$ACCT_ID/fills" || fail "GET fills"
 
-# ── Backend-data plan endpoints (A1-D1, BACKEND_IMPLEMENTATION_PLAN.md) ─────
+# ── Persisted aggregate and account-history surfaces ────────────────────────
 # Runs BEFORE market resolution so per-position fields like
 # `avg_entry_price_nanos` still appear in the portfolio response (resolution
 # zeroes positions and folds them into realized_pnl).
 
-step "Backend-data plan surfaces"
+step "Aggregate read-model surfaces"
 
 OVERVIEW=$(curl -sf "$API/v1/activity/overview")
 echo "$OVERVIEW" | grep -q '"all_time"' && pass "GET /v1/activity/overview (all_time bucket)" || fail "activity overview missing all_time"

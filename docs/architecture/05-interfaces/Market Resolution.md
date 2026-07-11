@@ -24,7 +24,7 @@ flowchart LR
     PAY --> WIT["Witness + state root"]
 ```
 
-The external signer may fetch arbitrary networks or use human/LLM review. None of that logic enters consensus. The core sees only the signed result and the installed feed/template policy.
+The external signer may fetch arbitrary networks or use human/LLM review. None of that logic enters validity. The core sees only the signed result and the installed feed/template policy.
 
 ## Implemented lifecycle
 
@@ -67,4 +67,3 @@ stateDiagram-v2
 - [[Settlement]]
 - [[Binary Markets and Market Groups]]
 - [[Threat Model]]
-

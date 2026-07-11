@@ -1,120 +1,58 @@
-# AGENTS.md
+# `matching-sequencer`
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this crate.
+Single-writer exchange state machine and persistence layer. `BlockSequencer` is
+the deterministic synchronous core; a supervised `ractor` actor exposes it
+through `SequencerHandle`. Simulation-only agents remain in `sequencer-sim`.
 
-## Purpose
+## Read first
 
-The **matching-sequencer** crate is the multi-batch block sequencer. It orchestrates block production, manages account state, validates orders, and settles fills. Provides both synchronous (`BlockSequencer`) and async actor-based (`SequencerHandle`) interfaces. This is a **production library** — `sybil-api` links it, so it must stay free of dev/simulation tooling.
+- [[Block Lifecycle]] and [[Order Admission]]
+- [[Settlement]] and [[Pending Orders and TTL]]
+- [[Persistence]] and [[Acknowledged-Write WAL Replay]]
+- [[Block Witness]] and [[State Root Schema]]
 
-> The agent-based simulation harness (`SimulationRunner`, the agent framework, and the `sybil-sim` binary) lives in the separate dev-only **`sequencer-sim`** crate, which depends on this one through its public API. Keep it that way: do not re-add `simulation.rs`/`scenario.rs`/`agent/`/sim-`metrics.rs` here.
+## Load-bearing rules
 
-## Architecture Notes
+- Prepare a block on a clone; persist it and flip the redb commit fence before
+  swapping live state or publishing.
+- Every acknowledged between-block mutation is durable-before-live and follows
+  the fixed WAL replay order.
+- redb is the commit authority; recovery reads only the fenced qMDB slot.
+- `OrderBook` owns resting-order reservations. Replay re-derives aggregates.
+- Settlement uses shared `matching-engine` integer helpers and MINT derivation.
+- Unsupported value-bearing order shapes fail closed at admission.
+- The header state root covers typed account, bridge, market, group, lifecycle,
+  resting-order/reservation, counter, and withdrawal/claim state—not merely an
+  account-vector hash.
+- Derived analytics/history are useful but never validity inputs.
 
-Before modifying this crate, read these vault notes (`docs/architecture/`):
-- [[Block Lifecycle]] — batch collection, solving, settlement, sealed block
-- [[Order Admission]] — order buffering, segregation, and drain limits
-- [[Settlement]] — fill settlement logic (simple and generic)
-- [[Fractional Quantities]] — `Qty` is fixed-point share-units
-- [[Pending Orders and TTL]] — cross-batch order persistence and expiry
-- [[State Root and Parent Hash]] — block chaining and state commitment
+## Block path
 
-## Core Architecture
-
-```
-SequencerHandle (async) / BlockSequencer (sync)
-        ↓
-  SequencerActor (tokio task, 1-second timer)
-        ↓
-  BlockSequencer (core sync logic)
-        ↓
-  Validation → Solving → Settlement → State Commitment
-```
-
-## Key Types
-
-| Type | Purpose |
-|------|---------|
-| `BlockSequencer` | Core state engine: accounts, markets, pending orders, block production |
-| `SequencerActor` | Async wrapper with message-passing, mempool, SSE broadcasts |
-| `Block` / `BlockHeader` | Immutable output with fills, prices, state root, parent hash |
-| `Account` / `AccountStore` | Balance + positions per account |
-| `OrderBook` | Resting orders with tracked balance/position reservations |
-| `OrderSubmission` | Request to include orders in next batch |
-
-## Block Production Flow
-
-```rust
-BlockSequencer::produce_block(submissions, timestamp_ms) → (Block, PipelineResult, BlockWitness)
+```text
+actor mailbox → durable admission/WAL → prepare cloned transition
+→ solve → integer settlement → block + witness → persist/fence
+→ live-state swap → realtime publication
 ```
 
-1. `order_book.expire()` — remove stale resting orders
-2. `order_book.revalidate()` — remove orders for resolved markets, bankrupt accounts
-3. Collect resting orders from book
-4. Accept new non-MM submissions via `order_book.accept()` (validates + reserves)
-5. Accept MM submissions (flash liquidity, bypass book, STP check only)
-6. Build `Problem`, `Pipeline::solve(&problem)`
-7. `settle_fill()` for each fill, derive minting from position imbalance
-8. `order_book.settle()` — release filled, adjust partial, keep unfilled
-9. Compute state root, build Block
+`BlockSequencer::try_produce_block` returns `BlockProduction`. Actor callers use
+the persistence-aware prepare/persist/commit path and publish `SealedBlock`.
 
-## Settlement Logic
+## Code map
 
-**Simple (single binary market):**
-- Buy: `balance -= price * qty / SHARE_SCALE; position(market, outcome) += qty`
-- Sell: `balance += price * qty / SHARE_SCALE; position(market, outcome) -= qty`
+| Area | Location |
+|---|---|
+| State transition | `sequencer.rs`, `sequencer/production/`, `sequencer/*` |
+| Actor/RPC/supervision | `actor.rs`, `actor/` |
+| Resting orders | `order_book.rs` |
+| Shared settlement orchestration | `settlement.rs` |
+| Canonical state/block | `canonical_state.rs`, `block.rs`, `system_event.rs` |
+| Persistence, WAL, DA, import | `store.rs`, `store/` |
+| Auth/signature checks | `crypto.rs` |
+| Bridge and lifecycle | `bridge.rs`, `market_lifecycle.rs` |
+| Off-block views | `aggregates/`, `analytics.rs`, trackers/recorders |
 
-**Generic (bundles, spreads):**
-- Debit balance by cost
-- Credit positions based on payoff-vector marginals
-- Uses mixed-radix state indexing
+Defaults live in `sequencer/config.rs`; API/env overrides may differ. Do not
+duplicate changing limits in documentation when a code pointer is clearer.
 
-**Market Resolution:**
-- YES shares → `yes_payout_nanos`
-- NO shares → `NANOS_PER_DOLLAR - yes_payout_nanos`
-- Supports fractional resolution (e.g., 70%/30%)
-
-## Agent Framework
-
-The synthetic agents (`InformedTrader`, `NoiseTrader`, `MarketMakerAgent`) and the multi-batch `SimulationRunner` that drives them now live in the **`sequencer-sim`** crate. See `crates/sequencer-sim/` and run `just sim-agent` (or `cargo run -p sequencer-sim --bin sybil-sim`).
-
-## Order Book
-
-- `OrderBook` is the single source of truth for committed capital
-- Unfilled non-MM orders become resting orders with tracked reservations
-- Balance reserved at acceptance time (buys), positions reserved (sells)
-- Expire after TTL blocks (default `63_072_000`, effectively GTC at the normal cadence), reservations released
-- Re-validated each block (market resolution, account solvency)
-- MM orders bypass the book entirely (flash liquidity, one-shot)
-
-## Deferred Bundle Buffer
-
-- Single-market non-MM orders can admit directly into `OrderBook`
-- MM, multi-market, and multi-order submissions are buffered as pending bundles
-- Defaults from `SequencerConfig`: `max_pending_bundles = 10_000`, `max_pending_bundles_per_account = 100`, `max_orders_per_submission = 64`
-- Rate limits: 50 submissions/account/second with burst 200; 1,000 global submissions/second with burst 3,000
-
-## State Commitment
-
-- **State root**: `blake3(canonical account encoding)`
-- **Parent hash**: Links blocks into chain
-- Enables ZK proof integration via `BlockWitness`
-
-## Module Map
-
-| Module | Purpose |
-|--------|---------|
-| `sequencer.rs` | BlockSequencer core |
-| `actor.rs` | SequencerActor async wrapper |
-| `settlement.rs` | Fill and market resolution |
-| `account.rs` | Account, AccountStore |
-| `block.rs` | Block, BlockHeader |
-| `order_book.rs` | OrderBook: resting orders + reservations |
-| `validation.rs` | Order validation rules |
-
-(`SimulationRunner`, agents, and scenarios now live in the `sequencer-sim` crate.)
-
-## Testing
-
-```bash
-cargo test -p matching-sequencer
-```
+Run `cargo test -p matching-sequencer`; persistence changes also require crash,
+restart, import, and API integration coverage.

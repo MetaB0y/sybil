@@ -1,83 +1,119 @@
 ---
-tags: [infrastructure]
+tags: [api, authentication, passkeys, security]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-06
+last_verified: 2026-07-11
 ---
 
-Sybil uses P256 (NIST secp256r1) ECDSA signatures for authenticated account actions. This is the same elliptic curve used by hardware security modules (HSMs), secure enclaves (Apple's Secure Enclave, Android's StrongBox), and WebAuthn/FIDO2 keys. The choice of P256 over secp256k1 (Bitcoin/Ethereum's curve) is deliberate: it enables direct hardware key integration without software key management.
+# P256 and WebAuthn authentication
 
-The authentication flow has two schemes. Raw P256 keys register a compressed
-P256 public key via `POST /v1/accounts/{id}/keys` with `auth_scheme =
-raw_p256` (the default for bots, SDKs, and arena clients). Passkey accounts use
-the same endpoint with `auth_scheme = webauthn`; the client sends the WebAuthn
-registration payload, the API extracts the COSE EC2 P256 public key, and the
-registered public key is tagged as WebAuthn. Multiple keys can be registered
-for operational flexibility and backup passkeys.
+> [!summary] In one paragraph
+> Accounts have a committed set of P256 signing keys. Raw agent keys sign
+> canonical action bytes directly; passkeys sign a WebAuthn assertion whose
+> challenge is the hash of those same bytes. Key registration/revocation is
+> state-bound, carried in witness v9, and re-verified by the OpenVM guest.
+> Ordinary orders/cancels are checked at API/sequencer admission with durable
+> replay nonces, but their signature envelopes and nonce state are not currently
+> re-proved by the guest—an important distinction in the trust model.
 
-New self-service accounts register their first key in `POST /v1/accounts` via
-the `initial_key` field. The legacy bare create and unsigned first-key bootstrap
-forms are service-only. Browser passkey onboarding uses a short-lived raw P256
-bootstrap key because the discoverable WebAuthn user handle contains the newly
-allocated account id; it registers the passkey through the signed additional-key
-flow and then revokes the bootstrap key.
+## Key and action model
 
-Account reads use a separate read-scoped bearer. Passkey login signs the
-existing API-key-creation canonical payload, receives a one-time bearer token,
-and stores it with the browser session. Discoverable login may omit the signer
-public key: the API verifies the assertion against the claimed account's active
-WebAuthn keys and returns the matching public key without exposing the gated key
-list.
+```mermaid
+flowchart LR
+    ACTION["Canonical action bytes<br/>genesis-bound"] --> RAW["Raw P256 signature"]
+    ACTION --> HASH["SHA-256 challenge"] --> WEB["WebAuthn assertion<br/>RP · origin · UP/UV"]
+    RAW --> EDGE["API / sequencer admission"]
+    WEB --> EDGE
+    EDGE --> WAL["Durable nonce or state-bound WAL"]
+    WAL --> BLOCK["Block transition"]
+    KEYOP["Key register/revoke"] --> WIT["Witness auth envelope"] --> GUEST["Guest P256/WebAuthn verification"]
+    BLOCK --> MATCH["Guest checks order/fill/state validity<br/>not ordinary signature envelope"]
+```
 
-For raw P256, clients sign the canonical payload directly. For WebAuthn, the
-assertion challenge is `base64url(SHA-256(canonical_payload_bytes))`, where the
-canonical payload is the same byte string used by raw P256. Ordinary actions
-include the replay nonce. Key registration/revocation instead bind to the
-account's current `keys_digest` and `events_digest`, fetched from
-`GET /v1/accounts/{id}/keyop-state`. The authenticator signs
-`authenticatorData || SHA-256(clientDataJSON)`. The API verifies the P256
-signature, `clientDataJSON.type`, challenge, origin, `rpIdHash`, user presence,
-user verification, and the registered auth scheme before forwarding an
-already-authenticated action into the sequencer.
+`KeyRecord` commits auth scheme, compressed SEC1 P256 public key, and a reserved
+capability mask through the account's `keys_digest`. All capability bits are
+authoritative today; scoped delegation is not active.
 
-Signed orders go to `POST /v1/orders/signed`; signed cancellations go to `POST
-/v1/orders/cancel/signed`; signed bridge withdrawals go to
-`POST /v1/bridge/withdrawals/signed`. The raw signed path still verifies inside
-the sequencer exactly as before. The WebAuthn path verifies the envelope at the
-API boundary, then uses the same registered-key lookup and the appropriate
-nonce- or state-bound admission/WAL machinery. The v9 block witness contains
-WebAuthn envelopes or raw signatures for `KeyRegistered` and `KeyRevoked`
-events so the authorization bytes are commitment-bound. The OpenVM guest uses
-the accelerated P-256 extension to verify both schemes. WebAuthn key ops also
-enforce the pinned RP id hash, UP+UV, `webauthn.get`, the exact challenge, and
-the envelope caps with an escape-aware RFC 8259 scanner. Admission-time
-verification remains mandatory and uses the same canonical bytes.
+## Bootstrap and key mutation
 
-Every signed order, signed cancellation, and signed bridge withdrawal carries a per-account `nonce: u64` covered by the canonical P256 payload. The sequencer stores each account's highest accepted signed-action nonce and requires strict increase; gaps are allowed. Key operations do not consume that nonce: their canonical bytes bind the running `keys_digest` plus the never-repeating `events_digest`, and stale bindings return HTTP 409 before WAL admission. The nonce advance for other signed actions is durably logged before the action becomes live.
+- Account creation can atomically install its initial key.
+- `POST /v1/accounts/{id}/keys` is service-gated and can bootstrap only an
+  account with zero keys.
+- Additional keys use `POST /v1/accounts/{id}/keys/register`; revocation uses
+  `/v1/accounts/{id}/keys/revoke`.
+- Each mutation binds the current `keys_digest` and `events_digest` from
+  `/v1/accounts/{id}/keyop-state` and is authorized by an active key.
+- The witness carries the key operation plus RawP256/WebAuthn envelope. Native
+  and guest verification replay the active-key set, canonical bytes, signature,
+  WebAuthn RP/origin/challenge, and required user presence/verification.
+- The last active key cannot be revoked.
 
-Unsigned order submission (`POST /v1/orders`) is also available and is the primary path in dev mode. Production deployments would require all orders to be signed, ensuring that only the account holder can submit orders against their balance. The P256 choice also aligns with the [[ZK Integration Path]]: P256 signature verification has efficient implementations in SNARK circuits, enabling on-chain verification of order authenticity as part of the block proof.
+This is the strongest authorization path: the key universe and mutation intent
+are validity-checked, not merely accepted by the server.
 
-Signed bridge withdrawals are scaffolding for [[L1 Settlement and Vault]] rather than the final L1 authorization story. The signature proves account intent and covers `account_id`, destination chain/vault, recipient, token, amount, `expiry_height`, and `nonce`; the signed route requires `expiry_height` and `nonce` so the server cannot inject unsigned defaults. SYB-178/SYB-188 still need the proof-backed vault release path before signatures alone can be treated as complete withdrawal authorization.
+## Ordinary signed actions
 
-## Key Properties
-- P256 (secp256r1) ECDSA — same curve as hardware security modules
-- Key registration: `POST /accounts/{id}/keys` — multiple keys per account
-- Signed order submission: `POST /orders/signed` — signature verified against registered keys
-- Signed cancellation: `POST /orders/cancel/signed` — signature verified against registered keys
-- Signed withdrawal scaffold: `POST /bridge/withdrawals/signed` — signature verified against registered keys and service-gated
-- Passkey support: WebAuthn assertions over the hash of the same canonical bytes
-- Replay protection: nonces for ordinary actions; state-bound running digests for key operations
-- Unsigned path available for dev mode
-- Hardware-compatible: Secure Enclave, StrongBox, FIDO2 keys
-- ZK-friendly: efficient P256 verification circuits exist
-- Recovery: register a second passkey while one existing account key still works; see [Passkey recovery](../../passkey-recovery.md)
+Public signed endpoints include orders and cancellations. Their canonical bytes
+bind the action, account nonce, and chain `genesis_hash`. The sequencer looks up
+the active key, verifies RawP256/WebAuthn at admission, requires a strictly
+increasing per-account nonce, and durably records the nonce advance before the
+action becomes live. Gaps are allowed.
 
-## Where This Lives
-> `crates/sybil-api/src/routes/` — signed order and bridge-withdrawal endpoints
-> `crates/sybil-api/src/webauthn.rs` — WebAuthn assertion and COSE EC2 registration checks
-> `crates/matching-sequencer/src/crypto.rs` — canonical payload conversion, raw P256 verification, and auth-scheme tags
+The block witness contains the accepted order/cancellation effects, so the guest
+checks funding, positions, expiry, limits, settlement, and state transition. It
+does **not** currently contain/re-verify the ordinary signature envelope or the
+prior cross-block nonce. Replay protection for these actions therefore still
+trusts the admission/WAL layer, bounded to one genesis domain. Do not claim that
+all trader intent is proven until this gap is closed or ordinary intent becomes
+otherwise validity-bound.
 
-## See Also
-- [[REST API]] — the endpoints for key registration and order submission
-- [[ZK Integration Path]] — P256 verification in SNARK circuits
+Unsigned `POST /v1/orders` is a service route: in production it requires the
+service token; dev mode skips that service bearer for local workflows. It is not
+a public production trading path.
+
+Signed bridge withdrawal creation is also service-gated scaffolding. The final
+L1 release remains proof/root/nullifier controlled; an API signature alone does
+not move vault funds.
+
+## WebAuthn details
+
+For a passkey assertion:
+
+```text
+challenge = base64url(SHA-256(canonical_action_bytes))
+signature covers authenticatorData || SHA-256(clientDataJSON)
+```
+
+The API checks credential/public-key association, `webauthn.get`, challenge,
+origin, RP ID hash, user presence, user verification, signature shape, and
+configured envelope limits. RP ID is the browser app hostname; origin includes
+scheme and hostname. Misconfiguring either locks out passkey actions.
+
+Account reads use a separate read-scoped bearer. Passkey login creates such a
+bearer after an assertion; read keys cannot trade, withdraw, or mutate signing
+keys.
+
+## Recovery
+
+Register and test a second passkey while an existing key is still usable. There
+is no server-side reset or seed phrase. See [Passkey recovery](../../passkey-recovery.md).
+
+## Implementation map
+
+| Concern | Owner |
+|---|---|
+| Canonical ordinary signing bytes | `crates/sybil-signing` |
+| API WebAuthn verification | `crates/sybil-api/src/webauthn.rs`, account/order routes |
+| Admission, nonce WAL, raw signatures | `crates/matching-sequencer/src/crypto.rs`, actor/store |
+| Key digest/transition/auth | `crates/sybil-verifier/src/account_keys.rs`, `key_transition.rs`, `key_op_auth.rs` |
+| Guest verification | `crates/sybil-zk` and OpenVM guest |
+
+## See also
+
+- [[REST API]]
+- [[Block Witness]]
+- [[Threat Model]]
+- [ADR-0007](../../adr/0007-canonical-bytes-domain-separation.md)
+- [ADR-0008](../../adr/0008-in-guest-p256-openvm-ecc.md)
+- [ADR-0014](../../adr/0014-webauthn-first-auth.md)

@@ -1,8 +1,6 @@
 /**
- * Mocks specific to the specific-market page. Every consumer reads from this
- * single module so there's one delete-site when OPEN_QUESTIONS #1-#3, #5-#8
- * land. All values are DETERMINISTIC from a seed (marketId + height, usually)
- * so they don't shuffle on rerenders.
+ * Deterministic values for the legacy `/m-dev/[id]` diagnostic route. These
+ * do not describe the product page or the current API surface.
  *
  * Each call site is expected to wrap the rendered value in a <MockValue>-style
  * marker so the placeholder is visible to the user.
@@ -22,8 +20,7 @@ function hash32(n: number): number {
 /**
  * Mocked last-24h volume in nanos. Sized as a fraction of lifetime volume so
  * busier markets show bigger numbers; deterministic from (marketId, latestHeight).
- * Replaced when OPEN_QUESTIONS #3 (`/v1/activity/overview` per-market rollups)
- * lands.
+ * Retained only for the legacy diagnostic presentation.
  */
 export function mock24hVolumeNanos(
   marketId: number,
@@ -38,8 +35,7 @@ export function mock24hVolumeNanos(
 
 /**
  * Mocked lifetime unique trader count. Roughly `sqrt(dollars) * 1.4 ± jitter`
- * to match the shape of `mockTraders` in `lib/mock.ts`. Replaced when
- * OPEN_QUESTIONS #2 (`trader_count` on MarketResponse) lands.
+ * to match the shape of `mockTraders` in `lib/mock.ts`.
  */
 export function mockLifetimeTraders(
   marketId: number,
@@ -54,7 +50,7 @@ export function mockLifetimeTraders(
 
 /**
  * Mocked liquidity in nanos. ~20-44% of lifetime volume, deterministic per
- * market. Replaced when OPEN_QUESTIONS #1 (per-block resting depth) lands.
+ * market.
  */
 export function mockLiquidityNanos(
   marketId: number,
@@ -69,8 +65,7 @@ export function mockLiquidityNanos(
 
 /**
  * Mocked count of traders that placed orders in the currently-open batch.
- * Backend exposes pending orders only via dev-mode `/v1/orders/pending`, so
- * we mock until OPEN_QUESTIONS #7 lands a prod-safe endpoint. Range 0..30.
+ * Range 0..30.
  */
 export function mockTradersInOpenBatch(
   marketId: number,
@@ -82,7 +77,7 @@ export function mockTradersInOpenBatch(
 /**
  * Mocked indicative YES clearing price in nanos for the open batch.
  * Anchored near the latest clearing price (if provided) ± a small drift so
- * the value stays plausible. Replaced when OPEN_QUESTIONS #7 lands.
+ * the value stays plausible.
  *
  * `currentYesPriceNanos` should be the most recent committed price for the
  * market; the indicative drift is ±5¢ around it. Falls back to 50¢ if
@@ -106,8 +101,7 @@ export function mockIndicativeYesPriceNanos(
 
 /**
  * Mocked indicative total volume that would clear in the open batch (nanos).
- * Sized to look like a single-batch slice of activity. Replaced when
- * OPEN_QUESTIONS #7 lands.
+ * Sized to look like a single-batch slice of activity.
  */
 export function mockIndicativeVolumeNanos(
   marketId: number,

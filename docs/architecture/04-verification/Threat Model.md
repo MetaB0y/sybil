@@ -8,7 +8,7 @@ last_verified: 2026-07-11
 # Threat model
 
 > [!summary] In one paragraph
-> Sybil minimizes trust in transition correctness and user authorization, but production security still depends on deployment choices. Witness v9 and the OpenVM guest check state transitions, key operations, P256/WebAuthn signatures, deposits, and committed sidecar state. L1 contracts gate roots and withdrawals. The remaining trust is operational: deploy the real pinned verifier, keep witness data available, govern admin/verifier changes, keep blocks live, and use an honest immediate-resolution feed.
+> Sybil minimizes trust in transition correctness, but authorization is split. Witness v9 and the OpenVM guest check state transitions plus key-operation P256/WebAuthn authorization. Ordinary order/cancel signatures and cross-block replay nonces are enforced at admission and are not yet re-proved by the guest. Production security also depends on deploying the real verifier, keeping witness data available, governing privileged keys, maintaining liveness, and using an honest immediate-resolution feed.
 
 This note distinguishes **implemented cryptographic controls** from **controls that only exist when the production deployment actually enables them**.
 
@@ -17,7 +17,7 @@ This note distinguishes **implemented cryptographic controls** from **controls t
 ```mermaid
 flowchart TB
     subgraph crypto["🟢 Implemented controls"]
-        INTENT["User intent<br/>state-bound keys · P256/WebAuthn · replay nonces · guest verification"]
+        INTENT["Key mutation intent<br/>state-bound keys · P256/WebAuthn · guest verification"]
         TRANS["State transition<br/>witness v9 · settlement · sidecar · exact qMDB proofs"]
         BRIDGE["Bridge accounting<br/>deposit inclusion · checkpoint · quarantine · withdrawal nullifiers"]
         SHAPES["Value safety<br/>unsupported order shapes rejected at every boundary"]
@@ -50,18 +50,19 @@ flowchart TB
 
 | Attack | Status | Control / residual trust |
 |---|---|---|
-| Forge an order, cancellation, or key operation | 🟢 | Witness v9 binds `genesis_hash`, account keys, key operations, signatures, and replay nonces; the guest re-verifies authorization. See [[P256 Authentication]] and [ADR-0008](../../adr/0008-in-guest-p256-openvm-ecc.md). |
+| Forge a key registration/revocation | 🟢 | Witness v9 binds `genesis_hash`, the active key universe, state digests, key operation, and RawP256/WebAuthn envelope; the guest re-verifies authorization. |
+| Forge an ordinary order/cancellation at admission | 🟡 | API/sequencer verify the active key, genesis-bound signature, and monotonic nonce before durable admission. The guest verifies the resulting order/state transition but not the ordinary signature envelope or prior cross-block nonce. |
 | Insert an unsupported multi-market/custom value path | 🟢 | Unsupported shapes are rejected at API, admission, solver, and verification boundaries. The expressive payoff-vector type is not treated as execution support. |
 | Forge balances, positions, reservations, or market/bridge sidecar | 🟢 / 🟡 | Native and guest transition checks cover the witness and exact post-state keyspace. This becomes a production guarantee only when the real pinned verifier—not `UnsafeAcceptAllVerifierAdapter` or a mock prover—is deployed. |
 | Credit an unbacked or misdirected deposit | 🟢 | Guest-verified deposit inclusion, vault checkpoint binding, ordered cursor, and witnessed credit-or-quarantine disposition. |
-| Replay or equivocate transitions | 🟢 / 🟡 | Genesis-domain separation, monotonic account nonces, consecutive height/parent binding, and L1 accepted-root rules; production monitoring still matters for liveness and submission. |
+| Replay or equivocate transitions | 🟢 / 🟡 | Consecutive height/parent binding and L1 root rules cover transitions. Genesis-domain separation limits captured ordinary signatures to one chain, while cross-block nonce enforcement remains admission-layer trust. |
 | Withhold witness data | 🟠 / 🔴 | Per-height DA manifest/payload endpoints and recovery import exist. Continued positions require retained payloads; hostile-operator replacement still needs provider policy and governance. See [[Data Availability]] and [[Operator Replacement]]. |
 
 ## Malicious user or client
 
 | Attack | Status | Control |
 |---|---|---|
-| Replay a signed write | 🟢 | Strictly increasing per-account nonce plus action/genesis domain separation ([ADR-0007](../../adr/0007-canonical-bytes-domain-separation.md)). |
+| Replay an ordinary signed write | 🟡 | Strictly increasing admission nonce plus action/genesis domain separation; nonce durability is tested but not guest-proven ([ADR-0007](../../adr/0007-canonical-bytes-domain-separation.md)). |
 | Register/revoke a key for another account | 🟢 | State-bound signed key operations, service-tier checks, committed `keys_digest`, and guest replay. |
 | Overspend through concurrent/resting orders | 🟢 | Direct-admission reservations, atomic deferred admission, Layer 4 accumulation, and deterministic settlement. |
 | Double-withdraw or reuse an escape claim | 🟢 | Typed withdrawal/claim leaves, root binding, freshness rules, and nullifiers. |

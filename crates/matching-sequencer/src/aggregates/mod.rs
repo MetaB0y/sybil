@@ -15,7 +15,7 @@
 //! - `equity_tracker` — per-account equity series (volatile; resets on restart,
 //!   no snapshot round-trip)
 //!
-//! See `frontend/BACKEND_IMPLEMENTATION_PLAN.md` for the full plan.
+//! These read models are documented in `docs/architecture/06-operations/Persistence.md`.
 
 pub mod account_event_log;
 pub mod cost_basis_tracker;

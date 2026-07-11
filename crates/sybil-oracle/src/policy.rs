@@ -2,7 +2,8 @@
 //!
 //! Today there is one variant, `Immediate`. Future variants (`Optimistic`,
 //! `Quorum`, `Predicate`, `External`) are new enum arms, not new traits — see
-//! `docs/architecture/Oracle System.md` for the roadmap.
+//! `docs/architecture/05-interfaces/Market Resolution.md` for the current
+//! trust boundary and future-policy discussion.
 
 use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
 use serde::{Deserialize, Serialize};

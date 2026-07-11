@@ -142,8 +142,7 @@ export default function MarketDetailPage({
  * Title, thumbnail and all five stats are scoped to the single market in the
  * URL — never its parent event. `vol / 24h / traders / liq` are real Phase-B
  * fields (see `derive-market-stats.ts`). `batches ~M` stays a cadence-based
- * timestamp approximation — an exact count needs a backend `created_at_height`
- * (OPEN_QUESTIONS #9).
+ * timestamp approximation — the API does not expose an exact creation height.
  */
 function Header({
   marketId,
@@ -273,8 +272,8 @@ function Header({
           )}
         </div>
 
-        {/* 5-stat meta row, all scoped to this market. Only `batches` is an
-            approximation (OPEN_QUESTIONS #9); vol / 24h / traders / liq are real. */}
+        {/* 5-stat meta row, all scoped to this market. Volume, 24h volume,
+            traders and liquidity are backend values; age is timestamp-derived. */}
         <div
           className="text-mono"
           style={{

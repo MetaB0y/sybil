@@ -94,7 +94,7 @@ Suggested redb tables for Phase 1:
 
 `blocks_full` should store the versioned API-neutral replay payload needed by
 REST and WebSocket catch-up. It can start as `SealedBlock` if that is the
-lowest-risk implementation, but the table name should not promise consensus
+lowest-risk implementation, but the table name should not promise validity
 state only: API replay needs canonical block fields plus the analytics sidecar
 currently carried by `BlockResponse`.
 
@@ -228,7 +228,7 @@ starting point is:
 | 5 minute candles | 180 days | Long horizon without a row explosion. |
 | 1 hour candles | unbounded on devnet until size proves otherwise | Cheap enough for coarse historical charts and backtests. |
 
-These are not consensus constants. Runtime configuration currently includes:
+These are not validity constants. Runtime configuration currently includes:
 
 - `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS`
 - `SYBIL_RAW_PRICE_RETENTION_BLOCKS`

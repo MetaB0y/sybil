@@ -46,6 +46,9 @@ jobs:
       - name: Validate architecture vault
         run: ./scripts/check-vault.sh
 
+      - name: Check maintained external links
+        run: ./scripts/check-external-links.py
+
   arena:
     name: Arena
     runs-on: ubuntu-latest
