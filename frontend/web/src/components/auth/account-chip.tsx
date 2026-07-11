@@ -7,7 +7,7 @@
  * copy account id / copy JWK.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { disconnect } from "@/lib/account/actions";
 import { readStoredAccount } from "@/lib/account/storage";
 import {
@@ -22,11 +22,20 @@ import { formatDollars, parseNanos } from "@/lib/format/nanos";
 export function AccountChip() {
   const session = useAccountSession();
   const hydrated = useAccountHydrated();
+  // AccountProvider can finish its outer effect while this client subtree is
+  // still being selectively hydrated. Gate on this component's own hydration
+  // boundary so a very fast login cannot replace the server's <button>
+  // placeholder with the connected <div> before React claims it.
+  const mounted = useSyncExternalStore(
+    subscribeToMount,
+    mountedOnClient,
+    mountedOnServer,
+  );
   const setOpen = useSetConnectModalOpen();
 
   // Server render + pre-hydration: render a stable placeholder so React
   // doesn't tear during hydration. Style matches the connect button.
-  if (!hydrated) {
+  if (!mounted || !hydrated) {
     return <ChipShell label="…" disabled />;
   }
 
@@ -45,6 +54,18 @@ export function AccountChip() {
   }
 
   return <ConnectedMenu accountId={session.accountId} />;
+}
+
+function subscribeToMount(): () => void {
+  return () => {};
+}
+
+function mountedOnClient(): boolean {
+  return true;
+}
+
+function mountedOnServer(): boolean {
+  return false;
 }
 
 function ConnectedMenu({ accountId }: { accountId: number }) {

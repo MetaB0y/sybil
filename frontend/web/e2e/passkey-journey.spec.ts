@@ -26,6 +26,11 @@ import {
 
 const APP_BASE = process.env.E2E_BASE_URL ?? "https://app.172-104-31-54.nip.io";
 const API_BASE = process.env.E2E_API_BASE ?? deriveApiBase(APP_BASE);
+// Chromium's opt-in host-resolver rules do not apply to Playwright's
+// APIRequestContext. Local pinned-RP runs can therefore keep browser traffic on
+// the HTTPS proxy while sending read-after-write assertions straight to the
+// loopback API.
+const REQUEST_API_BASE = process.env.E2E_REQUEST_API_BASE ?? API_BASE;
 
 // Strings whose appearance in a console error or the UI means the passkey /
 // signed-order path is broken (the exact failure class this test guards).
@@ -123,8 +128,8 @@ async function pickMarkets(
   request: APIRequestContext,
 ): Promise<{ priced?: MarketSummary; nullPrice?: MarketSummary }> {
   const [summary, pricesResp] = await Promise.all([
-    getJson<MarketSummary[]>(request, `${API_BASE}/v1/markets/summary`),
-    getJson<PricesResponse>(request, `${API_BASE}/v1/markets/prices`),
+    getJson<MarketSummary[]>(request, `${REQUEST_API_BASE}/v1/markets/summary`),
+    getJson<PricesResponse>(request, `${REQUEST_API_BASE}/v1/markets/prices`),
   ]);
   // The UI derives its indicative from the live `/v1/markets/prices` map (a
   // never-traded market is simply absent), so classify against that map — not
@@ -330,7 +335,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   // 7. Confirm the reconnected account has its demo balance (capped $5k).
   const pf0 = await getJson<Portfolio>(
     request,
-    `${API_BASE}/v1/accounts/${accountId}/portfolio`,
+    `${REQUEST_API_BASE}/v1/accounts/${accountId}/portfolio`,
     readToken!,
   );
   const balance0 = BigInt(pf0.balance_nanos);
@@ -413,17 +418,17 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     const [orders, fills, pf] = await Promise.all([
       getJson<unknown[]>(
         request,
-        `${API_BASE}/v1/accounts/${accountId}/orders`,
+        `${REQUEST_API_BASE}/v1/accounts/${accountId}/orders`,
         readToken!,
       ),
       getJson<unknown[]>(
         request,
-        `${API_BASE}/v1/accounts/${accountId}/fills?limit=10`,
+        `${REQUEST_API_BASE}/v1/accounts/${accountId}/fills?limit=10`,
         readToken!,
       ),
       getJson<Portfolio>(
         request,
-        `${API_BASE}/v1/accounts/${accountId}/portfolio`,
+        `${REQUEST_API_BASE}/v1/accounts/${accountId}/portfolio`,
         readToken!,
       ),
     ]);
@@ -477,7 +482,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   await expect(async () => {
     const orders = await getJson<PendingOrder[]>(
       request,
-      `${API_BASE}/v1/accounts/${accountId}/orders`,
+      `${REQUEST_API_BASE}/v1/accounts/${accountId}/orders`,
       readToken!,
     );
     const resting = orders.find(
@@ -517,7 +522,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   await expect(async () => {
     const orders = await getJson<PendingOrder[]>(
       request,
-      `${API_BASE}/v1/accounts/${accountId}/orders`,
+      `${REQUEST_API_BASE}/v1/accounts/${accountId}/orders`,
       readToken!,
     );
     expect(
