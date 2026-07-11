@@ -71,10 +71,19 @@ export function WithdrawalEtas({ accountId }: { accountId: number }) {
     );
   }
 
-  if (rows.length === 0) return null;
+  return <WithdrawalStatusPanel rows={rows} nowMs={nowMs} />;
+}
 
+export function WithdrawalStatusPanel({
+  rows,
+  nowMs,
+}: {
+  rows: readonly BridgeWithdrawal[];
+  nowMs: number;
+}) {
   return (
     <section
+      aria-labelledby="normal-withdrawals-title"
       style={{
         background: "var(--surface-1)",
         border: "1px solid var(--border-1)",
@@ -94,19 +103,49 @@ export function WithdrawalEtas({ accountId }: { accountId: number }) {
           gap: 12,
         }}
       >
-        <span className="eyebrow">Pending withdrawals</span>
-        <span className="text-annotation">
-          {q.isPending ? "checking bridge status" : `${rows.length} pending`}
+        <span id="normal-withdrawals-title" className="eyebrow">
+          Normal withdrawals
         </span>
+        <span className="text-annotation">{rows.length} active</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        {rows.map((withdrawal) => (
-          <WithdrawalRow
-            key={withdrawal.withdrawal_id}
-            withdrawal={withdrawal}
-            nowMs={nowMs}
-          />
-        ))}
+      {rows.length === 0 ? (
+        <div
+          style={{
+            padding: "12px 16px",
+            color: "var(--fg-3)",
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+          }}
+        >
+          No active withdrawal leaves.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {rows.map((withdrawal) => (
+            <WithdrawalRow
+              key={withdrawal.withdrawal_id}
+              withdrawal={withdrawal}
+              nowMs={nowMs}
+            />
+          ))}
+        </div>
+      )}
+      <div
+        style={{
+          padding: "10px 16px",
+          borderTop: "1px solid var(--border-1)",
+          background: "var(--bg-2)",
+          color: "var(--fg-4)",
+          fontFamily: "var(--font-sans)",
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        Status only on this private devnet. New withdrawal requests are not
+        enabled in the web app: the signed API is service-gated and currently
+        creates a Sybil withdrawal leaf and debits available cash, but does not
+        by itself release L1 funds. The proof-backed vault claim path is still
+        incomplete.
       </div>
     </section>
   );
