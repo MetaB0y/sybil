@@ -31,6 +31,8 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     bool public paused;
     bool public escapeModeActive;
     uint64 public escapeModeActivatedAt;
+    bytes32 public escapeStateRoot;
+    uint64 public escapeHeight;
 
     uint64 public depositCount;
     bytes32 public currentDepositRoot;
@@ -111,8 +113,11 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     error WithdrawalFinalizedError(bytes32 nullifier);
     error EscapeModeInactive();
     error EscapeModeAlreadyActive();
-    error EscapeClaimStaleRoot(bytes32 providedRoot, bytes32 latestRoot);
-    error EscapeClaimHeightMismatch(uint64 providedHeight, uint64 latestHeight);
+    error EscapeStateRootUnavailable();
+    error DepositsDisabledInEscapeMode();
+    error WithdrawalsDisabledInEscapeMode();
+    error EscapeClaimStaleRoot(bytes32 providedRoot, bytes32 frozenRoot);
+    error EscapeClaimHeightMismatch(uint64 providedHeight, uint64 frozenHeight);
     error EscapeNullifierMismatch(bytes32 providedNullifier, bytes32 expectedNullifier);
     error EscapeNullifierAlreadyUsed(bytes32 nullifier);
     error AmountZero();
@@ -161,6 +166,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         bytes32 sybilAccountKey
     ) external {
         if (paused) revert ContractPaused();
+        if (escapeModeActive) revert DepositsDisabledInEscapeMode();
         if (amount == 0) revert AmountZero();
 
         if (!token.transferFrom(msg.sender, address(this), amount)) revert TransferFailed();
@@ -182,6 +188,7 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         bytes calldata proof
     ) external returns (bytes32 nullifier) {
         if (paused) revert ContractPaused();
+        if (escapeModeActive) revert WithdrawalsDisabledInEscapeMode();
         // OL-3: this entrypoint serves normal withdrawal-leaf claims only. The
         // claimKind is bound into the proof public-input hash, so accepting a
         // non-normal kind here could dispatch it through the wrong verifier.
@@ -230,7 +237,9 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     function finalizeWithdrawal(
         bytes32 nullifier
     ) external {
-        if (paused) revert ContractPaused();
+        // A queued withdrawal was already debited from the account state used
+        // by escape. Once escape activates, pause must not strand that value.
+        if (paused && !escapeModeActive) revert ContractPaused();
 
         QueuedWithdrawal storage queued = withdrawals[nullifier];
         if (queued.nullifier == bytes32(0)) revert UnknownWithdrawal(nullifier);
@@ -256,13 +265,13 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         // SYB-96 PAUSE EXCEPTION: escape deliberately bypasses BOTH `paused`
         // and the normal withdrawal delay. A future pause refactor must not
         // silently re-gate this operator-disappearance recovery path.
-        bytes32 latestRoot = settlement.latestStateRoot();
-        if (inputs.stateRoot != latestRoot) {
-            revert EscapeClaimStaleRoot(inputs.stateRoot, latestRoot);
+        bytes32 frozenRoot = escapeStateRoot;
+        if (inputs.stateRoot != frozenRoot) {
+            revert EscapeClaimStaleRoot(inputs.stateRoot, frozenRoot);
         }
-        uint64 latestHeight = settlement.latestHeight();
-        if (inputs.height != latestHeight) {
-            revert EscapeClaimHeightMismatch(inputs.height, latestHeight);
+        uint64 frozenHeight = escapeHeight;
+        if (inputs.height != frozenHeight) {
+            revert EscapeClaimHeightMismatch(inputs.height, frozenHeight);
         }
 
         bytes32 expectedNullifier = keccak256(
@@ -295,6 +304,9 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
         bytes32 nullifier,
         string calldata reason
     ) external onlyAdmin {
+        // Cancellation expects the sequencer to refund the debit. After escape
+        // freezes state, that refund cannot enter the payable escape root.
+        if (escapeModeActive) revert WithdrawalsDisabledInEscapeMode();
         QueuedWithdrawal storage queued = withdrawals[nullifier];
         if (queued.nullifier == bytes32(0)) revert UnknownWithdrawal(nullifier);
         if (queued.finalized) revert WithdrawalFinalizedError(nullifier);
@@ -317,22 +329,25 @@ contract SybilVault is SybilAccessControl, ISybilVaultDepositRoots {
     function activateEscapeMode() external {
         if (escapeModeActive) revert EscapeModeAlreadyActive();
         // Escape mode signals operator disappearance. Liveness is measured from
-        // the last accepted root, but before any root is accepted there is no
-        // verifiedAt to measure from. Falling back to the vault deployment time
-        // means deposits made before the operator ever produced a first root
-        // are not trapped: if no root arrives within escapeTimeout of
-        // deployment, the mode still becomes activatable so governance and
-        // timeout-driven recovery paths can proceed.
+        // the last accepted root, or from deployment before the first root.
         uint64 latestVerifiedAt = settlement.latestRootVerifiedAt();
         uint64 livenessReference = latestVerifiedAt == 0 ? deployedAt : latestVerifiedAt;
         if (block.timestamp <= livenessReference + escapeTimeout) {
             revert EscapeModeInactive();
         }
+
+        // Every escape claim must value the same contemporaneous state. Freeze
+        // the nonzero settlement head here rather than trusting settlement to
+        // stop advancing after escape activation.
+        bytes32 latestRoot = settlement.latestStateRoot();
+        if (latestRoot == bytes32(0)) revert EscapeStateRootUnavailable();
+        uint64 latestHeight = settlement.latestHeight();
+
+        escapeStateRoot = latestRoot;
+        escapeHeight = latestHeight;
         escapeModeActive = true;
         escapeModeActivatedAt = uint64(block.timestamp);
-        emit EscapeModeActivated(
-            settlement.latestHeight(), settlement.latestStateRoot(), escapeModeActivatedAt
-        );
+        emit EscapeModeActivated(latestHeight, latestRoot, escapeModeActivatedAt);
     }
 
     function pause() external onlyAdmin {

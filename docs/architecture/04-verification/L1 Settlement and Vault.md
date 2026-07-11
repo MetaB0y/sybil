@@ -43,7 +43,8 @@ qMDB proofs. Those rules execute in [[ZK Integration Path|the guest]] over a
   commitment, and L1 deposit checkpoint.
 - Normal withdrawal claims come from committed withdrawal leaves, not a stale
   account balance.
-- Escape pays a conservative cash floor at the latest accepted root. It does
+- Escape pays a conservative cash floor at the settlement head frozen when
+  escape mode activates. It does
   not unwind orders or promise future market-resolution proceeds.
 - A generic OpenVM proof is insufficient: adapters pin the intended executable
   and VM commitments from [current protocol pins](../../protocol-pins.md).
@@ -102,8 +103,9 @@ Normal withdrawal is sequencer-cooperative:
 2. A proof against an accepted root authorizes `requestWithdrawal`.
 3. The vault consumes the root-independent nullifier and queues the transfer.
 4. Anyone may finalize after `withdrawalDelay`.
-5. Cancellation before `executableAt`, or confirmed L1 expiry, refunds the
-   exact debited nanos once; finalization retires the leaf without refund.
+5. Before escape activation, cancellation before `executableAt`, or confirmed
+   L1 expiry, refunds the exact debited nanos once; finalization retires the
+   leaf without refund.
 
 The contract queue, sequencer leaf lifecycle, refund/finalization replay rules,
 and verifier sidecar transition are implemented. A dedicated production-grade
@@ -113,15 +115,21 @@ not authorize vault release.
 
 ### Emergency escape
 
-Anyone may call `activateEscapeMode` after:
+After at least one nonzero state root has been accepted, anyone may call
+`activateEscapeMode` once:
 
 ```text
 block.timestamp > livenessReference + escapeTimeout
 ```
 
-The liveness reference is the latest accepted root time, or vault deployment
-time before the first root. Escape uses a separately pinned verifier and the
-latest accepted root/height. The guest proves:
+The liveness reference is the latest accepted root time. Activation stores that
+root and height permanently for escape claims; later settlement roots cannot
+change them. A pre-first-root activation is rejected because there is no
+mark-to-market state to prove. Deposits and new normal withdrawal requests are
+rejected after activation. Already queued withdrawals cannot be cancelled and
+may finalize even while the vault is paused, because their amounts were already
+debited from the frozen account state. Escape uses a separately pinned verifier.
+The guest proves:
 
 - ownership through the account's committed active P256/WebAuthn key set;
 - inclusion of the account and every referenced market leaf;
@@ -151,7 +159,7 @@ granular roles in early design drafts.
 | Action | Authority / delay |
 |---|---|
 | Pause/unpause either contract | Admin, immediate |
-| Cancel a queued vault withdrawal before execution | Admin, immediate |
+| Cancel a queued vault withdrawal before execution and escape activation | Admin, immediate |
 | Activate escape after timeout | Anyone |
 | Rotate normal/escape verifier, vault, delays, or admin | Exact proposal → `adminActionDelay` → execute |
 | Cancel a pending proposal | Admin before execution |

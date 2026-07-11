@@ -38,8 +38,8 @@ The current implementation is already strongly shaped toward A:
 - `MarketSnapshot.last_clearing_prices` is in the canonical `market/` leaf (`crates/sybil-verifier/src/types.rs:455-466`; `snapshot_schema.rs:57-67`). Stage 1a therefore landed, rather than remaining a plan.
 - The canonical transition witness is version 9 (`crates/sybil-verifier/src/witness_schema.rs:28`). The account leaf contains `balance`, `total_deposited`, positions, event digest, and key digest, but **not `total_withdrawn`** (`types.rs:432-444`; `snapshot_schema.rs:28-35`).
 - The escape guest is a separate OpenVM program that deserializes `EscapeClaimGuestInput`, calls the library, and reveals the 32-byte hash (`zk/openvm-escape-guest/src/main.rs:1-26`). Its executable/VM commitments are independent of the transition guest.
-- `SybilVault.escapeClaim` currently requires `settlement.latestStateRoot()` and `latestHeight()`, recomputes the root-bound nullifier, consumes the shared `nullifierUsed` entry, verifies the escape proof, and pays immediately while bypassing pause (`contracts/src/SybilVault.sol:250-292`).
-- The vault does **not** freeze that root at activation. `activateEscapeMode` emits the then-latest root but stores only activation time (`SybilVault.sol:317-335`), while `SybilSettlement.submitStateRoot` can continue advancing unless separately paused (`contracts/src/SybilSettlement.sol:108-176`). This leaves root churn and a second root-derived nullifier possible after activation.
+- `SybilVault.activateEscapeMode` stores a nonzero `escapeStateRoot` and `escapeHeight`; `escapeClaim` requires that frozen head, recomputes the root-bound nullifier, consumes the shared `nullifierUsed` entry, verifies the escape proof, and pays immediately while bypassing pause.
+- `SybilSettlement.submitStateRoot` can continue advancing after activation without changing the vault's frozen escape head. Deposits and new normal withdrawal requests are closed once escape activates. Requests queued beforehand cannot be cancelled and may finalize even while paused.
 - Normal `WithdrawalPublicInputs` do not reveal `accountId` (`contracts/src/SybilTypes.sol:32-40`), so the vault cannot currently maintain a per-account ledger spanning normal withdrawals and escape.
 - `sybil-custody` already has a versioned own-opening bundle containing account, reservation, market proofs, and active keys (`crates/sybil-custody/src/format.rs:5-21`), and it rejects a snapshot that is not the settlement head when assembling an A claim (`crates/sybil-custody/src/claim.rs:44-71`).
 - Current DA is the plaintext canonical witness. `payload_root` hashes the domain, length, and plaintext bytes; `da_commitment` additionally binds height, state root, witness root, payload length, and provider-reference hash (`crates/sybil-zk/src/lib.rs:439-484`). The file publisher writes those plaintext bytes and a version-1 manifest (`crates/sybil-prover/src/da.rs:124-168,255-284`).
@@ -54,12 +54,12 @@ A pays all claimants from one contemporaneous state, so it avoids personal-peak 
 2. Reject activation before a nonzero accepted root exists, or define a separate pre-first-root deposit refund. A mark-to-market proof cannot target the zero root.
 3. In `escapeClaim`, compare to the stored escape root/height, not the settlement's moving `latest*` values.
 4. Keep the existing nullifier domain `keccak256(domain, chain_id, vault, account_id, state_root)`. Once the root is frozen, it is one nullifier per account for the only payable root. The shared `nullifierUsed` map remains sufficient because normal and escape domains are distinct.
-5. Reject new `requestWithdrawal` calls after escape activation. Already queued normal withdrawals may still finalize because their withdrawal leaf was created only after the sequencer debited the account; allowing a new historical-root request after the escape root freezes would reopen stale-leaf overlap.
-6. Add tests for a root accepted after activation, repeated account claims, pending/finalized normal withdrawal overlap, post-activation normal requests, pause bypass, and zero-root activation.
+5. Reject deposits and new `requestWithdrawal` calls after escape activation. Already queued normal withdrawals must remain finalizable even while paused, and cannot be cancelled, because their withdrawal leaf was created only after the sequencer debited the account. Allowing cancellation would strand that debit outside the frozen payable state; allowing a new historical-root request after the escape root freezes would reopen stale-leaf overlap.
+6. Add tests for a root accepted after activation, repeated account claims, pending/finalized normal withdrawal overlap, post-activation deposits and normal requests, cancellation closure, pause bypass, and zero-root activation.
 
 Freezing in the vault is preferable to assuming the settlement is paused. It makes the payout state explicit and prevents a claimant who was paid at root N from acquiring a fresh root-bound nullifier at N+1. An additional `escapeClaimed[accountId]` mapping is harmless defense in depth but is not required if the stored root can never change.
 
-No all-roots registry scan or per-root payout sum is needed for A. Existing normal withdrawals are already debited from account state when their leaf is created (`crates/matching-sequencer/src/sequencer/bridge_ops.rs:328-381`), which is why an already queued transfer can coexist with the frozen-root valuation. Closing new normal requests at activation and testing the overlap remain necessary because the queue and escape are two vault payment paths.
+No all-roots registry scan or per-root payout sum is needed for A. Existing normal withdrawals are already debited from account state when their leaf is created (`crates/matching-sequencer/src/sequencer/bridge_ops.rs:328-381`), which is why an already queued transfer can coexist with the frozen-root valuation. Closing deposits, cancellations, and new normal requests at activation while preserving queued finalization keeps later vault actions from creating value absent from, or stranding value already debited in, the frozen state.
 
 ### Guest, state schema, and wire work
 
@@ -97,9 +97,9 @@ This is an ongoing operational subsystem. Object storage alone is not a self-cus
 
 ### Existing work retained or made unnecessary
 
-A uses essentially all built SYB-32 work: market-leaf prices and transition constraints (Stage 1a), mark-to-market valuation and market proof completeness (Stage 2), the separate escape guest, vault verifier, custody opening format, proving/ABI path, and latest-root check.
+A uses essentially all built SYB-32 work: market-leaf prices and transition constraints (Stage 1a), mark-to-market valuation and market proof completeness (Stage 2), the separate escape guest, vault verifier, custody opening format, proving/ABI path, and frozen-root check.
 
-That is not a reason by itself to choose A. The independently retained DA publisher, encryption/key release, frozen-root contract state, monitoring, and drills are new work. Full-state reconstruction/import for operator handoff remains descoped and should not be used to inflate A's benefit.
+That is not a reason by itself to choose A. The independently retained DA publisher, encryption/key release, monitoring, and drills remain new work. Full-state reconstruction/import for operator handoff remains descoped and should not be used to inflate A's benefit.
 
 For individual escape, Form P (making the escape guest itself ingest the full DA payload) is unnecessary. The user can authenticate/decrypt the snapshot outside the guest, derive Form-L openings, and prove the existing small statement. This keeps the claim prover cost proportional to one account rather than the exchange snapshot.
 
@@ -293,7 +293,7 @@ For Option B, system DA encryption is moot. Only the user's small local account-
 Adopt A with the smallest availability shape that actually satisfies it:
 
 1. Freeze the settlement head in `SybilVault` when escape activates.
-2. Close new normal-withdrawal requests on activation while allowing already debited/queued withdrawals to finalize.
+2. Close deposits, withdrawal cancellation, and new normal-withdrawal requests on activation while allowing already debited/queued withdrawals to finalize despite pause.
 3. Retain one encrypted final-state snapshot per accepted hourly epoch at independent providers; keep one predecessor during overlap and the frozen snapshot for the full claim lifetime. While v9 witnesses remain full, retain the epoch's final canonical witness so the existing plaintext `da_commitment` already binds it; if proving later moves to deltas, add and bind a separate epoch snapshot artifact.
 4. Bind plaintext as today and bind encrypted provider metadata before proving.
 5. Use non-operator threshold release of the epoch key; do not rely on an operator-only key.
