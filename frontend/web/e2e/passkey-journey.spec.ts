@@ -62,6 +62,15 @@ interface PendingOrder {
   limit_price_nanos: number | string;
 }
 
+interface SigningKeyResponse {
+  public_key_hex: string;
+  label?: string | null;
+}
+
+function normalizePublicKeyHex(value: string): string {
+  return value.replace(/^0x/i, "").toLowerCase();
+}
+
 /**
  * Attach a Chromium virtual authenticator (ctap2 / internal transport, resident
  * key + user verification, presence auto-simulated) so `navigator.credentials`
@@ -208,6 +217,13 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   );
   expect(accountIdRaw, "account id should be persisted").toBeTruthy();
   const accountId = Number(accountIdRaw);
+  const originalPublicKeyHex = await page.evaluate(() =>
+    localStorage.getItem("sybil:auth:pubkey_hex"),
+  );
+  expect(
+    originalPublicKeyHex,
+    "primary passkey public key should be persisted",
+  ).toMatch(/^(02|03)[0-9a-f]{64}$/i);
 
   // 4. Register a second passkey from Settings using a distinct virtual
   //    authenticator, modeling another device/provider. The backup device must
@@ -332,7 +348,66 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     /^sybk_/,
   );
 
-  // 7. Confirm the reconnected account has its demo balance (capped $5k).
+  // 7. Complete recovery from the backup session: the connected backup key is
+  //    deliberately not revocable, while the original browser passkey is.
+  //    Revoking the original must be signed by the backup and leave exactly the
+  //    tested backup credential active before we rely on it for trading.
+  const recoveredPublicKeyHex = await page.evaluate(() =>
+    localStorage.getItem("sybil:auth:pubkey_hex"),
+  );
+  expect(
+    recoveredPublicKeyHex,
+    "backup passkey public key should be persisted",
+  ).toMatch(/^(02|03)[0-9a-f]{64}$/i);
+  expect(normalizePublicKeyHex(recoveredPublicKeyHex!)).not.toBe(
+    normalizePublicKeyHex(originalPublicKeyHex!),
+  );
+
+  await page.goto("/settings");
+  const backupKeyRow = page.locator(".settings-row", {
+    hasText: "backup passkey · webauthn",
+  });
+  const originalKeyRow = page.locator(".settings-row", {
+    hasText: "browser passkey · webauthn",
+  });
+  await expect(backupKeyRow).toBeVisible({ timeout: 20_000 });
+  await expect(originalKeyRow).toBeVisible({ timeout: 20_000 });
+  await expect(
+    backupKeyRow.getByRole("button", { name: "Revoke" }),
+  ).toBeDisabled();
+  await expect(
+    backupKeyRow.getByRole("button", { name: "Revoke" }),
+  ).toHaveAttribute(
+    "title",
+    "Reconnect with another registered key before revoking this one",
+  );
+
+  const revokeResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/v1/accounts/${accountId}/keys/revoke`) &&
+      response.request().method() === "POST",
+  );
+  await originalKeyRow.getByRole("button", { name: "Revoke" }).click();
+  const revokeResponse = await revokeResponsePromise;
+  expect(
+    revokeResponse.ok(),
+    `backup-signed key revocation should succeed: HTTP ${revokeResponse.status()}`,
+  ).toBeTruthy();
+  await expect(originalKeyRow).toHaveCount(0, { timeout: 10_000 });
+  await expect(backupKeyRow).toBeVisible();
+
+  const remainingKeys = await getJson<SigningKeyResponse[]>(
+    request,
+    `${REQUEST_API_BASE}/v1/accounts/${accountId}/keys`,
+    readToken!,
+  );
+  expect(remainingKeys).toHaveLength(1);
+  expect(remainingKeys[0]?.label).toBe("backup passkey");
+  expect(normalizePublicKeyHex(remainingKeys[0]!.public_key_hex)).toBe(
+    normalizePublicKeyHex(recoveredPublicKeyHex!),
+  );
+
+  // 8. Confirm the reconnected account has its demo balance (capped $5k).
   const pf0 = await getJson<Portfolio>(
     request,
     `${REQUEST_API_BASE}/v1/accounts/${accountId}/portfolio`,
@@ -344,7 +419,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     "new passkey account should be funded with demo balance",
   ).toBeGreaterThan(0n);
 
-  // 8. Open a market that has a price.
+  // 9. Open a market that has a price.
   const { priced, nullPrice } = await pickMarkets(request);
   expect(priced, "need an active market with a price").toBeTruthy();
   expect(
@@ -365,7 +440,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   // seed-the-book copy) — sanity that we picked a live market.
   await expect(orderDialog).toContainText(/est\. fill · next batch/i);
 
-  // 9. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
+  // 10. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
   //    Clicking the CTA runs a WebAuthn assertion → POST /v1/orders/signed.
   const cta = orderDialog.getByRole("button", {
     name: /review buy|queue buy/i,
@@ -375,7 +450,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   const confirm = orderDialog.getByRole("button", { name: /confirm buy/i });
   if (await confirm.isVisible().catch(() => false)) await confirm.click();
 
-  // 10. Assert the signed order was ACCEPTED — and fail loudly, with the exact
+  // 11. Assert the signed order was ACCEPTED — and fail loudly, with the exact
   //    server error, if the passkey assertion was rejected (the rp_id/origin
   //    regression class). Race the accepted receipt against the error alert.
   const acceptedStatus = orderDialog
@@ -411,7 +486,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   }
   await expect(acceptedStatus).toBeVisible();
 
-  // 11. Within ~2 blocks (10s each), the order must leave a trace: a pending
+  // 12. Within ~2 blocks (10s each), the order must leave a trace: a pending
   //    order, a fill, a position, or a reserved-balance decrease. Any of these
   //    proves the signature verified server-side.
   await expect(async () => {
@@ -442,7 +517,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     ).toBeTruthy();
   }).toPass({ timeout: 30_000, intervals: [1_000, 2_000, 3_000] });
 
-  // 12. Create a deliberately non-crossing GTC order on the never-traded
+  // 13. Create a deliberately non-crossing GTC order on the never-traded
   //     market. The first priced order above may fill immediately, so it cannot
   //     provide deterministic cancel coverage. A 1c BUY YES on a null-price
   //     market stays resting and gives the UI an authoritative order id to
@@ -498,7 +573,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
   expect(cancelOrderId).toBeDefined();
 
-  // 13. Cancel through the real portfolio UI. The remaining backup passkey
+  // 14. Cancel through the real portfolio UI. The remaining backup passkey
   //     signs `/v1/orders/cancel/signed`; the row should disappear immediately
   //     from the shared cache, then the API must confirm it is no longer open.
   await page.goto("/portfolio");

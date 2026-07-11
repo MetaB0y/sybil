@@ -256,8 +256,16 @@ function SigningKeysSection({
   });
 
   const revoke = useMutation({
-    mutationFn: async (targetPubkeyHex: string) =>
-      revokeSigningKey({ accountId, publicKeyHex, targetPubkeyHex }),
+    mutationFn: async (target: {
+      publicKeyHex: string;
+      authScheme: AccountAuthScheme;
+    }) =>
+      revokeSigningKey({
+        accountId,
+        publicKeyHex,
+        targetPubkeyHex: target.publicKeyHex,
+        targetAuthScheme: target.authScheme,
+      }),
     onSuccess: () => {
       setError(null);
       void invalidate();
@@ -266,11 +274,8 @@ function SigningKeysSection({
   });
 
   const list = keys.data ?? [];
-  const isLastKey = list.length <= 1;
   const revokingTarget =
-    revoke.isPending && typeof revoke.variables === "string"
-      ? revoke.variables
-      : null;
+    revoke.isPending && revoke.variables ? revoke.variables.publicKeyHex : null;
 
   return (
     <Panel>
@@ -282,6 +287,11 @@ function SigningKeysSection({
           authority — this is the only way to delegate trading (read API keys
           below cannot trade). The new key&apos;s private JWK is shown once;
           save it then.
+        </p>
+        <p style={{ ...bodyText, margin: 0 }}>
+          To retire the key connected to this session, disconnect and sign in
+          with a different registered key first. The current session key cannot
+          revoke itself here.
         </p>
 
         <div
@@ -298,18 +308,28 @@ function SigningKeysSection({
           ) : list.length === 0 ? (
             <EmptyRow>no signing keys</EmptyRow>
           ) : (
-            list.map((k) => (
-              <SigningKeyRow
-                key={k.public_key_hex}
-                keyItem={k}
-                isSelf={
-                  k.public_key_hex.toLowerCase() === publicKeyHex.toLowerCase()
-                }
-                canRevoke={!isLastKey}
-                revoking={revokingTarget === k.public_key_hex}
-                onRevoke={() => revoke.mutate(k.public_key_hex)}
-              />
-            ))
+            list.map((k) => {
+              const isSelf = signingPublicKeysEqual(
+                k.public_key_hex,
+                publicKeyHex,
+              );
+              return (
+                <SigningKeyRow
+                  key={k.public_key_hex}
+                  keyItem={k}
+                  isSelf={isSelf}
+                  revokePolicy={signingKeyRevocationPolicy(list.length, isSelf)}
+                  revoking={revokingTarget === k.public_key_hex}
+                  onRevoke={() =>
+                    revoke.mutate({
+                      publicKeyHex: k.public_key_hex,
+                      authScheme:
+                        k.auth_scheme === "webauthn" ? "webauthn" : "raw_p256",
+                    })
+                  }
+                />
+              );
+            })
           )}
         </div>
 
@@ -459,13 +479,13 @@ function backupPasskeyError(cause: unknown): string {
 function SigningKeyRow({
   keyItem,
   isSelf,
-  canRevoke,
+  revokePolicy,
   revoking,
   onRevoke,
 }: {
   keyItem: SigningKey;
   isSelf: boolean;
-  canRevoke: boolean;
+  revokePolicy: SigningKeyRevocationPolicy;
   revoking: boolean;
   onRevoke: () => void;
 }) {
@@ -508,19 +528,50 @@ function SigningKeyRow({
         <button
           type="button"
           onClick={onRevoke}
-          disabled={!canRevoke || revoking}
-          title={
-            canRevoke
-              ? "Revoke this key"
-              : "Cannot revoke the last remaining key"
-          }
-          style={dangerButtonStyle(!canRevoke || revoking)}
+          disabled={!revokePolicy.canRevoke || revoking}
+          title={revokePolicy.title}
+          style={dangerButtonStyle(!revokePolicy.canRevoke || revoking)}
         >
           {revoking ? "Revoking…" : "Revoke"}
         </button>
       </div>
     </div>
   );
+}
+
+export type SigningKeyRevocationPolicy = {
+  canRevoke: boolean;
+  title: string;
+};
+
+export function signingPublicKeysEqual(left: string, right: string): boolean {
+  const normalize = (value: string) => value.replace(/^0x/i, "").toLowerCase();
+  return normalize(left) === normalize(right);
+}
+
+/**
+ * Keep the browser session usable while rotating signing keys. The backend
+ * still permits a key to revoke itself when another key remains, but the web
+ * UI requires users to prove the replacement works by reconnecting with it
+ * first. The backend's last-key protection remains a separate final guard.
+ */
+export function signingKeyRevocationPolicy(
+  activeKeyCount: number,
+  isCurrentSessionKey: boolean,
+): SigningKeyRevocationPolicy {
+  if (activeKeyCount <= 1) {
+    return {
+      canRevoke: false,
+      title: "Cannot revoke the last remaining key",
+    };
+  }
+  if (isCurrentSessionKey) {
+    return {
+      canRevoke: false,
+      title: "Reconnect with another registered key before revoking this one",
+    };
+  }
+  return { canRevoke: true, title: "Revoke this key" };
 }
 
 // --- Section 3: Read API keys ---------------------------------------------

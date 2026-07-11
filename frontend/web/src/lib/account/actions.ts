@@ -114,6 +114,7 @@ export async function createDemoAccount(
       publicKeyHex: bootstrapPublicKeyHex,
       authScheme: "raw_p256",
       targetPubkeyHex: bootstrapPublicKeyHex,
+      targetAuthScheme: "raw_p256",
     });
     clearKeyHandle(accountId);
     const readKey = await createApiKey({
