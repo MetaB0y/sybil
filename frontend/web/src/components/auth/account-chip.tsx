@@ -131,8 +131,10 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
+            // Match the trigger's width exactly: the shared relative container
+            // shrink-wraps the chip, so pinning both edges sizes the menu to it.
+            left: 0,
             right: 0,
-            minWidth: 200,
             background: "var(--surface-1)",
             border: "1px solid var(--border-1)",
             borderRadius: 8,

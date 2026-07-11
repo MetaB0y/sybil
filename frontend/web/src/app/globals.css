@@ -352,6 +352,11 @@ textarea {
   gap: var(--space-3);
   min-width: 0;
   flex-shrink: 0;
+  /* Hug the right edge. The search caps at 600px, so on wide screens the
+     leftover row space would otherwise pile up to the RIGHT of these controls,
+     leaving the connect chip floating off the corner. `auto` absorbs that slack
+     into the gap before the controls instead, pinning them to the edge. */
+  margin-left: auto;
 }
 
 /* The desktop search fills the middle of the bar — it grows into whatever space
