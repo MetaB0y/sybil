@@ -54,6 +54,13 @@ pub struct NativeMarketTemplate {
     /// Binary-market quote range. Categorical templates use per-outcome ranges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote_range: Option<NativeQuoteRange>,
+    /// Optional event/group card image (logo or hero). Becomes each child
+    /// market's `event_image_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_image_url: Option<String>,
+    /// Optional event/group icon (frontend `onError` fallback for the image).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_icon_url: Option<String>,
 }
 
 /// Template outcome shape.
@@ -66,6 +73,17 @@ pub enum NativeOutcomeSet {
     /// Categorical/multi-outcome template. Each enabled outcome becomes one
     /// binary market, and all enabled outcomes are placed in one MarketGroup.
     Categorical { outcomes: Vec<NativeOutcome> },
+    /// Nested threshold ladder. Each enabled rung becomes one binary child
+    /// market ("value {direction} {threshold} {unit}"), and all enabled rungs
+    /// are placed in one MarketGroup. Unlike `Categorical`, the rungs are NOT
+    /// mutually exclusive, so their initial prices are intentionally not summed.
+    Threshold {
+        /// `"above"` (bigger-is-the-question) or `"below"` (e.g. price ladders).
+        direction: String,
+        /// Display unit, e.g. `"tokens"`, `"hours"`, `"USD/MTok"`.
+        unit: String,
+        outcomes: Vec<NativeThresholdRung>,
+    },
 }
 
 /// One categorical outcome.
@@ -79,6 +97,29 @@ pub struct NativeOutcome {
     pub enabled: bool,
     /// YES-price quote range used to seed the MM for this child market.
     pub quote_range: NativeQuoteRange,
+    /// Optional per-child market image (e.g. the company logo). Becomes this
+    /// outcome's `market_image_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+}
+
+/// One rung of a threshold ladder. Each enabled rung expands to a binary child
+/// market grouped under the parent template.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NativeThresholdRung {
+    /// Stable rung id within the parent template.
+    pub id: String,
+    /// Display label, e.g. "≥ 8 hours" or "≤ $5 / MTok".
+    pub title: String,
+    /// Per-rung enablement.
+    pub enabled: bool,
+    /// Numeric rung threshold, expressed in the ladder's `unit`.
+    pub threshold: f64,
+    /// YES-price quote range used to seed the MM for this rung's child market.
+    pub quote_range: NativeQuoteRange,
+    /// Optional per-child market image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
 }
 
 /// YES-price quote range used by the native MM bootstrap.
@@ -139,6 +180,12 @@ pub struct NativeMarketSpec {
     /// SYB-48 auto-resolution poller (`api_poll` is fetched + LLM-evaluated;
     /// `manual` is left entirely to operators).
     resolution_source: ResolutionSourceConfig,
+    /// Event/group image, copied from the parent template (shared by siblings).
+    event_image_url: Option<String>,
+    /// Event/group icon fallback, copied from the parent template.
+    event_icon_url: Option<String>,
+    /// Per-child market image (categorical outcome / threshold rung logo).
+    market_image_url: Option<String>,
 }
 
 impl NativeMarketCatalog {
@@ -198,6 +245,12 @@ impl NativeMarketTemplate {
         validate_nonempty("resolution_criteria", &self.resolution_criteria, context)?;
         validate_nonempty("category", &self.category, context)?;
         validate_url("source_url", &self.source_url, context)?;
+        if let Some(u) = &self.event_image_url {
+            validate_url("event_image_url", u, context)?;
+        }
+        if let Some(u) = &self.event_icon_url {
+            validate_url("event_icon_url", u, context)?;
+        }
         let end_time_ms = parse_iso8601_to_ms(&self.end_time)
             .and_then(|ms| u64::try_from(ms).ok())
             .ok_or_else(|| {
@@ -270,6 +323,9 @@ impl NativeMarketTemplate {
                     outcome
                         .quote_range
                         .validate(&format!("{outcome_context} quote_range"))?;
+                    if let Some(u) = &outcome.image_url {
+                        validate_url("image_url", u, &outcome_context)?;
+                    }
                     if outcome.enabled {
                         enabled_count += 1;
                         initial_sum += outcome.quote_range.initial;
@@ -285,6 +341,61 @@ impl NativeMarketTemplate {
                         "{context} enabled categorical initial prices sum to {initial_sum:.4}, above 1.0"
                     )));
                 }
+            }
+            NativeOutcomeSet::Threshold {
+                direction,
+                unit,
+                outcomes,
+            } => {
+                if self.quote_range.is_some() {
+                    return Err(Error::NativeCatalog(format!(
+                        "{context} threshold template must use per-rung quote_range values"
+                    )));
+                }
+                if direction != "above" && direction != "below" {
+                    return Err(Error::NativeCatalog(format!(
+                        "{context} threshold direction must be \"above\" or \"below\""
+                    )));
+                }
+                validate_nonempty("outcome_set.unit", unit, context)?;
+                if outcomes.len() < 2 {
+                    return Err(Error::NativeCatalog(format!(
+                        "{context} threshold template needs at least two rungs"
+                    )));
+                }
+                let mut rung_ids = HashSet::new();
+                let mut enabled_count = 0usize;
+                for (i, rung) in outcomes.iter().enumerate() {
+                    let rung_context = format!("{context} rung #{i} ({:?})", rung.id);
+                    validate_id(&rung.id, &rung_context)?;
+                    if !rung_ids.insert(rung.id.clone()) {
+                        return Err(Error::NativeCatalog(format!(
+                            "{rung_context} duplicates rung id {:?}",
+                            rung.id
+                        )));
+                    }
+                    validate_nonempty("title", &rung.title, &rung_context)?;
+                    if !rung.threshold.is_finite() {
+                        return Err(Error::NativeCatalog(format!(
+                            "{rung_context} threshold must be finite"
+                        )));
+                    }
+                    rung.quote_range
+                        .validate(&format!("{rung_context} quote_range"))?;
+                    if let Some(u) = &rung.image_url {
+                        validate_url("image_url", u, &rung_context)?;
+                    }
+                    if rung.enabled {
+                        enabled_count += 1;
+                    }
+                }
+                if self.enabled && enabled_count < 2 {
+                    return Err(Error::NativeCatalog(format!(
+                        "{context} enabled threshold template needs at least two enabled rungs"
+                    )));
+                }
+                // Rungs are nested/independent: initial prices are intentionally
+                // NOT summed (unlike categorical outcomes, which must sum <= 1).
             }
         }
 
@@ -315,6 +426,9 @@ impl NativeMarketTemplate {
                     source_url: self.source_url.clone(),
                     event_title: self.title.clone(),
                     resolution_source: self.resolution_source.clone(),
+                    event_image_url: self.event_image_url.clone(),
+                    event_icon_url: self.event_icon_url.clone(),
+                    market_image_url: self.event_image_url.clone(),
                 }]
             }
             NativeOutcomeSet::Categorical { outcomes } => {
@@ -341,6 +455,39 @@ impl NativeMarketTemplate {
                         source_url: self.source_url.clone(),
                         event_title: self.title.clone(),
                         resolution_source: self.resolution_source.clone(),
+                        event_image_url: self.event_image_url.clone(),
+                        event_icon_url: self.event_icon_url.clone(),
+                        market_image_url: outcome.image_url.clone(),
+                    })
+                    .collect()
+            }
+            NativeOutcomeSet::Threshold { outcomes, .. } => {
+                let enabled: Vec<_> = outcomes.iter().filter(|rung| rung.enabled).collect();
+                let group_size = enabled.len();
+                let group_key = Some(native_group_key(&self.id));
+                enabled
+                    .into_iter()
+                    .map(|rung| NativeMarketSpec {
+                        template_id: self.id.clone(),
+                        market_key: outcome_market_key(&self.id, &rung.id),
+                        name: format!("{}: {}", self.title, rung.title),
+                        outcome_title: Some(rung.title.clone()),
+                        quote_range: rung.quote_range,
+                        group_key: group_key.clone(),
+                        group_size,
+                        end_time_ms,
+                        description: Some(format!(
+                            "Native threshold market. Units: {}.",
+                            self.units
+                        )),
+                        category: self.category.clone(),
+                        resolution_criteria: self.resolution_criteria.clone(),
+                        source_url: self.source_url.clone(),
+                        event_title: self.title.clone(),
+                        resolution_source: self.resolution_source.clone(),
+                        event_image_url: self.event_image_url.clone(),
+                        event_icon_url: self.event_icon_url.clone(),
+                        market_image_url: rung.image_url.clone(),
                     })
                     .collect()
             }
@@ -421,10 +568,10 @@ impl NativeMarketSpec {
             external_url: Some(self.source_url.clone()),
             event_id: Some(native_group_key(&self.template_id)),
             event_title: Some(self.event_title.clone()),
-            event_image_url: None,
-            event_icon_url: None,
+            event_image_url: self.event_image_url.clone(),
+            event_icon_url: self.event_icon_url.clone(),
             event_end_date_ms: Some(self.end_time_ms),
-            market_image_url: None,
+            market_image_url: self.market_image_url.clone(),
             market_icon_url: None,
             market_end_date_ms: Some(self.end_time_ms),
             category: Some(self.category.clone()),
@@ -493,23 +640,28 @@ mod tests {
     fn checked_in_catalog_is_research_backed() {
         let data = include_str!("../native_markets.json");
         let catalog = NativeMarketCatalog::parse_json(data).unwrap();
-        assert_eq!(catalog.len(), 7);
+        assert_eq!(catalog.len(), 25);
 
-        // 6 of 7 templates enabled; openrouter_top_app stays dark until its
-        // outcome set is re-verified against the live apps board.
+        // Every shipped template is enabled.
         let disabled: Vec<&str> = catalog
             .markets
             .iter()
             .filter(|m| !m.enabled)
             .map(|m| m.id.as_str())
             .collect();
-        assert_eq!(disabled, ["openrouter_top_app_dec_2026"]);
+        assert!(
+            disabled.is_empty(),
+            "unexpected disabled templates: {disabled:?}"
+        );
 
-        // Enabled specs: two categorical groups (5 + 8 children) + four binaries.
+        // Enabled specs: 17 categorical groups + 8 threshold ladders expand to
+        // 127 child markets.
         let specs = catalog.enabled_market_specs();
-        assert_eq!(specs.len(), 17);
+        assert_eq!(specs.len(), 127);
         assert!(specs.iter().all(|s| s.end_time_ms > 0));
         for spec in &specs {
+            // Native provenance: a native child market never carries a
+            // Polymarket condition id (the mirror/native discriminator).
             assert_eq!(spec.metadata_request().polymarket_condition_id, None);
         }
 
@@ -594,6 +746,78 @@ mod tests {
             specs[0].metadata_request().group_item_title.as_deref(),
             Some("A")
         );
+    }
+
+    #[test]
+    fn expands_enabled_threshold_ladder() {
+        let json = r#"{
+            "markets": [{
+                "id": "native_ladder",
+                "enabled": true,
+                "title": "How large will X be?",
+                "outcome_set": {
+                    "type": "threshold",
+                    "direction": "above",
+                    "unit": "tokens",
+                    "outcomes": [
+                        { "id": "ge_2m", "title": "≥ 2M", "enabled": true, "threshold": 2000000, "quote_range": { "min": 0.30, "max": 0.70, "initial": 0.50 } },
+                        { "id": "ge_5m", "title": "≥ 5M", "enabled": true, "threshold": 5000000, "quote_range": { "min": 0.06, "max": 0.30, "initial": 0.15 } },
+                        { "id": "ge_10m", "title": "≥ 10M", "enabled": false, "threshold": 10000000, "quote_range": { "min": 0.02, "max": 0.16, "initial": 0.06 } }
+                    ]
+                },
+                "units": "tokens",
+                "end_time": "2026-12-31T23:59:00Z",
+                "resolution_criteria": "Each rung resolves YES if X is at least the threshold.",
+                "source_url": "https://example.com/x",
+                "category": "AI",
+                "event_image_url": "https://example.com/logo.png",
+                "resolution_source": { "type": "manual", "instructions": "Read the tracker." }
+            }]
+        }"#;
+        let catalog = NativeMarketCatalog::parse_json(json).unwrap();
+        let specs = catalog.enabled_market_specs();
+        // Only the two enabled rungs expand; the disabled rung is skipped.
+        assert_eq!(specs.len(), 2);
+        assert!(specs
+            .iter()
+            .all(|spec| spec.group_key.as_deref() == Some("native:native_ladder")));
+        assert!(specs.iter().all(|spec| spec.group_size == 2));
+        assert_eq!(specs[0].market_key, "native_ladder:ge_2m");
+        let metadata = specs[0].metadata_request();
+        assert_eq!(metadata.group_item_title.as_deref(), Some("\u{2265} 2M"));
+        // Template image flows to every child's event image.
+        assert_eq!(
+            metadata.event_image_url.as_deref(),
+            Some("https://example.com/logo.png")
+        );
+        assert_eq!(metadata.polymarket_condition_id, None);
+    }
+
+    #[test]
+    fn threshold_below_direction_and_bad_direction() {
+        let ok = r#"{
+            "markets": [{
+                "id": "price_ladder", "enabled": true, "title": "How low?",
+                "outcome_set": { "type": "threshold", "direction": "below", "unit": "USD/MTok",
+                    "outcomes": [
+                        { "id": "le_10", "title": "≤ $10", "enabled": true, "threshold": 10, "quote_range": { "min": 0.5, "max": 0.9, "initial": 0.7 } },
+                        { "id": "le_5", "title": "≤ $5", "enabled": true, "threshold": 5, "quote_range": { "min": 0.06, "max": 0.34, "initial": 0.16 } }
+                    ] },
+                "units": "USD/MTok", "end_time": "2026-12-31T23:59:00Z",
+                "resolution_criteria": "Rungs on price.", "source_url": "https://example.com/p",
+                "category": "AI", "resolution_source": { "type": "manual", "instructions": "Read price." }
+            }]
+        }"#;
+        assert_eq!(
+            NativeMarketCatalog::parse_json(ok)
+                .unwrap()
+                .enabled_market_specs()
+                .len(),
+            2
+        );
+        let bad = ok.replace("\"below\"", "\"sideways\"");
+        let err = NativeMarketCatalog::parse_json(&bad).unwrap_err();
+        assert!(err.to_string().contains("direction must be"), "{err}");
     }
 
     #[test]
