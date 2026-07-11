@@ -77,7 +77,7 @@ export function GlobalNav() {
             textTransform: "uppercase",
           }}
         >
-          testnet
+          devnet
         </span>
       </Link>
 
@@ -89,7 +89,7 @@ export function GlobalNav() {
         <DevZoneNav />
       </nav>
 
-      {/* Right side — search + batch pill + (placeholder) account chip */}
+      {/* Right side — search + batch status + account controls. */}
       <div className="global-nav-right">
         <div className="global-nav-search-desktop">
           <Suspense fallback={<NavSearchSkeleton />}>
