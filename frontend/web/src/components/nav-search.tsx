@@ -10,7 +10,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
-import { useMarketsList, type Market } from "@/lib/markets/use-markets";
+import { useMarketsIndex, type IndexMarket } from "@/lib/markets/use-markets";
 import { buildIndexCards } from "@/lib/markets/build-index-cards";
 import {
   selectIndexCards,
@@ -58,11 +58,11 @@ export function NavSearch() {
     setQ(urlQ);
   }
 
-  const { bundle } = useMarketsList();
+  const { bundle } = useMarketsIndex();
   const prices = useStore(selectPricesByMarketId);
   const items = useMemo(
     () => (bundle ? buildIndexCards(bundle) : []),
-    [bundle]
+    [bundle],
   );
 
   const results = useMemo(() => {
@@ -96,7 +96,7 @@ export function NavSearch() {
       close();
       inputRef.current?.blur();
     },
-    [router, searchParams, close]
+    [router, searchParams, close],
   );
 
   const goToItem = useCallback(
@@ -109,7 +109,7 @@ export function NavSearch() {
       close();
       inputRef.current?.blur();
     },
-    [router, close]
+    [router, close],
   );
 
   const onChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -139,7 +139,7 @@ export function NavSearch() {
         }
       }
     },
-    [top, highlight, q, open, goToItem, goToGrid, close]
+    [top, highlight, q, open, goToItem, goToGrid, close],
   );
 
   // `/` focuses search from anywhere — the leading glyph promises it. Ignore
@@ -201,7 +201,9 @@ export function NavSearch() {
           style={dropdownStyle}
         >
           {top.length === 0 ? (
-            <div style={emptyStyle}>no events or markets match “{q.trim()}”</div>
+            <div style={emptyStyle}>
+              no events or markets match “{q.trim()}”
+            </div>
           ) : (
             <>
               {top.map((item, i) => (
@@ -221,7 +223,8 @@ export function NavSearch() {
                 style={footerStyle}
               >
                 <span>
-                  see all {results.length} result{results.length === 1 ? "" : "s"}
+                  see all {results.length} result
+                  {results.length === 1 ? "" : "s"}
                 </span>
                 <span aria-hidden>↵</span>
               </button>
@@ -234,7 +237,9 @@ export function NavSearch() {
 }
 
 export function NavSearchSkeleton() {
-  return <div className="nav-search-shell" style={searchShellStyle} aria-hidden />;
+  return (
+    <div className="nav-search-shell" style={searchShellStyle} aria-hidden />
+  );
 }
 
 function ResultRow({
@@ -275,7 +280,10 @@ function ResultRow({
       onMouseDown={(e) => e.preventDefault()}
       onMouseEnter={onHover}
       onClick={onPick}
-      style={{ ...rowStyle, background: active ? "var(--surface-2)" : "transparent" }}
+      style={{
+        ...rowStyle,
+        background: active ? "var(--surface-2)" : "transparent",
+      }}
     >
       <MarketThumb
         marketId={thumb.id}
@@ -308,7 +316,7 @@ function ResultRow({
 }
 
 /** Leader = open outcome with the most volume (matches MultiCard's ranking). */
-function pickLeaderId(markets: Market[]): number {
+function pickLeaderId(markets: IndexMarket[]): number {
   let best = markets[0]!;
   for (const m of markets) {
     const bClosed = best.closed === true ? 1 : 0;
@@ -350,8 +358,7 @@ function resultKey(item: CardItem): string {
     : `e${item.eventId}`;
 }
 
-const searchShellStyle: React.CSSProperties = {
-};
+const searchShellStyle: React.CSSProperties = {};
 
 const searchSlashStyle: React.CSSProperties = {
   color: "var(--fg-4)",
@@ -371,8 +378,7 @@ const searchInputStyle: React.CSSProperties = {
   padding: 0,
 };
 
-const dropdownStyle: React.CSSProperties = {
-};
+const dropdownStyle: React.CSSProperties = {};
 
 const rowStyle: React.CSSProperties = {
   display: "grid",

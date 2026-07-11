@@ -1,5 +1,9 @@
 import MarketsPageClient from "./markets-page-client";
-import type { Market } from "@/lib/markets/use-markets";
+import {
+  toIndexMarket,
+  type IndexMarket,
+  type Market,
+} from "@/lib/markets/use-markets";
 
 const DEFAULT_API_BASE = "https://172-104-31-54.nip.io";
 const INITIAL_MARKETS_TIMEOUT_MS = 2_500;
@@ -10,7 +14,7 @@ const INITIAL_MARKETS_TIMEOUT_MS = 2_500;
  * best-effort: a slow or unavailable API must not turn a recoverable client
  * loading/error state into a failed page request.
  */
-async function getInitialMarkets(): Promise<Market[] | undefined> {
+async function getInitialMarkets(): Promise<IndexMarket[] | undefined> {
   const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? DEFAULT_API_BASE;
 
   try {
@@ -20,7 +24,9 @@ async function getInitialMarkets(): Promise<Market[] | undefined> {
     });
     if (!response.ok) return undefined;
     const body: unknown = await response.json();
-    return Array.isArray(body) ? (body as Market[]) : undefined;
+    return Array.isArray(body)
+      ? (body as Market[]).map(toIndexMarket)
+      : undefined;
   } catch {
     return undefined;
   }

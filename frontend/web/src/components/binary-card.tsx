@@ -7,19 +7,20 @@ import {
   formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
-import { isMirror, isNative, type Market } from "@/lib/markets/use-markets";
+import {
+  isMirror,
+  isNative,
+  type IndexMarket,
+} from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
 import { formatTraders } from "@/lib/mock";
-import {
-  getCategoryColor,
-  pickDisplayCategory,
-} from "@/lib/categorize";
+import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import type { MarketPrice } from "@/lib/store";
 import { MarketThumb } from "./market-thumb";
 import { Sparkline } from "./sparkline";
 
 type Props = {
-  market: Market;
+  market: IndexMarket;
   price: MarketPrice | undefined;
 };
 
@@ -38,7 +39,7 @@ export function BinaryCard({ market, price }: Props) {
   const [ref, inView] = useInViewport<HTMLAnchorElement>();
   const { points, delta24Cents, noDelta24Cents } = useCardHistory(
     market.market_id,
-    inView
+    inView,
   );
 
   // Prices are odds → render as % (number is unchanged; see formatPercentPrecise).
@@ -97,7 +98,7 @@ export function BinaryCard({ market, price }: Props) {
   );
 }
 
-function EyebrowRow({ market }: { market: Market }) {
+function EyebrowRow({ market }: { market: IndexMarket }) {
   const { primary } = pickDisplayCategory(market.categories, market.category);
   return (
     <div
@@ -161,7 +162,7 @@ function EyebrowRow({ market }: { market: Market }) {
   );
 }
 
-function TitleRow({ market }: { market: Market }) {
+function TitleRow({ market }: { market: IndexMarket }) {
   return (
     <div
       style={{
@@ -276,7 +277,7 @@ function SideList({
   hasPrice,
   noDelta,
 }: {
-  market: Market;
+  market: IndexMarket;
   noCents: string;
   hasPrice: boolean;
   noDelta: number | null;
@@ -377,7 +378,7 @@ function SideRow({
   );
 }
 
-function FooterRow({ market }: { market: Market }) {
+function FooterRow({ market }: { market: IndexMarket }) {
   const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   const liqNanos = market.liquidity_avg10_nanos

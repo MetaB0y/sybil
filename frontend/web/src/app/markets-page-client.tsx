@@ -10,7 +10,7 @@ import {
   parseSortKey,
   type SortKey,
 } from "@/components/markets-filter-bar";
-import { useMarketsList, type Market } from "@/lib/markets/use-markets";
+import { useMarketsIndex, type IndexMarket } from "@/lib/markets/use-markets";
 import { useEventTradersMap } from "@/lib/markets/use-event-traders";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
@@ -23,7 +23,7 @@ const PAGE_SIZE = 15;
 export default function MarketsPageClient({
   initialMarkets,
 }: {
-  initialMarkets: Market[] | undefined;
+  initialMarkets: IndexMarket[] | undefined;
 }) {
   return (
     <Suspense fallback={null}>
@@ -35,16 +35,16 @@ export default function MarketsPageClient({
 function MarketsPageInner({
   initialMarkets,
 }: {
-  initialMarkets: Market[] | undefined;
+  initialMarkets: IndexMarket[] | undefined;
 }) {
-  const { bundle, isPending, error, refetch } = useMarketsList(initialMarkets);
+  const { bundle, isPending, error, refetch } = useMarketsIndex(initialMarkets);
   const prices = useStore(selectPricesByMarketId);
 
   // The clearing ticker is an active-board readout — exclude closed markets,
   // which the bundle now retains for detail/multi-card use.
   const openById = useMemo(() => {
     if (!bundle) return null;
-    const m = new Map<number, Market>();
+    const m = new Map<number, IndexMarket>();
     for (const [id, mk] of bundle.byId) {
       if (mk.closed !== true) m.set(id, mk);
     }

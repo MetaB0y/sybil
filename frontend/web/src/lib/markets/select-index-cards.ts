@@ -7,7 +7,7 @@
  * `showClosed`, and always sink below open cards regardless of the active sort.
  */
 
-import type { Market } from "./use-markets";
+import type { IndexMarket } from "./use-markets";
 import type { SortKey } from "./sort";
 
 export type CardItem =
@@ -15,7 +15,7 @@ export type CardItem =
       kind: "multi";
       name: string;
       eventId: string;
-      markets: Market[];
+      markets: IndexMarket[];
       volumeNanos: bigint;
       sortKey: string;
       createdMs: number;
@@ -24,7 +24,7 @@ export type CardItem =
     }
   | {
       kind: "binary";
-      market: Market;
+      market: IndexMarket;
       volumeNanos: bigint;
       sortKey: string;
       createdMs: number;

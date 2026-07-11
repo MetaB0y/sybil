@@ -8,12 +8,12 @@ import {
   formatInt,
   parseNanos,
 } from "@/lib/format/nanos";
-import type { Market } from "@/lib/markets/use-markets";
+import type { IndexMarket } from "@/lib/markets/use-markets";
 import { selectLatestBlock, selectRecentBlocks, useStore } from "@/lib/store";
 
 type Props = {
   /** Lookup table for resolving market_id → name. */
-  marketsById: Map<number, Market>;
+  marketsById: Map<number, IndexMarket>;
 };
 
 /** Most recent clears to keep on the strip. */
@@ -204,7 +204,12 @@ export function ClearingTicker({ marketsById }: Props) {
             {/* Second copy makes the -50% loop seamless. */}
             {animate &&
               events.map((e) => (
-                <TickerCell key={`dup-${e.key}`} event={e} now={now} ariaHidden />
+                <TickerCell
+                  key={`dup-${e.key}`}
+                  event={e}
+                  now={now}
+                  ariaHidden
+                />
               ))}
           </div>
         </div>

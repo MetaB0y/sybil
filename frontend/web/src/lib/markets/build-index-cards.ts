@@ -11,19 +11,24 @@ import { pickDisplayCategory } from "@/lib/categorize";
 import {
   eventVisibleOnIndex,
   isClosed,
-  type Market,
+  type IndexMarket,
   type MarketsListBundle,
 } from "./use-markets";
 import type { CardItem } from "./select-index-cards";
 
-export function buildIndexCards(bundle: MarketsListBundle): CardItem[] {
+export function buildIndexCards(
+  bundle: MarketsListBundle<IndexMarket>,
+): CardItem[] {
   const all: CardItem[] = [];
   for (const g of bundle.groups) {
     if (g.markets.length >= 2) {
       // Multi-outcome event. Closed only when EVERY outcome is closed; a
       // partially-closed event stays open (its closed rows render greyed).
       const first = g.markets[0]!;
-      const primary = pickDisplayCategory(first.categories, first.category).primary;
+      const primary = pickDisplayCategory(
+        first.categories,
+        first.category,
+      ).primary;
       all.push({
         kind: "multi",
         name: g.name,
@@ -43,7 +48,8 @@ export function buildIndexCards(bundle: MarketsListBundle): CardItem[] {
           volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
           sortKey: m.name.toLowerCase(),
           createdMs: marketNewnessMs(m),
-          primaryCategory: pickDisplayCategory(m.categories, m.category).primary,
+          primaryCategory: pickDisplayCategory(m.categories, m.category)
+            .primary,
           closed: isClosed(m),
         });
       }
@@ -63,7 +69,7 @@ export function buildIndexCards(bundle: MarketsListBundle): CardItem[] {
   return all;
 }
 
-export function sumVolume(markets: Market[]): bigint {
+export function sumVolume(markets: IndexMarket[]): bigint {
   let total = 0n;
   for (const m of markets) {
     if (m.volume_nanos != null) total += BigInt(m.volume_nanos);
@@ -77,15 +83,15 @@ export function sumVolume(markets: Market[]): bigint {
  * existing event both surface. `created_at_ms` (the mirror's admit time, which
  * clusters at sync) is only a last-resort fallback.
  */
-export function marketNewnessMs(m: Market): number {
+export function marketNewnessMs(m: IndexMarket): number {
   return Math.max(
     m.event_start_date_ms ?? 0,
     m.market_start_date_ms ?? 0,
-    m.created_at_ms ?? 0
+    m.created_at_ms ?? 0,
   );
 }
 
-export function eventNewnessMs(markets: Market[]): number {
+export function eventNewnessMs(markets: IndexMarket[]): number {
   let max = 0;
   for (const m of markets) max = Math.max(max, marketNewnessMs(m));
   return max;
