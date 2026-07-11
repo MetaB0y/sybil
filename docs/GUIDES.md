@@ -11,6 +11,7 @@ status: current
 | Goal | Start here | Success signal |
 |---|---|---|
 | Exercise signed trading | `just smoke` and [[P256 Authentication]] | Account, signed order, block, fill, and resolution assertions pass |
+| Recover a quarantined deposit | Portfolio → **L1 deposits**, then Settings if registration is incomplete | Matching parked value is automatically credited after successful account/signing-key registration |
 | Build a bot | [`arena/README.md`](https://github.com/MetaB0y/sybil/blob/main/arena/README.md) | Bot trades through the public API; `just arena-check` passes |
 | Deploy or recover | [Deployment index](deployment.md) | Post-deploy and restart gates pass against persistent state |
 | Retain an escape path | `crates/sybil-custody/README.md` and [[Operator Replacement]] | Saved openings authenticate to the intended root; real proof path is explicitly verified |
@@ -46,6 +47,23 @@ Build `sybil-custody`, inspect `--help`, and follow its crate README for
 `snapshot`, `reconstruct`, and `escape-claim`. An own-leaf snapshot supports a
 user claim; continuing the whole exchange requires the full canonical DA
 payload. Unsafe Anvil fixture proofs are not evidence of a real verifier path.
+
+## Quarantined L1 deposits
+
+The portfolio's **L1 deposits** panel shows the connected account's exact
+32-byte Sybil routing key. It is derived from the account id and is not a
+passkey or signing public key. Use that exact value in the devnet vault deposit
+call.
+
+If the indexer cannot resolve a deposit key, it still consumes the deposit in
+order and parks the value in the state-committed quarantine ledger. Successful
+account creation with an initial signing key, or any later signing-key
+registration for the matching account, automatically moves the full parked
+amount into that account. The web API currently exposes aggregate quarantine
+totals, not owner-scoped entries, so the portfolio cannot confirm the status of
+a specific missing deposit. **No L1 quarantine-refund transaction exists
+today.** Do not promise or instruct users to request one; registration and
+automatic claim are the implemented recovery path.
 
 ## Changing the system
 
