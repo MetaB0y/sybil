@@ -79,9 +79,16 @@ export function OutcomeLegend({
 
   const sel = new Set(selectedIds);
   const colorOf = (o: EventOutcome) => colorForOutcome(o, outcomes.indexOf(o));
-  // Keep the group's favourite-first order; the chosen outcome is highlighted
-  // in place rather than floated to the front.
-  const shown = outcomes.filter((o) => sel.has(o.marketId));
+  // Float the chosen outcome (the market in the URL) to the front so it always
+  // leads the list above the chart; the rest keep their favourite-first order.
+  const shownAll = outcomes.filter((o) => sel.has(o.marketId));
+  const shown =
+    highlightId == null
+      ? shownAll
+      : [
+          ...shownAll.filter((o) => o.marketId === highlightId),
+          ...shownAll.filter((o) => o.marketId !== highlightId),
+        ];
   const hidden = outcomes.filter((o) => !sel.has(o.marketId));
   const atCap = shown.length >= maxSelected;
   const interactive = outcomes.length > 1;

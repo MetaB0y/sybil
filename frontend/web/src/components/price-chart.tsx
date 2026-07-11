@@ -154,6 +154,36 @@ export function PriceChart({
 
   return (
     <div style={{ width: "100%" }}>
+      {/* Hover timestamp — floats in its own strip above the plot and tracks the
+          crosshair horizontally, so it reads clear of the lines instead of
+          overlapping them. Height is reserved even when idle so the chart never
+          jumps as you move on and off it. */}
+      <div style={{ position: "relative", height: 20 }}>
+        {showHover && (
+          <div
+            style={{
+              position: "absolute",
+              left: `${hover! * 100}%`,
+              bottom: 1,
+              transform: `translateX(${
+                hover! < 0.12 ? "0" : hover! > 0.88 ? "-100%" : "-50%"
+              })`,
+              padding: "2px 7px",
+              borderRadius: 4,
+              background: "var(--surface-2)",
+              border: "1px solid var(--border-2)",
+              color: "var(--fg-2)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              letterSpacing: "0.04em",
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+            }}
+          >
+            {tEnd - hoverT! < 1500 ? "now" : formatHoverTime(hoverT!)}
+          </div>
+        )}
+      </div>
       <div
         ref={containerRef}
         onMouseMove={onMove}
@@ -324,29 +354,6 @@ export function PriceChart({
                 </span>
               </div>
             ))}
-            {/* timestamp header, tracking the crosshair along the top */}
-            <div
-              style={{
-                position: "absolute",
-                left: `${hover! * 100}%`,
-                top: 2,
-                transform: `translateX(${
-                  hover! < 0.12 ? "0" : hover! > 0.88 ? "-100%" : "-50%"
-                })`,
-                padding: "2px 7px",
-                borderRadius: 4,
-                background: "var(--surface-2)",
-                border: "1px solid var(--border-2)",
-                color: "var(--fg-2)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                letterSpacing: "0.04em",
-                whiteSpace: "nowrap",
-                pointerEvents: "none",
-              }}
-            >
-              {tEnd - hoverT! < 1500 ? "now" : formatHoverTime(hoverT!)}
-            </div>
           </>
         )}
       </div>

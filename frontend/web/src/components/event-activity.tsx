@@ -16,8 +16,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { FloatingTooltip } from "@/components/floating-tooltip";
+import { useSoonTooltip } from "@/components/soon-tooltip";
 import { colorForOutcome } from "@/components/outcome-legend";
 import {
   formatAge,
@@ -528,17 +528,18 @@ function VolumeBars({
                 <div
                   key={bar.key}
                   onMouseEnter={(e) => {
-                    // Anchor the tooltip to the BAR, not the column: it rides the
-                    // bar's top edge, so a tall bar's readout sits high and a
-                    // quiet bucket's sits near the baseline.
+                    // Anchor the tooltip to the top of the plot area — the top of
+                    // the tallest bar (ratio 1 → CHART_H) — so the readout always
+                    // sits at that constant height and never overflows a bar,
+                    // whichever bucket you hover.
                     const col = e.currentTarget.getBoundingClientRect();
                     setHover({
                       key: bar.key,
                       rect: new DOMRect(
                         col.left,
-                        col.bottom - barH,
+                        col.bottom - CHART_H,
                         col.width,
-                        barH,
+                        CHART_H,
                       ),
                     });
                   }}
@@ -829,10 +830,7 @@ function ActivityBarTooltip({
  * When comments land, replace the faded button with a real tab + state.
  */
 function SectionTabs() {
-  const [hovered, setHovered] = useState(false);
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const trackCursor = (e: React.MouseEvent) =>
-    setPos({ x: e.clientX, y: e.clientY });
+  const { hovered, handlers, tooltip } = useSoonTooltip();
 
   const base: React.CSSProperties = {
     padding: "4px 10px",
@@ -872,15 +870,7 @@ function SectionTabs() {
           type="button"
           aria-disabled
           tabIndex={-1}
-          onMouseEnter={(e) => {
-            setHovered(true);
-            trackCursor(e);
-          }}
-          onMouseMove={trackCursor}
-          onMouseLeave={() => {
-            setHovered(false);
-            setPos(null);
-          }}
+          {...handlers}
           style={{
             ...base,
             background: "transparent",
@@ -892,42 +882,8 @@ function SectionTabs() {
           comments
         </button>
       </div>
-      {hovered && pos && typeof document !== "undefined"
-        ? createPortal(<SoonTooltip x={pos.x} y={pos.y} />, document.body)
-        : null}
+      {tooltip}
     </>
-  );
-}
-
-/** Floating "soon" hint anchored just above the cursor — as CategoryTabs. */
-function SoonTooltip({ x, y }: { x: number; y: number }) {
-  return (
-    <div
-      role="tooltip"
-      aria-hidden
-      style={{
-        position: "fixed",
-        left: x,
-        top: y - 14,
-        transform: "translate(-50%, -100%)",
-        pointerEvents: "none",
-        zIndex: 100,
-        padding: "3px 7px",
-        background: "var(--surface-2)",
-        border: "1px solid var(--border-2)",
-        borderRadius: "var(--radius-sm)",
-        boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
-        fontFamily: "var(--font-mono)",
-        fontSize: "9px",
-        letterSpacing: "var(--track-wide)",
-        textTransform: "uppercase",
-        color: "var(--accent)",
-        whiteSpace: "nowrap",
-        animation: "sybil-tooltip-in var(--dur-fast) var(--ease-standard)",
-      }}
-    >
-      soon
-    </div>
   );
 }
 

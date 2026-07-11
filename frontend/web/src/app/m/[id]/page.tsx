@@ -14,6 +14,7 @@ import { MarketRail } from "@/components/market-rail";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart } from "@/components/price-chart";
+import { useSoonTooltip } from "@/components/soon-tooltip";
 import {
   formatAge,
   formatCompactDollars,
@@ -747,11 +748,14 @@ function DescriptionBlock({
 
 /**
  * Inactive "Propose resolution" affordance. Resolution proposals aren't wired
- * to the backend yet, so the button is disabled with a "coming soon" hint —
- * it reserves the spot next to the resolution criteria the way the Discussion
- * card reserves the comments slot.
+ * to the backend yet, so hovering the button floats the shared "soon" tooltip
+ * (same animation as the Comments tab) rather than a static label. It reserves
+ * the spot next to the resolution criteria the way the Discussion card reserves
+ * the comments slot. `aria-disabled` (not the real `disabled` attribute) keeps
+ * the button hoverable so the tooltip can fire.
  */
 function ProposeResolution() {
+  const { hovered, handlers, tooltip } = useSoonTooltip();
   return (
     <div
       style={{
@@ -765,33 +769,26 @@ function ProposeResolution() {
     >
       <button
         type="button"
-        disabled
+        aria-disabled
+        tabIndex={-1}
+        {...handlers}
         style={{
           flexShrink: 0,
           padding: "10px 16px",
           borderRadius: "var(--radius-md)",
           border: "1px solid var(--border-2)",
           background: "var(--surface-2)",
-          color: "var(--fg-3)",
+          color: hovered ? "var(--fg-2)" : "var(--fg-3)",
           fontFamily: "var(--font-sans)",
           fontSize: "var(--fs-13)",
           fontWeight: 600,
-          cursor: "not-allowed",
+          cursor: "default",
+          transition: "color var(--dur-fast) var(--ease-standard)",
         }}
       >
         Propose resolution
       </button>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          color: "var(--fg-4)",
-          textTransform: "uppercase",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        coming soon
-      </span>
+      {tooltip}
     </div>
   );
 }
