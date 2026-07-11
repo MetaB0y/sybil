@@ -32,6 +32,11 @@
 #   --app-origin / SYBIL_SMOKE_APP_ORIGIN   browser origin for the CORS check
 #                                        (default https://app.172-104-31-54.nip.io)
 #   --block-interval / SYBIL_SMOKE_INTERVAL block time seconds (default 10)
+#   SYBIL_SMOKE_STARTUP_TIMEOUT
+#                                        seconds to wait for /v1/health after a
+#                                        container replacement (default 60)
+#   SYBIL_SMOKE_STARTUP_POLL
+#                                        seconds between health probes (default 2)
 #   --require-signer / SYBIL_SMOKE_REQUIRE_SIGNER=1
 #                                        FAIL (not SKIP) if the signed-order
 #                                        signer is unavailable. Set this in the
@@ -52,6 +57,8 @@ BASE="${SYBIL_SMOKE_BASE:-https://172-104-31-54.nip.io}"
 APP_ORIGIN="${SYBIL_SMOKE_APP_ORIGIN:-https://app.172-104-31-54.nip.io}"
 SERVICE_TOKEN="${SYBIL_SERVICE_TOKEN:-}"
 INTERVAL="${SYBIL_SMOKE_INTERVAL:-10}"
+STARTUP_TIMEOUT="${SYBIL_SMOKE_STARTUP_TIMEOUT:-60}"
+STARTUP_POLL="${SYBIL_SMOKE_STARTUP_POLL:-2}"
 REQUIRE_SIGNER="${SYBIL_SMOKE_REQUIRE_SIGNER:-0}"
 DOCKER_SSH="${SYBIL_SMOKE_DOCKER_SSH:-}"
 COMPOSE_PROJECT="${SYBIL_COMPOSE_PROJECT:-sybil}"
@@ -83,6 +90,25 @@ APP_ORIGIN="${APP_ORIGIN%/}"
 for tool in curl python3; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required" >&2; exit 2; }
 done
+
+if ! [[ "$STARTUP_TIMEOUT" =~ ^[0-9]+$ ]]; then
+    echo "error: SYBIL_SMOKE_STARTUP_TIMEOUT must be a non-negative integer" >&2
+    exit 2
+fi
+python3 - "$INTERVAL" "$STARTUP_POLL" <<'PY' || exit 2
+import math
+import sys
+
+for name, raw in zip(("block interval", "startup poll"), sys.argv[1:]):
+    try:
+        value = float(raw)
+    except ValueError:
+        print(f"error: {name} must be a positive number", file=sys.stderr)
+        raise SystemExit(1)
+    if not math.isfinite(value) or value <= 0:
+        print(f"error: {name} must be a positive number", file=sys.stderr)
+        raise SystemExit(1)
+PY
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -136,9 +162,25 @@ GENESIS_HASH=""
 check_liveness() {
     section "1a. API liveness"
 
-    http GET /v1/health
+    local deadline=$((SECONDS + STARTUP_TIMEOUT)) attempts=0
+    while true; do
+        attempts=$((attempts + 1))
+        http GET /v1/health
+        if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]]; then
+            break
+        fi
+        if (( SECONDS >= deadline )); then
+            break
+        fi
+        info "/v1/health not ready ($HTTP_CODE); retrying in ${STARTUP_POLL}s..."
+        sleep "$STARTUP_POLL"
+    done
+
     GENESIS_HASH="$(echo "$HTTP_BODY" | jget genesis_hash)"
     if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]]; then
+        if (( attempts > 1 )); then
+            info "/v1/health became ready after $attempts attempts"
+        fi
         pass "/v1/health -> ok (height=$(echo "$HTTP_BODY" | jget height))"
     else
         fail "/v1/health -> $HTTP_CODE: $HTTP_BODY"
