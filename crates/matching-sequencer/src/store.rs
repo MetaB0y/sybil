@@ -73,7 +73,7 @@ use crate::aggregates::{
     CostBasisTrackerSnapshot, LiquidityTrackerSnapshot, OrderStatsTrackerSnapshot,
     TraderTrackerSnapshot, WelfareTrackerSnapshot,
 };
-use crate::block::{state_sidecar_snapshot_from_resting_orders, BlockHeader, SealedBlock};
+use crate::block::{BlockHeader, SealedBlock, state_sidecar_snapshot_from_resting_orders};
 use crate::bridge::{
     BridgeL1Input, BridgeState, BridgeWithdrawalRequest, L1Deposit, L1WithdrawalStatus,
     WithdrawalLeaf,
@@ -84,8 +84,8 @@ use crate::market_info::{
 };
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::{
-    reservation_snapshots_from_resting_orders, validate_restored_account_reservations,
-    validate_restored_reservations, OrderBook, RestingOrder,
+    OrderBook, RestingOrder, reservation_snapshots_from_resting_orders,
+    validate_restored_account_reservations, validate_restored_reservations,
 };
 use crate::price_tracker::{PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot};
 use crate::sequencer::{BlockSequencer, SequencerConfig};
@@ -108,10 +108,10 @@ mod wal;
 
 use self::codec::*;
 #[cfg(test)]
-use self::fault::{pop_save_block_fault, StoreFaultInjection};
+use self::fault::{StoreFaultInjection, pop_save_block_fault};
 use self::restore::{
-    initialize_or_validate_layout, read_account_state_fence, read_recovery_metadata,
-    validate_witness_header, write_core_counters, AccountStateFence, PersistedCoreCounters,
+    AccountStateFence, PersistedCoreCounters, initialize_or_validate_layout,
+    read_account_state_fence, read_recovery_metadata, validate_witness_header, write_core_counters,
 };
 use self::retention::{backfill_price_history_indexes, prune_historical_block_rows};
 use self::tables::*;
@@ -119,9 +119,9 @@ use self::tables::*;
 pub use self::auto_resolution::{AutoResolutionAction, AutoResolutionRecord};
 pub use self::commit::{AnalyticsSnapshot, SequencerSnapshot, Store, StoreError};
 pub use self::da::{
-    DaArtifact, DaArtifactIntegrityError, DaArtifactLookup, DaArtifactManifest, DaProviderRef,
     DA_FILE_PROVIDER_REF_ENCODING, DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
-    DA_PROVIDER_REFS_ENCODING_BYTES,
+    DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact, DaArtifactIntegrityError, DaArtifactLookup,
+    DaArtifactManifest, DaProviderRef,
 };
 #[cfg(test)]
 pub(crate) use self::fault::StoreFaultPoint;

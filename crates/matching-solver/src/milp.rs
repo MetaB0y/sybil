@@ -21,13 +21,13 @@
 //! - Market groups: `Σ p_m ≤ NANOS_PER_DOLLAR` per group
 
 use matching_engine::{
-    minting_cost_from_fills, Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
+    Fill, MarketId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, minting_cost_from_fills,
 };
 
 use crate::MatchingResult;
 
-use russcip::prelude::*;
 use russcip::Variable;
+use russcip::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 /// How to handle MM budget constraints.
@@ -456,10 +456,10 @@ impl MilpSolver {
 
             let market = order.markets[0];
             let mut c = cons().coef(&z_vars[i], big_m);
-            if let Some(p_var) = p_vars.get(&market) {
-                if alpha.abs() > 1e-12 {
-                    c = c.coef(p_var, alpha);
-                }
+            if let Some(p_var) = p_vars.get(&market)
+                && alpha.abs() > 1e-12
+            {
+                c = c.coef(p_var, alpha);
             }
 
             let rhs = sign * limit + big_m - beta;

@@ -22,7 +22,7 @@ pub mod scenario;
 pub use matching_engine::{Problem, ProblemSummary};
 
 // Re-export unified scenario generator (primary API)
-pub use scenario::{generate_scenario, ScenarioConfig};
+pub use scenario::{ScenarioConfig, generate_scenario};
 
 // Re-export simple random generator
-pub use random::{generate_random_scenario, RandomConfig};
+pub use random::{RandomConfig, generate_random_scenario};

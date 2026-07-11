@@ -12,12 +12,12 @@
 //! collide with concurrent work extending that suite.
 
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 mod common;
 
 use common::process::{
-    get_status_and_body, restart_api_with_env, spawn_api_with_env, wait_for_health, ProcessTestRoot,
+    ProcessTestRoot, get_status_and_body, restart_api_with_env, spawn_api_with_env, wait_for_health,
 };
 
 const BLOCK_INTERVAL_MS: u64 = 200;

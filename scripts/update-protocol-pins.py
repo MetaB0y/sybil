@@ -64,6 +64,7 @@ def render() -> str:
     escape = load_json(
         "zk/openvm-escape-guest/openvm/release/sybil-openvm-escape-guest.commit.json"
     )
+    deployment = load_json("deploy/validity-pins.json")
 
     return f"""---
 tags: [reference, generated, verification]
@@ -95,9 +96,16 @@ status: current
 | State transition | `{main["app_exe_commit"]}` | `{main["app_vm_commit"]}` |
 | Escape claim | `{escape["app_exe_commit"]}` | `{escape["app_vm_commit"]}` |
 
+## Deployment coordination
+
+| Network | Recorded status |
+|---|---|
+| `{deployment["network"]}` | `{deployment["status"]}` |
+
 Sources: `witness_schema.rs`, `golden/golden-vectors.json`, and the two committed
-OpenVM release `commit.json` files. Deployment truth is the adapter actually
-installed on-chain; compare it with this page during every repin.
+OpenVM release `commit.json` files. `deploy/validity-pins.json` separately binds
+those desired pins to explicit deployment evidence; a `pending_redeploy` status
+must never be interpreted as an on-chain repin.
 """
 
 

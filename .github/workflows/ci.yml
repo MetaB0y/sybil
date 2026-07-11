@@ -19,23 +19,46 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.94.1"
+          toolchain: "1.97.0"
           components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
 
-      # These three steps mirror `just fmt-check`, `just lint`, and `just test`
-      # (the Rust portion of `just check-all`). Keep them in sync so local and
-      # CI can't drift. RUSTFLAGS=-Dwarnings is set in the workflow `env:` above,
-      # matching the inline RUSTFLAGS in the `lint` recipe.
+      - name: Check Rust workspace metadata # just rust-workspaces-check
+        run: ./scripts/check-rust-workspaces.py
+
       - name: Check formatting # just fmt-check
         run: cargo fmt --all -- --check
 
+      - name: Check all targets and features # just workspace-check
+        run: cargo check --workspace --all-targets --all-features
+
       - name: Clippy # just lint
-        run: cargo clippy --workspace --all-features
+        run: cargo clippy --workspace --all-targets --all-features
 
       - name: Test # just test
         run: cargo test --workspace
+
+  standalone-rust:
+    name: Standalone Rust Workspaces
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.0"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            fuzz
+            zk/openvm-guest
+            zk/openvm-escape-guest
+            zk/openvm-tools
+
+      - name: Compile standalone Cargo workspaces # just standalone-check
+        run: ./scripts/check-rust-standalone.sh
 
   docs:
     name: Docs Check
@@ -91,7 +114,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.94.1"
+          toolchain: "1.97.0"
 
       - uses: Swatinem/rust-cache@v2
 
@@ -132,7 +155,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.94.1"
+          toolchain: "1.97.0"
 
       - uses: Swatinem/rust-cache@v2
 
@@ -187,7 +210,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.94.1"
+          toolchain: "1.97.0"
           components: clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -197,6 +220,7 @@ jobs:
           workspaces: |
             zk/openvm-tools
             zk/openvm-guest
+            zk/openvm-escape-guest
 
       # Consensus-surface staleness gate: fail if the OpenVM guest source
       # changed without regenerating the pinned commitment. Compares only;
@@ -206,6 +230,9 @@ jobs:
 
       - name: Canonical golden-vector staleness gate
         run: cargo run -p sybil-golden-vectors --bin emit-golden -- --check
+
+      - name: Deployment validity-pin coordination gate
+        run: ./scripts/update-validity-pins.py --check
 
       # Host-side encoder (not consensus surface). Full check + clippy.
       - name: Check openvm-tools
@@ -220,4 +247,8 @@ jobs:
       # regenerate its artifact, only host-check the source unchanged.
       - name: Host-check openvm-guest
         working-directory: zk/openvm-guest
+        run: cargo clippy --tests
+
+      - name: Host-check openvm-escape-guest
+        working-directory: zk/openvm-escape-guest
         run: cargo clippy --tests

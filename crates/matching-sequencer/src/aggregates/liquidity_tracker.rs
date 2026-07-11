@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use matching_engine::{notional_nanos, MarketId, Nanos, Order};
+use matching_engine::{MarketId, Nanos, Order, notional_nanos};
 use serde::{Deserialize, Serialize};
 
 use crate::order_book::OrderBook;
@@ -200,7 +200,7 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use matching_engine::{
-        outcome_buy, shares_to_qty, spread, MarketId, MarketSet, NANOS_PER_DOLLAR,
+        MarketId, MarketSet, NANOS_PER_DOLLAR, outcome_buy, shares_to_qty, spread,
     };
 
     fn two_market_setup() -> (

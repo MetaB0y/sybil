@@ -1,16 +1,16 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
-use p256::ecdsa::{signature::Signer as _, Signature, SigningKey};
+use anyhow::{Context, Result, bail};
+use p256::ecdsa::{Signature, SigningKey, signature::Signer as _};
 use serde::Deserialize;
 use sybil_api_types::{
     QmdbStateExclusionProofResponse, QmdbStateInclusionProofResponse,
     QmdbStateOperationProofResponse, QmdbStateRangeProofResponse, StateProofResponse,
 };
 use sybil_escape_claim::{
-    compute_withdrawable_token_units, escape_claim_public_input_hash, escape_nullifier,
-    verify_escape_claim, AccountReservationLeafWitness, EscapeClaimGuestInput,
-    EscapeClaimPublicInputs, MarketLeafWitness,
+    AccountReservationLeafWitness, EscapeClaimGuestInput, EscapeClaimPublicInputs,
+    MarketLeafWitness, compute_withdrawable_token_units, escape_claim_public_input_hash,
+    escape_nullifier, verify_escape_claim,
 };
 use sybil_verifier::commitments::state_schema;
 use sybil_verifier::{AccountSnapshot, KeyOpAuth};
@@ -19,7 +19,7 @@ use sybil_zk::{
 };
 
 use crate::abi::{adapter_proof_from_openvm_json, encode_adapter_proof, escape_claim_calldata};
-use crate::format::{CustodySnapshot, CUSTODY_SNAPSHOT_VERSION};
+use crate::format::{CUSTODY_SNAPSHOT_VERSION, CustodySnapshot};
 use crate::rpc::{chain_id, decode20, decode32, fetch_root_record, latest_height};
 
 pub struct ClaimRequest<'a> {

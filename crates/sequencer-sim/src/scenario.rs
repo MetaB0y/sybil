@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos};
 
 /// Definition of one outcome in an event (e.g., "Trump", "Harris").
 #[derive(Clone, Debug)]

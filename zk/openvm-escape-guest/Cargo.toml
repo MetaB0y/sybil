@@ -1,7 +1,8 @@
 [package]
 name = "sybil-openvm-escape-guest"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.94"
 description = "OpenVM guest for Sybil Form-L escape claims"
 
 # Kept outside the root workspace so normal workspace tests do not require the

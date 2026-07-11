@@ -47,8 +47,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use matching_engine::{
-    compute_fill_settlement, derive_minting, notional_nanos, outcome_buy, shares_to_qty, Fill,
-    MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR,
+    Fill, MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Order, Qty, compute_fill_settlement,
+    derive_minting, notional_nanos, outcome_buy, shares_to_qty,
 };
 use matching_sequencer::bridge::{account_key, append_deposit_frontier};
 use matching_sequencer::{
@@ -666,10 +666,10 @@ impl ConservationHarness {
                     // Same height: pure state-machine transition, no expiry sweep.
                     l1_block_height: self.seq.bridge_state().observed_l1_height,
                 };
-                if let Ok(Some(updated)) = self.seq.apply_bridge_withdrawal_l1_event(event) {
-                    if updated.l1_status == L1WithdrawalStatus::Refunded {
-                        self.credit_refund(&updated);
-                    }
+                if let Ok(Some(updated)) = self.seq.apply_bridge_withdrawal_l1_event(event)
+                    && updated.l1_status == L1WithdrawalStatus::Refunded
+                {
+                    self.credit_refund(&updated);
                 }
             }
             EconAction::FinalizeWithdrawal { pick } => {

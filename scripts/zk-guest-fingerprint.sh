@@ -111,11 +111,11 @@ select_guest() {
 # the closure when the guest gained deposit-inclusion verification (SYB-188).
 collect_source_files() {
     {
-        # Guest build recipe/wrapper plus crate manifest, lock, OpenVM config,
+        # Guest build driver/wrapper plus crate manifest, lock, OpenVM config,
         # and Rust sources. Listed explicitly so we never sweep in openvm/
         # artifacts or the commitment lock file.
         printf '%s\n' \
-            "justfile" \
+            "scripts/openvm-commit.sh" \
             "scripts/openvm-rustc-wrapper.sh" \
             "$GUEST_REL/Cargo.toml" \
             "$GUEST_REL/Cargo.lock" \

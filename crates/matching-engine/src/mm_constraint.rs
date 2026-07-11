@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{checked_notional_nanos_ceil, notional_nanos_ceil, Nanos, Qty};
+use crate::types::{Nanos, Qty, checked_notional_nanos_ceil, notional_nanos_ceil};
 
 /// Unique identifier for a market maker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

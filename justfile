@@ -10,7 +10,19 @@ test:
 
 # Run clippy lints
 lint:
-    RUSTFLAGS="-Dwarnings" cargo clippy --workspace --all-features
+    RUSTFLAGS="-Dwarnings" cargo clippy --workspace --all-targets --all-features
+
+# Compile every root-workspace target and feature combination.
+workspace-check:
+    cargo check --workspace --all-targets --all-features
+
+# Keep the compiler, Edition, manifests, workflows, and Docker image aligned.
+rust-workspaces-check:
+    ./scripts/check-rust-workspaces.py
+
+# Compile every Cargo workspace intentionally excluded from the root workspace.
+standalone-check:
+    ./scripts/check-rust-standalone.sh
 
 # Format code
 fmt:
@@ -99,42 +111,12 @@ openvm-setup-evm-download:
 # OpenVM v2.0.0 forwards RUSTFLAGS to the guest rustc invocation; remap all
 # checkout/toolchain roots that can otherwise leak into panic and debug strings.
 openvm-commit output_dir="target/openvm/sybil":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-    rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
-    # Keep the remap flags byte-identical across checkouts. The rustc wrapper
-    # expands these sentinels only after Cargo computes its unit metadata.
-    remap_flags="--remap-path-prefix=/__SYBIL_WORKSPACE_ROOT__=/sybil-src --remap-path-prefix=/__SYBIL_CARGO_HOME__=/cargo --remap-path-prefix=/__SYBIL_RUSTUP_HOME__=/rustc"
-    PATH="{{justfile_directory()}}/scripts:$PATH" \
-      SYBIL_WORKSPACE_ROOT="$(pwd -P)" \
-      SYBIL_CARGO_HOME="$cargo_home" \
-      SYBIL_RUSTUP_HOME="$rustup_home" \
-      RUSTC_WRAPPER="openvm-rustc-wrapper.sh" \
-      RUSTFLAGS="$remap_flags${RUSTFLAGS:+ $RUSTFLAGS}" \
-      cargo openvm commit \
-        --manifest-path zk/openvm-guest/Cargo.toml \
-        --config zk/openvm-guest/openvm.toml \
-        --output-dir {{output_dir}}
+    ./scripts/openvm-commit.sh main {{output_dir}}
 
 # Build and print the independent Form-L escape guest commitments. This is a
 # commitment-only operation: it does not run setup, keygen, or proving.
 openvm-escape-commit output_dir="target/openvm/sybil-escape":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-    rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
-    remap_flags="--remap-path-prefix=/__SYBIL_WORKSPACE_ROOT__=/sybil-src --remap-path-prefix=/__SYBIL_CARGO_HOME__=/cargo --remap-path-prefix=/__SYBIL_RUSTUP_HOME__=/rustc"
-    PATH="{{justfile_directory()}}/scripts:$PATH" \
-      SYBIL_WORKSPACE_ROOT="$(pwd -P)" \
-      SYBIL_CARGO_HOME="$cargo_home" \
-      SYBIL_RUSTUP_HOME="$rustup_home" \
-      RUSTC_WRAPPER="openvm-rustc-wrapper.sh" \
-      RUSTFLAGS="$remap_flags${RUSTFLAGS:+ $RUSTFLAGS}" \
-      cargo openvm commit \
-        --manifest-path zk/openvm-escape-guest/Cargo.toml \
-        --config zk/openvm-escape-guest/openvm.toml \
-        --output-dir {{output_dir}}
+    ./scripts/openvm-commit.sh escape {{output_dir}}
 
 openvm-commit-all:
     just openvm-commit target/openvm/sybil
@@ -366,10 +348,18 @@ frontend-check:
     pnpm test
     pnpm build
 
-# Check all — mirrors every CI check so local runs catch what CI would.
-# Rust portion (fmt-check/lint/test) matches the ci.yml "Check, Lint, Test" job;
-# the remaining recipes mirror the docs/arena/frontend/contracts CI jobs.
-check-all: fmt-check lint test docs-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
+# Fast developer gate: metadata, formatting, compilation, and lints.
+check-fast: rust-workspaces-check fmt-check workspace-check lint
+
+# Consensus/protocol gate: shared vectors, guest inputs, deployment coordination,
+# and generated protocol documentation must all agree.
+check-consensus: golden-check
+    ./scripts/zk-guest-fingerprint.sh --check
+    ./scripts/update-validity-pins.py --check
+    ./scripts/update-protocol-pins.py --check
+
+# Complete local/CI-equivalent gate, including every standalone Rust workspace.
+check-all: check-fast test standalone-check check-consensus docs-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any
@@ -380,9 +370,9 @@ bench:
 watch:
     cargo watch -x "test --workspace"
 
-# Clean build artifacts
+# Clean build artifacts from the root and all standalone Cargo workspaces.
 clean:
-    cargo clean
+    ./scripts/clean-rust-workspaces.sh
 
 # Show dependency tree
 deps:
@@ -448,6 +438,13 @@ docs-pins-write:
 
 docs-pins-check:
     ./scripts/update-protocol-pins.py --check
+
+# Refresh/check the desired guest pins and separately recorded deployment state.
+validity-pins-write:
+    ./scripts/update-validity-pins.py --write-desired
+
+validity-pins-check:
+    ./scripts/update-validity-pins.py --check
 
 # Check workspace/design inventories against current repository structure.
 docs-sync:

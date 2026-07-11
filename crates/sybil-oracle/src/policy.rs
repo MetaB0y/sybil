@@ -5,7 +5,7 @@
 //! `docs/architecture/05-interfaces/Market Resolution.md` for the current
 //! trust boundary and future-policy discussion.
 
-use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos};
 use serde::{Deserialize, Serialize};
 
 use crate::attestation::SignedAttestation;
@@ -119,7 +119,7 @@ pub(crate) fn evaluate_admin_immediate(
 mod tests {
     use super::*;
     use crate::feed::FeedPubkey;
-    use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos};
 
     fn sample_feed(id: u64) -> DataFeed {
         DataFeed {

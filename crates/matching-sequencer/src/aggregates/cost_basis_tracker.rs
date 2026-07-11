@@ -51,7 +51,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{signed_price_delta_notional, MarketId, Qty, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Qty, signed_price_delta_notional};
 use serde::{Deserialize, Serialize};
 
 use crate::account::{Account, AccountId};
@@ -223,7 +223,7 @@ pub struct CostBasisTrackerSnapshot {
 mod tests {
     use super::*;
     use crate::account::Account;
-    use matching_engine::{shares_to_qty, signed_price_delta_notional, Qty, NANOS_PER_DOLLAR};
+    use matching_engine::{NANOS_PER_DOLLAR, Qty, shares_to_qty, signed_price_delta_notional};
 
     fn aid(n: u64) -> AccountId {
         AccountId(n)

@@ -237,8 +237,8 @@ mod tests {
         single_market_problem, zero_budget_mm_problem,
     };
     use matching_engine::{
-        outcome_sell, shares_to_qty, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint,
-        MmId, MmSide, Nanos, NANOS_PER_DOLLAR,
+        MarketGroup, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, outcome_sell,
+        shares_to_qty, simple_no_buy, simple_yes_buy,
     };
 
     fn dollars(nanos: i64) -> f64 {

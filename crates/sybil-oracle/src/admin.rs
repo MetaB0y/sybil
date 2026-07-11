@@ -6,7 +6,7 @@
 use matching_engine::{MarketId, Nanos};
 
 use crate::error::OracleError;
-use crate::policy::{evaluate_admin_immediate, PolicyOutcome};
+use crate::policy::{PolicyOutcome, evaluate_admin_immediate};
 use crate::traits::{Oracle, ResolutionAction};
 use crate::types::MarketStatus;
 
@@ -51,7 +51,7 @@ impl Oracle for AdminOracle {
 mod tests {
     use super::*;
     use crate::types::{OracleSource, ResolutionRecord};
-    use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos};
 
     #[test]
     fn test_admin_resolve_yes_wins() {

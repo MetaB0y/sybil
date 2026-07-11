@@ -28,8 +28,8 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use sybil_api_types::request::{AutoResolutionActionDto, SubmitAutoResolutionRequest};
 use sybil_api_types::SignedAttestationDto;
+use sybil_api_types::request::{AutoResolutionActionDto, SubmitAutoResolutionRequest};
 use sybil_client::SybilClient;
 
 use crate::error::Error;
@@ -284,11 +284,11 @@ impl AutoResolveActor {
         };
 
         // Already settled on-chain? Nothing to do; clear any local pending item.
-        if let Ok(Some(res)) = self.sybil.get_market_resolution(sybil_market_id).await {
-            if res.status == "resolved" {
-                self.pending.remove(&sybil_market_id);
-                return Ok(());
-            }
+        if let Ok(Some(res)) = self.sybil.get_market_resolution(sybil_market_id).await
+            && res.status == "resolved"
+        {
+            self.pending.remove(&sybil_market_id);
+            return Ok(());
         }
 
         let entry = board.get(&sybil_market_id);
@@ -339,11 +339,11 @@ impl AutoResolveActor {
         }
 
         // Per-source rate limit.
-        if let Some(&last) = self.last_fetch_ms.get(&endpoint) {
-            if now_ms.saturating_sub(last) < self.config.source_min_interval_secs * 1000 {
-                debug!(sybil_market_id, %endpoint, "rate-limited; skipping this tick");
-                return Ok(());
-            }
+        if let Some(&last) = self.last_fetch_ms.get(&endpoint)
+            && now_ms.saturating_sub(last) < self.config.source_min_interval_secs * 1000
+        {
+            debug!(sybil_market_id, %endpoint, "rate-limited; skipping this tick");
+            return Ok(());
         }
 
         // Fetch → evaluate. Any failure fails closed to an escalation.

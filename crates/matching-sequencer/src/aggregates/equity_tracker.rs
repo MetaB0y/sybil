@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use matching_engine::{signed_notional_nanos, MarketId, Nanos};
+use matching_engine::{MarketId, Nanos, signed_notional_nanos};
 
 use crate::account::{AccountId, AccountStore};
 

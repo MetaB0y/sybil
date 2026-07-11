@@ -5,9 +5,9 @@ use redb::{Database, TableDefinition};
 
 use super::testutil::*;
 use super::*;
+use crate::AdminOracle;
 use crate::account::AccountStore;
 use crate::market_lifecycle::MarketLifecycle;
-use crate::AdminOracle;
 
 #[tokio::test]
 async fn auto_resolution_records_round_trip() {
@@ -995,7 +995,7 @@ async fn test_store_restores_market_volumes() {
 #[tokio::test]
 async fn test_store_restores_resting_orders() {
     use crate::order_book::OrderBook;
-    use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
 
     let path = temp_db_path("store-resting-orders");
     let store = Store::open(&path).unwrap();
@@ -1049,7 +1049,7 @@ async fn test_store_restores_resting_orders() {
 #[tokio::test]
 async fn store_restore_rejects_doctored_reserved_balance_high_and_low() {
     use crate::order_book::OrderBook;
-    use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
 
     for (case, delta) in [("high", 1_i64), ("low", -1_i64), ("correct", 0_i64)] {
         let path = temp_db_path(&format!("store-reserved-balance-{case}"));
@@ -1116,7 +1116,7 @@ async fn store_restore_rejects_doctored_reserved_balance_high_and_low() {
 #[tokio::test]
 async fn store_restore_accepts_matched_remainder_and_rejects_under_reservation() {
     use crate::order_book::OrderBook;
-    use matching_engine::{outcome_buy, Fill, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR};
+    use matching_engine::{Fill, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, outcome_buy};
     use std::collections::HashSet;
 
     let lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
@@ -1204,7 +1204,7 @@ async fn store_restore_accepts_matched_remainder_and_rejects_under_reservation()
 #[tokio::test]
 async fn witness_import_rejects_doctored_reserved_balance_high_and_low_and_accepts_correct() {
     use crate::order_book::OrderBook;
-    use matching_engine::{outcome_buy, Fill, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR};
+    use matching_engine::{Fill, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, outcome_buy};
     use std::collections::HashSet;
 
     let lifecycle = MarketLifecycle::new(Arc::new(AdminOracle::new()));
@@ -1321,7 +1321,7 @@ async fn witness_import_rejects_doctored_reserved_balance_high_and_low_and_accep
 #[tokio::test]
 async fn test_store_clears_resting_orders_when_snapshot_empty() {
     use crate::order_book::OrderBook;
-    use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
 
     let path = temp_db_path("store-resting-orders-empty");
     let store = Store::open(&path).unwrap();
@@ -1423,7 +1423,7 @@ async fn test_store_roundtrips_account_fill_history() {
 #[tokio::test]
 async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
     use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
-    use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-fill-recorder-snapshot");
     let store = Store::open(&path).unwrap();
@@ -1482,7 +1482,7 @@ async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
 #[tokio::test]
 async fn import_witness_drill_restores_head_and_produces_children() {
     use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
-    use matching_engine::{outcome_buy, outcome_sell, MarketId, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketId, NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let source_path = temp_db_path("store-import-witness-source");
     let fresh_path = temp_db_path("store-import-witness-fresh");
@@ -1849,16 +1849,17 @@ async fn import_witness_drill_restores_head_and_produces_children() {
         .unwrap()
             + 1
     );
-    assert!(seq
-        .markets()
-        .get(MarketId(summary.next_market_id))
-        .is_none());
+    assert!(
+        seq.markets()
+            .get(MarketId(summary.next_market_id))
+            .is_none()
+    );
 }
 
 #[tokio::test]
 async fn test_store_account_fills_reads_full_persisted_history() {
     use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
-    use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-account-fills-read");
     let store = Store::open(&path).unwrap();
@@ -1914,10 +1915,12 @@ async fn test_store_account_fills_reads_full_persisted_history() {
         .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
         .unwrap();
     assert_eq!(forward.len(), 2);
-    assert!(store
-        .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 0)
-        .unwrap()
-        .is_empty());
+    assert!(
+        store
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 0)
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(forward[0].block_height, 1);
     assert_eq!(forward[1].block_height, 2);
     let cursor = AccountFillCursor::from_record(&forward[0]);
@@ -1937,10 +1940,12 @@ async fn test_store_account_fills_reads_full_persisted_history() {
     );
     // ...and drops everything for a market the account never traded.
     let untraded = markets.add_binary("Untraded");
-    assert!(store
-        .account_fills(buyer, Some(untraded), 10, 0)
-        .unwrap()
-        .is_empty());
+    assert!(
+        store
+            .account_fills(buyer, Some(untraded), 10, 0)
+            .unwrap()
+            .is_empty()
+    );
 
     // offset/limit page over the newest-first sequence.
     let page = store.account_fills(buyer, None, 1, 1).unwrap();
@@ -1948,16 +1953,18 @@ async fn test_store_account_fills_reads_full_persisted_history() {
     assert_eq!(page[0].block_height, 1);
 
     // Unknown account => empty, no error.
-    assert!(store
-        .account_fills(AccountId(99), None, 10, 0)
-        .unwrap()
-        .is_empty());
+    assert!(
+        store
+            .account_fills(AccountId(99), None, 10, 0)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
 async fn test_store_fill_cursor_pagination_survives_reopen() {
     use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
-    use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-account-fills-cursor-reopen");
     let store = Store::open(&path).unwrap();
@@ -2018,7 +2025,7 @@ async fn test_store_fill_cursor_pagination_survives_reopen() {
 #[tokio::test]
 async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
     use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
-    use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-fill-cap-zero");
     let store = Store::open(&path).unwrap();
@@ -2060,21 +2067,24 @@ async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
         )
         .unwrap();
 
-    assert!(prepared
-        .next_sequencer()
-        .analytics()
-        .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
-        .is_empty());
+    assert!(
+        prepared
+            .next_sequencer()
+            .analytics()
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
+            .is_empty()
+    );
 
     store
         .save_block(prepared.next_sequencer().snapshot())
         .await
         .unwrap();
     seq.commit_prepared_block(prepared).unwrap();
-    assert!(seq
-        .analytics()
-        .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
-        .is_empty());
+    assert!(
+        seq.analytics()
+            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
+            .is_empty()
+    );
 
     let durable = store
         .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
@@ -2094,7 +2104,7 @@ async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
 #[tokio::test]
 async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
     use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
-    use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
+    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-reopen-smoke");
     let oracle = Arc::new(AdminOracle::new());
@@ -2227,7 +2237,7 @@ fn test_open_rejects_legacy_store_layout() {
 async fn test_store_roundtrips_admit_log_and_replays_on_restore() {
     use crate::order_book::OrderBook;
     use crate::sequencer::{BlockSequencer, SequencerConfig};
-    use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
 
     let path = temp_db_path("store-admit-log");
     let store = Store::open(&path).unwrap();
@@ -2347,8 +2357,9 @@ async fn test_store_roundtrips_data_feeds() {
 async fn test_store_roundtrips_pending_bundles() {
     use crate::sequencer::OrderSubmission;
     use matching_engine::{
+        MarketSet, NANOS_PER_DOLLAR,
         mm_constraint::{MmConstraint, MmId, MmSide},
-        outcome_buy, MarketSet, NANOS_PER_DOLLAR,
+        outcome_buy,
     };
 
     let path = temp_db_path("store-pending-bundles");
@@ -2467,8 +2478,10 @@ fn equity_and_history_rows_roundtrip() {
 
     // Unknown account → empty.
     assert!(store.equity_series(AccountId(99), 0).unwrap().is_empty());
-    assert!(store
-        .account_events(AccountId(99), 10, None, None)
-        .unwrap()
-        .is_empty());
+    assert!(
+        store
+            .account_events(AccountId(99), 10, None, None)
+            .unwrap()
+            .is_empty()
+    );
 }

@@ -1,7 +1,8 @@
 [package]
 name = "sybil-custody"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "User-side Sybil custody snapshots, reconstruction, and escape claims"
 default-run = "sybil-custody"
 
@@ -11,20 +12,20 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4.5", features = ["derive", "env"] }
-hex = "0.4"
+clap = { workspace = true, features = ["derive", "env"] }
+hex = { workspace = true }
 matching-engine = { path = "../matching-engine" }
-p256 = { version = "0.14", features = ["ecdsa"] }
+p256 = { workspace = true, features = ["ecdsa"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
-rmp-serde = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha3 = "0.12"
+rmp-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha3 = { workspace = true }
 sybil-api-types = { path = "../sybil-api-types" }
 sybil-escape-claim = { path = "../sybil-escape-claim" }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
-tokio = { version = "1", features = ["macros", "process", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread"] }
 
 [dev-dependencies]
 tempfile = "3"

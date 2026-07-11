@@ -1,17 +1,18 @@
 [package]
 name = "sybil-client"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "The shared Rust HTTP client for the Sybil API (SYB-171)"
 
 [dependencies]
 sybil-api-types = { path = "../sybil-api-types" }
 reqwest = { version = "0.13", features = ["json", "rustls"] }
-serde = "1"
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 futures-util = "0.3"
-tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
-tracing = "0.1"
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+tracing = { workspace = true }
 thiserror = { workspace = true }
 
 # Used only by `examples/smoke_sign.rs` (SYB-223 post-deploy smoke). Kept as
@@ -19,10 +20,10 @@ thiserror = { workspace = true }
 # canonical-bytes stack. Versions mirror the workspace (matching-sequencer).
 [dev-dependencies]
 sybil-signing = { path = "../sybil-signing" }
-p256 = { version = "0.14", features = ["ecdsa"] }
-getrandom = "0.4"
-hex = "0.4"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+p256 = { workspace = true, features = ["ecdsa"] }
+getrandom = { workspace = true }
+hex = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints.clippy]
 # f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,

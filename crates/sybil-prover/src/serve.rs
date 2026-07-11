@@ -4,18 +4,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::{Path as AxumPath, State as AxumState},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::IntoResponse,
     routing::get,
-    Json, Router,
 };
 use clap::Args;
 use serde::Serialize;
 use tokio::net::TcpListener;
 
-use crate::artifacts::{discover_proof_jobs, unix_time_ms, WorkerStatusJson};
 use crate::ProverCliError;
+use crate::artifacts::{WorkerStatusJson, discover_proof_jobs, unix_time_ms};
 
 #[derive(Args)]
 pub struct ServeArgs {
@@ -464,8 +464,8 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use crate::artifacts::{hex32, worker_artifact_dir, write_json_pretty, WorkerStatusJson};
     use crate::StateTransitionProofJobId;
+    use crate::artifacts::{WorkerStatusJson, hex32, worker_artifact_dir, write_json_pretty};
 
     use super::{read_latest_worker_status, read_worker_status_by_height};
 

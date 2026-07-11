@@ -4,8 +4,8 @@
 //! arithmetic matches the sequencer's fixed-point quantity semantics.
 
 use matching_engine::{
-    checked_notional_ceil_i64, checked_notional_i64, checked_signed_price_delta_notional,
-    notional_nanos, Nanos, Qty,
+    Nanos, Qty, checked_notional_ceil_i64, checked_notional_i64,
+    checked_signed_price_delta_notional, notional_nanos,
 };
 
 /// Compute `price * qty / SHARE_SCALE` as i64.

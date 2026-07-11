@@ -61,7 +61,10 @@ just build            # cargo build --release
 just test             # cargo test --workspace
 just lint             # cargo clippy --workspace --all-features
 just fmt              # cargo fmt --all
-just check-all        # fmt-check + lint + test (CI equivalent)
+just check-fast       # Rust metadata + fmt + check + clippy
+just check-consensus  # goldens + guest fingerprints + deployment pins
+just check-all        # all workspaces and language/tooling gates (CI equivalent)
+just clean            # cargo clean in root, fuzz, and all OpenVM workspaces
 just contracts-test   # forge test in contracts/
 just bench            # cargo bench --workspace
 just doc              # cargo doc --workspace --no-deps

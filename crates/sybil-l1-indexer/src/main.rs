@@ -4,7 +4,7 @@ use std::time::Duration;
 use clap::Parser;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sybil_api_types::request::{
     BridgeWithdrawalL1Status, ObserveL1HeightRequest, SubmitL1DepositRequest,
     SubmitL1WithdrawalEventRequest,
@@ -17,9 +17,9 @@ use sybil_api_types::response::{
 };
 use sybil_client::SybilClient;
 use sybil_l1_protocol::{
-    deposit_received_topic0, deposit_root_by_count_calldata, parse_deposit_received_log,
-    parse_withdrawal_event_log, withdrawal_cancelled_topic0, withdrawal_finalized_topic0,
-    withdrawal_queued_topic0, Bytes32, EthAddress, L1Log, L1ProtocolError, WithdrawalEvent,
+    Bytes32, EthAddress, L1Log, L1ProtocolError, WithdrawalEvent, deposit_received_topic0,
+    deposit_root_by_count_calldata, parse_deposit_received_log, parse_withdrawal_event_log,
+    withdrawal_cancelled_topic0, withdrawal_finalized_topic0, withdrawal_queued_topic0,
 };
 use tokio::time::sleep;
 
@@ -1571,14 +1571,18 @@ mod tests {
 
         let deposit_ranges = l1.deposit_log_ranges.lock().unwrap();
         assert_eq!(deposit_ranges.as_slice(), &[(0, 2), (3, 5), (3, 5), (6, 8)]);
-        assert!(deposit_ranges
-            .iter()
-            .all(|(from, to)| from <= to && to - from < args.max_block_span));
+        assert!(
+            deposit_ranges
+                .iter()
+                .all(|(from, to)| from <= to && to - from < args.max_block_span)
+        );
         let withdrawal_ranges = l1.withdrawal_log_ranges.lock().unwrap();
         assert_eq!(withdrawal_ranges.as_slice(), &[(0, 2), (3, 5), (6, 8)]);
-        assert!(withdrawal_ranges
-            .iter()
-            .all(|(from, to)| from <= to && to - from < args.max_block_span));
+        assert!(
+            withdrawal_ranges
+                .iter()
+                .all(|(from, to)| from <= to && to - from < args.max_block_span)
+        );
         assert_eq!(sink.observed_heights.lock().unwrap().as_slice(), &[2, 5, 8]);
     }
 

@@ -6,20 +6,20 @@
 
 use std::time::Duration;
 
-use matching_engine::{shares_to_qty, MarketId, Nanos, Order, Qty};
-use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
+use matching_engine::{MarketId, Nanos, Order, Qty, shares_to_qty};
 use matching_sequencer::AccountId;
+use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 mod common;
 
 use common::process::{
-    get_json, get_status_and_body, pause_blocks, post_json, restart_api, restart_api_with_env,
-    resume_blocks, spawn_api, spawn_api_with_env, wait_for_block, wait_for_health,
-    wait_for_height_at_least, ProcessTestRoot,
+    ProcessTestRoot, get_json, get_status_and_body, pause_blocks, post_json, restart_api,
+    restart_api_with_env, resume_blocks, spawn_api, spawn_api_with_env, wait_for_block,
+    wait_for_health, wait_for_height_at_least,
 };
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -545,9 +545,11 @@ async fn history_retention_and_candles_survive_process_restart() {
         3,
         "raw price history after restart: {history}"
     );
-    assert!(points
-        .iter()
-        .all(|point| point["volume_nanos"].as_u64().unwrap() > 0));
+    assert!(
+        points
+            .iter()
+            .all(|point| point["volume_nanos"].as_u64().unwrap() > 0)
+    );
 
     let candles = get_json(
         &client,

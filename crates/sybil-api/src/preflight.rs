@@ -352,10 +352,12 @@ mod tests {
             ..prod_ready_config()
         };
         let report = build_report(&config).unwrap();
-        assert!(report
-            .violations()
-            .iter()
-            .any(|d| d.knob == "SYBIL_DEV_MODE"));
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|d| d.knob == "SYBIL_DEV_MODE")
+        );
         assert!(report.blocks_prod_start(false));
         assert!(run_preflight(&config).is_err());
     }
@@ -377,10 +379,12 @@ mod tests {
             ..prod_ready_config()
         };
         let report = build_report(&config).unwrap();
-        assert!(report
-            .violations()
-            .iter()
-            .any(|d| d.knob == "SYBIL_DATA_DIR"));
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|d| d.knob == "SYBIL_DATA_DIR")
+        );
         assert!(run_preflight(&config).is_err());
     }
 
@@ -391,10 +395,12 @@ mod tests {
             ..prod_ready_config()
         };
         let report = build_report(&config).unwrap();
-        assert!(report
-            .deviations
-            .iter()
-            .any(|d| d.knob == "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT" && !d.dev_only));
+        assert!(
+            report
+                .deviations
+                .iter()
+                .any(|d| d.knob == "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT" && !d.dev_only)
+        );
         assert!(report.violations().is_empty());
         assert!(!report.blocks_prod_start(false));
         assert!(run_preflight(&config).is_ok());
@@ -409,10 +415,12 @@ mod tests {
             ..prod_ready_config()
         };
         let report = build_report(&config).unwrap();
-        assert!(report
-            .deviations
-            .iter()
-            .any(|d| d.knob == "SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET" && !d.dev_only));
+        assert!(
+            report
+                .deviations
+                .iter()
+                .any(|d| d.knob == "SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET" && !d.dev_only)
+        );
         assert!(report.violations().is_empty());
         assert!(!report.blocks_prod_start(false));
         assert!(run_preflight(&config).is_ok());

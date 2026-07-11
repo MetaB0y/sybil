@@ -5,7 +5,7 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
-    outcome_buy, outcome_sell, price_to_nanos, MarketId, MarketSet, Order, Problem, Qty,
+    MarketId, MarketSet, Order, Problem, Qty, outcome_buy, outcome_sell, price_to_nanos,
 };
 
 /// Configuration for random hard instance generation

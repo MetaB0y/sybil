@@ -1,10 +1,10 @@
-use axum::extract::{Path, State};
 use axum::Json;
+use axum::extract::{Path, State};
 
 use matching_sequencer::{
-    AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
-    QmdbStateOperationProofParts, QmdbStateRangeProofParts, SequencerStateProof,
-    SequencerStateProofKind, QMDB_STATE_MAX_KEY_BYTES,
+    AccountSnapshotSlot, QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts,
+    QmdbStateKeyValueProofParts, QmdbStateOperationProofParts, QmdbStateRangeProofParts,
+    SequencerStateProof, SequencerStateProofKind,
 };
 
 use crate::state::AppState;

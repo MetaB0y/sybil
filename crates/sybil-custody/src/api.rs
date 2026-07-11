@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use matching_engine::MarketId;
 use reqwest::{Client, RequestBuilder};
 use serde::de::DeserializeOwned;
 use sybil_api_types::{DaManifestResponse, HealthResponse, StateProofResponse};
 use sybil_verifier::commitments::state_schema;
 
-use crate::format::{CustodyManifest, CustodySnapshot, CUSTODY_SNAPSHOT_VERSION};
+use crate::format::{CUSTODY_SNAPSHOT_VERSION, CustodyManifest, CustodySnapshot};
 use crate::rpc::{fetch_root_record, validate_manifest_root_record};
 
 const SNAPSHOT_RETRIES: usize = 20;

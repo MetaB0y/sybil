@@ -6,11 +6,10 @@ use clap::{Args, ValueEnum};
 use serde::Deserialize;
 use sha3::{Digest as _, Keccak256};
 
-use crate::artifacts::{read_guest_input, write_hex_bytes};
 use crate::ProverCliError;
+use crate::artifacts::{read_guest_input, write_hex_bytes};
 
-const SUBMIT_STATE_ROOT_SIGNATURE: &str =
-    "submitStateRoot((uint64,uint64,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,uint64),bytes)";
+const SUBMIT_STATE_ROOT_SIGNATURE: &str = "submitStateRoot((uint64,uint64,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,uint64),bytes)";
 const STATE_TRANSITION_PUBLIC_INPUT_WORDS: usize = 10;
 const ABI_WORD_BYTES: usize = 32;
 const SHELL_SAFE_CALLDATA_BYTES: usize = 128 * 1024;

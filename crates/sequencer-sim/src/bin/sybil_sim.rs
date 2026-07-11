@@ -1,5 +1,5 @@
 use clap::Parser;
-use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color, Table};
+use comfy_table::{Cell, Color, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL};
 
 use matching_engine::NANOS_PER_DOLLAR;
 use sequencer_sim::scenario::Scenario;

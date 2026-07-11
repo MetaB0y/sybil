@@ -560,9 +560,11 @@ mod tests {
         let attacker = key(2, 0);
         let result = verify_key_transitions(&witness(&[old], &[attacker], Vec::new()));
         assert!(!result.valid);
-        assert!(result.violations[0]
-            .details
-            .contains("without a witnessed key event"));
+        assert!(
+            result.violations[0]
+                .details
+                .contains("without a witnessed key event")
+        );
     }
 
     #[test]
@@ -580,9 +582,11 @@ mod tests {
             }],
         ));
         assert!(!result.valid);
-        assert!(result.violations[0]
-            .details
-            .contains("did not find the registered key"));
+        assert!(
+            result.violations[0]
+                .details
+                .contains("did not find the registered key")
+        );
     }
 
     #[test]
@@ -597,9 +601,11 @@ mod tests {
         }];
         let result = verify_key_transitions(&witness);
         assert!(!result.valid);
-        assert!(result.violations[0]
-            .details
-            .contains("no opened post-state leaf"));
+        assert!(
+            result.violations[0]
+                .details
+                .contains("no opened post-state leaf")
+        );
     }
 
     #[test]

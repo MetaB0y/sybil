@@ -6,9 +6,8 @@
 use std::collections::HashMap;
 
 use matching_engine::{
-    compute_fill_settlement_checked, derive_minting_checked,
-    minting_cost_from_incremental_adjustments_checked, Fill, MarketId, MintAdjustment, Nanos,
-    NANOS_PER_DOLLAR,
+    Fill, MarketId, MintAdjustment, NANOS_PER_DOLLAR, Nanos, compute_fill_settlement_checked,
+    derive_minting_checked, minting_cost_from_incremental_adjustments_checked,
 };
 
 use crate::types::{AccountSnapshot, BlockWitness, WitnessOrder};
@@ -544,8 +543,8 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
-        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, Fill, MarketSet, Nanos, Qty,
-        NANOS_PER_DOLLAR,
+        Fill, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, notional_nanos, outcome_buy, outcome_sell,
+        shares_to_qty,
     };
     use proptest::prelude::*;
 
@@ -787,10 +786,12 @@ mod tests {
 
         let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::FillAccountMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::FillAccountMismatch)
+        );
     }
 
     #[test]
@@ -840,10 +841,12 @@ mod tests {
 
         let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SettlementOverflow));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SettlementOverflow)
+        );
     }
 
     #[test]
@@ -1057,10 +1060,12 @@ mod tests {
 
         let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SettlementBalanceMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SettlementBalanceMismatch)
+        );
     }
 
     #[test]
@@ -1167,10 +1172,12 @@ mod tests {
 
         let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::NegativeBalance));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::NegativeBalance)
+        );
     }
 
     #[test]
@@ -1235,10 +1242,12 @@ mod tests {
 
         let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::NegativePosition));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::NegativePosition)
+        );
     }
 
     #[test]
@@ -1493,10 +1502,12 @@ mod tests {
 
         let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SettlementBalanceMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SettlementBalanceMismatch)
+        );
     }
 
     #[test]
@@ -1583,10 +1594,12 @@ mod tests {
 
         let result = verify_with_bound_post_value_commitments(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::MintingWithoutClearingPrice));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::MintingWithoutClearingPrice)
+        );
     }
 
     proptest! {

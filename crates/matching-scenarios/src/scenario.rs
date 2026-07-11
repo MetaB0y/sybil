@@ -9,8 +9,8 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
-    outcome_buy, outcome_sell, price_to_nanos, MarketGroup, MarketId, MmConstraint, MmId, MmSide,
-    Nanos, Order, Problem, NANOS_PER_DOLLAR,
+    MarketGroup, MarketId, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem,
+    outcome_buy, outcome_sell, price_to_nanos,
 };
 
 /// Unified configuration for scenario generation.

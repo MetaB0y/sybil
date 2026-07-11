@@ -1,6 +1,6 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha3::{Digest as _, Keccak256};
 use sybil_api_types::DaManifestResponse;
 

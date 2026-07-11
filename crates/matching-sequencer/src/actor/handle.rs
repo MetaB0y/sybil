@@ -141,10 +141,10 @@ impl SequencerHandle {
                 .read()
                 .expect("sequencer actor ref lock poisoned")
                 .clone();
-            if let Some(actor) = actor {
-                if actor.get_id() != old_id {
-                    return Ok(());
-                }
+            if let Some(actor) = actor
+                && actor.get_id() != old_id
+            {
+                return Ok(());
             }
 
             if Instant::now() >= deadline {
@@ -1163,10 +1163,10 @@ mod tests {
     use crate::market_info::ResolutionConfig;
     use crate::sequencer::SequencerConfig;
     use crate::system_event::SystemEvent;
-    use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::time::Duration;
     use sybil_oracle::{AdminOracle, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
     use sybil_verifier::SystemEventWitness;
@@ -1378,11 +1378,13 @@ mod tests {
                 .any(|fill| fill.order_id == ioc_order_id && fill.fill_qty.0 > 0),
             "IOC should participate in and match in its first admit-eligible batch"
         );
-        assert!(handle
-            .get_pending_orders(Some(buyer))
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            handle
+                .get_pending_orders(Some(buyer))
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -2557,11 +2559,13 @@ mod tests {
             .await
             .expect("the same nonce should still authorize a valid cancel");
 
-        assert!(handle
-            .get_pending_orders(Some(aid))
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            handle
+                .get_pending_orders(Some(aid))
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             handle.get_account(aid).await.unwrap().unwrap().last_nonce,
             1

@@ -1096,9 +1096,11 @@ mod tests {
         // Should have BuyYes + BuyNo (no sells since no position)
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
-        assert!(!orders
-            .iter()
-            .any(|o| matches!(o, OrderSpec::SellYes { .. })));
+        assert!(
+            !orders
+                .iter()
+                .any(|o| matches!(o, OrderSpec::SellYes { .. }))
+        );
         assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
     }
 
@@ -1108,9 +1110,11 @@ mod tests {
 
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
-        assert!(!orders
-            .iter()
-            .any(|o| matches!(o, OrderSpec::SellYes { .. })));
+        assert!(
+            !orders
+                .iter()
+                .any(|o| matches!(o, OrderSpec::SellYes { .. }))
+        );
         assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
     }
 
@@ -1226,9 +1230,11 @@ mod tests {
         input.no_position = q(50);
         let orders = generate_quotes(&input, &config);
         // Should have SellYes (holding YES) and SellNo (holding NO, standalone)
-        assert!(orders
-            .iter()
-            .any(|o| matches!(o, OrderSpec::SellYes { .. })));
+        assert!(
+            orders
+                .iter()
+                .any(|o| matches!(o, OrderSpec::SellYes { .. }))
+        );
         assert!(orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
     }
 

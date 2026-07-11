@@ -35,11 +35,11 @@ use std::process::exit;
 use getrandom::SysRng;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
-use p256::elliptic_curve::rand_core::UnwrapErr;
 use p256::elliptic_curve::Generate;
+use p256::elliptic_curve::rand_core::UnwrapErr;
 use sybil_signing::{
+    BridgeWithdrawalRequest, MAX_MARKETS_PER_ORDER, MAX_STATES, MarketId, Order,
     canonical_bridge_withdrawal_bytes, canonical_cancel_bytes, canonical_order_bytes,
-    BridgeWithdrawalRequest, MarketId, Order, MAX_MARKETS_PER_ORDER, MAX_STATES,
 };
 
 fn die(msg: &str) -> ! {

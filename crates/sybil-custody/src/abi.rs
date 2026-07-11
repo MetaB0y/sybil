@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use sha3::{Digest as _, Keccak256};
 use sybil_escape_claim::EscapeClaimPublicInputs;

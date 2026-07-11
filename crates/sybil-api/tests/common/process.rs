@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::process::{Child, Command};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
@@ -188,10 +188,10 @@ pub async fn wait_for_height_at_least(
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let health = wait_for_health(client, base_url).await;
-        if let Some(height) = health["height"].as_u64() {
-            if height >= min_height {
-                return height;
-            }
+        if let Some(height) = health["height"].as_u64()
+            && height >= min_height
+        {
+            return height;
         }
 
         assert!(

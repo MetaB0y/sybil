@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use sybil_api_types::DaManifestResponse;
 use sybil_escape_claim::compute_withdrawable_token_units;
-use sybil_verifier::commitments::witness_schema;
 use sybil_verifier::BlockWitness;
+use sybil_verifier::commitments::witness_schema;
 
-use crate::api::{collect_snapshot, fetch_payload, read_json, SnapshotRequest};
+use crate::api::{SnapshotRequest, collect_snapshot, fetch_payload, read_json};
 use crate::claim::snapshot_openings;
 use crate::format::{CustodyManifest, CustodySnapshot, RootRecord};
 use crate::rpc::{decode32, fetch_root_record, validate_manifest_root_record};

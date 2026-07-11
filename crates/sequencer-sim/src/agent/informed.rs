@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{outcome_buy, outcome_sell, MarketId, MarketSet, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, outcome_buy, outcome_sell};
 
 use crate::agent::{Agent, AgentSubmission, MarketView};
 use matching_sequencer::account::{Account, AccountId};

@@ -4,12 +4,12 @@
 //! only checks with `eprintln` warnings (sequencer.rs:650-715).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use matching_engine::{
-    compute_fill_settlement, derive_minting, net_welfare, outcome_buy, signed_notional_nanos,
-    MarketId, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR,
+    MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, compute_fill_settlement, derive_minting,
+    net_welfare, outcome_buy, signed_notional_nanos,
 };
 use matching_sequencer::{AccountId, AccountStore, AdminOracle, BlockSequencer, OrderSubmission};
 use proptest::prelude::*;

@@ -12,7 +12,7 @@ pub use admin::AdminOracle;
 pub use attestation::{ResolutionAttestation, SignedAttestation};
 pub use error::OracleError;
 pub use feed::{DataFeed, FeedId, FeedPubkey};
-pub use policy::{evaluate_immediate, PolicyOutcome, ResolutionPolicy};
+pub use policy::{PolicyOutcome, ResolutionPolicy, evaluate_immediate};
 pub use registry::FeedRegistry;
 pub use template::{ResolutionTemplate, TemplateId, TemplateRegistry};
 pub use traits::{ChallengeAction, Oracle, ResolutionAction};

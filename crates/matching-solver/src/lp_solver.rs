@@ -19,12 +19,12 @@ use std::time::Instant;
 use highs::{HighsModelStatus, RowProblem, Sense};
 
 use matching_engine::{
-    minting_cost_from_fills, Fill, MarketId, MmSide, Nanos, Order, Problem, Qty, NANOS_PER_DOLLAR,
+    Fill, MarketId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, minting_cost_from_fills,
 };
 
+use crate::MatchingResult;
 use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::solver::order_sign;
-use crate::MatchingResult;
 
 /// Configuration for the LP solver.
 #[derive(Clone, Debug)]

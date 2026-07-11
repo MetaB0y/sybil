@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use matching_engine::{ceil_mul_ratio, MarketId, Order, Qty, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Order, Qty, ceil_mul_ratio};
 use sybil_l1_protocol::DepositLeaf;
 
 use crate::match_verifier::price_is_in_protocol_range;
@@ -274,16 +274,16 @@ fn verify_withdrawal_transition(witness: &BlockWitness, violations: &mut Vec<Vio
     let pre = keyed_withdrawals(&witness.pre_state_sidecar.bridge.withdrawals, violations);
     let post = keyed_withdrawals(&witness.state_sidecar.bridge.withdrawals, violations);
 
-    if let Some(max_withdrawal_id) = post.keys().next_back().copied() {
-        if witness.state_sidecar.bridge.next_withdrawal_id <= max_withdrawal_id {
-            violations.push(Violation {
-                kind: ViolationKind::SidecarWithdrawalMismatch,
-                details: format!(
-                    "next_withdrawal_id {} must be greater than committed withdrawal id {}",
-                    witness.state_sidecar.bridge.next_withdrawal_id, max_withdrawal_id
-                ),
-            });
-        }
+    if let Some(max_withdrawal_id) = post.keys().next_back().copied()
+        && witness.state_sidecar.bridge.next_withdrawal_id <= max_withdrawal_id
+    {
+        violations.push(Violation {
+            kind: ViolationKind::SidecarWithdrawalMismatch,
+            details: format!(
+                "next_withdrawal_id {} must be greater than committed withdrawal id {}",
+                witness.state_sidecar.bridge.next_withdrawal_id, max_withdrawal_id
+            ),
+        });
     }
 
     let mut created = BTreeMap::new();
@@ -452,20 +452,17 @@ fn verify_withdrawal_transition(witness: &BlockWitness, violations: &mut Vec<Vio
                 reason,
                 ..
             } => {
-                if let crate::types::WithdrawalRefundReasonWitness::L1Expired {
-                    observed_l1_height,
-                } = reason
+                if let crate::types::WithdrawalRefundReasonWitness::L1Expired { observed_l1_height } =
+                    reason
+                    && (*observed_l1_height <= leaf_expiry
+                        || !observed_heights.contains(observed_l1_height))
                 {
-                    if *observed_l1_height <= leaf_expiry
-                        || !observed_heights.contains(observed_l1_height)
-                    {
-                        violations.push(Violation {
+                    violations.push(Violation {
                             kind: ViolationKind::SidecarWithdrawalMismatch,
                             details: format!(
                                 "withdrawal {withdrawal_id} expiry refund at L1 height {observed_l1_height} is not justified by expiry {leaf_expiry}"
                             ),
                         });
-                    }
                 }
                 (*account_id, *amount)
             }
@@ -1388,10 +1385,12 @@ mod tests {
         sidecar.resting_orders.clear();
         let result = verify_sidecar(&witness_with_sidecar(sidecar));
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarReservationMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarReservationMismatch)
+        );
     }
 
     #[test]
@@ -1404,10 +1403,12 @@ mod tests {
         let result = verify_sidecar(&witness_with_pre_post_sidecars(pre, post));
 
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarRestingOrderMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarRestingOrderMismatch)
+        );
     }
 
     #[test]
@@ -1421,10 +1422,12 @@ mod tests {
         }];
         let result = verify_sidecar(&witness_with_sidecar(sidecar));
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarReservationMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarReservationMismatch)
+        );
     }
 
     #[test]
@@ -1439,10 +1442,12 @@ mod tests {
         witness.state_sidecar.bridge.withdrawals.clear();
         let result = verify_sidecar(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarWithdrawalMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarWithdrawalMismatch)
+        );
     }
 
     #[test]
@@ -1456,10 +1461,12 @@ mod tests {
         let result = verify_sidecar(&witness_with_pre_post_sidecars(pre, post));
 
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarWithdrawalMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarWithdrawalMismatch)
+        );
     }
 
     #[test]
@@ -1485,10 +1492,12 @@ mod tests {
         witness.state_sidecar.bridge.deposit_cursor = 1;
         let result = verify_sidecar(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarDepositCursorMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarDepositCursorMismatch)
+        );
     }
 
     #[test]
@@ -1507,10 +1516,12 @@ mod tests {
         witness.state_sidecar.markets[0].status = MarketStatusSnapshot::Active;
         let result = verify_sidecar(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch)
+        );
     }
 
     #[test]
@@ -1523,10 +1534,12 @@ mod tests {
         let result = verify_sidecar(&witness_with_pre_post_sidecars(pre, post));
 
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch)
+        );
     }
 
     #[test]
@@ -1544,10 +1557,12 @@ mod tests {
         let result = verify_sidecar(&witness);
 
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch)
+        );
     }
 
     #[test]
@@ -1563,10 +1578,12 @@ mod tests {
         let result = verify_sidecar(&witness_with_pre_post_sidecars(pre, post));
 
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch)
+        );
     }
 
     #[test]
@@ -1606,10 +1623,12 @@ mod tests {
         out_of_range.markets = vec![market];
         let result = verify_sidecar(&witness_with_sidecar(out_of_range));
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarMarketStatusMismatch)
+        );
     }
 
     #[test]
@@ -1622,10 +1641,12 @@ mod tests {
         let result = verify_sidecar(&witness_with_pre_post_sidecars(pre, post));
 
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SidecarMarketGroupMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SidecarMarketGroupMismatch)
+        );
     }
 
     #[test]

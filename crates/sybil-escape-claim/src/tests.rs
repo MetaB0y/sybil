@@ -2,32 +2,32 @@ use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
 
 use base64::Engine as _;
 use commonware_codec::RangeCfg;
-use commonware_cryptography::{sha256::Digest as QmdbDigest, Sha256 as QmdbSha256};
+use commonware_cryptography::{Sha256 as QmdbSha256, sha256::Digest as QmdbDigest};
 use commonware_parallel::Sequential;
 use commonware_runtime::buffer::paged::CacheRef;
-use commonware_runtime::{deterministic, Runner as _};
+use commonware_runtime::{Runner as _, deterministic};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::full::Config as MmrConfig;
 use commonware_storage::merkle::mmr::Family as MmrFamily;
+use commonware_storage::merkle::mmr::full::Config as MmrConfig;
+use commonware_storage::qmdb::current::VariableConfig;
+use commonware_storage::qmdb::current::ordered::ExclusionProof as NativeExclusionProof;
 use commonware_storage::qmdb::current::ordered::variable::{
     Db as OrderedVariableDb, KeyValueProof,
 };
-use commonware_storage::qmdb::current::ordered::ExclusionProof as NativeExclusionProof;
 use commonware_storage::qmdb::current::proof::{OperationProof, RangeProof};
-use commonware_storage::qmdb::current::VariableConfig;
 use commonware_storage::translator::OneCap;
-use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos};
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{Signature, SigningKey};
 use proptest::prelude::*;
 use sha2::{Digest as _, Sha256};
 use sybil_verifier::{
-    commitments::state_schema, AccountReservationSnapshot, AccountSnapshot, KeyOpAuth, KeyRecord,
-    MarketSnapshot, MarketStatusSnapshot, EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID,
+    AccountReservationSnapshot, AccountSnapshot, EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID,
+    KeyOpAuth, KeyRecord, MarketSnapshot, MarketStatusSnapshot, commitments::state_schema,
 };
 use sybil_zk::{
-    QmdbStateExclusionProof, QmdbStateKeyValueProof, QmdbStateOperationProof, QmdbStateRangeProof,
-    QMDB_STATE_CHUNK_SIZE,
+    QMDB_STATE_CHUNK_SIZE, QmdbStateExclusionProof, QmdbStateKeyValueProof,
+    QmdbStateOperationProof, QmdbStateRangeProof,
 };
 
 use super::*;

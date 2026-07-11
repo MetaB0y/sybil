@@ -4,18 +4,18 @@
 //! section order: system events, accepted orders, rejected orders, fills.
 
 use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
-use std::sync::{mpsc, OnceLock};
+use std::sync::{OnceLock, mpsc};
 use std::thread;
 
 use commonware_codec::RangeCfg;
 use commonware_cryptography::Sha256 as QmdbSha256;
 use commonware_parallel::Sequential;
 use commonware_runtime::buffer::paged::CacheRef;
-use commonware_runtime::{deterministic, Runner as _};
+use commonware_runtime::{Runner as _, deterministic};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::full::Config as MmrConfig;
-use commonware_storage::merkle::mmr::Family as MmrFamily;
 use commonware_storage::merkle::Location;
+use commonware_storage::merkle::mmr::Family as MmrFamily;
+use commonware_storage::merkle::mmr::full::Config as MmrConfig;
 use commonware_storage::qmdb::keyless::variable::{
     Config as KeylessVariableConfig, Db as KeylessVariableDb,
 };

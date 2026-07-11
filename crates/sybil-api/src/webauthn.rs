@@ -1,8 +1,8 @@
 use std::fmt;
 use std::io::Cursor;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ciborium::value::{Integer, Value};
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -215,10 +215,10 @@ fn verify_client_data(
     if client_data.type_ != expected_type {
         return Err(WebAuthnError::UnexpectedClientDataType);
     }
-    if let Some(expected_challenge) = expected_challenge {
-        if client_data.challenge != expected_challenge {
-            return Err(WebAuthnError::ChallengeMismatch);
-        }
+    if let Some(expected_challenge) = expected_challenge
+        && client_data.challenge != expected_challenge
+    {
+        return Err(WebAuthnError::ChallengeMismatch);
     }
     if client_data.origin != config.origin {
         return Err(WebAuthnError::OriginMismatch);
@@ -353,8 +353,8 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p256::ecdsa::signature::Signer;
     use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::Signer;
 
     fn test_config() -> WebAuthnVerifierConfig {
         let rp_id = "localhost".to_string();

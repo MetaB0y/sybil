@@ -1,14 +1,15 @@
 [package]
 name = "sybil-zk"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "ZK public input binding and guest-safe Sybil verification entrypoints"
 
 [dependencies]
-blake3 = "1"
-serde = { version = "1", features = ["derive"] }
+blake3 = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 sha2 = { version = "0.11", default-features = false }
-sha3 = "0.12"
+sha3 = { workspace = true }
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 sybil-verifier = { path = "../sybil-verifier", default-features = false }
 
@@ -24,8 +25,8 @@ commonware-parallel = "2026.5.0"
 commonware-runtime = "2026.5.0"
 commonware-storage = "2026.5.0"
 matching-engine = { path = "../matching-engine" }
-p256 = { version = "0.14", features = ["ecdsa"] }
-serde_json = "1"
+p256 = { workspace = true, features = ["ecdsa"] }
+serde_json = { workspace = true }
 
 [lints.clippy]
 # f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,

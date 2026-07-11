@@ -18,7 +18,9 @@ auctions, deterministic integer settlement, and agent-first interfaces.
 just test             # Run all tests
 just sim-quick        # Run a small simulation (~50 orders)
 just compare          # Compare all solvers on medium scenario
-just check-all        # fmt + lint + test
+just check-fast       # Rust metadata + fmt + check + clippy
+just check-consensus  # protocol and guest commitment consistency
+just check-all        # complete CI-equivalent gate
 ```
 
 ## Project Structure

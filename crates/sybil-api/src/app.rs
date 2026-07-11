@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use axum::extract::{MatchedPath, State};
-use axum::http::{header, Method, Request};
+use axum::http::{Method, Request, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
@@ -1221,17 +1221,17 @@ pub fn create_router(state: AppState) -> Router {
 mod tests {
     use std::collections::BTreeSet;
 
+    use axum::Router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use axum::middleware::{self, Next};
     use axum::response::Response;
     use axum::routing::get;
-    use axum::Router;
     use tower::ServiceExt;
 
     use super::{
-        metric_path_label, unmatched_metric_label, DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE,
-        SERVICE_ROUTE_TABLE,
+        DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE, metric_path_label,
+        unmatched_metric_label,
     };
 
     /// Middleware that stamps the derived metric label onto the response so a

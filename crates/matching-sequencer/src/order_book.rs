@@ -13,14 +13,14 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use matching_engine::{ceil_mul_ratio, Fill, MarketId, Order, Qty};
+use matching_engine::{Fill, MarketId, Order, Qty, ceil_mul_ratio};
 use serde::{Deserialize, Serialize};
 
 use crate::account::{AccountId, AccountStore};
 use crate::error::RejectionReason;
 use crate::validation::{
-    balance_reservation, sell_reservations, validate_order_shape, validate_order_with_reservation,
-    PositionKey,
+    PositionKey, balance_reservation, sell_reservations, validate_order_shape,
+    validate_order_with_reservation,
 };
 
 fn default_resting_expires_at_block() -> u64 {
@@ -1123,8 +1123,8 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use matching_engine::{
-        notional_nanos, notional_nanos_ceil, outcome_buy, outcome_sell, shares_to_qty, MarketId,
-        MarketSet, Nanos, Qty, NANOS_PER_DOLLAR,
+        MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, notional_nanos, notional_nanos_ceil,
+        outcome_buy, outcome_sell, shares_to_qty,
     };
     use proptest::prelude::*;
 

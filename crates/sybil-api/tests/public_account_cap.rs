@@ -15,7 +15,7 @@ use common::test_app_with_config;
 use http_body_util::BodyExt;
 use matching_sequencer::crypto::PublicKey;
 use p256::ecdsa::SigningKey;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;
 

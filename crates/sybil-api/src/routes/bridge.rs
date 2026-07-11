@@ -1,18 +1,18 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::Json;
 
 use matching_sequencer::crypto::{
-    canonical_bridge_withdrawal_bytes, AccountAuthScheme, AuthenticatedBridgeWithdrawal, PublicKey,
-    SignedBridgeWithdrawal,
+    AccountAuthScheme, AuthenticatedBridgeWithdrawal, PublicKey, SignedBridgeWithdrawal,
+    canonical_bridge_withdrawal_bytes,
 };
 use matching_sequencer::{
     AccountId, BridgeWithdrawalL1Event,
     BridgeWithdrawalRequest as SequencerBridgeWithdrawalRequest, L1Deposit as SequencerL1Deposit,
     L1WithdrawalStatus,
 };
-use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
+use p256::ecdsa::{Signature, VerifyingKey};
 
 use crate::convert::bridge_withdrawal_to_response;
 use crate::state::AppState;
@@ -258,7 +258,7 @@ pub async fn submit_l1_deposit(
             None => {
                 return Err(AppError::bad_request(
                     "quarantined deposits require sybil_account_key_hex",
-                ))
+                ));
             }
         },
     };

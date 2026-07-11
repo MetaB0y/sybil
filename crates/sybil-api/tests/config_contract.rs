@@ -27,11 +27,11 @@ mod common;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
-use axum::http::{header, HeaderMap, Method, Request, StatusCode};
+use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sybil_api::app::{
-    RouteMount, DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE,
+    DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, RouteMount, SERVICE_ROUTE_TABLE,
 };
 use sybil_api::config::ApiConfig;
 use sybil_api::webauthn::WebAuthnVerifierConfig;

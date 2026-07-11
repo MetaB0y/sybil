@@ -4,7 +4,7 @@
 //! payoff vectors without manually calculating state indices.
 
 use crate::market::MarketSet;
-use crate::order::{ConditionDir, Order, PriceCondition, MAX_MARKETS_PER_ORDER, MAX_STATES};
+use crate::order::{ConditionDir, MAX_MARKETS_PER_ORDER, MAX_STATES, Order, PriceCondition};
 use crate::state::StateSpace;
 use crate::types::{MarketId, Nanos, Qty};
 

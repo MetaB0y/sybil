@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 
-use axum::extract::{Path, Query, State};
 use axum::Json;
+use axum::extract::{Path, Query, State};
 
-use matching_engine::{MarketId, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos};
 use matching_sequencer::aggregates::OrderStats;
 use matching_sequencer::{
-    MarketMetadata, ResolutionConfig, DEFAULT_PRICE_HISTORY_QUERY_POINTS,
-    MAX_PRICE_HISTORY_QUERY_POINTS,
+    DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_PRICE_HISTORY_QUERY_POINTS, MarketMetadata,
+    ResolutionConfig,
 };
 use sybil_oracle::{FeedPubkey, ResolutionAttestation, SignedAttestation};
 
 use crate::convert::prices_to_response;
-use crate::state::{save_market_ref_data, AppState, MarketRefData};
+use crate::state::{AppState, MarketRefData, save_market_ref_data};
 use crate::types::error::AppError;
 use crate::types::request::{
     CreateMarketGroupRequest, CreateMarketRequest, ExtendMarketGroupRequest, MarketSearchParams,
@@ -439,13 +439,13 @@ pub async fn create_market(
     State(state): State<AppState>,
     Json(req): Json<CreateMarketRequest>,
 ) -> Result<Json<CreateMarketResponse>, AppError> {
-    if let Some(template) = req.resolution_template.as_ref() {
-        if !state.sequencer.template_exists(template.clone()).await? {
-            return Err(AppError::bad_request(format!(
-                "Unknown resolution_template: {:?}. Install it before creating markets that reference it.",
-                template
-            )));
-        }
+    if let Some(template) = req.resolution_template.as_ref()
+        && !state.sequencer.template_exists(template.clone()).await?
+    {
+        return Err(AppError::bad_request(format!(
+            "Unknown resolution_template: {:?}. Install it before creating markets that reference it.",
+            template
+        )));
     }
 
     let has_metadata = req.description.is_some()

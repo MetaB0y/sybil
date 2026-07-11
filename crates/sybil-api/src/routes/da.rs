@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::response::Response;
-use axum::Json;
 
 use matching_sequencer::{DaArtifact, DaArtifactLookup, DaProviderRef};
 

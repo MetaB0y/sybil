@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_os = "zkvm"))]
 use sha2::{Digest as _, Sha256};
 use sybil_verifier::{
-    commitments::{event_schema, state_schema},
     BlockWitness,
+    commitments::{event_schema, state_schema},
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

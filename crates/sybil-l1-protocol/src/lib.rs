@@ -43,9 +43,7 @@ pub enum L1ProtocolError {
     },
     #[error("unexpected vault event topic0")]
     UnexpectedVaultEventTopic0,
-    #[error(
-        "unexpected {event} data length: expected at least {expected_min} bytes, got {actual}"
-    )]
+    #[error("unexpected {event} data length: expected at least {expected_min} bytes, got {actual}")]
     UnexpectedEventDataLength {
         event: &'static str,
         expected_min: usize,

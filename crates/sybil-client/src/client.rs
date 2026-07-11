@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::error::Error;
-use sybil_api_types::ws::{BlockStreamMessage, BlockStreamPayload, BLOCK_STREAM_VERSION};
+use sybil_api_types::ws::{BLOCK_STREAM_VERSION, BlockStreamMessage, BlockStreamPayload};
 use sybil_api_types::*;
 
 /// HTTP client for the Sybil API. This is THE shared client (SYB-171); it is
@@ -517,7 +517,7 @@ impl SybilClient {
     /// committed blocks before switching back to live.
     pub async fn stream_blocks(
         &self,
-    ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>>, Error> {
+    ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>> + use<>, Error> {
         self.stream_blocks_from_block(None).await
     }
 
@@ -532,7 +532,7 @@ impl SybilClient {
     pub async fn stream_blocks_from_block(
         &self,
         from_block: Option<u64>,
-    ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>>, Error> {
+    ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>> + use<>, Error> {
         let url = self.block_ws_url(from_block)?;
         let (socket, _) = tokio_tungstenite::connect_async(&url)
             .await

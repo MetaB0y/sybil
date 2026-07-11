@@ -169,14 +169,14 @@ fn import_genesis_hash(
     provided: Option<[u8; 32]>,
 ) -> Result<[u8; 32], StoreError> {
     let derived = derivable_genesis_hash_from_witness(witness);
-    if let (Some(provided), Some(derived)) = (provided, derived) {
-        if provided != derived {
-            return Err(import_err(format!(
-                "--genesis-hash {} does not match witness-derived genesis hash {}",
-                hex32(provided),
-                hex32(derived)
-            )));
-        }
+    if let (Some(provided), Some(derived)) = (provided, derived)
+        && provided != derived
+    {
+        return Err(import_err(format!(
+            "--genesis-hash {} does not match witness-derived genesis hash {}",
+            hex32(provided),
+            hex32(derived)
+        )));
     }
     if let Some(provided) = provided {
         return Ok(provided);
@@ -203,14 +203,14 @@ fn validate_import_witness_root(
             hex32(witness.header.state_root)
         )));
     }
-    if let Some(expected) = expect_state_root {
-        if expected != witness.header.state_root {
-            return Err(import_err(format!(
-                "--expect-state-root {} does not match witness header {}",
-                hex32(expected),
-                hex32(witness.header.state_root)
-            )));
-        }
+    if let Some(expected) = expect_state_root
+        && expected != witness.header.state_root
+    {
+        return Err(import_err(format!(
+            "--expect-state-root {} does not match witness header {}",
+            hex32(expected),
+            hex32(witness.header.state_root)
+        )));
     }
     Ok(())
 }
@@ -346,7 +346,7 @@ fn pubkey_registry_from_witness(
                 other => {
                     return Err(import_err(format!(
                         "unsupported account key auth scheme {other}"
-                    )))
+                    )));
                 }
             };
             let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&key.pubkey_sec1)

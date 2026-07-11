@@ -1,4 +1,4 @@
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
@@ -159,10 +159,10 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let body = axum::Json(self.body);
         let mut response = (self.status, body).into_response();
-        if let Some(retry_after_secs) = self.retry_after_secs {
-            if let Ok(value) = HeaderValue::from_str(&retry_after_secs.to_string()) {
-                response.headers_mut().insert(header::RETRY_AFTER, value);
-            }
+        if let Some(retry_after_secs) = self.retry_after_secs
+            && let Ok(value) = HeaderValue::from_str(&retry_after_secs.to_string())
+        {
+            response.headers_mut().insert(header::RETRY_AFTER, value);
         }
         response
     }
@@ -222,7 +222,7 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::ApiKeyNotFound => {
                 AppError::not_found("API key not found")
             }
-            matching_sequencer::SequencerError::ProfileInvalid(ref msg) => {
+            matching_sequencer::SequencerError::ProfileInvalid(msg) => {
                 AppError::bad_request(format!("Invalid profile: {msg}"))
             }
             matching_sequencer::SequencerError::MarketNotFound => {
@@ -249,16 +249,16 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::OrderOwnershipMismatch => {
                 AppError::forbidden("Pending order does not belong to account")
             }
-            matching_sequencer::SequencerError::OracleError(ref msg) => {
+            matching_sequencer::SequencerError::OracleError(msg) => {
                 AppError::bad_request(format!("Oracle error: {}", msg))
             }
-            matching_sequencer::SequencerError::InvalidMarketState(ref msg) => {
+            matching_sequencer::SequencerError::InvalidMarketState(msg) => {
                 AppError::conflict(format!("Invalid market state: {msg}"))
             }
-            matching_sequencer::SequencerError::Bridge(ref msg) => {
+            matching_sequencer::SequencerError::Bridge(msg) => {
                 AppError::bad_request(format!("Bridge error: {msg}"))
             }
-            matching_sequencer::SequencerError::ProofUnavailable(ref msg) => {
+            matching_sequencer::SequencerError::ProofUnavailable(msg) => {
                 AppError::service_unavailable(format!("Proof unavailable: {msg}"))
             }
             matching_sequencer::SequencerError::BlockProductionPaused => {
@@ -272,11 +272,11 @@ impl From<matching_sequencer::SequencerError> for AppError {
                 );
                 AppError::internal("Internal sequencer integrity failure")
             }
-            matching_sequencer::SequencerError::ReservationInvariant(ref error) => {
+            matching_sequencer::SequencerError::ReservationInvariant(error) => {
                 tracing::error!(%error, "sequencer reservation invariant failure");
                 AppError::internal("Internal sequencer integrity failure")
             }
-            matching_sequencer::SequencerError::Persistence(ref msg) => {
+            matching_sequencer::SequencerError::Persistence(msg) => {
                 AppError::internal(format!("Persistence error: {msg}"))
             }
         }

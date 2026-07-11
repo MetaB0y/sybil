@@ -732,7 +732,10 @@ impl Store {
                     .increment(1);
                 return Err(StoreError::CorruptLayout(format!(
                     "typed qMDB root mismatch at height {} before commit: slot {:?} root={:?} header_root={:?}",
-                    snapshot.header.height, state_root.slot, state_root.root, snapshot.header.state_root
+                    snapshot.header.height,
+                    state_root.slot,
+                    state_root.root,
+                    snapshot.header.state_root
                 )));
             }
             metrics::counter!("sybil_store_commit_root_verified_total").increment(1);

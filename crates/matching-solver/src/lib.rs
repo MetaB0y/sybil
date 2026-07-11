@@ -64,7 +64,7 @@ pub use decomposed::DecomposedSolver;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
-use matching_engine::{net_welfare, Fill, Order};
+use matching_engine::{Fill, Order, net_welfare};
 
 /// Result of solving a matching problem.
 #[derive(Clone, Debug, Default)]

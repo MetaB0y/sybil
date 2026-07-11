@@ -6,20 +6,20 @@ use std::sync::mpsc;
 use std::thread;
 
 use commonware_codec::RangeCfg;
-use commonware_cryptography::sha256::Digest as Sha256Digest;
 use commonware_cryptography::Sha256;
+use commonware_cryptography::sha256::Digest as Sha256Digest;
 use commonware_parallel::Sequential;
 use commonware_runtime::buffer::paged::CacheRef;
-use commonware_runtime::{tokio as commonware_tokio, Runner as _, Supervisor as _};
+use commonware_runtime::{Runner as _, Supervisor as _, tokio as commonware_tokio};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::full::Config as MmrConfig;
 use commonware_storage::merkle::mmr::Family as MmrFamily;
+use commonware_storage::merkle::mmr::full::Config as MmrConfig;
+use commonware_storage::qmdb::current::VariableConfig;
+use commonware_storage::qmdb::current::ordered::ExclusionProof;
 use commonware_storage::qmdb::current::ordered::variable::{
     Db as OrderedVariableDb, KeyValueProof,
 };
-use commonware_storage::qmdb::current::ordered::ExclusionProof;
 use commonware_storage::qmdb::current::proof::{OperationProof, RangeProof};
-use commonware_storage::qmdb::current::VariableConfig;
 use commonware_storage::translator::OneCap;
 use futures::StreamExt;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
@@ -396,10 +396,10 @@ fn cleanup_generation(storage_directory: &Path, generation: u64) {
     ];
     for partition in partitions {
         let path = storage_directory.join(partition);
-        if let Err(error) = fs::remove_dir_all(&path) {
-            if error.kind() != ErrorKind::NotFound {
-                let _ = fs::remove_file(&path);
-            }
+        if let Err(error) = fs::remove_dir_all(&path)
+            && error.kind() != ErrorKind::NotFound
+        {
+            let _ = fs::remove_file(&path);
         }
     }
 }
@@ -415,10 +415,10 @@ fn cleanup_uncommitted_generations(storage_directory: &Path, committed_generatio
         let Some(file_name) = file_name.to_str() else {
             continue;
         };
-        if let Some(generation) = generation_from_partition_name(file_name) {
-            if generation > committed_generation {
-                generations.push(generation);
-            }
+        if let Some(generation) = generation_from_partition_name(file_name)
+            && generation > committed_generation
+        {
+            generations.push(generation);
         }
     }
 

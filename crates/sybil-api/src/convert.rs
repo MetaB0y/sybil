@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use matching_engine::{
-    outcome_buy, outcome_sell, MarketId, MarketSet, Nanos, Order, Qty, NANOS_PER_DOLLAR,
+    MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, Order, Qty, outcome_buy, outcome_sell,
 };
+use matching_sequencer::Account;
 use matching_sequencer::block::SealedBlock;
 use matching_sequencer::error::Rejection;
-use matching_sequencer::Account;
 
 use crate::types::request::{
     BridgeWithdrawalL1Status as ApiBridgeWithdrawalL1Status, OrderSpec, SignedOrderData,
@@ -157,7 +157,7 @@ pub fn account_to_response(account: &Account, reserved_balance_nanos: i64) -> Ac
     let positions: Vec<PositionResponse> = account
         .positions
         .iter()
-        .filter(|(_, &qty)| qty != 0)
+        .filter(|&(_, &qty)| qty != 0)
         .map(|(&(market_id, outcome), &qty)| PositionResponse {
             market_id: market_id.0,
             outcome: if outcome == 0 {

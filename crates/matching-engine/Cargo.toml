@@ -1,14 +1,15 @@
 [package]
 name = "matching-engine"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Core matching types and logic for prediction market matching"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-proptest = "1.6"
+proptest = { workspace = true }
 
 [lints]
 workspace = true

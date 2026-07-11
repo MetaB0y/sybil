@@ -1,7 +1,8 @@
 [package]
 name = "matching-sequencer"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Multi-batch block sequencer for prediction market matching"
 
 [dependencies]
@@ -12,11 +13,11 @@ sybil-oracle = { path = "../sybil-oracle" }
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
-blake3 = "1"
-hex = "0.4"
-sha3 = "0.12"
-serde = { version = "1.0", features = ["derive"] }
-rmp-serde = "1"
+blake3 = { workspace = true }
+hex = { workspace = true }
+sha3 = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+rmp-serde = { workspace = true }
 redb = "4"
 commonware-codec = "2026.5.0"
 commonware-cryptography = "2026.5.0"
@@ -24,16 +25,16 @@ commonware-parallel = "2026.5.0"
 commonware-runtime = "2026.5.0"
 commonware-storage = "2026.5.0"
 futures = "0.3"
-getrandom = "0.4"
-p256 = { version = "0.14", features = ["ecdsa"] }
+getrandom = { workspace = true }
+p256 = { workspace = true, features = ["ecdsa"] }
 ractor = { version = "0.15.12", default-features = false, features = ["async-trait", "tokio_runtime"] }
 thiserror = { workspace = true }
-tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
-tracing = "0.1"
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tracing = { workspace = true }
 metrics = "0.24"
 
 [dev-dependencies]
-proptest = "1.6"
+proptest = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 matching-scenarios = { path = "../matching-scenarios" }

@@ -326,10 +326,10 @@ impl GammaMarket {
     /// Best estimate of the current YES price.
     pub fn yes_price(&self) -> Option<f64> {
         // Try outcome_prices first, fall back to best_bid/ask midpoint, then last_trade
-        if let Ok(prices) = self.parsed_outcome_prices() {
-            if !prices.is_empty() {
-                return Some(prices[0]);
-            }
+        if let Ok(prices) = self.parsed_outcome_prices()
+            && !prices.is_empty()
+        {
+            return Some(prices[0]);
         }
         match (self.best_bid, self.best_ask) {
             (Some(bid), Some(ask)) => Some((bid + ask) / 2.0),
@@ -366,17 +366,17 @@ impl ClobWsMessage {
         let asset_id = self.asset_id.as_ref()?;
 
         // Direct price field (last_trade_price, price_change)
-        if let Some(ref price_str) = self.price {
-            if let Ok(p) = price_str.parse::<f64>() {
-                return Some((asset_id.clone(), p));
-            }
+        if let Some(price_str) = &self.price
+            && let Ok(p) = price_str.parse::<f64>()
+        {
+            return Some((asset_id.clone(), p));
         }
 
         // Bid/ask midpoint (best_bid_ask)
-        if let (Some(ref bid_str), Some(ref ask_str)) = (&self.best_bid, &self.best_ask) {
-            if let (Ok(bid), Ok(ask)) = (bid_str.parse::<f64>(), ask_str.parse::<f64>()) {
-                return Some((asset_id.clone(), (bid + ask) / 2.0));
-            }
+        if let (Some(bid_str), Some(ask_str)) = (&self.best_bid, &self.best_ask)
+            && let (Ok(bid), Ok(ask)) = (bid_str.parse::<f64>(), ask_str.parse::<f64>())
+        {
+            return Some((asset_id.clone(), (bid + ask) / 2.0));
         }
 
         None

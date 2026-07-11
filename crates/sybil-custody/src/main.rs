@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
-use sybil_custody::api::{collect_snapshot, read_json, write_json, SnapshotRequest};
-use sybil_custody::claim::{assemble_claim, parse_address, ClaimRequest};
-use sybil_custody::format::{CustodySnapshot, CUSTODY_SNAPSHOT_VERSION};
-use sybil_custody::reconstruct::{reconstruct, ReconstructRequest};
+use sybil_custody::api::{SnapshotRequest, collect_snapshot, read_json, write_json};
+use sybil_custody::claim::{ClaimRequest, assemble_claim, parse_address};
+use sybil_custody::format::{CUSTODY_SNAPSHOT_VERSION, CustodySnapshot};
+use sybil_custody::reconstruct::{ReconstructRequest, reconstruct};
 use sybil_custody::rpc::send_raw_calldata_with_cast;
 
 #[derive(Parser)]
@@ -233,7 +233,9 @@ async fn escape_claim(args: EscapeClaimArgs) -> Result<()> {
     );
     if args.submit {
         if args.fixture_proof {
-            eprintln!("warning: submitting a fixture proof; this succeeds only with the unsafe dev adapter");
+            eprintln!(
+                "warning: submitting a fixture proof; this succeeds only with the unsafe dev adapter"
+            );
         }
         let private_key = args
             .eth_private_key

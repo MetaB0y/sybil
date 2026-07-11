@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest as _, Keccak256};
 use sybil_l1_protocol::DepositLeaf;
 use sybil_verifier::{
-    commitments::witness_schema, BlockWitness, L1DepositWitness, SystemEventWitness,
-    VerificationResult,
+    BlockWitness, L1DepositWitness, SystemEventWitness, VerificationResult,
+    commitments::witness_schema,
 };
 
 mod guest_commitments;
@@ -16,10 +16,10 @@ mod header_hash {
 }
 
 pub use guest_commitments::{
-    compute_events_root, events_root_from_event_bytes, verify_qmdb_exclusion_proof,
-    verify_qmdb_key_value_proof, verify_qmdb_state_root, verify_qmdb_state_root_for,
-    QmdbStateExclusionProof, QmdbStateKeyValueProof, QmdbStateOperationProof, QmdbStateRangeProof,
-    QmdbStateRootProof, QMDB_STATE_CHUNK_SIZE,
+    QMDB_STATE_CHUNK_SIZE, QmdbStateExclusionProof, QmdbStateKeyValueProof,
+    QmdbStateOperationProof, QmdbStateRangeProof, QmdbStateRootProof, compute_events_root,
+    events_root_from_event_bytes, verify_qmdb_exclusion_proof, verify_qmdb_key_value_proof,
+    verify_qmdb_state_root, verify_qmdb_state_root_for,
 };
 pub use header_hash::hash_header;
 
@@ -883,27 +883,27 @@ mod tests {
     use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
 
     use commonware_codec::RangeCfg;
-    use commonware_cryptography::{sha256::Digest as QmdbDigest, Sha256 as QmdbSha256};
+    use commonware_cryptography::{Sha256 as QmdbSha256, sha256::Digest as QmdbDigest};
     use commonware_parallel::Sequential;
     use commonware_runtime::buffer::paged::CacheRef;
-    use commonware_runtime::{deterministic, Runner as _};
+    use commonware_runtime::{Runner as _, deterministic};
     use commonware_storage::journal::contiguous::variable::Config as VConfig;
-    use commonware_storage::merkle::mmr::full::Config as MmrConfig;
     use commonware_storage::merkle::mmr::Family as MmrFamily;
+    use commonware_storage::merkle::mmr::full::Config as MmrConfig;
+    use commonware_storage::qmdb::current::VariableConfig;
     use commonware_storage::qmdb::current::ordered::variable::{
         Db as OrderedVariableDb, KeyValueProof,
     };
-    use commonware_storage::qmdb::current::VariableConfig;
     use commonware_storage::translator::OneCap;
     use matching_engine::{MarketId, Order};
-    use p256::ecdsa::{signature::hazmat::PrehashSigner as _, Signature, SigningKey};
+    use p256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
     use sha2::Sha256;
     use sybil_verifier::{
-        commitments::{event_schema, state_schema},
         AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot,
         DepositAccumulatorWitness, KeyOpAuth, KeyRecord, MarketGroupSnapshot, MarketSnapshot,
         MarketStatusSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
         WitnessBlockHeader,
+        commitments::{event_schema, state_schema},
     };
 
     const PAGE_SIZE: u16 = 4096;

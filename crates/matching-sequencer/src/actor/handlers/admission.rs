@@ -149,24 +149,24 @@ impl SequencerActorState {
                 order_id,
                 resting_order,
             } => {
-                if let Some(store) = &self.store {
-                    if let Err(err) = store.append_admit_log(&resting_order).await {
-                        // Durability lost — rollback the in-memory admit so
-                        // the 200 OK contract holds. If cancel somehow fails
-                        // (shouldn't: we just pushed the order), log loudly
-                        // and leave the order in-book as a degraded state.
-                        if let Err(cancel_err) = self
-                            .sequencer
-                            .cancel_pending_order(resting_order.account_id, order_id)
-                        {
-                            tracing::error!(
-                                error = %cancel_err,
-                                order_id,
-                                "admit-log persist failed and rollback could not cancel the order"
-                            );
-                        }
-                        return Err(SequencerError::Persistence(err.to_string()));
+                if let Some(store) = &self.store
+                    && let Err(err) = store.append_admit_log(&resting_order).await
+                {
+                    // Durability lost — rollback the in-memory admit so
+                    // the 200 OK contract holds. If cancel somehow fails
+                    // (shouldn't: we just pushed the order), log loudly
+                    // and leave the order in-book as a degraded state.
+                    if let Err(cancel_err) = self
+                        .sequencer
+                        .cancel_pending_order(resting_order.account_id, order_id)
+                    {
+                        tracing::error!(
+                            error = %cancel_err,
+                            order_id,
+                            "admit-log persist failed and rollback could not cancel the order"
+                        );
                     }
+                    return Err(SequencerError::Persistence(err.to_string()));
                 }
                 Ok(vec![order_id])
             }

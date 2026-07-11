@@ -9,14 +9,14 @@ mod common;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ciborium::value::Value as CborValue;
 use common::{get, post_json, test_app_with_config};
 use http_body_util::BodyExt;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;

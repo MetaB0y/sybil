@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use matching_engine::{MarketId, Problem, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Problem};
 
 use crate::result::PipelineResult;
 

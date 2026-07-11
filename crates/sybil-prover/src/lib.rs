@@ -20,12 +20,12 @@ pub mod witgen_cli;
 
 pub use error::ProverCliError;
 pub use job::{
-    build_state_transition_guest_input, ProofJobError, StateTransitionProofJob,
-    StateTransitionProofJobId, StateTransitionStateLeafProof, STATE_TRANSITION_PROOF_JOB_VERSION,
+    ProofJobError, STATE_TRANSITION_PROOF_JOB_VERSION, StateTransitionProofJob,
+    StateTransitionProofJobId, StateTransitionStateLeafProof, build_state_transition_guest_input,
 };
 
 #[cfg(feature = "sequencer-store")]
 pub use sequencer_store::{
-    build_state_transition_guest_input_from_store, collect_state_transition_proof_job,
-    SequencerStoreWitgenError,
+    SequencerStoreWitgenError, build_state_transition_guest_input_from_store,
+    collect_state_transition_proof_job,
 };

@@ -47,6 +47,10 @@ dependencies, withdrawal/escape claim schemas, or the L1 verifier adapters.
    cat zk/openvm-escape-guest/openvm/release/sybil-openvm-escape-guest.commit.json
    ```
 
+   After an intentional rebuild, run `just validity-pins-write`. This updates
+   the desired commitments in `deploy/validity-pins.json` and deliberately
+   marks the deployment `pending_redeploy`; it never claims the adapters moved.
+
 5. Take a store backup and restore-drill it, even when the state will be
    discarded. The backup is incident evidence and the rollback reference.
 
@@ -112,6 +116,9 @@ image, so do not rely on it alone for a frontend-bearing fresh-genesis release.
    are available for a new block.
 6. Check the deployed normal and escape adapter pins against the recorded
    commitment JSON files.
+   Populate the addresses, observed commitments, and verification timestamp in
+   `deploy/validity-pins.json`, set its status to `deployed`, and run
+   `just validity-pins-check`.
 7. Exercise the relevant L1 path on the target environment; never infer real
    proof verification from the mock prover.
 8. Verify alerts and the external synthetic probe are reporting the new chain.

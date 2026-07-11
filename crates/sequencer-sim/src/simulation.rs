@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketGroup, MarketId, MarketSet, MmId, NANOS_PER_DOLLAR, Nanos};
 use rand::RngExt;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -15,7 +15,7 @@ use crate::metrics::{self, AgentPnL, BatchMetrics};
 use crate::scenario::{EventMarketMap, NewsItem, NewsVisibility, PublicBeliefs, Scenario};
 use matching_sequencer::account::{AccountId, AccountStore};
 use matching_sequencer::sequencer::{
-    batch_result_from_block, BlockSequencer, OrderSubmission, SequencerConfig,
+    BlockSequencer, OrderSubmission, SequencerConfig, batch_result_from_block,
 };
 use matching_sequencer::settlement;
 

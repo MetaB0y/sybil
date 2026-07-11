@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
-use axum::Json;
 
 use matching_engine::MarketId;
 use matching_sequencer::crypto::{
@@ -9,14 +9,14 @@ use matching_sequencer::crypto::{
     canonical_profile_update_bytes,
 };
 use matching_sequencer::{
-    api_key_hash, AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId,
-    AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke, AuthenticatedKeyRegistration,
-    AuthenticatedKeyRevocation, AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey,
-    SignedApiKeyCreate, SignedApiKeyRevoke, SignedKeyRegistration, SignedKeyRevocation,
-    SignedProfileUpdate,
+    AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId, AuthenticatedApiKeyCreate,
+    AuthenticatedApiKeyRevoke, AuthenticatedKeyRegistration, AuthenticatedKeyRevocation,
+    AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey, SignedApiKeyCreate,
+    SignedApiKeyRevoke, SignedKeyRegistration, SignedKeyRevocation, SignedProfileUpdate,
+    api_key_hash,
 };
-use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
+use p256::ecdsa::{Signature, VerifyingKey};
 
 use crate::convert::{account_balance_breakdown, account_to_response};
 use crate::state::AppState;
@@ -106,17 +106,16 @@ pub async fn create_account(
         .transpose()?;
 
     let _bootstrap_guard = state.account_bootstrap_lock.lock().await;
-    if let Some((_, pubkey)) = &initial_key {
-        if state
+    if let Some((_, pubkey)) = &initial_key
+        && state
             .sequencer
             .lookup_registered_pubkey(pubkey.clone())
             .await?
             .is_some()
-        {
-            return Err(AppError::conflict(
-                "Initial signing key is already registered",
-            ));
-        }
+    {
+        return Err(AppError::conflict(
+            "Initial signing key is already registered",
+        ));
     }
 
     let account = state.sequencer.create_account(balance_nanos).await?;
@@ -1326,7 +1325,7 @@ pub async fn get_private_summary(
     let positions: Vec<PositionResponse> = account
         .positions
         .iter()
-        .filter(|(_, &qty)| qty != 0)
+        .filter(|&(_, &qty)| qty != 0)
         .map(|(&(market_id, outcome), &qty)| PositionResponse {
             market_id: market_id.0,
             outcome: if outcome == 0 { "YES" } else { "NO" }.to_string(),

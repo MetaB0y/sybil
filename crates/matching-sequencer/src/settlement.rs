@@ -1,6 +1,6 @@
 use matching_engine::{
-    compute_fill_settlement, notional_nanos, Fill, MarketId, MintAdjustment, Nanos, Order, Qty,
-    SettlementDelta, NANOS_PER_DOLLAR,
+    Fill, MarketId, MintAdjustment, NANOS_PER_DOLLAR, Nanos, Order, Qty, SettlementDelta,
+    compute_fill_settlement, notional_nanos,
 };
 
 use crate::account::{Account, AccountId, AccountStore};
@@ -171,7 +171,7 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use crate::canonical_state::CanonicalState;
-    use matching_engine::{outcome_buy, outcome_sell, shares_to_qty, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy, outcome_sell, shares_to_qty};
     use proptest::prelude::*;
     use std::collections::HashMap;
     use sybil_verifier::{BlockWitness, WitnessBlockHeader, WitnessOrder};

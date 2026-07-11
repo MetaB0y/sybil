@@ -507,7 +507,7 @@ impl SequencerActorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{outcome_buy, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
 
     fn mk_problem(orders: Vec<Order>, markets: MarketSet) -> Problem {
         let mut p = Problem::new("test");

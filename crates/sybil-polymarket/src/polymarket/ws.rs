@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::watch;
-use tokio::time::{interval, Instant};
+use tokio::time::{Instant, interval};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
@@ -81,15 +81,15 @@ pub async fn run_ws_feed(
                             snapshot.last_updated_ms = now;
                             snapshot.source = crate::feed::PriceSource::WebSocket;
                             let _ = price_tx.send(snapshot);
-                        } else if let Ok(ws_msg) = serde_json::from_str::<ClobWsMessage>(&text) {
-                            if let Some((token_id, price)) = ws_msg.midpoint() {
-                                let mut snapshot = price_tx.borrow().clone();
-                                let now = now_ms();
-                                snapshot.record_midpoint(token_id, price, now);
-                                snapshot.last_updated_ms = now;
-                                snapshot.source = crate::feed::PriceSource::WebSocket;
-                                let _ = price_tx.send(snapshot);
-                            }
+                        } else if let Ok(ws_msg) = serde_json::from_str::<ClobWsMessage>(&text)
+                            && let Some((token_id, price)) = ws_msg.midpoint()
+                        {
+                            let mut snapshot = price_tx.borrow().clone();
+                            let now = now_ms();
+                            snapshot.record_midpoint(token_id, price, now);
+                            snapshot.last_updated_ms = now;
+                            snapshot.source = crate::feed::PriceSource::WebSocket;
+                            let _ = price_tx.send(snapshot);
                         }
                     }
                     Some(Ok(Message::Pong(_))) => {}

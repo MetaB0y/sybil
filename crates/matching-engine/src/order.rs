@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    notional_nanos, signed_price_delta_notional, MarketId, Nanos, OrderDirection, Qty,
-    MAX_ORDER_QTY, NANOS_PER_DOLLAR,
+    MAX_ORDER_QTY, MarketId, NANOS_PER_DOLLAR, Nanos, OrderDirection, Qty, notional_nanos,
+    signed_price_delta_notional,
 };
 
 /// A (MarketId, value) pair from marginal payoff computation.
@@ -151,11 +151,7 @@ impl Order {
     /// from the sum of these terms gives the protocol welfare scalar.
     pub fn gross_welfare_contribution(&self, fill_qty: Qty) -> i64 {
         let value = notional_nanos(self.limit_price, fill_qty).0 as i64;
-        if self.is_seller() {
-            -value
-        } else {
-            value
-        }
+        if self.is_seller() { -value } else { value }
     }
 
     /// Check if this order would be satisfied at a given price.
@@ -405,7 +401,7 @@ impl Fill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{shares_to_qty, signed_price_delta_notional, NANOS_PER_DOLLAR};
+    use crate::{NANOS_PER_DOLLAR, shares_to_qty, signed_price_delta_notional};
     use proptest::prelude::*;
 
     #[test]

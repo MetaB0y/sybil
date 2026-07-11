@@ -34,11 +34,11 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use matching_engine::{Nanos, Problem};
-use matching_scenarios::{generate_scenario, ScenarioConfig};
+use matching_scenarios::{ScenarioConfig, generate_scenario};
 use matching_solver::MmBudgetMode;
 #[cfg(any(feature = "lp", feature = "conic"))]
 use matching_solver::VizSnapshot;
-use sybil_verifier::{verify_match, BlockWitness};
+use sybil_verifier::{BlockWitness, verify_match};
 
 use cli::*;
 use json_export::build_comparison_json;

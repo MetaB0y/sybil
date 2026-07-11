@@ -198,7 +198,7 @@ impl BlockSequencer {
                 let markets: HashSet<MarketId> = account
                     .positions
                     .iter()
-                    .filter(|(_, &qty)| qty != 0)
+                    .filter(|&(_, &qty)| qty != 0)
                     .map(|(&(market_id, _), _)| market_id)
                     .collect();
                 Some(LeaderboardBase {

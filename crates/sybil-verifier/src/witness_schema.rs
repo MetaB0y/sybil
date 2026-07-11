@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::str;
 
 use matching_engine::{
-    ConditionDir, Fill, MarketGroup, MarketId, MmConstraint, MmId, MmSide, Nanos, Order,
-    OrderDirection, PriceCondition, Qty, MAX_MARKETS_PER_ORDER, MAX_STATES,
+    ConditionDir, Fill, MAX_MARKETS_PER_ORDER, MAX_STATES, MarketGroup, MarketId, MmConstraint,
+    MmId, MmSide, Nanos, Order, OrderDirection, PriceCondition, Qty,
 };
 
 use crate::event_schema::{
@@ -77,7 +77,7 @@ pub fn decode_canonical_witness_bytes(bytes: &[u8]) -> Result<BlockWitness, Witn
                 field: "previous_header",
                 tag,
                 offset: reader.offset.saturating_sub(1),
-            })
+            });
         }
     };
     let genesis_hash = reader.read_hash32()?;
@@ -359,7 +359,7 @@ impl<'a> WitnessReader<'a> {
                             field: "condition.direction",
                             tag,
                             offset: dir_offset,
-                        })
+                        });
                     }
                 };
                 Some(PriceCondition {
@@ -373,7 +373,7 @@ impl<'a> WitnessReader<'a> {
                     field: "order.condition",
                     tag,
                     offset: condition_offset,
-                })
+                });
             }
         };
         let expires_offset = self.offset;
@@ -385,7 +385,7 @@ impl<'a> WitnessReader<'a> {
                     field: "order.expires_at_block",
                     tag,
                     offset: expires_offset,
-                })
+                });
             }
         };
 
@@ -414,7 +414,7 @@ impl<'a> WitnessReader<'a> {
                     field: "order_accepted.is_mm",
                     tag,
                     offset: is_mm_offset,
-                })
+                });
             }
         };
         Ok(WitnessOrder {
@@ -546,7 +546,7 @@ impl<'a> WitnessReader<'a> {
                             field: "withdrawal_refund_reason",
                             tag,
                             offset: reason_offset,
-                        })
+                        });
                     }
                 };
                 Ok(SystemEventWitness::WithdrawalRefunded {
@@ -1466,9 +1466,11 @@ mod tests {
             clearing_prices,
             total_welfare: 12_345,
             minting_cost: -222,
-            mm_constraints: vec![MmConstraint::new(MmId::new(12), Nanos(3_000_000_000))
-                .with_order(7, MmSide::BuyYes)
-                .with_order(8, MmSide::SellNo)],
+            mm_constraints: vec![
+                MmConstraint::new(MmId::new(12), Nanos(3_000_000_000))
+                    .with_order(7, MmSide::BuyYes)
+                    .with_order(8, MmSide::SellNo),
+            ],
             market_groups: vec![MarketGroup {
                 name: "Weather basket".to_string(),
                 markets: vec![market_a, market_b],

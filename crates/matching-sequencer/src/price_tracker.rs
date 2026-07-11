@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use matching_engine::{
-    mark_yes_no, notional_nanos, Fill, MarketId, Nanos, Order, NANOS_PER_DOLLAR,
+    Fill, MarketId, NANOS_PER_DOLLAR, Nanos, Order, mark_yes_no, notional_nanos,
 };
 use serde::{Deserialize, Serialize};
 
@@ -201,7 +201,7 @@ impl PriceTracker {
         position_markets: &HashSet<MarketId>,
     ) -> HashMap<MarketId, Vec<Nanos>> {
         // Update stored prices in-place with fresh solver output
-        if let Some(ref pd) = price_discovery {
+        if let Some(pd) = price_discovery {
             for (market_id, prices) in &pd.prices {
                 if markets_with_fills.contains(market_id) {
                     self.last_clearing_prices.insert(*market_id, prices.clone());
@@ -493,7 +493,7 @@ impl PriceTracker {
 mod tests {
     use super::*;
     use matching_engine::{
-        notional_nanos, outcome_buy, shares_to_qty, Fill, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR,
+        Fill, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, notional_nanos, outcome_buy, shares_to_qty,
     };
 
     fn q(shares: u64) -> u64 {
@@ -762,9 +762,11 @@ mod tests {
         // Now sits in hour 105; 24h ago = hour 81 boundary. Oldest bucket is
         // hour 100 > 81h → None.
         let young_now = 105 * HOUR_MS + 500;
-        assert!(young_tracker
-            .price_n_hours_ago(young, 24, young_now)
-            .is_none());
+        assert!(
+            young_tracker
+                .price_n_hours_ago(young, 24, young_now)
+                .is_none()
+        );
     }
 
     /// Cap at `HOURLY_CLEARING_HISTORY_CAP` per market — oldest bucket drops.

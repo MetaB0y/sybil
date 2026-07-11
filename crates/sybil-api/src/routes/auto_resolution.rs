@@ -6,8 +6,8 @@
 //! existing `POST /v1/markets/{id}/resolve` money path; approving/rejecting here
 //! merely steers whether/when that replay happens.
 
-use axum::extract::{Path, State};
 use axum::Json;
+use axum::extract::{Path, State};
 use matching_engine::MarketId;
 
 use crate::auto_resolution::Decision;
@@ -43,10 +43,9 @@ async fn display_status(
         .sequencer
         .get_market_status(MarketId::new(entry.market_id))
         .await
+        && status.as_str() == "resolved"
     {
-        if status.as_str() == "resolved" {
-            return "resolved".to_string();
-        }
+        return "resolved".to_string();
     }
     match entry.decision {
         Some(Decision::Rejected) => "rejected".to_string(),

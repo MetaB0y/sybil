@@ -25,9 +25,16 @@ status: current
 
 | Guest | Executable commitment | VM commitment |
 |---|---|---|
-| State transition | `0x004cc5ec5e73092133128f3f8cc56bb54c6385756c326908c067a4d7826aa4d0` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
-| Escape claim | `0x0045004c9ee510b956dcc5422e06d30f5e587cfff7b882c62de845ac0d7589cd` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
+| State transition | `0x004f2f9b1f6115f4befa7127ded102fd26b1a62c66e21868f2f1e50c5f4f09b5` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
+| Escape claim | `0x0013128cbb4f1579cc3cd3df99bfe0293684a703d78d6c359c1480642a5c08f0` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
+
+## Deployment coordination
+
+| Network | Recorded status |
+|---|---|
+| `devnet` | `pending_redeploy` |
 
 Sources: `witness_schema.rs`, `golden/golden-vectors.json`, and the two committed
-OpenVM release `commit.json` files. Deployment truth is the adapter actually
-installed on-chain; compare it with this page during every repin.
+OpenVM release `commit.json` files. `deploy/validity-pins.json` separately binds
+those desired pins to explicit deployment evidence; a `pending_redeploy` status
+must never be interpreted as an on-chain repin.

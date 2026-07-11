@@ -10,8 +10,8 @@
 //! Gated on `feature = "lp"` because every LP-family solver requires it.
 
 use matching_engine::{
-    outcome_sell, simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId, MmSide, Nanos,
-    Problem, Qty, NANOS_PER_DOLLAR,
+    MarketGroup, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Problem, Qty, outcome_sell,
+    simple_no_buy, simple_yes_buy,
 };
 
 use crate::PipelineResult;

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use matching_engine::{Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order, OrderDirection};
-use sybil_l1_protocol::{DepositFrontier, DEPOSIT_TREE_DEPTH};
+use sybil_l1_protocol::{DEPOSIT_TREE_DEPTH, DepositFrontier};
 
 /// Everything the verifier needs to check a single block.
 ///

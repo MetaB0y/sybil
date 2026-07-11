@@ -6,7 +6,7 @@ use matching_engine::MarketSet;
 use matching_sequencer::store::Store;
 use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, SequencerConfig};
 
-use crate::{collect_state_transition_proof_job, StateTransitionProofJobId};
+use crate::{StateTransitionProofJobId, collect_state_transition_proof_job};
 
 #[derive(Args)]
 pub struct WitgenArgs {
@@ -105,14 +105,14 @@ pub async fn run(args: WitgenArgs) -> Result<(), WitgenCliError> {
 }
 
 async fn escape_smoke(args: EscapeSmokeArgs) -> Result<(), WitgenCliError> {
-    use matching_engine::{outcome_buy, outcome_sell, NANOS_PER_DOLLAR};
-    use matching_sequencer::crypto::PublicKey;
+    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
     use matching_sequencer::OrderSubmission;
+    use matching_sequencer::crypto::PublicKey;
     use p256::ecdsa::signature::Signer as _;
     use p256::ecdsa::{Signature, SigningKey};
     use sybil_escape_claim::{
-        compute_withdrawable_token_units, escape_nullifier, AccountReservationLeafWitness,
-        EscapeClaimGuestInput, EscapeClaimPublicInputs, MarketLeafWitness,
+        AccountReservationLeafWitness, EscapeClaimGuestInput, EscapeClaimPublicInputs,
+        MarketLeafWitness, compute_withdrawable_token_units, escape_nullifier,
     };
     use sybil_verifier::commitments::state_schema;
 

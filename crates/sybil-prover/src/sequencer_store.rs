@@ -1,9 +1,9 @@
 use matching_sequencer::store::Store;
-use sybil_verifier::{commitments::state_schema, BlockWitness};
+use sybil_verifier::{BlockWitness, commitments::state_schema};
 
 use crate::{
-    build_state_transition_guest_input, ProofJobError, StateTransitionProofJob,
-    StateTransitionStateLeafProof,
+    ProofJobError, StateTransitionProofJob, StateTransitionStateLeafProof,
+    build_state_transition_guest_input,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -128,10 +128,10 @@ pub async fn build_state_transition_guest_input_from_store(
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    use matching_engine::{outcome_buy, outcome_sell, MarketSet, NANOS_PER_DOLLAR};
+    use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
     use matching_sequencer::store::Store;
     use matching_sequencer::{AccountStore, BlockSequencer, OrderSubmission, SequencerConfig};
     use sybil_oracle::AdminOracle;
