@@ -586,6 +586,13 @@ export function BuyBox({
             {unit === "usd" ? "$" : "#"}
           </span>
           <input
+            type="text"
+            inputMode="decimal"
+            aria-label={
+              unit === "usd"
+                ? "Order amount in dollars"
+                : "Order quantity in shares"
+            }
             value={unit === "usd" ? amount : shares}
             disabled={disabledInputs}
             onChange={(e) =>
@@ -685,6 +692,9 @@ export function BuyBox({
           }}
         >
           <input
+            type="text"
+            inputMode="decimal"
+            aria-label="Limit price in cents"
             value={limitText}
             disabled={disabledInputs}
             onChange={(e) => {
@@ -718,6 +728,7 @@ export function BuyBox({
         </div>
         <input
           type="range"
+          aria-label="Limit price slider in cents"
           min={1}
           max={99}
           value={limit}
