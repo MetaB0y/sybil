@@ -23,8 +23,12 @@ const sans = localFont({
   src: [{ path: "./fonts/Inter-Variable.woff2", weight: "100 900", style: "normal" }],
 });
 
+// Exposed as `--font-mono-vendor` (not `--font-mono`) so it doesn't collide
+// with the design token in sybil-tokens.css. The token references this var
+// first, so the bundled variable font (every weight 100–800 real) is actually
+// used instead of a system fallback whose weight faces are hit-or-miss.
 const mono = localFont({
-  variable: "--font-mono",
+  variable: "--font-mono-vendor",
   display: "swap",
   src: [{ path: "./fonts/JetBrainsMono-Variable.woff2", weight: "100 800", style: "normal" }],
 });
