@@ -230,10 +230,10 @@ function InfoRow({
 
 /**
  * Read-only warning shown in place of the "copy key" affordance for passkey
- * (WebAuthn) accounts. A passkey has no exportable private key — the credential
- * lives in this browser + authenticator only — so there is nothing to copy as a
- * backup. Saying so plainly avoids false backup confidence (the old "copy key
- * handle" copied the non-restorable credential id).
+ * (WebAuthn) accounts. A passkey has no exportable private key, but clearing
+ * local browser state does not delete a synced or authenticator-held passkey.
+ * Say both plainly: there is nothing secret to copy, and recovery is through
+ * passkey sign-in or a second passkey registered from Settings.
  */
 function PasskeyNotice() {
   return (
@@ -265,9 +265,9 @@ function PasskeyNotice() {
           color: "var(--fg-3)",
         }}
       >
-        Lives in this browser + authenticator. There is no exportable key to
-        back up — clearing this browser or losing the authenticator loses
-        access.
+        Stored by your authenticator or passkey provider, not Sybil. You can
+        reconnect after clearing this browser. Add and test a second passkey in
+        Settings before losing access to every registered authenticator.
       </span>
     </div>
   );

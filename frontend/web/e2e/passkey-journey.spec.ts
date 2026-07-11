@@ -56,20 +56,45 @@ interface Portfolio {
  * key + user verification, presence auto-simulated) so `navigator.credentials`
  * resolves without a real device. Must be enabled before any WebAuthn ceremony.
  */
-async function addVirtualAuthenticator(page: Page): Promise<CDPSession> {
+interface VirtualAuthenticator {
+  client: CDPSession;
+  authenticatorId: string;
+}
+
+type VirtualAuthenticatorTransport = "usb" | "ble" | "nfc" | "internal";
+
+async function addVirtualAuthenticator(
+  client: CDPSession,
+  transport: VirtualAuthenticatorTransport,
+  automaticPresenceSimulation: boolean,
+): Promise<string> {
+  const { authenticatorId } = await client.send(
+    "WebAuthn.addVirtualAuthenticator",
+    {
+      options: {
+        protocol: "ctap2",
+        transport,
+        hasResidentKey: true,
+        hasUserVerification: true,
+        isUserVerified: true,
+        automaticPresenceSimulation,
+      },
+    },
+  );
+  return authenticatorId;
+}
+
+async function enableVirtualAuthenticator(
+  page: Page,
+): Promise<VirtualAuthenticator> {
   const client = await page.context().newCDPSession(page);
   await client.send("WebAuthn.enable");
-  await client.send("WebAuthn.addVirtualAuthenticator", {
-    options: {
-      protocol: "ctap2",
-      transport: "internal",
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
-    },
-  });
-  return client;
+  const authenticatorId = await addVirtualAuthenticator(
+    client,
+    "internal",
+    true,
+  );
+  return { client, authenticatorId };
 }
 
 async function getJson<T>(
@@ -127,7 +152,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   });
   page.on("pageerror", (e) => pageErrors.push(e.message));
 
-  await addVirtualAuthenticator(page);
+  const authenticator = await enableVirtualAuthenticator(page);
 
   // 1. Land.
   await page.goto("/");
@@ -175,8 +200,79 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   expect(accountIdRaw, "account id should be persisted").toBeTruthy();
   const accountId = Number(accountIdRaw);
 
-  // 4. Disconnect. This deliberately clears every sybil:auth localStorage key
-  //    while leaving the resident credential in the virtual authenticator.
+  // 4. Register a second passkey from Settings using a distinct virtual
+  //    authenticator, modeling another device/provider. The backup device must
+  //    handle credential creation; the primary must then return to authorize
+  //    the state-bound key registration.
+  const primaryCredentials = await authenticator.client.send(
+    "WebAuthn.getCredentials",
+    { authenticatorId: authenticator.authenticatorId },
+  );
+  expect(primaryCredentials.credentials).toHaveLength(1);
+
+  await authenticator.client.send("WebAuthn.setAutomaticPresenceSimulation", {
+    authenticatorId: authenticator.authenticatorId,
+    enabled: false,
+  });
+  const backupAuthenticatorId = await addVirtualAuthenticator(
+    authenticator.client,
+    "usb",
+    true,
+  );
+  const backupCredentialReady = new Promise<void>((resolve, reject) => {
+    const onCredentialAdded = (event: { authenticatorId: string }) => {
+      if (event.authenticatorId !== backupAuthenticatorId) return;
+      authenticator.client.off("WebAuthn.credentialAdded", onCredentialAdded);
+      void (async () => {
+        await authenticator.client.send(
+          "WebAuthn.setAutomaticPresenceSimulation",
+          { authenticatorId: backupAuthenticatorId, enabled: false },
+        );
+        await authenticator.client.send(
+          "WebAuthn.setAutomaticPresenceSimulation",
+          { authenticatorId: authenticator.authenticatorId, enabled: true },
+        );
+        resolve();
+      })().catch(reject);
+    };
+    authenticator.client.on("WebAuthn.credentialAdded", onCredentialAdded);
+  });
+
+  // Hold the key-operation binding request until the CDP event has switched
+  // simulated presence back to the primary authenticator. This removes a race
+  // between navigator.credentials.create() resolving and the authorization
+  // assertion that follows it.
+  await page.route(
+    `**/v1/accounts/${accountId}/keyop-state`,
+    async (route) => {
+      await backupCredentialReady;
+      await route.continue();
+    },
+    { times: 1 },
+  );
+
+  await page.goto("/settings");
+  const addBackup = page.getByRole("button", { name: "Add backup passkey" });
+  await expect(addBackup).toBeEnabled();
+  await addBackup.click();
+  await expect(page.getByRole("status")).toContainText("Backup passkey added");
+  await expect(page.getByText(/backup passkey · webauthn/i)).toBeVisible();
+
+  const backupCredentials = await authenticator.client.send(
+    "WebAuthn.getCredentials",
+    { authenticatorId: backupAuthenticatorId },
+  );
+  expect(backupCredentials.credentials).toHaveLength(1);
+  await authenticator.client.send("WebAuthn.setAutomaticPresenceSimulation", {
+    authenticatorId: backupAuthenticatorId,
+    enabled: true,
+  });
+  await authenticator.client.send("WebAuthn.removeVirtualAuthenticator", {
+    authenticatorId: authenticator.authenticatorId,
+  });
+
+  // 5. Disconnect. This deliberately clears every sybil:auth localStorage key
+  //    while leaving only the backup authenticator available.
   await accountMenu.click();
   const accountDropdown = page.getByRole("menu");
   await accountDropdown.getByRole("menuitem", { name: "Disconnect" }).click();
@@ -193,7 +289,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     "disconnect should clear the read API key",
   ).toBeNull();
 
-  // 5. Reconnect through an empty allowCredentials list. Chromium's resident
+  // 6. Reconnect through an empty allowCredentials list. Chromium's resident
   //    credential returns the original 8-byte userHandle, so the app can
   //    recover the account id and registered public key without local state.
   await connect.click();
@@ -211,7 +307,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   await expect(connectDialog).toBeHidden({ timeout: 30_000 });
   await expect(
     accountMenu,
-    "discoverable passkey sign-in should reconnect the account",
+    "backup passkey sign-in should reconnect the account",
   ).toBeVisible({ timeout: 30_000 });
   const recoveredAccountIdRaw = await page.evaluate(() =>
     localStorage.getItem("sybil:auth:account_id"),
@@ -227,7 +323,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     /^sybk_/,
   );
 
-  // 6. Confirm the reconnected account has its demo balance (capped $5k).
+  // 7. Confirm the reconnected account has its demo balance (capped $5k).
   const pf0 = await getJson<Portfolio>(
     request,
     `${API_BASE}/v1/accounts/${accountId}/portfolio`,
@@ -239,7 +335,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     "new passkey account should be funded with demo balance",
   ).toBeGreaterThan(0n);
 
-  // 7. Open a market that has a price.
+  // 8. Open a market that has a price.
   const { priced } = await pickMarkets(request);
   expect(priced, "need an active market with a price").toBeTruthy();
   const market = priced!;
@@ -256,7 +352,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   // seed-the-book copy) — sanity that we picked a live market.
   await expect(orderDialog).toContainText(/est\. fill · next batch/i);
 
-  // 8. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
+  // 9. Submit a signed BUY YES (default BuyBox state: buy / YES / $25 / GTC).
   //    Clicking the CTA runs a WebAuthn assertion → POST /v1/orders/signed.
   const cta = orderDialog.getByRole("button", { name: /review buy|queue buy/i });
   await expect(cta).toBeVisible();
@@ -264,7 +360,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   const confirm = orderDialog.getByRole("button", { name: /confirm buy/i });
   if (await confirm.isVisible().catch(() => false)) await confirm.click();
 
-  // 9. Assert the signed order was ACCEPTED — and fail loudly, with the exact
+  // 10. Assert the signed order was ACCEPTED — and fail loudly, with the exact
   //    server error, if the passkey assertion was rejected (the rp_id/origin
   //    regression class). Race the accepted receipt against the error alert.
   const acceptedStatus = orderDialog
@@ -316,7 +412,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     [],
   );
 
-  // 10. Within ~2 blocks (10s each), the order must leave a trace: a pending
+  // 11. Within ~2 blocks (10s each), the order must leave a trace: a pending
   //    order, a fill, a position, or a reserved-balance decrease. Any of these
   //    proves the signature verified server-side.
   await expect(async () => {

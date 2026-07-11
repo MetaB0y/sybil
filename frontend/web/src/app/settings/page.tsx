@@ -36,6 +36,10 @@ export default function SettingsPage() {
       <SettingsView
         accountId={session.accountId}
         publicKeyHex={session.publicKeyHex}
+        authScheme={session.authScheme}
+        {...(session.credentialIdB64url
+          ? { credentialIdB64url: session.credentialIdB64url }
+          : {})}
       />
     </Shell>
   );
