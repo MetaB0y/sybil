@@ -48,6 +48,7 @@ use crate::util::now_ms;
         routes::accounts::get_account_history,
         routes::bridge::status,
         routes::bridge::account_key,
+        routes::bridge::list_account_withdrawals,
         routes::bridge::account_by_key,
         routes::bridge::submit_l1_deposit,
         routes::bridge::create_withdrawal,
@@ -702,6 +703,10 @@ pub const OWNER_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
+        path: "/v1/accounts/{id}/withdrawals",
+    },
+    RouteMount {
+        method: "GET",
         path: "/v1/accounts/{id}/private-summary",
     },
 ];
@@ -922,6 +927,10 @@ fn public_routes(state: &AppState) -> Router<AppState> {
         .route(
             "/v1/accounts/{id}/bridge-key",
             axum::routing::get(routes::bridge::account_key),
+        )
+        .route(
+            "/v1/accounts/{id}/withdrawals",
+            axum::routing::get(routes::bridge::list_account_withdrawals),
         )
         .route(
             "/v1/accounts/{id}/orders",

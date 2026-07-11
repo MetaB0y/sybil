@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
-import type { HistoryEvent } from "@/lib/account/use-account-history";
 import {
   formatWithdrawalCountdown,
   pendingWithdrawals,
@@ -11,48 +10,34 @@ import {
   type BridgeWithdrawal,
 } from "@/lib/account/withdrawals";
 import { formatDollars, parseNanos } from "@/lib/format/nanos";
+import { selectLatestBlock, useStore } from "@/lib/store";
 
-export function WithdrawalEtas({
-  accountId,
-  events,
-}: {
-  accountId: number;
-  events: HistoryEvent[];
-}) {
+export function WithdrawalEtas({ accountId }: { accountId: number }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const queryClient = useQueryClient();
+  const latest = useStore(selectLatestBlock);
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  const blockHeights = useMemo(
-    () =>
-      [...new Set(events.filter((e) => e.type === "withdrawal").map((e) => e.blockHeight))]
-        .filter((height) => Number.isFinite(height))
-        .sort((a, b) => b - a),
-    [events],
-  );
+  useEffect(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["account", accountId, "withdrawals"],
+    });
+  }, [accountId, latest?.height, queryClient]);
 
   const q = useQuery({
-    enabled: blockHeights.length > 0,
-    queryKey: ["account", accountId, "withdrawal-leaves", blockHeights],
+    queryKey: ["account", accountId, "withdrawals"],
     queryFn: async (): Promise<BridgeWithdrawal[]> => {
-      const blocks = await Promise.all(
-        blockHeights.map(async (height) => {
-          const { data, error } = await api.GET("/v1/blocks/{height}", {
-            params: { path: { height } },
-          });
-          if (error || !data) throw new Error("fetch withdrawal block failed");
-          return data;
-        }),
+      const { data, error } = await api.GET(
+        "/v1/accounts/{id}/withdrawals",
+        { params: { path: { id: accountId } } },
       );
-      return blocks.flatMap((block) =>
-        (block.bridge?.withdrawal_leaves ?? []).filter(
-          (leaf) => leaf.account_id === accountId,
-        ),
-      );
+      if (error || !data) throw new Error("fetch active withdrawals failed");
+      return data;
     },
-    staleTime: 30_000,
+    staleTime: 0,
     refetchOnWindowFocus: false,
   });
 
@@ -64,7 +49,7 @@ export function WithdrawalEtas({
     [q.data, nowMs],
   );
 
-  if (blockHeights.length === 0 || rows.length === 0) return null;
+  if (rows.length === 0) return null;
 
   return (
     <section

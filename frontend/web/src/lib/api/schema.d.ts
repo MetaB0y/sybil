@@ -328,6 +328,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/accounts/{id}/withdrawals": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/accounts/{id}/withdrawals
+     * @description Returns the account's currently active withdrawal leaves. Terminal leaves
+     *     are visible with their terminal status until the next committed block
+     *     retires them, then disappear from this collection. Historical creation
+     *     blocks remain immutable and must not be used as a current-status view.
+     */
+    get: operations["list_account_withdrawals"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/activity/overview": {
     parameters: {
       query?: never;
@@ -4550,6 +4573,43 @@ export interface operations {
       };
       /** @description Replay nonce is stale or duplicate */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  list_account_withdrawals: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Active withdrawals for this account */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeWithdrawalResponse"][];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
         headers: {
           [name: string]: unknown;
         };

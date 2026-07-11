@@ -11,7 +11,7 @@ The REST API is the external interface to the exchange. Built with Axum (a Rust 
 The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, first-party [[WebSocket Block Stream|WebSocket stream]] with `?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). Operator/service writes, the state-proof and DA-payload custody surfaces, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
 
 Per-account reads (`/accounts/{id}`, portfolio, fills, equity, events, orders,
-signing-key metadata, read-key metadata, bridge key, and private summary) require
+signing-key metadata, read-key metadata, bridge key, active withdrawals, and private summary) require
 either an active read-scoped bearer owned by `{id}` or the service token. A
 wrong-account read bearer is `403`; missing, invalid, or revoked read credentials
 are `401`. Public market, activity, aggregate-statistics, and leaderboard reads
@@ -43,6 +43,11 @@ expiry clock. Crossing `expiry_height` emits a refund event, restores the
 account balance exactly once, and retires the leaf in the same committed block.
 `refunded` is exposed as a withdrawal status while the terminal event is
 pending; replays after pruning are accepted as no-ops.
+
+`GET /v1/accounts/{id}/withdrawals` is the owner-scoped current-status view.
+It returns active leaves, including a terminal status during the short interval
+before the next block retires that leaf. Historical block responses preserve
+the immutable creation-time leaf and are not a current withdrawal-status API.
 
 Order quantity fields (`quantity`, `max_fill`, `fill_qty`,
 `remaining_quantity`, `original_quantity`, and position `quantity`) are protocol

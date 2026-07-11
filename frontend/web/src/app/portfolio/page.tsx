@@ -178,7 +178,7 @@ function Connected({
         />
       </section>
 
-      <WithdrawalEtas accountId={accountId} events={history.events} />
+      <WithdrawalEtas accountId={accountId} />
 
       {tab === "positions" && (
         <PositionsList

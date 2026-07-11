@@ -222,6 +222,10 @@ fn exact_owner_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
+            path: "/v1/accounts/{id}/withdrawals",
+        },
+        RouteMount {
+            method: "GET",
             path: "/v1/accounts/{id}/private-summary",
         },
     ]
@@ -741,7 +745,7 @@ async fn account_reads_enforce_owner_or_service_matrix() {
     let (owner_id, owner_token) = create_owner_with_read_key(app.clone(), 21).await;
     let (_, wrong_owner_token) = create_owner_with_read_key(app.clone(), 22).await;
 
-    for suffix in ["", "/portfolio", "/orders"] {
+    for suffix in ["", "/portfolio", "/orders", "/withdrawals"] {
         let uri = format!("/v1/accounts/{owner_id}{suffix}");
 
         let (status, _) = request_json(app.clone(), Method::GET, &uri, None, json!({})).await;

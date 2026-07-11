@@ -196,6 +196,41 @@ pub async fn account_key(
     }))
 }
 
+/// GET /v1/accounts/{id}/withdrawals
+///
+/// Returns the account's currently active withdrawal leaves. Terminal leaves
+/// are visible with their terminal status until the next committed block
+/// retires them, then disappear from this collection. Historical creation
+/// blocks remain immutable and must not be used as a current-status view.
+#[utoipa::path(
+    get,
+    path = "/v1/accounts/{id}/withdrawals",
+    params(("id" = u64, Path, description = "Account ID")),
+    responses(
+        (status = 200, description = "Active withdrawals for this account", body = [BridgeWithdrawalResponse]),
+        (status = 401, description = "Missing/invalid bearer token"),
+        (status = 403, description = "Token belongs to a different account")
+    ),
+    security(("bearer_read" = []))
+)]
+pub async fn list_account_withdrawals(
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<BridgeWithdrawalResponse>>, AppError> {
+    let account_id = AccountId(id);
+    crate::routes::accounts::authorize_account_read(&state, &headers, account_id).await?;
+    let bridge = state.sequencer.get_bridge_state().await?;
+    Ok(Json(
+        bridge
+            .withdrawals
+            .values()
+            .filter(|withdrawal| withdrawal.account_id == account_id)
+            .map(bridge_withdrawal_to_response)
+            .collect(),
+    ))
+}
+
 /// GET /v1/bridge/accounts/by-key/{key_hex}
 #[utoipa::path(
     get,

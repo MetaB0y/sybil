@@ -730,8 +730,50 @@ async fn bridge_deposit_and_withdrawal_surface_in_block_response() {
     assert_eq!(withdrawal["withdrawal_id"], json!(1));
     assert_eq!(withdrawal["amount_nanos"], json!(4_000_000u64));
     assert!(withdrawal["withdrawal_leaf_digest_hex"].as_str().is_some());
+    let nullifier_hex = withdrawal["nullifier_hex"].as_str().unwrap().to_string();
+
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/withdrawals"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let active = parse_json(&body);
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["l1_status"], json!("not_requested"));
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/bridge/withdrawals/l1-events",
+        json!({
+            "nullifier_hex": nullifier_hex,
+            "status": "finalized",
+            "event_at_unix": 1_700_000_000u64,
+            "l1_block_height": 1u64,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/withdrawals"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let active = parse_json(&body);
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["l1_status"], json!("finalized"));
 
     handle.produce_block().await.unwrap();
+
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/withdrawals"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
 
     let (status, body) = get(app, "/v1/blocks/latest").await;
     assert_eq!(status, StatusCode::OK);
