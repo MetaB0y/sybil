@@ -16,10 +16,10 @@ mod header_hash {
 }
 
 pub use guest_commitments::{
-    compute_events_root, events_root_from_event_bytes, verify_qmdb_key_value_proof,
-    verify_qmdb_state_root, verify_qmdb_state_root_for, QmdbStateExclusionProof,
-    QmdbStateKeyValueProof, QmdbStateOperationProof, QmdbStateRangeProof, QmdbStateRootProof,
-    QMDB_STATE_CHUNK_SIZE,
+    compute_events_root, events_root_from_event_bytes, verify_qmdb_exclusion_proof,
+    verify_qmdb_key_value_proof, verify_qmdb_state_root, verify_qmdb_state_root_for,
+    QmdbStateExclusionProof, QmdbStateKeyValueProof, QmdbStateOperationProof, QmdbStateRangeProof,
+    QmdbStateRootProof, QMDB_STATE_CHUNK_SIZE,
 };
 pub use header_hash::hash_header;
 

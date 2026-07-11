@@ -18,6 +18,13 @@ zk/openvm-guest/openvm/release/*
 !zk/openvm-guest/openvm/release/sybil-openvm-guest.baseline.json
 zk/openvm-guest/target/
 zk/openvm-guest/openvm_init.rs
+zk/openvm-escape-guest/openvm/*
+!zk/openvm-escape-guest/openvm/release/
+zk/openvm-escape-guest/openvm/release/*
+!zk/openvm-escape-guest/openvm/release/sybil-openvm-escape-guest.commit.json
+!zk/openvm-escape-guest/openvm/release/sybil-openvm-escape-guest.baseline.json
+zk/openvm-escape-guest/target/
+zk/openvm-escape-guest/openvm_init.rs
 *.tsbuildinfo
 .env
 arena.env

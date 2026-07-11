@@ -2,7 +2,7 @@
 tags: [zk]
 layer: verification
 status: planned
-last_verified: 2026-07-10
+last_verified: 2026-07-11
 ---
 
 Sybil is designed for a Validium architecture: off-chain data, on-chain proofs. The exchange runs off-chain for performance, but every batch's correctness is attested by an OpenVM proof posted to Ethereum L1. The [[L1 Settlement and Vault|on-chain contracts]] store accepted [[State Root and Parent Hash|state roots]], custody collateral, and process proof-backed withdrawals — they never see individual orders, fills, or account balances.
@@ -47,6 +47,14 @@ The first guest boundary is intentionally narrow:
 - `zk/openvm-guest/` is a standalone OpenVM package pinned to
   `v2.0.0`. It is outside the root Cargo workspace so normal Rust checks do
   not require the OpenVM CLI or generated artifacts.
+- `crates/sybil-escape-claim/` and `zk/openvm-escape-guest/` form a second,
+  deliberately small Form-L statement. The guest authenticates selective qMDB
+  openings for one account, its reservation leaf (inclusion or proven
+  exclusion), and every positioned market; welds the opened active P-256 key
+  set to `keys_digest`; verifies RawP256 or WebAuthn user authorization; marks
+  positions at committed last-clearing prices; and reveals the dedicated
+  escape-claim public-input hash. It has its own OpenVM config, commitment pair,
+  release records, and fingerprint closure.
 - `zk/openvm-tools/` is a standalone host-tool package pinned to the same
   OpenVM tag. It converts prepared `StateTransitionGuestInput` MessagePack into
   the JSON/hex input format expected by `cargo openvm run` and
@@ -110,14 +118,18 @@ roles and authority (SYB-208):
    the repo a persistent, diff-able record instead of relying solely on the
    deployed constructor args. The large `.vmexe`/`.pk`/`.vk` binaries stay
    gitignored.
-3. **`guest.commitment.lock.json` (source fingerprint).** A SHA-256 fingerprint
+3. **`guest.commitment.lock.json` (source fingerprint).** Each guest carries a SHA-256 fingerprint
    of the guest *source tree and its full path-dependency closure*
    (`zk/openvm-guest/`, `crates/sybil-zk`, `crates/sybil-verifier`,
    `crates/matching-engine`, `crates/sybil-l1-protocol`) plus a copy of the
    commitment hashes. Its job is
    staleness detection: `scripts/zk-guest-fingerprint.sh --check` fails if any
    of that source changes without regenerating the pin, and now also
-   cross-checks that its copied hashes still equal `commit.json`.
+  cross-checks that its copied hashes still equal `commit.json`.
+
+The Form-L guest repeats this three-record discipline independently under
+`zk/openvm-escape-guest/`. `scripts/zk-guest-fingerprint.sh --check` and
+`just zk-rebuild-check` validate both closures and both commitment pairs.
 
 **Authority order:** deployed pin > `commit.json` > lock file. The lock owns the
 source-fingerprint role; `commit.json` owns the commitment-hash record.

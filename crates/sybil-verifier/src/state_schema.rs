@@ -138,7 +138,7 @@ pub fn account_reservation_leaf_key(account_id: u64) -> Vec<u8> {
     key
 }
 
-fn account_leaf_value(account: &AccountSnapshot) -> Vec<u8> {
+pub fn account_leaf_value(account: &AccountSnapshot) -> Vec<u8> {
     let mut value = Vec::new();
     append_state_account_leaf_value(&mut value, account);
     value
@@ -175,7 +175,7 @@ pub fn market_metadata_digest(payload: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn market_leaf_value(market: &MarketSnapshot) -> Vec<u8> {
+pub fn market_leaf_value(market: &MarketSnapshot) -> Vec<u8> {
     let mut value = Vec::new();
     append_state_market_leaf_value(&mut value, market);
     value
@@ -199,7 +199,7 @@ fn resting_order_leaf_value(resting: &RestingOrderSnapshot) -> Vec<u8> {
     value
 }
 
-fn account_reservation_leaf_value(reservation: &AccountReservationSnapshot) -> Vec<u8> {
+pub fn account_reservation_leaf_value(reservation: &AccountReservationSnapshot) -> Vec<u8> {
     let mut value = Vec::new();
     append_state_account_reservation_leaf_value(&mut value, reservation);
     value

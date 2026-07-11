@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# ZK guest commitment staleness gate.
+# ZK guest commitment staleness gate (state-transition + Form-L escape).
 #
-# The OpenVM guest (`zk/openvm-guest`) is consensus surface: its compiled
-# artifact yields the `app_exe_commit` / `app_vm_commit` values that
-# `contracts/src/OpenVmVerifierAdapter.sol` pins at deploy time. Those
+# Both OpenVM guests (`zk/openvm-guest` and `zk/openvm-escape-guest`) are
+# consensus surface. Each compiled artifact yields an independent
+# `app_exe_commit` / `app_vm_commit` pair pinned by its own verifier adapter.
+# Their
 # generated artifacts live under `zk/openvm-guest/openvm/` which is
 # .gitignore'd, so nothing in the committed tree records "which source the
 # pinned commitment was built from". This script closes that gap.
@@ -30,25 +31,51 @@
 #   scripts/zk-guest-fingerprint.sh --check
 #   scripts/zk-guest-fingerprint.sh --write    # refresh lock after a rebuild
 #
-# The `--write` path is for a human/release step AFTER regenerating the guest
-# commitment (`just openvm-commit`): it snapshots the current source
+# The `--write` path is for a human/release step AFTER regenerating both guest
+# commitments (`just openvm-commit-all`): it snapshots each source
 # fingerprint and, when the local (gitignored) commit.json is present, records
 # the freshly built commitment hashes for traceability.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-GUEST_DIR="$REPO_ROOT/zk/openvm-guest"
-LOCK_FILE="$GUEST_DIR/guest.commitment.lock.json"
-COMMIT_JSON="$GUEST_DIR/openvm/release/sybil-openvm-guest.commit.json"
 OPENVM_TAG="v2.0.0"
 KEY_MATERIAL_NAMES=("app.pk" "app.vk" "agg_prefix.pk" "internal_recursive.pk")
 KEY_MATERIAL_PATHS=(
-    "$GUEST_DIR/openvm/app.pk"
-    "$GUEST_DIR/openvm/app.vk"
-    "$GUEST_DIR/openvm/agg_prefix.pk"
+    "$REPO_ROOT/zk/openvm-guest/openvm/app.pk"
+    "$REPO_ROOT/zk/openvm-guest/openvm/app.vk"
+    "$REPO_ROOT/zk/openvm-guest/openvm/agg_prefix.pk"
     "$HOME/.openvm/internal_recursive.pk"
 )
+
+select_guest() {
+    case "$1" in
+        main)
+            GUEST_LABEL="main state-transition guest"
+            GUEST_REL="zk/openvm-guest"
+            GUEST_DIR="$REPO_ROOT/$GUEST_REL"
+            LOCK_FILE="$GUEST_DIR/guest.commitment.lock.json"
+            COMMIT_JSON="$GUEST_DIR/openvm/release/sybil-openvm-guest.commit.json"
+            CHECK_KEY_MATERIAL=true
+            CLOSURE_CRATES=(crates/sybil-zk crates/sybil-verifier crates/matching-engine crates/sybil-l1-protocol)
+            ;;
+        escape)
+            GUEST_LABEL="Form-L escape-claim guest"
+            GUEST_REL="zk/openvm-escape-guest"
+            GUEST_DIR="$REPO_ROOT/$GUEST_REL"
+            LOCK_FILE="$GUEST_DIR/guest.commitment.lock.json"
+            COMMIT_JSON="$GUEST_DIR/openvm/release/sybil-openvm-escape-guest.commit.json"
+            # Stage 2 deliberately does not run keygen. Commitments are fully
+            # determined by source/config and do not consume app proving keys.
+            CHECK_KEY_MATERIAL=false
+            CLOSURE_CRATES=(crates/sybil-escape-claim crates/sybil-zk crates/sybil-verifier crates/matching-engine crates/sybil-l1-protocol)
+            ;;
+        *)
+            echo "ERROR: unknown guest selector: $1" >&2
+            exit 2
+            ;;
+    esac
+}
 
 # Consensus-relevant guest source inputs, as paths relative to $REPO_ROOT.
 #
@@ -82,8 +109,6 @@ KEY_MATERIAL_PATHS=(
 # preferable to a false "fresh" -- the failure mode SYB-196 exposed, where a
 # real consensus drift slipped past a green gate. sybil-l1-protocol joined
 # the closure when the guest gained deposit-inclusion verification (SYB-188).
-CLOSURE_CRATES=(crates/sybil-zk crates/sybil-verifier crates/matching-engine crates/sybil-l1-protocol)
-
 collect_source_files() {
     {
         # Guest build recipe/wrapper plus crate manifest, lock, OpenVM config,
@@ -92,10 +117,10 @@ collect_source_files() {
         printf '%s\n' \
             "justfile" \
             "scripts/openvm-rustc-wrapper.sh" \
-            "zk/openvm-guest/Cargo.toml" \
-            "zk/openvm-guest/Cargo.lock" \
-            "zk/openvm-guest/openvm.toml"
-        (cd "$REPO_ROOT" && find zk/openvm-guest/src -type f -name '*.rs')
+            "$GUEST_REL/Cargo.toml" \
+            "$GUEST_REL/Cargo.lock" \
+            "$GUEST_REL/openvm.toml"
+        (cd "$REPO_ROOT" && find "$GUEST_REL/src" -type f -name '*.rs')
         # Path-dep closure crates: every Rust source + the manifest.
         local crate
         for crate in "${CLOSURE_CRATES[@]}"; do
@@ -226,10 +251,16 @@ EOF
 write_lock() {
     local source_hash exe_commit vm_commit app_pk app_vk agg_prefix_pk internal_recursive_pk
     source_hash="$(compute_source_hash)"
-    app_pk="$(hash_key_file app.pk "${KEY_MATERIAL_PATHS[0]}")"
-    app_vk="$(hash_key_file app.vk "${KEY_MATERIAL_PATHS[1]}")"
-    agg_prefix_pk="$(hash_key_file agg_prefix.pk "${KEY_MATERIAL_PATHS[2]}")"
-    internal_recursive_pk="$(hash_key_file internal_recursive.pk "${KEY_MATERIAL_PATHS[3]}")"
+    app_pk=""
+    app_vk=""
+    agg_prefix_pk=""
+    internal_recursive_pk=""
+    if $CHECK_KEY_MATERIAL; then
+        app_pk="$(hash_key_file app.pk "${KEY_MATERIAL_PATHS[0]}")"
+        app_vk="$(hash_key_file app.vk "${KEY_MATERIAL_PATHS[1]}")"
+        agg_prefix_pk="$(hash_key_file agg_prefix.pk "${KEY_MATERIAL_PATHS[2]}")"
+        internal_recursive_pk="$(hash_key_file internal_recursive.pk "${KEY_MATERIAL_PATHS[3]}")"
+    fi
     exe_commit=""
     vm_commit=""
     if [ -f "$COMMIT_JSON" ]; then
@@ -241,7 +272,9 @@ write_lock() {
         exe_commit="$(read_lock_field app_exe_commit)"
         vm_commit="$(read_lock_field app_vm_commit)"
     fi
-    cat > "$LOCK_FILE" <<EOF
+    mkdir -p "$(dirname "$LOCK_FILE")"
+    if $CHECK_KEY_MATERIAL; then
+        cat > "$LOCK_FILE" <<EOF
 {
   "_comment": "Staleness pin for the OpenVM guest commitment. Regenerate with 'scripts/zk-guest-fingerprint.sh --write' AFTER rebuilding the guest commitment ('just openvm-commit'). CI runs '--check' and fails if source_sha256 or pinned key material no longer matches.",
   "openvm_tag": "$OPENVM_TAG",
@@ -256,12 +289,25 @@ write_lock() {
   "app_vm_commit": "$vm_commit"
 }
 EOF
+    else
+        cat > "$LOCK_FILE" <<EOF
+{
+  "_comment": "Staleness pin for the independent Form-L escape guest commitment. Regenerate with 'scripts/zk-guest-fingerprint.sh --write' AFTER 'just openvm-escape-commit'. No proving keys are generated or consumed by this commitment-only Stage 2 workflow.",
+  "openvm_tag": "$OPENVM_TAG",
+  "source_sha256": "$source_hash",
+  "app_exe_commit": "$exe_commit",
+  "app_vm_commit": "$vm_commit"
+}
+EOF
+    fi
     echo "Wrote $LOCK_FILE"
     echo "  source_sha256=$source_hash"
-    echo "  key_material.app.pk=$app_pk"
-    echo "  key_material.app.vk=$app_vk"
-    echo "  key_material.agg_prefix.pk=$agg_prefix_pk"
-    echo "  key_material.internal_recursive.pk=$internal_recursive_pk"
+    if $CHECK_KEY_MATERIAL; then
+        echo "  key_material.app.pk=$app_pk"
+        echo "  key_material.app.vk=$app_vk"
+        echo "  key_material.agg_prefix.pk=$agg_prefix_pk"
+        echo "  key_material.internal_recursive.pk=$internal_recursive_pk"
+    fi
     echo "  app_exe_commit=$exe_commit"
     echo "  app_vm_commit=$vm_commit"
 }
@@ -272,7 +318,9 @@ check_lock() {
         echo "       Run: scripts/zk-guest-fingerprint.sh --write" >&2
         exit 1
     fi
-    check_key_material
+    if $CHECK_KEY_MATERIAL; then
+        check_key_material
+    fi
     local expected actual
     expected="$(read_lock_field source_sha256)"
     actual="$(compute_source_hash)"
@@ -295,15 +343,24 @@ If you did NOT intend to change guest behavior, revert the guest edit.
 EOF
         exit 1
     fi
-    echo "OK: guest source matches pinned commitment fingerprint ($actual)."
+    echo "OK: $GUEST_LABEL source matches pinned commitment fingerprint ($actual)."
     cross_check_commit_json
 }
 
-case "${1:---check}" in
-    --check) check_lock ;;
-    --write) write_lock ;;
+MODE="${1:---check}"
+case "$MODE" in
+    --check|--write) ;;
     *)
         echo "usage: $0 [--check|--write]" >&2
         exit 2
         ;;
 esac
+
+for guest in main escape; do
+    select_guest "$guest"
+    echo "== $GUEST_LABEL =="
+    case "$MODE" in
+        --check) check_lock ;;
+        --write) write_lock ;;
+    esac
+done

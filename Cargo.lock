@@ -4577,6 +4577,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-escape-claim"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "commonware-codec",
+ "commonware-cryptography",
+ "commonware-runtime",
+ "commonware-storage",
+ "matching-engine",
+ "p256 0.13.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "proptest",
+ "serde",
+ "sha2 0.10.9",
+ "sybil-l1-protocol",
+ "sybil-verifier",
+ "sybil-zk",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "sybil-golden-vectors"
 version = "0.1.0"
 dependencies = [
@@ -4665,12 +4685,14 @@ dependencies = [
  "hex",
  "matching-engine",
  "matching-sequencer",
+ "p256 0.14.0",
  "reqwest",
  "rmp-serde",
  "serde",
  "serde_json",
  "sha3",
  "sybil-api-types",
+ "sybil-escape-claim",
  "sybil-oracle",
  "sybil-verifier",
  "sybil-zk",

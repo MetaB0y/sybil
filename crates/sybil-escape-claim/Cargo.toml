@@ -1,0 +1,26 @@
+[package]
+name = "sybil-escape-claim"
+version = "0.1.0"
+edition = "2021"
+description = "Guest-safe Form-L escape-claim verification"
+
+[dependencies]
+matching-engine = { path = "../matching-engine" }
+serde = { version = "1", features = ["derive"] }
+sybil-l1-protocol = { path = "../sybil-l1-protocol" }
+sybil-verifier = { path = "../sybil-verifier", default-features = false }
+sybil-zk = { path = "../sybil-zk" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+base64 = "0.22"
+commonware-codec = "2026.4.0"
+commonware-cryptography = "2026.4.0"
+commonware-runtime = "2026.4.0"
+commonware-storage = "2026.4.0"
+p256 = { version = "0.13", features = ["ecdsa"] }
+proptest = "1.6"
+sha2 = "0.10"
+
+[lints.clippy]
+disallowed_types = "allow"

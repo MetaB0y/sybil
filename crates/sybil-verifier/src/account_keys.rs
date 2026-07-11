@@ -68,6 +68,36 @@ pub fn canonical_key_revocation_bytes(
     )
 }
 
+/// Canonical deployment- and state-bound bytes authorized by an escape claim.
+///
+/// This deliberately follows the fixed-width, little-endian key-operation
+/// convention rather than a transport serializer. It is shared by host tools
+/// and both OpenVM guests so claim authorization has one byte definition.
+#[allow(clippy::too_many_arguments)] // Frozen claim layout; a wrapper would duplicate its shape.
+pub fn canonical_escape_claim_bytes(
+    genesis_hash: [u8; 32],
+    chain_id: u64,
+    vault_address: [u8; 20],
+    state_root: [u8; 32],
+    height: u64,
+    account_id: u64,
+    recipient: [u8; 20],
+    amount_token_units: u64,
+) -> Vec<u8> {
+    const DOMAIN: &[u8] = b"sybil/escape-claim/v1";
+    let mut bytes = Vec::with_capacity(DOMAIN.len() + 32 + 8 + 20 + 32 + 8 + 8 + 20 + 8);
+    bytes.extend_from_slice(DOMAIN);
+    bytes.extend_from_slice(&genesis_hash);
+    bytes.extend_from_slice(&chain_id.to_le_bytes());
+    bytes.extend_from_slice(&vault_address);
+    bytes.extend_from_slice(&state_root);
+    bytes.extend_from_slice(&height.to_le_bytes());
+    bytes.extend_from_slice(&account_id.to_le_bytes());
+    bytes.extend_from_slice(&recipient);
+    bytes.extend_from_slice(&amount_token_units.to_le_bytes());
+    bytes
+}
+
 fn canonical_key_op_bytes(
     domain: &[u8],
     genesis_hash: [u8; 32],
@@ -136,5 +166,28 @@ mod tests {
             base,
             account_keys_digest(42, [raw_key(0x11), raw_key(0x12)])
         );
+    }
+
+    #[test]
+    fn escape_claim_bytes_pin_frozen_layout() {
+        let bytes = canonical_escape_claim_bytes(
+            [0x11; 32],
+            0x0102_0304_0506_0708,
+            [0x22; 20],
+            [0x33; 32],
+            0x1112_1314_1516_1718,
+            0x2122_2324_2526_2728,
+            [0x44; 20],
+            0x3132_3334_3536_3738,
+        );
+        assert_eq!(&bytes[..21], b"sybil/escape-claim/v1");
+        assert_eq!(&bytes[21..53], &[0x11; 32]);
+        assert_eq!(&bytes[53..61], &0x0102_0304_0506_0708u64.to_le_bytes());
+        assert_eq!(&bytes[61..81], &[0x22; 20]);
+        assert_eq!(&bytes[81..113], &[0x33; 32]);
+        assert_eq!(&bytes[113..121], &0x1112_1314_1516_1718u64.to_le_bytes());
+        assert_eq!(&bytes[121..129], &0x2122_2324_2526_2728u64.to_le_bytes());
+        assert_eq!(&bytes[129..149], &[0x44; 20]);
+        assert_eq!(&bytes[149..157], &0x3132_3334_3536_3738u64.to_le_bytes());
     }
 }
