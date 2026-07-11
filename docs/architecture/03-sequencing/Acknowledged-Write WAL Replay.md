@@ -59,9 +59,10 @@ WAL. Every WAL is cleared atomically inside `save_block`.
 | `pending_bridge_l1_inputs` | actor bridge handlers, after transition preflight and before the live mutation | `restore` replays withdrawal events and confirmed-height observations after withdrawal creation rows | the same `save_block_inner` transaction that persists bridge state |
 
 `control_plane_log` carries a single typed enum, `ControlPlaneCommand`
-(`crates/matching-sequencer/src/store.rs:479`), covering account create/fund,
-pubkey registration, market create/metadata, market-group create, signed cancel,
-market resolution (plain + attested), feed registration, and template install.
+(`crates/matching-sequencer/src/store.rs:479`), covering bare account create,
+atomic account-plus-initial-key create, funding, pubkey registration, market
+create/metadata, market-group create, signed cancel, market resolution (plain +
+attested), feed registration, and template install.
 So it is *already* a partially unified WAL for the control plane; the open
 question is only whether the order/deposit/withdrawal subsystems should join it.
 

@@ -23,9 +23,12 @@ before signing key registration/revocation; it contains no key list, balance,
 position, or profile data. Admission rejects a stale state binding with 409.
 
 Public account onboarding uses `POST /v1/accounts` with both
-`initial_balance_nanos` and `initial_key`. Omitting `initial_key` retains the
-deprecated bare-account form for service/dev tooling only; the old unsigned
-`POST /accounts/{id}/keys` bootstrap is likewise service-only.
+`initial_balance_nanos` and `initial_key`. The API sends both through one
+sequencer actor command and one control-plane WAL row, so restart cannot expose
+an acknowledged onboarding account without its initial key. Omitting
+`initial_key` retains the deprecated bare-account form for service/dev tooling
+only; the old unsigned `POST /accounts/{id}/keys` bootstrap is likewise
+service-only.
 
 > [!warning] Public onboarding is not production-safe yet
 > The route currently permits unlimited free accounts and caller-selected demo

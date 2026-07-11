@@ -401,6 +401,21 @@ impl SequencerHandle {
             .await?
     }
 
+    /// Allocate an account and install its first signing key under one actor
+    /// command and one durable control-plane WAL row. `meta.account_id` is
+    /// replaced with the newly allocated id.
+    pub async fn create_account_with_initial_key(
+        &self,
+        initial_balance: i64,
+        pubkey: PublicKey,
+        meta: RegisteredPubkey,
+    ) -> Result<Account, SequencerError> {
+        self.rpc(|reply| {
+            SequencerMsg::CreateAccountWithInitialKey(initial_balance, pubkey, meta, reply)
+        })
+        .await?
+    }
+
     pub async fn fund_account(
         &self,
         account_id: AccountId,
@@ -1164,7 +1179,7 @@ mod tests {
     use super::*;
     use crate::account::AccountStore;
     use crate::bridge::L1WithdrawalStatus;
-    use crate::crypto::sign_cancel;
+    use crate::crypto::{KeyScope, sign_cancel};
     use crate::market_info::ResolutionConfig;
     use crate::sequencer::SequencerConfig;
     use crate::system_event::SystemEvent;
@@ -2697,6 +2712,93 @@ mod tests {
             result,
             Err(SequencerError::AccountAlreadyRegistered)
         ));
+    }
+
+    #[tokio::test]
+    async fn atomic_account_onboarding_is_one_wal_command_and_recovers_with_key() {
+        let path = temp_store_path("atomic-account-onboarding");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(60),
+            ..SequencerConfig::default()
+        };
+        let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
+        sequencer.produce_block(Vec::new(), 1);
+        store.save_block(sequencer.snapshot()).await.unwrap();
+
+        let restored = store.load_state().await.unwrap().unwrap();
+        let sequencer =
+            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
+        let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+        let signing_key =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let pubkey = PublicKey(*signing_key.verifying_key());
+        let created = handle
+            .create_account_with_initial_key(
+                17,
+                pubkey.clone(),
+                RegisteredPubkey {
+                    account_id: AccountId(0),
+                    auth_scheme: AccountAuthScheme::WebAuthn,
+                    label: Some("primary passkey".to_string()),
+                    scope: KeyScope::Primary,
+                    created_at_ms: 123,
+                },
+            )
+            .await
+            .unwrap();
+
+        let duplicate = handle
+            .create_account_with_initial_key(
+                99,
+                pubkey.clone(),
+                RegisteredPubkey::primary(AccountId(0), AccountAuthScheme::WebAuthn),
+            )
+            .await;
+        assert!(matches!(
+            duplicate,
+            Err(SequencerError::AccountAlreadyRegistered)
+        ));
+
+        let pending = store.load_state().await.unwrap().unwrap();
+        assert_eq!(pending.control_plane_log.len(), 1);
+        assert!(matches!(
+            &pending.control_plane_log[0],
+            ControlPlaneCommand::CreateAccountWithInitialKey {
+                initial_balance: 17,
+                auth_scheme: AccountAuthScheme::WebAuthn,
+                label: Some(label),
+                scope: KeyScope::Primary,
+                created_at_ms: 123,
+                ..
+            } if label == "primary passkey"
+        ));
+
+        let mut replayed = BlockSequencer::restore(pending, Arc::new(AdminOracle::new()), config);
+        let account = replayed.accounts.get(created.id).unwrap();
+        assert_eq!(account.balance, 17);
+        assert_eq!(account.total_deposited, 17);
+        let keys = replayed.signing_keys_for_account(created.id);
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].0, pubkey.compressed_bytes());
+        assert_eq!(keys[0].1.label.as_deref(), Some("primary passkey"));
+
+        let block = replayed.produce_block(Vec::new(), 2);
+        assert!(matches!(
+            block.block.system_events.as_slice(),
+            [SystemEvent::CreateAccount {
+                account_id,
+                initial_balance: 17,
+                initial_keys,
+            }] if *account_id == created.id && initial_keys.len() == 1
+        ));
+        assert!(sybil_verifier::verify_full(&block.witness, false).valid);
+
+        drop(handle);
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]

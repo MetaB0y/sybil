@@ -37,7 +37,9 @@ authoritative today; scoped delegation is not active.
 
 ## Bootstrap and key mutation
 
-- Account creation can atomically install its initial key.
+- Public account creation installs its initial key through one sequencer actor
+  command and one control-plane WAL row. Legacy bare service-tier creation and
+  the deprecated service-tier first-key bootstrap remain separate commands.
 - Initial and additional signing-key labels are optional metadata limited to
   128 UTF-8 bytes. Admission measures the original bytes without trimming or
   normalization and rejects oversized labels before account/key/WAL mutation.

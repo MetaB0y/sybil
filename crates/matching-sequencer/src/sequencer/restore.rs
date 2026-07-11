@@ -450,6 +450,36 @@ impl BlockSequencer {
                 api_key_id,
                 revoked_at_ms,
             } => self.revoke_api_key(account_id, api_key_id, revoked_at_ms),
+            ControlPlaneCommand::CreateAccountWithInitialKey {
+                initial_balance,
+                timestamp_ms,
+                compressed_pubkey,
+                auth_scheme,
+                label,
+                scope,
+                created_at_ms,
+            } => {
+                let pubkey = crate::crypto::PublicKey::from_compressed_bytes(&compressed_pubkey)
+                    .ok_or_else(|| {
+                        SequencerError::Persistence(
+                            "invalid pubkey in control-plane WAL".to_string(),
+                        )
+                    })?;
+                let prepared = self.prepare_account_with_initial_key(
+                    initial_balance,
+                    timestamp_ms,
+                    pubkey,
+                    crate::crypto::RegisteredPubkey {
+                        account_id: AccountId(self.accounts.next_id()),
+                        auth_scheme,
+                        label,
+                        scope,
+                        created_at_ms,
+                    },
+                )?;
+                self.apply_prepared_account_with_initial_key(prepared);
+                Ok(())
+            }
         }
     }
 }

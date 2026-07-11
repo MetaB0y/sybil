@@ -891,6 +891,62 @@ fn quarantined_deposit_is_auto_claimed_on_witnessed_key_registration_across_bloc
 }
 
 #[test]
+fn atomic_onboarding_prevalidates_nonzero_balance_quarantine_claim() {
+    let accounts = AccountStore::new();
+    let oracle = Arc::new(AdminOracle::new());
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        MarketSet::new(),
+        vec![],
+        oracle,
+        SequencerConfig::default(),
+    );
+    let account_id = AccountId(seq.accounts.next_id());
+    let mut deposit = next_l1_deposit(&seq, account_id, 25_000);
+    deposit.account_id = None;
+    assert!(matches!(
+        seq.ingest_l1_deposit(deposit),
+        Ok(DepositDisposition::Quarantined {
+            amount_nanos: 25_000_000,
+            ..
+        })
+    ));
+
+    let pubkey = fresh_public_key();
+    let prepared = seq
+        .prepare_account_with_initial_key(
+            17,
+            123,
+            pubkey.clone(),
+            crate::crypto::RegisteredPubkey::primary(
+                AccountId(0),
+                crate::crypto::AccountAuthScheme::WebAuthn,
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        seq.apply_prepared_account_with_initial_key(prepared),
+        account_id
+    );
+    let account = seq.accounts.get(account_id).unwrap();
+    assert_eq!(account.balance, 25_000_017);
+    assert_eq!(account.total_deposited, 25_000_017);
+    assert!(seq.bridge_state().quarantine.is_empty());
+    assert_eq!(seq.signing_keys_for_account(account_id).len(), 1);
+
+    let block = seq.produce_block(Vec::new(), 1_000);
+    assert!(matches!(
+        block.block.system_events.as_slice(),
+        [
+            SystemEvent::CreateAccount { initial_keys, .. },
+            SystemEvent::DepositQuarantined { .. },
+            SystemEvent::QuarantineClaimed { .. },
+        ] if initial_keys.len() == 1
+    ));
+    assert!(sybil_verifier::verify_full(&block.witness, false).valid);
+}
+
+#[test]
 fn restore_resumes_deposit_frontier_fold_for_next_block() {
     let (mut seq, aid) = make_sequencer(0);
     let first = next_l1_deposit(&seq, aid, 10_000);

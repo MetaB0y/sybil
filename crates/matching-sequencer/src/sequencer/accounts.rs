@@ -1,5 +1,21 @@
 use super::*;
 
+pub(crate) struct PreparedAccountWithInitialKey {
+    account_id: AccountId,
+    initial_balance: i64,
+    timestamp_ms: u64,
+    pubkey: crate::crypto::PublicKey,
+    meta: crate::crypto::RegisteredPubkey,
+    quarantine_claim: Option<PreparedQuarantineClaim>,
+}
+
+struct PreparedQuarantineClaim {
+    key: [u8; 32],
+    amount: i64,
+    balance: i64,
+    total_deposited: i64,
+}
+
 impl BlockSequencer {
     pub fn register_pubkey(
         &mut self,
@@ -527,12 +543,118 @@ impl BlockSequencer {
     }
 
     pub fn create_account_at(&mut self, initial_balance: i64, timestamp_ms: u64) -> AccountId {
+        self.apply_account_creation_at(initial_balance, timestamp_ms, None)
+    }
+
+    /// Validate every fallible part of public account onboarding before its
+    /// single control-plane WAL row is appended.
+    pub(crate) fn prepare_account_with_initial_key(
+        &self,
+        initial_balance: i64,
+        timestamp_ms: u64,
+        pubkey: crate::crypto::PublicKey,
+        mut meta: crate::crypto::RegisteredPubkey,
+    ) -> Result<PreparedAccountWithInitialKey, SequencerError> {
+        crate::crypto::RegisteredPubkey::validate_label(meta.label.as_deref())?;
+        if self.pubkey_registry.contains_key(&pubkey) {
+            return Err(SequencerError::AccountAlreadyRegistered);
+        }
+
+        let account_id = AccountId(self.accounts.next_id());
+        if account_id == AccountId::MINT {
+            return Err(SequencerError::Persistence(
+                "account id space is exhausted".to_string(),
+            ));
+        }
+        meta.account_id = account_id;
+
+        let key = account_key(account_id);
+        let quarantine_claim = self.bridge.quarantine.get(&key).copied().map(|amount| {
+            let balance = initial_balance
+                .checked_add(amount)
+                .ok_or_else(|| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
+            let total_deposited = initial_balance
+                .checked_add(amount)
+                .ok_or_else(|| SequencerError::Bridge(BridgeError::AmountOverflow.to_string()))?;
+            Ok::<_, SequencerError>(PreparedQuarantineClaim {
+                key,
+                amount,
+                balance,
+                total_deposited,
+            })
+        });
+
+        Ok(PreparedAccountWithInitialKey {
+            account_id,
+            initial_balance,
+            timestamp_ms,
+            pubkey,
+            meta,
+            quarantine_claim: quarantine_claim.transpose()?,
+        })
+    }
+
+    /// Apply a fully prevalidated public onboarding command. The actor calls
+    /// this only after the command's WAL row is durable, so this phase has no
+    /// fallible validation or persistence boundary left.
+    pub(crate) fn apply_prepared_account_with_initial_key(
+        &mut self,
+        prepared: PreparedAccountWithInitialKey,
+    ) -> AccountId {
+        let account_id = self.apply_account_creation_at(
+            prepared.initial_balance,
+            prepared.timestamp_ms,
+            Some((prepared.pubkey, prepared.meta)),
+        );
+        assert_eq!(
+            account_id, prepared.account_id,
+            "prevalidated account id must remain stable inside the sequencer actor"
+        );
+
+        if let Some(claim) = prepared.quarantine_claim {
+            let removed = self.bridge.quarantine.remove(&claim.key);
+            assert_eq!(
+                removed,
+                Some(claim.amount),
+                "prevalidated quarantine claim must remain stable inside the sequencer actor"
+            );
+            let account = self
+                .accounts
+                .get_mut(account_id)
+                .expect("newly created account must exist");
+            account.balance = claim.balance;
+            account.total_deposited = claim.total_deposited;
+            self.record_system_event(SystemEvent::QuarantineClaimed {
+                account_id,
+                amount: claim.amount,
+                sybil_account_key: claim.key,
+            });
+            self.note_first_deposit_at(account_id, prepared.timestamp_ms);
+        }
+
+        account_id
+    }
+
+    fn apply_account_creation_at(
+        &mut self,
+        initial_balance: i64,
+        timestamp_ms: u64,
+        initial_key: Option<(crate::crypto::PublicKey, crate::crypto::RegisteredPubkey)>,
+    ) -> AccountId {
         let account_id = self.accounts.create_account(initial_balance);
         self.capture_missing_system_account(account_id);
+        let initial_keys = initial_key
+            .map(|(pubkey, mut meta)| {
+                meta.account_id = account_id;
+                let key = crate::digest::key_record(&pubkey, &meta);
+                self.apply_pubkey_registration(account_id, pubkey, meta);
+                vec![key]
+            })
+            .unwrap_or_default();
         self.record_system_event(SystemEvent::CreateAccount {
             account_id,
             initial_balance,
-            initial_keys: Vec::new(),
+            initial_keys,
         });
         {
             use crate::aggregates::{HistoryEvent, HistoryKind};
