@@ -502,6 +502,19 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   //     signs `/v1/orders/cancel/signed`; the row should disappear immediately
   //     from the shared cache, then the API must confirm it is no longer open.
   await page.goto("/portfolio");
+  const bridgeKey = await getJson<{ sybil_account_key_hex: string }>(
+    request,
+    `${REQUEST_API_BASE}/v1/accounts/${accountId}/bridge-key`,
+    readToken!,
+  );
+  const displayedBridgeKey = bridgeKey.sybil_account_key_hex.startsWith("0x")
+    ? bridgeKey.sybil_account_key_hex
+    : `0x${bridgeKey.sybil_account_key_hex}`;
+  const depositGuide = page.getByRole("region", { name: "L1 deposits" });
+  await expect(depositGuide).toContainText(displayedBridgeKey, {
+    timeout: 20_000,
+  });
+  await expect(depositGuide).toContainText(/no L1 refund flow today/i);
   await page.getByRole("tab", { name: /open orders/i }).click();
   const cancelRow = page.locator(`a[href="/m/${cancelMarket.market_id}"]`);
   await expect(cancelRow).toBeVisible({ timeout: 20_000 });
