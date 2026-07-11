@@ -50,6 +50,9 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
     if response.status_code == 404:
         return None
 
+    if response.status_code == 409:
+        return None
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
@@ -72,7 +75,14 @@ def sync_detailed(
     body: RegisterKeyRequest,
 
 ) -> Response[Any]:
-    """ POST /v1/accounts/{id}/keys
+    """ POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
+
+     SYB-229: public unsigned key registration is a critical auth hole — anyone
+    could attach their own key to any account and then sign as it. This endpoint
+    is service-token gated (like account creation) and accepts an UNSIGNED
+    registration ONLY when the account has zero registered keys. Once an account
+    has a key, every subsequent key must be added via the SIGNED path
+    (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
 
     Args:
         id (int):
@@ -107,7 +117,14 @@ async def asyncio_detailed(
     body: RegisterKeyRequest,
 
 ) -> Response[Any]:
-    """ POST /v1/accounts/{id}/keys
+    """ POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
+
+     SYB-229: public unsigned key registration is a critical auth hole — anyone
+    could attach their own key to any account and then sign as it. This endpoint
+    is service-token gated (like account creation) and accepts an UNSIGNED
+    registration ONLY when the account has zero registered keys. Once an account
+    has a key, every subsequent key must be added via the SIGNED path
+    (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
 
     Args:
         id (int):

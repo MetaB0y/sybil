@@ -8,6 +8,9 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.bridge_withdrawal_l1_status import BridgeWithdrawalL1Status
+from ..types import UNSET, Unset
+from typing import cast
 
 
 
@@ -34,6 +37,12 @@ class BridgeWithdrawalResponse:
             withdrawal_id (int):
             withdrawal_leaf_digest_hex (str):
             withdrawal_leaf_hex (str):
+            l1_cancelled_at_unix (int | None | Unset):
+            l1_executable_at_unix (int | None | Unset):
+            l1_finalized_at_unix (int | None | Unset):
+            l1_requested_at_unix (int | None | Unset):
+            l1_status (BridgeWithdrawalL1Status | Unset):
+            l1_tx_hash_hex (None | str | Unset):
      """
 
     account_id: int
@@ -47,6 +56,12 @@ class BridgeWithdrawalResponse:
     withdrawal_id: int
     withdrawal_leaf_digest_hex: str
     withdrawal_leaf_hex: str
+    l1_cancelled_at_unix: int | None | Unset = UNSET
+    l1_executable_at_unix: int | None | Unset = UNSET
+    l1_finalized_at_unix: int | None | Unset = UNSET
+    l1_requested_at_unix: int | None | Unset = UNSET
+    l1_status: BridgeWithdrawalL1Status | Unset = UNSET
+    l1_tx_hash_hex: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -76,6 +91,41 @@ class BridgeWithdrawalResponse:
 
         withdrawal_leaf_hex = self.withdrawal_leaf_hex
 
+        l1_cancelled_at_unix: int | None | Unset
+        if isinstance(self.l1_cancelled_at_unix, Unset):
+            l1_cancelled_at_unix = UNSET
+        else:
+            l1_cancelled_at_unix = self.l1_cancelled_at_unix
+
+        l1_executable_at_unix: int | None | Unset
+        if isinstance(self.l1_executable_at_unix, Unset):
+            l1_executable_at_unix = UNSET
+        else:
+            l1_executable_at_unix = self.l1_executable_at_unix
+
+        l1_finalized_at_unix: int | None | Unset
+        if isinstance(self.l1_finalized_at_unix, Unset):
+            l1_finalized_at_unix = UNSET
+        else:
+            l1_finalized_at_unix = self.l1_finalized_at_unix
+
+        l1_requested_at_unix: int | None | Unset
+        if isinstance(self.l1_requested_at_unix, Unset):
+            l1_requested_at_unix = UNSET
+        else:
+            l1_requested_at_unix = self.l1_requested_at_unix
+
+        l1_status: str | Unset = UNSET
+        if not isinstance(self.l1_status, Unset):
+            l1_status = self.l1_status.value
+
+
+        l1_tx_hash_hex: None | str | Unset
+        if isinstance(self.l1_tx_hash_hex, Unset):
+            l1_tx_hash_hex = UNSET
+        else:
+            l1_tx_hash_hex = self.l1_tx_hash_hex
+
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -92,6 +142,18 @@ class BridgeWithdrawalResponse:
             "withdrawal_leaf_digest_hex": withdrawal_leaf_digest_hex,
             "withdrawal_leaf_hex": withdrawal_leaf_hex,
         })
+        if l1_cancelled_at_unix is not UNSET:
+            field_dict["l1_cancelled_at_unix"] = l1_cancelled_at_unix
+        if l1_executable_at_unix is not UNSET:
+            field_dict["l1_executable_at_unix"] = l1_executable_at_unix
+        if l1_finalized_at_unix is not UNSET:
+            field_dict["l1_finalized_at_unix"] = l1_finalized_at_unix
+        if l1_requested_at_unix is not UNSET:
+            field_dict["l1_requested_at_unix"] = l1_requested_at_unix
+        if l1_status is not UNSET:
+            field_dict["l1_status"] = l1_status
+        if l1_tx_hash_hex is not UNSET:
+            field_dict["l1_tx_hash_hex"] = l1_tx_hash_hex
 
         return field_dict
 
@@ -122,6 +184,66 @@ class BridgeWithdrawalResponse:
 
         withdrawal_leaf_hex = d.pop("withdrawal_leaf_hex")
 
+        def _parse_l1_cancelled_at_unix(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        l1_cancelled_at_unix = _parse_l1_cancelled_at_unix(d.pop("l1_cancelled_at_unix", UNSET))
+
+
+        def _parse_l1_executable_at_unix(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        l1_executable_at_unix = _parse_l1_executable_at_unix(d.pop("l1_executable_at_unix", UNSET))
+
+
+        def _parse_l1_finalized_at_unix(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        l1_finalized_at_unix = _parse_l1_finalized_at_unix(d.pop("l1_finalized_at_unix", UNSET))
+
+
+        def _parse_l1_requested_at_unix(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        l1_requested_at_unix = _parse_l1_requested_at_unix(d.pop("l1_requested_at_unix", UNSET))
+
+
+        _l1_status = d.pop("l1_status", UNSET)
+        l1_status: BridgeWithdrawalL1Status | Unset
+        if isinstance(_l1_status,  Unset):
+            l1_status = UNSET
+        else:
+            l1_status = BridgeWithdrawalL1Status(_l1_status)
+
+
+
+
+        def _parse_l1_tx_hash_hex(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        l1_tx_hash_hex = _parse_l1_tx_hash_hex(d.pop("l1_tx_hash_hex", UNSET))
+
+
         bridge_withdrawal_response = cls(
             account_id=account_id,
             amount_nanos=amount_nanos,
@@ -134,6 +256,12 @@ class BridgeWithdrawalResponse:
             withdrawal_id=withdrawal_id,
             withdrawal_leaf_digest_hex=withdrawal_leaf_digest_hex,
             withdrawal_leaf_hex=withdrawal_leaf_hex,
+            l1_cancelled_at_unix=l1_cancelled_at_unix,
+            l1_executable_at_unix=l1_executable_at_unix,
+            l1_finalized_at_unix=l1_finalized_at_unix,
+            l1_requested_at_unix=l1_requested_at_unix,
+            l1_status=l1_status,
+            l1_tx_hash_hex=l1_tx_hash_hex,
         )
 
 

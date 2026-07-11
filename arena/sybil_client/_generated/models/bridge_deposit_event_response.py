@@ -8,6 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
+from typing import cast
 
 
 
@@ -22,16 +24,16 @@ T = TypeVar("T", bound="BridgeDepositEventResponse")
 class BridgeDepositEventResponse:
     """ 
         Attributes:
-            account_id (int):
             amount_token_units (int): Token base units accepted by the vault, e.g. USDC's 6-decimal units.
             deposit_id (int):
             deposit_root_hex (str):
+            account_id (int | None | Unset):
      """
 
-    account_id: int
     amount_token_units: int
     deposit_id: int
     deposit_root_hex: str
+    account_id: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -39,23 +41,28 @@ class BridgeDepositEventResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        account_id = self.account_id
-
         amount_token_units = self.amount_token_units
 
         deposit_id = self.deposit_id
 
         deposit_root_hex = self.deposit_root_hex
 
+        account_id: int | None | Unset
+        if isinstance(self.account_id, Unset):
+            account_id = UNSET
+        else:
+            account_id = self.account_id
+
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "account_id": account_id,
             "amount_token_units": amount_token_units,
             "deposit_id": deposit_id,
             "deposit_root_hex": deposit_root_hex,
         })
+        if account_id is not UNSET:
+            field_dict["account_id"] = account_id
 
         return field_dict
 
@@ -64,19 +71,27 @@ class BridgeDepositEventResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        account_id = d.pop("account_id")
-
         amount_token_units = d.pop("amount_token_units")
 
         deposit_id = d.pop("deposit_id")
 
         deposit_root_hex = d.pop("deposit_root_hex")
 
+        def _parse_account_id(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        account_id = _parse_account_id(d.pop("account_id", UNSET))
+
+
         bridge_deposit_event_response = cls(
-            account_id=account_id,
             amount_token_units=amount_token_units,
             deposit_id=deposit_id,
             deposit_root_hex=deposit_root_hex,
+            account_id=account_id,
         )
 
 

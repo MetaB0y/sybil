@@ -30,7 +30,7 @@ class CreateBridgeWithdrawalRequest:
             recipient_hex (str): Hex-encoded L1 recipient address (20 bytes).
             token_address_hex (str): Hex-encoded token contract address (20 bytes).
             vault_address_hex (str): Hex-encoded vault contract address (20 bytes).
-            expiry_height (int | None | Unset): Last Sybil block height at which this withdrawal leaf is valid.
+            expiry_height (int | None | Unset): Last L1 block height at which this withdrawal leaf is valid.
             nonce (int | None | Unset): Per-account replay nonce. Required for signed bridge withdrawals.
      """
 

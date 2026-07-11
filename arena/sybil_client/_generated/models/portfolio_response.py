@@ -27,10 +27,15 @@ class PortfolioResponse:
     """ 
         Attributes:
             account_id (int):
-            balance_nanos (int): Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+            available_balance_nanos (int): Spendable account balance after live-order reservations. Integer
+                nanodollars; 1_000_000_000 = $1.
+            balance_nanos (int): Total (gross) account balance; see `available_balance_nanos` for spendable
+                funds. Integer nanodollars; 1_000_000_000 = $1.
             pnl_nanos (int): Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
             portfolio_value_nanos (int): Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
             positions (list[PositionValueResponse]):
+            reserved_balance_nanos (int): Balance reserved by live resting orders. Integer nanodollars;
+                1_000_000_000 = $1.
             total_deposited_nanos (int): Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
             total_position_value_nanos (int): Mark-to-market value of all positions. Integer nanodollars;
                 1_000_000_000 = $1.
@@ -52,10 +57,12 @@ class PortfolioResponse:
      """
 
     account_id: int
+    available_balance_nanos: int
     balance_nanos: int
     pnl_nanos: int
     portfolio_value_nanos: int
     positions: list[PositionValueResponse]
+    reserved_balance_nanos: int
     total_deposited_nanos: int
     total_position_value_nanos: int
     first_deposit_ms: int | Unset = UNSET
@@ -72,6 +79,8 @@ class PortfolioResponse:
         from ..models.position_value_response import PositionValueResponse
         account_id = self.account_id
 
+        available_balance_nanos = self.available_balance_nanos
+
         balance_nanos = self.balance_nanos
 
         pnl_nanos = self.pnl_nanos
@@ -84,6 +93,8 @@ class PortfolioResponse:
             positions.append(positions_item)
 
 
+
+        reserved_balance_nanos = self.reserved_balance_nanos
 
         total_deposited_nanos = self.total_deposited_nanos
 
@@ -102,10 +113,12 @@ class PortfolioResponse:
         field_dict.update(self.additional_properties)
         field_dict.update({
             "account_id": account_id,
+            "available_balance_nanos": available_balance_nanos,
             "balance_nanos": balance_nanos,
             "pnl_nanos": pnl_nanos,
             "portfolio_value_nanos": portfolio_value_nanos,
             "positions": positions,
+            "reserved_balance_nanos": reserved_balance_nanos,
             "total_deposited_nanos": total_deposited_nanos,
             "total_position_value_nanos": total_position_value_nanos,
         })
@@ -128,6 +141,8 @@ class PortfolioResponse:
         d = dict(src_dict)
         account_id = d.pop("account_id")
 
+        available_balance_nanos = d.pop("available_balance_nanos")
+
         balance_nanos = d.pop("balance_nanos")
 
         pnl_nanos = d.pop("pnl_nanos")
@@ -144,6 +159,8 @@ class PortfolioResponse:
             positions.append(positions_item)
 
 
+        reserved_balance_nanos = d.pop("reserved_balance_nanos")
+
         total_deposited_nanos = d.pop("total_deposited_nanos")
 
         total_position_value_nanos = d.pop("total_position_value_nanos")
@@ -158,10 +175,12 @@ class PortfolioResponse:
 
         portfolio_response = cls(
             account_id=account_id,
+            available_balance_nanos=available_balance_nanos,
             balance_nanos=balance_nanos,
             pnl_nanos=pnl_nanos,
             portfolio_value_nanos=portfolio_value_nanos,
             positions=positions,
+            reserved_balance_nanos=reserved_balance_nanos,
             total_deposited_nanos=total_deposited_nanos,
             total_position_value_nanos=total_position_value_nanos,
             first_deposit_ms=first_deposit_ms,

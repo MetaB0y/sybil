@@ -18,6 +18,8 @@ def _get_kwargs(
     *,
     limit: int | Unset = UNSET,
     trader: str | Unset = UNSET,
+    market_id: int | Unset = UNSET,
+    since: str | Unset = UNSET,
 
 ) -> dict[str, Any]:
     
@@ -29,6 +31,10 @@ def _get_kwargs(
     params["limit"] = limit
 
     params["trader"] = trader
+
+    params["market_id"] = market_id
+
+    params["since"] = since
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -73,6 +79,8 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     limit: int | Unset = UNSET,
     trader: str | Unset = UNSET,
+    market_id: int | Unset = UNSET,
+    since: str | Unset = UNSET,
 
 ) -> Response[BotDecisionFeedResponse]:
     """ GET /v1/bots/decisions
@@ -82,6 +90,8 @@ def sync_detailed(
     Args:
         limit (int | Unset):
         trader (str | Unset):
+        market_id (int | Unset):
+        since (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -95,6 +105,8 @@ def sync_detailed(
     kwargs = _get_kwargs(
         limit=limit,
 trader=trader,
+market_id=market_id,
+since=since,
 
     )
 
@@ -109,6 +121,8 @@ def sync(
     client: AuthenticatedClient | Client,
     limit: int | Unset = UNSET,
     trader: str | Unset = UNSET,
+    market_id: int | Unset = UNSET,
+    since: str | Unset = UNSET,
 
 ) -> BotDecisionFeedResponse | None:
     """ GET /v1/bots/decisions
@@ -118,6 +132,8 @@ def sync(
     Args:
         limit (int | Unset):
         trader (str | Unset):
+        market_id (int | Unset):
+        since (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -132,6 +148,8 @@ def sync(
         client=client,
 limit=limit,
 trader=trader,
+market_id=market_id,
+since=since,
 
     ).parsed
 
@@ -140,6 +158,8 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     limit: int | Unset = UNSET,
     trader: str | Unset = UNSET,
+    market_id: int | Unset = UNSET,
+    since: str | Unset = UNSET,
 
 ) -> Response[BotDecisionFeedResponse]:
     """ GET /v1/bots/decisions
@@ -149,6 +169,8 @@ async def asyncio_detailed(
     Args:
         limit (int | Unset):
         trader (str | Unset):
+        market_id (int | Unset):
+        since (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -162,6 +184,8 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         limit=limit,
 trader=trader,
+market_id=market_id,
+since=since,
 
     )
 
@@ -176,6 +200,8 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     limit: int | Unset = UNSET,
     trader: str | Unset = UNSET,
+    market_id: int | Unset = UNSET,
+    since: str | Unset = UNSET,
 
 ) -> BotDecisionFeedResponse | None:
     """ GET /v1/bots/decisions
@@ -185,6 +211,8 @@ async def asyncio(
     Args:
         limit (int | Unset):
         trader (str | Unset):
+        market_id (int | Unset):
+        since (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -199,5 +227,7 @@ async def asyncio(
         client=client,
 limit=limit,
 trader=trader,
+market_id=market_id,
+since=since,
 
     )).parsed

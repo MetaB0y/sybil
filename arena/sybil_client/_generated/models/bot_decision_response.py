@@ -37,9 +37,9 @@ class BotDecisionResponse:
             market_name (None | str | Unset):
             market_price (float | None | Unset):
             motivation (None | str | Unset):
-            no_pos (int | None | Unset):
+            no_pos (float | None | Unset):
             timestamp (None | str | Unset):
-            yes_pos (int | None | Unset):
+            yes_pos (float | None | Unset):
      """
 
     article_urls: Any
@@ -55,9 +55,9 @@ class BotDecisionResponse:
     market_name: None | str | Unset = UNSET
     market_price: float | None | Unset = UNSET
     motivation: None | str | Unset = UNSET
-    no_pos: int | None | Unset = UNSET
+    no_pos: float | None | Unset = UNSET
     timestamp: None | str | Unset = UNSET
-    yes_pos: int | None | Unset = UNSET
+    yes_pos: float | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -127,7 +127,7 @@ class BotDecisionResponse:
         else:
             motivation = self.motivation
 
-        no_pos: int | None | Unset
+        no_pos: float | None | Unset
         if isinstance(self.no_pos, Unset):
             no_pos = UNSET
         else:
@@ -139,7 +139,7 @@ class BotDecisionResponse:
         else:
             timestamp = self.timestamp
 
-        yes_pos: int | None | Unset
+        yes_pos: float | None | Unset
         if isinstance(self.yes_pos, Unset):
             yes_pos = UNSET
         else:
@@ -284,12 +284,12 @@ class BotDecisionResponse:
         motivation = _parse_motivation(d.pop("motivation", UNSET))
 
 
-        def _parse_no_pos(data: object) -> int | None | Unset:
+        def _parse_no_pos(data: object) -> float | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(float | None | Unset, data)
 
         no_pos = _parse_no_pos(d.pop("no_pos", UNSET))
 
@@ -304,12 +304,12 @@ class BotDecisionResponse:
         timestamp = _parse_timestamp(d.pop("timestamp", UNSET))
 
 
-        def _parse_yes_pos(data: object) -> int | None | Unset:
+        def _parse_yes_pos(data: object) -> float | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(int | None | Unset, data)
+            return cast(float | None | Unset, data)
 
         yes_pos = _parse_yes_pos(d.pop("yes_pos", UNSET))
 

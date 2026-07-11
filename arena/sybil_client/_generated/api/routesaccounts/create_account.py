@@ -48,6 +48,14 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = cast(Any, None)
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = cast(Any, None)
+        return response_401
+
     if response.status_code == 403:
         response_403 = cast(Any, None)
         return response_403
@@ -73,7 +81,11 @@ def sync_detailed(
     body: CreateAccountRequest,
 
 ) -> Response[AccountResponse | Any]:
-    """ POST /v1/accounts
+    """ POST /v1/accounts — create an account with its initial signing key.
+
+     Public onboarding must provide `initial_key`; account allocation and
+    first-key registration are serialized as one API operation. The legacy
+    bare request shape (no `initial_key`) is deprecated and service-tier only.
 
     Args:
         body (CreateAccountRequest):
@@ -104,7 +116,11 @@ def sync(
     body: CreateAccountRequest,
 
 ) -> AccountResponse | Any | None:
-    """ POST /v1/accounts
+    """ POST /v1/accounts — create an account with its initial signing key.
+
+     Public onboarding must provide `initial_key`; account allocation and
+    first-key registration are serialized as one API operation. The legacy
+    bare request shape (no `initial_key`) is deprecated and service-tier only.
 
     Args:
         body (CreateAccountRequest):
@@ -130,7 +146,11 @@ async def asyncio_detailed(
     body: CreateAccountRequest,
 
 ) -> Response[AccountResponse | Any]:
-    """ POST /v1/accounts
+    """ POST /v1/accounts — create an account with its initial signing key.
+
+     Public onboarding must provide `initial_key`; account allocation and
+    first-key registration are serialized as one API operation. The legacy
+    bare request shape (no `initial_key`) is deprecated and service-tier only.
 
     Args:
         body (CreateAccountRequest):
@@ -161,7 +181,11 @@ async def asyncio(
     body: CreateAccountRequest,
 
 ) -> AccountResponse | Any | None:
-    """ POST /v1/accounts
+    """ POST /v1/accounts — create an account with its initial signing key.
+
+     Public onboarding must provide `initial_key`; account allocation and
+    first-key registration are serialized as one API operation. The legacy
+    bare request shape (no `initial_key`) is deprecated and service-tier only.
 
     Args:
         body (CreateAccountRequest):
