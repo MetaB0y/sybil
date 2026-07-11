@@ -94,7 +94,6 @@ export const CATEGORY_OF: Record<
 
 export interface AccountHistory {
   events: HistoryEvent[];
-  isMock: boolean;
   // `hasMore` is true only when the cursor walk hit the `MAX_PAGES` safety cap
   // (i.e. older events exist beyond what we loaded); `loadMore` raises the cap.
   hasMore: boolean;
@@ -149,7 +148,6 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
   const events = q.data?.events ?? [];
   return {
     events,
-    isMock: false,
     hasMore: q.data?.truncated ?? false,
     loadMore: () => setMaxPages((p) => p + MAX_PAGES),
   };

@@ -12,7 +12,6 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { MockValue } from "@/components/mock-value";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
 import {
   CATEGORY_OF,
@@ -34,7 +33,6 @@ interface Props {
   tabs: React.ReactNode;
   events: HistoryEvent[];
   marketsById: Map<number, Market>;
-  isMock?: boolean;
 }
 
 const CHIPS: { id: HistoryCategory; label: string }[] = [
@@ -132,7 +130,7 @@ function compareBy(a: HistoryRow, b: HistoryRow, key: SortKey): number {
   }
 }
 
-export function HistoryFeed({ tabs, events, marketsById, isMock }: Props) {
+export function HistoryFeed({ tabs, events, marketsById }: Props) {
   const [category, setCategory] = useState<HistoryCategory>("all");
   const [type, setType] = useState<HistoryEventType | "all">("all");
   const [marketId, setMarketId] = useState<number | "all">("all");
@@ -205,16 +203,6 @@ export function HistoryFeed({ tabs, events, marketsById, isMock }: Props) {
           )
         }
       >
-        {isMock && (
-          <span>
-            <MockValue
-              hint="history feed is mocked; pending backend /events endpoint (per-account event log)"
-              variant="pill"
-            >
-              {" "}
-            </MockValue>
-          </span>
-        )}
         {!noData && (
           <div style={{ display: "flex", gap: 6 }}>
             {CHIPS.map((c) => (

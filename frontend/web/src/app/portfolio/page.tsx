@@ -213,7 +213,6 @@ function Connected({
           tabs={tabsStrip}
           events={history.events}
           marketsById={marketsById}
-          isMock={history.isMock}
         />
       )}
     </>
