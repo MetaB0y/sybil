@@ -138,7 +138,7 @@ function EyebrowRow({ market }: { market: Market }) {
             {primary}
           </>
         ) : (
-          <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
+          <span style={{ color: "var(--fg-3)" }}>uncategorized</span>
         )}
       </span>
       <span
@@ -178,7 +178,7 @@ function TitleRow({ market }: { market: Market }) {
         fallbackIconUrl={market.market_icon_url ?? null}
         size={64}
       />
-      <h3
+      <h2
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
@@ -196,7 +196,7 @@ function TitleRow({ market }: { market: Market }) {
         }}
       >
         {market.name}
-      </h3>
+      </h2>
     </div>
   );
 }
@@ -443,4 +443,3 @@ function deltaValueColor(delta: number | null): string {
   if (Math.round(delta) === 0) return "var(--fg-3)";
   return delta > 0 ? "var(--yes)" : "var(--no)";
 }
-

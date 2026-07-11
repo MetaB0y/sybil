@@ -191,7 +191,7 @@ function EyebrowRow({
             {primary}
           </>
         ) : (
-          <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
+          <span style={{ color: "var(--fg-3)" }}>uncategorized</span>
         )}
       </span>
       <span
@@ -268,7 +268,7 @@ function TitleRow({
         fallbackIconUrl={fallbackIconUrl}
         size={64}
       />
-      <h3
+      <h2
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
@@ -286,7 +286,7 @@ function TitleRow({
         }}
       >
         {groupName}
-      </h3>
+      </h2>
     </Link>
   );
 }

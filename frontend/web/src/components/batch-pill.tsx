@@ -10,6 +10,10 @@ const BLOCK_MS = BLOCK_INTERVAL_MS;
 // "9.9" instead of flashing "10.0" for the first frame after a new block.
 const MAX_DISPLAY_MS = BLOCK_MS - 100;
 
+export function batchPillLabelColor(isLive: boolean): string {
+  return isLive ? "var(--accent)" : "var(--warn)";
+}
+
 /**
  * Live batch countdown pill — mirrors the handoff layout:
  *
@@ -72,9 +76,7 @@ export function BatchPill() {
 
   const accent = isLive ? "var(--accent)" : "var(--warn)";
   const accentSoft = isLive ? "var(--accent-soft)" : "var(--warn-soft)";
-  const labelColor = isLive
-    ? "color-mix(in srgb, var(--accent) 70%, transparent)"
-    : "color-mix(in srgb, var(--warn) 70%, transparent)";
+  const labelColor = batchPillLabelColor(isLive);
 
   return (
     <div
