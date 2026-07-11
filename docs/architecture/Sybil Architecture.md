@@ -169,7 +169,7 @@ Read [[Threat Model]] first. Then follow [[Block Witness]], [[Four-Layer Verific
 
 ### 05 — Interfaces and resolution
 
-See [[REST API]], [[P256 Authentication]], [[WebSocket Block Stream]], [[SSE Block Stream]], and [[Market Resolution]].
+See [[REST API]], [[P256 Authentication]], [[Attestation]], [[WebSocket Block Stream]], [[SSE Block Stream]], and [[Market Resolution]].
 
 ### 06 — Agents
 

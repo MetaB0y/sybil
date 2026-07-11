@@ -10,6 +10,22 @@ use crate::error::Error;
 use sybil_api_types::ws::{BLOCK_STREAM_VERSION, BlockStreamMessage, BlockStreamPayload};
 use sybil_api_types::*;
 
+/// Result of checking the server's enclave attestation endpoint.
+///
+/// The only currently accepted result is explicitly untrusted. A future real
+/// Nitro response must pass CBOR/COSE, certificate-chain, signature, freshness,
+/// and application-policy checks before this API can return a trusted variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttestationVerification {
+    /// The server exposed the development shape, not cryptographic evidence.
+    StubAccepted {
+        attestation: AttestationResponse,
+        warning: String,
+    },
+}
+
+const STUB_ATTESTATION_WARNING: &str = "development attestation stub accepted; no Nitro signature, certificate chain, or PCR was verified";
+
 /// HTTP client for the Sybil API. This is THE shared client (SYB-171); it is
 /// typed against [`sybil_api_types`] and mirrors the Python `SybilClient`.
 pub struct SybilClient {
@@ -98,6 +114,20 @@ impl SybilClient {
             .send()
             .await?;
         self.decode(resp).await
+    }
+
+    /// Fetch and classify the server's enclave attestation.
+    ///
+    /// Development stubs are accepted only as [`AttestationVerification::StubAccepted`]
+    /// and emit a warning. Non-stub responses fail closed until real Nitro
+    /// verification is implemented; they are never silently trusted.
+    pub async fn verify_attestation(&self) -> Result<AttestationVerification, Error> {
+        let resp = self
+            .with_service_auth(self.http.get(self.url("/v1/attestation")))
+            .send()
+            .await?;
+        let attestation: AttestationResponse = self.decode(resp).await?;
+        classify_attestation(attestation)
     }
 
     // === Accounts ===
@@ -598,6 +628,23 @@ impl SybilClient {
     }
 }
 
+fn classify_attestation(
+    attestation: AttestationResponse,
+) -> Result<AttestationVerification, Error> {
+    if !attestation.is_stub {
+        return Err(Error::Attestation(
+            "real enclave attestation verification is not implemented; refusing to trust non-stub response"
+                .to_string(),
+        ));
+    }
+
+    tracing::warn!("{STUB_ATTESTATION_WARNING}");
+    Ok(AttestationVerification::StubAccepted {
+        attestation,
+        warning: STUB_ATTESTATION_WARNING.to_string(),
+    })
+}
+
 fn decode_block_stream_message(text: &str) -> Result<Option<BlockResponse>, Error> {
     let msg: BlockStreamMessage = serde_json::from_str(text)?;
     if msg.v != BLOCK_STREAM_VERSION {
@@ -626,5 +673,44 @@ fn decode_block_stream_message(text: &str) -> Result<Option<BlockResponse>, Erro
             retention_min_height,
             head_height,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{AttestationVerification, classify_attestation};
+    use crate::Error;
+    use sybil_api_types::AttestationResponse;
+
+    fn attestation(is_stub: bool) -> AttestationResponse {
+        AttestationResponse {
+            pcr_values: HashMap::new(),
+            enclave_pubkey: String::new(),
+            report_data: String::new(),
+            signature: String::new(),
+            is_stub,
+        }
+    }
+
+    #[test]
+    fn stub_attestation_is_explicitly_untrusted() {
+        let result = classify_attestation(attestation(true)).expect("stub is classified");
+        let AttestationVerification::StubAccepted {
+            attestation,
+            warning,
+        } = result;
+        assert!(attestation.is_stub);
+        assert!(warning.contains("no Nitro signature"));
+        assert!(warning.contains("no Nitro signature, certificate chain, or PCR was verified"));
+    }
+
+    #[test]
+    fn non_stub_attestation_fails_closed_until_crypto_verification_exists() {
+        let error = classify_attestation(attestation(false)).expect_err("must fail closed");
+        assert!(
+            matches!(error, Error::Attestation(message) if message.contains("refusing to trust"))
+        );
     }
 }

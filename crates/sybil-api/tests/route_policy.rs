@@ -327,6 +327,10 @@ fn exact_service_routes() -> &'static [RouteMount] {
 fn exact_dev_routes() -> &'static [RouteMount] {
     &[
         RouteMount {
+            method: "GET",
+            path: "/v1/attestation",
+        },
+        RouteMount {
             method: "POST",
             path: "/v1/simulation/pause",
         },
@@ -1036,6 +1040,7 @@ async fn service_routes_succeed_with_token_in_prod() {
 async fn dev_routes_are_not_mounted_in_prod() {
     let app = prod_app().await;
     for (method, uri) in [
+        (Method::GET, "/v1/attestation"),
         (Method::POST, "/v1/simulation/pause"),
         (Method::POST, "/v1/simulation/resume"),
         (Method::GET, "/v1/orders/pending"),

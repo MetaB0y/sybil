@@ -5,7 +5,28 @@ use serde_json;
 
 use crate::state::AppState;
 use crate::types::error::AppError;
-use crate::types::response::{HealthResponse, StateRootResponse};
+use crate::types::response::{AttestationResponse, HealthResponse, StateRootResponse};
+
+/// GET /v1/attestation
+///
+/// Development-only shape stub. The route is mounted only when `dev_mode` is
+/// enabled; none of these empty fields are cryptographic evidence.
+#[utoipa::path(
+    get,
+    path = "/v1/attestation",
+    responses(
+        (status = 200, description = "Development-only unverified attestation shape", body = AttestationResponse)
+    )
+)]
+pub async fn attestation() -> Json<AttestationResponse> {
+    Json(AttestationResponse {
+        pcr_values: Default::default(),
+        enclave_pubkey: String::new(),
+        report_data: String::new(),
+        signature: String::new(),
+        is_stub: true,
+    })
+}
 
 /// GET /v1/health
 ///

@@ -23,6 +23,7 @@ use crate::util::now_ms;
     paths(
         routes::system::health,
         routes::system::state_root,
+        routes::system::attestation,
         routes::system::pause,
         routes::system::resume,
         routes::proofs::get_state_proof,
@@ -157,6 +158,7 @@ use crate::util::now_ms;
         RejectionResponse,
         BlockResponse,
         HealthResponse,
+        AttestationResponse,
         StateRootResponse,
         DaManifestResponse,
         DaProviderRefResponse,
@@ -801,6 +803,10 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
 
 pub const DEV_ROUTE_TABLE: &[RouteMount] = &[
     RouteMount {
+        method: "GET",
+        path: "/v1/attestation",
+    },
+    RouteMount {
         method: "POST",
         path: "/v1/simulation/pause",
     },
@@ -1111,6 +1117,10 @@ fn service_routes() -> Router<AppState> {
 
 fn dev_routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/v1/attestation",
+            axum::routing::get(routes::system::attestation),
+        )
         .route(
             "/v1/simulation/pause",
             axum::routing::post(routes::system::pause),

@@ -764,6 +764,30 @@ pub struct HealthResponse {
     pub genesis_hash: Option<String>,
 }
 
+/// Development-only JSON projection of an enclave attestation.
+///
+/// These fields correspond to values carried by an AWS Nitro attestation
+/// document, but this DTO is not itself the canonical CBOR/COSE document. A
+/// response with `is_stub = true` has no cryptographic trust value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AttestationResponse {
+    /// PCR index to lowercase hex-encoded measurement bytes. A real Nitro
+    /// document uses SHA-384 PCR values; the development stub returns no PCRs.
+    pub pcr_values: HashMap<u8, String>,
+    /// Lowercase hex encoding of Nitro's optional DER-encoded `public_key`
+    /// field. Empty in the development stub.
+    pub enclave_pubkey: String,
+    /// Lowercase hex encoding of protocol data carried in Nitro's optional
+    /// `user_data` field. Empty in the development stub.
+    pub report_data: String,
+    /// Base64url encoding of the COSE_Sign1 signature bytes. Empty in the
+    /// development stub; this field alone is insufficient to verify Nitro PKI.
+    pub signature: String,
+    /// Always true for the currently implemented development-only response.
+    pub is_stub: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StateRootResponse {
