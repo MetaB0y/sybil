@@ -7,7 +7,7 @@ state or matching logic.
 
 ## Local development
 
-Requirements: Node 20+ and pnpm 10+.
+Requirements: Node 24+ and pnpm 11+.
 
 ```bash
 cd frontend/web
