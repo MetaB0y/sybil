@@ -13,7 +13,7 @@ import {
 import { useMarketsList, type Market } from "@/lib/markets/use-markets";
 import { buildIndexCards } from "@/lib/markets/build-index-cards";
 import {
-  selectIndexCards,
+  searchResultCards,
   type CardItem,
 } from "@/lib/markets/select-index-cards";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
@@ -23,8 +23,6 @@ import { MarketThumb } from "./market-thumb";
 
 /** Rows rendered in the dropdown before the "see all" footer. */
 const MAX_RESULTS = 8;
-/** Trader counts don't matter for the volume-sorted preview. */
-const EMPTY_TRADERS: Map<string, number> = new Map();
 
 /**
  * Global search. Typing opens a dropdown preview of matching events/markets —
@@ -32,8 +30,11 @@ const EMPTY_TRADERS: Map<string, number> = new Map();
  * commits the query to the markets grid (`/?q=`); arrow-keys + Enter (or a
  * click) jump straight to a specific market. `/` focuses the box from anywhere.
  *
- * The preview filters with the same defaults a fresh `/?q=` landing uses
- * (volume sort, no category, open-only) so what you see is what the grid shows.
+ * Unlike the grid (one card per event), the preview drills into the match: an
+ * event whose title matches shows as the event; an event matched only through an
+ * outcome shows that specific market (e.g. "OpenAI" inside a "best AI model"
+ * event). Open-only, volume-sorted. `see all` still hands the raw query to the
+ * grid, which keeps its event grouping.
  */
 export function NavSearch() {
   const searchParams = useSearchParams();
@@ -65,16 +66,7 @@ export function NavSearch() {
     [bundle]
   );
 
-  const results = useMemo(() => {
-    if (!q.trim()) return [] as CardItem[];
-    return selectIndexCards(items, {
-      query: q,
-      sort: "volume",
-      category: null,
-      showClosed: false,
-      eventTraders: EMPTY_TRADERS,
-    });
-  }, [items, q]);
+  const results = useMemo(() => searchResultCards(items, q), [items, q]);
   const top = results.slice(0, MAX_RESULTS);
 
   const close = useCallback(() => {
@@ -247,7 +239,15 @@ function ResultRow({
   onPick: () => void;
   onHover: () => void;
 }) {
-  const name = item.kind === "binary" ? item.market.name : item.name;
+  const isBinary = item.kind === "binary";
+  // For an outcome surfaced as its own market, show the short outcome label
+  // ("OpenAI") — not the mirror's full "Event: Outcome" name — and put the
+  // parent event underneath so identically-named outcomes across events stay
+  // distinguishable. Standalone binaries (event title ≈ market name) get the
+  // plain name and no subtitle.
+  const name = isBinary ? outcomeShortLabel(item.market) : item.name;
+  const eventTitle = isBinary ? item.market.event_title?.trim() : null;
+  const context = eventTitle && eventTitle !== name ? eventTitle : null;
   const thumb = thumbProps(item);
   const vol =
     item.volumeNanos > 0n ? formatCompactDollars(item.volumeNanos) : "—";
@@ -282,19 +282,22 @@ function ResultRow({
         size={28}
       />
       <span style={rowNameStyle}>
-        {item.primaryCategory && (
-          <span
-            aria-hidden
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: getCategoryColor(item.primaryCategory),
-              flexShrink: 0,
-            }}
-          />
-        )}
-        <span style={rowTitleStyle}>{name}</span>
+        <span style={rowTitleLineStyle}>
+          {item.primaryCategory && (
+            <span
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: getCategoryColor(item.primaryCategory),
+                flexShrink: 0,
+              }}
+            />
+          )}
+          <span style={rowTitleStyle}>{name}</span>
+        </span>
+        {context && <span style={rowContextStyle}>{context}</span>}
       </span>
       <span className="text-mono tabular" style={rowMetaStyle}>
         <span style={{ color: "var(--fg-2)" }}>{detail}</span>
@@ -341,6 +344,23 @@ function thumbProps(item: CardItem): {
   };
 }
 
+/**
+ * Short outcome label for a market row. Prefers Polymarket's `group_item_title`
+ * ("OpenAI"); else strips a leading "Event title: " prefix off the mirror name
+ * ("…best AI model?: OpenAI" → "OpenAI"); else the name as-is (standalone
+ * binaries, whose name is already the whole question).
+ */
+function outcomeShortLabel(m: Market): string {
+  const git = m.group_item_title?.trim();
+  if (git) return git;
+  const et = m.event_title?.trim();
+  if (et && m.name.startsWith(et)) {
+    const rest = m.name.slice(et.length).replace(/^[\s:]+/, "").trim();
+    if (rest) return rest;
+  }
+  return m.name;
+}
+
 function resultKey(item: CardItem): string {
   return item.kind === "binary"
     ? `m${item.market.market_id}`
@@ -381,8 +401,27 @@ const rowStyle: React.CSSProperties = {
 
 const rowNameStyle: React.CSSProperties = {
   display: "flex",
+  flexDirection: "column",
+  justifyContent: "center",
+  gap: 1,
+  minWidth: 0,
+};
+
+const rowTitleLineStyle: React.CSSProperties = {
+  display: "flex",
   alignItems: "center",
   gap: "var(--space-2)",
+  minWidth: 0,
+};
+
+const rowContextStyle: React.CSSProperties = {
+  fontFamily: "var(--font-sans)",
+  fontSize: "11px",
+  lineHeight: 1.3,
+  color: "var(--fg-4)",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
   minWidth: 0,
 };
 
