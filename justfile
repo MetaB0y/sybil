@@ -586,7 +586,7 @@ deploy-sync:
     ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib && touch /opt/sybil/arena.env'
     scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
-    scp scripts/ops-smoke.sh scripts/store-backup.sh scripts/store-restore-drill.sh scripts/synthetic-probe.sh {{SERVER}}:/opt/sybil/scripts/
+    scp scripts/ops-smoke.sh scripts/store-backup.sh scripts/store-restore-drill.sh scripts/store-manifest.py scripts/synthetic-probe.sh {{SERVER}}:/opt/sybil/scripts/
     scp scripts/lib/smoke-common.sh {{SERVER}}:/opt/sybil/scripts/lib/
 
 deploy-prod-env-check:

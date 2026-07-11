@@ -8,8 +8,9 @@ last_verified: 2026-07-11
 
 > **Executive summary:** a valid backup contains the entire data directory and
 > is not trusted until an isolated restore reproduces the recorded height,
-> state root, and sample account. The script briefly freezes the whole API
-> container so redb and both qMDB slots are copied as one crash-consistent unit.
+> committed and replayed state roots, and sample account. The script briefly
+> freezes the whole API container so redb and both qMDB slots are copied as one
+> crash-consistent unit.
 
 **Scripts:** `scripts/store-backup.sh`, `scripts/store-restore-drill.sh`
 
@@ -51,6 +52,11 @@ is not stopped or recreated.
 After resuming the source, the script boots the source image against a second,
 throwaway copy with a 24-hour block interval. It records the state that actually
 restores—not a racy API sample taken before the freeze—in `manifest.json`.
+The manifest records two roots because acknowledged WAL rows replay on startup:
+`committed_state_root` is the root in `/v1/blocks/latest`, while
+`replayed_state_root` is the current in-memory root served by `/v1/state-root`.
+They may legitimately differ until the next block folds replayed writes into a
+committed snapshot.
 
 ## Take a production backup
 
@@ -78,7 +84,7 @@ The output directory is `sybil-store-<UTC>-<pid>/` and contains:
   `sybil.qmdb/`;
 - `SHA256SUMS`: checksum for every copied file;
 - `manifest.json`: source provenance, the consistency mechanism, exact block
-  height/state root, and one complete account response.
+  height, committed and replayed state roots, and one complete account response.
 
 The script fails and removes an incomplete output if the source cannot be
 unpaused, the files are absent, the copied store cannot boot, or an account
@@ -127,10 +133,16 @@ image; `--port` and `--timeout` tune local execution.
 - redb and the fenced qMDB slot pass startup recovery;
 - `/v1/health` succeeds;
 - `/v1/blocks/latest.height` exactly equals the manifest height;
-- both `/v1/blocks/latest.state_root` and `/v1/state-root` exactly equal the
-  manifest state root;
+- `/v1/blocks/latest.state_root` exactly equals the manifest
+  `committed_state_root`;
+- `/v1/state-root` exactly equals the manifest `replayed_state_root`;
 - `GET /v1/accounts/<sample>` is structurally equal to the complete account
   object recorded in the manifest.
+
+The drill also accepts legacy `sybil.store-backup.v1` manifests. Those manifests
+recorded only `state_root`, so their original contract remains strict: both
+endpoints must equal that one root. Unknown schemas or malformed/missing roots
+fail before the restore container is started.
 
 Any difference exits nonzero. A 24-hour drill block interval prevents the
 restored node from advancing before those exact comparisons.

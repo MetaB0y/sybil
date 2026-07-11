@@ -11,9 +11,12 @@
 # The source container is frozen with `docker pause` while the complete data
 # directory is copied. The service is always unpaused by the EXIT trap. A
 # throwaway inspector is then booted from a second copy to record the exact
-# restored height, state root, and one complete account response in manifest.json.
+# restored height, committed/replayed state roots, and one complete account
+# response in manifest.json.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TARGET=""
 PROJECT=""
@@ -72,7 +75,7 @@ dry-run: resolve running sybil-api container ${CONTAINER:-from compose project '
 dry-run: verify $DATA_DIR/sybil.redb and $DATA_DIR/sybil.qmdb exist in the source
 dry-run: docker pause <source>; docker cp <source>:$DATA_DIR/. <timestamped-backup>/store/; docker unpause <source>
 dry-run: hash every copied file and boot the source image against a throwaway second copy
-dry-run: record exact restored height/state_root and account ${ACCOUNT_ID:-auto (leaderboard, then account 0)} in <timestamped-backup>/manifest.json
+dry-run: record exact restored height, committed/replayed state roots, and account ${ACCOUNT_ID:-auto (leaderboard, then account 0)} in <timestamped-backup>/manifest.json
 dry-run: destination root $DEST; the production sybil-data volume is never mounted or modified
 EOF
     exit 0
@@ -81,6 +84,8 @@ fi
 for tool in docker python3 sha256sum; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required" >&2; exit 2; }
 done
+[[ -f "$SCRIPT_DIR/store-manifest.py" ]] \
+    || { echo "error: $SCRIPT_DIR/store-manifest.py is required" >&2; exit 2; }
 
 if [[ -z "$CONTAINER" ]]; then
     mapfile -t CANDIDATES < <(docker ps -q \
@@ -198,48 +203,17 @@ if ! docker exec "$INSPECT_CONTAINER" curl -fsS \
     exit 4
 fi
 
-python3 - "$INSPECT_ROOT/latest.json" "$INSPECT_ROOT/state-root.json" \
-    "$INSPECT_ROOT/account.json" "$OUT/manifest.json" "$STAMP" "$TARGET" \
-    "$PROJECT" "$CONTAINER" "$SOURCE_IMAGE" "$DATA_DIR" <<'PY'
-import json, socket, sys
-latest_path, root_path, account_path, output = sys.argv[1:5]
-stamp, target, project, container, image, data_dir = sys.argv[5:11]
-latest = json.load(open(latest_path, encoding="utf-8"))
-root = json.load(open(root_path, encoding="utf-8"))
-account = json.load(open(account_path, encoding="utf-8"))
-height = latest.get("height")
-block_root = latest.get("state_root")
-served_root = root.get("state_root")
-if not isinstance(height, int) or not block_root or block_root != served_root:
-    raise SystemExit("inspector returned inconsistent latest block/state root")
-if not isinstance(account, dict) or not isinstance(account.get("account_id"), int):
-    raise SystemExit("inspector returned an invalid account sample")
-manifest = {
-    "schema": "sybil.store-backup.v1",
-    "created_utc": stamp,
-    "host": socket.gethostname(),
-    "source": {
-        "target": target,
-        "compose_project": project or None,
-        "container": container,
-        "image": image,
-        "data_dir": data_dir,
-    },
-    "consistency": {
-        "mechanism": "docker-pause-whole-container",
-        "scope": "complete-sybil-data-dir",
-    },
-    "expected": {
-        "height": height,
-        "state_root": block_root,
-        "account_id": account["account_id"],
-        "account": account,
-    },
-}
-with open(output, "w", encoding="utf-8") as handle:
-    json.dump(manifest, handle, indent=2, sort_keys=True)
-    handle.write("\n")
-PY
+python3 "$SCRIPT_DIR/store-manifest.py" build \
+    --latest "$INSPECT_ROOT/latest.json" \
+    --state-root "$INSPECT_ROOT/state-root.json" \
+    --account "$INSPECT_ROOT/account.json" \
+    --output "$OUT/manifest.json" \
+    --stamp "$STAMP" \
+    --target "$TARGET" \
+    --project "$PROJECT" \
+    --container "$CONTAINER" \
+    --image "$SOURCE_IMAGE" \
+    --data-dir "$DATA_DIR"
 
 docker rm -f "$INSPECT_CONTAINER" >/dev/null
 rm -rf "$INSPECT_ROOT"
