@@ -66,10 +66,11 @@ async function fetchMarkets(): Promise<Market[]> {
   return data;
 }
 
-export function useMarketsList() {
+export function useMarketsList(initialData?: Market[]) {
   const marketsQ = useQuery({
     queryKey: ["markets", "all"],
     queryFn: fetchMarkets,
+    initialData,
     staleTime: 60_000,
   });
 

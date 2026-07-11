@@ -1,0 +1,356 @@
+"use client";
+
+import { Suspense, useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { BinaryCard } from "@/components/binary-card";
+import { ClearingTicker } from "@/components/clearing-ticker";
+import { MultiCard } from "@/components/multi-card";
+import {
+  MarketsFilterBar,
+  parseSortKey,
+  type SortKey,
+} from "@/components/markets-filter-bar";
+import { useMarketsList, type Market } from "@/lib/markets/use-markets";
+import { useEventTradersMap } from "@/lib/markets/use-event-traders";
+import { selectPricesByMarketId, useStore } from "@/lib/store";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
+import { selectIndexCards } from "@/lib/markets/select-index-cards";
+import { buildIndexCards } from "@/lib/markets/build-index-cards";
+
+/** Cards (events) shown per page on the markets index. */
+const PAGE_SIZE = 15;
+
+export default function MarketsPageClient({
+  initialMarkets,
+}: {
+  initialMarkets: Market[] | undefined;
+}) {
+  return (
+    <Suspense fallback={null}>
+      <MarketsPageInner initialMarkets={initialMarkets} />
+    </Suspense>
+  );
+}
+
+function MarketsPageInner({
+  initialMarkets,
+}: {
+  initialMarkets: Market[] | undefined;
+}) {
+  const { bundle, isPending, error } = useMarketsList(initialMarkets);
+  const prices = useStore(selectPricesByMarketId);
+
+  // The clearing ticker is an active-board readout — exclude closed markets,
+  // which the bundle now retains for detail/multi-card use.
+  const openById = useMemo(() => {
+    if (!bundle) return null;
+    const m = new Map<number, Market>();
+    for (const [id, mk] of bundle.byId) {
+      if (mk.closed !== true) m.set(id, mk);
+    }
+    return m;
+  }, [bundle]);
+
+  const { query, sort, setSort, category, showClosed, setHideClosed } =
+    useFilterParams();
+
+  const items = useMemo(
+    () => (bundle ? buildIndexCards(bundle) : null),
+    [bundle],
+  );
+
+  // Event ids for MultiCard items — the "traders" sort ranks events by their
+  // union trader count, fetched per event. Gated to that sort so the fan-out
+  // of requests only fires when the user actually picks it.
+  const multiEventIds = useMemo(
+    () =>
+      items
+        ? items.flatMap((it) => (it.kind === "multi" ? [it.eventId] : []))
+        : [],
+    [items],
+  );
+  const eventTradersMap = useEventTradersMap(multiEventIds, sort === "traders");
+
+  const filtered = useMemo(() => {
+    if (!items) return null;
+    return selectIndexCards(items, {
+      query,
+      sort,
+      category,
+      showClosed,
+      eventTraders: eventTradersMap,
+    });
+  }, [items, query, sort, category, showClosed, eventTradersMap]);
+
+  const [page, setPage] = useState(1);
+
+  // Reset to the first page whenever the active filter set changes. Done
+  // during render (not in an effect) per the React "adjust state on prop
+  // change" pattern — avoids an extra commit.
+  const filterKey = `${query} ${sort} ${category ?? ""} ${showClosed}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setPage(1);
+  }
+
+  const totalPages = filtered
+    ? Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+    : 1;
+  // Clamp: a filter change can shrink the result set below the current page.
+  const currentPage = Math.min(page, totalPages);
+  const paged = filtered
+    ? filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+    : null;
+
+  const goToPage = useCallback((next: number) => {
+    setPage(next);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  // Header counts — same "{markets} markets · {events} events" shape whether or
+  // not a filter is active. Derived from `filtered` (≡ all cards when nothing
+  // is filtered), so picking a category just narrows both numbers instead of
+  // switching to a different "N of M cards" wording. Summing markets per card
+  // equals bundle.total when unfiltered (every market lives in exactly one card).
+  const shownEvents = filtered?.length ?? 0;
+  const shownMarkets =
+    filtered?.reduce(
+      (n, it) => n + (it.kind === "multi" ? it.markets.length : 1),
+      0,
+    ) ?? 0;
+
+  return (
+    <>
+      {openById && <ClearingTicker marketsById={openById} />}
+      <main
+        className="sybil-page-pad"
+        style={{
+          width: "100%",
+          paddingTop: "var(--space-6)",
+          paddingBottom: "var(--space-9)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-5)",
+        }}
+      >
+        <header
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-2)",
+          }}
+        >
+          <h1
+            className="markets-page-title"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontWeight: 600,
+              fontSize: "var(--fs-56)",
+              lineHeight: "var(--lh-56)",
+              letterSpacing: "var(--track-tight)",
+              margin: 0,
+              color: "var(--fg-1)",
+            }}
+          >
+            All markets
+          </h1>
+          <p className="text-annotation">
+            {bundle == null
+              ? "loading…"
+              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
+          </p>
+        </header>
+
+        <MarketsFilterBar
+          sort={sort}
+          onSortChange={setSort}
+          hideClosed={!showClosed}
+          onHideClosedChange={setHideClosed}
+        />
+
+        {isPending && <Placeholder>loading markets…</Placeholder>}
+        {error && <Placeholder error>error: {String(error)}</Placeholder>}
+
+        {filtered && filtered.length === 0 && (
+          <Placeholder>
+            {query !== "" || category != null || sort !== "volume" || showClosed
+              ? "no events match these filters."
+              : "no open markets right now — check back soon."}
+          </Placeholder>
+        )}
+
+        {paged && paged.length > 0 && (
+          <>
+            <div className="markets-grid" data-testid="markets-grid">
+              {paged.map((it) =>
+                it.kind === "multi" ? (
+                  <MultiCard
+                    key={`g-${it.name}`}
+                    groupName={it.name}
+                    markets={it.markets}
+                    prices={prices}
+                  />
+                ) : (
+                  <BinaryCard
+                    key={`m-${it.market.market_id}`}
+                    market={it.market}
+                    price={prices[it.market.market_id]}
+                  />
+                ),
+              )}
+            </div>
+            {totalPages > 1 && (
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                onChange={goToPage}
+              />
+            )}
+          </>
+        )}
+      </main>
+    </>
+  );
+}
+
+/**
+ * URL-backed `?q=` + `?sort=` state. Reads via useSearchParams, writes via
+ * router.replace so back/forward doesn't get cluttered by every keystroke.
+ * Empty/default values are dropped from the URL to keep it tidy.
+ */
+function useFilterParams() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const query = searchParams.get("q") ?? "";
+  const sort = parseSortKey(searchParams.get("sort"));
+  const category = searchParams.get("category");
+  const showClosed = searchParams.get("closed") === "show";
+
+  const update = useCallback(
+    (next: { q?: string; sort?: SortKey; showClosed?: boolean }) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next.q !== undefined) {
+        if (next.q) params.set("q", next.q);
+        else params.delete("q");
+      }
+      if (next.sort !== undefined) {
+        if (next.sort !== "volume") params.set("sort", next.sort);
+        else params.delete("sort");
+      }
+      if (next.showClosed !== undefined) {
+        // Default is hide-closed; only write the param when showing them.
+        if (next.showClosed) params.set("closed", "show");
+        else params.delete("closed");
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
+  return {
+    query,
+    sort,
+    category,
+    showClosed,
+    setSort: (s: SortKey) => update({ sort: s }),
+    setHideClosed: (hide: boolean) => update({ showClosed: !hide }),
+  };
+}
+
+function Pagination({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div
+      className="text-mono"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "var(--space-4)",
+        padding: "var(--space-4) 0",
+        fontSize: "11px",
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+      }}
+    >
+      <PageButton disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        ← prev
+      </PageButton>
+      <span style={{ color: "var(--fg-3)" }}>
+        page {page} / {totalPages}
+      </span>
+      <PageButton
+        disabled={page >= totalPages}
+        onClick={() => onChange(page + 1)}
+      >
+        next →
+      </PageButton>
+    </div>
+  );
+}
+
+function PageButton({
+  children,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="text-mono"
+      style={{
+        minHeight: 40,
+        padding: "var(--space-2) var(--space-3)",
+        fontSize: "11px",
+        textTransform: "uppercase",
+        letterSpacing: "var(--track-wide)",
+        color: disabled ? "var(--fg-4)" : "var(--fg-1)",
+        background: "var(--surface-1)",
+        border: "1px solid var(--border-1)",
+        borderRadius: "var(--radius-md)",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Placeholder({
+  children,
+  error,
+}: {
+  children: React.ReactNode;
+  error?: boolean;
+}) {
+  return (
+    <div
+      className="text-mono"
+      style={{
+        color: error ? "var(--no)" : "var(--fg-3)",
+        padding: "var(--space-6) 0",
+        textAlign: "center",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
