@@ -64,6 +64,24 @@ async fn admin_feed_key_is_created_once_and_reused_after_process_restart() {
 
     let first_key_hex = std::fs::read_to_string(root.admin_key_path())
         .expect("first boot creates the configured admin feed key");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(root.admin_key_path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "admin feed private key must be owner-readable only"
+        );
+        std::fs::set_permissions(
+            root.admin_key_path(),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+    }
     let first_key_bytes = hex::decode(first_key_hex.trim()).expect("admin key file contains hex");
     let signing_key = SigningKey::from_slice(&first_key_bytes)
         .expect("admin key file contains a valid P256 scalar");
@@ -87,6 +105,19 @@ async fn admin_feed_key_is_created_once_and_reused_after_process_restart() {
         restarted_key_hex, first_key_hex,
         "restart must reuse the first-boot key instead of rotating it"
     );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(root.admin_key_path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "restart must repair permissive admin key permissions"
+        );
+    }
     let restarted_feeds = get_json(&client, &reader.base_url, "/v1/feeds").await;
     let restarted_admin = admin_feed(&restarted_feeds);
     assert_eq!(restarted_admin["feed_id"].as_u64(), first_feed_id);

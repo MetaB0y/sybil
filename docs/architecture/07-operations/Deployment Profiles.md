@@ -212,8 +212,9 @@ blocks a `prod` boot. `SYBIL_DATA_DIR` unset remains prod-blocking.
 
 The production overlay pins `SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key`.
 On the first boot of a new `sybil-data` volume, the API generates the P256
-scalar and writes it there; later process and container starts load the same
-key. The admin feed therefore keeps the same public identity across ordinary
+scalar and writes it there with mode `0600`; later process and container starts
+load the same key and repair broader Unix permissions to `0600`. The admin feed
+therefore keeps the same public identity across ordinary
 restarts and host reboots. Removing `sybil-data` is an intentional key rotation
 as well as a chain-state reset, so operators must not use the reset recipe as a
 routine restart mechanism. A process-level API test covers first-boot creation,
