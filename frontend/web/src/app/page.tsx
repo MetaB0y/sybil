@@ -102,7 +102,7 @@ function MarketsPageInner() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // Header counts — same "{markets} markets · {events} events" shape whether or
+  // Header counts — same "{events} events · {markets} markets" shape whether or
   // not a filter is active. Derived from `filtered` (≡ all cards when nothing
   // is filtered), so picking a category just narrows both numbers instead of
   // switching to a different "N of M cards" wording. Summing markets per card
@@ -161,7 +161,7 @@ function MarketsPageInner() {
           >
             {bundle == null
               ? "loading…"
-              : `${shownMarkets} markets · ${shownEvents} events`}
+              : `${shownEvents} events · ${shownMarkets} markets`}
           </p>
         </header>
 
