@@ -154,7 +154,11 @@ export function BatchesTable({
         className="activity-grid-table"
         style={{
           background: "var(--surface-1)",
-          border: "1px solid var(--border-1)",
+          // border-2 is the "card outline" token — border-1 (hairline) is too
+          // faint in light theme, leaving the batch table (and its expanded
+          // detail) floating with no visible left/right edge. Matches the
+          // leaderboard fix (aa78ea2).
+          border: "1px solid var(--border-2)",
           borderRadius: 6,
           overflowY: "hidden",
         }}
@@ -261,7 +265,7 @@ function TailSwitch({
           <span
             style={{
               padding: "1px 5px",
-              borderRadius: 999,
+              borderRadius: "var(--radius-sm)",
               background: "color-mix(in srgb, var(--accent) 18%, transparent)",
               color: "var(--accent)",
               fontSize: 9,
@@ -298,7 +302,7 @@ function SegmentedGroup({
         padding: 3,
         background: "var(--bg-0)",
         border: "1px solid var(--border-1)",
-        borderRadius: 999,
+        borderRadius: "var(--radius-lg)",
       }}
     >
       {children}
@@ -330,7 +334,7 @@ function Segment({
         alignItems: "center",
         gap: 6,
         padding: "4px 10px",
-        borderRadius: 999,
+        borderRadius: "var(--radius-md)",
         cursor: active ? "default" : "pointer",
         border: 0,
         background: active ? "var(--surface-2)" : "transparent",

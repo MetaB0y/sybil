@@ -68,14 +68,12 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
       <div
         className="activity-pulse-grid"
       >
-        {items.map((it, i) => (
+        {items.map((it) => (
           <div
             key={it.label}
             className="activity-pulse-cell"
             style={{
               padding: "14px 18px",
-              borderRight:
-                i < items.length - 1 ? "1px solid var(--border-1)" : 0,
               display: "flex",
               flexDirection: "column",
               gap: 8,

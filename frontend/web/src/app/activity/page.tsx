@@ -12,7 +12,6 @@ import { PulseStrip } from "@/components/activity/pulse-strip";
 import { BatchesTable } from "@/components/activity/batches-table";
 import { BatchDetail } from "@/components/activity/batch-detail";
 import { PageHeader } from "@/components/page-header";
-import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 import { useArenaFeed } from "@/lib/arena/use-arena-feed";
 
 export default function ActivityPage() {
@@ -38,12 +37,12 @@ export default function ActivityPage() {
           // +36px = markets ClearingTicker height, so the title aligns
           // with /'s "All markets" across pages
           paddingTop: "calc(var(--space-6) + 36px)",
+          // Space between the title and the divider that opens the all-time
+          // section below.
+          paddingBottom: "var(--space-6)",
         }}
       >
-        <PageHeader
-          title="Activity"
-          meta={`everything happening on Sybil · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
-        />
+        <PageHeader title="Activity" />
       </div>
 
       <HeroAllTime allTime={overview.allTime} botCount={botCount} />

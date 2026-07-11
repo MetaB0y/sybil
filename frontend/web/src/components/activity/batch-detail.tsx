@@ -24,9 +24,11 @@ import { useBatchDetail } from "@/lib/activity/use-batch-detail";
 import type { BatchMarketRow, BatchRow } from "@/lib/activity/types";
 import { DonutOutcome } from "./donut-outcome";
 
-// Sized so the market table's natural height lands on the sidebar's, leaving
-// the stretch to absorb only a few pixels rather than a visible gap.
-const ROWS_INITIAL = 7;
+// Sized so the market table's natural height meets-or-exceeds the sidebar's
+// (~392px): 8 rows fill it, so the "show more" footer sits right under the last
+// row instead of being pushed down by margin-top:auto with a visible gap above
+// it. Any residual slack lands below the shorter column, where it's unobtrusive.
+const ROWS_INITIAL = 8;
 const ROWS_STEP = 10;
 
 const GRID = "2fr 70px 60px 110px 100px 130px";

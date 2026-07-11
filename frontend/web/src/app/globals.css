@@ -616,8 +616,20 @@ textarea {
 
 .activity-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 48px;
+  /* Vertically centre the two $ heroes against the taller 2x2 stat grid,
+     rather than pinning them to the top with dead space below. */
+  align-items: center;
+}
+
+/* The two hero $ numbers sit in a 2-col grid that mirrors the right-hand
+   .activity-hero-stats grid, so the columns line up across the divider and the
+   left pair fills its half instead of clustering at the left edge. */
+.activity-hero-numbers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 36px;
   align-items: start;
 }
 
@@ -626,14 +638,14 @@ textarea {
   grid-template-columns: 1fr 1fr;
   column-gap: 36px;
   row-gap: 22px;
-  align-self: start;
-  padding-top: 24px;
 }
 
 .activity-pulse-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  border-top: 1px solid var(--border-1);
+  /* Only the divider *after* the 24h section — the one after the main summary
+     is the hero's own border-bottom. No top border and no inter-cell verticals
+     (see below), so the 24h numbers read as a plain band, not a boxed grid. */
   border-bottom: 1px solid var(--border-1);
 }
 
@@ -982,10 +994,6 @@ textarea {
     gap: var(--space-5);
   }
 
-  .activity-hero-stats {
-    padding-top: 0;
-  }
-
   .activity-pulse-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -1131,6 +1139,7 @@ textarea {
   }
 
   .activity-hero-numbers {
+    grid-template-columns: 1fr;
     gap: var(--space-5) !important;
   }
 
@@ -1142,11 +1151,6 @@ textarea {
   .activity-table-head > .text-annotation {
     flex: 1 0 100%;
     order: 3;
-  }
-
-  .activity-pulse-cell {
-    border-right: 0 !important;
-    border-bottom: 1px solid var(--border-1);
   }
 
   .arena-main {

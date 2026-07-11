@@ -29,30 +29,56 @@ export function HeroAllTime({
       className="activity-hero-section"
       style={{
         padding: "28px 24px 28px",
+        // Bracket the all-time section like the others: a divider above it
+        // (between the page title and this block) as well as below.
+        borderTop: "1px solid var(--border-1)",
         borderBottom: "1px solid var(--border-1)",
         position: "relative",
       }}
     >
+      {/* Section heading — matches the "Last 24 hours" / "Batches" strips. The
+          "All time" window here lets the stat eyebrows below drop their
+          redundant "All-time" prefix (mirrors the unprefixed pulse labels). */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 14,
+          paddingBottom: 18,
+        }}
+      >
+        <h3
+          style={{
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+            fontWeight: 600,
+            margin: 0,
+            color: "var(--fg-2)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          All time
+        </h3>
+        <span className="text-annotation" style={{ fontSize: 11 }}>
+          since launch
+        </span>
+      </div>
+
       <div
         className="activity-hero-grid"
       >
-        {/* Left: two hero numbers — matched volume + welfare, same size */}
+        {/* Left: two hero numbers — matched volume + welfare, same size.
+            Layout (2-col grid mirroring the right stats) lives in
+            `.activity-hero-numbers`. */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div
-            className="activity-hero-numbers"
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 80,
-              alignItems: "flex-start",
-            }}
-          >
+          <div className="activity-hero-numbers">
             <HeroNumber
-              label="All-time matched volume"
+              label="Matched volume"
               value={allTime.matchedVolume}
             />
             <HeroNumber
-              label="All-time welfare"
+              label="Welfare"
               value={allTime.welfare}
               glossaryTerm="All-time welfare"
             />
