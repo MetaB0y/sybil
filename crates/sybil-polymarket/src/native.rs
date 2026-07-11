@@ -780,9 +780,11 @@ mod tests {
         let specs = catalog.enabled_market_specs();
         // Only the two enabled rungs expand; the disabled rung is skipped.
         assert_eq!(specs.len(), 2);
-        assert!(specs
-            .iter()
-            .all(|spec| spec.group_key.as_deref() == Some("native:native_ladder")));
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.group_key.as_deref() == Some("native:native_ladder"))
+        );
         assert!(specs.iter().all(|spec| spec.group_size == 2));
         assert_eq!(specs[0].market_key, "native_ladder:ge_2m");
         let metadata = specs[0].metadata_request();
