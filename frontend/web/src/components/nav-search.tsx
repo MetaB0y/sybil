@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
+import { X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -104,6 +105,22 @@ export function NavSearch() {
     [router, close]
   );
 
+  // Clear the query. If the grid is currently filtered by it (`?q=`), reset to
+  // all markets — that URL param is the only way back to the full grid — while
+  // preserving the active sort. Off a `?q=` view we just empty the box.
+  const clearSearch = useCallback(() => {
+    setQ("");
+    close();
+    if (urlQ) {
+      const params = new URLSearchParams();
+      const sort = searchParams.get("sort");
+      if (sort) params.set("sort", sort);
+      const qs = params.toString();
+      router.push(qs ? `/?${qs}` : "/", { scroll: false });
+    }
+    inputRef.current?.focus();
+  }, [close, urlQ, searchParams, router]);
+
   const onChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     setQ(e.target.value);
     setOpen(true);
@@ -180,6 +197,25 @@ export function NavSearch() {
           aria-autocomplete="list"
           style={searchInputStyle}
         />
+        {q && (
+          <button
+            type="button"
+            aria-label="Clear search"
+            title="Clear search"
+            // Keep focus (don't blur the input) through the click.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={clearSearch}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "var(--fg-1)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--fg-4)";
+            }}
+            style={clearButtonStyle}
+          >
+            <X size={14} aria-hidden />
+          </button>
+        )}
       </div>
 
       {showDropdown && (
@@ -188,6 +224,9 @@ export function NavSearch() {
           role="listbox"
           className="nav-search-dropdown"
           style={dropdownStyle}
+          // Drop the hover highlight when the pointer leaves the dropdown so a
+          // row doesn't stay "selected" (and Enter falls back to the grid).
+          onMouseLeave={() => setHighlight(-1)}
         >
           {top.length === 0 ? (
             <div style={emptyStyle}>no events or markets match “{q.trim()}”</div>
@@ -207,6 +246,17 @@ export function NavSearch() {
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => goToGrid(q)}
+                // Hovering the footer clears any row highlight so only one row
+                // reads as active, and gives the button its own hover feedback.
+                onMouseEnter={(e) => {
+                  setHighlight(-1);
+                  e.currentTarget.style.background = "var(--surface-2)";
+                  e.currentTarget.style.color = "var(--fg-1)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = "var(--fg-3)";
+                }}
                 style={footerStyle}
               >
                 <span>
@@ -379,6 +429,24 @@ const searchInputStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "var(--fs-12)",
   padding: 0,
+  minWidth: 0,
+};
+
+const clearButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+  width: 18,
+  height: 18,
+  marginLeft: 4,
+  padding: 0,
+  border: 0,
+  borderRadius: "var(--radius-sm)",
+  background: "transparent",
+  color: "var(--fg-4)",
+  cursor: "pointer",
+  transition: "color var(--dur-fast) var(--ease-standard)",
 };
 
 const dropdownStyle: React.CSSProperties = {
@@ -472,4 +540,6 @@ const footerStyle: React.CSSProperties = {
   letterSpacing: "var(--track-wide)",
   textTransform: "uppercase",
   color: "var(--fg-3)",
+  transition:
+    "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
 };
