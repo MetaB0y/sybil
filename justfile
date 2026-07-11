@@ -368,8 +368,14 @@ check-consensus: golden-check
     ./scripts/check-validity-boundary.py --check
     ./scripts/update-protocol-pins.py --check
 
+# Backup/restore manifest compatibility and shell-entrypoint syntax.
+store-tools-check:
+    python3 scripts/test-store-manifest.py
+    python3 -m py_compile scripts/store-manifest.py scripts/test-store-manifest.py
+    bash -n scripts/store-backup.sh scripts/store-restore-drill.sh
+
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
-check-all: check-fast test standalone-check check-consensus docs-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
+check-all: check-fast test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any
