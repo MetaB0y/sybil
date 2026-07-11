@@ -39,6 +39,20 @@ services:
       # so host memory no longer grows with the (ever-increasing) account count.
       SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT: "0"
       SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT: "0"
+      # Seven days at the inherited 10-second block cadence: 6 blocks/minute
+      # * 60 * 24 * 7 = 60,480 blocks. Full blocks and their paired DA
+      # artifact/manifest rows share the first floor; raw prices use the same
+      # height window. Every supported candle resolution gets 604,800 seconds.
+      # This does not prune account events, fills, or equity points.
+      SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS: "60480"
+      SYBIL_RAW_PRICE_RETENTION_BLOCKS: "60480"
+      # Run a bounded maintenance pass every ten minutes (60 blocks) so raw
+      # price rows from the current market set do not accumulate behind the
+      # target floor. One pass still deletes at most 10,000 rows.
+      SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS: "60"
+      SYBIL_HISTORY_PRUNE_MAX_ROWS: "10000"
+      SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS: "60,300,3600"
+      SYBIL_PRICE_CANDLE_RETENTION_SECS: "604800,604800,604800"
 
     logging: *default-logging
   sybil-polymarket:

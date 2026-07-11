@@ -221,7 +221,10 @@ opt-in bounded retention. `history_meta` records the lowest retained
 Pruning runs after a successful block save, deletes rows under a per-run row
 budget, and advances metadata only in the same committed redb transaction as
 the deletes. See [[Historical Data Serving]] for the longer candle/history
-roadmap.
+roadmap. The production Compose overlay opts the current devnet into a
+seven-day target for full blocks and their paired DA rows, raw prices, and all
+three candle resolutions. It deliberately does not extend pruning to recovery
+state or the still-append-only account-event, fill, and equity tables.
 
 ## Recovery Order
 

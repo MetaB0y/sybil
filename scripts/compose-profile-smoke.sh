@@ -65,6 +65,48 @@ compose config --quiet
 COMPOSE_PROFILES=prover-worker compose config --quiet
 pass "compose config parses with and without prover-worker profile"
 
+retention_env=$(
+    compose config | python3 -c '
+import re
+import sys
+
+keys = (
+    "SYBIL_BLOCK_INTERVAL_MS",
+    "SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS",
+    "SYBIL_RAW_PRICE_RETENTION_BLOCKS",
+    "SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS",
+    "SYBIL_HISTORY_PRUNE_MAX_ROWS",
+    "SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS",
+    "SYBIL_PRICE_CANDLE_RETENTION_SECS",
+)
+environment = {}
+in_api = False
+for line in sys.stdin:
+    if line.rstrip() == "  sybil-api:":
+        in_api = True
+        continue
+    if in_api and re.match(r"^  [^ ]", line):
+        break
+    if in_api:
+        match = re.match(r"^      ([A-Z0-9_]+): (.*)$", line.rstrip())
+        if match:
+            environment[match.group(1)] = match.group(2).strip("\"\047")
+for key in keys:
+    print(f"{key}={environment.get(key)}")
+'
+)
+expected_retention_env=$(printf '%s\n' \
+    'SYBIL_BLOCK_INTERVAL_MS=10000' \
+    'SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS=60480' \
+    'SYBIL_RAW_PRICE_RETENTION_BLOCKS=60480' \
+    'SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS=60' \
+    'SYBIL_HISTORY_PRUNE_MAX_ROWS=10000' \
+    'SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS=60,300,3600' \
+    'SYBIL_PRICE_CANDLE_RETENTION_SECS=604800,604800,604800')
+[[ "$retention_env" == "$expected_retention_env" ]] \
+    || fail "production compose does not pin the seven-day history retention policy"
+pass "production compose pins seven-day block/DA, raw-price, and candle retention"
+
 # `deploy-all` builds every application image locally. Keep its save/load stream
 # in lockstep so the host cannot silently restart an older image after a build.
 deploy_all_save=$(
