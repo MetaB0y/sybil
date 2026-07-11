@@ -2,6 +2,17 @@ use std::collections::HashMap;
 
 use matching_engine::MarketId;
 
+/// Lifetime cap on read API-key records retained by one account. Revoked
+/// records deliberately count toward this cap: keeping tombstones preserves
+/// stable ids/audit history while making add/revoke churn permanently bounded.
+pub const MAX_API_KEYS_PER_ACCOUNT: usize = 64;
+/// Labels are metadata, not an unbounded account-storage channel.
+pub const MAX_API_KEY_LABEL_BYTES: usize = 128;
+/// Admission ceiling for the complete MessagePack-encoded recovery account.
+/// qMDB accepts 1 MiB values; 256 KiB leaves 75% headroom for codec/schema
+/// overhead and future account fields.
+pub const MAX_SERIALIZED_ACCOUNT_BYTES: usize = 1 << 18;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AccountId(pub u64);
 

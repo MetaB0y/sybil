@@ -48,6 +48,12 @@ pub struct DaArtifactLookup {
     pub oldest_retained_height: Option<u64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DaManifestLookup {
+    pub manifest: Option<DaArtifactManifest>,
+    pub oldest_retained_height: Option<u64>,
+}
+
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
 pub enum DaArtifactIntegrityError {
     #[error(
@@ -173,10 +179,15 @@ impl Store {
                 return Ok(false);
             }
 
-            let bytes = rmp_serde::to_vec(&artifact)?;
+            let artifact_bytes = rmp_serde::to_vec(&artifact)?;
+            let manifest_bytes = rmp_serde::to_vec(&artifact.manifest)?;
             {
                 let mut table = txn.open_table(DA_ARTIFACTS)?;
-                table.insert(artifact.manifest.height, bytes.as_slice())?;
+                table.insert(artifact.manifest.height, artifact_bytes.as_slice())?;
+            }
+            {
+                let mut table = txn.open_table(DA_MANIFESTS)?;
+                table.insert(artifact.manifest.height, manifest_bytes.as_slice())?;
             }
             txn.commit()?;
             Ok(true)
@@ -188,6 +199,21 @@ impl Store {
     pub async fn load_da_artifact(&self, height: u64) -> Result<Option<DaArtifact>, StoreError> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(DA_ARTIFACTS)?;
+        table
+            .get(height)?
+            .map(|value| rmp_serde::from_slice(value.value()))
+            .transpose()
+            .map_err(StoreError::from)
+    }
+
+    /// Load the small publish-time manifest row without reading, allocating,
+    /// or hashing the canonical witness payload.
+    pub async fn load_da_manifest(
+        &self,
+        height: u64,
+    ) -> Result<Option<DaArtifactManifest>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(DA_MANIFESTS)?;
         table
             .get(height)?
             .map(|value| rmp_serde::from_slice(value.value()))

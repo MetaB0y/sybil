@@ -307,7 +307,7 @@ impl SequencerActorState {
         // Reject a duplicate registration before writing the WAL. The digest
         // binding has already rejected stale or replayed key operations.
         self.sequencer
-            .can_register_pubkey(authenticated.account_id, &authenticated.new_pubkey)?;
+            .can_register_authorized_pubkey(authenticated.account_id, &authenticated.new_pubkey)?;
         let meta = RegisteredPubkey {
             account_id: authenticated.account_id,
             auth_scheme: authenticated.new_auth_scheme,
@@ -465,9 +465,15 @@ impl SequencerActorState {
         authenticated: AuthenticatedApiKeyCreate,
     ) -> Result<u64, SequencerError> {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
+        let created_at_ms = current_timestamp_ms();
+        self.sequencer.can_create_api_key(
+            authenticated.account_id,
+            authenticated.token_hash,
+            authenticated.label.as_deref(),
+            created_at_ms,
+        )?;
         self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
             .await?;
-        let created_at_ms = current_timestamp_ms();
         self.persist_control_plane(&ControlPlaneCommand::CreateApiKey {
             account_id: authenticated.account_id,
             token_hash: authenticated.token_hash,

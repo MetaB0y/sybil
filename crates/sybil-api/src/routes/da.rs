@@ -4,7 +4,9 @@ use axum::extract::{Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 
-use matching_sequencer::{DaArtifact, DaArtifactLookup, DaProviderRef};
+use matching_sequencer::{
+    DaArtifact, DaArtifactLookup, DaArtifactManifest, DaManifestLookup, DaProviderRef,
+};
 
 use crate::state::AppState;
 use crate::types::error::AppError;
@@ -26,9 +28,8 @@ pub async fn get_da_manifest(
     State(state): State<AppState>,
     Path(height): Path<u64>,
 ) -> Result<Json<DaManifestResponse>, AppError> {
-    let artifact = retained_da_artifact(state.sequencer.get_da_artifact(height).await?, height)?;
-    verify_da_artifact(&artifact)?;
-    Ok(Json(da_manifest_response(&artifact)))
+    let manifest = retained_da_manifest(state.sequencer.get_da_manifest(height).await?, height)?;
+    Ok(Json(da_manifest_response(&manifest)))
 }
 
 /// GET /v1/da/{height}/payload
@@ -68,6 +69,21 @@ fn retained_da_artifact(lookup: DaArtifactLookup, height: u64) -> Result<DaArtif
     })
 }
 
+fn retained_da_manifest(
+    lookup: DaManifestLookup,
+    height: u64,
+) -> Result<DaArtifactManifest, AppError> {
+    lookup.manifest.ok_or_else(|| {
+        // Preserve the endpoint's existing not-found contract: the manifest
+        // row is one part of the retained DA artifact.
+        let mut message = format!("DA artifact not retained for height {height}");
+        if let Some(oldest) = lookup.oldest_retained_height {
+            message.push_str(&format!("; oldest retained height is {oldest}"));
+        }
+        AppError::not_found(message)
+    })
+}
+
 fn verify_da_artifact(artifact: &DaArtifact) -> Result<(), AppError> {
     artifact.verify_payload_integrity().map_err(|error| {
         tracing::error!(
@@ -79,8 +95,7 @@ fn verify_da_artifact(artifact: &DaArtifact) -> Result<(), AppError> {
     })
 }
 
-fn da_manifest_response(artifact: &DaArtifact) -> DaManifestResponse {
-    let manifest = &artifact.manifest;
+fn da_manifest_response(manifest: &DaArtifactManifest) -> DaManifestResponse {
     DaManifestResponse {
         version: manifest.version,
         payload_kind: manifest.payload_kind.clone(),

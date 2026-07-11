@@ -386,6 +386,32 @@ impl Actor for SequencerActor {
                 };
                 let _ = reply.send(result);
             }
+            SequencerMsg::GetDaManifest(height, reply) => {
+                let result = match &state.store {
+                    Some(store) => {
+                        let oldest_retained_height = store
+                            .history_retention_meta()
+                            .map_err(|error| SequencerError::Persistence(error.to_string()))
+                            .map(|meta| meta.blocks_full_min_height);
+                        match oldest_retained_height {
+                            Ok(oldest_retained_height) => store
+                                .load_da_manifest(height)
+                                .await
+                                .map(|manifest| DaManifestLookup {
+                                    manifest,
+                                    oldest_retained_height,
+                                })
+                                .map_err(|error| SequencerError::Persistence(error.to_string())),
+                            Err(error) => Err(error),
+                        }
+                    }
+                    None => Ok(DaManifestLookup {
+                        manifest: None,
+                        oldest_retained_height: None,
+                    }),
+                };
+                let _ = reply.send(result);
+            }
             SequencerMsg::CreateMarketWithMetadata(name, metadata, reply) => {
                 let _ = reply.send(
                     state

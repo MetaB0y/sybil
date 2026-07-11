@@ -9,6 +9,15 @@ use crate::AdminOracle;
 use crate::account::AccountStore;
 use crate::market_lifecycle::MarketLifecycle;
 
+fn store_test_sequencer_config() -> crate::SequencerConfig {
+    crate::SequencerConfig {
+        // Persistence tests intentionally use tiny orders to keep fixtures
+        // compact; admission-floor policy is exercised separately.
+        min_resting_order_notional_nanos: 0,
+        ..crate::SequencerConfig::default()
+    }
+}
+
 #[tokio::test]
 async fn auto_resolution_records_round_trip() {
     let path = temp_db_path("auto-resolution-records");
@@ -152,6 +161,8 @@ async fn history_pruning_deletes_blocks_and_price_points_with_metadata() {
     assert!(store.load_block(2).await.unwrap().is_none());
     assert!(store.load_da_artifact(1).await.unwrap().is_none());
     assert!(store.load_da_artifact(2).await.unwrap().is_none());
+    assert!(store.load_da_manifest(1).await.unwrap().is_none());
+    assert!(store.load_da_manifest(2).await.unwrap().is_none());
     assert_eq!(
         store
             .load_da_artifact(3)
@@ -162,6 +173,7 @@ async fn history_pruning_deletes_blocks_and_price_points_with_metadata() {
             .height,
         3
     );
+    assert_eq!(store.load_da_manifest(3).await.unwrap().unwrap().height, 3);
     assert_eq!(
         store
             .load_block(3)
@@ -807,6 +819,40 @@ async fn da_artifact_from_witness_matches_commitment_chain() {
 }
 
 #[tokio::test]
+async fn da_manifest_cache_loads_without_reading_or_hashing_payload() {
+    let path = temp_db_path("da-manifest-cache");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let markets = MarketSet::new();
+    let env = TestEnv::new();
+    let accounts = AccountStore::new();
+    let (_, witness) =
+        coherent_header_and_witness(1, &accounts, &markets, &lifecycle, &env.bridge_state);
+    let mut artifact = DaArtifact::from_witness(&witness);
+    let expected_manifest = artifact.manifest.clone();
+
+    // Corrupt only the large payload after its publish-time metadata was
+    // computed. A payload-backed manifest path would fail its hash check;
+    // the independent manifest row remains directly readable.
+    artifact.payload[0] ^= 1;
+    store.save_da_artifact(artifact).await.unwrap();
+    assert_eq!(
+        store.load_da_manifest(1).await.unwrap(),
+        Some(expected_manifest)
+    );
+    assert!(matches!(
+        store
+            .load_da_artifact(1)
+            .await
+            .unwrap()
+            .unwrap()
+            .verify_payload_integrity(),
+        Err(DaArtifactIntegrityError::PayloadRootMismatch { .. })
+    ));
+}
+
+#[tokio::test]
 async fn save_block_with_witness_prunes_historical_witnesses() {
     let path = temp_db_path("store-witness-prune");
     let store = Store::open(&path).unwrap();
@@ -1284,7 +1330,7 @@ async fn witness_import_rejects_doctored_reserved_balance_high_and_low_and_accep
         let store = Store::open(&path).unwrap();
 
         let error = store
-            .import_witness_genesis(doctored, None, None, SequencerConfig::default())
+            .import_witness_genesis(doctored, None, None, store_test_sequencer_config())
             .await
             .unwrap_err();
         assert!(matches!(
@@ -1300,7 +1346,7 @@ async fn witness_import_rejects_doctored_reserved_balance_high_and_low_and_accep
     let path = temp_db_path("witness-reserved-balance-correct");
     let store = Store::open(&path).unwrap();
     store
-        .import_witness_genesis(correct, None, None, SequencerConfig::default())
+        .import_witness_genesis(correct, None, None, store_test_sequencer_config())
         .await
         .unwrap();
     let restored = store.load_state().await.unwrap().unwrap();
@@ -1408,11 +1454,8 @@ async fn test_store_roundtrips_account_fill_history() {
         vec![(account_id, fill.clone())]
     );
 
-    let seq = crate::sequencer::BlockSequencer::restore(
-        restored,
-        oracle,
-        crate::sequencer::SequencerConfig::default(),
-    );
+    let seq =
+        crate::sequencer::BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
     assert_eq!(
         seq.analytics()
             .account_fills(account_id, Some(market_id), 10, 0),
@@ -1422,7 +1465,7 @@ async fn test_store_roundtrips_account_fill_history() {
 
 #[tokio::test]
 async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+    use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-fill-recorder-snapshot");
@@ -1445,7 +1488,7 @@ async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
         markets.clone(),
         vec![],
         oracle.clone(),
-        SequencerConfig::default(),
+        store_test_sequencer_config(),
     );
     seq.produce_block(
         vec![
@@ -1470,7 +1513,7 @@ async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
     store.save_block(seq.snapshot()).await.unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
-    let restored_seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
+    let restored_seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
     let fills = restored_seq
         .analytics()
         .account_fills(buyer, Some(market_id), 10, 0);
@@ -1481,14 +1524,14 @@ async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
 
 #[tokio::test]
 async fn import_witness_drill_restores_head_and_produces_children() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+    use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{MarketId, NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let source_path = temp_db_path("store-import-witness-source");
     let fresh_path = temp_db_path("store-import-witness-fresh");
     let source_store = Store::open(&source_path).unwrap();
     let oracle = Arc::new(AdminOracle::new());
-    let config = SequencerConfig::default();
+    let config = store_test_sequencer_config();
 
     let mut markets = MarketSet::new();
     let active_a = markets.add_binary("Active A");
@@ -1858,7 +1901,7 @@ async fn import_witness_drill_restores_head_and_produces_children() {
 
 #[tokio::test]
 async fn test_store_account_fills_reads_full_persisted_history() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+    use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-account-fills-read");
@@ -1881,7 +1924,7 @@ async fn test_store_account_fills_reads_full_persisted_history() {
         markets.clone(),
         vec![],
         oracle.clone(),
-        SequencerConfig::default(),
+        store_test_sequencer_config(),
     );
     // Two blocks, each crossing one unit, so two distinct buyer fills persist.
     for height in 1..=2u64 {
@@ -1963,7 +2006,7 @@ async fn test_store_account_fills_reads_full_persisted_history() {
 
 #[tokio::test]
 async fn test_store_fill_cursor_pagination_survives_reopen() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+    use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-account-fills-cursor-reopen");
@@ -1986,7 +2029,7 @@ async fn test_store_fill_cursor_pagination_survives_reopen() {
         markets.clone(),
         vec![],
         oracle,
-        SequencerConfig::default(),
+        store_test_sequencer_config(),
     );
     for height in 1..=2u64 {
         let prepared = seq
@@ -2024,7 +2067,7 @@ async fn test_store_fill_cursor_pagination_survives_reopen() {
 
 #[tokio::test]
 async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+    use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-fill-cap-zero");
@@ -2044,7 +2087,7 @@ async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
 
     let config = SequencerConfig {
         max_fill_history_per_account: 0,
-        ..SequencerConfig::default()
+        ..store_test_sequencer_config()
     };
     let mut seq =
         BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, config);
@@ -2103,7 +2146,7 @@ async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
 
 #[tokio::test]
 async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
+    use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
     let path = temp_db_path("store-reopen-smoke");
@@ -2125,7 +2168,7 @@ async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
         markets.clone(),
         vec![],
         oracle.clone(),
-        SequencerConfig::default(),
+        store_test_sequencer_config(),
     );
     let production = seq.produce_block(
         vec![
@@ -2204,7 +2247,7 @@ async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
             > 0
     );
 
-    let restored_seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
+    let restored_seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
     let fills = restored_seq
         .analytics()
         .account_fills(buyer, Some(market_id), 10, 0);
@@ -2236,7 +2279,7 @@ fn test_open_rejects_legacy_store_layout() {
 #[tokio::test]
 async fn test_store_roundtrips_admit_log_and_replays_on_restore() {
     use crate::order_book::OrderBook;
-    use crate::sequencer::{BlockSequencer, SequencerConfig};
+    use crate::sequencer::BlockSequencer;
     use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
 
     let path = temp_db_path("store-admit-log");
@@ -2283,7 +2326,7 @@ async fn test_store_roundtrips_admit_log_and_replays_on_restore() {
     assert_eq!(restored.admit_log.len(), 1);
     assert!(restored.resting_orders.is_empty());
 
-    let seq = BlockSequencer::restore(restored, oracle, SequencerConfig::default());
+    let seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
     assert_eq!(
         seq.pending_orders_info(Some(aid)).len(),
         1,

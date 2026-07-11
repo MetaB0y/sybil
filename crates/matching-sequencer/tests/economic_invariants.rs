@@ -88,13 +88,14 @@ fn make_sequencer() -> (BlockSequencer, MarketSet) {
     }
     let markets = make_markets();
     let oracle = Arc::new(AdminOracle::new());
-    let seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets.clone(),
-        vec![],
-        oracle,
-        SequencerConfig::default(),
-    );
+    // Generated cases deliberately include dust values to probe arithmetic;
+    // admission-floor policy has focused tests in the sequencer crate.
+    let config = SequencerConfig {
+        min_resting_order_notional_nanos: 0,
+        ..SequencerConfig::default()
+    };
+    let seq =
+        BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, config);
     (seq, markets)
 }
 

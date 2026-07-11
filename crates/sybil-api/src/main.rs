@@ -71,6 +71,7 @@ fn sequencer_config_from_api(config: &ApiConfig) -> SequencerConfig {
         max_global_submissions_per_second: config.max_global_submissions_per_second,
         global_submission_burst: config.global_submission_burst,
         max_open_orders_per_account: config.max_open_orders_per_account,
+        min_resting_order_notional_nanos: config.min_resting_order_notional_nanos,
         max_pending_bundles_per_account: config.max_pending_bundles_per_account,
         block_history_capacity: config.block_history_capacity,
         max_price_history_points_per_market: config.max_price_history_points_per_market,

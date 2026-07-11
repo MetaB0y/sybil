@@ -11,9 +11,9 @@ use matching_sequencer::crypto::{
 use matching_sequencer::{
     AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId, AuthenticatedApiKeyCreate,
     AuthenticatedApiKeyRevoke, AuthenticatedKeyRegistration, AuthenticatedKeyRevocation,
-    AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey, SignedApiKeyCreate,
-    SignedApiKeyRevoke, SignedKeyRegistration, SignedKeyRevocation, SignedProfileUpdate,
-    api_key_hash,
+    AuthenticatedProfileUpdate, KeyScope, MAX_API_KEY_LABEL_BYTES, PublicKey, RegisteredPubkey,
+    SignedApiKeyCreate, SignedApiKeyRevoke, SignedKeyRegistration, SignedKeyRevocation,
+    SignedProfileUpdate, api_key_hash,
 };
 use p256::Sec1Point;
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -1096,6 +1096,13 @@ pub async fn create_api_key(
 ) -> Result<Json<CreateApiKeyResponse>, AppError> {
     let account_id = AccountId(id);
     let label = req.label.clone().filter(|s| !s.is_empty());
+    if let Some(label) = label.as_deref()
+        && label.len() > MAX_API_KEY_LABEL_BYTES
+    {
+        return Err(AppError::bad_request(format!(
+            "API-key label exceeds {MAX_API_KEY_LABEL_BYTES} bytes"
+        )));
+    }
     let canonical = canonical_api_key_create_bytes(account_id, label.as_deref(), req.nonce);
 
     let signer = match req.auth_scheme {

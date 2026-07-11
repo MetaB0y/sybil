@@ -14,6 +14,33 @@ pub fn validate_order_shape(order: &Order) -> Result<(), RejectionReason> {
         .map_err(|reason| RejectionReason::InvalidOrder(reason.to_string()))
 }
 
+/// Admission-only resource floor for orders that can become durable resting
+/// state. This intentionally does not alter the engine/witness wire validator:
+/// historical and guest inputs retain their existing format and semantics.
+pub fn validate_resting_order_shape(
+    order: &Order,
+    min_notional_nanos: u64,
+) -> Result<(), RejectionReason> {
+    validate_order_shape(order)?;
+    if order.max_fill.0 == 0 {
+        return Err(RejectionReason::InvalidOrder(
+            "resting order quantity must be greater than zero".to_string(),
+        ));
+    }
+    if order.limit_price.0 == 0 {
+        return Err(RejectionReason::InvalidOrder(
+            "resting order price must be greater than zero".to_string(),
+        ));
+    }
+    let notional = checked_notional_ceil_i64(order.limit_price.0, order.max_fill.0)? as u64;
+    if notional < min_notional_nanos {
+        return Err(RejectionReason::InvalidOrder(format!(
+            "resting order notional {notional} is below minimum {min_notional_nanos} nanos"
+        )));
+    }
+    Ok(())
+}
+
 fn checked_notional_ceil_i64(price: u64, qty: u64) -> Result<i64, RejectionReason> {
     let numerator = (price as i128)
         .checked_mul(qty as i128)

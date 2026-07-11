@@ -27,14 +27,15 @@ fn make_sequencer(balance: i64) -> (BlockSequencer, AccountId) {
     let aid = accounts.create_account(balance);
     let markets = MarketSet::new();
     let oracle = Arc::new(AdminOracle::new());
+    // Most kernel tests exercise settlement/replay semantics with deliberately
+    // tiny fixture quantities. Admission-floor behavior has dedicated tests
+    // below, so keep that product policy out of unrelated kernel assertions.
+    let config = SequencerConfig {
+        min_resting_order_notional_nanos: 0,
+        ..SequencerConfig::default()
+    };
     (
-        BlockSequencer::with_default_solver(
-            accounts,
-            markets,
-            vec![],
-            oracle,
-            SequencerConfig::default(),
-        ),
+        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config),
         aid,
     )
 }
@@ -45,6 +46,58 @@ fn fresh_public_key() -> crate::crypto::PublicKey {
             &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
         );
     crate::crypto::PublicKey(*signing_key.verifying_key())
+}
+
+#[test]
+fn api_key_churn_is_lifetime_bounded_and_account_stays_well_below_qmdb_limit() {
+    let (mut seq, aid) = make_sequencer(0);
+    for index in 0..crate::account::MAX_API_KEYS_PER_ACCOUNT {
+        let mut hash = [0u8; 32];
+        hash[..8].copy_from_slice(&(index as u64).to_le_bytes());
+        let id = seq
+            .create_api_key(
+                aid,
+                hash,
+                Some("x".repeat(crate::account::MAX_API_KEY_LABEL_BYTES)),
+                index as u64,
+            )
+            .unwrap();
+        seq.revoke_api_key(aid, id, 10_000 + index as u64).unwrap();
+    }
+
+    let account = seq.accounts.get(aid).unwrap();
+    assert_eq!(
+        account.api_keys.len(),
+        crate::account::MAX_API_KEYS_PER_ACCOUNT
+    );
+    assert!(account.api_keys.iter().all(|key| !key.is_active()));
+    let serialized = rmp_serde::to_vec(account).unwrap();
+    assert!(serialized.len() <= crate::account::MAX_SERIALIZED_ACCOUNT_BYTES);
+    assert!(serialized.len() < (1 << 20));
+
+    let error = seq
+        .create_api_key(aid, [0xff; 32], Some("after-churn".to_string()), 99_999)
+        .unwrap_err();
+    assert!(matches!(error, SequencerError::ApiKeyLimit { .. }));
+}
+
+#[test]
+fn api_key_label_and_aggregate_account_byte_budgets_are_preflighted() {
+    let (mut seq, aid) = make_sequencer(0);
+    let too_long = "x".repeat(crate::account::MAX_API_KEY_LABEL_BYTES + 1);
+    assert!(matches!(
+        seq.can_create_api_key(aid, [1; 32], Some(&too_long), 1),
+        Err(SequencerError::ApiKeyLabelTooLong { .. })
+    ));
+    assert!(seq.accounts.get(aid).unwrap().api_keys.is_empty());
+
+    seq.accounts.get_mut(aid).unwrap().profile.avatar_seed =
+        Some("x".repeat(crate::account::MAX_SERIALIZED_ACCOUNT_BYTES));
+    assert!(matches!(
+        seq.can_create_api_key(aid, [2; 32], None, 2),
+        Err(SequencerError::AccountStorageBudgetExceeded { .. })
+    ));
+    assert!(seq.accounts.get(aid).unwrap().api_keys.is_empty());
 }
 
 fn q(shares: u64) -> u64 {
@@ -122,6 +175,7 @@ fn sequencer_from_scenario_problem(
     let config = SequencerConfig {
         order_ttl_blocks: 2,
         debug_verify_full: true,
+        min_resting_order_notional_nanos: 0,
         ..SequencerConfig::default()
     };
     let mut accounts = AccountStore::new();
@@ -1660,7 +1714,10 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
         markets.clone(),
         vec![],
         oracle.clone(),
-        SequencerConfig::default(),
+        SequencerConfig {
+            min_resting_order_notional_nanos: 0,
+            ..SequencerConfig::default()
+        },
     );
     committed.produce_block(Vec::new(), 1_000);
     assert_eq!(committed.next_order_id(), 1);
@@ -2228,6 +2285,96 @@ fn key_registry_mutations_refresh_account_keys_digest() {
         remaining_key_digest
     );
     assert_ne!(remaining_key_digest, two_key_digest);
+}
+
+#[test]
+fn signing_key_churn_stops_at_verifier_block_limit_and_block_remains_valid() {
+    use p256::ecdsa::signature::Signer as _;
+
+    let (mut seq, aid) = make_sequencer(0);
+    let primary_signing =
+        <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+        );
+    let primary = crate::crypto::PublicKey(*primary_signing.verifying_key());
+    seq.register_pubkey_with_scheme(
+        aid,
+        primary.clone(),
+        crate::crypto::AccountAuthScheme::RawP256,
+    )
+    .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    let secondary = fresh_public_key();
+    let secondary_meta =
+        crate::crypto::RegisteredPubkey::primary(aid, crate::crypto::AccountAuthScheme::RawP256);
+    let secondary_record = crate::digest::key_record(&secondary, &secondary_meta);
+    let mut signer_pubkey = [0u8; 33];
+    signer_pubkey.copy_from_slice(&primary.compressed_bytes());
+
+    for op_index in 0..sybil_verifier::MAX_KEY_OPS_PER_BLOCK {
+        let account = seq.accounts.get(aid).unwrap().clone();
+        if op_index % 2 == 0 {
+            let canonical = sybil_verifier::canonical_key_registration_bytes(
+                seq.genesis_hash().unwrap(),
+                aid.0,
+                &secondary_record,
+                account.keys_digest,
+                account.events_digest,
+            );
+            let signature: p256::ecdsa::Signature = primary_signing.sign(&canonical);
+            seq.register_pubkey_with_meta_authorized(
+                aid,
+                secondary.clone(),
+                secondary_meta.clone(),
+                sybil_verifier::KeyOpAuth::RawP256 {
+                    signer_pubkey,
+                    signature: signature.to_bytes().into(),
+                },
+            )
+            .unwrap();
+        } else {
+            let canonical = sybil_verifier::canonical_key_revocation_bytes(
+                seq.genesis_hash().unwrap(),
+                aid.0,
+                &secondary_record,
+                account.keys_digest,
+                account.events_digest,
+            );
+            let signature: p256::ecdsa::Signature = primary_signing.sign(&canonical);
+            seq.revoke_signing_key(
+                aid,
+                &secondary,
+                sybil_verifier::KeyOpAuth::RawP256 {
+                    signer_pubkey,
+                    signature: signature.to_bytes().into(),
+                },
+            )
+            .unwrap();
+        }
+    }
+
+    assert!(matches!(
+        seq.can_register_authorized_pubkey(aid, &secondary),
+        Err(SequencerError::KeyOpLimit { count, limit })
+            if count == sybil_verifier::MAX_KEY_OPS_PER_BLOCK
+                && limit == sybil_verifier::MAX_KEY_OPS_PER_BLOCK
+    ));
+    let production = seq.produce_block(vec![], 2_000);
+    let key_ops = production
+        .witness
+        .system_events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                sybil_verifier::SystemEventWitness::KeyRegistered { .. }
+                    | sybil_verifier::SystemEventWitness::KeyRevoked { .. }
+            )
+        })
+        .count();
+    assert_eq!(key_ops, sybil_verifier::MAX_KEY_OPS_PER_BLOCK);
+    assert!(sybil_verifier::verify_full(&production.witness, false).valid);
 }
 
 /// Wiring + accumulation: the live block path feeds each block's
@@ -3405,6 +3552,44 @@ fn direct_admission_rejects_oversized_quantity() {
         AdmitOutcome::Rejected(_) => {}
         other => panic!("expected oversized quantity rejection, got {:?}", other),
     }
+}
+
+#[test]
+fn direct_write_path_rejects_zero_and_subminimum_resting_orders() {
+    let (mut seq, aid, _markets, m0, _) = make_grouped_sequencer(100 * NANOS_PER_DOLLAR as i64);
+    assert_eq!(
+        seq.config.min_resting_order_notional_nanos,
+        crate::sequencer::DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS
+    );
+
+    for (order, expected) in [
+        (
+            raw_single_market_order(m0, [1, 0], 0, q(1)),
+            "price must be greater than zero",
+        ),
+        (
+            raw_single_market_order(m0, [1, 0], NANOS_PER_DOLLAR, 0),
+            "quantity must be greater than zero",
+        ),
+        (raw_single_market_order(m0, [1, 0], 1, 1), "below minimum"),
+    ] {
+        match seq.try_admit_direct(single_order_sub(aid, order), 0) {
+            AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
+                reason: RejectionReason::InvalidOrder(reason),
+                ..
+            })) => assert!(reason.contains(expected), "unexpected reason: {reason}"),
+            other => panic!("expected admission rejection, got {other:?}"),
+        }
+    }
+    assert_eq!(seq.open_orders_for_account(aid), 0);
+
+    // One minimum quantity unit at a $1 limit is exactly the default floor.
+    let boundary = raw_single_market_order(m0, [1, 0], NANOS_PER_DOLLAR, 1);
+    assert!(matches!(
+        seq.try_admit_direct(single_order_sub(aid, boundary), 0),
+        AdmitOutcome::Admitted { .. }
+    ));
+    assert_eq!(seq.open_orders_for_account(aid), 1);
 }
 
 #[test]

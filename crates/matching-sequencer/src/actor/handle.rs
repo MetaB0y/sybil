@@ -766,6 +766,11 @@ impl SequencerHandle {
             .await?
     }
 
+    pub async fn get_da_manifest(&self, height: u64) -> Result<DaManifestLookup, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetDaManifest(height, reply))
+            .await?
+    }
+
     pub async fn get_recent_blocks(&self, n: usize) -> Result<Vec<SealedBlock>, SequencerError> {
         self.read_query(move |state| {
             let cap = state.sequencer.config.block_history_capacity;
@@ -1184,10 +1189,18 @@ mod tests {
     }
 
     fn make_test_sequencer() -> (BlockSequencer, AccountId) {
-        make_test_sequencer_with_config(SequencerConfig::default())
+        make_test_sequencer_with_config(SequencerConfig {
+            // Actor tests use minimum-unit orders to isolate mailbox/WAL
+            // behavior. The admission floor is covered in sequencer tests.
+            min_resting_order_notional_nanos: 0,
+            ..SequencerConfig::default()
+        })
     }
 
-    fn make_test_sequencer_with_config(config: SequencerConfig) -> (BlockSequencer, AccountId) {
+    fn make_test_sequencer_with_config(mut config: SequencerConfig) -> (BlockSequencer, AccountId) {
+        // Callers customize actor limits, persistence, and timing. Their tiny
+        // order fixtures are not admission-policy tests.
+        config.min_resting_order_notional_nanos = 0;
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
@@ -1233,6 +1246,7 @@ mod tests {
     async fn produce_block_rpc_returns_error_when_paused() {
         let config = SequencerConfig {
             block_interval: Duration::from_secs(60),
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
         let (seq, _) = make_test_sequencer_with_config(config);
@@ -1419,6 +1433,7 @@ mod tests {
             global_submission_burst: 1,
             max_submissions_per_account_per_second: 1_000,
             submission_burst_per_account: 1_000,
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
         let mut accounts = AccountStore::new();
@@ -1767,6 +1782,7 @@ mod tests {
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
             block_interval: Duration::from_secs(60),
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
         let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
@@ -3147,6 +3163,7 @@ mod tests {
         let config = SequencerConfig {
             max_price_history_points_per_market: 1,
             block_interval: Duration::from_secs(60),
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
 
@@ -3297,6 +3314,7 @@ mod tests {
             block_interval: Duration::from_secs(60),
             max_equity_points_per_account: 0,
             max_history_events_per_account: 0,
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
 
@@ -3430,6 +3448,7 @@ mod tests {
         let m0 = markets.add_binary("Test");
         let config = SequencerConfig {
             block_interval: Duration::from_secs(60),
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
         let seq = BlockSequencer::new(

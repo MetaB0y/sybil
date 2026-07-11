@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-07-01
+last_verified: 2026-07-11
 ---
 
 # Persistence
@@ -184,6 +184,11 @@ Persisted today:
 - **Full block replay payloads**: `SealedBlock` rows in `blocks_full`, keyed by
   height, used as the exact-height fallback for `GET /v1/blocks/{height}` when
   the hot block ring has evicted the block or after restart.
+- **DA serving artifacts**: canonical witness payloads in `da_artifacts` plus
+  small publish-time metadata in `da_manifests`, keyed by height. The paired
+  rows are written atomically after block commit and pruned together with the
+  `blocks_full` retention floor. They are availability artifacts, not part of
+  the redb commit fence.
 - **Raw price history**: per-market mark-price rows in `price_points`, keyed by
   `(market_id, height)`, used by `GET /v1/markets/{id}/prices/history` when a
   durable store is configured.

@@ -43,7 +43,8 @@ use crate::sequencer::{
     SequencerConfig,
 };
 use crate::store::{
-    AutoResolutionRecord, ControlPlaneCommand, DaArtifact, DaArtifactLookup, HistoryRetentionPolicy,
+    AutoResolutionRecord, ControlPlaneCommand, DaArtifact, DaArtifactLookup, DaManifestLookup,
+    HistoryRetentionPolicy,
 };
 use crate::{
     AccountSnapshotSlot, QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts,

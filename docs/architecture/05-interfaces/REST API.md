@@ -29,9 +29,10 @@ deprecated bare-account form for service/dev tooling only; the old unsigned
 
 > [!warning] Public onboarding is not production-safe yet
 > The route currently permits unlimited free accounts and caller-selected demo
-> balances. API-key record growth, zero-reservation orders across those
-> accounts, and several unbounded history/read paths also lack stock or byte
-> budgets. Order token buckets limit flow, not accumulated state. See the
+> balances. Read-API-key recovery state and durable resting-order admission are
+> now bounded, but free account creation and several unbounded history paths
+> still lack stock or byte budgets. Order token buckets limit flow, not all
+> accumulated state. See the
 > [2026-07-11 resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md).
 
 Bridge deposit ingestion is scaffolding for [[L1 Settlement and Vault]] rather than a completed trust boundary. `POST /v1/bridge/deposits` is service-only and credits the sequencer through the existing `pending_l1_deposits` WAL, but today it trusts the operator/indexer-supplied L1 event fields. `POST /v1/bridge/withdrawals/signed` verifies a P256 signature over the canonical withdrawal payload against the account key registry before using the existing `pending_bridge_withdrawals` WAL; `POST /v1/bridge/withdrawals` remains a service-only operator path. SYB-178/SYB-188 still need proof-backed L1 deposit inclusion/finality and vault withdrawal authorization before these paths are production trust-complete.
@@ -94,16 +95,17 @@ requires a persistent store-backed sequencer; in-memory dev sequencers return
 `GET /v1/da/{height}/manifest` and `GET /v1/da/{height}/payload` expose the
 retained canonical witness payload and its typed DA manifest. The manifest is
 public; the payload requires the service token. They require store-backed
-DA artifact rows written after block commit; in-memory sequencers and artifact
-gaps return `404 Not Found`, including the oldest retained block-history
-height when the store knows it. Before either route serves data, the API
-recomputes `payload_root` over the bytes and fails closed with `500` on a
-mismatch. Clients must still verify the SYB-80 binding chain themselves:
+DA artifact rows written after block commit; the small manifest is cached in a
+separate row in the same transaction as the payload artifact. In-memory
+sequencers and artifact gaps return `404 Not Found`, including the oldest
+retained block-history height when the store knows it. Manifest reads therefore
+do not load or hash the witness payload. Payload reads still recompute
+`payload_root` over the returned bytes and fail closed with `500` on a mismatch.
+Clients must still verify the SYB-80 binding chain themselves:
 `payload_root -> witness_root -> da_commitment -> L1 RootRecord`. Retention is
 the existing block-history retention behavior, not a new DA policy.
-The public manifest route currently loads and re-hashes the full retained
-payload per request and has no dedicated read limiter; treat that as an open
-availability issue, not a harmless metadata read.
+Both retained DA routes share a dedicated global/per-client token bucket and a
+hard in-flight concurrency cap before dispatching store work.
 
 ## Key Properties
 - Axum-based, async, with OpenAPI auto-generation
@@ -111,6 +113,7 @@ availability issue, not a harmless metadata read.
 - All values in [[Nanos and Integer Arithmetic|nanos]] (u64)
 - Service bearer auth gates operator writes in production; dev mode is limited to local conveniences and diagnostics
 - Order-write endpoints return `429 Too Many Requests` with `Retry-After` under abnormal load
+- Retained DA reads return `429` when their dedicated rate or concurrency budget is exhausted
 - State proof endpoint returns inclusion or exclusion proofs for the latest committed qMDB root
 - DA endpoints expose public typed manifests and service-gated retained witness payload bytes
 - Order submissions support GTC, IOC, and GTD time-in-force

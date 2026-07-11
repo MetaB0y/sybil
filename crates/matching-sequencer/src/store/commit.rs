@@ -585,6 +585,7 @@ impl Store {
         txn.open_table(BLOCKS_FULL)?;
         txn.open_table(BLOCK_WITNESSES)?;
         txn.open_table(DA_ARTIFACTS)?;
+        txn.open_table(DA_MANIFESTS)?;
         txn.open_table(PUBKEY_REGISTRY)?;
         txn.open_table(PUBKEY_AUTH_SCHEMES)?;
         txn.open_table(COUNTERS)?;

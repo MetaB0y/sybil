@@ -938,7 +938,7 @@ async fn service_routes_succeed_with_token_in_prod() {
                 "type": "BuyYes",
                 "market_id": market_id,
                 "limit_price_nanos": 500_000_000u64,
-                "quantity": 1u64
+                "quantity": 2u64
             }]
         }),
     )

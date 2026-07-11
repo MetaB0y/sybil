@@ -3,7 +3,7 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-06
+last_verified: 2026-07-11
 ---
 
 Sybil runs the same `sybil-api` binary in three very different postures. The
@@ -67,6 +67,10 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_BLOCK_HISTORY_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` | `0` (no prune) | `0` | `0` | no |
 | `SYBIL_RAW_PRICE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `0` | no |
+| `SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS` | `1000000` | `1000000` | `1000000` | no |
+| `SYBIL_HTTP_DA_GLOBAL_RPS` / `BURST` | `20` / `40` | `20` / `40` | `20` / `40` | no |
+| `SYBIL_HTTP_DA_CLIENT_RPS` / `BURST` | `10` / `20` | `10` / `20` | `10` / `20` | no |
+| `SYBIL_HTTP_DA_MAX_CONCURRENCY` | `4` | `4` | `4` | no |
 
 > Constraint note: the `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` compose value is
 > owned by a separate lane (SYB-193 / AR-5). This doc references it but does not
@@ -124,9 +128,11 @@ At boot, before opening the store or binding the socket,
   design limitation, not a config knob.
 - DA/custody artifacts are separate from `block_witnesses`: when a store is
   configured, each committed block schedules a best-effort write to
-  `da_artifacts` containing the canonical witness payload bytes and typed
-  manifest served by `GET /v1/da/{height}/manifest` and
-  `/v1/da/{height}/payload`. These rows are retained with the existing
+  `da_artifacts` containing the canonical witness payload bytes and a paired
+  small `da_manifests` metadata row. The public manifest endpoint reads only
+  the cached metadata; the service-gated payload endpoint reads and integrity-
+  checks the large artifact. Both endpoints have dedicated rate and concurrency
+  limits. These rows are retained together with the existing
   `blocks_full` history policy (`SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` and
   `SYBIL_HISTORY_PRUNE_MAX_ROWS`). With `SYBIL_DATA_DIR` unset, no DA artifacts
   are retained. With block-history pruning disabled, rows remain until the

@@ -75,6 +75,38 @@ impl BlockSequencer {
         Ok(())
     }
 
+    /// Preflight a validity-proven registration, including the verifier's
+    /// per-block key-operation bound. Initial account keys are carried inside
+    /// `CreateAccount` and are not counted by `MAX_KEY_OPS_PER_BLOCK`.
+    pub fn can_register_authorized_pubkey(
+        &self,
+        account_id: AccountId,
+        pubkey: &crate::crypto::PublicKey,
+    ) -> Result<(), SequencerError> {
+        self.can_register_pubkey(account_id, pubkey)?;
+        self.can_accept_key_op()
+    }
+
+    fn can_accept_key_op(&self) -> Result<(), SequencerError> {
+        let count = self
+            .pending_system_events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    SystemEvent::KeyRegistered { .. } | SystemEvent::KeyRevoked { .. }
+                )
+            })
+            .count();
+        if count >= sybil_verifier::MAX_KEY_OPS_PER_BLOCK {
+            return Err(SequencerError::KeyOpLimit {
+                count,
+                limit: sybil_verifier::MAX_KEY_OPS_PER_BLOCK,
+            });
+        }
+        Ok(())
+    }
+
     /// Preflight the unsigned first-key bootstrap.
     ///
     /// This is deliberately stricter than signed key registration: the target
@@ -139,7 +171,7 @@ impl BlockSequencer {
         mut meta: crate::crypto::RegisteredPubkey,
         authorization: sybil_verifier::KeyOpAuth,
     ) -> Result<(), SequencerError> {
-        self.can_register_pubkey(account_id, &pubkey)?;
+        self.can_register_authorized_pubkey(account_id, &pubkey)?;
         self.validate_quarantine_claim_for_account(account_id)?;
         self.capture_system_account_baseline(account_id);
         meta.account_id = account_id;
@@ -223,6 +255,7 @@ impl BlockSequencer {
         account_id: AccountId,
         target: &crate::crypto::PublicKey,
     ) -> Result<(), SequencerError> {
+        self.can_accept_key_op()?;
         let registered = self
             .pubkey_registry
             .get(target)
@@ -309,18 +342,11 @@ impl BlockSequencer {
         label: Option<String>,
         created_at_ms: u64,
     ) -> Result<u64, SequencerError> {
-        let account = self.accounts.get_mut(account_id).ok_or({
-            SequencerError::Rejected(Rejection {
-                order_id: 0,
-                account_id,
-                reason: RejectionReason::AccountNotFound,
-            })
-        })?;
-        // Collisions are astronomically unlikely, but a duplicate hash would
-        // corrupt the reverse index, so reject rather than shadow it.
-        if account.api_keys.iter().any(|k| k.hash == token_hash) {
-            return Err(SequencerError::AccountAlreadyRegistered);
-        }
+        self.can_create_api_key(account_id, token_hash, label.as_deref(), created_at_ms)?;
+        let account = self
+            .accounts
+            .get_mut(account_id)
+            .expect("API-key creation preflight requires the account to remain present");
         let id = account.next_api_key_id;
         account.next_api_key_id = account.next_api_key_id.saturating_add(1);
         account.api_keys.push(crate::account::ApiKeyRecord {
@@ -332,6 +358,64 @@ impl BlockSequencer {
         });
         self.api_key_index.insert(token_hash, account_id);
         Ok(id)
+    }
+
+    /// Preflight read API-key creation before nonce/WAL mutation. The count
+    /// includes revoked tombstones so churn cannot grow recovery state, and the
+    /// full candidate account is serialized with the persistence codec before
+    /// it is admitted.
+    pub fn can_create_api_key(
+        &self,
+        account_id: AccountId,
+        token_hash: [u8; 32],
+        label: Option<&str>,
+        created_at_ms: u64,
+    ) -> Result<(), SequencerError> {
+        let account = self.accounts.get(account_id).ok_or({
+            SequencerError::Rejected(Rejection {
+                order_id: 0,
+                account_id,
+                reason: RejectionReason::AccountNotFound,
+            })
+        })?;
+        if let Some(label) = label {
+            if label.len() > crate::account::MAX_API_KEY_LABEL_BYTES {
+                return Err(SequencerError::ApiKeyLabelTooLong {
+                    bytes: label.len(),
+                    limit: crate::account::MAX_API_KEY_LABEL_BYTES,
+                });
+            }
+        }
+        if account.api_keys.len() >= crate::account::MAX_API_KEYS_PER_ACCOUNT {
+            return Err(SequencerError::ApiKeyLimit {
+                count: account.api_keys.len(),
+                limit: crate::account::MAX_API_KEYS_PER_ACCOUNT,
+            });
+        }
+        // Collisions are astronomically unlikely, but a duplicate hash would
+        // corrupt the reverse index, so reject rather than shadow it.
+        if account.api_keys.iter().any(|k| k.hash == token_hash) {
+            return Err(SequencerError::AccountAlreadyRegistered);
+        }
+        let mut candidate = account.clone();
+        candidate.next_api_key_id = candidate.next_api_key_id.saturating_add(1);
+        candidate.api_keys.push(crate::account::ApiKeyRecord {
+            id: account.next_api_key_id,
+            hash: token_hash,
+            label: label.map(str::to_owned),
+            created_at_ms,
+            revoked_at_ms: None,
+        });
+        let bytes = rmp_serde::to_vec(&candidate)
+            .map_err(|error| SequencerError::Persistence(error.to_string()))?
+            .len();
+        if bytes > crate::account::MAX_SERIALIZED_ACCOUNT_BYTES {
+            return Err(SequencerError::AccountStorageBudgetExceeded {
+                bytes,
+                limit: crate::account::MAX_SERIALIZED_ACCOUNT_BYTES,
+            });
+        }
+        Ok(())
     }
 
     /// Revoke a read API key by id. Idempotent-safe: an already-revoked or

@@ -92,7 +92,11 @@ scheme and hostname. Misconfiguring either locks out passkey actions.
 
 Account reads use a separate read-scoped bearer. Passkey login creates such a
 bearer after an assertion; read keys cannot trade, withdraw, or mutate signing
-keys.
+keys. An account retains at most 64 read-key records over its lifetime,
+including revoked tombstones, and labels are limited to 128 UTF-8 bytes. The
+sequencer also serializes the candidate recovery account before accepting a new
+read key and keeps it under a conservative 256 KiB budget, well below qMDB's
+1 MiB value-codec ceiling.
 
 ## Recovery
 

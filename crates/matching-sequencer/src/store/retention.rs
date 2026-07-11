@@ -175,11 +175,13 @@ pub(super) fn prune_history_redb(
         }
         if remaining > 0 {
             let mut table = txn.open_table(DA_ARTIFACTS)?;
+            let mut manifests = txn.open_table(DA_MANIFESTS)?;
             let mut iter = table.extract_from_if(0..floor, |_, _| true)?;
             while remaining > 0 {
-                let Some(_) = iter.next().transpose()? else {
+                let Some((height, _)) = iter.next().transpose()? else {
                     break;
                 };
+                manifests.remove(height.value())?;
                 da_artifacts_pruned += 1;
                 remaining -= 1;
             }
