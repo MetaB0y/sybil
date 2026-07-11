@@ -7,6 +7,8 @@
 # trading flows are HARD assertions, never silent SKIPs:
 #
 #   * CORS preflight from the real app origin (the browser-breakage class).
+#   * Deployed web shell + one Next.js static asset (the broken-web-promotion
+#     class that API-only checks cannot see).
 #   * Passkey onboarding: unauthenticated account create + first-key bootstrap
 #     (the HTTP-401 regression that shipped would FAIL here, not skip).
 #   * Fills-after-seed: a deterministic crossing seed MUST increase matched
@@ -243,9 +245,72 @@ check_services() {
     smoke_check_compose_services "$DOCKER_SSH" "$COMPOSE_PROJECT" pass fail skip
 }
 
-# ── 2. CORS preflight from the app origin ───────────────────────────────────
+# ── 2a. Deployed web shell + static asset ──────────────────────────────────────
+check_web_app() {
+    section "2a. Deployed web app ($APP_ORIGIN)"
+
+    local code asset_url asset_meta asset_code asset_type asset_size
+    if ! code="$(curl -sS -L -m 30 -o "$TMP/app.html" -w '%{http_code}' "$APP_ORIGIN/")"; then
+        fail "GET $APP_ORIGIN/ failed (deployed web app unreachable)"
+        return
+    fi
+    if ! is_2xx "$code"; then
+        fail "GET $APP_ORIGIN/ -> $code (deployed web app unavailable)"
+        return
+    fi
+    if grep -Fq '<title>Sybil</title>' "$TMP/app.html"; then
+        pass "GET $APP_ORIGIN/ -> $code with Sybil app shell"
+    else
+        fail "GET $APP_ORIGIN/ -> $code but the Sybil app shell is missing"
+        return
+    fi
+
+    # A 200 HTML shell is not sufficient for this interactive app: a stale or
+    # misrouted /_next/static path leaves users with an unhydrated page. Resolve
+    # the first emitted JavaScript asset exactly as a browser would and require
+    # a non-empty JavaScript response.
+    asset_url="$(python3 - "$APP_ORIGIN" "$TMP/app.html" <<'PY'
+import html
+import re
+import sys
+from pathlib import Path
+from urllib.parse import urljoin
+
+origin, path = sys.argv[1:]
+document = Path(path).read_text(encoding="utf-8", errors="replace")
+assets = re.findall(r'(?:src|href)="([^"]+)"', document)
+asset = next(
+    (html.unescape(value) for value in assets
+     if "/_next/static/" in value and ".js" in value),
+    "",
+)
+if asset:
+    print(urljoin(f"{origin}/", asset))
+PY
+)"
+    if [[ -z "$asset_url" ]]; then
+        fail "GET $APP_ORIGIN/ returned no Next.js JavaScript asset"
+        return
+    fi
+    if ! asset_meta="$(curl -sS -L -m 30 -o /dev/null \
+        -w '%{http_code}|%{content_type}|%{size_download}' "$asset_url")"; then
+        fail "GET $asset_url failed (Next.js static asset unreachable)"
+        return
+    fi
+    IFS='|' read -r asset_code asset_type asset_size <<< "$asset_meta"
+    if is_2xx "$asset_code" \
+       && [[ "$asset_type" == *javascript* ]] \
+       && [[ "$asset_size" =~ ^[0-9]+$ ]] \
+       && (( asset_size > 0 )); then
+        pass "Next.js asset -> $asset_code ($asset_type, ${asset_size}B)"
+    else
+        fail "Next.js asset -> ${asset_code:-?} (${asset_type:-no content-type}, ${asset_size:-0}B)"
+    fi
+}
+
+# ── 2b. CORS preflight from the app origin ──────────────────────────────────
 check_cors() {
-    section "2. CORS preflight (browser origin: $APP_ORIGIN)"
+    section "2b. CORS preflight (browser origin: $APP_ORIGIN)"
     local path="/v1/accounts"
     local hdr code allow
     curl -sS -m 20 -D "$TMP/cors_hdr" -o /dev/null -X OPTIONS "$BASE$path" \
@@ -729,6 +794,7 @@ echo "  docker     : $([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo 
 
 check_liveness
 check_services
+check_web_app
 check_cors
 check_onboarding
 check_markets
