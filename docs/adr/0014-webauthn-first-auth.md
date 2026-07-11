@@ -41,7 +41,7 @@ not new design.
 
 **Passkeys/WebAuthn are the primary authentication path, verified in-guest.** Raw
 P256 is kept for programmatic / agent keys (see
-[capability-mask-keys](../../design/capability-mask-keys.md)). The guest verifies a
+[capability-mask-keys](https://github.com/MetaB0y/sybil/blob/main/design/capability-mask-keys.md)). The guest verifies a
 WebAuthn assertion by replicating `webauthn.rs`: reconstruct `authenticatorData`,
 `SHA-256(clientDataJSON)`, verify the embedded challenge equals
 `base64url(SHA-256(canonical_bytes))`, check `type`/`origin`, then ECDSA-verify

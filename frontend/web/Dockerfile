@@ -11,7 +11,7 @@
 # IMPORTANT: NEXT_PUBLIC_* are inlined into the client bundle at BUILD time.
 # They are build args, NOT runtime env — changing them requires a rebuild.
 
-ARG NODE_VERSION=22
+ARG NODE_VERSION=24
 
 # ── deps: install node_modules from the lockfile ──────────────────────────────
 FROM node:${NODE_VERSION}-slim AS deps

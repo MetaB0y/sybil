@@ -6,13 +6,14 @@ use std::thread;
 
 use commonware_codec::RangeCfg;
 use commonware_cryptography::Sha256;
+use commonware_parallel::Sequential;
 use commonware_runtime::buffer::paged::CacheRef;
-use commonware_runtime::{tokio as commonware_tokio, Runner as _};
+use commonware_runtime::{Runner as _, tokio as commonware_tokio};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
 use commonware_storage::merkle::mmr::Family as MmrFamily;
-use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableDb;
+use commonware_storage::merkle::mmr::full::Config as MmrConfig;
 use commonware_storage::qmdb::current::VariableConfig;
+use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableDb;
 use commonware_storage::translator::OneCap;
 use futures::StreamExt;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
@@ -41,6 +42,7 @@ type AccountDb = OrderedVariableDb<
     Sha256,
     OneCap,
     CHUNK_SIZE,
+    Sequential,
 >;
 
 pub struct LoadedAccountSnapshot {
@@ -182,7 +184,7 @@ async fn open_db(context: commonware_tokio::Context) -> Result<AccountDb, StoreE
             items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
             write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
             metadata_partition: "accounts-mmr-metadata".to_string(),
-            thread_pool: None,
+            strategy: Sequential,
             page_cache: page_cache.clone(),
         },
         journal_config: VConfig {

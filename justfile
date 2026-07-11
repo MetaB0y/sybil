@@ -10,7 +10,19 @@ test:
 
 # Run clippy lints
 lint:
-    RUSTFLAGS="-Dwarnings" cargo clippy --workspace --all-features
+    RUSTFLAGS="-Dwarnings" cargo clippy --workspace --all-targets --all-features
+
+# Compile every root-workspace target and feature combination.
+workspace-check:
+    cargo check --workspace --all-targets --all-features
+
+# Keep the compiler, Edition, manifests, workflows, and Docker image aligned.
+rust-workspaces-check:
+    ./scripts/check-rust-workspaces.py
+
+# Compile every Cargo workspace intentionally excluded from the root workspace.
+standalone-check:
+    ./scripts/check-rust-standalone.sh
 
 # Format code
 fmt:
@@ -99,42 +111,12 @@ openvm-setup-evm-download:
 # OpenVM v2.0.0 forwards RUSTFLAGS to the guest rustc invocation; remap all
 # checkout/toolchain roots that can otherwise leak into panic and debug strings.
 openvm-commit output_dir="target/openvm/sybil":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-    rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
-    # Keep the remap flags byte-identical across checkouts. The rustc wrapper
-    # expands these sentinels only after Cargo computes its unit metadata.
-    remap_flags="--remap-path-prefix=/__SYBIL_WORKSPACE_ROOT__=/sybil-src --remap-path-prefix=/__SYBIL_CARGO_HOME__=/cargo --remap-path-prefix=/__SYBIL_RUSTUP_HOME__=/rustc"
-    PATH="{{justfile_directory()}}/scripts:$PATH" \
-      SYBIL_WORKSPACE_ROOT="$(pwd -P)" \
-      SYBIL_CARGO_HOME="$cargo_home" \
-      SYBIL_RUSTUP_HOME="$rustup_home" \
-      RUSTC_WRAPPER="openvm-rustc-wrapper.sh" \
-      RUSTFLAGS="$remap_flags${RUSTFLAGS:+ $RUSTFLAGS}" \
-      cargo openvm commit \
-        --manifest-path zk/openvm-guest/Cargo.toml \
-        --config zk/openvm-guest/openvm.toml \
-        --output-dir {{output_dir}}
+    ./scripts/openvm-commit.sh main {{output_dir}}
 
 # Build and print the independent Form-L escape guest commitments. This is a
 # commitment-only operation: it does not run setup, keygen, or proving.
 openvm-escape-commit output_dir="target/openvm/sybil-escape":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-    rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
-    remap_flags="--remap-path-prefix=/__SYBIL_WORKSPACE_ROOT__=/sybil-src --remap-path-prefix=/__SYBIL_CARGO_HOME__=/cargo --remap-path-prefix=/__SYBIL_RUSTUP_HOME__=/rustc"
-    PATH="{{justfile_directory()}}/scripts:$PATH" \
-      SYBIL_WORKSPACE_ROOT="$(pwd -P)" \
-      SYBIL_CARGO_HOME="$cargo_home" \
-      SYBIL_RUSTUP_HOME="$rustup_home" \
-      RUSTC_WRAPPER="openvm-rustc-wrapper.sh" \
-      RUSTFLAGS="$remap_flags${RUSTFLAGS:+ $RUSTFLAGS}" \
-      cargo openvm commit \
-        --manifest-path zk/openvm-escape-guest/Cargo.toml \
-        --config zk/openvm-escape-guest/openvm.toml \
-        --output-dir {{output_dir}}
+    ./scripts/openvm-commit.sh escape {{output_dir}}
 
 openvm-commit-all:
     just openvm-commit target/openvm/sybil
@@ -366,10 +348,18 @@ frontend-check:
     pnpm test
     pnpm build
 
-# Check all — mirrors every CI check so local runs catch what CI would.
-# Rust portion (fmt-check/lint/test) matches the ci.yml "Check, Lint, Test" job;
-# the remaining recipes mirror the docs/arena/frontend/contracts CI jobs.
-check-all: fmt-check lint test docs-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
+# Fast developer gate: metadata, formatting, compilation, and lints.
+check-fast: rust-workspaces-check fmt-check workspace-check lint
+
+# Consensus/protocol gate: shared vectors, guest inputs, deployment coordination,
+# and generated protocol documentation must all agree.
+check-consensus: golden-check
+    ./scripts/zk-guest-fingerprint.sh --check
+    ./scripts/update-validity-pins.py --check
+    ./scripts/update-protocol-pins.py --check
+
+# Complete local/CI-equivalent gate, including every standalone Rust workspace.
+check-all: check-fast test standalone-check check-consensus docs-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any
@@ -380,9 +370,9 @@ bench:
 watch:
     cargo watch -x "test --workspace"
 
-# Clean build artifacts
+# Clean build artifacts from the root and all standalone Cargo workspaces.
 clean:
-    cargo clean
+    ./scripts/clean-rust-workspaces.sh
 
 # Show dependency tree
 deps:
@@ -431,13 +421,43 @@ arena-demo-quick:
 
 # ── Architecture Vault ───────────────────────────────────────────────────────
 
-# Validate vault (links, frontmatter, staleness, orphans)
+# Validate vault metadata/paths and build the full documentation site strictly.
 docs-check:
+    ./scripts/update-protocol-pins.py --check
+    ./scripts/check-doc-sync.py
     ./scripts/check-vault.sh
+    NO_MKDOCS_2_WARNING=1 PYTHONWARNINGS=ignore::DeprecationWarning uvx --with mkdocs==1.6.1 --with mkdocs-material==9.7.6 --with mkdocs-roamlinks-plugin==0.3.2 mkdocs build --strict
+
+# Render every maintained Mermaid diagram with the pinned official CLI image.
+docs-mermaid:
+    ./scripts/check-mermaid.sh
+
+# Regenerate/check the compact page sourced from protocol constants and artifacts.
+docs-pins-write:
+    ./scripts/update-protocol-pins.py --write
+
+docs-pins-check:
+    ./scripts/update-protocol-pins.py --check
+
+# Refresh/check the desired guest pins and separately recorded deployment state.
+validity-pins-write:
+    ./scripts/update-validity-pins.py --write-desired
+
+validity-pins-check:
+    ./scripts/update-validity-pins.py --check
+
+# Check workspace/design inventories against current repository structure.
+docs-sync:
+    ./scripts/check-doc-sync.py
+
+# Check public links in maintained Markdown. Confirmed 404/410 responses fail;
+# authentication, rate limits, and transient network errors are warnings.
+docs-links:
+    ./scripts/check-external-links.py
 
 # List notes with last_verified > 90 days
 docs-stale:
-    @for f in docs/architecture/*.md; do \
+    @find docs/architecture -type f -name '*.md' -print | sort | while IFS= read -r f; do \
         lv="$(awk '/^---$/{n++; next} n==1 && /^last_verified:/{print $2; exit}' "$f")"; \
         [ -z "$lv" ] && continue; \
         days=$(( ($(date +%s) - $(date -d "$lv" +%s 2>/dev/null || echo $(date +%s))) / 86400 )); \
@@ -446,14 +466,14 @@ docs-stale:
 
 # Search vault content
 docs-search term:
-    @grep -rni "{{term}}" docs/architecture/*.md --include='*.md' | sed 's|docs/architecture/||'
+    @grep -rni "{{term}}" docs/architecture --include='*.md' | sed 's|docs/architecture/||'
 
 # List all notes with layer + status
 docs-list:
-    @for f in docs/architecture/*.md; do \
+    @find docs/architecture -type f -name '*.md' -print | sort | while IFS= read -r f; do \
         layer="$(awk '/^---$/{n++; next} n==1 && /^layer:/{print $2; exit}' "$f")"; \
         status="$(awk '/^---$/{n++; next} n==1 && /^status:/{print $2; exit}' "$f")"; \
-        printf "  %-12s %-12s %s\n" "$layer" "$status" "$(basename "$f" .md)"; \
+        printf "  %-12s %-12s %s\n" "$layer" "$status" "${f#docs/architecture/}"; \
     done
 
 # Rename note and update wiki-links (requires notesmd-cli)
@@ -643,11 +663,11 @@ status:
 
 # Serve the docs site locally with live reload (http://127.0.0.1:8000)
 docs-serve:
-    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs serve
+    NO_MKDOCS_2_WARNING=1 PYTHONWARNINGS=ignore::DeprecationWarning uvx --with mkdocs==1.6.1 --with mkdocs-material==9.7.6 --with mkdocs-roamlinks-plugin==0.3.2 mkdocs serve
 
 # Build the static docs site into ./site
 docs-build:
-    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build
+    NO_MKDOCS_2_WARNING=1 PYTHONWARNINGS=ignore::DeprecationWarning uvx --with mkdocs==1.6.1 --with mkdocs-material==9.7.6 --with mkdocs-roamlinks-plugin==0.3.2 mkdocs build --strict
 
 # ── Contracts ───────────────────────────────────────────────────────────────
 

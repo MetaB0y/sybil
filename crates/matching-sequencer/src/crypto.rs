@@ -802,7 +802,7 @@ pub fn sign_api_key_revoke(
 mod tests {
     use super::*;
     use getrandom::SysRng;
-    use matching_engine::{outcome_buy, MarketSet};
+    use matching_engine::{MarketSet, outcome_buy};
     use p256::ecdsa::SigningKey;
     use p256::elliptic_curve::rand_core::UnwrapErr;
 

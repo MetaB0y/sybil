@@ -28,8 +28,8 @@
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
-use matching_engine::{MarketId, Nanos, Order, Problem, NANOS_PER_DOLLAR};
-use matching_scenarios::{generate_scenario, ScenarioConfig};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos, Order, Problem};
+use matching_scenarios::{ScenarioConfig, generate_scenario};
 use matching_solver::{ConicConfig, ConicSolver, DecomposedSolver, ObjectiveMode};
 
 const D: u64 = NANOS_PER_DOLLAR;

@@ -35,7 +35,7 @@ to 5 markets plus an optional `PriceCondition`. It is *deliberately disabled* â€
 `validate_binary_one_hot()` is enforced at four layers (API ingress, sequencer,
 the validity-critical verifier, and solver ingress) so only simple binary orders pass
 today ([[Payoff Vectors]]; the KEEP-DEFERRED entry in
-`docs/review/simplification-plan.md`; math in canonical
+`design/archive/review-2026-07-02/simplification-plan.md`; math in canonical
 `~/github/prediction-markets-are-fisher-markets/decomposition.typ`,
 `bundle-clearing.typ` â€” see `design/math-papers.md`).
 

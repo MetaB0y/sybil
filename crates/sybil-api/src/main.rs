@@ -4,9 +4,9 @@ use std::time::Duration;
 use clap::Parser;
 use opentelemetry::trace::TracerProvider;
 use tokio::net::TcpListener;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 use matching_engine::MarketSet;
 use matching_sequencer::{
@@ -269,10 +269,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if config.import_witness {
         let result = run_witness_import(&config).await;
-        if let Some(provider) = tracer_provider {
-            if let Err(e) = provider.shutdown() {
-                tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
-            }
+        if let Some(provider) = tracer_provider
+            && let Err(e) = provider.shutdown()
+        {
+            tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
         }
         return result;
     }
@@ -427,10 +427,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    if let Some(provider) = tracer_provider {
-        if let Err(e) = provider.shutdown() {
-            tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
-        }
+    if let Some(provider) = tracer_provider
+        && let Err(e) = provider.shutdown()
+    {
+        tracing::warn!(error = %e, "failed to flush OpenTelemetry spans on shutdown");
     }
 
     tracing::info!("Server shut down cleanly");
@@ -529,11 +529,11 @@ fn load_or_generate_admin_pubkey(key_path: &str) -> Result<Vec<u8>, String> {
         let pubkey = matching_sequencer::PublicKey(*key.verifying_key());
         Ok(pubkey.compressed_bytes())
     } else {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("create dir {}: {e}", parent.display()))?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create dir {}: {e}", parent.display()))?;
         }
         let key = <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
             &mut UnwrapErr(getrandom::SysRng),

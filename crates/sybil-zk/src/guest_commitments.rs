@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_os = "zkvm"))]
 use sha2::{Digest as _, Sha256};
 use sybil_verifier::{
-    commitments::{event_schema, state_schema},
     BlockWitness,
+    commitments::{event_schema, state_schema},
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,9 +44,8 @@ pub struct QmdbStateOperationProof {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QmdbStateRangeProof {
     pub leaves: u64,
+    pub inactive_peaks: u64,
     pub digests: Vec<[u8; 32]>,
-    pub pre_prefix_acc: Option<[u8; 32]>,
-    pub unfolded_prefix_peaks: Vec<[u8; 32]>,
     pub partial_chunk_digest: Option<[u8; 32]>,
     pub ops_root: [u8; 32],
 }
@@ -255,9 +254,17 @@ fn verify_qmdb_range_proof(
         return false;
     }
 
-    let Some(merkle_root) =
-        reconstruct_qmdb_mmr_root(proof.leaves, &proof.digests, start_loc, operation, chunk)
-    else {
+    let Some(merkle_root) = reconstruct_qmdb_mmr_root(
+        proof.leaves,
+        match usize::try_from(proof.inactive_peaks) {
+            Ok(inactive_peaks) => inactive_peaks,
+            Err(_) => return false,
+        },
+        &proof.digests,
+        start_loc,
+        operation,
+        chunk,
+    ) else {
         return false;
     };
 
@@ -314,6 +321,9 @@ fn encode_keyless_commit_operation(metadata: Option<&[u8]>) -> Option<Vec<u8>> {
         }
         None => out.push(0),
     }
+    // Commonware 2026.5 commits the application-declared inactivity floor.
+    // Sybil retains the complete per-block event log, so the floor is always 0.
+    append_u64_varint(&mut out, 0);
     Some(out)
 }
 
@@ -367,6 +377,7 @@ const fn grafting_height() -> u32 {
 // pulling native commonware cryptography dependencies into the OpenVM build.
 fn reconstruct_qmdb_mmr_root(
     leaves: u64,
+    inactive_peaks: usize,
     proof_digests: &[[u8; 32]],
     start_loc: u64,
     operation: &[u8],
@@ -383,10 +394,13 @@ fn reconstruct_qmdb_mmr_root(
 
     let size = mmr_location_to_position(leaves)?;
     let range = start_loc..end_loc;
-    let mut fold_prefix = Vec::new();
-    let mut after_peaks = Vec::new();
+    let mut fold_prefix_count = 0usize;
+    let mut prefix_active_count = 0usize;
+    let mut after_inactive_count = 0usize;
+    let mut suffix_active_count = 0usize;
     let mut range_peaks = Vec::new();
     let mut leaf_cursor = 0u64;
+    let mut peak_count = 0usize;
 
     for (peak_pos, height) in mmr_peaks(size) {
         let width = 1u64.checked_shl(height)?;
@@ -394,9 +408,17 @@ fn reconstruct_qmdb_mmr_root(
         let leaf_end = leaf_start.checked_add(width)?;
 
         if leaf_end <= range.start {
-            fold_prefix.push(peak_pos);
+            if peak_count < inactive_peaks {
+                fold_prefix_count = fold_prefix_count.checked_add(1)?;
+            } else {
+                prefix_active_count = prefix_active_count.checked_add(1)?;
+            }
         } else if leaf_start >= range.end {
-            after_peaks.push(peak_pos);
+            if peak_count >= inactive_peaks {
+                suffix_active_count = suffix_active_count.checked_add(1)?;
+            } else {
+                after_inactive_count = after_inactive_count.checked_add(1)?;
+            }
         } else {
             range_peaks.push(MmrSubtree {
                 pos: peak_pos,
@@ -405,25 +427,33 @@ fn reconstruct_qmdb_mmr_root(
             });
         }
         leaf_cursor = leaf_end;
+        peak_count = peak_count.checked_add(1)?;
     }
 
-    if range_peaks.is_empty() || leaf_cursor != leaves {
+    if range_peaks.is_empty() || leaf_cursor != leaves || inactive_peaks > peak_count {
         return None;
     }
 
-    let prefix_digests = usize::from(!fold_prefix.is_empty());
-    let after_start = prefix_digests;
-    let after_end = after_start.checked_add(after_peaks.len())?;
-    if proof_digests.len() < after_end {
+    // Commonware's backward-bagged range-proof layout is:
+    // [folded inactive prefix? | active prefix peaks | inactive after peaks |
+    //  backward-folded active suffix? | DFS siblings].
+    let fold_count = usize::from(fold_prefix_count != 0);
+    let prefix_start = fold_count;
+    let after_start = prefix_start.checked_add(prefix_active_count)?;
+    let suffix_start = after_start.checked_add(after_inactive_count)?;
+    let suffix_count = usize::from(suffix_active_count != 0);
+    let siblings_start = suffix_start.checked_add(suffix_count)?;
+    if proof_digests.len() < siblings_start {
         return None;
     }
 
     let mut peak_digests = Vec::new();
-    if !fold_prefix.is_empty() {
+    if fold_count != 0 {
         peak_digests.push(proof_digests[0]);
     }
+    peak_digests.extend_from_slice(&proof_digests[prefix_start..after_start]);
 
-    let siblings = &proof_digests[after_end..];
+    let siblings = &proof_digests[siblings_start..];
     let mut sibling_cursor = 0usize;
     let mut element = Some(operation);
     let mut leaf_consumed = false;
@@ -442,15 +472,28 @@ fn reconstruct_qmdb_mmr_root(
         peak_digests.push(peak_digest);
     }
 
-    for digest in &proof_digests[after_start..after_end] {
-        peak_digests.push(*digest);
+    peak_digests.extend_from_slice(&proof_digests[after_start..suffix_start]);
+    if suffix_count != 0 {
+        peak_digests.push(proof_digests[suffix_start]);
     }
 
     if !leaf_consumed || element.is_some() || sibling_cursor != siblings.len() {
         return None;
     }
 
-    Some(mmr_root(leaves, &peak_digests))
+    let inactive_peaks_to_fold = if fold_prefix_count == 0 {
+        inactive_peaks
+    } else {
+        inactive_peaks
+            .checked_sub(fold_prefix_count)?
+            .checked_add(1)?
+    };
+    mmr_root(
+        leaves,
+        inactive_peaks_to_fold,
+        inactive_peaks,
+        &peak_digests,
+    )
 }
 
 struct QmdbPeakReconstruction<'a, 'b> {
@@ -536,7 +579,7 @@ fn compute_mmr_root_from_elements(elements: &[Vec<u8>]) -> Option<[u8; 32]> {
     if leaf_cursor != elements.len() {
         return None;
     }
-    Some(mmr_root(leaves, &peak_digests))
+    mmr_root(leaves, 0, 0, &peak_digests)
 }
 
 fn compute_mmr_peak_from_elements(pos: u64, height: u32, elements: &[Vec<u8>]) -> Option<[u8; 32]> {
@@ -691,14 +734,44 @@ fn mmr_node_digest(pos: u64, left_digest: &[u8; 32], right_digest: &[u8; 32]) ->
     ])
 }
 
-fn mmr_root(leaves: u64, peak_digests: &[[u8; 32]]) -> [u8; 32] {
+fn mmr_root(
+    leaves: u64,
+    inactive_peaks_to_fold: usize,
+    committed_inactive_peaks: usize,
+    peak_digests: &[[u8; 32]],
+) -> Option<[u8; 32]> {
     let Some((first, rest)) = peak_digests.split_first() else {
-        return sha256([leaves.to_be_bytes().as_slice()]);
+        return (inactive_peaks_to_fold == 0 && committed_inactive_peaks == 0)
+            .then(|| sha256([leaves.to_be_bytes().as_slice()]));
     };
-    let acc = rest.iter().fold(*first, |acc, digest| {
-        sha256([acc.as_slice(), digest.as_slice()])
-    });
-    sha256([leaves.to_be_bytes().as_slice(), acc.as_slice()])
+    if inactive_peaks_to_fold > peak_digests.len() {
+        return None;
+    }
+
+    let mut acc = *first;
+    let mut active = Vec::with_capacity(peak_digests.len());
+    let mut rest = rest.iter();
+    for _ in 0..inactive_peaks_to_fold.saturating_sub(1) {
+        let peak = rest.next()?;
+        acc = sha256([acc.as_slice(), peak.as_slice()]);
+    }
+    active.push(acc);
+    active.extend(rest.copied());
+
+    let mut folded = *active.last()?;
+    for peak in active.iter().rev().skip(1) {
+        folded = sha256([peak.as_slice(), folded.as_slice()]);
+    }
+
+    if committed_inactive_peaks == 0 {
+        Some(sha256([leaves.to_be_bytes().as_slice(), folded.as_slice()]))
+    } else {
+        Some(sha256([
+            leaves.to_be_bytes().as_slice(),
+            (committed_inactive_peaks as u64).to_be_bytes().as_slice(),
+            folded.as_slice(),
+        ]))
+    }
 }
 
 fn sha256<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> [u8; 32] {

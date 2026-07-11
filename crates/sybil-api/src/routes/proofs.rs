@@ -1,17 +1,17 @@
-use axum::extract::{Path, State};
 use axum::Json;
+use axum::extract::{Path, State};
 
 use matching_sequencer::{
-    AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
-    QmdbStateOperationProofParts, QmdbStateRangeProofParts, SequencerStateProof,
-    SequencerStateProofKind, QMDB_STATE_MAX_KEY_BYTES,
+    AccountSnapshotSlot, QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts,
+    QmdbStateKeyValueProofParts, QmdbStateOperationProofParts, QmdbStateRangeProofParts,
+    SequencerStateProof, SequencerStateProofKind,
 };
 
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::*;
 
-const STATE_PROOF_FORMAT: &str = "commonware-qmdb-current-ordered-sha256-mmr";
+const STATE_PROOF_FORMAT: &str = "commonware-qmdb-current-ordered-sha256-mmr-2026.5";
 
 /// GET /v1/proofs/state/{leaf_key_hex}
 #[utoipa::path(
@@ -131,13 +131,8 @@ fn operation_response(proof: QmdbStateOperationProofParts) -> QmdbStateOperation
 fn range_response(proof: QmdbStateRangeProofParts) -> QmdbStateRangeProofResponse {
     QmdbStateRangeProofResponse {
         leaves: proof.leaves,
+        inactive_peaks: proof.inactive_peaks,
         digests_hex: proof.digests.into_iter().map(hex::encode).collect(),
-        pre_prefix_acc_hex: proof.pre_prefix_acc.map(hex::encode),
-        unfolded_prefix_peaks_hex: proof
-            .unfolded_prefix_peaks
-            .into_iter()
-            .map(hex::encode)
-            .collect(),
         partial_chunk_digest_hex: proof.partial_chunk_digest.map(hex::encode),
         ops_root_hex: hex::encode(proof.ops_root),
     }

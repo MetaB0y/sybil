@@ -268,11 +268,7 @@ pub fn ceil_mul_ratio(value: u64, numer: u64, denom: u64) -> u64 {
 /// Signed floor of `price_nanos * qty / SHARE_SCALE`.
 pub fn signed_notional_nanos(price: Nanos, qty: i64) -> i64 {
     let abs = notional_nanos(price, Qty(qty.unsigned_abs())).0 as i64;
-    if qty < 0 {
-        -abs
-    } else {
-        abs
-    }
+    if qty < 0 { -abs } else { abs }
 }
 
 /// Checked signed floor of `price_nanos * qty / SHARE_SCALE`.
@@ -288,11 +284,7 @@ pub fn checked_signed_notional_nanos(price: Nanos, qty: i64) -> Option<i64> {
 /// Signed floor of `price_delta_nanos * qty / SHARE_SCALE`.
 pub fn signed_price_delta_notional(price_delta: i64, qty: Qty) -> i64 {
     let abs = ((price_delta.unsigned_abs() as u128 * qty.0 as u128) / SHARE_SCALE as u128) as i64;
-    if price_delta < 0 {
-        -abs
-    } else {
-        abs
-    }
+    if price_delta < 0 { -abs } else { abs }
 }
 
 /// Checked signed floor of `price_delta_nanos * qty / SHARE_SCALE`.
@@ -408,7 +400,7 @@ impl fmt::Display for OrderDirection {
 // into the state root — money on the consensus path stays integer nanos.
 #[allow(clippy::disallowed_types)]
 pub mod conversions {
-    use super::{Nanos, NANOS_PER_DOLLAR};
+    use super::{NANOS_PER_DOLLAR, Nanos};
 
     /// Convert a decimal price (e.g., 0.53 for 53 cents) to nanos
     /// Price should be in [0, 1] for probability markets
@@ -502,7 +494,7 @@ mod tests {
         assert_eq!(ceil_mul_ratio(100, 3, 3), 100);
         // Genuine ceiling.
         assert_eq!(ceil_mul_ratio(10, 1, 3), 4); // 10/3 = 3.33 -> 4
-                                                 // remaining == max_fill -> unchanged.
+        // remaining == max_fill -> unchanged.
         assert_eq!(ceil_mul_ratio(u64::MAX / 2, 5, 5), u64::MAX / 2);
         // Above 2^53, where f64 loses integer precision but i128 stays exact.
         let value = (1u64 << 53) + 1;

@@ -7,8 +7,8 @@
 //!   light up in C2.
 //! - `GET /v1/events/{event_id}/traders` — per-event union of placers.
 
-use axum::extract::{Path, State};
 use axum::Json;
+use axum::extract::{Path, State};
 use matching_engine::MarketId;
 
 use crate::state::AppState;

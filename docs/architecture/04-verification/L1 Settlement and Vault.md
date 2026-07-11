@@ -1,0 +1,200 @@
+---
+tags: [contracts, bridge, validium, spec]
+layer: verification
+status: current
+last_verified: 2026-07-11
+---
+
+# L1 settlement and vault
+
+> [!summary] In one paragraph
+> Ethereum does not run Sybil's market. `SybilSettlement` accepts a consecutive
+> chain of validity-proven state roots; `SybilVault` holds one collateral token
+> and moves it through deposits, delayed normal withdrawals, or conservative
+> escape claims. Solidity contracts, Rust hash twins, the escape guest, and the
+> custody CLI exist. Real verifier deployment, a dedicated normal-withdrawal
+> proof producer, production DA, and hostile-successor governance remain
+> incomplete.
+
+## Boundary at a glance
+
+```mermaid
+flowchart LR
+    USER["User"] -->|"ERC20 deposit"| VAULT["SybilVault<br/>custody · withdrawal · escape"]
+    INDEXER["L1 indexer"] -->|"confirmed ordered logs"| API["sybil-api / sequencer"]
+    VAULT --> INDEXER
+    API -->|"block witness"| GUEST["OpenVM transition guest"]
+    GUEST -->|"proof + public inputs"| SETTLE["SybilSettlement<br/>accepted root chain"]
+    SETTLE --> ADAPTER["Pinned verifier adapter"]
+    SETTLE -->|"accepted roots"| VAULT
+    CUSTODY["sybil-custody"] -->|"escape proof / calldata"| VAULT
+    DA["Canonical DA payload"] --> CUSTODY
+```
+
+L1 never solves auctions, resolves markets, replays orders, or interprets raw
+qMDB proofs. Those rules execute in [[ZK Integration Path|the guest]] over a
+[[Block Witness]] and typed [[State Root Schema|state]].
+
+## Non-negotiable design choices
+
+- `SybilSettlement` accepts proofs and roots; it never holds collateral.
+- `SybilVault` is the only token custodian.
+- Every accepted transition binds its parent, block/events/witness roots, DA
+  commitment, and L1 deposit checkpoint.
+- Normal withdrawal claims come from committed withdrawal leaves, not a stale
+  account balance.
+- Escape pays a conservative cash floor at the latest accepted root. It does
+  not unwind orders or promise future market-resolution proceeds.
+- A generic OpenVM proof is insufficient: adapters pin the intended executable
+  and VM commitments from [current protocol pins](../../protocol-pins.md).
+- `UnsafeAcceptAllVerifierAdapter` is Anvil-only and never evidence of
+  production validity.
+
+## `SybilSettlement`
+
+The settlement contract stores the accepted root chain and liveness reference.
+A `RootRecord` carries height, new/previous state roots, block/events/witness
+roots, DA commitment, deposit root/count, acceptance time, and verifier version.
+
+`submitStateRoot` requires:
+
+1. the supplied previous height/root to match the accepted head;
+2. a forward height and a new, nonzero state root;
+3. deposit count/root to match `SybilVault.depositRootByCount`;
+4. the pinned adapter to accept the exact transition public-input hash.
+
+The OpenVM adapter decodes the proof envelope, checks the pinned executable/VM
+commitments, requires the guest's 32-byte reveal to equal Sybil's public-input
+hash, and calls the generated verifier. Root submission pauses immediately;
+adapter/vault/admin changes use the timelock described below.
+
+## `SybilVault`
+
+The vault currently supports one USDC-like token with six decimals. Internal
+accounting is nanodollars:
+
+```text
+amount_nanos = amount_token_units * 1_000
+```
+
+### Deposits
+
+1. `deposit` transfers tokens and appends a domain-separated leaf to a
+   depth-32 incremental Merkle tree.
+2. `DepositReceived` exposes the sequential id and cumulative root.
+3. The indexer waits for configured confirmations, reconciles the log root with
+   `depositRootByCount`, and submits ordered input through service routes.
+4. The sequencer credits a known account or quarantines an unresolved key.
+5. The transition guest reconstructs the same deposit prefix and requires the
+   credited/quarantined events and committed cursor/root to agree.
+
+Leaf/node domains, ABI padding, zero hashes, and conversion rules are shared by
+`sybil-l1-protocol` and Solidity golden tests. RPC/finality policy remains an
+operational trust boundary; root mismatch or cursor/vault identity mismatch is
+fatal in the indexer.
+
+### Normal withdrawals
+
+Normal withdrawal is sequencer-cooperative:
+
+1. An authenticated API request debits available cash and creates a typed
+   `withdrawal/{id}` leaf with recipient, token, amounts, expiry, and nullifier.
+2. A proof against an accepted root authorizes `requestWithdrawal`.
+3. The vault consumes the root-independent nullifier and queues the transfer.
+4. Anyone may finalize after `withdrawalDelay`.
+5. Cancellation before `executableAt`, or confirmed L1 expiry, refunds the
+   exact debited nanos once; finalization retires the leaf without refund.
+
+The contract queue, sequencer leaf lifecycle, refund/finalization replay rules,
+and verifier sidecar transition are implemented. A dedicated production-grade
+user proof generator/guest for the normal withdrawal public inputs is not yet
+the same complete path that exists for escape claims. API signatures alone do
+not authorize vault release.
+
+### Emergency escape
+
+Anyone may call `activateEscapeMode` after:
+
+```text
+block.timestamp > livenessReference + escapeTimeout
+```
+
+The liveness reference is the latest accepted root time, or vault deployment
+time before the first root. Escape uses a separately pinned verifier and the
+latest accepted root/height. The guest proves:
+
+- ownership through the account's committed active P256/WebAuthn key set;
+- inclusion of the account and every referenced market leaf;
+- inclusion or authenticated exclusion of `acct_resv/{account_id}`;
+- cash plus positions valued at committed last-clearing prices, less cash
+  reservations, floored at zero and converted to token units;
+- deployment/account/root-bound nullifier and exact recipient/amount.
+
+The vault recomputes the nullifier, consumes it, verifies the proof, and pays
+immediately. Escape intentionally bypasses both pause and the normal withdrawal
+delay so an emergency administrator cannot trap a valid claimant.
+
+`sybil-custody snapshot`, `reconstruct`, and `escape-claim` retain openings,
+authenticate a full DA payload, run real OpenVM prove/verify, wrap adapter bytes,
+and optionally submit calldata. An own-leaf snapshot supports one user's claim;
+full exchange continuation still needs the complete canonical DA payload. See
+[[Operator Replacement]].
+
+Returning every historical deposit is rejected: trading transfers value, so
+raw deposit refunds would let losing accounts drain winners' collateral.
+
+## Authority
+
+Both contracts inherit `SybilAccessControl` and have one administrator—not the
+granular roles in early design drafts.
+
+| Action | Authority / delay |
+|---|---|
+| Pause/unpause either contract | Admin, immediate |
+| Cancel a queued vault withdrawal before execution | Admin, immediate |
+| Activate escape after timeout | Anyone |
+| Rotate normal/escape verifier, vault, delays, or admin | Exact proposal → `adminActionDelay` → execute |
+| Cancel a pending proposal | Admin before execution |
+
+Escape activation and valid escape claims remain permissionless. Live key
+custody belongs in a private operator inventory; see the
+[administrator runbook](../../runbooks/admin-keys.md).
+
+## Typed state and Rust ownership
+
+The proof path relies on committed account, reservation, market/group,
+withdrawal, deposit cursor/root, quarantine, observed-L1-height, and allocation
+counter leaves. Display metadata and derived histories are not withdrawal
+authority.
+
+| Concern | Source of truth |
+|---|---|
+| Solidity ABI/state machine | `contracts/src/SybilSettlement.sol`, `SybilVault.sol`, `SybilTypes.sol` |
+| Authority/timelock | `contracts/src/access/SybilAccessControl.sol` |
+| L1 domains/tree/event decoding | `crates/sybil-l1-protocol` |
+| Confirmed log ingestion | `crates/sybil-l1-indexer` |
+| Bridge WAL/state transition | `crates/matching-sequencer/src/bridge.rs` and bridge operations |
+| Native transition checks | `crates/sybil-verifier` |
+| Transition/DA public inputs | `crates/sybil-zk`, `crates/sybil-prover` |
+| Escape statement and user tooling | `crates/sybil-escape-claim`, `crates/sybil-custody` |
+| Rust/Solidity parity | `golden/golden-vectors.json`, `SybilGoldenVectors.t.sol` |
+
+## Still incomplete for production
+
+- Deploy and independently verify real pinned OpenVM adapters; mock/unsafe
+  acceptance must be impossible.
+- Complete the normal-withdrawal user proof path and drill it end to end.
+- Operate provider-backed retention/decryption and emergency disclosure for DA.
+- Ratify hostile-successor authority; witness import alone does not appoint a
+  replacement operator.
+- Decide whether escape mode is permanent for a deployment or has an explicit,
+  safe resumption mechanism.
+
+## See also
+
+- [[Threat Model]]
+- [[State Root Schema]]
+- [[ZK Integration Path]]
+- [[Data Availability]]
+- [[Operator Replacement]]
+- [[P256 Authentication]]

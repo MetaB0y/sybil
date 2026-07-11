@@ -17,7 +17,7 @@ use std::time::Instant;
 use clarabel::algebra::*;
 use clarabel::solver::*;
 
-use matching_engine::{Problem, NANOS_PER_DOLLAR};
+use matching_engine::{NANOS_PER_DOLLAR, Problem};
 
 use crate::lp_solver::{build_solver_context, project_and_finalize, welfare_weights};
 use crate::result::PipelineResult;
@@ -143,12 +143,12 @@ impl ConicSolver {
         // This ensures V_k > 0, which the exp cone requires.
         let mut mm_groups: Vec<Vec<usize>> = vec![Vec::new(); num_active_mm];
         for (&order_idx, &(mm_idx, _)) in &mm_order_map {
-            if let Some(&local) = active_mm_to_local.get(&mm_idx) {
-                if welfare_weights[order_idx] > 0.0 {
-                    mm_groups[local].push(order_idx);
-                }
-                // Negative-weight orders treated as retail (linear welfare in objective)
+            if let Some(&local) = active_mm_to_local.get(&mm_idx)
+                && welfare_weights[order_idx] > 0.0
+            {
+                mm_groups[local].push(order_idx);
             }
+            // Negative-weight orders treated as retail (linear welfare in objective)
         }
 
         // MM budgets for active MMs
@@ -487,8 +487,8 @@ mod tests {
         single_market_problem, zero_budget_mm_problem,
     };
     use matching_engine::{
-        outcome_sell, simple_no_buy, simple_yes_buy, MmConstraint, MmId, MmSide, Nanos,
-        NANOS_PER_DOLLAR,
+        MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, outcome_sell, simple_no_buy,
+        simple_yes_buy,
     };
 
     #[test]

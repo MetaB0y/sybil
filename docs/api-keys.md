@@ -1,18 +1,35 @@
-# API Keys
+# Secrets and API keys
 
-**Do not commit live secrets to this repo.** Keys live in the deploy host's
-`/opt/sybil/.env` (see `docs/runbooks/`) and each operator's local environment,
-never in tracked files. This page documents *which* keys exist and *where* they
-are sourced — not their values.
+> **Rule:** never commit a live secret. Runtime secrets belong in host-side env
+> files or an operator's local secret store; documentation records purpose and
+> custody, never values.
 
-## OpenRouter
+## Secret classes
 
-Arena bot LLM calls (`deepseek/deepseek-v4-flash` model).
+| Secret | Purpose | Runtime location |
+|---|---|---|
+| Service bearer token | Authenticates first-party service/operator routes | `/opt/sybil/.env` |
+| Grafana administrator password | Protects the Grafana account | `/opt/sybil/.env` |
+| Caddy operations credentials | Protects operator-facing HTTP surfaces | `/opt/sybil/.env` |
+| WebAuthn RP/origin configuration | Binds browser assertions to the deployed origin | `/opt/sybil/.env` |
+| OpenRouter provider key | Allows arena agents to call configured LLMs | `/opt/sybil/arena.env` |
+| Contract/feed signing keys | Controls privileged on-chain or resolution actions | Operator custody; see [Admin keys](runbooks/admin-keys.md) |
 
-- Source: `OPENROUTER_API_KEY` in the deploy host env / local shell.
-- Used by: `just deploy-arena` (reads the key from the environment).
-- Rotation / custody: see the Valery action list (SYB-218) and SYB-230.
+The authoritative required-variable list and deployment checks live in
+[`DEPLOY.md`](https://github.com/MetaB0y/sybil/blob/main/DEPLOY.md). Compose and the `justfile` should fail before a
+production deploy if required entries are absent.
 
-> A previously committed key was removed from this file (SYB-230). Because it
-> remains in git history, it must be **rotated**, not just deleted — treat the
-> old value as compromised.
+## Rotation checklist
+
+1. Create the replacement in the provider or custody system.
+2. Update the host-side env/secret store without printing the value to logs,
+   shell history, process arguments, or review output.
+3. Restart only the consumers of that secret and run the relevant smoke checks.
+4. Revoke the old credential and verify that it no longer works.
+5. If a value ever entered version-control history, treat it as compromised;
+   deletion from the current tree is not revocation.
+
+User-created read API keys are a different class: they are read-only account
+credentials created and revoked through the account settings/API. They cannot
+authorize trades, withdrawals, or signing-key changes; those require a
+registered P256/WebAuthn signing key.

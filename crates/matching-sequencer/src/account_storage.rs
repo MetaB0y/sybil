@@ -8,9 +8,9 @@ use crate::canonical_state::CanonicalState;
 use crate::qmdb_accounts::QmdbAccounts;
 use crate::qmdb_state::QmdbState;
 pub use crate::qmdb_state::{
-    QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts, QmdbStateLeafExclusionProof,
-    QmdbStateLeafProof, QmdbStateOperationProofParts, QmdbStateRangeProofParts, QmdbStateRoot,
-    QMDB_STATE_MAX_KEY_BYTES,
+    QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
+    QmdbStateLeafExclusionProof, QmdbStateLeafProof, QmdbStateOperationProofParts,
+    QmdbStateRangeProofParts, QmdbStateRoot,
 };
 use crate::store::StoreError;
 
@@ -343,11 +343,13 @@ mod tests {
         assert!(proof.verify());
 
         let missing_key = b"acct/missing".to_vec();
-        assert!(storage
-            .qmdb_state_leaf_proof(slot, &missing_key)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            storage
+                .qmdb_state_leaf_proof(slot, &missing_key)
+                .await
+                .unwrap()
+                .is_none()
+        );
         let exclusion = storage
             .qmdb_state_leaf_exclusion_proof(slot, &missing_key)
             .await
@@ -356,10 +358,12 @@ mod tests {
         assert_eq!(exclusion.root, state_root.root);
         assert_eq!(exclusion.slot, slot);
         assert!(exclusion.verify());
-        assert!(storage
-            .qmdb_state_leaf_exclusion_proof(slot, leaf_key)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            storage
+                .qmdb_state_leaf_exclusion_proof(slot, leaf_key)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

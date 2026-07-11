@@ -1,7 +1,8 @@
 [package]
 name = "sybil-golden-vectors"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Deterministic cross-language golden-vector generator for Sybil"
 publish = false
 
@@ -10,13 +11,13 @@ name = "emit-golden"
 path = "src/main.rs"
 
 [dependencies]
-hex = "0.4"
-blake3 = "1"
+hex = { workspace = true }
+blake3 = { workspace = true }
 matching-engine = { path = "../../crates/matching-engine" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-sha3 = "0.10"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = "0.11"
+sha3 = { workspace = true }
 sybil-l1-protocol = { path = "../../crates/sybil-l1-protocol" }
 sybil-verifier = { path = "../../crates/sybil-verifier" }
 sybil-zk = { path = "../../crates/sybil-zk" }

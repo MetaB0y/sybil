@@ -1434,7 +1434,7 @@ export interface components {
     BlockResponse: {
       bridge?: components["schemas"]["BridgeBlockResponse"];
       /**
-       * @description Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
+       * @description Nested per-market block scalars. Each
        *     `BlockMarketStats` carries the per-market splits for this block. Old
        *     clients ignore it; new clients consume what they recognise.
        */
@@ -2892,11 +2892,11 @@ export interface components {
     QmdbStateRangeProofResponse: {
       digests_hex: string[];
       /** Format: int64 */
+      inactive_peaks: number;
+      /** Format: int64 */
       leaves: number;
       ops_root_hex: string;
       partial_chunk_digest_hex?: string | null;
-      pre_prefix_acc_hex?: string | null;
-      unfolded_prefix_peaks_hex: string[];
     };
     RegisterFeedRequest: {
       /** @description Human-readable name (e.g. "admin", "polymarket_mirror"). */

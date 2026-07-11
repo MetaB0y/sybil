@@ -1,17 +1,18 @@
 [package]
 name = "sybil-l1-protocol"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Ethereum L1 ABI, event parsing, and bridge hashing primitives for Sybil"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-sha3 = "0.10"
+serde = { workspace = true, features = ["derive"] }
+sha3 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-hex = "0.4"
-serde_json = "1"
+hex = { workspace = true }
+serde_json = { workspace = true }
 
 [lints.clippy]
 # f64 ban (SYB-196) is scoped to the consensus crates (matching-engine,

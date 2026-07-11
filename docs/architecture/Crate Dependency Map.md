@@ -2,10 +2,14 @@
 tags: [infrastructure]
 layer: core
 status: current
-last_verified: 2026-07-03
+last_verified: 2026-07-11
 ---
 
-The Rust workspace is organized as a directed acyclic graph (DAG) of crates, with `matching-engine` as the foundation. Every crate depends on `matching-engine` for core types — orders, fills, markets, nanos, market groups, MM constraints. No crate depends upward: the engine knows nothing about solvers, and solvers know nothing about the API.
+The Rust workspace is organized as a directed acyclic graph (DAG) of crates.
+`matching-engine` is the foundation of exchange state and arithmetic; DTO,
+client, L1 protocol, and tooling crates can remain independent of it when they
+do not need domain types. Dependencies point inward: the engine knows nothing
+about solvers or the API.
 
 The dependency DAG flows in three tiers. **Foundation**: `matching-engine` defines the domain model with zero solver logic. **Middle tier**: `matching-solver` (optimization algorithms), `sybil-oracle` (resolution decisions), `sybil-verifier` (block verification and commitment schemas), and `matching-scenarios` (test data generation) all depend on the engine but not on each other. **Top tier**: `matching-sequencer` composes solver + oracle + verifier into the block production pipeline. `sybil-api` wraps the sequencer as an HTTP server. `matching-sim` pulls from scenarios + solver + verifier for benchmarking. `sequencer-sim` is a dev-only harness that drives the sequencer over many batches with synthetic agents (the `sybil-sim` binary); it depends on `matching-sequencer` so that the sequencer library itself ships no simulation code to `sybil-api`.
 
@@ -21,9 +25,15 @@ block/proof material from the sequencer store. The sequencer depends on
 produces and persists blocks, witnesses, and qMDB proof material without
 assembling prover inputs.
 
+Emergency exit has its own narrow verifier/tool split. `sybil-escape-claim`
+owns guest-safe Form-L account/reservation verification and public inputs;
+`sybil-custody` composes it with API DTOs, native verifier/qMDB proofs,
+`sybil-zk`, HTTP/RPC access, OpenVM proving, and vault calldata. It is a
+user-side client and never mutates sequencer state directly.
+
 The client tier sits below the DTO crate. `sybil-api-types` is the shared source of truth for request/response shapes; `sybil-client` is THE Rust HTTP client for `sybil-api` (SYB-171), typed against those DTOs. In-tree Rust consumers use it: `sybil-polymarket` (the mirror + market maker), the `sybil-admin` CLI (a binary inside `sybil-api`), and the dev L1 bridge indexer. It replaced two hand-written clients that had drifted independently — there is now exactly one, so no third should be added. It owns base-url + optional service-token (`SYBIL_SERVICE_TOKEN`) auth, response decoding, bridge service-route helpers, and the SSE block-stream consumption; each consumer keeps its own concerns (the mirror's reconnect loop and poisoned-market parsing, the indexer's L1 JSON-RPC polling, the admin's audit log) around it. `sybil-signing` is separate from the commitment schemas: it owns stable Borsh signable payload bytes for client signatures (orders, cancels, attestations, bridge withdrawals), and is used by the sequencer's signed-write verification and by signing clients.
 
-The L1 bridge scaffolding is split into a protocol crate and a sidecar binary. `sybil-l1-protocol` owns Ethereum ABI/event parsing and the deposit/withdrawal hash domains shared with the planned `SybilVault`. It deliberately has no sequencer dependency. `sybil-l1-indexer` depends on `sybil-l1-protocol` plus `sybil-client`: it polls a dev/anvil-style L1 JSON-RPC endpoint for `DepositReceived` logs, parses them into protocol structs, resolves the Sybil account through the service-only reverse bridge-key route, and submits deposits through the existing API bridge endpoint. The sequencer still receives deposits through its current `pending_l1_deposits` WAL path; the indexer does not bypass `sybil-api` or introduce a new storage dependency.
+The L1 bridge scaffolding is split into a protocol crate and a sidecar binary. `sybil-l1-protocol` owns Ethereum ABI/event parsing and the deposit/withdrawal hash domains shared with `SybilVault`. It deliberately has no sequencer dependency. `sybil-l1-indexer` depends on `sybil-l1-protocol` plus `sybil-client`: it polls a dev/anvil-style L1 JSON-RPC endpoint for `DepositReceived` logs, parses them into protocol structs, resolves the Sybil account through the service-only reverse bridge-key route, and submits deposits through the existing API bridge endpoint. The sequencer still receives deposits through its current `pending_l1_deposits` WAL path; the indexer does not bypass `sybil-api` or introduce a new storage dependency.
 
 The Python `arena/` sits outside the Rust workspace entirely, connected only via HTTP to `sybil-api`. This clean boundary means the Python bots can be developed, tested, and deployed independently of the Rust code — they only need a running server. The separation also means the arena doesn't need to compile any Rust code, which is important for Python-first developers who want to build bots without a Rust toolchain.
 
@@ -47,6 +57,8 @@ graph TB
 
     SCENARIOS --> SIM["matching-sim"]
     VERIFIER --> ZK["sybil-zk"]
+    VERIFIER --> ESCAPEGUEST["sybil-escape-claim<br/>guest-safe Form L"]
+    ZK --> ESCAPEGUEST
     VERIFIER --> PROVER["sybil-prover"]
     ZK --> PROVER
     SEQ -.->|"sequencer-store feature"| PROVER
@@ -59,6 +71,13 @@ graph TB
     CLIENT --> API
     POLY -.->|"HTTP"| API
     L1PROTO["sybil-l1-protocol<br/>L1 ABI · bridge hash domains"] --> L1INDEXER["sybil-l1-indexer<br/>dev L1 deposit sidecar"]
+    L1PROTO --> ESCAPEGUEST
+    ESCAPEGUEST --> CUSTODY["sybil-custody<br/>snapshot · reconstruct · escape claim"]
+    VERIFIER --> CUSTODY
+    ZK --> CUSTODY
+    TYPES --> CUSTODY
+    CUSTODY -.->|"HTTP / RPC"| API
+    CUSTODY -.->|"prove / submit"| L1
     TYPES --> L1INDEXER
     CLIENT --> L1INDEXER
     L1INDEXER -.->|"HTTP service routes"| API
@@ -68,16 +87,19 @@ graph TB
 *Note: `matching-sim` also depends on `matching-solver` and `sybil-verifier` — omitted to keep arrows clean. It's a dev tool for benchmarking.*
 
 ## Key Properties
-- `matching-engine` is the sole foundation — all crates depend on it
+- `matching-engine` is the exchange-domain foundation; protocol/client tools
+  stay narrower where possible
 - No upward dependencies: engine doesn't know about solvers, solvers don't know about API
 - Sequencer composes middle-tier crates into the block production pipeline
 - `sybil-zk` is guest-safe verification; `sybil-prover` owns portable proof jobs and host-side prover input construction
 - `sybil-prover witgen ...` is sequencer-side tooling for exporting latest-block proof jobs from the store, gated behind `sequencer-store`
 - Default `sybil-prover` builds are the proof-job CLI/service boundary and settlement calldata encoder; they do not depend on the sequencer
 - Sequencer owns block production and persistence, not prover input assembly; its `sybil-zk` edge is limited to shared qMDB proof structs
-- `sybil-signing` is client-signature serialization, not consensus commitment serialization
+- `sybil-signing` is client-signature serialization, not validity-commitment serialization
 - `sybil-client` is THE Rust HTTP client (SYB-171): `sybil-polymarket` and the `sybil-admin` CLI both depend on it; no hand-written duplicate should be reintroduced
 - `sybil-l1-protocol` is dependency-light and owns L1 ABI/hash primitives; `sybil-l1-indexer` uses it plus `sybil-client` to feed the existing bridge WAL entrypoints
+- `sybil-escape-claim` is the guest-safe emergency statement;
+  `sybil-custody` is the user-side retention/reconstruction/proving client
 - Arena connects via HTTP only — no Rust compilation required
 - `matching-sim` is a dev tool that cross-cuts multiple crates for benchmarking
 - `sequencer-sim` is a dev-only crate: it depends on `matching-sequencer` so the sequencer library stays free of simulation/agent code (nothing `sybil-api` links pulls it in)

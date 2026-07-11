@@ -1,6 +1,6 @@
 use rand::RngExt;
 
-use matching_engine::{outcome_buy, outcome_sell, MarketSet, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketSet, NANOS_PER_DOLLAR, Nanos, outcome_buy, outcome_sell};
 
 use crate::agent::{Agent, AgentSubmission, MarketView};
 use matching_sequencer::account::{Account, AccountId};

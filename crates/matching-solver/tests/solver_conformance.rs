@@ -3,16 +3,16 @@ mod conformance {
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
     use matching_engine::{
-        compute_fill_settlement, derive_minting, notional_nanos, outcome_buy, outcome_sell,
-        shares_to_qty, MarketId, MarketSet, MintAdjustment, MmConstraint, MmId, MmSide, Nanos,
-        Order, Problem, Qty, MAX_ORDER_QTY, NANOS_PER_DOLLAR,
+        MAX_ORDER_QTY, MarketId, MarketSet, MintAdjustment, MmConstraint, MmId, MmSide,
+        NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, compute_fill_settlement, derive_minting,
+        notional_nanos, outcome_buy, outcome_sell, shares_to_qty,
     };
     use matching_solver::{PipelineResult, Solver};
     use proptest::prelude::*;
     use proptest::test_runner::{Config as ProptestConfig, RngSeed, TestCaseError, TestRunner};
     use sybil_verifier::{
-        empty_account_keys_digest, verify_match, verify_orders, verify_settlement, AccountSnapshot,
-        BlockWitness, StateSidecarSnapshot, WitnessBlockHeader, WitnessOrder,
+        AccountSnapshot, BlockWitness, StateSidecarSnapshot, WitnessBlockHeader, WitnessOrder,
+        empty_account_keys_digest, verify_match, verify_orders, verify_settlement,
     };
 
     const DEFAULT_CASES: u32 = 64;
@@ -926,5 +926,7 @@ mod conformance {
 #[cfg(not(any(feature = "lp", feature = "conic", feature = "milp")))]
 #[test]
 fn solver_conformance_no_solver_features_enabled() {
-    eprintln!("matching-solver has no default solver feature enabled; no Solver impl is available for conformance");
+    eprintln!(
+        "matching-solver has no default solver feature enabled; no Solver impl is available for conformance"
+    );
 }

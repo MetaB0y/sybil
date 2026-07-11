@@ -12,9 +12,9 @@
 
 use std::collections::HashMap;
 
-use crate::order::derive_order_direction;
-use crate::types::{MarketId, Nanos, NANOS_PER_DOLLAR};
 use crate::OrderDirection;
+use crate::order::derive_order_direction;
+use crate::types::{MarketId, NANOS_PER_DOLLAR, Nanos};
 
 /// Per-market YES touch midpoint over the resting single-market book.
 ///
@@ -70,10 +70,10 @@ pub fn book_midprices<'a>(
 
     let mut mids = HashMap::new();
     for (&market, &bid) in &best_bid {
-        if let Some(&ask) = best_ask.get(&market) {
-            if bid < ask {
-                mids.insert(market, bid + Nanos((ask.0 - bid.0) / 2));
-            }
+        if let Some(&ask) = best_ask.get(&market)
+            && bid < ask
+        {
+            mids.insert(market, bid + Nanos((ask.0 - bid.0) / 2));
         }
     }
     mids
@@ -88,10 +88,8 @@ pub fn mark_yes_no(
     last_mark: Option<&[Nanos]>,
 ) -> Vec<Nanos> {
     let half = Nanos(NANOS_PER_DOLLAR / 2);
-    if had_fill {
-        if let Some(c) = clearing {
-            return c.to_vec();
-        }
+    if had_fill && let Some(c) = clearing {
+        return c.to_vec();
     }
     if let Some(mid) = midpoint {
         return vec![mid, Nanos(NANOS_PER_DOLLAR.saturating_sub(mid.0))];
@@ -108,8 +106,8 @@ pub fn mark_yes_no(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::order_builder::{outcome_buy, outcome_sell, spread};
     use crate::MarketSet;
+    use crate::order_builder::{outcome_buy, outcome_sell, spread};
 
     fn markets() -> (MarketSet, MarketId, MarketId) {
         let mut m = MarketSet::new();

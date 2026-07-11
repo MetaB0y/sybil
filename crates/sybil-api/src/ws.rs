@@ -5,10 +5,10 @@ use std::time::Duration;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::time::{interval, Instant, MissedTickBehavior};
+use tokio::time::{Instant, MissedTickBehavior, interval};
 
 use matching_sequencer::{SequencerError, SequencerHandle};
-use sybil_api_types::ws::{BlockStreamMessage, BlockStreamPayload, BLOCK_STREAM_VERSION};
+use sybil_api_types::ws::{BLOCK_STREAM_VERSION, BlockStreamMessage, BlockStreamPayload};
 
 use crate::convert::block_to_response;
 

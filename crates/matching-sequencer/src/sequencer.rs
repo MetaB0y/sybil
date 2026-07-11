@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use matching_engine::{
-    derive_order_direction, Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order,
-    Problem,
+    Fill, MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem,
+    derive_order_direction,
 };
 use matching_solver::{PipelineResult, Solver};
 use sybil_oracle::{MarketStatus, Oracle, ResolutionRecord};
@@ -16,16 +16,16 @@ use tracing::{debug, error};
 use crate::account::{Account, AccountId, AccountStore};
 use crate::analytics::{AnalyticsState, OrderHistoryOptions};
 use crate::block::{
-    hash_header, state_sidecar_snapshot, AdmitTimingView, Block, BlockAnalytics, BlockFlowMetrics,
-    BlockHeader, BlockProduction, DerivedViewSidecar, RejectedOrderView, RemovedOrderExitReason,
-    RemovedOrderPhase, RemovedOrderView,
+    AdmitTimingView, Block, BlockAnalytics, BlockFlowMetrics, BlockHeader, BlockProduction,
+    DerivedViewSidecar, RejectedOrderView, RemovedOrderExitReason, RemovedOrderPhase,
+    RemovedOrderView, hash_header, state_sidecar_snapshot,
 };
 use crate::bridge::{
-    account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos, BridgeBlockData,
-    BridgeError, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, DepositDisposition,
-    L1Deposit, L1WithdrawalStatus, WithdrawalLeaf, DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS,
+    BridgeBlockData, BridgeError, BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest,
+    DEFAULT_WITHDRAWAL_EXPIRY_BLOCKS, DepositDisposition, L1Deposit, L1WithdrawalStatus,
+    WithdrawalLeaf, account_key, amount_token_units_to_i64_nanos, amount_token_units_to_nanos,
 };
-use crate::canonical_state::{snapshot_account, CanonicalState};
+use crate::canonical_state::{CanonicalState, snapshot_account};
 use crate::error::{
     BlockInvariantFailure, Rejection, RejectionReason, SequencerError, VerifierFailure,
 };
@@ -47,10 +47,10 @@ mod restore;
 mod types;
 mod views;
 
-pub use self::config::{AnalyticsMemoryStats, SequencerConfig, DEFAULT_ORDER_TTL_BLOCKS};
+pub use self::config::{AnalyticsMemoryStats, DEFAULT_ORDER_TTL_BLOCKS, SequencerConfig};
 pub use self::types::{
-    batch_result_from_block, AdmitOutcome, BatchResult, LeaderboardBase, LeaderboardRow,
-    OrderSubmission, PendingOrderInfo, PreparedBlock,
+    AdmitOutcome, BatchResult, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,
+    PreparedBlock, batch_result_from_block,
 };
 
 fn current_timestamp_ms() -> u64 {

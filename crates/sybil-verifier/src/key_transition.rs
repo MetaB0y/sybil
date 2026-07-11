@@ -468,7 +468,7 @@ mod tests {
     fn key(byte: u8, auth_scheme: u8) -> KeyRecord {
         let signing = SigningKey::from_slice(&[byte; 32]).unwrap();
         let mut pubkey_sec1 = [0u8; 33];
-        pubkey_sec1.copy_from_slice(signing.verifying_key().to_encoded_point(true).as_bytes());
+        pubkey_sec1.copy_from_slice(signing.verifying_key().to_sec1_point(true).as_bytes());
         KeyRecord {
             auth_scheme,
             pubkey_sec1,
@@ -560,9 +560,11 @@ mod tests {
         let attacker = key(2, 0);
         let result = verify_key_transitions(&witness(&[old], &[attacker], Vec::new()));
         assert!(!result.valid);
-        assert!(result.violations[0]
-            .details
-            .contains("without a witnessed key event"));
+        assert!(
+            result.violations[0]
+                .details
+                .contains("without a witnessed key event")
+        );
     }
 
     #[test]
@@ -580,9 +582,11 @@ mod tests {
             }],
         ));
         assert!(!result.valid);
-        assert!(result.violations[0]
-            .details
-            .contains("did not find the registered key"));
+        assert!(
+            result.violations[0]
+                .details
+                .contains("did not find the registered key")
+        );
     }
 
     #[test]
@@ -597,9 +601,11 @@ mod tests {
         }];
         let result = verify_key_transitions(&witness);
         assert!(!result.valid);
-        assert!(result.violations[0]
-            .details
-            .contains("no opened post-state leaf"));
+        assert!(
+            result.violations[0]
+                .details
+                .contains("no opened post-state leaf")
+        );
     }
 
     #[test]

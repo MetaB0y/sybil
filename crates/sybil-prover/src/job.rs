@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sybil_verifier::{commitments::state_schema, BlockWitness};
+use sybil_verifier::{BlockWitness, commitments::state_schema};
 
 pub const STATE_TRANSITION_PROOF_JOB_VERSION: u8 = 2;
 

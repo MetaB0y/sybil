@@ -25,19 +25,17 @@ class QmdbStateRangeProofResponse:
     """ 
         Attributes:
             digests_hex (list[str]):
+            inactive_peaks (int):
             leaves (int):
             ops_root_hex (str):
-            unfolded_prefix_peaks_hex (list[str]):
             partial_chunk_digest_hex (None | str | Unset):
-            pre_prefix_acc_hex (None | str | Unset):
      """
 
     digests_hex: list[str]
+    inactive_peaks: int
     leaves: int
     ops_root_hex: str
-    unfolded_prefix_peaks_hex: list[str]
     partial_chunk_digest_hex: None | str | Unset = UNSET
-    pre_prefix_acc_hex: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -47,13 +45,12 @@ class QmdbStateRangeProofResponse:
     def to_dict(self) -> dict[str, Any]:
         digests_hex = self.digests_hex
 
+        inactive_peaks = self.inactive_peaks
 
 
         leaves = self.leaves
 
         ops_root_hex = self.ops_root_hex
-
-        unfolded_prefix_peaks_hex = self.unfolded_prefix_peaks_hex
 
 
 
@@ -63,26 +60,16 @@ class QmdbStateRangeProofResponse:
         else:
             partial_chunk_digest_hex = self.partial_chunk_digest_hex
 
-        pre_prefix_acc_hex: None | str | Unset
-        if isinstance(self.pre_prefix_acc_hex, Unset):
-            pre_prefix_acc_hex = UNSET
-        else:
-            pre_prefix_acc_hex = self.pre_prefix_acc_hex
-
-
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
             "digests_hex": digests_hex,
+            "inactive_peaks": inactive_peaks,
             "leaves": leaves,
             "ops_root_hex": ops_root_hex,
-            "unfolded_prefix_peaks_hex": unfolded_prefix_peaks_hex,
         })
         if partial_chunk_digest_hex is not UNSET:
             field_dict["partial_chunk_digest_hex"] = partial_chunk_digest_hex
-        if pre_prefix_acc_hex is not UNSET:
-            field_dict["pre_prefix_acc_hex"] = pre_prefix_acc_hex
-
         return field_dict
 
 
@@ -92,13 +79,11 @@ class QmdbStateRangeProofResponse:
         d = dict(src_dict)
         digests_hex = cast(list[str], d.pop("digests_hex"))
 
+        inactive_peaks = d.pop("inactive_peaks")
 
         leaves = d.pop("leaves")
 
         ops_root_hex = d.pop("ops_root_hex")
-
-        unfolded_prefix_peaks_hex = cast(list[str], d.pop("unfolded_prefix_peaks_hex"))
-
 
         def _parse_partial_chunk_digest_hex(data: object) -> None | str | Unset:
             if data is None:
@@ -110,23 +95,12 @@ class QmdbStateRangeProofResponse:
         partial_chunk_digest_hex = _parse_partial_chunk_digest_hex(d.pop("partial_chunk_digest_hex", UNSET))
 
 
-        def _parse_pre_prefix_acc_hex(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        pre_prefix_acc_hex = _parse_pre_prefix_acc_hex(d.pop("pre_prefix_acc_hex", UNSET))
-
-
         qmdb_state_range_proof_response = cls(
             digests_hex=digests_hex,
+            inactive_peaks=inactive_peaks,
             leaves=leaves,
             ops_root_hex=ops_root_hex,
-            unfolded_prefix_peaks_hex=unfolded_prefix_peaks_hex,
             partial_chunk_digest_hex=partial_chunk_digest_hex,
-            pre_prefix_acc_hex=pre_prefix_acc_hex,
         )
 
 

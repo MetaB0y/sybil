@@ -62,7 +62,7 @@ pattern; escape-claim and key-op canonical bytes inherit the same rule
 
 **Costs / constraints:** the canonical-bytes builders are **validity-critical surface**
 and today are **duplicated** in spots (the `hash_header`-×3 / divergent
-reservation-encoder problem, `docs/review/02-cross-cutting-themes.md` Theme 6) —
+reservation-encoder problem, recorded in the [historical audit](https://github.com/MetaB0y/sybil/blob/main/design/archive/review-2026-07-02/02-cross-cutting-themes.md) Theme 6) —
 divergent copies are a genuine bug class this ADR makes urgent to consolidate;
 every client (Rust, Python, frontend) must construct identical bytes or signing
 silently fails; changing a domain string or field order is a breaking change for

@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use matching_engine::{outcome_buy, MarketId, MarketSet, Qty, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, MarketSet, NANOS_PER_DOLLAR, Qty, outcome_buy};
 use matching_sequencer::{
     AccountId, AccountStore, AdminOracle, BlockProduction, BlockSequencer, OrderSubmission,
     SequencerConfig,

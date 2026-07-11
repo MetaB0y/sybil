@@ -6,17 +6,17 @@ mod common;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
-use axum::http::{header, HeaderMap, Method, Request, StatusCode};
+use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
 use matching_sequencer::crypto::{
-    canonical_api_key_create_bytes, canonical_bridge_withdrawal_bytes, PublicKey,
+    PublicKey, canonical_api_key_create_bytes, canonical_bridge_withdrawal_bytes,
 };
 use matching_sequencer::{AccountId, BridgeWithdrawalRequest};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sybil_api::app::{
-    RouteMount, DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE,
+    DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, RouteMount, SERVICE_ROUTE_TABLE,
 };
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;

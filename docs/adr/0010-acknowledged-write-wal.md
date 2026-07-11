@@ -39,7 +39,7 @@ actions, in order, before bridge WALs.
 
 Source: vault note `docs/architecture/Acknowledged-Write WAL Replay.md` (self-
 described "single-sequenced-WAL decision record"); the ordering flags in
-`docs/review/god-module-decomposition.md` §3 (actor `admit_or_defer`,
+the [historical decomposition review](https://github.com/MetaB0y/sybil/blob/main/design/archive/review-2026-07-02/god-module-decomposition.md) §3 (actor `admit_or_defer`,
 `on_tick_inner`, WAL-before-apply).
 
 ## Alternatives considered

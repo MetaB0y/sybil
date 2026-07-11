@@ -737,9 +737,11 @@ mod tests {
             .unwrap()
             .enabled_market_specs();
         assert_eq!(specs.len(), 3);
-        assert!(specs
-            .iter()
-            .all(|spec| spec.group_key.as_deref() == Some("native:native_multi")));
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.group_key.as_deref() == Some("native:native_multi"))
+        );
         assert!(specs.iter().all(|spec| spec.group_size == 3));
         assert_eq!(specs[0].market_key, "native_multi:a");
         assert_eq!(

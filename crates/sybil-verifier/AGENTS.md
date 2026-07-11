@@ -1,122 +1,52 @@
-# AGENTS.md
+# `sybil-verifier`
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this crate.
+Canonical native verifier and encoding owner for the block witness. The OpenVM
+guest reuses this transition logic through `sybil-zk`; changes here can move
+guest commitments, state roots, witness bytes, and L1 public inputs.
 
-## Purpose
+## Read first
 
-The **sybil-verifier** crate provides comprehensive block verification for ZK proof integration. It validates every aspect of a block produced by the sequencer across 4 independent layers.
+- [[Four-Layer Verification]] and [[Block Witness]]
+- [[Canonical Serialization]] and [[State Root Schema]]
+- [[P256 Authentication]] and [[ZK Integration Path]]
 
-## Architecture Notes
+## Verification shape
 
-Before modifying this crate, read these vault notes (`docs/architecture/`):
-- [[Four-Layer Verification]] — the 4-layer verification model
-- [[Block Witness]] — witness structure for ZK proof generation
-- [[ZK Integration Path]] — roadmap from verifier to SNARK circuits
+`verify_full(witness, diagnostics)` combines more than the historical four
+named layers:
 
-## Verification Layers
+- match/fill, uniform-price, group, MM-budget, and welfare checks;
+- integer settlement/MINT replay;
+- header roots, parent/height/counts, and exact authenticated state;
+- admission funding/positions/expiry/rejection validity;
+- system-event, bridge/quarantine, lifecycle, and committed sidecar transition;
+- active-key universe/digest transitions and RawP256/WebAuthn authorization.
 
-### Layer 1: Match Verification (`match_verifier.rs`)
-- **Per-fill checks**: order existence, quantity constraints, price limits, no duplicates
-- **UCP**: single-market fills match clearing price
-- **Price complementarity**: YES + NO = $1 for binary markets
-- **Market group constraints**: grouped markets' YES prices sum ≤ $1
-- **MM budget constraints**: fills don't exceed allocated capital
-- **Welfare consistency**: computed total matches reported
+There is no “lenient versus strict” verifier mode. The `diagnostics` flag
+controls extra diagnostic reporting, not validity rules.
 
-### Layer 2: Settlement Verification (`settlement.rs`)
-- Re-derives post-state from `pre_state + fills`
-- Derives protocol MINT account adjustments from post-fill position imbalance
-- Verifies balances and positions after settlement
-- Uses i128 intermediates to avoid overflow
+## Ownership
 
-### Layer 3: Block Integrity (`block.rs`)
-- **State root**: BLAKE3 hash of post-state
-- **Parent hash chaining**: `header.parent_hash == hash(previous_header)`
-- **Height verification**: consecutive block heights
-- **Count verification**: order_count, fill_count match witness
+| Area | Location |
+|---|---|
+| Witness/domain types | `types.rs` |
+| Full orchestration | `lib.rs` |
+| Match/settlement/orders/block | corresponding verifier modules |
+| System/sidecar/quarantine | `system.rs`, `sidecar.rs`, `quarantine.rs` |
+| Keys and intent | `account_keys.rs`, `key_transition.rs`, `key_op_auth.rs` |
+| Canonical bytes | `canonical.rs`, `witness_schema.rs`, event/state/snapshot schemas |
+| Violations/results | `violations.rs` |
 
-### Layer 4: Order Validation (`orders.rs`)
-- Pre-state balance checks (buy orders)
-- Pre-state position checks (sell orders)
-- Intra-batch double-spend detection
-- Rejection validation (false rejections, incorrect reasons)
+## Rules
 
-## Key Types
+- Never fork canonical byte layouts between host and guest.
+- Preserve exact-keyspace/absence proofs, not inclusion alone.
+- Use shared checked integer settlement helpers; no floating point.
+- Treat tag/version/layout changes as validity changes: update golden vectors,
+  decoders, guest fingerprints/commitments, ADR/current docs, and fresh-genesis
+  planning together.
+- `sybil-verifier` is the sole trusted solver-output verifier; no parallel
+  matching-solver verifier exists.
 
-```rust
-struct BlockWitness {
-    header: WitnessBlockHeader,
-    previous_header: Option<WitnessBlockHeader>,
-    genesis_hash: [u8; 32],
-    orders: Vec<WitnessOrder>,
-    rejections: Vec<WitnessRejection>,
-    system_events: Vec<SystemEventWitness>,
-    fills: Vec<Fill>,
-    clearing_prices: HashMap<MarketId, Vec<Nanos>>,
-    total_welfare: i64,
-    minting_cost: i64,
-    mm_constraints: Vec<MmConstraint>,
-    market_groups: Vec<MarketGroup>,
-    pre_state: Vec<AccountSnapshot>,
-    post_system_state: Vec<AccountSnapshot>,
-    post_state: Vec<AccountSnapshot>,
-    state_sidecar: StateSidecarSnapshot,
-    resolved_markets: Vec<MarketId>,
-}
-
-struct VerificationResult {
-    valid: bool,
-    violations: Vec<Violation>,
-    stats: VerificationStats,
-}
-```
-
-## Usage
-
-```rust
-use sybil_verifier::{verify_match, BlockWitness};
-
-let result = verify_match(&witness);
-if !result.valid {
-    for violation in &result.violations {
-        eprintln!("{:?}", violation.kind);
-    }
-}
-```
-
-## Strict vs Lenient Mode
-
-| Mode | Zero Fills | Welfare Tolerance |
-|------|-----------|-------------------|
-| Lenient (default) | Allowed | 1000 nanos |
-| Strict (ZK) | Forbidden | 0 |
-
-## Violation Types (37 total)
-
-**Layer 1**: OrderNotFound, QuantityExceedsMax, PriceExceedsLimit, DuplicateFill, WelfareMismatch, MmBudgetExceeded, UniformClearingPriceViolation, PriceComplementarityViolation, MarketGroupConstraintViolation, ...
-
-**Layer 2**: SettlementBalanceMismatch, SettlementPositionMismatch, SettlementOverflow
-
-**Layer 3**: StateRootMismatch, ParentHashMismatch, HeightNotConsecutive, OrderCountMismatch
-
-**Layer 4**: InsufficientBalance, InsufficientPosition, FalseRejection, IncorrectRejectionReason
-
-## vs matching-solver/verifier
-
-| Aspect | sybil-verifier | matching-solver/verifier |
-|--------|----------------|--------------------------|
-| Scope | Complete block (4 layers) | Match result only |
-| Input | BlockWitness | Problem + MatchingResult |
-| Purpose | ZK circuit integration | Solver output correctness |
-
-## Module Map
-
-| Module | Purpose |
-|--------|---------|
-| `match_verifier.rs` | Layer 1: fill/market invariants |
-| `settlement.rs` | Layer 2: state transition |
-| `block.rs` | Layer 3: header integrity |
-| `orders.rs` | Layer 4: pre-state/rejections |
-| `types.rs` | BlockWitness, AccountSnapshot |
-| `violations.rs` | ViolationKind enum |
-| `arithmetic.rs` | Overflow-safe computations |
+Run `cargo test -p sybil-verifier`, `just golden-check`, and relevant
+`sybil-zk`/OpenVM checks for validity-surface changes.

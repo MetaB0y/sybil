@@ -10,7 +10,8 @@ Only Caddy publishes host ports in the production compose stack.
 
 | Public port | Hostname | Service | Auth |
 | --- | --- | --- | --- |
-| 80, 443 | `172-104-31-54.nip.io` | `sybil-api` trading API and web UI | Public |
+| 80, 443 | `172-104-31-54.nip.io` | `sybil-api` trading and realtime API | Public |
+| 80, 443 | `app.172-104-31-54.nip.io` | Next.js web UI | Public |
 | 80, 443 | `arena.172-104-31-54.nip.io` | Streamlit arena dashboard | Caddy basic auth |
 | 80, 443 | `grafana.172-104-31-54.nip.io` | Grafana | Caddy basic auth, then Grafana login |
 | 80, 443 | `prover.172-104-31-54.nip.io` | Prover status/API | Caddy basic auth |
@@ -32,6 +33,8 @@ Create `/opt/sybil/.env` on the deploy host before running prod compose commands
 
 ```bash
 SYBIL_SERVICE_TOKEN=<strong random bearer token for service/operator routes>
+SYBIL_WEBAUTHN_RP_ID=app.172-104-31-54.nip.io
+SYBIL_WEBAUTHN_ORIGIN=https://app.172-104-31-54.nip.io
 GF_SECURITY_ADMIN_PASSWORD=<strong grafana admin password>
 CADDY_OPS_AUTH_USER=ops
 CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
@@ -41,6 +44,12 @@ CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 `sybil-arena`. In prod, service routes fail closed when it is missing. Optional
 `SYBIL_CORS_ORIGINS` may be set to a comma-separated browser-origin allowlist;
 empty/unset keeps CORS same-origin only.
+
+`SYBIL_WEBAUTHN_RP_ID` is the web-app hostname only; `SYBIL_WEBAUTHN_ORIGIN` is
+the exact browser origin including `https://`. Both must match the app hostname
+baked into the web image via `NEXT_PUBLIC_WEBAUTHN_RP_ID`; changing them
+requires a frontend rebuild. The API hostname is not the relying party when the
+browser ceremony runs on `app.172-104-31-54.nip.io`.
 
 Generate the Caddy hash with:
 
@@ -76,9 +85,10 @@ startup preflight: the server refuses to boot if a dev-only knob is wired in
 `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0`). Every profile logs a `deployment
 profile preflight` block naming knobs that diverge from the prod baseline.
 
-Override deliberately (never steady state) with `SYBIL_ALLOW_DEV_KNOBS=1`. On
-the shared devnet box, export `SYBIL_DEPLOYMENT_PROFILE=devnet` so its logs
-self-label. Full knob matrix and history-serving policy:
+Override deliberately (never steady state) with `SYBIL_ALLOW_DEV_KNOBS=1`.
+The checked-in production overlay sets the profile to `prod`; changing a shell
+variable does not override that literal Compose value. Full knob matrix and
+history-serving policy:
 `docs/architecture/Deployment Profiles.md`.
 
 ## Deploy Commands
@@ -90,6 +100,10 @@ just deploy-monitoring
 just deploy-caddy
 just deploy-all
 ```
+
+`deploy-all` currently transfers the API and arena images but not the freshly
+built `sybil-web` image. Run `just deploy-web` whenever frontend source or its
+baked `NEXT_PUBLIC_*` configuration changed.
 
 `deploy-arena` and `deploy-all` require `OPENROUTER_API_KEY` in
 `/opt/sybil/arena.env`. The recipes check only for the presence of required variable
@@ -155,5 +169,5 @@ Reset app state only when intentional:
 just deploy-reset-state CONFIRM
 ```
 
-For a full consensus-breaking redeploy (fresh genesis, verifier-adapter repin),
-follow `docs/runbooks/devnet-redeploy.md`.
+For a validity-breaking devnet redeploy (fresh genesis and verifier-adapter
+repin), follow `docs/runbooks/fresh-genesis-redeploy.md`.

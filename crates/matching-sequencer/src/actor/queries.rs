@@ -138,10 +138,10 @@ impl SequencerActorState {
             let metadata = self.sequencer.market_metadata(mid);
             let status = self.sequencer.market_status(mid);
 
-            if let Some(ref status_filter) = query.status {
-                if status.as_str() != status_filter.as_str() {
-                    continue;
-                }
+            if let Some(ref status_filter) = query.status
+                && status.as_str() != status_filter.as_str()
+            {
+                continue;
             }
 
             if let Some(ref text) = query.text {
@@ -181,21 +181,21 @@ impl SequencerActorState {
             let no_price = market_prices.and_then(|p| p.get(1).copied());
             let volume = self.sequencer.analytics().market_volume(mid);
 
-            if let Some(min_p) = query.min_yes_price {
-                if yes_price.unwrap_or(Nanos::ZERO) < min_p {
-                    continue;
-                }
+            if let Some(min_p) = query.min_yes_price
+                && yes_price.unwrap_or(Nanos::ZERO) < min_p
+            {
+                continue;
             }
-            if let Some(max_p) = query.max_yes_price {
-                if yes_price.unwrap_or(Nanos::ZERO) > max_p {
-                    continue;
-                }
+            if let Some(max_p) = query.max_yes_price
+                && yes_price.unwrap_or(Nanos::ZERO) > max_p
+            {
+                continue;
             }
 
-            if let Some(min_vol) = query.min_volume {
-                if volume < min_vol {
-                    continue;
-                }
+            if let Some(min_vol) = query.min_volume
+                && volume < min_vol
+            {
+                continue;
             }
 
             results.push(MarketSearchResult {
@@ -212,7 +212,7 @@ impl SequencerActorState {
         if let Some(ref sort_field) = query.sort_by {
             match sort_field {
                 crate::market_info::MarketSortField::Volume => {
-                    results.sort_by(|a, b| b.volume_nanos.cmp(&a.volume_nanos));
+                    results.sort_by_key(|entry| std::cmp::Reverse(entry.volume_nanos));
                 }
                 crate::market_info::MarketSortField::CreatedAt => {
                     results.sort_by(|a, b| {

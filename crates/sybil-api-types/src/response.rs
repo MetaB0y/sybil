@@ -627,7 +627,7 @@ pub struct BlockResponse {
     /// scalar — `by_market[m].placers` is the per-market split.
     #[serde(default)]
     pub unique_placers: u32,
-    /// Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
+    /// Nested per-market block scalars. Each
     /// `BlockMarketStats` carries the per-market splits for this block. Old
     /// clients ignore it; new clients consume what they recognise.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -875,10 +875,8 @@ pub struct QmdbStateOperationProofResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct QmdbStateRangeProofResponse {
     pub leaves: u64,
+    pub inactive_peaks: u64,
     pub digests_hex: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pre_prefix_acc_hex: Option<String>,
-    pub unfolded_prefix_peaks_hex: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial_chunk_digest_hex: Option<String>,
     pub ops_root_hex: String,

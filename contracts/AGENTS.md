@@ -25,10 +25,10 @@ forge test
 
 Read these architecture notes before changing contracts:
 
-- `docs/architecture/L1 Settlement and Vault.md`
-- `docs/architecture/State Root Schema.md`
-- `docs/architecture/ZK Integration Path.md`
-- `docs/architecture/Canonical Serialization.md`
+- `docs/architecture/04-verification/L1 Settlement and Vault.md`
+- `docs/architecture/04-verification/State Root Schema.md`
+- `docs/architecture/04-verification/ZK Integration Path.md`
+- `docs/architecture/04-verification/Canonical Serialization.md`
 
 ## Constraints
 

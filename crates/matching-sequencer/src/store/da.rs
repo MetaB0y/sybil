@@ -50,7 +50,9 @@ pub struct DaArtifactLookup {
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
 pub enum DaArtifactIntegrityError {
-    #[error("DA artifact payload length mismatch at height {height}: manifest={expected}, bytes={actual}")]
+    #[error(
+        "DA artifact payload length mismatch at height {height}: manifest={expected}, bytes={actual}"
+    )]
     PayloadLenMismatch {
         height: u64,
         expected: u64,
@@ -162,10 +164,9 @@ impl Store {
             let txn = db.begin_write()?;
             let retained_floor = {
                 let meta = txn.open_table(HISTORY_META)?;
-                let retained_floor = meta
-                    .get(KEY_BLOCKS_FULL_MIN_HEIGHT)?
-                    .map(|value| value.value());
-                retained_floor
+
+                meta.get(KEY_BLOCKS_FULL_MIN_HEIGHT)?
+                    .map(|value| value.value())
             };
             if retained_floor.is_some_and(|floor| artifact.manifest.height < floor) {
                 txn.commit()?;

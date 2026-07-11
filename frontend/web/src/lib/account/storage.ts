@@ -4,9 +4,9 @@
  * localStorage I/O for the connected demo account.
  *
  * Keys are namespaced under `sybil:auth:`. The private key is stored as JWK
- * — extractable so the user can disconnect/reconnect across sessions. Move
- * to non-extractable IndexedDB once dev_mode is no longer the onboarding
- * path (see OPEN_QUESTIONS).
+ * — extractable so the user can disconnect/reconnect across sessions. This is
+ * the raw-P256 compatibility path; WebAuthn credentials use the browser's
+ * authenticator instead.
  */
 
 export const STORAGE_KEYS = {

@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::categorize::derive_categories;
@@ -14,7 +14,7 @@ use crate::mapping::{GroupInfo, MappingStore};
 use crate::mm::{MmMessage, QuoteRange};
 use crate::native::{NativeMarketCatalog, NativeMarketSpec, NativeQuoteRange};
 use crate::polymarket::gamma::GammaClient;
-use crate::polymarket::types::{parse_iso8601_to_ms, GammaEvent, GammaMarket};
+use crate::polymarket::types::{GammaEvent, GammaMarket, parse_iso8601_to_ms};
 use sybil_api_types::*;
 use sybil_client::SybilClient;
 
@@ -687,14 +687,13 @@ impl SyncActor {
         }
 
         // Notify Feed about new tokens to subscribe
-        if !new_token_ids.is_empty() {
-            if let Err(e) = self
+        if !new_token_ids.is_empty()
+            && let Err(e) = self
                 .feed_tx
                 .send(FeedMessage::SubscribeTokens(new_token_ids))
                 .await
-            {
-                warn!(error = %e, "failed to notify feed about new token subscriptions");
-            }
+        {
+            warn!(error = %e, "failed to notify feed about new token subscriptions");
         }
 
         Ok(())

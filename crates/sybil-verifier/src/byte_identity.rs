@@ -16,7 +16,7 @@ use crate::types::{
     WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 use crate::witness_schema;
-use crate::{account_keys_digest, empty_account_keys_digest, AccountKeyDigestRecord};
+use crate::{AccountKeyDigestRecord, account_keys_digest, empty_account_keys_digest};
 
 #[test]
 fn golden_vectors_pin_header_hash_and_snapshot_encoders() {
@@ -221,9 +221,11 @@ fn byte_identity_witness() -> BlockWitness {
         clearing_prices,
         total_welfare: 12_345,
         minting_cost: -222,
-        mm_constraints: vec![MmConstraint::new(MmId::new(12), Nanos(3_000_000_000))
-            .with_order(42, MmSide::BuyYes)
-            .with_order(7, MmSide::SellNo)],
+        mm_constraints: vec![
+            MmConstraint::new(MmId::new(12), Nanos(3_000_000_000))
+                .with_order(42, MmSide::BuyYes)
+                .with_order(7, MmSide::SellNo),
+        ],
         market_groups: vec![MarketGroup {
             name: "Weather basket".to_string(),
             markets: vec![market_b, market_a],

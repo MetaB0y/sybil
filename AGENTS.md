@@ -24,8 +24,18 @@ sybil/
 │   ├── matching-sequencer/        # Multi-batch block sequencer (production lib; linked by sybil-api)
 │   ├── sequencer-sim/             # Dev-only agent-based simulation driving the sequencer (bin: sybil-sim)
 │   ├── sybil-api/                 # HTTP API server for agent trading
+│   ├── sybil-api-types/           # Shared REST/WebSocket DTOs and OpenAPI schema
+│   ├── sybil-client/              # Shared Rust HTTP/SSE client
+│   ├── sybil-signing/             # Canonical client-action signing bytes
 │   ├── sybil-oracle/              # Oracle/resolution service
-│   └── sybil-verifier/            # ZK-ready block verification
+│   ├── sybil-verifier/            # Native canonical witness/state verification
+│   ├── sybil-zk/                  # Guest-safe transition/public-input verification
+│   ├── sybil-prover/              # Proof jobs, DA artifacts, calldata/submission
+│   ├── sybil-escape-claim/         # Guest-safe conservative escape statement
+│   ├── sybil-custody/              # User snapshots, reconstruction, escape proving CLI
+│   ├── sybil-l1-protocol/          # Shared Rust/Solidity bridge hash and ABI domains
+│   ├── sybil-l1-indexer/           # L1 deposit/withdrawal lifecycle sidecar
+│   └── sybil-polymarket/           # External market mirror and MM integration
 ├── arena/                         # Python: trading bots, client SDK, simulation framework (has its own AGENTS.md)
 │   ├── sim/                       #   Generic simulation framework (clock, news_trader, runner)
 │   ├── markets/                   #   Per-market config (iran/ with personas, sources, datasets)
@@ -33,19 +43,16 @@ sybil/
 ├── contracts/                     # Solidity + Foundry L1 settlement/vault contracts
 ├── viz/                           # Python: Streamlit visualization dashboard (Rust solver)
 ├── fuzz/                          # Cargo-fuzz targets (separate workspace)
-├── design/                        # Historical design notes (superseded by docs/architecture/)
-│   ├── architecture.md            #   [superseded] Solver design, key abstractions
-│   ├── architecture-diagrams.md   #   [superseded] System overview diagrams
-│   ├── solver-benchmarks.md       #   Comparative solver evaluation
-│   └── welfare-vs-volume.md       #   Optimization objective tradeoffs (deep-dive)
-├── docs/architecture/             # Obsidian vault — canonical architecture spec (~35 notes)
+├── design/                        # Proposals, proofs, research, and historical archive
+├── docs/                          # Current spec, ADRs, runbooks, security/custody guides
+│   └── architecture/              # Canonical architecture vault, grouped by system flow
 ├── scripts/check-vault.sh         # Vault validation (links, frontmatter, staleness)
 ├── AGENTS.md                      # This file
 ├── justfile                       # Task runner (run `just` to see all commands)
 └── Cargo.toml                     # Workspace root
 ```
 
-Each crate has its own AGENTS.md with detailed architecture notes.
+Each crate has its own AGENTS.md with focused ownership, boundaries, and checks.
 
 ## Build & Development Commands
 
@@ -54,7 +61,10 @@ just build            # cargo build --release
 just test             # cargo test --workspace
 just lint             # cargo clippy --workspace --all-features
 just fmt              # cargo fmt --all
-just check-all        # fmt-check + lint + test (CI equivalent)
+just check-fast       # Rust metadata + fmt + check + clippy
+just check-consensus  # goldens + guest fingerprints + deployment pins
+just check-all        # all workspaces and language/tooling gates (CI equivalent)
+just clean            # cargo clean in root, fuzz, and all OpenVM workspaces
 just contracts-test   # forge test in contracts/
 just bench            # cargo bench --workspace
 just doc              # cargo doc --workspace --no-deps
@@ -127,15 +137,15 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 - **Welfare maximization**: The objective is `Σ (limit_price - clearing_price) * fill_qty`, not volume.
 - **Fisher market structure**: MM budgets can be absorbed into the EG objective (no explicit budget constraints). See `paper.typ` in `~/github/prediction-markets-are-fisher-markets/` (pointer: `design/math-papers.md`).
 - **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration.
-- **All integer arithmetic**: No floating point. Prices/quantities in nanos (1 dollar = 1,000,000,000 nanos).
+- **Integer protocol truth**: Prices, quantities, settlement, commitments, and verification use integers. Optimization libraries may search in floating point; only landed integer outputs are trusted.
 
 ## Architecture Knowledge Base
 
-An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~48 interlinked notes covering every major concept. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
+An Obsidian vault at `docs/architecture/` is the canonical architectural spec. Its interlinked notes cover the major concepts. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
 
 **Entry point**: `docs/architecture/Sybil Architecture.md`
 
-**Linear walkthrough**: `docs/SPEC.md` is a single connected document covering the whole system (domain model → solvers → sequencer → verification → ZK → contracts → API → arena → ops → invariants). Read it for orientation; use the vault for per-concept depth. `design/architecture-review-2026-07.md` tracks simplification proposals and known doc drift.
+**Linear walkthrough**: `docs/SPEC.md` is a single connected document covering the whole system (domain model → solvers → sequencer → verification → ZK → contracts → API → arena → ops → invariants). Read it for orientation; use the vault for per-concept depth. `design/` is proposal/research material and `design/archive/` is historical, not current-state guidance.
 
 **When to read**: Before modifying any crate, read the notes listed in that crate's AGENTS.md under "Architecture Notes". This gives you the design context and invariants you need to preserve.
 
@@ -147,9 +157,9 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~
 |-------|-------|
 | Core model | Payoff Vectors, Binary Markets and Market Groups, Nanos and Integer Arithmetic, Order Types |
 | Solvers | Solver Landscape, LP Solver, EG Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
-| Sequencer | Block Lifecycle, Mempool, Settlement, Pending Orders and TTL |
+| Sequencer | Block Lifecycle, Order Admission, Settlement, Pending Orders and TTL |
 | API | REST API, SSE Block Stream, P256 Authentication |
-| Oracle | Oracle Lifecycle, Market Resolution |
+| Oracle | Market Resolution |
 | Verification | Four-Layer Verification, Block Witness, ZK Integration Path |
 | Economics | Welfare Maximization, Welfare vs Volume, MM Budget Constraint, LP Duality and Clearing Prices, Minting |
 | Arena | Bot Framework, LLM Trader, Python SDK |
@@ -157,7 +167,9 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~
 ### Vault Commands
 
 ```bash
-just docs-check               # Validate links, frontmatter, staleness
+just docs-check               # Validate generated pins, inventories, vault, and site build
+just docs-mermaid             # Render every maintained Mermaid diagram
+just docs-links               # Check public and repository links
 just docs-list                 # List all notes with layer + status
 just docs-stale                # List notes with last_verified > 90 days
 just docs-search "welfare"     # Grep vault content
@@ -174,9 +186,9 @@ just docs-verify "LP Solver"   # Set last_verified to today (needs notesmd-cli)
 
 ```bash
 just deploy-api                    # Build + deploy sybil-api + polymarket mirror
-just deploy-arena $OPENROUTER_KEY  # Build + deploy arena bots
-just deploy-dashboard              # Deploy Streamlit dashboard
-just deploy-all $OPENROUTER_KEY    # Everything at once
+just deploy-arena                  # Build + deploy arena bots/dashboard
+just deploy-web                    # Build + deploy Next.js frontend
+just deploy-all                    # Deploy API/arena/ops; run deploy-web for a changed frontend image
 
 just deploy-logs                   # Tail sybil-api logs
 just deploy-logs sybil-polymarket  # Tail polymarket mirror logs
@@ -186,12 +198,13 @@ just deploy-shell                  # SSH into server
 
 ### Dashboards
 
-- `https://172-104-31-54.nip.io/dev` — web UI dev console (Next.js): markets, MM state, live blocks, aggregates, bot decisions. (Replaced the old Alpine.js static console served by `sybil-api` at `/`, deleted in SYB-174.)
-- `http://172.104.31.54:8501/` — Streamlit: arena bot decisions, PnL, news feed
+- `https://172-104-31-54.nip.io/` — public web UI and API
+- `https://arena.172-104-31-54.nip.io/` — authenticated Streamlit arena dashboard
+- `https://grafana.172-104-31-54.nip.io/` — authenticated operations dashboard
 
 ## Development Notes
 
-- Do not use floating point numbers, use u64 etc.
+- Do not introduce floating point into protocol state, settlement, commitments, or verification. Solver-internal search may use it behind the integer landing/verifier boundary.
 - Use proptest for property-based/metamorphic tests but only where it makes sense
 - Always think about boundaries and reducing accidental complexity -- avoid tight coupling unless necessary
 - Prefer actor model using this pattern https://ryhl.io/blog/actors-with-tokio/ to mutex etc.

@@ -1,5 +1,5 @@
 use matching_engine::{
-    outcome_buy, outcome_sell, MarketSet, MmConstraint, MmId, MmSide, Nanos, NANOS_PER_DOLLAR,
+    MarketSet, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, outcome_buy, outcome_sell,
 };
 
 use crate::agent::{Agent, AgentSubmission, MarketView};

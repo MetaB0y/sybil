@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "network": "devnet",
+  "status": "pending_redeploy",
+  "desired": {
+    "state_transition": {
+      "app_exe_commit": "0x004f2f9b1f6115f4befa7127ded102fd26b1a62c66e21868f2f1e50c5f4f09b5",
+      "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
+    },
+    "escape_claim": {
+      "app_exe_commit": "0x0013128cbb4f1579cc3cd3df99bfe0293684a703d78d6c359c1480642a5c08f0",
+      "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
+    }
+  },
+  "deployed": {
+    "settlement_address": null,
+    "vault_address": null,
+    "transition_adapter_address": null,
+    "escape_adapter_address": null,
+    "state_transition": null,
+    "escape_claim": null,
+    "verified_at": null
+  },
+  "note": "Populate deployed evidence after the fresh-genesis verifier repin; never infer deployment state from desired source pins."
+}

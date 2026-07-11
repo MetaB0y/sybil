@@ -137,13 +137,13 @@ pub fn parse_verdict(raw: &str) -> Result<LlmVerdict, LlmError> {
             other => {
                 return Err(LlmError::Parse(format!(
                     "unrecognized proposed_outcome: {other:?}"
-                )))
+                )));
             }
         },
         (None, None) => {
             return Err(LlmError::Parse(
                 "neither payout_fraction nor proposed_outcome present".into(),
-            ))
+            ));
         }
     };
 

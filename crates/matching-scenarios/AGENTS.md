@@ -22,6 +22,8 @@ let problem = generate_scenario(ScenarioConfig::medium());
 
 ## Presets
 
+Preset sizes below are defaults from `scenario.rs`; the source is authoritative.
+
 | Preset | Orders | Markets | MMs | Use Case |
 |--------|--------|---------|-----|----------|
 | `quick()` | ~50 | 5 | 0 | Unit tests, rapid iteration |
@@ -58,7 +60,7 @@ let problem = generate_scenario(ScenarioConfig::medium());
 3. Add liquidity depth (3 price levels × 2 outcomes × 2 sides per market)
 4. Generate single-market orders (buy/sell YES/NO)
 5. Add MM constraints with aggressive quotes
-7. Shuffle orders to avoid order-dependent solver behavior
+6. Shuffle orders to avoid order-dependent solver behavior
 
 ## Reproducibility
 

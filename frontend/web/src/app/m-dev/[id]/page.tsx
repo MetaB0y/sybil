@@ -134,7 +134,7 @@ function MarketStatsPanel({ marketId }: { marketId: number }) {
           <Stat
             label="24h volume"
             value={
-              <MockValue hint="24h volume — no backend rollup (OPEN_QUESTIONS #3)">
+              <MockValue hint="legacy diagnostic placeholder; the product page uses the backend 24h rollup">
                 {formatCompactDollars(stats.volume24hNanos)}
               </MockValue>
             }
@@ -142,7 +142,7 @@ function MarketStatsPanel({ marketId }: { marketId: number }) {
           <Stat
             label="traders (lifetime)"
             value={
-              <MockValue hint="trader count — MarketResponse lacks trader_count (OPEN_QUESTIONS #2)">
+              <MockValue hint="legacy diagnostic placeholder; MarketResponse now carries trader_count">
                 {formatInt(stats.traders)}
               </MockValue>
             }
@@ -150,7 +150,7 @@ function MarketStatsPanel({ marketId }: { marketId: number }) {
           <Stat
             label="liquidity"
             value={
-              <MockValue hint="liquidity — no resting book snapshot (OPEN_QUESTIONS #1)">
+              <MockValue hint="legacy diagnostic placeholder; the product page uses the backend liquidity aggregate">
                 {formatCompactDollars(stats.liquidityNanos)}
               </MockValue>
             }
@@ -177,13 +177,13 @@ function OpenBatchPanel({ marketId }: { marketId: number }) {
       title={`open batch (in-flight · height ${
         snap.latestHeight == null ? "?" : snap.latestHeight + 1
       })`}
-      subtitle="every field is mocked — see OPEN_QUESTIONS #6 (imbalance) and #7 (everything else)"
+      subtitle="every field is a deterministic placeholder; this route is not a backend capability view"
     >
       <Grid>
         <Stat
           label="traders in batch"
           value={
-            <MockValue hint="no prod-safe pending-orders endpoint (OPEN_QUESTIONS #7)">
+            <MockValue hint="open-batch trader count is a placeholder on this legacy diagnostic route">
               {formatInt(snap.tradersInBatch)}
             </MockValue>
           }
@@ -191,7 +191,7 @@ function OpenBatchPanel({ marketId }: { marketId: number }) {
         <Stat
           label="indicative YES"
           value={
-            <MockValue hint="mid-batch clearing price not exposed (OPEN_QUESTIONS #7)">
+            <MockValue hint="mid-batch clearing price is not exposed on this route">
               {formatProbability(snap.indicativeYesPriceNanos)}
             </MockValue>
           }
@@ -199,7 +199,7 @@ function OpenBatchPanel({ marketId }: { marketId: number }) {
         <Stat
           label="indicative volume"
           value={
-            <MockValue hint="mid-batch volume not exposed (OPEN_QUESTIONS #7)">
+            <MockValue hint="mid-batch volume is not exposed on this route">
               {formatCompactDollars(snap.indicativeVolumeNanos)}
             </MockValue>
           }
@@ -207,7 +207,7 @@ function OpenBatchPanel({ marketId }: { marketId: number }) {
         <Stat
           label="imbalance"
           value={
-            <MockValue hint="NOT NOW — FillResponse has no side (OPEN_QUESTIONS #6)">
+            <MockValue hint="per-market buy/sell imbalance is not exposed">
               {formatImbalance(snap.imbalanceBps)}
             </MockValue>
           }

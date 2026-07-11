@@ -2,7 +2,7 @@
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use matching_engine::{Fill, MarketId, Order, NANOS_PER_DOLLAR};
+use matching_engine::{Fill, MarketId, Nanos, Order, Qty, NANOS_PER_DOLLAR};
 use matching_sequencer::Account;
 use matching_sequencer::account::AccountId;
 
@@ -42,8 +42,8 @@ fuzz_target!(|input: SettlementInput| {
     for i in 0..num_states {
         order.payoffs[i] = input.payoffs_raw[i];
     }
-    order.limit_price = limit_price;
-    order.max_fill = fill_qty;
+    order.limit_price = Nanos(limit_price);
+    order.max_fill = Qty(fill_qty);
 
     // Build account
     let mut account = Account::new(AccountId(0), input.balance);
@@ -55,7 +55,7 @@ fuzz_target!(|input: SettlementInput| {
         account.positions.insert((m0, 1), input.no_position);
     }
 
-    let fill = Fill::new(1, fill_qty, fill_price);
+    let fill = Fill::new(1, Qty(fill_qty), Nanos(fill_price));
 
     // Must not panic
     matching_sequencer::settlement::settle_fill(&mut account, &order, &fill);

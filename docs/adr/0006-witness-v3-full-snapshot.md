@@ -37,7 +37,7 @@ from a single accepted payload; you do not need to replay the whole chain.
 witness bytes feed `witness_root` → DA commitment → the guest public input.
 
 Sources: `docs/architecture/Block Witness.md` (v3 as-landed),
-`design/witness-schema-v2.md`, and the v3 update in commit `397fabe2`.
+`design/archive/implemented/witness-schema-v2.md`, and the v3 update in commit `397fabe2`.
 
 ## Alternatives considered
 
@@ -65,5 +65,5 @@ genesis in devnet ([ADR-0009](0009-fresh-genesis-for-consensus-changes.md)); the
 `keys_digest` addition (SYB-225) is exactly such a v3→v4 bump.
 
 **Follow-ups:** put `witness_root` into the block header for anti-equivocation
-(`design/general-advice-2026-07.md` open items); revisit checkpoint+diff if DA
+(historical `design/archive/planning/general-advice-2026-07.md` open items); revisit checkpoint+diff if DA
 cost dominates at scale.

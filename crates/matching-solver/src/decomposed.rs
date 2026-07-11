@@ -29,8 +29,8 @@ use rayon::prelude::*;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem};
 
-use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 use crate::MatchingResult;
+use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
 
 // ============================================================================
 // DecomposedSolver
@@ -460,12 +460,12 @@ fn assign_mms(
             let mut all_comps = HashSet::new();
             let mut pos_comps = HashSet::new();
             for &oid in &mm.order_ids {
-                if let Some(&idx) = order_id_to_idx.get(&oid) {
-                    if let Some(comp) = order_components[idx] {
-                        all_comps.insert(comp);
-                        if !problem.orders[idx].is_seller() {
-                            pos_comps.insert(comp);
-                        }
+                if let Some(&idx) = order_id_to_idx.get(&oid)
+                    && let Some(comp) = order_components[idx]
+                {
+                    all_comps.insert(comp);
+                    if !problem.orders[idx].is_seller() {
+                        pos_comps.insert(comp);
                     }
                 }
             }
@@ -910,7 +910,7 @@ fn aggregate_results(component_results: Vec<PipelineResult>) -> PipelineResult {
 mod tests {
     use super::*;
     use matching_engine::{
-        simple_no_buy, simple_yes_buy, MarketGroup, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR,
+        MarketGroup, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, simple_no_buy, simple_yes_buy,
     };
 
     /// Trivial component solver that delegates to LpSolver.

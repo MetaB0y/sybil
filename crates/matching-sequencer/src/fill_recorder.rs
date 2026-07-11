@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use matching_engine::{compute_fill_settlement, Fill, MarketId, Order};
+use matching_engine::{Fill, MarketId, Order, compute_fill_settlement};
 
 use crate::account::{AccountId, AccountStore};
 use crate::aggregates::CostBasisTracker;
@@ -314,7 +314,7 @@ fn trim_account_fills(fills: &mut Vec<AccountFillRecord>, max_history_per_accoun
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matching_engine::{outcome_buy, Fill, MarketSet, Nanos, Qty, NANOS_PER_DOLLAR};
+    use matching_engine::{Fill, MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, outcome_buy};
 
     #[test]
     fn fill_history_is_bounded_per_account_on_record() {
@@ -463,9 +463,11 @@ mod tests {
         fill.account_id = 42;
         recorder.record_fills(&[fill], &orders, 1, 1_000, &mut cb, &accounts, &mut log);
 
-        assert!(recorder
-            .account_fills_after(AccountId(42), None, Some(AccountFillCursor::MIN), 10)
-            .is_empty());
+        assert!(
+            recorder
+                .account_fills_after(AccountId(42), None, Some(AccountFillCursor::MIN), 10)
+                .is_empty()
+        );
         assert_eq!(recorder.pending_delta().len(), 1);
         assert_eq!(recorder.pending_delta()[0].1.block_height, 1);
     }

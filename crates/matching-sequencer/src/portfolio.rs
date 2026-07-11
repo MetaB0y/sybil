@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{signed_notional_nanos, signed_price_delta_notional, MarketId, Nanos, Qty};
+use matching_engine::{MarketId, Nanos, Qty, signed_notional_nanos, signed_price_delta_notional};
 
 use crate::account::{Account, AccountId};
 use crate::aggregates::CostBasisTracker;

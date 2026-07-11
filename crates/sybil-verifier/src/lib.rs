@@ -64,12 +64,12 @@ pub mod commitments {
 }
 
 pub use account_keys::{
-    account_keys_digest, canonical_escape_claim_bytes, canonical_key_registration_bytes,
-    canonical_key_revocation_bytes, empty_account_keys_digest, AccountKeyDigestRecord,
-    ACCOUNT_KEYS_DIGEST_DOMAIN, MAX_KEYS_PER_ACCOUNT, MAX_KEY_OPS_PER_BLOCK,
-    MAX_WEBAUTHN_AUTHENTICATOR_DATA_BYTES, MAX_WEBAUTHN_CLIENT_DATA_JSON_BYTES,
+    ACCOUNT_KEYS_DIGEST_DOMAIN, AccountKeyDigestRecord, MAX_KEY_OPS_PER_BLOCK,
+    MAX_KEYS_PER_ACCOUNT, MAX_WEBAUTHN_AUTHENTICATOR_DATA_BYTES,
+    MAX_WEBAUTHN_CLIENT_DATA_JSON_BYTES, account_keys_digest, canonical_escape_claim_bytes,
+    canonical_key_registration_bytes, canonical_key_revocation_bytes, empty_account_keys_digest,
 };
-pub use key_op_auth::{verify_keyop_auth, EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID};
+pub use key_op_auth::{EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID, verify_keyop_auth};
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
     ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,

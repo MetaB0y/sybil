@@ -1,15 +1,16 @@
 [package]
 name = "sybil-signing"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Stable signable payloads shared across Sybil clients"
 
 [dependencies]
 borsh = { version = "1.6.1", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
-hex = "0.4"
+hex = { workspace = true }
 insta = "1.47.2"
 
 [lints.clippy]

@@ -4,13 +4,13 @@
 // still warns.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
-use axum::Router;
 use http_body_util::BodyExt;
 use matching_engine::MarketSet;
 use matching_sequencer::store::Store;

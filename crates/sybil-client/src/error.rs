@@ -32,9 +32,7 @@ pub enum Error {
     /// The server-side broadcast buffer overflowed. Reconnect with
     /// `last_sent_height + 1` when present, or cold-resync if the client never
     /// received a block on this connection.
-    #[error(
-        "block stream lagged: skipped {skipped} blocks, last_sent_height={last_sent_height:?}"
-    )]
+    #[error("block stream lagged: skipped {skipped} blocks, last_sent_height={last_sent_height:?}")]
     BlockStreamLagged {
         skipped: u64,
         last_sent_height: Option<u64>,

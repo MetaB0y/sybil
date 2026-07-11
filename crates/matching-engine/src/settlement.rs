@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::order::{Fill, Order};
-use crate::types::{checked_notional_i64, checked_signed_notional_nanos, MarketId, Nanos, Qty};
+use crate::types::{MarketId, Nanos, Qty, checked_notional_i64, checked_signed_notional_nanos};
 
 /// Balance and position changes resulting from settling one fill.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -482,7 +482,7 @@ pub fn market_totals_from_fills<'a>(
 mod tests {
     use super::*;
     use crate::{
-        notional_nanos, outcome_buy, outcome_sell, shares_to_qty, MarketSet, NANOS_PER_DOLLAR,
+        MarketSet, NANOS_PER_DOLLAR, notional_nanos, outcome_buy, outcome_sell, shares_to_qty,
     };
     use proptest::prelude::*;
 
@@ -563,14 +563,18 @@ mod tests {
         // Each market gets +1 YES position per fill unit
         // m0: yes_sum=1, yes_count=2, delta = 1*4000/2 = 2000 units
         // m1: yes_sum=1, yes_count=2, delta = 1*4000/2 = 2000 units
-        assert!(delta
-            .position_deltas
-            .iter()
-            .any(|&(m, o, q)| m == m0 && o == 0 && q == shares_to_qty(2).0 as i64));
-        assert!(delta
-            .position_deltas
-            .iter()
-            .any(|&(m, o, q)| m == m1 && o == 0 && q == shares_to_qty(2).0 as i64));
+        assert!(
+            delta
+                .position_deltas
+                .iter()
+                .any(|&(m, o, q)| m == m0 && o == 0 && q == shares_to_qty(2).0 as i64)
+        );
+        assert!(
+            delta
+                .position_deltas
+                .iter()
+                .any(|&(m, o, q)| m == m1 && o == 0 && q == shares_to_qty(2).0 as i64)
+        );
     }
 
     #[test]
@@ -592,14 +596,18 @@ mod tests {
         // Bundle YES: payoffs = [1, 0, 0, 0]
         // m0: yes_sum=1, yes_count=2, delta = 1*3/2 = 1 (truncated from 1.5)
         // m1: yes_sum=1, yes_count=2, delta = 1*3/2 = 1 (truncated from 1.5)
-        assert!(delta
-            .position_deltas
-            .iter()
-            .any(|&(m, o, q)| m == m0 && o == 0 && q == 1));
-        assert!(delta
-            .position_deltas
-            .iter()
-            .any(|&(m, o, q)| m == m1 && o == 0 && q == 1));
+        assert!(
+            delta
+                .position_deltas
+                .iter()
+                .any(|&(m, o, q)| m == m0 && o == 0 && q == 1)
+        );
+        assert!(
+            delta
+                .position_deltas
+                .iter()
+                .any(|&(m, o, q)| m == m1 && o == 0 && q == 1)
+        );
         // Cost is scaled by SHARE_SCALE: 0.003 shares at $0.25 = 750,000 nanos.
         assert_eq!(delta.balance_delta, -750_000);
     }

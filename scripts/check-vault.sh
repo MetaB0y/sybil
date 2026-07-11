@@ -44,12 +44,12 @@ is_top_dir() {
 
 # Collect all note names (without .md extension). Use indexed arrays instead
 # of associative arrays so the script runs on macOS' bundled Bash 3.
+NOTE_FILES=()
 NOTE_NAMES=()
-for f in "$VAULT_PATH"/*.md; do
-    [ -f "$f" ] || continue
-    name="$(basename "$f" .md)"
-    NOTE_NAMES+=("$name")
-done
+while IFS= read -r f; do
+    NOTE_FILES+=("$f")
+    NOTE_NAMES+=("$(basename "$f" .md)")
+done < <(find "$VAULT_PATH" -type f -name '*.md' -print | sort)
 
 # Track incoming links for orphan detection
 INCOMING_NAMES=()
@@ -118,8 +118,7 @@ echo ""
 
 # ── Check each note ──────────────────────────────────────────────────────────
 
-for f in "$VAULT_PATH"/*.md; do
-    [ -f "$f" ] || continue
+for f in "${NOTE_FILES[@]}"; do
     name="$(basename "$f" .md)"
     echo "[$name]"
 

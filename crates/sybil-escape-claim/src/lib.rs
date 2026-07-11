@@ -3,16 +3,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use matching_engine::{checked_signed_notional_nanos, MarketId, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, checked_signed_notional_nanos};
 use serde::{Deserialize, Serialize};
-use sybil_l1_protocol::{abi_keccak256_domain_and_words, AbiWord};
+use sybil_l1_protocol::{AbiWord, abi_keccak256_domain_and_words};
 use sybil_verifier::{
-    commitments::state_schema, AccountReservationSnapshot, AccountSnapshot, KeyOpAuth, KeyRecord,
-    MarketSnapshot,
+    AccountReservationSnapshot, AccountSnapshot, KeyOpAuth, KeyRecord, MarketSnapshot,
+    commitments::state_schema,
 };
 use sybil_zk::{
-    verify_qmdb_exclusion_proof, verify_qmdb_key_value_proof, QmdbStateExclusionProof,
-    QmdbStateKeyValueProof, NANOS_PER_TOKEN_UNIT,
+    NANOS_PER_TOKEN_UNIT, QmdbStateExclusionProof, QmdbStateKeyValueProof,
+    verify_qmdb_exclusion_proof, verify_qmdb_key_value_proof,
 };
 
 pub const ESCAPE_CLAIM_PUBLIC_INPUT_DOMAIN: &[u8] = b"sybil/openvm/escape-claim/v1";

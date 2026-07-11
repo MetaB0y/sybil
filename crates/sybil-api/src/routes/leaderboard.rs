@@ -1,5 +1,5 @@
-use axum::extract::{Query, State};
 use axum::Json;
+use axum::extract::{Query, State};
 
 use crate::state::AppState;
 use crate::types::error::AppError;

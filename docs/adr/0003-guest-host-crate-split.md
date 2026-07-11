@@ -38,7 +38,7 @@ core:
 
 `matching-engine` is the pure leaf every crate depends on; the guest imports the
 core and nothing else. Source: `docs/architecture/Crate Dependency Map.md` (Key
-Properties), `design/architecture-review-2026-07.md` P7/§1.
+Properties), historical `design/archive/planning/architecture-review-2026-07.md` P7/§1.
 
 ## Alternatives considered
 
@@ -65,4 +65,4 @@ new crypto crosses into the core.
 
 **Follow-ups:** finishing `sybil-verifier::commitments` / a dedicated
 `sybil-commitments` crate to hold every canonical encoding once
-(`docs/review/30-roadmap.md` 2.1) — see the consolidation design.
+(the historical audit's [roadmap](https://github.com/MetaB0y/sybil/blob/main/design/archive/review-2026-07-02/30-roadmap.md) 2.1) — see the consolidation design.

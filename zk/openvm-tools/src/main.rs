@@ -242,8 +242,7 @@ mod tests {
             range: sybil_zk::QmdbStateRangeProof {
                 leaves: 0,
                 digests: vec![],
-                pre_prefix_acc: None,
-                unfolded_prefix_peaks: vec![],
+                inactive_peaks: 0,
                 partial_chunk_digest: None,
                 ops_root: [0; 32],
             },

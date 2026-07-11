@@ -1,16 +1,21 @@
 ---
 tags: [design, validity, refactor, crispness]
 layer: core
-status: proposed
+status: proposal-needs-revalidation
 date: 2026-07-07
 ---
 
 # `sybil-commitments` — one home for every canonical encoding
 
+> **Status note (2026-07-11):** no `sybil-commitments` crate exists. Several
+> ownership boundaries changed since this survey; re-audit duplication before
+> adopting the proposed module shape.
+
 The concrete "crisp boundaries" deliverable: turn the diagnosed duplicated
 validity-critical encodings into a single owning module. This is not a re-diagnosis —
-`design/architecture-review-2026-07.md` (P5) and `docs/review/02-cross-cutting-
-themes.md` (Theme 6) already found the problem; this says exactly what to build.
+the archived `design/archive/planning/architecture-review-2026-07.md` (P5) and the archived review's
+`02-cross-cutting-themes.md` (Theme 6) already found the problem; this says
+exactly what to build.
 
 ## The problem, in one sentence
 

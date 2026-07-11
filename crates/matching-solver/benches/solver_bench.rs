@@ -2,7 +2,7 @@
 //!
 //! Benchmarks the LP/EG/Conic solvers on generated scenarios of various sizes.
 
-use matching_scenarios::{generate_scenario, ScenarioConfig};
+use matching_scenarios::{ScenarioConfig, generate_scenario};
 
 fn main() {
     divan::main();
@@ -35,7 +35,7 @@ fn bench_scenario_generation_large() {
 mod lp {
     use divan::Bencher;
     use matching_engine::Problem;
-    use matching_scenarios::{generate_scenario, ScenarioConfig};
+    use matching_scenarios::{ScenarioConfig, generate_scenario};
     use matching_solver::LpSolver;
     use std::sync::OnceLock;
 
@@ -78,7 +78,7 @@ mod lp {
 #[cfg(feature = "lp")]
 mod eg {
     use matching_engine::Problem;
-    use matching_scenarios::{generate_scenario, ScenarioConfig};
+    use matching_scenarios::{ScenarioConfig, generate_scenario};
     use matching_solver::EgSolver;
     use std::sync::OnceLock;
 
@@ -106,7 +106,7 @@ mod eg {
 #[cfg(feature = "conic")]
 mod conic {
     use matching_engine::Problem;
-    use matching_scenarios::{generate_scenario, ScenarioConfig};
+    use matching_scenarios::{ScenarioConfig, generate_scenario};
     use matching_solver::ConicSolver;
     use std::sync::OnceLock;
 

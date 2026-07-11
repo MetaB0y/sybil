@@ -7,10 +7,10 @@ use crate::market_info::ResolutionConfig;
 use crate::order_book::RestingOrder;
 use crate::validation::{validate_order, validate_order_with_reservation};
 use matching_engine::{
-    notional_nanos, outcome_buy, outcome_sell, shares_to_qty, MarketId, MarketSet, MmId, Nanos,
-    Order, Problem, Qty, NANOS_PER_DOLLAR,
+    MarketId, MarketSet, MmId, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, notional_nanos,
+    outcome_buy, outcome_sell, shares_to_qty,
 };
-use matching_scenarios::{generate_scenario, ScenarioConfig};
+use matching_scenarios::{ScenarioConfig, generate_scenario};
 use proptest::prelude::*;
 use sybil_oracle::{
     AdminOracle, ResolutionAttestation, ResolutionPolicy, ResolutionTemplate, TemplateId,
@@ -576,18 +576,20 @@ fn cancelled_withdrawal_refunds_exactly_once_and_prunes_with_valid_witness() {
     assert_eq!(seq.accounts.get(aid).unwrap().balance, 10_000_000);
 
     let refunded_block = seq.produce_block(vec![], 2_000);
-    assert!(!seq
-        .bridge_state()
-        .withdrawals
-        .contains_key(&withdrawal.withdrawal_id));
-    assert!(seq
-        .apply_bridge_withdrawal_l1_event(test_withdrawal_event(
+    assert!(
+        !seq.bridge_state()
+            .withdrawals
+            .contains_key(&withdrawal.withdrawal_id)
+    );
+    assert!(
+        seq.apply_bridge_withdrawal_l1_event(test_withdrawal_event(
             &withdrawal,
             L1WithdrawalStatus::Cancelled,
             5,
         ))
         .unwrap()
-        .is_none());
+        .is_none()
+    );
     assert_eq!(seq.accounts.get(aid).unwrap().balance, 10_000_000);
     let verification = sybil_verifier::verify_full(&refunded_block.witness, false);
     assert!(verification.valid, "{:?}", verification.violations);
@@ -650,10 +652,11 @@ fn unrelated_confirmed_l1_event_still_advances_expiry_clock() {
         tx_hash: Some([0xAA; 32]),
         l1_block_height: 11,
     };
-    assert!(seq
-        .apply_bridge_withdrawal_l1_event(unrelated)
-        .unwrap()
-        .is_none());
+    assert!(
+        seq.apply_bridge_withdrawal_l1_event(unrelated)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(seq.bridge_state().observed_l1_height, 11);
     assert_eq!(seq.accounts.get(aid).unwrap().balance, 10_000_000);
     assert_eq!(
@@ -2374,11 +2377,12 @@ fn test_create_account_uses_post_system_state_for_orders() {
 
     let bp = seq.produce_block(vec![sub], 0);
 
-    assert!(bp
-        .witness
-        .pre_state
-        .iter()
-        .all(|snapshot| snapshot.id != aid.0));
+    assert!(
+        bp.witness
+            .pre_state
+            .iter()
+            .all(|snapshot| snapshot.id != aid.0)
+    );
     let post_system = bp
         .witness
         .post_system_state
@@ -3185,7 +3189,7 @@ fn test_bankrupt_mm_skipped() {
 /// so that total_yes == total_no for every market, every block.
 #[test]
 fn test_group_minting_position_balance_multi_block() {
-    use matching_engine::{simple_yes_buy, MarketGroup};
+    use matching_engine::{MarketGroup, simple_yes_buy};
 
     let mut markets = MarketSet::new();
     let m0 = markets.add_binary("A");
@@ -3485,24 +3489,27 @@ fn stp_undo_preserves_other_accounts_same_block_expired_history_and_state_root()
         balance_before
     );
 
-    assert!(production
-        .derived_view_sidecar
-        .removed_orders
-        .iter()
-        .any(|removed| {
-            removed.account_id == expiring_account.0
-                && removed.order_id == expiring_order_id
-                && removed.phase == crate::block::RemovedOrderPhase::PostSolve
-                && removed.exit_reason == crate::block::RemovedOrderExitReason::Expired
-        }));
-    assert!(seq
-        .analytics()
-        .account_history(expiring_account, usize::MAX, None, None)
-        .iter()
-        .any(|event| {
-            event.order_id == Some(expiring_order_id)
-                && event.kind == crate::aggregates::HistoryKind::Expired
-        }));
+    assert!(
+        production
+            .derived_view_sidecar
+            .removed_orders
+            .iter()
+            .any(|removed| {
+                removed.account_id == expiring_account.0
+                    && removed.order_id == expiring_order_id
+                    && removed.phase == crate::block::RemovedOrderPhase::PostSolve
+                    && removed.exit_reason == crate::block::RemovedOrderExitReason::Expired
+            })
+    );
+    assert!(
+        seq.analytics()
+            .account_history(expiring_account, usize::MAX, None, None)
+            .iter()
+            .any(|event| {
+                event.order_id == Some(expiring_order_id)
+                    && event.kind == crate::aggregates::HistoryKind::Expired
+            })
+    );
 
     assert_eq!(
         production.block.header.state_root,
@@ -4004,7 +4011,8 @@ fn portfolio_summary_values_positions_at_book_midpoint_mark() {
         .expect("buyer must have a valued YES position in portfolio summary");
 
     assert_eq!(
-        pos.current_price_nanos, Nanos(500_000_000),
+        pos.current_price_nanos,
+        Nanos(500_000_000),
         "portfolio must value the YES position at the 50c book-midpoint mark, not the old clearing price"
     );
 }

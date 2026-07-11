@@ -15,7 +15,7 @@
 //! - `equity_tracker` — per-account equity series (volatile; resets on restart,
 //!   no snapshot round-trip)
 //!
-//! See `frontend/BACKEND_IMPLEMENTATION_PLAN.md` for the full plan.
+//! These read models are documented in `docs/architecture/06-operations/Persistence.md`.
 
 pub mod account_event_log;
 pub mod cost_basis_tracker;
@@ -26,12 +26,12 @@ pub mod trader_tracker;
 pub mod welfare_tracker;
 
 pub use account_event_log::{
-    fill_facets, side_outcome_from_order, AccountEventLog, HistoryEvent, HistoryKind,
-    StoredHistoryEvent, MAX_HISTORY_EVENTS_PER_ACCOUNT,
+    AccountEventLog, HistoryEvent, HistoryKind, MAX_HISTORY_EVENTS_PER_ACCOUNT, StoredHistoryEvent,
+    fill_facets, side_outcome_from_order,
 };
 pub use cost_basis_tracker::{CostBasisTracker, CostBasisTrackerSnapshot};
 pub use equity_tracker::{EquityPoint, EquityTracker, MAX_EQUITY_POINTS};
-pub use liquidity_tracker::{LiquidityTracker, LiquidityTrackerSnapshot, LIQUIDITY_RING_CAP};
+pub use liquidity_tracker::{LIQUIDITY_RING_CAP, LiquidityTracker, LiquidityTrackerSnapshot};
 pub use order_stats_tracker::{OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot};
 pub use trader_tracker::{TraderTracker, TraderTrackerSnapshot};
 pub use welfare_tracker::{WelfareTracker, WelfareTrackerSnapshot};

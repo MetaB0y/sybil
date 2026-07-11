@@ -8,8 +8,8 @@ use crate::artifacts::{
     write_msgpack_named,
 };
 use crate::{
-    build_state_transition_guest_input, ProverCliError, StateTransitionProofJob,
-    StateTransitionProofJobId,
+    ProverCliError, StateTransitionProofJob, StateTransitionProofJobId,
+    build_state_transition_guest_input,
 };
 
 const FILE_DA_PROVIDER_REF_ENCODING: &str = "sybil-da-file-ref-v1";

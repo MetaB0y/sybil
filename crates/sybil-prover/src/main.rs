@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
+use sybil_prover::ProverCliError;
 use sybil_prover::abi;
 use sybil_prover::artifacts;
 use sybil_prover::da;
 use sybil_prover::serve;
-use sybil_prover::ProverCliError;
 
 #[derive(Parser)]
 #[command(name = "sybil-prover")]

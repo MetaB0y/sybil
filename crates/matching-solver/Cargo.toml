@@ -1,24 +1,25 @@
 [package]
 name = "matching-solver"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Solvers for the prediction market matching problem"
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tracing = "0.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
 
 [dependencies.russcip]
-version = "0.9"
+version = "0.10"
 features = ["bundled"]
 optional = true
 
 [dependencies.highs]
-version = "1"
+version = "2"
 optional = true
 
 [dependencies.clarabel]
@@ -30,8 +31,8 @@ version = "1"
 optional = true
 
 [dev-dependencies]
-blake3 = "1.8"
-proptest = "1.9"
+blake3 = { workspace = true }
+proptest = { workspace = true }
 divan = "0.1"
 matching-scenarios = { path = "../matching-scenarios" }
 sybil-verifier = { path = "../sybil-verifier", default-features = false }

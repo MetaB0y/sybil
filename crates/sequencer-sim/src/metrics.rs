@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use matching_engine::{signed_notional_nanos, MarketId, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos, signed_notional_nanos};
 
 use matching_sequencer::account::{AccountId, AccountStore};
 
@@ -93,12 +93,12 @@ pub fn price_convergence(
     let mut count = 0;
 
     for (&market_id, &true_p) in true_probs {
-        if let Some(prices) = clearing_prices.get(&market_id) {
-            if let Some(&yes_price) = prices.first() {
-                let market_p = yes_price.0 as f64 / NANOS_PER_DOLLAR as f64;
-                total_error += (market_p - true_p).abs();
-                count += 1;
-            }
+        if let Some(prices) = clearing_prices.get(&market_id)
+            && let Some(&yes_price) = prices.first()
+        {
+            let market_p = yes_price.0 as f64 / NANOS_PER_DOLLAR as f64;
+            total_error += (market_p - true_p).abs();
+            count += 1;
         }
     }
 

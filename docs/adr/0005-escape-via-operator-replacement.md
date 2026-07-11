@@ -41,9 +41,9 @@ Two separate recovery paths, deliberately asymmetric:
   recipient — and the vault pays that out. Cash-only, one claim per account per
   root, no position unwinding.
 
-Sources: `design/escape-hatch-reconstruction.md` (SYB-80),
+Sources: `design/archive/implemented/escape-hatch-reconstruction.md` (SYB-80),
 `docs/architecture/Operator Replacement.md` (SYB-116),
-`design/escape-claim-guest.md` (SYB-32), vault note
+`design/archive/implemented/escape-claim-guest.md` (SYB-32), vault note
 `docs/architecture/L1 Settlement and Vault.md`.
 
 ## Alternatives considered

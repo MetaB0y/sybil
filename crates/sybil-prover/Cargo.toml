@@ -1,7 +1,8 @@
 [package]
 name = "sybil-prover"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Host-side Sybil proof job tooling"
 default-run = "sybil-prover"
 
@@ -21,23 +22,23 @@ required-features = ["mock-live"]
 
 [dependencies]
 axum = { version = "0.8", features = ["json"] }
-clap = { version = "4.5", features = ["derive"] }
-hex = "0.4"
+clap = { workspace = true, features = ["derive"] }
+hex = { workspace = true }
 matching-engine = { path = "../matching-engine", optional = true }
 matching-sequencer = { path = "../matching-sequencer", optional = true }
-p256 = { version = "0.14.0-rc.7", features = ["ecdsa"], optional = true }
-rmp-serde = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha3 = "0.10"
+p256 = { workspace = true, features = ["ecdsa"], optional = true }
+rmp-serde = { workspace = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha3 = { workspace = true }
 sybil-api-types = { path = "../sybil-api-types", optional = true }
 sybil-oracle = { path = "../sybil-oracle", optional = true }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
 sybil-escape-claim = { path = "../sybil-escape-claim" }
 thiserror = { workspace = true }
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 
 [dev-dependencies]
 

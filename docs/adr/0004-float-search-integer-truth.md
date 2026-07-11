@@ -32,7 +32,7 @@ Split the pipeline into a **float search** and an **integer truth**:
   floats are a *proposal*, never the record.
 
 Conventions: `docs/architecture/Nanos and Integer Arithmetic.md`, the
-"integer truth" framing in `design/architecture-review-2026-07.md` §1, and the
+"integer truth" framing in historical `design/archive/planning/architecture-review-2026-07.md` §1, and the
 AGENTS.md all-integer convention.
 
 ## Alternatives considered
@@ -53,11 +53,11 @@ stamp.
 
 **Costs / constraints:** the **quantization boundary is a real place bugs live** —
 a fill that is a few nanos over a limit price in `f64` but exact-rejected by the
-integer verifier is a known special case (`docs/review/02-cross-cutting-themes.md`
+integer verifier is a known special case (historical [cross-cutting review](https://github.com/MetaB0y/sybil/blob/main/design/archive/review-2026-07-02/02-cross-cutting-themes.md)
 Theme 3 / P2); the solver and verifier must agree on the *rounding rule*, not
 just the arithmetic; and "all-integer" is a convention the codebase has violated
 in spots (stated in prose, not enforced by types — the newtype-`Nanos`/`Qty`
-follow-up in `docs/review/30-roadmap.md` Phase 3 exists to make it a type-level
+the historical [audit roadmap](https://github.com/MetaB0y/sybil/blob/main/design/archive/review-2026-07-02/30-roadmap.md) Phase 3 proposed making it a type-level
 constraint).
 
 **Follow-ups:** `Nanos`/`Qty` newtypes + workspace lints to make the boundary

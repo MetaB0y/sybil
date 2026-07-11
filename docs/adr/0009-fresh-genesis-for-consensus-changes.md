@@ -39,9 +39,9 @@ refresh the `OpenVmVerifierAdapter.sol` pin, `zk-guest-fingerprint.sh --write`,
 no fmt between write and check). Batch multiple validity changes into one
 fresh-genesis window (SYB-224 + SYB-225 + the P-256 extension together).
 
-Precedent: `design/witness-schema-v2.md` (canonical-witness changes force a
+Precedent: `design/archive/implemented/witness-schema-v2.md` (canonical-witness changes force a
 guest repin + fresh genesis in devnet); runbook
-`docs/runbooks/devnet-redeploy.md`.
+`docs/runbooks/fresh-genesis-redeploy.md`.
 
 ## Alternatives considered
 
@@ -69,5 +69,5 @@ D-cluster (SYB-224/225/32/P-256) is sequenced into a single fresh-genesis
 redeploy.
 
 **Follow-ups:** exercise the in-place migration fallback on a throwaway
-deployment before mainnet; keep `devnet-redeploy.md` turnkey (current final-tag
+deployment before mainnet; keep `fresh-genesis-redeploy.md` turnkey (current final-tag
 pins: exe `0x000f896e`, vm `0x007a02fc`).

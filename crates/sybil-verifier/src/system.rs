@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use matching_engine::{notional_nanos, MarketId, Nanos, OrderDirection, Qty, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos, OrderDirection, Qty, notional_nanos};
 
 use crate::types::{
     AccountSnapshot, BlockWitness, KeyRecord, SystemEventWitness, WithdrawalRefundReasonWitness,

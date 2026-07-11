@@ -68,7 +68,7 @@ trustworthy as the solver↔verifier conformance harness; and because `Order` an
 the settlement math are in the guest commitment, **generalizing the instrument
 (payoff vectors, conditionals) is a validity change**, not a local feature
 (see [ADR-0006](0006-witness-v3-full-snapshot.md), and the payoff-vector
-generality deferred in `docs/review/30-roadmap.md`).
+generality was deferred in the historical [audit roadmap](https://github.com/MetaB0y/sybil/blob/main/design/archive/review-2026-07-02/30-roadmap.md)).
 
 **Follow-ups:** combinatorial-markets direction (canonical
 `~/github/prediction-markets-are-fisher-markets/bundle-clearing.typ`,

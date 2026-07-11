@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use matching_engine::{Fill, MarketGroup, MarketId, MmConstraint, Nanos, Order, OrderDirection};
-use sybil_l1_protocol::{DepositFrontier, DEPOSIT_TREE_DEPTH};
+use sybil_l1_protocol::{DEPOSIT_TREE_DEPTH, DepositFrontier};
 
 /// Everything the verifier needs to check a single block.
 ///
@@ -228,8 +228,8 @@ impl KeyRecord {
 }
 
 /// Authorization envelope retained one-for-one with a witnessed key mutation.
-/// Cryptographic verification is wired by the separate P256-in-guest ticket;
-/// v6 already constrains the signer to the running active set.
+/// Native and guest verification check this envelope against the running
+/// active-key set and the state-bound canonical mutation bytes.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum KeyOpAuth {
     RawP256 {

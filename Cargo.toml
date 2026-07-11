@@ -17,10 +17,18 @@ members = [
     "crates/sybil-verifier",
     "crates/sybil-zk",
     "crates/sybil-escape-claim",
+    "crates/sybil-custody",
     "crates/sybil-prover",
     "crates/sybil-polymarket",
     "tools/golden-vectors",
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# OpenVM v2.0 compiles the guest closure with nightly-2026-01-18 (Rust 1.94).
+# Keep the MSRV compatible with that pinned compiler; host/CI use Rust 1.97.
+rust-version = "1.94"
 
 [profile.release]
 overflow-checks = true
@@ -34,6 +42,20 @@ disallowed_types = "deny"
 unwrap_used = "deny"
 
 [workspace.dependencies]
+blake3 = "1"
+clap = "4.5"
+getrandom = "0.4"
+hex = "0.4"
+p256 = "0.14"
+proptest = "1.11"
 rand = "0.10"
 rand_chacha = "0.10"
+rmp-serde = "1"
+serde = "1"
+serde_json = "1"
+sha3 = "0.12"
 thiserror = "2"
+tokio = "1"
+tokio-tungstenite = "0.30"
+tracing = "0.1"
+tracing-subscriber = "0.3"

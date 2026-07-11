@@ -1,17 +1,17 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::Json;
 
-use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
 use matching_engine::MarketId;
 use matching_engine::Nanos;
+use matching_engine::mm_constraint::{MmConstraint, MmId, MmSide};
 use matching_sequencer::crypto::{
-    canonical_cancel_bytes, canonical_order_bytes, AccountAuthScheme, AuthenticatedCancel,
-    AuthenticatedOrder, PublicKey, SignedCancel, SignedOrder,
+    AccountAuthScheme, AuthenticatedCancel, AuthenticatedOrder, PublicKey, SignedCancel,
+    SignedOrder, canonical_cancel_bytes, canonical_order_bytes,
 };
 use matching_sequencer::{AccountId, OrderSubmission, PendingOrderInfo};
-use p256::ecdsa::{Signature, VerifyingKey};
 use p256::Sec1Point;
+use p256::ecdsa::{Signature, VerifyingKey};
 
 use crate::convert::{apply_time_in_force, order_spec_to_order, signed_order_data_to_order};
 use crate::state::AppState;
@@ -365,8 +365,8 @@ pub async fn get_all_pending_orders(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p256::ecdsa::signature::Signer;
     use p256::ecdsa::SigningKey;
+    use p256::ecdsa::signature::Signer;
 
     /// A `0x`-prefixed pubkey must parse identically to the bare form, matching
     /// the sibling bridge/proofs/accounts endpoints (client-footgun fix).

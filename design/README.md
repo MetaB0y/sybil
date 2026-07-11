@@ -2,68 +2,84 @@
 tags: [moc, guide]
 layer: core
 status: current
-last_verified: 2026-07-07
+last_verified: 2026-07-11
 ---
 
-# `design/` — specs, proofs, and where things are going
+# Design workspace
 
-This tree answers **"where is it going?"** — forward specs, mathematical
-foundations, and design explorations. For **"how does it work today?"** see
-[`../docs/architecture/`](../docs/architecture/Sybil%20Architecture.md); for
-**"why is it this way?"** see [`../docs/adr/`](../docs/adr/); for the honest
-current state see [`../docs/review/`](../docs/review/00-executive-summary.md).
+> **Executive summary:** only durable research and genuinely open proposals live
+> here. Completed implementation plans, superseded architecture, dated roadmaps,
+> reviews, and editorial material live under [`archive/`](archive/README.md).
+> Nothing in `design/` overrides the current spec, ADRs, code, or tests.
 
-Status markers: **proof** (math) · **spec** (ratified/near-ratified) ·
-**strategy** (how-to program) · **exploratory** (design sketch) · **review**.
+## Status vocabulary
 
-> **Start here for "what happens next":**
-> [`execution-order-2026-07.md`](execution-order-2026-07.md) — the dependency-ordered
-> spine tying every doc below into one prioritized program (trust first, features
-> second).
+- **reference** — durable explanation or dated empirical result; not a backlog.
+- **exploratory / proposed** — unratified possibility.
+- **proposal-needs-revalidation** — potentially useful, but written against an
+  older implementation and must be resurveyed before work begins.
+- **current-audit** — dated findings that still need explicit remediation or
+  closure; verify each finding against newer code before acting.
+- **current** — only for an index that is actively maintained.
 
-## Foundations — the math
-The theoretical core: why the matching problem is what it is.
-- [`problem-statement.md`](problem-statement.md) — what Sybil is solving.
-- [`math-papers.md`](math-papers.md) — pointer to the canonical math papers, now in `~/github/prediction-markets-are-fisher-markets/` (the copies below moved there 2026-07-07):
-  - `paper.typ` (was `lmsr-proof.typ`) — **proof** · prediction markets are Fisher markets; the theoretical spine ([ADR-0001](../docs/adr/0001-eg-fisher-market-matching.md)).
-  - `primer.typ` (was `math-primer.typ`) — the arithmetic/convex-analysis background.
-  - `decomposition.typ` / `bundle-clearing.typ` — **proof** · combinatorial/bundle clearing (the substrate for conditional markets); corrected July 2026.
-- [`welfare-vs-volume.md`](welfare-vs-volume.md) — why we maximize welfare, not trades.
-- [`eg-conic.typ`](eg-conic.typ) — Eisenberg–Gale ↔ conic formulations.
-- [`mint-pnl.typ`](mint-pnl.typ) — minting and P&L accounting.
-- [`solver-benchmarks.md`](solver-benchmarks.md) — solver performance data.
+An accepted decision belongs in `docs/adr/`; implemented behavior belongs in
+`docs/architecture/` and `docs/SPEC.md`. A completed plan belongs in the
+archive.
 
-## Architecture — the big picture
-- [`architecture-review-2026-07.md`](architecture-review-2026-07.md) — **review** · the Philosophy-of-Software-Design pass over the whole system (the canonical PoSD analysis — start here for boundaries/complexity).
-- [`general-advice-2026-07.md`](general-advice-2026-07.md) — cross-cutting engineering guidance + open items.
-- [`architecture-diagrams.md`](architecture-diagrams.md) — the diagram collection (rendered by `preview.html`).
-- *(`architecture.md` is superseded by [Sybil Architecture](../docs/architecture/Sybil%20Architecture.md).)*
+## Foundations and reference
 
-## Consensus & custody — the D-cluster
-The proven-key / escape / redeploy work that moves the guest commitment.
-- [`account-keys-digest.md`](account-keys-digest.md) — **spec** · `keys_digest` in account leaves (SYB-225).
-- [`escape-claim-guest.md`](escape-claim-guest.md) — **spec** · the cash-escape guest (SYB-32).
-- [`escape-hatch-reconstruction.md`](escape-hatch-reconstruction.md) — state reconstruction for escape/replacement (SYB-80).
-- [`keys-and-escape-ratification.md`](keys-and-escape-ratification.md) — **spec** · the D0–D10 decisions consolidated for ratification.
-- [`capability-mask-keys.md`](capability-mask-keys.md) — **exploratory** · scoped delegated authority (trade-not-withdraw keys); refines D1 — reserve the byte slot in v4 now.
-- [`openvm-p256-integration.md`](openvm-p256-integration.md) — **spec** · in-guest P-256 ECDSA recipe ([ADR-0008](../docs/adr/0008-in-guest-p256-openvm-ecc.md)).
-- [`witness-schema-v2.md`](witness-schema-v2.md) — the canonical witness format design (v2→v3 precedent).
+| Document | Status | Use |
+|---|---|---|
+| [`problem-statement.md`](problem-statement.md) | reference | Self-contained mathematical matching problem |
+| [`math-papers.md`](math-papers.md) | current index | Canonical external proof-repository map |
+| [`welfare-vs-volume.md`](welfare-vs-volume.md) | reference | Objective trade-off analysis |
+| [`solver-benchmarks.md`](solver-benchmarks.md) | dated reference | Methodology and historical results; rerun before quoting |
+| [`eg-conic.typ`](eg-conic.typ) | draft research | Quasi-linear EG conic reformulation |
+| [`mint-pnl.typ`](mint-pnl.typ) | draft research | MINT-account accounting analysis |
 
-## Quality & operations — strategy
-- [`testing-strategy-2026-07.md`](testing-strategy-2026-07.md) — **strategy** · bulletproof testing (defense against divergence; the P0 gaps).
-- [`observability-otel-2026-07.md`](observability-otel-2026-07.md) — **strategy** · OpenTelemetry/OTLP tracing spine.
+## Open mechanism and product proposals
 
-## Crispness — buildable refactors
-- [`sybil-commitments-consolidation.md`](sybil-commitments-consolidation.md) — **strategy** · one home for every canonical encoding.
-- *(God-module decomposition lives in [`../docs/review/god-module-decomposition.md`](../docs/review/god-module-decomposition.md).)*
+| Document | Status |
+|---|---|
+| [`conditional-combinatorial-markets.md`](conditional-combinatorial-markets.md) | exploratory |
+| [`sealed-bid-batch-auctions.md`](sealed-bid-batch-auctions.md) | exploratory |
+| [`data-availability-design.md`](data-availability-design.md) | proposed construction under ADR-0012 |
+| [`trust-minimized-resolution.md`](trust-minimized-resolution.md) | exploratory |
+| [`proof-of-reserves.md`](proof-of-reserves.md) | exploratory |
+| [`capability-mask-keys.md`](capability-mask-keys.md) | exploratory; the committed field exists, scoped enforcement does not |
+| [`user-cli-plan.md`](user-cli-plan.md) | proposed |
+| [`possibility-space-2026-07.md`](possibility-space-2026-07.md) | brainstorm, not backlog |
 
-## Forward — the possibility space
-Where the product could go once the trust story is solid.
-- [`possibility-space-2026-07.md`](possibility-space-2026-07.md) — 17 future directions, scored; the map of the after.
-- [`sealed-bid-batch-auctions.md`](sealed-bid-batch-auctions.md) — **exploratory** · MEV-resistance as a structural property.
-- [`conditional-combinatorial-markets.md`](conditional-combinatorial-markets.md) — **exploratory** · the Fisher-market headline capability.
-- [`proof-of-reserves.md`](proof-of-reserves.md) — **exploratory** · prove the vault covers every balance (solvent by construction; O(1) via a committed aggregate).
-- [`trust-minimized-resolution.md`](trust-minimized-resolution.md) — **exploratory** · optimistic propose/challenge resolution (fills the reserved oracle arms); closes the biggest trusted surface.
+## Strategies requiring a fresh survey
 
-## Tooling
-- [`user-cli-plan.md`](user-cli-plan.md) — the custody/user CLI plan.
+These remain visible because their direction may still matter, but their
+inventories, counts, and execution stages are not current:
+
+- [`sybil-commitments-consolidation.md`](sybil-commitments-consolidation.md)
+- [`testing-strategy-2026-07.md`](testing-strategy-2026-07.md)
+- [`observability-otel-2026-07.md`](observability-otel-2026-07.md)
+- [`bot-quality-plan.md`](bot-quality-plan.md)
+- [`settlement-aggregation-swirl.md`](settlement-aggregation-swirl.md)
+
+Resurvey the named code and issue state before turning any of these into work.
+
+## Current audits
+
+- [`dos-audit-2026-07-11.md`](dos-audit-2026-07-11.md) — permissionless
+  resource/state-growth audit. Findings remain active until code or a dated
+  follow-up closes them.
+
+## Historical design lineage
+
+- [`archive/implemented/`](archive/implemented/README.md) — plans/specs whose
+  essential work landed (witness/key transitions, WebAuthn guest verification,
+  escape claims, recovery).
+- [`archive/superseded/`](archive/superseded/README.md) — architecture replaced
+  by the canonical vault.
+- [`archive/planning/`](archive/planning/README.md) — dated reviews, roadmaps,
+  and execution-order snapshots.
+- [`archive/review-2026-07-02/`](archive/review-2026-07-02/README.md) — original
+  full-code audit.
+
+For current behavior start with [`docs/README.md`](../docs/README.md) and
+[`docs/SPEC.md`](../docs/SPEC.md).

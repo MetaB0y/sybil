@@ -1,80 +1,49 @@
 # AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this crate.
-
 ## Purpose
 
-The **matching-sim** crate is a CLI simulation harness for testing and benchmarking the matching engine. It compares solver implementations, validates correctness, and generates visualization data.
+`matching-sim` is the solver-level CLI harness. It creates synthetic `Problem`s through `matching-scenarios`, dispatches one or more solvers, builds verification material, compares trusted integer results, and optionally exports visualization JSON. It does not exercise the full sequencer lifecycle.
 
-## Architecture Notes
+## Read first
 
-For context on what this crate orchestrates, see vault notes (`docs/architecture/`):
-- [[Crate Dependency Map]] — where this crate fits in the dependency graph
-- [[Solver Landscape]] — the solvers being compared
+- [[Solver Landscape]]
+- [[Crate Dependency Map]]
+- [[Four-Layer Verification]]
 
-## Usage
+## Common commands
 
 ```bash
-# Basic presets
-cargo run -p matching-sim --release -- --preset quick -v
-cargo run -p matching-sim --release -- --preset medium --solver all
-
-# With MILP (feature-gated)
-cargo run -p matching-sim --release --features milp -- --preset small --solver milp --milp-timeout 60
-
-# Custom scenario
-cargo run -p matching-sim --release -- --markets 20 --orders 500 --solver lp -v
+just sim-quick
+just sim-small
+just compare
+cargo run --release -p matching-sim --features milp -- --preset small --solver milp --milp-timeout 60 --mm-mode exact
 ```
 
-## CLI Options
+Run `--help` for the current preset and flag list; do not duplicate clap's complete contract here.
 
-**Presets:** `--preset <quick|small|medium|large|extreme|milp-killer>`
+## Solver names
 
-**Custom Scenario:**
-- `--markets N` — number of binary markets
-- `--orders N` — total orders
-- `--scarcity F` — liquidity scarcity (lower = scarcer)
-- `--mms N` — number of MM constraints
-- `--seed N` — random seed
+| Name | Implementation |
+|---|---|
+| `lp` | HiGHS LP plus budget-linearized re-solve; production default |
+| `iter-lp` | Damped fixed-point LP |
+| `eg` | Eisenberg–Gale / Frank–Wolfe |
+| `conic` | Clarabel conic modes |
+| `milp` | Feature-gated SCIP reference |
+| `decomposed` | Per-group coordination experiment |
+| `all` | Compare enabled implementations |
 
-**Solver Selection:** `--solver <lp|eg|conic|milp|all>`
+## Invariants
 
-**MILP Options:**
-- `--milp-timeout S` — time limit in seconds (default: 5.0)
-- `--mm-mode <exact|mccormick|ignore>` — MM budget constraint handling
+- Compare integer landed outputs and recomputed welfare, not raw floating objectives.
+- Treat a timeout/incumbent separately from a proven MILP optimum.
+- Keep scenario generation in `matching-scenarios`; keep reporting/export in this crate.
+- Full-sequencer simulations belong in `sequencer-sim`; durability/restart
+  behavior belongs in `matching-sequencer` and API integration tests.
 
-**Output:**
-- `-v, --verbose` — detailed step-by-step output
-- `--export-json PATH` — save VizSnapshot for Streamlit dashboard
-- `--show-charts` — ASCII convergence charts
-- `--batches N` — run N independent batches
+## Testing
 
-## Solvers
-
-| Solver | Description |
-|--------|-------------|
-| `lp` | Default. LP via HiGHS with entropy smoothing |
-| `eg` | Eisenberg-Gale / Fisher market formulation |
-| `conic` | Conic EG via Clarabel |
-| `milp` | SCIP-based MIQCQP (exact with timeout) |
-| `all` | Run all solvers and compare metrics |
-
-## Verification
-
-All solver outputs are validated via `sybil-verifier`:
-- Order constraints (quantity, price limits)
-- MM budget constraints
-- Welfare computation
-- No duplicate fills
-
-## Integration
-
-```
-matching-scenarios  →  Problem
-        ↓
-matching-solver    →  PipelineResult (fills, welfare, prices)
-        ↓
-sybil-verifier     →  VerificationResult
-        ↓
-VizSnapshot        →  JSON for Streamlit
+```bash
+cargo test -p matching-sim
+cargo run --release -p matching-sim -- --preset quick --solver all
 ```

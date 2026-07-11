@@ -501,17 +501,17 @@ impl AnalyticsState {
                 RemovedOrderExitReason::RevalidateInsufficientBalance
                 | RemovedOrderExitReason::RevalidateInsufficientPosition
                 | RemovedOrderExitReason::RevalidateRejected => {
-                    if removed.phase == RemovedOrderPhase::BlockStartRevalidate {
-                        if let Some(reason) = &removed.rejection_reason {
-                            self.record_order_history(
-                                AccountId(removed.account_id),
-                                crate::aggregates::HistoryKind::Rejected,
-                                height,
-                                timestamp_ms,
-                                &removed.order,
-                                OrderHistoryOptions::rejection(reason),
-                            );
-                        }
+                    if removed.phase == RemovedOrderPhase::BlockStartRevalidate
+                        && let Some(reason) = &removed.rejection_reason
+                    {
+                        self.record_order_history(
+                            AccountId(removed.account_id),
+                            crate::aggregates::HistoryKind::Rejected,
+                            height,
+                            timestamp_ms,
+                            &removed.order,
+                            OrderHistoryOptions::rejection(reason),
+                        );
                     }
                 }
                 RemovedOrderExitReason::RevalidateMarketInactive

@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tokio::sync::broadcast;
-use tokio::time::{interval_at, Instant};
+use tokio::time::{Instant, interval_at};
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos, Order, Problem};
 use sybil_oracle::{
@@ -23,14 +23,14 @@ use crate::bridge::{
     BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf,
 };
 use crate::crypto::{
+    AccountAuthScheme, AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke,
+    AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedKeyRegistration,
+    AuthenticatedKeyRevocation, AuthenticatedOrder, AuthenticatedProfileUpdate, PublicKey,
+    RegisteredPubkey, SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
+    SignedKeyRegistration, SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
     verify_signed_api_key_create, verify_signed_api_key_revoke, verify_signed_bridge_withdrawal,
     verify_signed_cancel, verify_signed_key_registration, verify_signed_key_revocation,
-    verify_signed_order, verify_signed_profile_update, AccountAuthScheme,
-    AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke, AuthenticatedBridgeWithdrawal,
-    AuthenticatedCancel, AuthenticatedKeyRegistration, AuthenticatedKeyRevocation,
-    AuthenticatedOrder, AuthenticatedProfileUpdate, PublicKey, RegisteredPubkey,
-    SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
-    SignedKeyRegistration, SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
+    verify_signed_order, verify_signed_profile_update,
 };
 use crate::error::SequencerError;
 use crate::market_info::{
@@ -46,8 +46,8 @@ use crate::store::{
     AutoResolutionRecord, ControlPlaneCommand, DaArtifact, DaArtifactLookup, HistoryRetentionPolicy,
 };
 use crate::{
-    AccountSnapshotSlot, QmdbStateExclusionProofParts, QmdbStateKeyValueProofParts,
-    QMDB_STATE_MAX_KEY_BYTES,
+    AccountSnapshotSlot, QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts,
+    QmdbStateKeyValueProofParts,
 };
 
 mod handle;
@@ -73,9 +73,9 @@ pub use self::messages::{IndicativeSnapshot, SequencerMsg, SequencerReadQuery};
 #[cfg(test)]
 pub use self::messages::{SequencerTestCrashpoint, SequencerTestTickHold};
 pub use self::queries::{
-    MarketSearchResult, SequencerStateProof, SequencerStateProofKind,
     DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_BLOCK_HISTORY_QUERY_BLOCKS,
-    MAX_PRICE_HISTORY_QUERY_POINTS,
+    MAX_PRICE_HISTORY_QUERY_POINTS, MarketSearchResult, SequencerStateProof,
+    SequencerStateProofKind,
 };
 
 const SEQUENCER_ACTOR_METRIC_NAME: &str = "sequencer";

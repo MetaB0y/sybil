@@ -27,8 +27,8 @@ use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use reqwest::{Client, Method};
 use serde::Serialize;
-use serde_json::{json, Value};
-use sybil_signing::{canonical_order_bytes, MarketId, Order, MAX_MARKETS_PER_ORDER, MAX_STATES};
+use serde_json::{Value, json};
+use sybil_signing::{MAX_MARKETS_PER_ORDER, MAX_STATES, MarketId, Order, canonical_order_bytes};
 
 const FIXTURE_VERSION: &str = "SYB-247-v1";
 const MARKET_NAME: &str = "SYB-247 deterministic crossing v1";

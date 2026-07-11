@@ -6,11 +6,11 @@
 mod common;
 
 use axum::body::Body;
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use http_body_util::BodyExt;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use common::{
@@ -19,9 +19,9 @@ use common::{
     test_app_with_store_zero_caps,
 };
 use matching_engine::{MarketSet, Nanos, Qty};
-use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use matching_sequencer::SequencerConfig;
 use matching_sequencer::SequencerHandle;
+use matching_sequencer::crypto::{canonical_cancel_bytes, canonical_order_bytes};
 use std::time::Duration;
 use sybil_api::config::ApiConfig;
 
@@ -415,9 +415,11 @@ async fn state_proof_returns_inclusion_for_committed_account_leaf() {
     assert_eq!(proof["proof_kind"], json!("inclusion"));
     assert_eq!(proof["verified"], json!(true));
     assert!(proof["leaf_value_hex"].as_str().is_some());
-    assert!(proof["inclusion_proof"]["operation"]["location"]
-        .as_u64()
-        .is_some());
+    assert!(
+        proof["inclusion_proof"]["operation"]["location"]
+            .as_u64()
+            .is_some()
+    );
 }
 
 #[tokio::test]
@@ -445,9 +447,11 @@ async fn state_proof_returns_exclusion_for_missing_leaf() {
     assert_eq!(proof["proof_kind"], json!("exclusion"));
     assert_eq!(proof["verified"], json!(true));
     assert!(proof.get("leaf_value_hex").is_none());
-    assert!(proof["exclusion_proof"]["operation"]["location"]
-        .as_u64()
-        .is_some());
+    assert!(
+        proof["exclusion_proof"]["operation"]["location"]
+            .as_u64()
+            .is_some()
+    );
 }
 
 #[tokio::test]
@@ -464,10 +468,12 @@ async fn da_manifest_404s_when_no_artifact_is_retained() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     let error = parse_json(&body);
     assert_eq!(error["code"], json!("NOT_FOUND"));
-    assert!(error["error"]
-        .as_str()
-        .expect("error string")
-        .contains("DA artifact not retained for height 1"));
+    assert!(
+        error["error"]
+            .as_str()
+            .expect("error string")
+            .contains("DA artifact not retained for height 1")
+    );
 }
 
 #[tokio::test]
@@ -774,10 +780,12 @@ async fn resolved_market_rejects_new_orders() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     let resp = parse_json(&body);
-    assert!(resp["error"]
-        .as_str()
-        .unwrap()
-        .contains("Invalid market state"));
+    assert!(
+        resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid market state")
+    );
 }
 
 #[tokio::test]
@@ -908,9 +916,11 @@ async fn multi_order_submit_returns_ids_preserved_when_orders_rest() {
         .iter()
         .map(|order| order["order_id"].as_u64().unwrap())
         .collect();
-    assert!(order_ids
-        .iter()
-        .all(|order_id| resting_ids.contains(order_id)));
+    assert!(
+        order_ids
+            .iter()
+            .all(|order_id| resting_ids.contains(order_id))
+    );
 }
 
 #[tokio::test]
@@ -983,10 +993,12 @@ async fn gtd_requires_expires_at_block() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(parse_json(&body)["error"]
-        .as_str()
-        .unwrap()
-        .contains("GTD orders require expires_at_block"));
+    assert!(
+        parse_json(&body)["error"]
+            .as_str()
+            .unwrap()
+            .contains("GTD orders require expires_at_block")
+    );
 }
 
 #[tokio::test]
@@ -1193,9 +1205,11 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
     );
     assert_eq!(points[0]["height"].as_u64().unwrap(), 1);
     assert_eq!(points[1]["height"].as_u64().unwrap(), 2);
-    assert!(points
-        .iter()
-        .all(|point| point["volume_nanos"].as_u64().unwrap() > 0));
+    assert!(
+        points
+            .iter()
+            .all(|point| point["volume_nanos"].as_u64().unwrap() > 0)
+    );
 
     let (status, body) = get(
         app.clone(),
@@ -1216,9 +1230,11 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
         .map(|candle| candle["point_count"].as_u64().unwrap())
         .sum();
     assert_eq!(point_count, 2);
-    assert!(candles
-        .iter()
-        .all(|candle| candle["volume_nanos"].as_u64().unwrap() > 0));
+    assert!(
+        candles
+            .iter()
+            .all(|candle| candle["volume_nanos"].as_u64().unwrap() > 0)
+    );
 
     let (status, body) = get(
         app.clone(),
@@ -1959,11 +1975,13 @@ async fn fills_paginated_correctly() {
         !rest_forward.as_array().unwrap().is_empty(),
         "expected at least one fill after first cursor"
     );
-    assert!(rest_forward
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|fill| fill["cursor"].as_str().unwrap() != cursor));
+    assert!(
+        rest_forward
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|fill| fill["cursor"].as_str().unwrap() != cursor)
+    );
 
     let (status, _) = get(app, "/v1/accounts/0/fills?after=not-a-cursor").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);

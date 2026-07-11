@@ -49,7 +49,7 @@ class BlockResponse:
             total_welfare_nanos (int): Total solver welfare in the block. Integer nanodollars;
                 1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
             bridge (BridgeBlockResponse | Unset):
-            by_market (BlockResponseByMarket | Unset): Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
+            by_market (BlockResponseByMarket | Unset): Nested per-market block scalars. Each
                 `BlockMarketStats` carries the per-market splits for this block. Old
                 clients ignore it; new clients consume what they recognise.
             clearing_prices_nanos (BlockResponseClearingPricesNanos | Unset): Clearing price vectors by market/group.

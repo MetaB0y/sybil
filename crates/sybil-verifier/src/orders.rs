@@ -50,16 +50,16 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
             continue;
         }
 
-        if let Some(expires_at_block) = order.expires_at_block {
-            if expires_at_block < witness.header.height {
-                violations.push(Violation {
-                    kind: ViolationKind::OrderExpiryViolation,
-                    details: format!(
-                        "Order {}: expires_at_block {} < block height {}",
-                        order.id, expires_at_block, witness.header.height
-                    ),
-                });
-            }
+        if let Some(expires_at_block) = order.expires_at_block
+            && expires_at_block < witness.header.height
+        {
+            violations.push(Violation {
+                kind: ViolationKind::OrderExpiryViolation,
+                details: format!(
+                    "Order {}: expires_at_block {} < block height {}",
+                    order.id, expires_at_block, witness.header.height
+                ),
+            });
         }
 
         // MM orders skip balance validation (matching sequencer behavior)
@@ -302,8 +302,8 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder, WitnessRejection};
     use matching_engine::{
-        notional_nanos_ceil, outcome_buy, outcome_sell, shares_to_qty, MarketSet, Nanos, Qty,
-        NANOS_PER_DOLLAR,
+        MarketSet, NANOS_PER_DOLLAR, Nanos, Qty, notional_nanos_ceil, outcome_buy, outcome_sell,
+        shares_to_qty,
     };
     use proptest::prelude::*;
     use std::collections::HashMap;
@@ -409,10 +409,12 @@ mod tests {
         );
 
         let result = verify_orders(&witness);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::OrderExpiryViolation));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::OrderExpiryViolation)
+        );
     }
 
     #[test]
@@ -457,10 +459,12 @@ mod tests {
             vec![account.clone()],
             vec![account],
         );
-        assert!(verify_orders(&invalid)
-            .violations
-            .iter()
-            .any(|v| { v.kind == ViolationKind::IncorrectRejectionReason }));
+        assert!(
+            verify_orders(&invalid)
+                .violations
+                .iter()
+                .any(|v| { v.kind == ViolationKind::IncorrectRejectionReason })
+        );
     }
 
     #[test]
@@ -492,10 +496,12 @@ mod tests {
 
         let result = verify_orders(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::InsufficientBalance));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::InsufficientBalance)
+        );
     }
 
     #[test]
@@ -538,10 +544,12 @@ mod tests {
         let result = verify_orders(&witness);
         assert!(!result.valid);
         // Second order should fail due to reservation
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::InsufficientBalance));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::InsufficientBalance)
+        );
     }
 
     #[test]
@@ -624,10 +632,12 @@ mod tests {
 
         let result = verify_orders(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::AcceptedOrderMissingAccount));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::AcceptedOrderMissingAccount)
+        );
     }
 
     #[test]
@@ -659,10 +669,12 @@ mod tests {
 
         let result = verify_orders(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::InsufficientPosition));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::InsufficientPosition)
+        );
     }
 
     #[test]
@@ -693,10 +705,12 @@ mod tests {
 
         let result = verify_orders(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::FalseRejection));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::FalseRejection)
+        );
     }
 
     proptest! {

@@ -1,7 +1,18 @@
-# Runbook: synthetic monitoring and alert delivery
+---
+tags: [runbook, monitoring, operations]
+status: current
+last_verified: 2026-07-11
+---
 
-**Owning tickets:** SYB-250, SYB-223 item 3 · **Components:** operations,
-VictoriaMetrics, vmalert, Telegram · **Script:** `scripts/synthetic-probe.sh`
+# Synthetic monitoring and alert delivery
+
+> **Executive summary:** every five minutes, a read-only probe checks the public
+> API, block advancement, markets, browser CORS, proof lag, and container
+> health. It writes results to VictoriaMetrics; vmalert—not the probe—owns
+> paging and missing-probe detection.
+
+**Components:** VictoriaMetrics, vmalert, optional Telegram delivery ·
+**Script:** `scripts/synthetic-probe.sh`
 
 The five-minute synthetic probe checks the public path from the deployment host
 without creating accounts, orders, or any other application state.

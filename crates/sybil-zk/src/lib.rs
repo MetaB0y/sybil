@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest as _, Keccak256};
 use sybil_l1_protocol::DepositLeaf;
 use sybil_verifier::{
-    commitments::witness_schema, BlockWitness, L1DepositWitness, SystemEventWitness,
-    VerificationResult,
+    BlockWitness, L1DepositWitness, SystemEventWitness, VerificationResult,
+    commitments::witness_schema,
 };
 
 mod guest_commitments;
@@ -16,10 +16,10 @@ mod header_hash {
 }
 
 pub use guest_commitments::{
-    compute_events_root, events_root_from_event_bytes, verify_qmdb_exclusion_proof,
-    verify_qmdb_key_value_proof, verify_qmdb_state_root, verify_qmdb_state_root_for,
-    QmdbStateExclusionProof, QmdbStateKeyValueProof, QmdbStateOperationProof, QmdbStateRangeProof,
-    QmdbStateRootProof, QMDB_STATE_CHUNK_SIZE,
+    QMDB_STATE_CHUNK_SIZE, QmdbStateExclusionProof, QmdbStateKeyValueProof,
+    QmdbStateOperationProof, QmdbStateRangeProof, QmdbStateRootProof, compute_events_root,
+    events_root_from_event_bytes, verify_qmdb_exclusion_proof, verify_qmdb_key_value_proof,
+    verify_qmdb_state_root, verify_qmdb_state_root_for,
 };
 pub use header_hash::hash_header;
 
@@ -883,28 +883,27 @@ mod tests {
     use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
 
     use commonware_codec::RangeCfg;
-    use commonware_cryptography::{
-        sha256::Digest as QmdbDigest, Hasher as _, Sha256 as QmdbSha256,
-    };
+    use commonware_cryptography::{Sha256 as QmdbSha256, sha256::Digest as QmdbDigest};
+    use commonware_parallel::Sequential;
     use commonware_runtime::buffer::paged::CacheRef;
-    use commonware_runtime::{deterministic, Runner as _};
+    use commonware_runtime::{Runner as _, deterministic};
     use commonware_storage::journal::contiguous::variable::Config as VConfig;
-    use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
     use commonware_storage::merkle::mmr::Family as MmrFamily;
+    use commonware_storage::merkle::mmr::full::Config as MmrConfig;
+    use commonware_storage::qmdb::current::VariableConfig;
     use commonware_storage::qmdb::current::ordered::variable::{
         Db as OrderedVariableDb, KeyValueProof,
     };
-    use commonware_storage::qmdb::current::VariableConfig;
     use commonware_storage::translator::OneCap;
     use matching_engine::{MarketId, Order};
-    use p256::ecdsa::{signature::hazmat::PrehashSigner as _, Signature, SigningKey};
+    use p256::ecdsa::{Signature, SigningKey, signature::hazmat::PrehashSigner as _};
     use sha2::Sha256;
     use sybil_verifier::{
-        commitments::{event_schema, state_schema},
         AccountReservationSnapshot, AccountSnapshot, BridgeStateSnapshot,
         DepositAccumulatorWitness, KeyOpAuth, KeyRecord, MarketGroupSnapshot, MarketSnapshot,
         MarketStatusSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
         WitnessBlockHeader,
+        commitments::{event_schema, state_schema},
     };
 
     const PAGE_SIZE: u16 = 4096;
@@ -950,6 +949,7 @@ mod tests {
         QmdbSha256,
         OneCap,
         QMDB_STATE_CHUNK_SIZE,
+        Sequential,
     >;
     type NativeKeyValueProof = KeyValueProof<MmrFamily, Vec<u8>, QmdbDigest, QMDB_STATE_CHUNK_SIZE>;
 
@@ -1281,7 +1281,7 @@ mod tests {
 
     fn real_test_key(byte: u8) -> (SigningKey, KeyRecord) {
         let signing_key = SigningKey::from_bytes((&[byte; 32]).into()).expect("valid test key");
-        let encoded = signing_key.verifying_key().to_encoded_point(true);
+        let encoded = signing_key.verifying_key().to_sec1_point(true);
         let pubkey_sec1 = encoded
             .as_bytes()
             .try_into()
@@ -1649,8 +1649,8 @@ mod tests {
             let root = db.root().0;
             let mut leaf_proofs = Vec::with_capacity(proof_keys.len());
             for key in &proof_keys {
-                let mut hasher = QmdbSha256::new();
-                let proof = db.key_value_proof(&mut hasher, key.clone()).await.unwrap();
+                let hasher = commonware_storage::qmdb::hasher::<QmdbSha256>();
+                let proof = db.key_value_proof(&hasher, key.clone()).await.unwrap();
                 leaf_proofs.push(qmdb_proof_parts(&proof));
             }
             (root, QmdbStateRootProof { leaf_proofs })
@@ -1669,7 +1669,7 @@ mod tests {
                 items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
                 write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
                 metadata_partition: "test-state-mmr-metadata".to_string(),
-                thread_pool: None,
+                strategy: Sequential,
                 page_cache: page_cache.clone(),
             },
             journal_config: VConfig {
@@ -1697,20 +1697,12 @@ mod tests {
                 activity_chunk: proof.proof.chunk,
                 range: QmdbStateRangeProof {
                     leaves: u64::from(proof.proof.range_proof.proof.leaves),
+                    inactive_peaks: proof.proof.range_proof.proof.inactive_peaks as u64,
                     digests: proof
                         .proof
                         .range_proof
                         .proof
                         .digests
-                        .iter()
-                        .copied()
-                        .map(digest_bytes)
-                        .collect(),
-                    pre_prefix_acc: proof.proof.range_proof.pre_prefix_acc.map(digest_bytes),
-                    unfolded_prefix_peaks: proof
-                        .proof
-                        .range_proof
-                        .unfolded_prefix_peaks
                         .iter()
                         .copied()
                         .map(digest_bytes)
@@ -1799,8 +1791,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                126, 40, 160, 245, 139, 139, 88, 160, 242, 67, 82, 7, 12, 104, 127, 241, 144, 154,
-                39, 150, 206, 0, 53, 109, 98, 111, 56, 229, 197, 28, 16, 101,
+                60, 43, 23, 176, 113, 66, 179, 155, 20, 58, 245, 206, 217, 73, 115, 37, 36, 139,
+                224, 86, 204, 150, 255, 45, 175, 136, 69, 181, 44, 199, 108, 70,
             ]
         );
     }
@@ -1840,8 +1832,8 @@ mod tests {
         assert_eq!(
             events_root_from_event_bytes(&events),
             Some([
-                192, 49, 15, 127, 205, 199, 131, 164, 175, 240, 21, 115, 173, 61, 247, 113, 35,
-                129, 44, 150, 211, 36, 13, 167, 222, 164, 46, 216, 180, 50, 124, 160,
+                80, 198, 242, 60, 202, 11, 62, 126, 105, 245, 100, 247, 169, 21, 83, 76, 35, 1,
+                244, 153, 133, 23, 155, 42, 68, 174, 231, 138, 200, 30, 115, 90,
             ])
         );
     }

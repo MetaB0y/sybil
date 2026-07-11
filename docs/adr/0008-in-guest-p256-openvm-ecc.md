@@ -31,7 +31,7 @@ a first-class accelerated curve (`P256Point`, `NistP256`, drop-in `openvm-p256`
 guest crate, `verify_prehash`), at parity with secp256k1. The concrete wiring
 (the `openvm.toml` `modular`+`ecc` stanza with P-256's `a = -3`/`b` constants,
 guest deps, generated init macros, and the `verify_prehash` API against our
-compressed-SEC1 keys) is in `design/openvm-p256-integration.md`.
+compressed-SEC1 keys) is in `design/archive/implemented/openvm-p256-integration.md`.
 
 ## Alternatives considered
 
@@ -61,4 +61,4 @@ surface. WebAuthn-in-guest is a further step (envelope parsing) and is deferred
 ([ADR-0009](0009-fresh-genesis-for-consensus-changes.md)).
 
 **Follow-ups:** SYB-225 increment 4 (guest support), SYB-32 escape guest;
-`design/keys-and-escape-ratification.md` D0 gates the WebAuthn scope.
+`design/archive/implemented/keys-and-escape-ratification.md` D0 records the historical WebAuthn scope decision.

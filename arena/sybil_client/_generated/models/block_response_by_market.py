@@ -23,7 +23,7 @@ T = TypeVar("T", bound="BlockResponseByMarket")
 
 @_attrs_define
 class BlockResponseByMarket:
-    """ Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
+    """ Nested per-market block scalars. Each
     `BlockMarketStats` carries the per-market splits for this block. Old
     clients ignore it; new clients consume what they recognise.
 

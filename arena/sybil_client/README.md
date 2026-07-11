@@ -33,9 +33,10 @@ The spec is the `utoipa`-generated OpenAPI 3.1 document served by `sybil-api` at
 `regen-sdk.sh` produces it fresh by building and briefly booting `sybil-api` on an ephemeral port
 and scraping `/openapi.json` — mirroring the frontend's `openapi-typescript` flow.
 
-Last regenerated from the spec at repo commit **`81c94b82`** (`feat(arena,mirror): … (SYB-152)`),
-which includes the SYB-164 unit descriptions (share-units = 1000/share, nanodollars = 1e9/$) — these
-now appear in the generated model docstrings.
+Do not infer freshness from a commit hash recorded in this README. After an API
+schema change, run the regeneration command below and review the resulting diff.
+The generated model docstrings record the current unit contract: share units
+use `SHARE_SCALE = 1000` per share and money uses `1e9` nanodollars per dollar.
 
 ## Regenerate
 

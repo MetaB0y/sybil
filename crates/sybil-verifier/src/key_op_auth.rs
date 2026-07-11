@@ -11,9 +11,9 @@ use crate::{
 };
 
 #[cfg(target_os = "zkvm")]
-use openvm_p256::ecdsa::{signature::hazmat::PrehashVerifier, Signature, VerifyingKey};
+use openvm_p256::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 #[cfg(not(target_os = "zkvm"))]
-use p256::ecdsa::{signature::hazmat::PrehashVerifier, Signature, VerifyingKey};
+use p256::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 
 /// The RP used by the currently pinned Sybil passkey deployment.
 ///
@@ -232,7 +232,7 @@ impl JsonParser<'_> {
                 }
                 b'\\' => self.parse_escape(&mut out)?,
                 0x00..=0x1f => {
-                    return Err("clientDataJSON string contains an unescaped control byte".into())
+                    return Err("clientDataJSON string contains an unescaped control byte".into());
                 }
                 _ => out.push(byte),
             }
@@ -431,7 +431,7 @@ mod tests {
 
     fn raw_record(key: &SigningKey, scheme: u8) -> KeyRecord {
         let mut pubkey_sec1 = [0u8; 33];
-        pubkey_sec1.copy_from_slice(key.verifying_key().to_encoded_point(true).as_bytes());
+        pubkey_sec1.copy_from_slice(key.verifying_key().to_sec1_point(true).as_bytes());
         KeyRecord {
             auth_scheme: scheme,
             pubkey_sec1,

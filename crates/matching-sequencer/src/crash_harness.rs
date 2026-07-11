@@ -5,10 +5,10 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use matching_engine::{outcome_buy, MarketId, MarketSet, Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, outcome_buy};
 use p256::ecdsa::SigningKey;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -17,8 +17,8 @@ use sybil_oracle::AdminOracle;
 use crate::account::{AccountId, AccountStore};
 use crate::actor::{SequencerHandle, SequencerTestCrashpoint};
 use crate::block::compute_complete_state_root;
-use crate::bridge::{account_key, BridgeWithdrawalRequest, L1Deposit};
-use crate::crypto::{sign_cancel, PublicKey};
+use crate::bridge::{BridgeWithdrawalRequest, L1Deposit, account_key};
+use crate::crypto::{PublicKey, sign_cancel};
 use crate::market_info::{AccountFillRecord, MarketMetadata};
 use crate::order_book::reservation_snapshots_from_resting_orders;
 use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
@@ -722,7 +722,10 @@ impl Harness {
         }
         for market_id in &self.ledger.resolved_markets {
             assert!(
-                matches!(seq.market_status(*market_id), sybil_oracle::MarketStatus::Resolved { .. }),
+                matches!(
+                    seq.market_status(*market_id),
+                    sybil_oracle::MarketStatus::Resolved { .. }
+                ),
                 "{context}: acknowledged resolution for market {market_id:?} missing after recovery"
             );
         }
@@ -853,7 +856,7 @@ impl Harness {
             seq.analytics()
                 .pending_account_history(account_id, None, None),
         );
-        events.sort_by(|a, b| (b.block_height, b.seq).cmp(&(a.block_height, a.seq)));
+        events.sort_by_key(|event| std::cmp::Reverse((event.block_height, event.seq)));
         events.dedup_by_key(|event| (event.account_id.0, event.block_height, event.seq));
         events
     }

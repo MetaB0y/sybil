@@ -1,6 +1,6 @@
 use axum::response::sse::{Event, KeepAlive, Sse};
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 
 use matching_sequencer::SequencerHandle;
 
@@ -9,7 +9,7 @@ use crate::convert::block_to_response;
 pub async fn block_stream(
     handle: &SequencerHandle,
 ) -> Result<
-    Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>,
+    Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>> + use<>>,
     crate::types::AppError,
 > {
     let rx = handle.subscribe_blocks().await?;

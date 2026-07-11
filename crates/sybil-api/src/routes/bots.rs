@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
-use axum::extract::{Query, State};
 use axum::Json;
+use axum::extract::{Query, State};
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{params_from_iter, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, params_from_iter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -505,8 +505,8 @@ fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotS
            ON p.trader_name = latest.trader_name AND p.id = latest.id",
     );
 
-    if let Ok(mut stmt) = with_totals {
-        if let Ok(rows) = stmt.query_map([], |row| {
+    if let Ok(mut stmt) = with_totals
+        && let Ok(rows) = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<f64>>(1)?,
@@ -516,12 +516,12 @@ fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotS
                 row.get::<_, Option<i64>>(5)?,
                 row.get::<_, Option<String>>(6)?,
             ))
-        }) {
-            for row in rows.flatten() {
-                apply_snapshot(summaries, row);
-            }
-            return;
+        })
+    {
+        for row in rows.flatten() {
+            apply_snapshot(summaries, row);
         }
+        return;
     }
 
     let Ok(mut stmt) = conn.prepare(

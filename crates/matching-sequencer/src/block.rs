@@ -5,13 +5,13 @@ use matching_solver::PipelineResult;
 use sybil_verifier::{BlockWitness, WitnessBlockHeader};
 
 use crate::account::AccountStore;
-use crate::bridge::{bridge_state_snapshot, BridgeBlockData, BridgeState};
+use crate::bridge::{BridgeBlockData, BridgeState, bridge_state_snapshot};
 use crate::canonical_state::CanonicalState;
 use crate::error::{Rejection, RejectionReason};
 use crate::market_info::MarketMetadata;
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::{
-    reservation_snapshots_from_resting_orders, resting_order_snapshots, OrderBook, RestingOrder,
+    OrderBook, RestingOrder, reservation_snapshots_from_resting_orders, resting_order_snapshots,
 };
 use crate::system_event::SystemEvent;
 
@@ -598,7 +598,7 @@ mod tests {
                 let mut positions: Vec<_> = account
                     .positions
                     .iter()
-                    .filter(|(_, &qty)| qty != 0)
+                    .filter(|&(_, &qty)| qty != 0)
                     .map(|(&(market, outcome), &qty)| (market, outcome, qty))
                     .collect();
                 positions.sort_by_key(|&(market, outcome, _)| (market.0, outcome));

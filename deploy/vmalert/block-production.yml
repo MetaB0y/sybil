@@ -18,15 +18,16 @@
 #   * sybil_orders_per_block    — per-block order count, summary (p99 label).
 #
 # SLA rationale (thresholds):
-#   Block cadence is SYBIL_BLOCK_INTERVAL_MS: 500ms prod default, 10000ms in the
-#   dev compose. The solver runs once per block and its wall-time must fit inside
-#   the interval or blocks slip. SLA target: p99 solve latency < 100ms sustained.
-#   - 100ms keeps p99 solve <= 20% of the 500ms prod block budget, leaving room
+#   Block cadence is SYBIL_BLOCK_INTERVAL_MS: the binary default is 500ms, while
+#   the checked-in prod/dev compose sets 10000ms. The solver runs once per block
+#   and its wall-time must fit inside the interval or blocks slip. The shared SLA
+#   stays conservative for faster profiles: p99 solve latency < 100ms sustained.
+#   - 100ms keeps p99 solve <= 20% of the 500ms binary-default budget, leaving room
 #     for redb persistence (spawn_blocking, SYB-169), verification and proof
 #     export. It is also strictly tighter than the pre-existing SolveTimeHigh
 #     alert, which pages on the *average* crossing 100ms; this SLA is tail-aware.
-#   - 250ms critical: solve now consumes half the 500ms block budget, cadence is
-#     at risk and the redb commit backlog begins to compound.
+#   - 250ms critical: solve consumes half the 500ms binary-default budget. On the
+#     10s compose profile this is a regression threshold, not half the cadence.
 #   The 5m `for` combines with the 60s summary window to ignore single heavy
 #   blocks / GC pauses while catching sustained degradation.
 #
@@ -77,5 +78,5 @@ groups:
           severity: critical
           component: sequencer
         annotations:
-          summary: "Block-production p99 latency is half the block budget"
-          description: "p99 solve time has stayed above 250ms for 5m (current p99: {{ $value | humanizeDuration }}) — over half the 500ms block interval. Block cadence and the redb commit backlog are at risk. See docs/runbooks/block-production-latency.md."
+          summary: "Block-production p99 latency is above the critical threshold"
+          description: "p99 solve time has stayed above 250ms for 5m (current p99: {{ $value | humanizeDuration }}). Cadence and the redb commit backlog may be at risk on faster deployment profiles. See docs/runbooks/block-production-latency.md."

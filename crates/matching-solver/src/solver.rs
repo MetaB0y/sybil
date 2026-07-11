@@ -17,11 +17,7 @@ use crate::PipelineResult;
 /// - Seller (any negative payoff) -> -1.0
 #[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
 pub(crate) fn order_sign(order: &Order) -> f64 {
-    if order.is_seller() {
-        -1.0
-    } else {
-        1.0
-    }
+    if order.is_seller() { -1.0 } else { 1.0 }
 }
 
 #[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
@@ -91,8 +87,8 @@ pub trait Solver: Send + Sync {
 #[cfg(all(test, any(feature = "lp", feature = "conic", feature = "milp")))]
 mod tests {
     use matching_engine::{
-        outcome_buy, MarketId, MmConstraint, MmId, MmSide, Nanos, Order, Problem, Qty,
-        NANOS_PER_DOLLAR,
+        MarketId, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty,
+        outcome_buy,
     };
 
     use super::filter_supported_problem;

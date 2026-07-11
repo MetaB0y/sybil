@@ -1,0 +1,34 @@
+[package]
+name = "sybil-custody"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "User-side Sybil custody snapshots, reconstruction, and escape claims"
+default-run = "sybil-custody"
+
+[[bin]]
+name = "sybil-custody"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { workspace = true, features = ["derive", "env"] }
+hex = { workspace = true }
+matching-engine = { path = "../matching-engine" }
+p256 = { workspace = true, features = ["ecdsa"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+rmp-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha3 = { workspace = true }
+sybil-api-types = { path = "../sybil-api-types" }
+sybil-escape-claim = { path = "../sybil-escape-claim" }
+sybil-verifier = { path = "../sybil-verifier" }
+sybil-zk = { path = "../sybil-zk" }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.clippy]
+disallowed_types = "allow"

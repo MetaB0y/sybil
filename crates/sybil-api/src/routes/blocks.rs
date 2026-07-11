@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path, Query, State};
-use axum::response::sse::{Event, Sse};
 use axum::response::Response;
-use axum::Json;
+use axum::response::sse::{Event, Sse};
 
 use matching_sequencer::MAX_BLOCK_HISTORY_QUERY_BLOCKS;
 

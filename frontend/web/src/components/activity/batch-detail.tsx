@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Expanded panel for a batch row. 2-col grid: a market-row table on the left,
- * and on the right the batch identity (number + proof tx) sitting above the
- * order stats — donut and composition KV.
+ * Expanded panel for a batch row. Top: a meta strip (tx hash / block / sequencer
+ * / clearing duration / algorithm; placeholders are visibly labelled). Body: a
+ * 2-col grid — a market-row table on the left, and on the right the batch
+ * identity (number + proof tx) above the order stats (donut + composition KV).
  *
  * Data comes from `useBatchDetail(height)`. The per-market rows are real —
  * volume, welfare and placed/matched come from `BlockResponse.by_market`.

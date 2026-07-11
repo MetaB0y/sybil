@@ -168,9 +168,7 @@ pub enum SequencerError {
     #[error("public key already registered to an account")]
     AccountAlreadyRegistered,
     /// First keys are validity-bound to the account-creation event.
-    #[error(
-        "the first signing key must be attached before the account's creation block is sealed"
-    )]
+    #[error("the first signing key must be attached before the account's creation block is sealed")]
     FirstKeyMustBeInitial,
     /// Per-account validity key cap reached.
     #[error("account signing-key limit reached")]

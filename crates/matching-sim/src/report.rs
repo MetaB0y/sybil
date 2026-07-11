@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Color, Table};
+use comfy_table::{Cell, Color, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL};
 
 use matching_engine::{Fill, MarketId, Order, Problem};
 use sybil_verifier::VerificationResult;
@@ -255,13 +255,13 @@ pub fn print_market_details(
         let mut volume: u64 = 0;
         let mut welfare: i64 = 0;
         for order in &problem.orders {
-            if order.num_markets == 1 && order.markets[0] == market_id {
-                if let Some(&fill_qty) = fill_map.get(&order.id) {
-                    volume += fill_qty;
-                    if let Some(fill) = result.result.fills.iter().find(|f| f.order_id == order.id)
-                    {
-                        welfare += fill.welfare(order);
-                    }
+            if order.num_markets == 1
+                && order.markets[0] == market_id
+                && let Some(&fill_qty) = fill_map.get(&order.id)
+            {
+                volume += fill_qty;
+                if let Some(fill) = result.result.fills.iter().find(|f| f.order_id == order.id) {
+                    welfare += fill.welfare(order);
                 }
             }
         }
@@ -613,16 +613,16 @@ pub fn print_results(results: &[SolverResults], choice: &SolverChoice) {
 
     // Print violation details for invalid solvers
     for result in results {
-        if let Some(ref v) = result.verification {
-            if !v.valid {
-                println!();
-                println!("{}: {} violations", result.name, v.violations.len());
-                for (i, violation) in v.violations.iter().enumerate().take(10) {
-                    println!("  {}. {:?}: {}", i + 1, violation.kind, violation.details);
-                }
-                if v.violations.len() > 10 {
-                    println!("  ... and {} more", v.violations.len() - 10);
-                }
+        if let Some(ref v) = result.verification
+            && !v.valid
+        {
+            println!();
+            println!("{}: {} violations", result.name, v.violations.len());
+            for (i, violation) in v.violations.iter().enumerate().take(10) {
+                println!("  {}. {:?}: {}", i + 1, violation.kind, violation.details);
+            }
+            if v.violations.len() > 10 {
+                println!("  ... and {} more", v.violations.len() - 10);
             }
         }
     }
@@ -795,7 +795,7 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
             (mid, bw, ow, bw - ow)
         })
         .collect();
-    market_gaps.sort_by(|a, b| b.3.abs().cmp(&a.3.abs()));
+    market_gaps.sort_by_key(|entry| std::cmp::Reverse(entry.3.abs()));
 
     let best_price_yes = |mid: &MarketId| -> u64 {
         best.clearing_prices
@@ -928,7 +928,7 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
             })
         })
         .collect();
-    best_only.sort_by(|a, b| b.2.abs().cmp(&a.2.abs()));
+    best_only.sort_by_key(|entry| std::cmp::Reverse(entry.2.abs()));
 
     if !best_only.is_empty() {
         println!(

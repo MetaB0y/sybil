@@ -41,8 +41,9 @@ impl From<sybil_client::Error> for Error {
             sybil_client::Error::Api { status, body } => Self::SybilApi { status, body },
             sybil_client::Error::Http(err) => Self::Http(err),
             sybil_client::Error::Json(err) => Self::Json(err),
-            sybil_client::Error::WebSocket(message)
-            | sybil_client::Error::Protocol(message) => Self::WebSocket(message),
+            sybil_client::Error::WebSocket(message) | sybil_client::Error::Protocol(message) => {
+                Self::WebSocket(message)
+            }
             sybil_client::Error::BlockStreamLagged {
                 skipped,
                 last_sent_height,

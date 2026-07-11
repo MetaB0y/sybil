@@ -1,9 +1,8 @@
 /**
  * Pure derivation of the open-batch (in-flight) snapshot panel.
  *
- * Everything in this panel is mocked today (OPEN_QUESTIONS #6, #7). The
- * deriver still exists so we have one place to update when backend lands a
- * real endpoint.
+ * Everything in this legacy diagnostic panel is deterministic mock data. The
+ * product UI does not treat these values as backend capabilities.
  *
  * - tradersInBatch: MOCK
  * - indicativeYesPrice: MOCK (anchored to last committed price)

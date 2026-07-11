@@ -4,8 +4,8 @@ pub(super) fn prune_historical_block_rows(db: &Database) -> Result<bool, StoreEr
     let txn = db.begin_write()?;
     let Some(height) = ({
         let counters = txn.open_table(COUNTERS)?;
-        let height = counters.get(KEY_HEIGHT)?.map(|value| value.value());
-        height
+
+        counters.get(KEY_HEIGHT)?.map(|value| value.value())
     }) else {
         txn.commit()?;
         return Ok(false);
@@ -186,30 +186,29 @@ pub(super) fn prune_history_redb(
         }
     }
 
-    if remaining > 0 {
-        if let Some(floor) = price_floor {
-            let lo = price_point_by_height_key(0, MarketId(0));
-            let hi = price_point_by_height_key(floor, MarketId(0));
-            let mut points = txn.open_table(PRICE_POINTS)?;
-            let mut by_height = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
-            let mut iter = by_height.extract_from_if(lo.as_slice()..hi.as_slice(), |_, _| true)?;
-            while remaining > 0 {
-                let Some((key, _)) = iter.next().transpose()? else {
-                    break;
-                };
-                if let Some((height, market_id)) = price_point_by_height_parts_from_key(key.value())
+    if remaining > 0
+        && let Some(floor) = price_floor
+    {
+        let lo = price_point_by_height_key(0, MarketId(0));
+        let hi = price_point_by_height_key(floor, MarketId(0));
+        let mut points = txn.open_table(PRICE_POINTS)?;
+        let mut by_height = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
+        let mut iter = by_height.extract_from_if(lo.as_slice()..hi.as_slice(), |_, _| true)?;
+        while remaining > 0 {
+            let Some((key, _)) = iter.next().transpose()? else {
+                break;
+            };
+            if let Some((height, market_id)) = price_point_by_height_parts_from_key(key.value()) {
+                if points
+                    .remove(price_point_key(market_id, height).as_slice())?
+                    .is_some()
                 {
-                    if points
-                        .remove(price_point_key(market_id, height).as_slice())?
-                        .is_some()
-                    {
-                        price_points_pruned += 1;
-                    }
-                } else {
-                    warn!("invalid price point retention index key in store");
+                    price_points_pruned += 1;
                 }
-                remaining -= 1;
+            } else {
+                warn!("invalid price point retention index key in store");
             }
+            remaining -= 1;
         }
     }
 
@@ -253,25 +252,25 @@ pub(super) fn prune_history_redb(
 
     let blocks_full_min_height = if block_floor.is_some() {
         let table = txn.open_table(BLOCKS_FULL)?;
-        let min_height = table
+
+        table
             .iter()?
             .next()
             .transpose()?
-            .map(|(key, _)| key.value());
-        min_height
+            .map(|(key, _)| key.value())
     } else {
         None
     };
-    let price_points_min_height = if price_floor.is_some() {
-        let table = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
-        let min_height =
+    let price_points_min_height =
+        if price_floor.is_some() {
+            let table = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
+
             table.iter()?.next().transpose()?.and_then(|(key, _)| {
                 price_point_by_height_parts_from_key(key.value()).map(|(h, _)| h)
-            });
-        min_height
-    } else {
-        None
-    };
+            })
+        } else {
+            None
+        };
     let mut price_candles_min_bucket_ms = BTreeMap::new();
     if !price_candle_cutoffs.is_empty() {
         let table = txn.open_table(PRICE_CANDLES_BY_RESOLUTION)?;
@@ -281,12 +280,10 @@ pub(super) fn prune_history_redb(
                 .range(lo.as_slice()..=hi.as_slice())?
                 .next()
                 .transpose()?
-            {
-                if let Some((_, bucket_start_ms, _)) =
+                && let Some((_, bucket_start_ms, _)) =
                     price_candle_by_resolution_parts_from_key(key.value())
-                {
-                    price_candles_min_bucket_ms.insert(resolution_secs, bucket_start_ms);
-                }
+            {
+                price_candles_min_bucket_ms.insert(resolution_secs, bucket_start_ms);
             }
         }
     }

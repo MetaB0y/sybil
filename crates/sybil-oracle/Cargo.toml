@@ -1,12 +1,13 @@
 [package]
 name = "sybil-oracle"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Pluggable oracle/resolution system for Sybil prediction markets"
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 
 [lints.clippy]

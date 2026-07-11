@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sybil web frontend
 
-## Getting Started
+The Next.js client for browsing markets, connecting a P256/WebAuthn account,
+submitting signed orders, watching blocks, inspecting a portfolio, and viewing
+the arena. It consumes the public `sybil-api`; it does not contain exchange
+state or matching logic.
 
-First, run the development server:
+## Local development
+
+Requirements: Node 24+ and pnpm 11+.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+cd frontend/web
+pnpm install --frozen-lockfile
+cp .env.example .env.local       # adjust API/WS origins if needed
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The default environment targets the shared devnet. For a local API, set
+`NEXT_PUBLIC_API_BASE` and `NEXT_PUBLIC_WS_BASE` to the matching HTTP and
+WebSocket origins.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Checks
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+From the repository root, `just frontend-check` runs the same install,
+typecheck, lint, unit-test, and production-build sequence as CI. Individually:
 
-## Learn More
+```bash
+pnpm tsc --noEmit
+pnpm lint
+pnpm test
+pnpm build
+pnpm e2e                 # requires the configured app/API environment
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Data and trust boundaries
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- REST and realtime transport live under `src/lib/api/`.
+- Canonical signing and WebAuthn helpers live under `src/lib/auth/`.
+- The browser stores account-session material; server state remains authoritative.
+- `src/lib/api/schema.d.ts` is generated from `sybil-api`'s OpenAPI document.
+  Regenerate it with `pnpm types:generate` against the intended API revision.
+- Read API keys are read-only. Orders, cancels, key changes, and withdrawals
+  require a registered signing key.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [`DATA_MAP.md`](../DATA_MAP.md) for endpoint-to-screen coverage and
+[`docs/architecture/05-interfaces/REST API.md`](../../docs/architecture/05-interfaces/REST%20API.md)
+for the backend contract. Before changing frontend code, read the local
+[`AGENTS.md`](AGENTS.md); this repo's Next.js version may differ from familiar
+framework conventions.

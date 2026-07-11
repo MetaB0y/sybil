@@ -3,7 +3,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use matching_engine::{Nanos, NANOS_PER_DOLLAR};
+use matching_engine::{NANOS_PER_DOLLAR, Nanos};
 use matching_sequencer::crypto::sign_attestation;
 use p256::ecdsa::SigningKey;
 use p256::elliptic_curve::rand_core::UnwrapErr;

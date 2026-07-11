@@ -3,18 +3,19 @@
 //! Checks state root, events root, parent hash chaining, height, and counts.
 
 use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
-use std::sync::{mpsc, OnceLock};
+use std::sync::{OnceLock, mpsc};
 use std::thread;
 
 use commonware_codec::RangeCfg;
 use commonware_cryptography::Sha256 as QmdbSha256;
+use commonware_parallel::Sequential;
 use commonware_runtime::buffer::paged::CacheRef;
-use commonware_runtime::{deterministic, Runner as _};
+use commonware_runtime::{Runner as _, deterministic};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
 use commonware_storage::merkle::mmr::Family as MmrFamily;
-use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableDb;
+use commonware_storage::merkle::mmr::full::Config as MmrConfig;
 use commonware_storage::qmdb::current::VariableConfig;
+use commonware_storage::qmdb::current::ordered::variable::Db as OrderedVariableDb;
 use commonware_storage::translator::OneCap;
 
 pub use crate::commitments::hash_header;
@@ -42,6 +43,7 @@ type StateRootDb = OrderedVariableDb<
     QmdbSha256,
     OneCap,
     QMDB_CHUNK_SIZE,
+    Sequential,
 >;
 
 struct StateRootRequest {
@@ -281,7 +283,7 @@ async fn open_state_root_db(context: deterministic::Context) -> Result<StateRoot
             items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
             write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
             metadata_partition: "state-root-mmr-metadata".to_string(),
-            thread_pool: None,
+            strategy: Sequential,
             page_cache: page_cache.clone(),
         },
         journal_config: VConfig {
@@ -785,10 +787,12 @@ mod tests {
 
         let result = verify_block(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::StateRootMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::StateRootMismatch)
+        );
     }
 
     #[test]
@@ -828,10 +832,12 @@ mod tests {
 
         let result = verify_block(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::EventRootMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::EventRootMismatch)
+        );
     }
 
     #[test]
@@ -954,10 +960,12 @@ mod tests {
         witness.pre_state_sidecar.markets.clear();
         let result = verify_block(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::PreStateRootMismatch));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::PreStateRootMismatch)
+        );
     }
 
     #[test]
@@ -1005,10 +1013,12 @@ mod tests {
 
         let result = verify_block(&witness);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::HeightNotConsecutive));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::HeightNotConsecutive)
+        );
     }
 
     #[test]

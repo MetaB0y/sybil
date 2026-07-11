@@ -365,10 +365,10 @@ impl Store {
                     continue;
                 }
             }
-            if let Some(ref c) = category {
-                if stored.kind.category() != c.as_str() {
-                    continue;
-                }
+            if let Some(ref c) = category
+                && stored.kind.category() != c.as_str()
+            {
+                continue;
             }
             out.push(stored.into_event());
             if out.len() >= limit {

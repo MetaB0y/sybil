@@ -1,7 +1,7 @@
 //! Off-block tracker of order placed / matched / unmatched counts.
 //! Sidecar — does not enter `state_root` / `events_root` / `BlockWitness`.
 //!
-//! Inclusion rules (decision Q-table in BACKEND_DATA_PLAN.md):
+//! Inclusion rules:
 //! - MM submissions count as placed when they enter a batch problem. They do
 //!   not rest, so matched/unmatched lifecycle counts only arise if they are
 //!   later represented by an exit hook.

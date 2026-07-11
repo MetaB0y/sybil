@@ -1,7 +1,8 @@
 [package]
 name = "sybil-openvm-guest"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.94"
 description = "OpenVM guest for Sybil state-transition verification"
 
 # This package intentionally lives outside the root workspace so normal

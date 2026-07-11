@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use matching_engine::{Fill, MarketId, Nanos, Order, NANOS_PER_DOLLAR};
+use matching_engine::{Fill, MarketId, NANOS_PER_DOLLAR, Nanos, Order};
 
 use crate::arithmetic::{checked_price_qty, checked_welfare};
 use crate::types::BlockWitness;
@@ -73,10 +73,10 @@ pub fn verify_match(witness: &BlockWitness, diagnostics: bool) -> VerificationRe
         for group in &witness.market_groups {
             let mut sum: u64 = 0;
             for &market in &group.markets {
-                if let Some(prices) = witness.clearing_prices.get(&market) {
-                    if let Some(&yes_price) = prices.first() {
-                        sum = sum.saturating_add(yes_price.0);
-                    }
+                if let Some(prices) = witness.clearing_prices.get(&market)
+                    && let Some(&yes_price) = prices.first()
+                {
+                    sum = sum.saturating_add(yes_price.0);
                 }
             }
             let delta = sum.abs_diff(NANOS_PER_DOLLAR);
@@ -314,10 +314,10 @@ fn verify_mm_constraints(
         let mut mm_fills: HashMap<u64, (matching_engine::Nanos, matching_engine::Qty)> =
             HashMap::new();
         for &order_id in &mm.order_ids {
-            if let Some(fill) = fill_map.get(&order_id) {
-                if fill.fill_qty.0 > 0 {
-                    mm_fills.insert(order_id, (fill.fill_price, fill.fill_qty));
-                }
+            if let Some(fill) = fill_map.get(&order_id)
+                && fill.fill_qty.0 > 0
+            {
+                mm_fills.insert(order_id, (fill.fill_price, fill.fill_qty));
             }
         }
 
@@ -407,16 +407,16 @@ fn verify_uniform_clearing_prices(
             None
         };
 
-        if let Some(expected) = expected_price {
-            if fill.fill_price != expected {
-                violations.push(Violation {
-                    kind: ViolationKind::UniformClearingPriceViolation,
-                    details: format!(
-                        "Order {} on market {:?}: fill_price {} != clearing_price {}",
-                        fill.order_id, market, fill.fill_price, expected
-                    ),
-                });
-            }
+        if let Some(expected) = expected_price
+            && fill.fill_price != expected
+        {
+            violations.push(Violation {
+                kind: ViolationKind::UniformClearingPriceViolation,
+                details: format!(
+                    "Order {} on market {:?}: fill_price {} != clearing_price {}",
+                    fill.order_id, market, fill.fill_price, expected
+                ),
+            });
         }
     }
 }
@@ -468,20 +468,17 @@ fn verify_market_group_constraints(witness: &BlockWitness, violations: &mut Vec<
     for group in &witness.market_groups {
         let mut sum: u64 = 0;
         for &market in &group.markets {
-            if let Some(prices) = witness.clearing_prices.get(&market) {
-                if let Some(&yes_price) = prices.first() {
-                    let Some(updated) = sum.checked_add(yes_price.0) else {
-                        violations.push(Violation {
-                            kind: ViolationKind::SettlementOverflow,
-                            details: format!(
-                                "Market group {}: YES price sum overflowed",
-                                group.name
-                            ),
-                        });
-                        continue;
-                    };
-                    sum = updated;
-                }
+            if let Some(prices) = witness.clearing_prices.get(&market)
+                && let Some(&yes_price) = prices.first()
+            {
+                let Some(updated) = sum.checked_add(yes_price.0) else {
+                    violations.push(Violation {
+                        kind: ViolationKind::SettlementOverflow,
+                        details: format!("Market group {}: YES price sum overflowed", group.name),
+                    });
+                    continue;
+                };
+                sum = updated;
             }
         }
         if sum > NANOS_PER_DOLLAR {
@@ -585,9 +582,9 @@ mod tests {
     use super::*;
     use crate::types::{WitnessBlockHeader, WitnessOrder};
     use matching_engine::{
-        gross_welfare_from_fills, minting_cost_from_fills, net_welfare, outcome_sell,
-        shares_to_qty, simple_no_buy, simple_yes_buy, MarketSet, MmConstraint, MmId, MmSide, Nanos,
-        Qty,
+        MarketSet, MmConstraint, MmId, MmSide, Nanos, Qty, gross_welfare_from_fills,
+        minting_cost_from_fills, net_welfare, outcome_sell, shares_to_qty, simple_no_buy,
+        simple_yes_buy,
     };
 
     fn empty_header() -> WitnessBlockHeader {
@@ -696,10 +693,12 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::OrderNotFound));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::OrderNotFound)
+        );
     }
 
     #[test]
@@ -715,10 +714,12 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::QuantityExceedsMax));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::QuantityExceedsMax)
+        );
     }
 
     #[test]
@@ -737,10 +738,12 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::DuplicateFill));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::DuplicateFill)
+        );
     }
 
     #[test]
@@ -756,10 +759,12 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::PriceExceedsLimit));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::PriceExceedsLimit)
+        );
     }
 
     #[test]
@@ -776,10 +781,12 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SettlementOverflow));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SettlementOverflow)
+        );
     }
 
     #[test]
@@ -795,10 +802,12 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::SettlementOverflow));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::SettlementOverflow)
+        );
     }
 
     #[test]
@@ -821,10 +830,12 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::MmBudgetExceeded));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::MmBudgetExceeded)
+        );
     }
 
     #[test]
@@ -840,10 +851,12 @@ mod tests {
         let witness = make_witness(orders, vec![]);
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::DuplicateOrderId));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::DuplicateOrderId)
+        );
     }
 
     #[test]
@@ -872,10 +885,12 @@ mod tests {
 
         let result = verify_match(&witness, false);
         assert!(!result.valid);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::PriceComplementarityViolation));
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::PriceComplementarityViolation)
+        );
     }
 
     #[test]
@@ -894,10 +909,12 @@ mod tests {
 
         let with_diagnostics = verify_match(&witness, true);
         assert!(!with_diagnostics.valid);
-        assert!(with_diagnostics
-            .violations
-            .iter()
-            .any(|v| v.kind == ViolationKind::ZeroQuantityFill));
+        assert!(
+            with_diagnostics
+                .violations
+                .iter()
+                .any(|v| v.kind == ViolationKind::ZeroQuantityFill)
+        );
     }
 
     #[test]

@@ -8,8 +8,8 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    build_state_transition_guest_input, ProverCliError, StateTransitionProofJob,
-    StateTransitionProofJobId,
+    ProverCliError, StateTransitionProofJob, StateTransitionProofJobId,
+    build_state_transition_guest_input,
 };
 
 #[derive(Args)]

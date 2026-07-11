@@ -2,7 +2,7 @@
 
 # cargo-chef supplies a manifest-driven dependency build, so workspace targets do
 # not need handwritten dummy source files.
-FROM rust:1.94-bookworm AS chef
+FROM rust:1.97-bookworm AS chef
 
 RUN cargo install cargo-chef --locked
 
