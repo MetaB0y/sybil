@@ -229,7 +229,6 @@ function TailSwitch({
       <Segment
         active={!live}
         onClick={onFrozen}
-        title="Hold the rows still so you can inspect a batch"
       >
         <span
           aria-hidden
@@ -245,7 +244,6 @@ function TailSwitch({
       <Segment
         active={live}
         onClick={onLive}
-        title="Follow new batches as they clear"
         accent={!live && newWhileFrozen > 0}
       >
         <span
@@ -314,13 +312,11 @@ function Segment({
   active,
   accent,
   onClick,
-  title,
   children,
 }: {
   active: boolean;
   accent?: boolean;
   onClick: () => void;
-  title: string;
   children: ReactNode;
 }) {
   return (
@@ -328,7 +324,6 @@ function Segment({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      title={title}
       style={{
         display: "inline-flex",
         alignItems: "center",

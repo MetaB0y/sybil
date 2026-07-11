@@ -416,17 +416,9 @@ export function EventClosedOrders({
 function ClosedRow({ order }: { order: ClosedOrder }) {
   const isBuy = order.side === "BUY";
   const isSell = order.side === "SELL";
-  // For a PARTIAL, spell out the ordered total, how much filled, and how the
-  // remainder closed — the Qty cell shows "filled / ordered"; this hover carries
-  // the full breakdown.
-  const partialNote =
-    order.status === "PARTIAL" && order.qty != null && order.remainderQty != null
-      ? `${formatShareUnits(order.qty + order.remainderQty)} ordered · ${formatShareUnits(order.qty)} filled · ${formatShareUnits(order.remainderQty)} ${order.remainderKind}`
-      : undefined;
   return (
     <Row>
       <span
-        title={order.label}
         style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -451,7 +443,7 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
       </span>
       <span>{order.outcome ? <SidePill outcome={order.outcome} /> : <Muted>—</Muted>}</span>
       <Right>
-        <StatusBadge status={order.status} title={partialNote} />
+        <StatusBadge status={order.status} />
       </Right>
       <Right mono>
         {order.qty == null ? (
@@ -459,14 +451,14 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
         ) : order.status === "PARTIAL" && order.remainderQty != null ? (
           // filled / ordered — the faded total makes the unfilled (expired /
           // cancelled) part visible without a separate phantom row.
-          <span title={partialNote}>
+          <span>
             {formatShareUnits(order.qty, 1)}
             <span style={{ color: "var(--fg-4)" }}>
               {` / ${formatShareUnits(order.qty + order.remainderQty, 1)}`}
             </span>
           </span>
         ) : (
-          <span title={partialNote}>{formatShareUnits(order.qty, 1)}</span>
+          <span>{formatShareUnits(order.qty, 1)}</span>
         )}
       </Right>
       <Right mono dim={order.unfilled}>
@@ -602,14 +594,12 @@ function PnlCell({ pnlNanos }: { pnlNanos: bigint | null }) {
 /**
  * Terminal-status chip. FILLED reads in the position tone, PARTIAL in the amber
  * "incomplete" tone (filled, but the rest didn't), REJECTED in the loss tone;
- * the rest are muted. `title` carries the partial breakdown on hover.
+ * the rest are muted.
  */
 function StatusBadge({
   status,
-  title,
 }: {
   status: Status;
-  title?: string | undefined;
 }) {
   const tone =
     status === "FILLED"
@@ -621,7 +611,6 @@ function StatusBadge({
           : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
   return (
     <span
-      title={title}
       style={{
         padding: "1px 7px",
         background: tone.bg,
@@ -694,7 +683,6 @@ function HeaderCell({
         letterSpacing: "var(--track-wide)",
         color: active ? "var(--fg-2)" : "var(--fg-4)",
       }}
-      title={`Sort by ${col.label}`}
     >
       <span>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>

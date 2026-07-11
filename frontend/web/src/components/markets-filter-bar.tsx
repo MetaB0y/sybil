@@ -11,7 +11,6 @@ type ChipDef = {
   key: SortKey;
   label: string;
   disabled?: boolean;
-  title?: string;
 };
 
 const SORTS: ChipDef[] = [
@@ -60,7 +59,6 @@ export function MarketsFilterBar({
             key={s.key}
             active={sort === s.key}
             disabled={s.disabled ?? false}
-            title={s.title}
             onClick={() => {
               if (!s.disabled) onSortChange(s.key);
             }}

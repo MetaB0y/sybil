@@ -20,7 +20,6 @@ export function CategoryDot({
   return (
     <span
       aria-hidden
-      title={pick.primary ?? undefined}
       style={{
         display: "inline-block",
         width: size,

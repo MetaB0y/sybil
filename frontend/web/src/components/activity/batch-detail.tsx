@@ -248,7 +248,6 @@ function SortTh({
     <button
       type="button"
       onClick={() => onSort(col)}
-      title={`Sort by ${label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -347,7 +346,6 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
         <Link
           href={`/m/${row.marketId}`}
           className="market-link"
-          title={row.title}
           style={{
             fontFamily: "var(--font-sans)",
             fontSize: 12,

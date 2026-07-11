@@ -459,7 +459,6 @@ function OutcomeFilter({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="Filter by outcome"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -545,7 +544,6 @@ function OutcomeFilter({
             <OutcomeOption
               key={o.marketId}
               label={o.shortLabel}
-              title={o.label}
               color={colorForOutcome(o, i)}
               selected={selected === o.marketId}
               onClick={() => pick(o.marketId)}
@@ -559,13 +557,11 @@ function OutcomeFilter({
 
 function OutcomeOption({
   label,
-  title,
   color,
   selected,
   onClick,
 }: {
   label: string;
-  title?: string;
   color?: string;
   selected: boolean;
   onClick: () => void;
@@ -576,7 +572,6 @@ function OutcomeOption({
       role="option"
       aria-selected={selected}
       onClick={onClick}
-      title={title ?? label}
       style={{
         display: "flex",
         alignItems: "center",
@@ -670,7 +665,6 @@ function HeaderCell({
         letterSpacing: "var(--track-wide)",
         color: active ? "var(--fg-2)" : "var(--fg-4)",
       }}
-      title={`Sort by ${col.label}`}
     >
       <span>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
@@ -686,7 +680,6 @@ function HoldingRow({ holding }: { holding: Holding }) {
   return (
     <Row>
       <span
-        title={label}
         style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -708,7 +701,7 @@ function HoldingRow({ holding }: { holding: Holding }) {
         ) : (
           // entry → mark. Fade the entry (what you paid, historical) so the eye
           // lands on the mark — the live price that's actually true right now.
-          <span title="entry → current">
+          <span>
             <span style={{ color: "var(--fg-4)" }}>{formatCentsPrecise(avgNanos)}</span>
             <span style={{ color: "var(--fg-4)" }}>{" → "}</span>
             {formatCentsPrecise(markNanos)}

@@ -96,11 +96,6 @@ export function DegenProgress(props: DegenProgressProps) {
               type="button"
               onClick={props.onCancel}
               disabled={!props.canCancel || props.cancelling}
-              title={
-                props.canCancel
-                  ? "Cancel this bet"
-                  : "Cancel unlocks the moment your order registers (about a second)."
-              }
               style={{
                 ...cancelStyle,
                 cursor:

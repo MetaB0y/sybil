@@ -133,7 +133,6 @@ export function DegenOutcomePicker({
           fontWeight: 600,
           color: "var(--fg-1)",
         }}
-        title={selected.label}
       >
         {selected.shortLabel}
       </span>
@@ -271,7 +270,6 @@ export function DegenOutcomePicker({
                       fontSize: 13,
                       color: "var(--fg-1)",
                     }}
-                    title={o.label}
                   >
                     {o.shortLabel}
                   </span>

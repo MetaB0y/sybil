@@ -343,7 +343,6 @@ function EventRow({ row }: { row: HistoryRow }) {
           fontFamily: "var(--font-sans)",
           fontSize: 13,
         }}
-        title={marketName || undefined}
       >
         {marketName || "—"}
       </span>
@@ -426,7 +425,7 @@ function AmountCell({ event }: { event: HistoryEvent }) {
     const reserved = notionalNanosCeil(event.priceNanos, event.qty);
     return (
       <RightCell mono>
-        <span style={{ color: "var(--fg-4)" }} title="reserved margin">
+        <span style={{ color: "var(--fg-4)" }}>
           {formatDollars(reserved, { decimals: 2 })}
         </span>
       </RightCell>
@@ -545,7 +544,6 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(col.key)}
-      title={`Sort by ${col.label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",

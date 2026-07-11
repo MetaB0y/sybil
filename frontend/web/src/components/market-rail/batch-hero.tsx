@@ -94,7 +94,6 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
           textTransform: "uppercase",
           letterSpacing: "0.06em",
         }}
-        title={`block stream: ${wsState}`}
       >
         <span
           aria-hidden
@@ -163,7 +162,6 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
             />
             <span
               style={{ color: "var(--fg-1)", fontWeight: 600 }}
-              title="Distinct traders with a resting order in the open batch — updates ~1s"
             >
               {placers ?? "—"}
             </span>

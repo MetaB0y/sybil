@@ -11,7 +11,6 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-label={isLight ? "Switch to dark theme" : "Switch to light theme"}
-      title={isLight ? "Dark" : "Light"}
     >
       {/* sun when light is active (click → dark), moon when dark is active (click → light) */}
       {isLight ? (

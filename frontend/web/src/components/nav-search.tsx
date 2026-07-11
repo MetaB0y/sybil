@@ -201,7 +201,6 @@ export function NavSearch() {
           <button
             type="button"
             aria-label="Clear search"
-            title="Clear search"
             // Keep focus (don't blur the input) through the click.
             onMouseDown={(e) => e.preventDefault()}
             onClick={clearSearch}

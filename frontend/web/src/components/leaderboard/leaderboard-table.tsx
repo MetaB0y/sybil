@@ -197,7 +197,6 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(col)}
-      title={`Sort by ${label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",

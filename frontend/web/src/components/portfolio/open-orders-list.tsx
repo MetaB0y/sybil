@@ -321,7 +321,6 @@ function OrderRow({
           fontFamily: "var(--font-sans)",
           fontSize: 13,
         }}
-        title={label}
       >
         {label}
       </span>
@@ -358,7 +357,7 @@ function OrderRow({
           type="button"
           onClick={onCancel}
           disabled={cancelling}
-          title={error ?? "Cancel order"}
+          title={error || undefined}
           style={{
             padding: "3px 9px",
             background: "transparent",
@@ -406,9 +405,7 @@ function FilledCell({
     return <>{formatShareUnits(remaining, 1)}</>;
   }
   return (
-    <span
-      title={`${formatShareUnits(filled)} filled of ${formatShareUnits(placed)} placed`}
-    >
+    <span>
       {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
     </span>
   );
@@ -420,7 +417,6 @@ function AvgFillCell({ agg }: { agg: OrderFillAgg }) {
   const count = agg.count;
   return (
     <span
-      title={count === 1 ? "1 fill" : `${count} fills`}
       style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}
     >
       <span style={{ color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
@@ -447,7 +443,6 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(col.key)}
-      title={`Sort by ${col.label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",

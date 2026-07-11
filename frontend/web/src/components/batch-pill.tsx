@@ -91,7 +91,6 @@ export function BatchPill() {
         color: accent,
         fontVariantNumeric: "tabular-nums",
       }}
-      title={`connection: ${connection.state}`}
     >
       <span
         aria-hidden

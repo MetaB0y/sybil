@@ -3,7 +3,8 @@
 /**
  * Nav chip showing the current account. Disconnected → "connect" button
  * (opens modal). Connected → the live portfolio "total / cash ▾" with a small
- * dropdown that recaps portfolio / cash / account id and offers Settings /
+ * dropdown that breaks the balance into portfolio / cash / in orders /
+ * positions (+ account id) and offers Settings /
  * disconnect / copy account id / copy JWK. Settings has no top-level nav tab —
  * this dropdown is its only entry point.
  */
@@ -38,7 +39,6 @@ export function AccountChip() {
         className="account-chip nav-chip"
         type="button"
         onClick={() => setOpen(true)}
-        title="Create or import an account"
       >
         connect
       </button>
@@ -67,16 +67,21 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
     portfolio != null
       ? formatDollars(parseNanos(portfolio.portfolio_value_nanos), { decimals: 2 })
       : "—";
-  // "Cash" is the AVAILABLE (spendable) balance — total minus funds reserved by
-  // open orders — so the chip never implies more buying power than the engine
-  // will accept. Reserved is surfaced separately when non-zero.
+  // Portfolio breakdown: Cash (spendable) + In orders (reserved by open orders)
+  // + Positions (marked value of holdings) = Portfolio. "Cash" is the AVAILABLE
+  // balance so the chip never implies more buying power than the engine accepts.
   const { availableNanos, reservedNanos } = selectBalances(portfolio);
   const cash =
     availableNanos != null
       ? formatDollars(availableNanos, { decimals: 2 })
       : "—";
-  const reserved =
-    reservedNanos > 0n ? formatDollars(reservedNanos, { decimals: 2 }) : null;
+  const inOrders = formatDollars(reservedNanos, { decimals: 2 });
+  const positions =
+    portfolio != null
+      ? formatDollars(parseNanos(portfolio.total_position_value_nanos), {
+          decimals: 2,
+        })
+      : "—";
 
   useEffect(() => {
     if (!open) return;
@@ -104,7 +109,6 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={`Portfolio ${total} · Available ${cash}${reserved ? ` · Reserved ${reserved}` : ""} · Account #${accountId}`}
       >
         <span
           className="account-chip-balance"
@@ -145,8 +149,9 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         >
           <div style={{ padding: "6px 10px 8px" }}>
             <InfoRow label="Portfolio" value={total} strong />
-            <InfoRow label="Available" value={cash} />
-            {reserved && <InfoRow label="Reserved" value={reserved} />}
+            <InfoRow label="Cash" value={cash} />
+            <InfoRow label="In orders" value={inOrders} />
+            <InfoRow label="Positions" value={positions} />
             <InfoRow label="Account" value={`#${accountId}`} />
           </div>
           <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
@@ -194,7 +199,8 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
   );
 }
 
-/** Labeled value row in the dropdown header (Portfolio / Cash / Account). */
+/** Labeled value row in the dropdown header (Portfolio / Cash / In orders /
+ *  Positions / Account). */
 function InfoRow({
   label,
   value,

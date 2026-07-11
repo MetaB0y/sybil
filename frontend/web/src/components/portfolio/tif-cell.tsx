@@ -19,32 +19,25 @@ export function TifCell({ expiresAtBlock }: { expiresAtBlock: number }) {
     typeof latestHeight === "number" ? expiresAtBlock - latestHeight : null;
 
   let label: string;
-  let title: string;
   let accent = false;
 
   if (remaining == null) {
     label = `@${expiresAtBlock}`;
-    title = `Expires at block ${expiresAtBlock}`;
   } else if (remaining > GTC_THRESHOLD) {
     label = "GTC";
-    title = "Good till cancelled — rests until you cancel it";
     accent = true;
   } else if (remaining <= 0) {
     label = "expired";
-    title = `Expired at block ${expiresAtBlock}`;
   } else if (remaining === 1) {
     label = "next batch";
-    title = "Expires at the next batch";
   } else {
     const eta = formatAge(remaining * BLOCK_INTERVAL_MS);
     label = `~${eta}`;
-    title = `~${eta} left (${remaining} batches)`;
   }
 
   return (
     <span
       className="tabular"
-      title={title}
       style={{
         fontFamily: "var(--font-mono)",
         fontSize: 11.5,

@@ -308,7 +308,6 @@ function OrderRow({
   return (
     <Row>
       <span
-        title={label}
         style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -338,10 +337,8 @@ function OrderRow({
         {placed === 0 ? (
           <>{formatShareUnits(order.remaining_quantity, 1)}</>
         ) : (
-          // Rounded to 1dp in view; the hover title keeps the exact share counts.
-          <span
-            title={`${formatShareUnits(filled)} filled of ${formatShareUnits(placed)} placed`}
-          >
+          // Rounded to 1dp in view.
+          <span>
             {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
           </span>
         )}
@@ -362,7 +359,7 @@ function OrderRow({
           type="button"
           onClick={onCancel}
           disabled={cancelling}
-          title={cancelError ?? "Cancel order"}
+          title={cancelError || undefined}
           style={{
             padding: "3px 8px",
             background: "transparent",
@@ -403,7 +400,6 @@ function CreatedCell({ placedAtMs, nowMs }: { placedAtMs: number; nowMs: number 
 function AvgFillCell({ priceNanos, count }: { priceNanos: bigint | null; count: number }) {
   return (
     <span
-      title={count === 1 ? "1 fill" : `${count} fills`}
       style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}
     >
       <span style={{ color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
@@ -445,7 +441,6 @@ function HeaderCell({
         letterSpacing: "var(--track-wide)",
         color: active ? "var(--fg-2)" : "var(--fg-4)",
       }}
-      title={`Sort by ${col.label}`}
     >
       <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>

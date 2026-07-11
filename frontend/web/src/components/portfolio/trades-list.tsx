@@ -229,7 +229,6 @@ function ExportCsvButton({
       onClick={onExport}
       disabled={count === 0}
       aria-label="Export fills as CSV"
-      title={count === 0 ? "No fills to export" : `Export ${count} fills as CSV`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -503,7 +502,6 @@ function TradeRow({ row }: { row: TradeRowData }) {
               whiteSpace: "nowrap",
               minWidth: 0,
             }}
-            title={label}
           >
             {label}
           </span>
@@ -803,7 +801,6 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(col.key)}
-      title={`Sort by ${col.label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",

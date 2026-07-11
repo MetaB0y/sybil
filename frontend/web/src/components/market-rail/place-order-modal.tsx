@@ -137,7 +137,6 @@ function ModalBody({
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
               }}
-              title={selected.label}
             >
               {selected.shortLabel}
             </span>
