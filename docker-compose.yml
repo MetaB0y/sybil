@@ -166,7 +166,7 @@ services:
     image: sybil-arena:latest
     mem_limit: "512m"
     memswap_limit: "512m"
-    entrypoint: ["uv", "run", "streamlit", "run", "live/dashboard.py"]
+    entrypoint: ["uv", "run", "--no-sync", "streamlit", "run", "live/dashboard.py"]
     command:
       - "--server.port=8501"
       - "--server.address=0.0.0.0"

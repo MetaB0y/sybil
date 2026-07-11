@@ -125,3 +125,11 @@ done
 grep -Fq '| ssh {{SERVER}} docker load' <<<"$deploy_all_save" \
     || fail "deploy-all does not stream its images to the remote Docker daemon"
 pass "deploy-all transfers every locally built application image"
+
+grep -Eq '^COPY[[:space:]]+scripts/[[:space:]]+scripts/$' arena/Dockerfile \
+    || fail "arena image does not include offline calibration scripts"
+for recipe in arena-outcomes-dry-run arena-record-outcomes arena-calibration; do
+    grep -Eq "^${recipe}:" justfile \
+        || fail "justfile is missing the ${recipe} operator recipe"
+done
+pass "arena image and operator recipes expose live calibration tooling"

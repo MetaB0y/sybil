@@ -129,6 +129,16 @@ values are baked into `sybil-web`, export any overrides before running either
 `/opt/sybil/arena.env`. The recipes check only for the presence of required variable
 names; they do not print or pass secret values in command arguments.
 
+The arena image also carries its offline quality-report tools. After resolved
+markets exist, preview and persist their conflict-checked outcome labels, then
+print the live calibration report from the shared arena volume:
+
+```bash
+just arena-outcomes-dry-run
+just arena-record-outcomes
+just arena-calibration
+```
+
 Optional Telegram alerting:
 
 ```bash

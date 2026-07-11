@@ -673,7 +673,19 @@ deploy-shell:
 
 # Arena bot status — text dashboard (readable by CLI / LLM)
 arena-status hours="24":
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run python -m live.status --hours {{hours}}'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m live.status --hours {{hours}}'
+
+# Preview resolved-market labels that would be added to the live decisions DB.
+arena-outcomes-dry-run:
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.record_outcomes --db /data/decisions.db --api-base http://sybil-api:3000 --dry-run'
+
+# Persist conflict-checked resolved-market labels used by calibration reports.
+arena-record-outcomes:
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.record_outcomes --db /data/decisions.db --api-base http://sybil-api:3000'
+
+# Print the live bot calibration/rejection report from the shared arena volume.
+arena-calibration:
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.calibration --db /data/decisions.db'
 
 # Live system status (containers, blocks, traders, fills)
 status:
