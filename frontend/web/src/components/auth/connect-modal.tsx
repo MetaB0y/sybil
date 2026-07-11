@@ -219,7 +219,7 @@ function CreateTab() {
     } catch (e) {
       const msg =
         e instanceof AccountError && e.kind === "dev_mode_off"
-          ? "Demo accounts are disabled on this server. Bridge deposits coming soon."
+          ? "Demo accounts are disabled on this server. Import an existing account instead."
           : e instanceof AccountError && e.kind === "webauthn_unavailable"
             ? "Passkeys are not available in this browser."
             : e instanceof Error
@@ -234,8 +234,8 @@ function CreateTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
-        Creates a demo account with the selected starting balance. Passkeys use
-        your device authenticator; local dev keys keep the preview JWK path.
+        Create a demo account with a starting balance. Use a passkey for
+        device-backed signing, or a local key for browser-only testing.
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -254,7 +254,7 @@ function CreateTab() {
             onClick={() => setMode("local_key")}
             style={chipStyle(mode === "local_key")}
           >
-            Local dev key
+            Local browser key
           </button>
         </div>
       </div>

@@ -254,8 +254,8 @@ function Disconnected() {
           lineHeight: 1.5,
         }}
       >
-        Create a demo account in your browser — preview &middot; wallet auth
-        coming soon. Your keys are stored only in this browser.
+        Create a demo account with a passkey or a local browser key. Your key
+        material stays on this device.
       </p>
       <button
         type="button"

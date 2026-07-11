@@ -4,8 +4,7 @@
  * Research nudge — a subtle footer under the Degen CTA that nudges unsure
  * bettors toward AI research tools. The platform name cycles through the list
  * with a fade, and the visible name is a live external link. Cycling pauses on
- * hover/focus so the moving target is actually clickable. The "soon" pill hints
- * that native in-app research is a coming-soon feature preview.
+ * hover/focus so the moving target is actually clickable.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -98,26 +97,6 @@ export function ResearchNudge() {
         </a>
       </span>
 
-      <span aria-hidden="true" style={{ color: "var(--fg-4)" }}>
-        ·
-      </span>
-
-      <span
-        title="Native AI research is coming to Sybil — this is an early preview."
-        style={{
-          fontSize: 9,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: "var(--accent)",
-          background: "color-mix(in srgb, var(--accent) 14%, transparent)",
-          border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
-          borderRadius: "var(--radius-pill, 999px)",
-          padding: "1px 6px",
-          cursor: "help",
-        }}
-      >
-        soon
-      </span>
     </div>
   );
 }

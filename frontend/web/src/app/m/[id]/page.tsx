@@ -120,7 +120,6 @@ export default function MarketDetailPage({
                 <ChartSection marketId={marketId} />
                 <EventHoldings marketId={marketId} />
                 <DescriptionBlock market={market} />
-                <DiscussionPlaceholder />
               </div>
 
               <MarketRail marketId={marketId} />
@@ -700,122 +699,6 @@ function DescriptionBlock({
           </span>
         )}
       </div>
-
-      <ProposeResolution />
-    </section>
-  );
-}
-
-/**
- * Inactive "Propose resolution" affordance. Resolution proposals aren't wired
- * to the backend yet, so the button is disabled with a "coming soon" hint —
- * it reserves the spot next to the resolution criteria the way the Discussion
- * card reserves the comments slot.
- */
-function ProposeResolution() {
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: "var(--space-3)",
-        paddingTop: "var(--space-3)",
-        borderTop: "1px solid var(--border-1)",
-      }}
-    >
-      <button
-        type="button"
-        disabled
-        style={{
-          flexShrink: 0,
-          padding: "10px 16px",
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--border-2)",
-          background: "var(--surface-2)",
-          color: "var(--fg-3)",
-          fontFamily: "var(--font-sans)",
-          fontSize: "var(--fs-13)",
-          fontWeight: 600,
-          cursor: "not-allowed",
-        }}
-      >
-        Propose resolution
-      </button>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          color: "var(--fg-4)",
-          textTransform: "uppercase",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        coming soon
-      </span>
-    </div>
-  );
-}
-
-/**
- * Empty Discussion card. Backend has no comments endpoint today; this slot
- * reserves the layout so the page doesn't shift later when the thread lands.
- */
-function DiscussionPlaceholder() {
-  return (
-    <section
-      style={{
-        padding: "var(--space-5)",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-2)",
-        borderRadius: "var(--radius-lg)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-2)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          gap: "var(--space-3)",
-        }}
-      >
-        <h3
-          style={{
-            fontFamily: "var(--font-sans)",
-            fontSize: 16,
-            fontWeight: 600,
-            color: "var(--fg-1)",
-            margin: 0,
-          }}
-        >
-          Discussion
-        </h3>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            color: "var(--fg-4)",
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
-          coming soon
-        </span>
-      </div>
-      <p
-        style={{
-          margin: 0,
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-          lineHeight: "20px",
-          color: "var(--fg-3)",
-        }}
-      >
-        Comments are coming with the next backend cycle. This card reserves
-        the spot so the layout stays stable.
-      </p>
     </section>
   );
 }
