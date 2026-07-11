@@ -66,8 +66,9 @@ untracked key files match the tracked `key_material` hashes (first measured
 across workspaces 2026-07-10). The 2026-07-10 upgrade to OpenVM v2.0.0 final
 moved both commitments because the final release replaces the beta proof
 system with SWIRL and changes the SHA-2 VM AIR. The committed `commit.json` +
-lock carry the current-source commitments
-(`app_exe_commit 0x00765420…`, `app_vm_commit 0x00618538…`). A fresh genesis
+lock carry the current-source commitments. The RustCrypto SHA-2 0.11 / SHA-3
+0.12 upgrade moved `app_exe_commit` to `0x004cc5ec…`; `app_vm_commit` remains
+`0x00618538…`. A fresh genesis
 and adapter redeploy must use these pins; older commitment compatibility is
 not supported.
 

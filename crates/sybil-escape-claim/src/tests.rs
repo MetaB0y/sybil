@@ -65,7 +65,7 @@ struct PortableProofs {
 
 fn key_record(signing: &SigningKey, auth_scheme: u8) -> KeyRecord {
     let mut pubkey_sec1 = [0u8; 33];
-    pubkey_sec1.copy_from_slice(signing.verifying_key().to_encoded_point(true).as_bytes());
+    pubkey_sec1.copy_from_slice(signing.verifying_key().to_sec1_point(true).as_bytes());
     KeyRecord {
         auth_scheme,
         pubkey_sec1,

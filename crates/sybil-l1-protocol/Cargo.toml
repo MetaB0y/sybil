@@ -6,7 +6,7 @@ description = "Ethereum L1 ABI, event parsing, and bridge hashing primitives for
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-sha3 = "0.10"
+sha3 = "0.12"
 thiserror = { workspace = true }
 
 [dev-dependencies]

@@ -1281,7 +1281,7 @@ mod tests {
 
     fn real_test_key(byte: u8) -> (SigningKey, KeyRecord) {
         let signing_key = SigningKey::from_bytes((&[byte; 32]).into()).expect("valid test key");
-        let encoded = signing_key.verifying_key().to_encoded_point(true);
+        let encoded = signing_key.verifying_key().to_sec1_point(true);
         let pubkey_sec1 = encoded
             .as_bytes()
             .try_into()

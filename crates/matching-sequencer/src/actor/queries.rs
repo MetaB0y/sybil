@@ -212,7 +212,7 @@ impl SequencerActorState {
         if let Some(ref sort_field) = query.sort_by {
             match sort_field {
                 crate::market_info::MarketSortField::Volume => {
-                    results.sort_by(|a, b| b.volume_nanos.cmp(&a.volume_nanos));
+                    results.sort_by_key(|entry| std::cmp::Reverse(entry.volume_nanos));
                 }
                 crate::market_info::MarketSortField::CreatedAt => {
                     results.sort_by(|a, b| {

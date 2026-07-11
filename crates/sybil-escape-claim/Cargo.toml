@@ -19,9 +19,9 @@ commonware-cryptography = "2026.5.0"
 commonware-parallel = "2026.5.0"
 commonware-runtime = "2026.5.0"
 commonware-storage = "2026.5.0"
-p256 = { version = "0.13", features = ["ecdsa"] }
+p256 = { version = "0.14", features = ["ecdsa"] }
 proptest = "1.6"
-sha2 = "0.10"
+sha2 = "0.11"
 
 [lints.clippy]
 disallowed_types = "allow"

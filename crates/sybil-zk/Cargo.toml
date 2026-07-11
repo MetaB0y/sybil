@@ -7,8 +7,8 @@ description = "ZK public input binding and guest-safe Sybil verification entrypo
 [dependencies]
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
-sha2 = { version = "0.10", default-features = false }
-sha3 = "0.10"
+sha2 = { version = "0.11", default-features = false }
+sha3 = "0.12"
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 sybil-verifier = { path = "../sybil-verifier", default-features = false }
 
@@ -24,7 +24,7 @@ commonware-parallel = "2026.5.0"
 commonware-runtime = "2026.5.0"
 commonware-storage = "2026.5.0"
 matching-engine = { path = "../matching-engine" }
-p256 = { version = "0.13", features = ["ecdsa"] }
+p256 = { version = "0.14", features = ["ecdsa"] }
 serde_json = "1"
 
 [lints.clippy]

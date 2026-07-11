@@ -468,7 +468,7 @@ mod tests {
     fn key(byte: u8, auth_scheme: u8) -> KeyRecord {
         let signing = SigningKey::from_slice(&[byte; 32]).unwrap();
         let mut pubkey_sec1 = [0u8; 33];
-        pubkey_sec1.copy_from_slice(signing.verifying_key().to_encoded_point(true).as_bytes());
+        pubkey_sec1.copy_from_slice(signing.verifying_key().to_sec1_point(true).as_bytes());
         KeyRecord {
             auth_scheme,
             pubkey_sec1,

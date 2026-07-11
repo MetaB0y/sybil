@@ -20,7 +20,7 @@ scripts/zk-guest-fingerprint.sh --write
 just zk-rebuild-check
 ```
 
-The current-source commitments are `app_exe_commit 0x00943d4b…` and
+The current-source commitments are `app_exe_commit 0x0045004c…` and
 `app_vm_commit 0x00618538…`; the full values live in the committed release
 record and fingerprint lock.
 

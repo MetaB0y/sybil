@@ -795,7 +795,7 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
             (mid, bw, ow, bw - ow)
         })
         .collect();
-    market_gaps.sort_by(|a, b| b.3.abs().cmp(&a.3.abs()));
+    market_gaps.sort_by_key(|entry| std::cmp::Reverse(entry.3.abs()));
 
     let best_price_yes = |mid: &MarketId| -> u64 {
         best.clearing_prices
@@ -928,7 +928,7 @@ fn print_solver_diff(problem: &Problem, best: &SolverDetail, other: &SolverDetai
             })
         })
         .collect();
-    best_only.sort_by(|a, b| b.2.abs().cmp(&a.2.abs()));
+    best_only.sort_by_key(|entry| std::cmp::Reverse(entry.2.abs()));
 
     if !best_only.is_empty() {
         println!(

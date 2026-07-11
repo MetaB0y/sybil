@@ -128,7 +128,7 @@ pub fn input_from_snapshot(
     let signing = signing_key(private_key_hex)?;
     let signer_bytes: [u8; 33] = signing
         .verifying_key()
-        .to_encoded_point(true)
+        .to_sec1_point(true)
         .as_bytes()
         .try_into()
         .expect("compressed P256 key is 33 bytes");

@@ -308,13 +308,11 @@ fn verify_withdrawal_transition(witness: &BlockWitness, violations: &mut Vec<Vio
                     });
                 }
             }
-            SystemEventWitness::L1BlockObserved { height } => {
-                if !observed_heights.insert(*height) {
-                    violations.push(Violation {
-                        kind: ViolationKind::SidecarWithdrawalMismatch,
-                        details: format!("duplicate L1 height observation {height}"),
-                    });
-                }
+            SystemEventWitness::L1BlockObserved { height } if !observed_heights.insert(*height) => {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarWithdrawalMismatch,
+                    details: format!("duplicate L1 height observation {height}"),
+                });
             }
             _ => {}
         }

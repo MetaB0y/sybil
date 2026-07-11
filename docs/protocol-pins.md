@@ -25,8 +25,8 @@ status: current
 
 | Guest | Executable commitment | VM commitment |
 |---|---|---|
-| State transition | `0x0076542058598596578aaf9144911bbbda347b9bacd8c16fa644c02f005c9e72` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
-| Escape claim | `0x00943d4be2afd180b22c6f828bbbeca19cfe24e31e4e93c091829d3b62f0e397` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
+| State transition | `0x004cc5ec5e73092133128f3f8cc56bb54c6385756c326908c067a4d7826aa4d0` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
+| Escape claim | `0x0045004c9ee510b956dcc5422e06d30f5e587cfff7b882c62de845ac0d7589cd` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` |
 
 Sources: `witness_schema.rs`, `golden/golden-vectors.json`, and the two committed
 OpenVM release `commit.json` files. Deployment truth is the adapter actually
