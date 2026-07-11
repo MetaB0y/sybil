@@ -190,6 +190,13 @@ The Python arena and web frontend use the same public interfaces. The Rust clien
 
 Before real value, operators must deploy the pinned real verifier, eliminate mock/unsafe acceptance, retain DA payloads, exercise backup/import/withdrawal/escape drills, configure L1 confirmation depth and monitoring, and protect admin/feed/verifier keys under the chosen governance policy. See [[Threat Model]] and [[Deployment Profiles]].
 
+The current permissionless API is also not economically resource-bounded:
+unlimited demo accounts, unbounded API-key records, zero-reservation orders,
+and unbudgeted history/read paths can grow or wedge state without deposited
+capital. These critical availability gaps must be closed or service-gated
+before real-value deployment; the [dated audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md)
+owns the detailed evidence and remediation order.
+
 ## 11. Consolidated invariants
 
 1. Protocol state and verification contain no floating point; solver search is outside the trusted boundary.

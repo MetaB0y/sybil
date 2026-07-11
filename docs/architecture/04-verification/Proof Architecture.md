@@ -1,307 +1,144 @@
 ---
-tags: [zk, infrastructure]
+tags: [zk, infrastructure, authenticated-data]
 layer: verification
-status: planned
+status: current
 last_verified: 2026-07-11
 ---
 
-# Proof Architecture
+# Proof architecture
 
-Sybil is a [[ZK Integration Path|validium]]: off-chain execution, on-chain state commitments, validity proofs. This note defines the **authenticated data layer** — the cryptographic structures that make arbitrary account-level proofs possible.
+> [!summary] In one paragraph
+> A trusted Sybil root authenticates complete typed state, the events of one
+> block, and the parent-linked block history. The transition guest proves that
+> those commitments came from a valid exchange transition; qMDB membership or
+> exclusion proofs open individual state leaves. These primitives support
+> auditing, withdrawals, escape, and future selective claims, but they do not
+> make every historical or privacy-preserving query available automatically.
 
-## Design Philosophy
-
-**Authenticate data, not proof types.** We don't enumerate specific proofs ("prove PnL > X", "prove I didn't trade market M"). Instead, we provide authenticated data primitives — Merkle commitments over state and events — and any proof is composed from these by an external prover.
-
-The sequencer's job: produce blocks, authenticate every piece of data in them, commit roots to a trust anchor. A prover's job: extract the relevant authenticated data, run computation, produce a claim with proof. This could be a ZK circuit, an AI agent, or a human with a script.
-
-Analogy: we build the database with authenticated indexes. We don't pre-define the queries.
+## The trust chain
 
 ```mermaid
 flowchart TB
-    subgraph header["Block Header — root of trust"]
-        direction LR
-        SR["state_root"]
-        ER["events_root"]
-        PH["parent_hash"]
-    end
-    SR --> ST["State tree<br/>balances · positions · orders · markets<br/>inclusion / exclusion proofs"]
-    ER --> EV["Events log<br/>fills · deposits · resolutions<br/>range proofs"]
-    PH --> CH["Block chain<br/>ordering · no insert/remove"]
-    ST & EV & CH --> PROVER["External prover<br/>ZK circuit · agent · script"]
-    PROVER --> CLAIM["Arbitrary claim<br/>'PnL &gt; $500 across blocks 1000–2000'"]
+    L1["Accepted L1 RootRecord"] --> HEADER["Block header / public inputs"]
+    HEADER --> STATE["state_root<br/>complete typed qMDB state"]
+    HEADER --> EVENTS["events_root<br/>one block's keyless qMDB log"]
+    HEADER --> PARENT["parent_hash<br/>height-ordered chain"]
+    HEADER --> WITNESS["witness_root + DA commitment"]
+    WITNESS --> PAYLOAD["Canonical full-state witness payload"]
+    STATE --> OPEN["Membership / exclusion proof"]
+    STATE & EVENTS & PARENT & WITNESS --> GUEST["Native + OpenVM transition verification"]
 ```
 
-## Trust Anchors
-
-The **block header** is the root of trust. If a verifier trusts a block header (via the on-chain state root chain or a validity proof), they transitively trust anything provable from its commitments.
-
-Current header:
-```
-height | parent_hash | state_root | events_root | order_count | fill_count | timestamp_ms
-```
-
-The header gives two authenticated roots:
-1. **State tree** (`state_root`): "after this block, this complete validium state leaf has value V" — inclusion or exclusion proof against the typed state root.
-2. **Events commitment** (`events_root`): "fill F happened in block N" or "these are ALL fills in block N" — range proof against the block's authenticated event log.
-
-Combined with `parent_hash` chaining, a prover can make claims spanning any range of blocks.
-
-## Three Authenticated Structures
-
-### 1. State Tree
-
-A typed authenticated key-value tree over complete validium state, updated
-incrementally each block. The current [[State Root Schema]] implementation is
-a native qMDB root over accounts, bridge leaves, markets, market groups,
-active resting orders, and aggregate reservations.
-
-**Keys**: typed namespaces such as `acct/{account_id}`,
-`acct_resv/{account_id}`, `order/{order_id}`, `market/{market_id}`,
-`market_group/{group_id}`, `withdrawal/{withdrawal_id}`, plus `sys/*`.
-
-**Values**: canonical Sybil bytes for each leaf type.
-
-**What it proves**:
-- Account X has balance B at block N (inclusion proof)
-- Account X does not exist at block N (non-inclusion proof, requires sparse or sorted tree)
-- Resting order Y is active or absent at block N
-- Market M has lifecycle/resolution state S
-- Withdrawal W exists and can be claimed against an accepted root
-- The complete validium state at block N (full tree)
+A root is useful only after its transition proof and exact public inputs are
+accepted by the intended pinned verifier. A hash returned by the operator is
+not independently trustworthy.
 
-**Current implementation**: ordered qMDB authenticated key-value store using
-SHA-256 for the native state root. The committed leaves cover accounts,
-bridge state, markets, market groups, resting orders, and reservations.
-Account leaves include `events_digest`, a running BLAKE3 accumulator over
-fills and admin events that touched the account.
+## Authenticated structures
+
+### Typed state
 
-**Why this enables flexible proofs**:
-- PnL: state proof at block A + state proof at block B → `portfolio_value_B - total_deposited_B` (note: `total_deposited` is already on the Account struct)
-- Sharpe ratio: state proofs at blocks A, A+k, A+2k, ..., B → compute returns series → mean/std
-- Current positions: single state proof at latest block
-- Solvency: state proof showing `balance ≥ 0` and no negative positions
-- Inactivity: if `events_digest_A == events_digest_B`, the account had no recorded fills/deposits/resolutions in that range (assuming collision resistance)
+`state_root` is the native ordered qMDB root over the complete keyspace needed
+to continue the exchange:
 
-### 2. Events Commitment
-
-An authenticated append-only log over everything that happened in this block,
-built fresh each block. The implementation target is commonware's keyless
-qMDB with SHA-256, not a custom binary Merkle tree. Each canonical event byte
-string is appended in section order - system events, accepted orders, rejected
-orders, then fills - and qMDB's native MMR root becomes `events_root`.
-Under the pinned Commonware `2026.5.0` format, commit operations encode the
-inactivity floor (always zero for Sybil's per-block event log) and MMR peaks
-are bagged backward. The OpenVM-safe implementation mirrors both details and
-is golden-pinned to the native root.
-
-**Leaves** (canonical encoding of each event):
-
-| Event type | Fields |
-|------------|--------|
-| `Fill` | order_id, fill_qty, fill_price, account_id, market_ids |
-| `OrderAccepted` | order (full), account_id |
-| `OrderRejected` | order, account_id, reason |
-| `CreateAccount` | account_id, initial_balance |
-| `Deposit` | account_id, amount |
-| `Withdrawal` | account_id, amount |
-| `MarketResolved` | market_id, payout_nanos, affected_accounts |
-| `MintAdjustment` | market_id, outcome, position_delta, balance_delta |
-
-Current groundwork already landed:
-- `Fill` carries `account_id`
-- Blocks carry `system_events`
-- Each account carries `events_digest`, so range-inactivity proofs can often use state snapshots instead of scanning every block event
-
-**What it proves**:
-- Fill F happened in block N (qMDB range proof at the event's location)
-- These are ALL events in block N (range proof for the complete append interval plus the committed event count)
-- Account X had no fills in block N (enumerate all fills, show none match — or maintain per-account sub-index)
-
-**Why this enables flexible proofs**:
-- "I didn't trade market M between blocks A and B": for each block in range, show the authenticated event range has no fills for my account on market M
-- "I didn't receive deposits": for each block in range, show the authenticated event range has no Deposit events for my account
-- Trade history: collect all Fill events for my account across blocks
-- Volume: sum fill quantities from events proofs
-
-### 3. Block Chain
-
-Already exists: `parent_hash` links blocks into a hash chain. The on-chain contract stores the latest state root. Walking backwards from any trusted header reaches genesis.
-
-**What it proves**:
-- Block N exists and has specific commitments (header chain)
-- Block ordering and timestamps
-- No blocks were inserted or removed
-
-**No changes needed** — the current chain structure works. The chain becomes more useful once state roots and event commitments provide per-block proofs to anchor to.
-
-## Proof Composition
-
-A proof of an arbitrary claim follows the pattern:
-
-```
-Claim: "Account 42 had PnL > $500 between blocks 1000 and 2000"
-
-Data:
-  1. Block header at height 1000 (trusted via chain)
-  2. State Merkle proof: account 42 at block 1000 → {balance: X, deposited: D, positions: [...]}
-  3. Block header at height 2000 (trusted via chain)
-  4. State Merkle proof: account 42 at block 2000 → {balance: Y, deposited: D', positions: [...]}
-  5. Clearing prices at block 2000 (from the event commitment or header extension)
-
-Computation:
-  portfolio_value = balance_2000 + Σ(position * clearing_price)
-  pnl = portfolio_value - total_deposited_2000
-  assert pnl > 500 * NANOS_PER_DOLLAR
-```
-
-The verifier checks: (a) Merkle proofs verify against trusted state roots, (b) computation is correct.
-
-For a ZK proof, the computation runs inside a circuit and the Merkle paths are private inputs. For a non-ZK attestation, the prover just provides the data and computation in the clear.
-
-## Proof Sketches
-
-### "My Sharpe ratio is > 2.0 over the last 30 days"
-
-Data: state proofs at daily intervals (30 snapshots). Computation: daily returns → annualized sharpe.
-
-### "I never traded market M"
-
-Data: for each block in range, event range proof showing no fills for my account on market M. If blocks are frequent (1/sec), this could be compressed by providing state proofs showing my position on market M is 0 at start and 0 at end, plus event proofs at a coarser granularity.
-
-### "I had no deposits after block 1000"
-
-Data: state proof at block 1000 showing `total_deposited = D`, state proof at block N showing `total_deposited = D`. Since `total_deposited` is monotonically non-decreasing and only increases on deposit, equality proves no deposits occurred.
-
-### "My account was never funded by account X"
-
-This requires provenance tracking not currently in the data model. Deposits are admin-only operations with no on-chain linkage to source. Once deposits come from L1 bridge (Phase 4), the deposit events in the event commitment will include the L1 sender address, making this provable.
-
-## Implementation Plan
-
-### Phase 0: Events on Fill (done)
-
-`Fill` now carries `account_id`. This was the prerequisite for useful event authentication.
-
-### Phase 1: Events Commitment (done)
-
-Build a keyless qMDB over block events and commit `events_root` in the block
-header. This is a pure addition - it doesn't change existing state management.
-
-- Canonical encoding for each event type
-- commonware `qmdb::keyless::variable` over canonical event bytes
-- `events_root` added to `BlockHeader`
-- Verifier checks `events_root` matches (new Layer 3 check)
-- SHA-256 qMDB root/proof format, matching the state-root verifier path
-
-### Current: Typed qMDB State Root
-
-`BlockHeader.state_root` is the native qMDB root over the typed state leaves
-specified in [[State Root Schema]]. It covers accounts, reservations, resting
-orders, market lifecycle state, market groups, bridge counters, deposit root,
-and active withdrawal leaves.
-
-The verifier currently recomputes that root from the full witness by inserting
-the typed leaves into a fresh qMDB and comparing the native qMDB root. Runtime
-persistence stores the same keyspace in a dedicated typed-state qMDB, so proof
-APIs can verify directly against the header root.
-
-### Current: State Proof API
-
-The first proof endpoint serves authenticated typed-state data for the latest
-committed block:
-
-- `GET /v1/proofs/state/{leaf_key_hex}` -> typed state inclusion/exclusion proof
-
-The key is hex-encoded because typed state keys are canonical byte strings.
-The response includes the committed block height, header `state_root`, proof
-kind, canonical value for inclusion proofs, and the Commonware ordered-current
-qMDB operation/range proof parts.
-
-Historical state proofs and event proofs remain future work:
-
-- `GET /v1/proofs/state/{leaf_key_hex}?height={N}` -> historical typed-state proof
-- `GET /v1/proofs/events?height={N}` -> qMDB event range proof for block N
-- `GET /v1/proofs/events/{account_id}?from={A}&to={B}` -> account's events with Merkle proofs
-
-Historical state proofs are intentionally not implemented yet. They become
-important when L1 contracts accept old roots during a withdrawal window, when a
-ZK prover needs authenticated reads against a specific pre-state root, or when
-auditors need reproducible block-by-block account/order/market state. They are
-not required for the latest-root proof API, which is enough for current state
-checks and early prover plumbing.
-
-The sequencer needs to retain enough history to serve historical proofs:
-state tree history at each height, or enough data to reconstruct it. The
-current fenced A/B qMDB persistence boundary does not provide that by itself.
-Commonware qMDB provides historical operation proofs within its retained
-journal window, but Sybil still needs a height-to-root/operation-boundary index
-and a clean API for current-state membership or exclusion as of an old block.
-This interacts with the persistence tiers because authenticated state snapshots
-need to be stored or reconstructable.
-
-### Later: Integration with ZK Pipeline
-
-The [[Block Witness]] evolves: instead of full `pre_state` / `post_state` snapshots, it includes qmdb paths for the typed leaves touched by the block. The ZK circuit verifies the paths against the state root, applies settlement and order-book/market-state changes, and verifies the new state root.
-
-This is when the authenticated data layer and the validity proof pipeline converge.
-
-## Candidate: qmdb
-
-[QMDB](https://commonware.xyz/blogs/qmdb) (LayerZero research + Commonware productionization) is an append-only authenticated database: a log of key updates with an MMR (Merkle Mountain Range) overlay.
-
-Key properties:
-- Append-only — merklization only touches the right side of the tree (minimal memory, no disk reads for new writes)
-- Supports current state proofs and historical state proofs
-- Single Rust implementation (MIT/Apache 2.0), rapidly maturing
-- Available as `commonware-storage::qmdb`
-
-It's a natural fit for the state tree: typed state leaves are keys, canonical
-state values are values, and blocks produce updates. The MMR structure means
-we get historical state proofs within the retained journal window — "account
-X had balance B at block 1000" or "order Y was absent at block 1000" without
-storing a separate tree snapshot per height.
-
-Stability: ALPHA. It is already in the sequencer as the account snapshot
-store, so the typed state store should reuse it unless the ZK/bridge
-implementation proves qMDB proof verification is too expensive.
-
-## What Changes in Sybil
-
-| Component | Current | With proof API |
-|-----------|---------|----------------|
-| `BlockHeader` | state_root, events_root, parent_hash | same |
-| `Block` | orders, fills, prices, rejections, system_events | same |
-| `compute_state_root()` | native typed qMDB root | same |
-| `Fill` struct | order_id, qty, price, account_id | same |
-| `Account` | balance, positions, total_deposited, events_digest | same |
-| `AccountStore` | HashMap | mirrored into authenticated KV |
-| `store.rs` | redb tables + account qMDB snapshots | typed-state qMDB plus retained event proof material / block event bounds as needed |
-| Verifier Layer 3 | checks state_root, events_root, parent_hash | verifies post-state qMDB paths and recomputes keyless-qMDB events_root in the OpenVM guest |
-| `BlockWitness` | full pre/post state snapshots + system_events | qMDB paths for committed post-state leaves, then touched historical leaves as needed |
-| API | latest state proof endpoint | + historical state/event proof endpoints |
-
-## Resolved Decisions
-
-1. **Events commitment structure**: keyless qMDB append log over a flat list of canonical event bytes in section order: system events, accepted orders, rejected orders, fills. Per-account indexing can be added later if scans become too expensive.
-
-2. **Events hash function**: SHA-256 through commonware qMDB. This reuses the proof machinery already used by `state_root`; the separate per-account `events_digest` remains BLAKE3 because it is an account-local activity accumulator, not the block event commitment.
-
-3. **Typed state-root hash function**: SHA-256. This matches the current qmdb instantiation and is easier to route through ZK/EVM verification paths than BLAKE3.
-
-4. **Range inactivity compression**: implemented today as `events_digest` on `Account`. Equal digests at two trusted heights imply no account-level activity in between.
-
-## Remaining Open Question
-
-1. **Historical state retention**: how much qmdb journal history is retained locally and on DA. This is a DA/recovery policy question, not a state-root schema question.
-2. **Operator replacement**: state root commits to complete state, but state data must be available independently for a replacement operator. See SYB-116 and SYB-76.
-
-## Related Notes
-
-- [[ZK Integration Path]] — the validity proof pipeline this feeds into
-- [[L1 Settlement and Vault]] — how accepted roots and withdrawal proofs are used on-chain
-- [[Block Witness]] — evolves to use Merkle paths instead of full snapshots
-- [[State Root and Parent Hash]] — state-root concept and qMDB commitment
-- [[Four-Layer Verification]] — checks `events_root` in Layer 3
-- [[Persistence]] — storage requirements for authenticated structures
-- [[Settlement]] — fills need account_id for the event commitment
+- accounts, balances, positions, deposited totals, and key/event digests;
+- aggregate reservations and active resting orders;
+- markets, last clearing prices, lifecycle, and market groups;
+- deposit cursor/frontier/quarantine and observed L1 height;
+- active withdrawals/claims and allocation counters.
+
+Keys and values use verifier-owned canonical bytes from [[State Root Schema]].
+The transition verifier authenticates both pre/post openings and requires the
+post-state sidecar to equal the exact replayed keyspace—not merely the keys the
+operator chose to show.
+
+The latest-state API serves inclusion or exclusion proofs at
+`GET /v1/proofs/state/{leaf_key_hex}`. It requires persistent qMDB storage and
+returns the committed height/root plus Commonware 2026.5 proof parts. Clients
+must know the canonical key/value schema and verify the proof themselves.
+
+### Per-block events
+
+`events_root` is a fresh keyless qMDB/MMR commitment over canonical event bytes
+in fixed section order: system events, accepted orders, rejected orders, then
+fills. Native and guest implementations share the Commonware 2026.5 operation
+format and backward peak-bagging rule.
+
+It authenticates occurrence and complete per-block ranges. It is not a global
+query index. Account-local `events_digest` is a separate running BLAKE3
+accumulator useful for detecting whether account activity changed between two
+trusted states.
+
+### Block and witness chain
+
+`parent_hash` plus consecutive heights prevents insertion, removal, or
+reordering relative to a trusted head. Transition public inputs additionally
+bind `witness_root`, `da_commitment`, and the L1 deposit checkpoint.
+
+The canonical witness is intentionally a full snapshot. It lets the verifier
+check exact keyspace transitions and lets a fresh operator reconstruct the
+exchange from one retained payload. It is not scheduled to become a
+touched-leaves-only witness unless the recovery/trust model is redesigned.
+
+## What the transition proof establishes
+
+Given the private `StateTransitionGuestInput`, the guest re-derives:
+
+1. header, parent/height, count, and block hash bindings;
+2. canonical events, witness, state, and DA commitments;
+3. order/fill limits, uniform prices, groups, MM budgets, and welfare;
+4. integer settlement, minting, balances, positions, and reservations;
+5. market, bridge, withdrawal, quarantine, and key-operation transitions;
+6. deposit prefix/checkpoint agreement and the exact public-input hash.
+
+Ordinary order/cancel signature envelopes and prior cross-block nonce are not
+guest inputs; see [[P256 Authentication]] and [[Threat Model]].
+
+## Composing other claims
+
+Authenticated leaves can be inputs to another proof—for example, proving an
+account balance at a root or computing the conservative escape amount from
+account/reservation/market openings. The claim-specific circuit must still
+define and verify its computation, root trust, range completeness, and privacy
+properties.
+
+Current concrete compositions are:
+
+- state-transition verification and L1 root acceptance;
+- latest typed-state membership/exclusion;
+- full-payload authentication and witness import;
+- Form-L escape authorization/valuation through `sybil-escape-claim` and
+  `sybil-custody`.
+
+Not currently provided as general services:
+
+- arbitrary historical state proofs by height;
+- public per-event/account range-proof APIs;
+- generic PnL, Sharpe, provenance, or non-participation proof circuits.
+
+## Retention and availability
+
+The fenced A/B live qMDB slots are not a historical proof archive. Historical
+claims require retained journals/snapshots or reconstruction from canonical DA.
+The API stores blocks and DA payloads according to configured retention, but a
+production provider/decryption/disclosure policy is still required. See
+[[Historical Data Serving]], [[Data Availability]], and [[Operator Replacement]].
+
+## Implementation map
+
+| Concern | Owner |
+|---|---|
+| Typed state/event canonical bytes | `crates/sybil-verifier` |
+| qMDB native roots and persistent slots | `matching-sequencer` store/qMDB modules |
+| Guest qMDB, transition, DA, public inputs | `crates/sybil-zk` |
+| Proof jobs/artifacts/submission | `crates/sybil-prover` |
+| Escape-specific claim | `crates/sybil-escape-claim`, `crates/sybil-custody` |
+| L1 accepted roots and adapters | `contracts/src/` |
+| Current hashes/commitments | [Generated protocol pins](../../protocol-pins.md) |
+
+## See also
+
+- [[Block Witness]]
+- [[State Root Schema]]
+- [[Four-Layer Verification]]
+- [[ZK Integration Path]]
+- [[L1 Settlement and Vault]]

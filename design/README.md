@@ -18,6 +18,8 @@ last_verified: 2026-07-11
 - **exploratory / proposed** — unratified possibility.
 - **proposal-needs-revalidation** — potentially useful, but written against an
   older implementation and must be resurveyed before work begins.
+- **current-audit** — dated findings that still need explicit remediation or
+  closure; verify each finding against newer code before acting.
 - **current** — only for an index that is actively maintained.
 
 An accepted decision belongs in `docs/adr/`; implemented behavior belongs in
@@ -60,6 +62,12 @@ inventories, counts, and execution stages are not current:
 - [`settlement-aggregation-swirl.md`](settlement-aggregation-swirl.md)
 
 Resurvey the named code and issue state before turning any of these into work.
+
+## Current audits
+
+- [`dos-audit-2026-07-11.md`](dos-audit-2026-07-11.md) — permissionless
+  resource/state-growth audit. Findings remain active until code or a dated
+  follow-up closes them.
 
 ## Historical design lineage
 

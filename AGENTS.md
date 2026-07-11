@@ -52,7 +52,7 @@ sybil/
 └── Cargo.toml                     # Workspace root
 ```
 
-Each crate has its own AGENTS.md with detailed architecture notes.
+Each crate has its own AGENTS.md with focused ownership, boundaries, and checks.
 
 ## Build & Development Commands
 
@@ -138,7 +138,7 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 ## Architecture Knowledge Base
 
-An Obsidian vault at `docs/architecture/` is the canonical architectural spec. Its 51 interlinked notes cover the major concepts. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
+An Obsidian vault at `docs/architecture/` is the canonical architectural spec. Its interlinked notes cover the major concepts. Notes use `[[wiki-links]]` and YAML frontmatter (`tags`, `layer`, `status`, `last_verified`).
 
 **Entry point**: `docs/architecture/Sybil Architecture.md`
 
@@ -164,7 +164,9 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. I
 ### Vault Commands
 
 ```bash
-just docs-check               # Validate links, frontmatter, staleness
+just docs-check               # Validate generated pins, inventories, vault, and site build
+just docs-mermaid             # Render every maintained Mermaid diagram
+just docs-links               # Check public and repository links
 just docs-list                 # List all notes with layer + status
 just docs-stale                # List notes with last_verified > 90 days
 just docs-search "welfare"     # Grep vault content

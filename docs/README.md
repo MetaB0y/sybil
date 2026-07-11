@@ -138,6 +138,8 @@ Sybil separates current reference material from design work and history:
 | **[`architecture/`](architecture/Sybil%20Architecture.md)** (the MOC) | *How does it work today?* | Understanding a subsystem |
 | **[`adr/`](adr/README.md)** | *Why is it this way?* | Before changing a load-bearing decision |
 | **[`SPEC.md`](SPEC.md)** | *How does the whole system connect?* | Orientation and cross-cutting invariants |
+| **[`GUIDES.md`](GUIDES.md)** | *What is the shortest safe path for this task?* | Trading, bots, operations, custody, or architectural changes |
+| **[`protocol-pins.md`](protocol-pins.md)** | *What exact formats/hashes are current?* | Generated release and migration checks |
 | **[`runbooks/`](deployment.md#choose-the-right-procedure)** | *How do I operate it?* | Deploying / on-call |
 | **[`design/`](https://github.com/MetaB0y/sybil/blob/main/design/README.md)** | *What are we considering or researching?* | Planning; verify status against code |
 
@@ -150,6 +152,8 @@ Sybil separates current reference material from design work and history:
   [deployment index](deployment.md) → the relevant runbook.
 - *Building a trading bot* → [[REST API]] → [[P256 Authentication]] →
   [[Bot Framework]] → [[Python SDK]].
+- *Doing a concrete task* → [task guide](GUIDES.md) → the linked source or
+  runbook; avoid reading the vault front-to-back.
 
 > **Status legend.** Notes carry a `status:` in their frontmatter — `current`
 > (built and verified), `planned`, or `deprecated`. When a note describes something
@@ -162,5 +166,6 @@ Sybil separates current reference material from design work and history:
 
 *This guide is intentionally high-level and drift-resistant — it avoids exact
 counts (checks, solvers, cadence) that change over time. For precise current
-numbers, follow the links. Run `just docs-check` for the vault and strict site
-build; run `just docs-links` for maintained external links.*
+numbers, follow the links. Run `just docs-check` for source/site sync,
+`just docs-mermaid` for diagrams, and `just docs-links` for maintained external
+links.*

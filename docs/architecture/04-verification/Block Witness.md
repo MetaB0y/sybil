@@ -344,18 +344,12 @@ regenerate goldens, redeploy, and start a fresh genesis. Old witness bytes are
 not accepted by a new guest, and a new guest is not accepted by an old adapter
 pin.
 
-## Golden Pins
+## Golden pins
 
-| Pin | Current value | Test or artifact |
-|---|---:|---|
-| Witness format byte | `9` | `witness_schema::WITNESS_FORMAT_VERSION` |
-| Empty canonical witness length | `1631` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
-| Byte-identity canonical witness length | `4003` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
-| Byte-identity witness SHA-256 length-prefixed digest | `b37ef5be6703feddaf24ac8075851e62701c236464c0cf9a72bf5d41fc299a13` | `golden/golden-vectors.json` |
-| Empty public-input hash | `3c2b17b07142b39b143af5ced9497325248be056cc96ff2daf8845b52cc76c46` | `public_input_hash_golden` |
-| OL-4 Solidity/Rust public-input hash vector | `42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` | Rust test plus `contracts/test/SybilGoldenVectors.t.sol` |
-| Current main `app_exe_commit` | `0x0076542058598596578aaf9144911bbbda347b9bacd8c16fa644c02f005c9e72` | committed main-guest `commit.json` and lock |
-| Current main `app_vm_commit` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` | committed main-guest `commit.json` and lock |
+Current witness/vector hashes and both OpenVM guest commitments live on the
+generated [protocol pins page](../../protocol-pins.md). `just docs-check`
+compares that page with source constants, golden JSON, and committed guest
+artifacts, so this note does not duplicate fast-changing values.
 
 The L1 deposit leaf/root vectors live in both
 `crates/sybil-l1-protocol/src/lib.rs` and

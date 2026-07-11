@@ -433,8 +433,25 @@ arena-demo-quick:
 
 # Validate vault metadata/paths and build the full documentation site strictly.
 docs-check:
+    ./scripts/update-protocol-pins.py --check
+    ./scripts/check-doc-sync.py
     ./scripts/check-vault.sh
-    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build --strict
+    NO_MKDOCS_2_WARNING=1 PYTHONWARNINGS=ignore::DeprecationWarning uvx --with mkdocs==1.6.1 --with mkdocs-material==9.7.6 --with mkdocs-roamlinks-plugin==0.3.2 mkdocs build --strict
+
+# Render every maintained Mermaid diagram with the pinned official CLI image.
+docs-mermaid:
+    ./scripts/check-mermaid.sh
+
+# Regenerate/check the compact page sourced from protocol constants and artifacts.
+docs-pins-write:
+    ./scripts/update-protocol-pins.py --write
+
+docs-pins-check:
+    ./scripts/update-protocol-pins.py --check
+
+# Check workspace/design inventories against current repository structure.
+docs-sync:
+    ./scripts/check-doc-sync.py
 
 # Check public links in maintained Markdown. Confirmed 404/410 responses fail;
 # authentication, rate limits, and transient network errors are warnings.
@@ -649,11 +666,11 @@ status:
 
 # Serve the docs site locally with live reload (http://127.0.0.1:8000)
 docs-serve:
-    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs serve
+    NO_MKDOCS_2_WARNING=1 PYTHONWARNINGS=ignore::DeprecationWarning uvx --with mkdocs==1.6.1 --with mkdocs-material==9.7.6 --with mkdocs-roamlinks-plugin==0.3.2 mkdocs serve
 
 # Build the static docs site into ./site
 docs-build:
-    uvx --with mkdocs-material --with mkdocs-roamlinks-plugin mkdocs build --strict
+    NO_MKDOCS_2_WARNING=1 PYTHONWARNINGS=ignore::DeprecationWarning uvx --with mkdocs==1.6.1 --with mkdocs-material==9.7.6 --with mkdocs-roamlinks-plugin==0.3.2 mkdocs build --strict
 
 # ── Contracts ───────────────────────────────────────────────────────────────
 

@@ -43,8 +43,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: astral-sh/setup-uv@v5
+
       - name: Validate architecture vault
-        run: ./scripts/check-vault.sh
+        run: |
+          ./scripts/update-protocol-pins.py --check
+          ./scripts/check-doc-sync.py
+          ./scripts/check-vault.sh
+
+      - name: Build documentation strictly
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+          PYTHONWARNINGS: "ignore::DeprecationWarning"
+        run: uvx --with mkdocs==1.6.1 --with mkdocs-material==9.7.6 --with mkdocs-roamlinks-plugin==0.3.2 mkdocs build --strict
+
+      - name: Render Mermaid diagrams
+        run: ./scripts/check-mermaid.sh
 
       - name: Check maintained external links
         run: ./scripts/check-external-links.py

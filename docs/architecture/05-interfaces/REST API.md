@@ -27,6 +27,13 @@ Public account onboarding uses `POST /v1/accounts` with both
 deprecated bare-account form for service/dev tooling only; the old unsigned
 `POST /accounts/{id}/keys` bootstrap is likewise service-only.
 
+> [!warning] Public onboarding is not production-safe yet
+> The route currently permits unlimited free accounts and caller-selected demo
+> balances. API-key record growth, zero-reservation orders across those
+> accounts, and several unbounded history/read paths also lack stock or byte
+> budgets. Order token buckets limit flow, not accumulated state. See the
+> [2026-07-11 resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md).
+
 Bridge deposit ingestion is scaffolding for [[L1 Settlement and Vault]] rather than a completed trust boundary. `POST /v1/bridge/deposits` is service-only and credits the sequencer through the existing `pending_l1_deposits` WAL, but today it trusts the operator/indexer-supplied L1 event fields. `POST /v1/bridge/withdrawals/signed` verifies a P256 signature over the canonical withdrawal payload against the account key registry before using the existing `pending_bridge_withdrawals` WAL; `POST /v1/bridge/withdrawals` remains a service-only operator path. SYB-178/SYB-188 still need proof-backed L1 deposit inclusion/finality and vault withdrawal authorization before these paths are production trust-complete.
 
 The service-gated indexer advances `POST /v1/bridge/l1-height` after each fully
@@ -94,6 +101,9 @@ recomputes `payload_root` over the bytes and fails closed with `500` on a
 mismatch. Clients must still verify the SYB-80 binding chain themselves:
 `payload_root -> witness_root -> da_commitment -> L1 RootRecord`. Retention is
 the existing block-history retention behavior, not a new DA policy.
+The public manifest route currently loads and re-hashes the full retained
+payload per request and has no dedicated read limiter; treat that as an open
+availability issue, not a harmless metadata read.
 
 ## Key Properties
 - Axum-based, async, with OpenAPI auto-generation

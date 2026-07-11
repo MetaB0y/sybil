@@ -8,7 +8,7 @@ last_verified: 2026-07-11
 # Threat model
 
 > [!summary] In one paragraph
-> Sybil minimizes trust in transition correctness, but authorization is split. Witness v9 and the OpenVM guest check state transitions plus key-operation P256/WebAuthn authorization. Ordinary order/cancel signatures and cross-block replay nonces are enforced at admission and are not yet re-proved by the guest. Production security also depends on deploying the real verifier, keeping witness data available, governing privileged keys, maintaining liveness, and using an honest immediate-resolution feed.
+> Sybil minimizes trust in transition correctness, but authorization is split. Witness v9 and the OpenVM guest check state transitions plus key-operation P256/WebAuthn authorization. Ordinary order/cancel signatures and cross-block replay nonces are enforced at admission and are not yet re-proved by the guest. The current permissionless API also has critical resource-bound gaps, so production security requires closing those—not merely deploying the real verifier and keeping DA available.
 
 This note distinguishes **implemented cryptographic controls** from **controls that only exist when the production deployment actually enables them**.
 
@@ -66,7 +66,24 @@ flowchart TB
 | Register/revoke a key for another account | 🟢 | State-bound signed key operations, service-tier checks, committed `keys_digest`, and guest replay. |
 | Overspend through concurrent/resting orders | 🟢 | Direct-admission reservations, atomic deferred admission, Layer 4 accumulation, and deterministic settlement. |
 | Double-withdraw or reuse an escape claim | 🟢 | Typed withdrawal/claim leaves, root binding, freshness rules, and nullifiers. |
-| Exhaust parsing, signatures, actor queues, or solver work | 🟡 | HTTP and actor token buckets, account/global caps, supported-shape gates, mailbox metrics, and deployment limits reduce the surface; capacity remains operational. |
+| Exhaust parsing, signatures, actor queues, solver work, or persistent state | 🔴 | Order token buckets and per-account caps limit some flow, but unlimited free accounts, unbounded API-key records, zero-reservation orders, key-op churn, unpruned histories, and expensive public DA-manifest reads leave stock/liveness attacks open. |
+
+## Resource exhaustion and free state
+
+The current public surface does **not** satisfy the assumption that persistent
+state is bounded by deposited capital. The highest-priority gaps are:
+
+- API-key records/labels can grow an account beyond its qMDB value limit;
+- account creation is unbounded and can mint a caller-selected demo balance;
+- zero-price or zero-quantity resting orders can reserve no capital;
+- key operations can exceed the verifier's per-block limit before admission
+  stops them;
+- durable histories and public full-payload manifest hashing lack appropriate
+  retention/read budgets.
+
+These are availability and persistence-safety defects even when every state
+transition is cryptographically valid. The detailed evidence and remediation
+order are in the [2026-07-11 resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md).
 
 ## Oracle and market resolution
 
@@ -82,12 +99,13 @@ Core resolution is `ResolutionPolicy::Immediate`: one registered feed signs a pa
 
 ## Production trust checklist
 
-1. Deploy and pin the real Sybil OpenVM verifier; ensure no unsafe adapter or mock prover can accept production roots.
-2. Run persistent storage, backups, restore drills, L1 confirmation depth, synthetic monitoring, and alerting from [[Deployment Profiles]].
-3. Publish and retain the canonical witness payload before treating a root as recoverable.
-4. Protect admin, feed, service, and verifier-change keys with the chosen multisig/timelock policy.
-5. Test normal withdrawal, escape claim, and witness-import recovery against the deployed artifacts.
-6. State the oracle trust model plainly: signed does not mean objectively true.
+1. Close or explicitly gate the critical public resource-growth paths in the current audit.
+2. Deploy and pin the real Sybil OpenVM verifier; ensure no unsafe adapter or mock prover can accept production roots.
+3. Run persistent storage, backups, restore drills, L1 confirmation depth, synthetic monitoring, and alerting from [[Deployment Profiles]].
+4. Publish and retain the canonical witness payload before treating a root as recoverable.
+5. Protect admin, feed, service, and verifier-change keys with the chosen multisig/timelock policy.
+6. Test normal withdrawal, escape claim, and witness-import recovery against the deployed artifacts.
+7. State the oracle trust model plainly: signed does not mean objectively true.
 
 ## See also
 
