@@ -112,6 +112,27 @@ finding 5 in `design/dos-audit-2026-07-11.md`.
 
 ## Deploy Commands
 
+### Release gate matrix
+
+The release checks are cost-tiered so browser/container journeys do not inflate
+the normal pull-request path:
+
+| Gate | Workflow / command | Trigger and budget | Promotion effect |
+| --- | --- | --- | --- |
+| L0 property + L1 matching/fills + L2 config contract | `CI` (`check`, `smoke`, `compose-profile-smoke`) | Pull request once Actions billing is restored; no live host | Required merge checks once branch protection is enabled |
+| Web unit/type/lint/build | `Frontend CI` (`build`) | Frontend pull request once Actions billing is restored | Required merge check once branch protection is enabled |
+| L3 deterministic Compose money path | `Compose Integration` / `just itest-compose` | Manual pre-deploy now; nightly after billing; 45-minute hard timeout | Must be green before an operator deploys |
+| L4 passkey browser journey | `Frontend CI` (`e2e`) / `pnpm e2e` | Manual pre-deploy now; future mainline/nightly, never pull requests; 20-minute hard timeout | Must be green before an operator deploys |
+| L5 live-stack smoke | `just deploy-verify` | Automatic final dependency of `deploy-api`, `deploy-web`, `deploy-arena`, and `deploy-all` | Non-zero exits fail the deploy; promotion is not reported successful |
+
+GitHub Actions is intentionally manual-dispatch-only while SYB-251's billing
+limit remains in effect. Do not interpret that temporary trigger policy as a
+green merge gate. After billing is restored, restore the checked-in PR/mainline
+and nightly triggers, run each lane successfully to establish actual duration,
+then configure the named fast checks as required in branch protection. The L4
+job is explicitly guarded from pull-request events so restoring frontend PR
+triggers cannot accidentally put the browser journey on the fast path.
+
 ```bash
 just deploy-api
 just deploy-arena

@@ -41,7 +41,11 @@ jobs:
 
   e2e:
     name: Playwright e2e (passkey journey)
+    # L4 is the slow pre-deploy/mainline lane, not a per-PR check. Keep this
+    # guard when pull_request triggers are restored after the billing block.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend/web
