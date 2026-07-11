@@ -69,6 +69,56 @@ export function SettingsView({
   );
 }
 
+function SettingsSectionReadState({
+  title,
+  status,
+  loadingMessage,
+  errorMessage,
+  onRetry,
+  retrying,
+}: {
+  title: string;
+  status: "loading" | "error";
+  loadingMessage: string;
+  errorMessage: string;
+  onRetry: () => void;
+  retrying: boolean;
+}) {
+  const failed = status === "error";
+  return (
+    <Panel>
+      <PanelHead title={title} />
+      <PanelBody>
+        <div
+          role={failed ? "alert" : "status"}
+          aria-live={failed ? "assertive" : "polite"}
+          aria-busy={!failed || retrying}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+            gap: 10,
+          }}
+        >
+          <p style={{ ...bodyText, margin: 0 }}>
+            {failed ? errorMessage : loadingMessage}
+          </p>
+          {failed && (
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={retrying}
+              style={secondaryButtonStyle(retrying)}
+            >
+              {retrying ? "Retrying…" : "Retry"}
+            </button>
+          )}
+        </div>
+      </PanelBody>
+    </Panel>
+  );
+}
+
 // --- Section 1: Profile ---------------------------------------------------
 
 function ProfileSection({
@@ -141,6 +191,19 @@ function ProfileSection({
   const previewSeed =
     avatarSeed.trim() || displayName.trim() || String(accountId);
   const busy = save.isPending || clear.isPending;
+
+  if (!profile.isSuccess) {
+    return (
+      <SettingsSectionReadState
+        title="Profile"
+        status={profile.isError ? "error" : "loading"}
+        loadingMessage="Loading your current profile before editing is enabled…"
+        errorMessage="Your current profile could not be verified. Editing is disabled until this read succeeds."
+        onRetry={() => void profile.refetch()}
+        retrying={profile.isFetching}
+      />
+    );
+  }
 
   return (
     <Panel>
@@ -277,6 +340,19 @@ function SigningKeysSection({
   const revokingTarget =
     revoke.isPending && revoke.variables ? revoke.variables.publicKeyHex : null;
 
+  if (!keys.isSuccess) {
+    return (
+      <SettingsSectionReadState
+        title="Signing keys / agent keys"
+        status={keys.isError ? "error" : "loading"}
+        loadingMessage="Loading the authoritative signing-key list before key management is enabled…"
+        errorMessage="Your signing keys could not be verified. Key creation, revocation, and recovery setup are disabled until this read succeeds."
+        onRetry={() => void keys.refetch()}
+        retrying={keys.isFetching}
+      />
+    );
+  }
+
   return (
     <Panel>
       <PanelHead title="Signing keys / agent keys" />
@@ -303,9 +379,7 @@ function SigningKeysSection({
             overflow: "hidden",
           }}
         >
-          {keys.isLoading ? (
-            <EmptyRow>loading keys…</EmptyRow>
-          ) : list.length === 0 ? (
+          {list.length === 0 ? (
             <EmptyRow>no signing keys</EmptyRow>
           ) : (
             list.map((k) => {
@@ -629,6 +703,19 @@ function ReadApiKeysSection({
       ? revoke.variables
       : null;
 
+  if (!apiKeys.isSuccess) {
+    return (
+      <SettingsSectionReadState
+        title="Read API keys"
+        status={apiKeys.isError ? "error" : "loading"}
+        loadingMessage="Loading the authoritative read-key list before API-key management is enabled…"
+        errorMessage="Your read API keys could not be verified. Key creation and revocation are disabled until this read succeeds."
+        onRetry={() => void apiKeys.refetch()}
+        retrying={apiKeys.isFetching}
+      />
+    );
+  }
+
   return (
     <Panel>
       <PanelHead title="Read API keys" />
@@ -650,9 +737,7 @@ function ReadApiKeysSection({
             overflow: "hidden",
           }}
         >
-          {apiKeys.isLoading ? (
-            <EmptyRow>loading API keys…</EmptyRow>
-          ) : list.length === 0 ? (
+          {list.length === 0 ? (
             <EmptyRow>no read API keys</EmptyRow>
           ) : (
             list.map((k) => (
