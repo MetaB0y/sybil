@@ -2,7 +2,7 @@
 
 /**
  * Batches table — sticky-header table of recent batches (= blocks). One row
- * per block; click any row to expand. The expanded detail is rendered via
+ * per block; select any row to expand. The expanded detail is rendered via
  * the `renderDetail` slot prop so this file stays focused on the table; the
  * detail UI lives in <BatchDetail>.
  *
@@ -58,7 +58,10 @@ export function BatchesTable({
   };
 
   return (
-    <section className="activity-batches-section" style={{ padding: "26px 24px 40px" }}>
+    <section
+      className="activity-batches-section"
+      style={{ padding: "26px 24px 40px" }}
+    >
       <div
         className="activity-table-head"
         style={{
@@ -83,7 +86,7 @@ export function BatchesTable({
         </h3>
         <span className="text-annotation" style={{ fontSize: 11 }}>
           showing last {displayRows.length}
-          {isBackfilling ? " · backfilling…" : ""} · click any row to expand
+          {isBackfilling ? " · backfilling…" : ""} · select any row to expand
         </span>
         <span style={{ marginLeft: "auto" }}>
           <LiveToggle
@@ -125,7 +128,15 @@ export function BatchesTable({
                 setExpanded((cur) => (cur === r.height ? null : r.height))
               }
             />
-            {expanded === r.height && renderDetail && renderDetail(r)}
+            {expanded === r.height && renderDetail && (
+              <div
+                id={detailId(r.height)}
+                role="region"
+                aria-labelledby={batchLabelId(r.height)}
+              >
+                {renderDetail(r)}
+              </div>
+            )}
           </Fragment>
         ))}
       </div>
@@ -166,7 +177,9 @@ function LiveToggle({
         borderRadius: 999,
         cursor: "pointer",
         border: `1px solid ${live ? "var(--border-2)" : "var(--accent)"}`,
-        background: live ? "var(--surface-1)" : "color-mix(in srgb, var(--accent) 12%, transparent)",
+        background: live
+          ? "var(--surface-1)"
+          : "color-mix(in srgb, var(--accent) 12%, transparent)",
         color: live ? "var(--fg-2)" : "var(--accent)",
         fontFamily: "var(--font-mono)",
         fontSize: 10,
@@ -240,8 +253,14 @@ function Row({
   onToggle: () => void;
 }) {
   return (
-    <div
+    <button
+      type="button"
+      id={triggerId(row.height)}
+      className="activity-batch-row"
       onClick={onToggle}
+      aria-expanded={expanded}
+      aria-controls={detailId(row.height)}
+      data-expanded={expanded}
       style={{
         display: "grid",
         gridTemplateColumns: GRID,
@@ -249,20 +268,18 @@ function Row({
         alignItems: "center",
         padding: "0 22px",
         height: 64,
+        width: "100%",
+        border: 0,
         borderBottom: "1px solid var(--border-1)",
         cursor: "pointer",
-        background: expanded ? "var(--surface-2)" : "transparent",
+        color: "inherit",
+        textAlign: "left",
+        touchAction: "manipulation",
         transition: "background var(--dur-fast) var(--ease-standard)",
-      }}
-      onMouseEnter={(e) => {
-        if (!expanded) e.currentTarget.style.background = "var(--surface-2)";
-      }}
-      onMouseLeave={(e) => {
-        if (!expanded) e.currentTarget.style.background = "transparent";
       }}
     >
       {/* chevron */}
-      <div
+      <span
         style={{
           display: "flex",
           alignItems: "center",
@@ -271,6 +288,8 @@ function Row({
         }}
       >
         <svg
+          aria-hidden="true"
+          focusable="false"
           width="10"
           height="10"
           viewBox="0 0 12 12"
@@ -284,11 +303,12 @@ function Row({
         >
           <path d="m4 3 3 3-3 3" />
         </svg>
-      </div>
+      </span>
 
       {/* batch # */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
         <span
+          id={batchLabelId(row.height)}
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: 16,
@@ -299,10 +319,10 @@ function Row({
         >
           #{formatInt(row.height)}
         </span>
-      </div>
+      </span>
 
       {/* cleared timestamp + relative */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <span
           style={{
             fontFamily: "var(--font-mono)",
@@ -324,10 +344,10 @@ function Row({
         >
           {fmtRelTime(row.timestampMs)}
         </span>
-      </div>
+      </span>
 
       {/* markets touched */}
-      <div
+      <span
         style={{
           fontFamily: "var(--font-mono)",
           fontSize: 14,
@@ -336,10 +356,10 @@ function Row({
         }}
       >
         {row.marketsTouched}
-      </div>
+      </span>
 
       {/* matched volume */}
-      <div
+      <span
         style={{
           fontFamily: "var(--font-mono)",
           fontSize: 14,
@@ -348,10 +368,10 @@ function Row({
         }}
       >
         {formatCompactDollars(row.matchedVolumeNanos)}
-      </div>
+      </span>
 
       {/* welfare */}
-      <div
+      <span
         style={{
           fontFamily: "var(--font-mono)",
           fontSize: 14,
@@ -376,10 +396,10 @@ function Row({
             saved
           </span>
         )}
-      </div>
+      </span>
 
       {/* traders */}
-      <div
+      <span
         style={{
           fontFamily: "var(--font-mono)",
           fontSize: 14,
@@ -388,7 +408,7 @@ function Row({
         }}
       >
         {row.uniqueTraders}
-      </div>
+      </span>
 
       {/* orders cell */}
       <OrdersCell
@@ -396,7 +416,7 @@ function Row({
         matched={row.ordersMatched}
         unmatched={row.ordersUnmatched}
       />
-    </div>
+    </button>
   );
 }
 
@@ -410,7 +430,7 @@ function OrdersCell({
   unmatched: number;
 }) {
   return (
-    <div
+    <span
       style={{
         display: "flex",
         alignItems: "center",
@@ -429,16 +449,38 @@ function OrdersCell({
       >
         {placed}
       </span>
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--yes)" }}>
-        {matched}{" "}
-        <span style={subLabel}>matched</span>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 12,
+          color: "var(--yes)",
+        }}
+      >
+        {matched} <span style={subLabel}>matched</span>
       </span>
-      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--no)" }}>
-        {unmatched}{" "}
-        <span style={subLabel}>unmatched</span>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 12,
+          color: "var(--no)",
+        }}
+      >
+        {unmatched} <span style={subLabel}>unmatched</span>
       </span>
-    </div>
+    </span>
   );
+}
+
+function triggerId(height: number): string {
+  return `activity-batch-${height}-trigger`;
+}
+
+function detailId(height: number): string {
+  return `activity-batch-${height}-detail`;
+}
+
+function batchLabelId(height: number): string {
+  return `activity-batch-${height}-label`;
 }
 
 const subLabel: React.CSSProperties = {

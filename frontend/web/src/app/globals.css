@@ -419,6 +419,29 @@ textarea {
   min-width: 860px;
 }
 
+.activity-batch-row {
+  appearance: none;
+  background: transparent;
+}
+
+.activity-batch-row[data-expanded="true"],
+.activity-batch-row:active {
+  background: var(--surface-2);
+}
+
+.activity-batch-row:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .activity-batch-row:hover {
+    background: var(--surface-2);
+  }
+}
+
 .arena-main {
   min-height: 100vh;
   background: var(--bg-1);
