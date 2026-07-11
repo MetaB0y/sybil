@@ -5,11 +5,13 @@
  *
  *   imageUrl (404) → fallbackIconUrl (404) → deterministic colored tile
  *
- * Pure `<img>` (no next/image) — avoids registering remote domain config
- * for the Polymarket S3 bucket. Fallback tile uses the first glyph of
- * the market name on a palette-keyed background.
+ * Known Polymarket artwork is resized and re-encoded by `next/image`; unknown
+ * hosts stay browser-loaded and lazy rather than widening the server-side
+ * image-proxy allowlist. Fallback tile uses the first glyph of the market name
+ * on a palette-keyed background.
  */
 
+import Image from "next/image";
 import { useState } from "react";
 
 type Props = {
@@ -21,6 +23,8 @@ type Props = {
 };
 
 type Stage = "image" | "icon" | "tile";
+
+const OPTIMIZED_IMAGE_HOST = "polymarket-upload.s3.us-east-2.amazonaws.com";
 
 const PALETTE = [
   "var(--accent-soft)",
@@ -61,23 +65,36 @@ export function MarketThumb({
 
   if (stage !== "tile") {
     const src = stage === "image" ? imageUrl! : fallbackIconUrl!;
+    const onError = () => {
+      if (stage === "image" && fallbackIconUrl) setStage("icon");
+      else setStage("tile");
+    };
     return (
       <div style={thumbStyles(size)} aria-hidden>
-        {/* eslint-disable-next-line @next/next/no-img-element -- pure CSS; remote-domain config out of scope */}
-        <img
-          src={src}
-          alt=""
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
-          onError={() => {
-            if (stage === "image" && fallbackIconUrl) setStage("icon");
-            else setStage("tile");
-          }}
-        />
+        {isOptimizedImageUrl(src) ? (
+          <Image
+            src={src}
+            alt=""
+            width={size}
+            height={size}
+            sizes={`${size}px`}
+            quality={60}
+            style={imageStyles}
+            onError={onError}
+          />
+        ) : (
+          /* eslint-disable-next-line @next/next/no-img-element -- unknown hosts must not widen the server image proxy */
+          <img
+            src={src}
+            alt=""
+            width={size}
+            height={size}
+            loading="lazy"
+            decoding="async"
+            style={imageStyles}
+            onError={onError}
+          />
+        )}
       </div>
     );
   }
@@ -104,6 +121,27 @@ export function MarketThumb({
       {initial}
     </div>
   );
+}
+
+const imageStyles: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  display: "block",
+};
+
+export function isOptimizedImageUrl(src: string): boolean {
+  try {
+    const url = new URL(src);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === OPTIMIZED_IMAGE_HOST &&
+      url.port === "" &&
+      url.search === ""
+    );
+  } catch {
+    return false;
+  }
 }
 
 function thumbStyles(size: number): React.CSSProperties {
