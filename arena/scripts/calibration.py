@@ -372,27 +372,60 @@ def _surprises(rows: list[dict[str, Any]], top_n: int) -> list[dict[str, Any]]:
     ]
 
 
-def _native_noise_pnl_baseline(conn: sqlite3.Connection) -> dict[str, Any]:
+def _portfolio_pnl_summary(
+    conn: sqlite3.Connection,
+    trader_kind: str,
+    since: datetime | None,
+    until: datetime | None,
+) -> dict[str, Any]:
     if not _has_table(conn, "portfolio_snapshots"):
         return {"n": 0}
-    rows = conn.execute(
-        "SELECT trader_name, pnl FROM portfolio_snapshots WHERE id IN ("
-        "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
-        ")"
-    )
-    pnls = [
-        float(row["pnl"])
-        for row in rows
-        if row["pnl"] is not None
-        and (
-            str(row["trader_name"]).startswith("Noise")
-            or "NativeNoiseTrader" in str(row["trader_name"])
-        )
-    ]
+
+    def matches(trader_name: str) -> bool:
+        if trader_kind == "flat":
+            return trader_name.endswith(" (Flat)")
+        if trader_kind == "kelly":
+            return trader_name.endswith(" (Kelly)")
+        if trader_kind == "native_noise":
+            return trader_name.startswith("Noise") or "NativeNoiseTrader" in trader_name
+        raise ValueError(f"unknown trader kind: {trader_kind}")
+
+    snapshots: dict[str, list[tuple[datetime, float]]] = {}
+    rows = conn.execute("SELECT trader_name, timestamp, pnl FROM portfolio_snapshots ORDER BY id")
+    for row in rows:
+        trader_name = str(row["trader_name"] or "")
+        timestamp = _parse_iso_timestamp(row["timestamp"])
+        pnl = _safe_float(row["pnl"])
+        if not matches(trader_name) or timestamp is None or pnl is None:
+            continue
+        snapshots.setdefault(trader_name, []).append((timestamp, pnl))
+
+    pnls = []
+    for trader_snapshots in snapshots.values():
+        trader_snapshots.sort(key=lambda item: item[0])
+        eligible = [
+            (timestamp, pnl)
+            for timestamp, pnl in trader_snapshots
+            if until is None or timestamp < until
+        ]
+        if not eligible:
+            continue
+        if since is None:
+            pnls.append(eligible[-1][1])
+            continue
+
+        in_window = [item for item in eligible if item[0] >= since]
+        if not in_window:
+            continue
+        before_window = [item for item in eligible if item[0] < since]
+        starting_pnl = before_window[-1][1] if before_window else in_window[0][1]
+        pnls.append(in_window[-1][1] - starting_pnl)
+
     if not pnls:
         return {"n": 0}
     return {
         "n": len(pnls),
+        "mode": "window_delta" if since is not None else "cumulative",
         "mean_pnl": statistics.fmean(pnls),
         "median_pnl": statistics.median(pnls),
         "min_pnl": min(pnls),
@@ -494,6 +527,10 @@ def analyze_decisions_db(
 
         all_forecast_pairs = [(row["forecast"], row["outcome"]) for row in rows]
         all_market_pairs = [(row["market_price"], row["outcome"]) for row in rows]
+        portfolio_pnl = {
+            kind: _portfolio_pnl_summary(conn, kind, since_dt, until_dt)
+            for kind in ("flat", "kelly", "native_noise")
+        }
         return {
             "db_path": str(Path(db_path)),
             "bins": bins,
@@ -514,8 +551,9 @@ def analyze_decisions_db(
                     "n": len(all_market_pairs),
                     "brier": _brier(all_market_pairs),
                 },
-                "native_noise_trader_pnl": _native_noise_pnl_baseline(conn),
+                "native_noise_trader_pnl": portfolio_pnl["native_noise"],
             },
+            "portfolio_pnl": portfolio_pnl,
             "overall": {
                 "n": len(rows),
                 "brier": _brier(all_forecast_pairs),
@@ -562,7 +600,17 @@ def format_report(result: dict[str, Any]) -> str:
             f"{_fmt(persona['mean_confidence'], 3):>6s}"
         )
 
-    baseline = result["baselines"]["native_noise_trader_pnl"]
+    def pnl_line(label: str, summary: dict[str, Any]) -> str:
+        return (
+            f"{label}: n={summary.get('n', 0)} "
+            f"mode={summary.get('mode', 'n/a')} "
+            f"mean={_fmt(summary.get('mean_pnl'), 2)} "
+            f"median={_fmt(summary.get('median_pnl'), 2)} "
+            f"min={_fmt(summary.get('min_pnl'), 2)} "
+            f"max={_fmt(summary.get('max_pnl'), 2)}"
+        )
+
+    portfolio_pnl = result["portfolio_pnl"]
     lines.extend(
         [
             "",
@@ -571,14 +619,9 @@ def format_report(result: dict[str, Any]) -> str:
                 f"{_fmt(result['baselines']['market_price_as_forecast']['brier'])} "
                 f"(n={result['baselines']['market_price_as_forecast']['n']})"
             ),
-            (
-                "NativeNoiseTrader PnL baseline: "
-                f"n={baseline.get('n', 0)} "
-                f"mean={_fmt(baseline.get('mean_pnl'), 2)} "
-                f"median={_fmt(baseline.get('median_pnl'), 2)} "
-                f"min={_fmt(baseline.get('min_pnl'), 2)} "
-                f"max={_fmt(baseline.get('max_pnl'), 2)}"
-            ),
+            pnl_line("Flat-arm PnL", portfolio_pnl["flat"]),
+            pnl_line("Kelly-arm PnL", portfolio_pnl["kelly"]),
+            pnl_line("NativeNoiseTrader PnL baseline", portfolio_pnl["native_noise"]),
             (
                 "Outcomes: "
                 f"{result['outcomes']['count']} ({result['outcomes']['source']}), "

@@ -97,6 +97,7 @@ def test_calibration_harness_computes_brier_reliability_and_noise_baseline(tmp_p
     assert bob["brier"] == 0.6400000000000001
     assert noise == {
         "n": 2,
+        "mode": "cumulative",
         "mean_pnl": -1.0,
         "median_pnl": -1.0,
         "min_pnl": -3.0,
@@ -107,6 +108,63 @@ def test_calibration_harness_computes_brier_reliability_and_noise_baseline(tmp_p
     assert "Calibration by persona" in report
     assert "Market-price baseline Brier" in report
     assert "NativeNoiseTrader PnL baseline" in report
+
+
+def test_calibration_pnl_uses_window_deltas_for_all_live_arms(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        """INSERT INTO portfolio_snapshots
+           (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+           VALUES (?, ?, 0, 0, ?, '{}')""",
+        [
+            ("Alice (Flat)", "2026-01-01T00:00:00Z", 10.0),
+            ("Alice (Flat)", "2026-01-01T00:01:30Z", 14.0),
+            ("Alice (Flat)", "2026-01-01T00:03:00Z", 30.0),
+            ("Alice (Kelly)", "2026-01-01T00:01:30Z", 8.0),
+            ("Noise-0", "2026-01-01T00:01:30Z", 4.0),
+            ("Noise-0", "2026-01-01T00:03:00Z", 20.0),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = analyze_decisions_db(
+        str(db_path),
+        since="2026-01-01T00:01:00Z",
+        until="2026-01-01T00:02:00Z",
+    )
+
+    assert result["portfolio_pnl"] == {
+        "flat": {
+            "n": 1,
+            "mode": "window_delta",
+            "mean_pnl": 4.0,
+            "median_pnl": 4.0,
+            "min_pnl": 4.0,
+            "max_pnl": 4.0,
+        },
+        "kelly": {
+            "n": 1,
+            "mode": "window_delta",
+            "mean_pnl": 3.0,
+            "median_pnl": 3.0,
+            "min_pnl": 3.0,
+            "max_pnl": 3.0,
+        },
+        "native_noise": {
+            "n": 1,
+            "mode": "window_delta",
+            "mean_pnl": 3.0,
+            "median_pnl": 3.0,
+            "min_pnl": 3.0,
+            "max_pnl": 3.0,
+        },
+    }
+    report = format_report(result)
+    assert "Flat-arm PnL: n=1 mode=window_delta mean=4.00" in report
+    assert "Kelly-arm PnL: n=1 mode=window_delta mean=3.00" in report
 
 
 def test_calibration_window_reason_counterfactuals_categories_and_surprises(tmp_path):

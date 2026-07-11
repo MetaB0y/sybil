@@ -176,7 +176,9 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
   primary PnL readout (Kelly out of scope and higher-variance).
 - **Metrics per window** (calibration.py): per-analyst Brier vs market-price baseline (the
   delta column), reliability curve, rejection accuracy (per reason, Stage 0), Flat-arm PnL vs
-  NativeNoiseTrader baseline, LLM $/decision from `token_usage`.
+  NativeNoiseTrader baseline, LLM $/decision from `token_usage`. When `--since` is supplied,
+  portfolio PnL is reported as the per-trader delta from the last pre-window snapshot to the
+  last snapshot inside the half-open window; without it, the report keeps cumulative PnL.
 - **Windows**: ≥1 day per side, or concurrent A/B (preferred — same news, same prices). Compare
   on decisions matched by (market_id, article batch) where possible.
 - **Guardrail**: any stage that raises analyst spend must show cost per decision; abort a stage
