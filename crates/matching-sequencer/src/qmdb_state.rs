@@ -7,12 +7,12 @@ use std::thread;
 
 use commonware_codec::RangeCfg;
 use commonware_cryptography::sha256::Digest as Sha256Digest;
-use commonware_cryptography::Hasher as _;
 use commonware_cryptography::Sha256;
+use commonware_parallel::Sequential;
 use commonware_runtime::buffer::paged::CacheRef;
-use commonware_runtime::{tokio as commonware_tokio, Runner as _};
+use commonware_runtime::{tokio as commonware_tokio, Runner as _, Supervisor as _};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
+use commonware_storage::merkle::mmr::full::Config as MmrConfig;
 use commonware_storage::merkle::mmr::Family as MmrFamily;
 use commonware_storage::qmdb::current::ordered::variable::{
     Db as OrderedVariableDb, KeyValueProof,
@@ -45,6 +45,7 @@ type StateDb = OrderedVariableDb<
     Sha256,
     OneCap,
     CHUNK_SIZE,
+    Sequential,
 >;
 type StateLeafEntries = Vec<(Vec<u8>, Vec<u8>)>;
 
@@ -83,9 +84,9 @@ pub struct QmdbStateLeafProof {
 
 impl QmdbStateLeafProof {
     pub fn verify(&self) -> bool {
-        let mut hasher = Sha256::new();
+        let hasher = commonware_storage::qmdb::hasher::<Sha256>();
         StateDb::verify_key_value_proof(
-            &mut hasher,
+            &hasher,
             self.leaf_key.clone(),
             self.leaf_value.clone(),
             &self.proof,
@@ -111,9 +112,9 @@ pub struct QmdbStateLeafExclusionProof {
 
 impl QmdbStateLeafExclusionProof {
     pub fn verify(&self) -> bool {
-        let mut hasher = Sha256::new();
+        let hasher = commonware_storage::qmdb::hasher::<Sha256>();
         StateDb::verify_exclusion_proof(
-            &mut hasher,
+            &hasher,
             &self.leaf_key,
             &self.proof,
             &Sha256Digest::from(self.root),
@@ -181,7 +182,7 @@ impl QmdbState {
                 );
                 runner.start(|context| async move {
                     let opened = match generation {
-                        Ok(generation) => open_db(context.clone(), generation)
+                        Ok(generation) => open_db(context.child("state_db"), generation)
                             .await
                             .map(|db| (db, generation)),
                         Err(error) => Err(error),
@@ -330,7 +331,7 @@ async fn open_db(
             items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
             write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
             metadata_partition: partition("state-mmr-metadata", generation),
-            thread_pool: None,
+            strategy: Sequential,
             page_cache: page_cache.clone(),
         },
         journal_config: VConfig {
@@ -491,7 +492,7 @@ async fn replace_leaves(
 
     let previous_generation = *generation;
     let next_generation = generation.saturating_add(1);
-    let mut next_db = open_db(context.clone(), next_generation).await?;
+    let mut next_db = open_db(context.child("state_db"), next_generation).await?;
 
     if !leaves.is_empty() {
         let mut batch = next_db.new_batch();
@@ -534,16 +535,10 @@ fn digest_bytes(digest: Sha256Digest) -> [u8; 32] {
 fn range_proof_parts(proof: &RangeProof<MmrFamily, Sha256Digest>) -> QmdbStateRangeProofParts {
     QmdbStateRangeProofParts {
         leaves: u64::from(proof.proof.leaves),
+        inactive_peaks: proof.proof.inactive_peaks as u64,
         digests: proof
             .proof
             .digests
-            .iter()
-            .copied()
-            .map(digest_bytes)
-            .collect(),
-        pre_prefix_acc: proof.pre_prefix_acc.map(digest_bytes),
-        unfolded_prefix_peaks: proof
-            .unfolded_prefix_peaks
             .iter()
             .copied()
             .map(digest_bytes)
@@ -592,9 +587,9 @@ async fn leaf_proof(
         return Ok(None);
     };
 
-    let mut hasher = Sha256::new();
+    let hasher = commonware_storage::qmdb::hasher::<Sha256>();
     let proof = db
-        .key_value_proof(&mut hasher, leaf_key.clone())
+        .key_value_proof(&hasher, leaf_key.clone())
         .await
         .map_err(|error| StoreError::Qmdb(format!("failed to prove state qmdb leaf: {error}")))?;
     Ok(Some(QmdbStateLeafProof {
@@ -611,8 +606,8 @@ async fn leaf_exclusion_proof(
     db: &StateDb,
     leaf_key: Vec<u8>,
 ) -> Result<Option<QmdbStateLeafExclusionProof>, StoreError> {
-    let mut hasher = Sha256::new();
-    let proof = match db.exclusion_proof(&mut hasher, &leaf_key).await {
+    let hasher = commonware_storage::qmdb::hasher::<Sha256>();
+    let proof = match db.exclusion_proof(&hasher, &leaf_key).await {
         Ok(proof) => proof,
         Err(commonware_storage::qmdb::Error::KeyExists) => return Ok(None),
         Err(error) => {

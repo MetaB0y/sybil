@@ -78,7 +78,9 @@ The first guest boundary is intentionally narrow:
   `sybil-verifier` with qMDB block-runtime features disabled. The guest uses
   small local SHA-256/MMR verifiers for the qMDB proof/root shapes so OpenVM
   does not need to link commonware storage or its native cryptography
-  dependencies.
+  dependencies. Those local verifiers mirror the pinned Commonware `2026.5.0`
+  backward peak bagging, inactive-peak commitment, keyless commit-floor
+  encoding, and current-qMDB range-proof layout.
 - The guest reveals
   `keccak256(abi.encode("sybil/openvm/state-transition/v1", ...))` as the
   public value expected by `SybilSettlement`.
@@ -156,22 +158,23 @@ blind spot the `zk-rebuild` lane exists to close. Fixed the same day (borrowed
 args, same commit as the SYB-208 landing).
 
 With the fix, rebuilds are **deterministic** (two independent
-`just openvm-commit` runs → identical commitments), so the `zk-rebuild` CI
-lane (below) is a **hard gate**: regenerated commits must equal the committed
-`commit.json`. The OpenVM v2.0.0 final migration intentionally moved both
-current-source commitments to `app_exe_commit 0x000f896e…` and
-`app_vm_commit 0x007a02fc…`. The planned fresh genesis and adapter redeploy
-must use those final-tag pins; beta proofs and commitments are not supported.
+`just openvm-commit-all` runs → identical commitments), so the `zk-rebuild`
+CI lane (below) is a **hard gate**: regenerated commits must equal the
+committed `commit.json` files. After the Commonware 2026.5 proof-format
+migration, the state-transition guest is pinned to
+`app_exe_commit 0x00765420…`; the Form-L guest is pinned to
+`app_exe_commit 0x00943d4b…`; both use
+`app_vm_commit 0x00618538…`. The planned fresh genesis and adapter redeploys
+must use those pins; older proofs and commitments are not supported.
 
 ### Redeploy procedure (when the commitment legitimately changes)
 
 When a guest rebuild *does* produce a new, correct commitment (after the guest
 build is fixed and any intended source change lands):
 
-1. `just openvm-commit` → regenerate the artifacts and read the new
-   `app_exe_commit` / `app_vm_commit`.
-2. Copy the new `commit.json` + `baseline.json` into
-   `zk/openvm-guest/openvm/release/` and commit them.
+1. `just openvm-commit-all` → regenerate both guests and read their new
+   `app_exe_commit` / `app_vm_commit` pairs.
+2. Commit both guests' updated `commit.json` + `baseline.json` release records.
 3. `scripts/zk-guest-fingerprint.sh --write` → refresh the lock's source
    fingerprint and commitment-hash copy.
 4. Redeploy `OpenVmVerifierAdapter` with the new pin (or deploy a new adapter

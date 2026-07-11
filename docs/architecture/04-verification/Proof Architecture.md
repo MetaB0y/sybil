@@ -2,7 +2,7 @@
 tags: [zk, infrastructure]
 layer: verification
 status: planned
-last_verified: 2026-04-30
+last_verified: 2026-07-11
 ---
 
 # Proof Architecture
@@ -90,6 +90,10 @@ built fresh each block. The implementation target is commonware's keyless
 qMDB with SHA-256, not a custom binary Merkle tree. Each canonical event byte
 string is appended in section order - system events, accepted orders, rejected
 orders, then fills - and qMDB's native MMR root becomes `events_root`.
+Under the pinned Commonware `2026.5.0` format, commit operations encode the
+inactivity floor (always zero for Sybil's per-block event log) and MMR peaks
+are bagged backward. The OpenVM-safe implementation mirrors both details and
+is golden-pinned to the native root.
 
 **Leaves** (canonical encoding of each event):
 

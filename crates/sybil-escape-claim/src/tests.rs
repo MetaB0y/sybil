@@ -2,11 +2,12 @@ use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
 
 use base64::Engine as _;
 use commonware_codec::RangeCfg;
-use commonware_cryptography::{sha256::Digest as QmdbDigest, Hasher as _, Sha256 as QmdbSha256};
+use commonware_cryptography::{sha256::Digest as QmdbDigest, Sha256 as QmdbSha256};
+use commonware_parallel::Sequential;
 use commonware_runtime::buffer::paged::CacheRef;
 use commonware_runtime::{deterministic, Runner as _};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
+use commonware_storage::merkle::mmr::full::Config as MmrConfig;
 use commonware_storage::merkle::mmr::Family as MmrFamily;
 use commonware_storage::qmdb::current::ordered::variable::{
     Db as OrderedVariableDb, KeyValueProof,
@@ -51,6 +52,7 @@ type TestStateDb = OrderedVariableDb<
     QmdbSha256,
     OneCap,
     QMDB_STATE_CHUNK_SIZE,
+    Sequential,
 >;
 type NativeKeyValueProof = KeyValueProof<MmrFamily, Vec<u8>, QmdbDigest, QMDB_STATE_CHUNK_SIZE>;
 type NativeOperationProof = OperationProof<MmrFamily, QmdbDigest, QMDB_STATE_CHUNK_SIZE>;
@@ -337,17 +339,17 @@ fn portable_proofs(
         let root = db.root().0;
         let mut inclusions = Vec::new();
         for key in inclusion_keys {
-            let mut hasher = QmdbSha256::new();
+            let hasher = commonware_storage::qmdb::hasher::<QmdbSha256>();
             let proof = db
-                .key_value_proof(&mut hasher, key)
+                .key_value_proof(&hasher, key)
                 .await
                 .expect("inclusion proof");
             inclusions.push(key_value_parts(&proof));
         }
         let exclusion = if expect_exclusion {
-            let mut hasher = QmdbSha256::new();
+            let hasher = commonware_storage::qmdb::hasher::<QmdbSha256>();
             let proof = db
-                .exclusion_proof(&mut hasher, &exclusion_key)
+                .exclusion_proof(&hasher, &exclusion_key)
                 .await
                 .expect("exclusion proof");
             exclusion_parts(&proof)
@@ -381,9 +383,9 @@ fn portable_inclusions(
         let root = db.root().0;
         let mut proofs = Vec::new();
         for key in inclusion_keys {
-            let mut hasher = QmdbSha256::new();
+            let hasher = commonware_storage::qmdb::hasher::<QmdbSha256>();
             proofs.push(key_value_parts(
-                &db.key_value_proof(&mut hasher, key)
+                &db.key_value_proof(&hasher, key)
                     .await
                     .expect("inclusion proof"),
             ));
@@ -423,7 +425,7 @@ async fn open_test_state_db(context: deterministic::Context) -> TestStateDb {
             items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).expect("items per blob"),
             write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).expect("write buffer"),
             metadata_partition: "escape-state-mmr-metadata".to_string(),
-            thread_pool: None,
+            strategy: Sequential,
             page_cache: page_cache.clone(),
         },
         journal_config: VConfig {
@@ -486,14 +488,8 @@ fn operation_parts(proof: &NativeOperationProof) -> QmdbStateOperationProof {
 fn range_parts(proof: &RangeProof<MmrFamily, QmdbDigest>) -> QmdbStateRangeProof {
     QmdbStateRangeProof {
         leaves: u64::from(proof.proof.leaves),
+        inactive_peaks: proof.proof.inactive_peaks as u64,
         digests: proof.proof.digests.iter().copied().map(|d| d.0).collect(),
-        pre_prefix_acc: proof.pre_prefix_acc.map(|d| d.0),
-        unfolded_prefix_peaks: proof
-            .unfolded_prefix_peaks
-            .iter()
-            .copied()
-            .map(|d| d.0)
-            .collect(),
         partial_chunk_digest: proof.partial_chunk_digest.map(|d| d.0),
         ops_root: proof.ops_root.0,
     }

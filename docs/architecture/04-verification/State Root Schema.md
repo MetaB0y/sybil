@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-10
+last_verified: 2026-07-11
 ---
 
 # State Root Schema
@@ -20,7 +20,12 @@ byte-level commitment contract.
 
 `state_root` is the native current-qmdb root over sorted typed state leaves.
 The root uses commonware's ordered current qMDB with SHA-256 and variable-size
-`Vec<u8>` keys and values.
+`Vec<u8>` keys and values. The authenticated-storage boundary is pinned to
+Commonware `2026.5.0`: MMR peaks use Commonware's backward-bagging policy,
+and roots with an inactive prefix commit the inactive-peak count. Sybil uses
+the explicit `Sequential` merkleization strategy so native recomputation,
+sequencer persistence, and proof generation all share one deterministic
+configuration.
 
 Implementation:
 
@@ -125,6 +130,13 @@ job and converts it into the guest input shape. Inside OpenVM,
 directly, avoiding commonware storage as a guest dependency while keeping the
 proof format pinned to commonware's ordered-current-qMDB semantics.
 
+The portable 2026.5 range-proof subset carries `leaves`, `inactive_peaks`, the
+MMR proof digests, the optional partial-bitmap-chunk digest, and `ops_root`.
+The guest mirrors backward peak bagging and the inactive-prefix root encoding.
+Commonware's MMR family has no pending-chunk contribution. Native/guest tests
+include a state that crosses a complete bitmap-chunk boundary so drift in
+proof layout, grafting, or peak bagging fails closed.
+
 ## Sequencer Storage
 
 Current storage has two qMDB roles:
@@ -159,7 +171,7 @@ GET /v1/proofs/state/{leaf_key_hex}
       "state_root": "...",
       "leaf_key_hex": "...",
       "proof_kind": "inclusion" | "exclusion",
-      "proof_format": "commonware-qmdb-current-ordered-sha256-mmr",
+      "proof_format": "commonware-qmdb-current-ordered-sha256-mmr-2026.5",
       "verified": true,
       "leaf_value_hex": "...",
       "inclusion_proof": { ... },

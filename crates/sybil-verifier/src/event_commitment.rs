@@ -9,11 +9,13 @@ use std::thread;
 
 use commonware_codec::RangeCfg;
 use commonware_cryptography::Sha256 as QmdbSha256;
+use commonware_parallel::Sequential;
 use commonware_runtime::buffer::paged::CacheRef;
 use commonware_runtime::{deterministic, Runner as _};
 use commonware_storage::journal::contiguous::variable::Config as VConfig;
-use commonware_storage::merkle::mmr::journaled::Config as MmrConfig;
+use commonware_storage::merkle::mmr::full::Config as MmrConfig;
 use commonware_storage::merkle::mmr::Family as MmrFamily;
+use commonware_storage::merkle::Location;
 use commonware_storage::qmdb::keyless::variable::{
     Config as KeylessVariableConfig, Db as KeylessVariableDb,
 };
@@ -27,7 +29,8 @@ const ITEMS_PER_BLOB: u64 = 1024;
 const WRITE_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_VALUE_BYTES: usize = 1 << 20;
 
-type EventRootDb = KeylessVariableDb<MmrFamily, deterministic::Context, Vec<u8>, QmdbSha256>;
+type EventRootDb =
+    KeylessVariableDb<MmrFamily, deterministic::Context, Vec<u8>, QmdbSha256, Sequential>;
 
 struct EventRootRequest {
     events: Vec<Vec<u8>>,
@@ -97,7 +100,11 @@ fn event_root_from_event_bytes_inner(events: Vec<Vec<u8>>) -> [u8; 32] {
             );
             batch = batch.append(event);
         }
-        let merkleized = batch.merkleize(&db, Some(event_count.to_le_bytes().to_vec()));
+        let merkleized = batch.merkleize(
+            &db,
+            Some(event_count.to_le_bytes().to_vec()),
+            Location::new(0),
+        );
         db.apply_batch(merkleized)
             .await
             .expect("event root qmdb batch should apply");
@@ -117,7 +124,7 @@ async fn open_event_root_db(context: deterministic::Context) -> Result<EventRoot
             items_per_blob: NonZeroU64::new(ITEMS_PER_BLOB).unwrap(),
             write_buffer: NonZeroUsize::new(WRITE_BUFFER_BYTES).unwrap(),
             metadata_partition: "event-root-mmr-metadata".to_string(),
-            thread_pool: None,
+            strategy: Sequential,
             page_cache: page_cache.clone(),
         },
         log: VConfig {
@@ -198,8 +205,8 @@ mod tests {
         assert_eq!(
             events_root_from_event_bytes(&events),
             [
-                192, 49, 15, 127, 205, 199, 131, 164, 175, 240, 21, 115, 173, 61, 247, 113, 35,
-                129, 44, 150, 211, 36, 13, 167, 222, 164, 46, 216, 180, 50, 124, 160,
+                80, 198, 242, 60, 202, 11, 62, 126, 105, 245, 100, 247, 169, 21, 83, 76, 35, 1,
+                244, 153, 133, 23, 155, 42, 68, 174, 231, 138, 200, 30, 115, 90,
             ]
         );
     }

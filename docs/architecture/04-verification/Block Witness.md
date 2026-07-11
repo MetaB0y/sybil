@@ -3,7 +3,7 @@ tags: [zk, serialization, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-10
+last_verified: 2026-07-11
 ---
 
 # Block Witness Format
@@ -352,10 +352,10 @@ pin.
 | Empty canonical witness length | `1583` bytes | `canonical_witness_bytes_are_stable_for_empty_witness` |
 | Byte-identity canonical witness length | `3907` bytes | `golden_vectors_pin_header_hash_and_snapshot_encoders` |
 | Byte-identity witness SHA-256 length-prefixed digest | `2cc74a0d572c4519b1dcd06e8b230e1cc1b5af488f93324e3297ee8478d8c1f5` | same byte-identity test |
-| Empty public-input hash | `e37bee4b2c3e7bb723c01665ccc59fbf098e708c878e1d488a792fdb51858a6f` | `public_input_hash_golden` |
+| Empty public-input hash | `3c2b17b07142b39b143af5ced9497325248be056cc96ff2daf8845b52cc76c46` | `public_input_hash_golden` |
 | OL-4 Solidity/Rust public-input hash vector | `42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` | Rust test plus `contracts/test/SybilGoldenVectors.t.sol` |
-| Current `app_exe_commit` | `0x000a9cb169bb987eb2cdff9cc550179c1d3aae8ebcf0469b9ecb5f56e9a81398` | committed OpenVM `commit.json` and lock |
-| Current `app_vm_commit` | `0x007a02fc3055c8beb7aa51187d008991bdec498852b5e1e27f223ee04a72cac5` | committed OpenVM `commit.json` and lock |
+| Current `app_exe_commit` | `0x0076542058598596578aaf9144911bbbda347b9bacd8c16fa644c02f005c9e72` | committed OpenVM `commit.json` and lock |
+| Current `app_vm_commit` | `0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d` | committed OpenVM `commit.json` and lock |
 
 The L1 deposit leaf/root vectors live in both
 `crates/sybil-l1-protocol/src/lib.rs` and

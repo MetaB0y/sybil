@@ -67,9 +67,9 @@ across workspaces 2026-07-10). The 2026-07-10 upgrade to OpenVM v2.0.0 final
 moved both commitments because the final release replaces the beta proof
 system with SWIRL and changes the SHA-2 VM AIR. The committed `commit.json` +
 lock carry the current-source commitments
-(`app_exe_commit 0x000f896e…`, `app_vm_commit 0x007a02fc…`). A fresh genesis
-and adapter redeploy must use these new pins; no beta commitment compatibility
-is supported.
+(`app_exe_commit 0x00765420…`, `app_vm_commit 0x00618538…`). A fresh genesis
+and adapter redeploy must use these pins; older commitment compatibility is
+not supported.
 
 ## Rebuild / redeploy procedure
 

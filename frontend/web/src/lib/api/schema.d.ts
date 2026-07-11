@@ -2892,11 +2892,11 @@ export interface components {
     QmdbStateRangeProofResponse: {
       digests_hex: string[];
       /** Format: int64 */
+      inactive_peaks: number;
+      /** Format: int64 */
       leaves: number;
       ops_root_hex: string;
       partial_chunk_digest_hex?: string | null;
-      pre_prefix_acc_hex?: string | null;
-      unfolded_prefix_peaks_hex: string[];
     };
     RegisterFeedRequest: {
       /** @description Human-readable name (e.g. "admin", "polymarket_mirror"). */

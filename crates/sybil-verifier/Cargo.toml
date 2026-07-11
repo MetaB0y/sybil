@@ -9,6 +9,7 @@ default = ["qmdb"]
 qmdb = [
     "dep:commonware-codec",
     "dep:commonware-cryptography",
+    "dep:commonware-parallel",
     "dep:commonware-runtime",
     "dep:commonware-storage",
 ]
@@ -17,10 +18,11 @@ qmdb = [
 matching-engine = { path = "../matching-engine" }
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 blake3 = "1"
-commonware-codec = { version = "2026.4.0", optional = true }
-commonware-cryptography = { version = "2026.4.0", optional = true }
-commonware-runtime = { version = "2026.4.0", optional = true }
-commonware-storage = { version = "2026.4.0", optional = true }
+commonware-codec = { version = "2026.5.0", optional = true }
+commonware-cryptography = { version = "2026.5.0", optional = true }
+commonware-parallel = { version = "2026.5.0", optional = true }
+commonware-runtime = { version = "2026.5.0", optional = true }
+commonware-storage = { version = "2026.5.0", optional = true }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 thiserror = { workspace = true }

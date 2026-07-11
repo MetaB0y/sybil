@@ -3,7 +3,7 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-06
+last_verified: 2026-07-11
 ---
 
 The REST API is the external interface to the exchange. Built with Axum (a Rust async web framework), it exposes endpoints for account management, market operations, order submission, and block retrieval. An OpenAPI schema is auto-generated for client code generation. The API communicates with the sequencer via message passing through a `SequencerHandle` — no shared mutable state.
@@ -80,7 +80,9 @@ example `acct/{account_id_be_u64}`). Responses are anchored to the latest
 persisted block height and include either a qMDB inclusion proof with the
 canonical leaf value or a qMDB exclusion proof for absent keys. This endpoint
 requires a persistent store-backed sequencer; in-memory dev sequencers return
-`503 Service Unavailable`.
+`503 Service Unavailable`. Its range-proof payload follows Commonware 2026.5:
+`leaves`, `inactive_peaks`, proof digests, optional partial-chunk digest, and
+`ops_root`.
 
 `GET /v1/da/{height}/manifest` and `GET /v1/da/{height}/payload` expose the
 retained canonical witness payload and its typed DA manifest. The manifest is
