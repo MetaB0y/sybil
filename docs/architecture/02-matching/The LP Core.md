@@ -12,7 +12,7 @@ The LP has three kinds of decision variables: fill quantities `q_i` in fixed-poi
 
 ```mermaid
 flowchart LR
-    subgraph lp["The LP core — polynomial, solved in < 1ms"]
+    subgraph lp["The LP core — polynomial and fast"]
         direction TB
         OBJ["maximize WELFARE<br/>Σ L_i·q_i (linear)"]
         VAR["variables:<br/>fills q_i · mint_m · gmint_g"]
@@ -26,7 +26,7 @@ flowchart LR
 
 The whole difficulty gradient lives in that one arrow: everything on the left is a textbook LP, and the single [[MM Budget Constraint|bilinear budget constraint]] on the right is what turns the problem NP-hard. Every entry in the [[Solver Landscape]] is a different strategy for coping with that one arrow.
 
-The problem size scales as O(N + M + G) variables and O(N + M) constraints, where N is the number of orders, M the number of markets, and G the number of groups. For a typical batch of 10,000 orders across 100 markets and 10 groups, modern LP solvers (HiGHS, used by the [[LP Solver]]) solve this in under a millisecond. The dual variables of the position balance constraints are the [[LP Duality and Clearing Prices|clearing prices]], and all economic properties (uniform clearing prices, price normalization, group consistency) emerge automatically from LP duality. No post-hoc enforcement is needed.
+The problem size scales linearly in orders, markets, and groups. HiGHS (used by [[LP Solver]]) solves the core efficiently. Balance-constraint duals become [[LP Duality and Clearing Prices|clearing prices]] and minting stationarity produces price coherence; the verifier still checks the landed integer result.
 
 ## Key Properties
 - Variables: `q_i` (fills), `mint_m` (per-market), `gmint_g` (group) — all continuous, bounded

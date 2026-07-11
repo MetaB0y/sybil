@@ -3,12 +3,17 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-04-26
+last_verified: 2026-07-11
 ---
 
-The old broad mempool has been narrowed into a deferred-submission buffer. Simple single-market, non-MM orders are admitted directly into the [[Pending Orders and TTL|resting order book]] at submission time, after validation and capital reservation. That makes them visible immediately and eligible for the next [[Block Lifecycle|block]] without waiting in an unvalidated queue.
+# Order admission
 
-Submissions that cannot be safely admitted one order at a time still use the deferred path: MM-constrained orders, multi-order bundles, and multi-market orders. They are durably appended to `PENDING_BUNDLES` and drained into the next block. This preserves batch-local semantics for flash liquidity, bundle atomicity, and group self-trade prevention.
+> [!summary] In one paragraph
+> Admission has two durable paths for supported single-market orders. Simple non-MM orders are validated, capital-reserved, and inserted into the resting book immediately. MM-constrained or multi-order submissions are deferred to the next block so they can be validated atomically. Unsupported multi-market/custom payoff shapes are rejected, not deferred. Layered limits protect the actor before work becomes mailbox pressure.
+
+Simple single-market, non-MM orders are admitted directly into the [[Pending Orders and TTL|resting order book]] at submission time, after validation and capital reservation. That makes them visible immediately and eligible for the next [[Block Lifecycle|block]] without waiting in an unvalidated queue.
+
+Supported submissions that cannot be safely admitted one order at a time still use the deferred path: MM-constrained orders and multi-order bundles of supported single-market orders. They are durably appended to `PENDING_BUNDLES` and drained into the next block. This preserves flash-liquidity, atomicity, and group self-trade-prevention semantics. Multi-market/custom payoff execution is rejected at API, admission, solver, and verifier boundaries.
 
 Admission has lightweight backpressure before either path mutates state:
 
@@ -25,7 +30,8 @@ graph TB
     API["REST API<br/>POST /v1/orders"]
     API --> LIMITS["Admission limits<br/>HTTP + sequencer"]
     LIMITS --> DIRECT["Direct admit<br/>single-market non-MM"]
-    LIMITS --> DEFER["Deferred bundles<br/>MM · bundles · multi-market"]
+    LIMITS --> DEFER["Deferred submissions<br/>MM · supported multi-order"]
+    LIMITS --> REJECT["Reject unsupported<br/>multi-market / custom"]
     DIRECT --> BOOK["Resting order book"]
     DEFER --> PROBLEM["Next block problem"]
     BOOK -->|"re-validate"| PROBLEM
@@ -33,7 +39,8 @@ graph TB
 
 ## Key Properties
 - Simple single-market non-MM orders are validated, reserved, and visible immediately
-- Deferred buffer is only for MM / bundle / multi-market submissions
+- Deferred buffer is for MM-constrained and supported multi-order submissions
+- Unsupported multi-market/custom shapes are rejected before value execution
 - Deferred submissions are persisted before the API returns success
 - MM quotes are one-shot — never carried over to the next batch
 - Admission backpressure is generous by default and only affects abnormal load
@@ -47,5 +54,5 @@ graph TB
 ## See Also
 - [[Block Lifecycle]] — deferred submissions are merged at block production
 - [[Actor Mailbox Monitoring]] — queue-depth metrics and alerts for actor backpressure
-- [[Pending Orders and TTL]] — unfilled orders that bypass the mempool on re-inclusion
+- [[Pending Orders and TTL]] — unfilled orders that stay in the resting book
 - [[REST API]] — how orders enter the sequencer

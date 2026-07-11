@@ -73,7 +73,7 @@ Tuning env vars: `AUTORESOLVE_POLL_INTERVAL_SECS`, `AUTORESOLVE_CONFIDENCE_PROPO
 | `polymarket/types.rs` | Gamma event/market types, WS message types |
 | `polymarket/gamma.rs` | Gamma REST client, CLOB midpoint client |
 | `polymarket/ws.rs` | CLOB WebSocket price feed |
-| `sybil/client.rs` | Legacy Sybil HTTP client surface; shared Rust client lives in `sybil-client` |
+| `sybil-client` crate | Shared Sybil REST/WebSocket client used by every actor |
 | `sync.rs` | SyncActor |
 | `feed.rs` | FeedActor |
 | `mm.rs` | MmActor |
@@ -94,7 +94,7 @@ cargo run --release -p sybil-polymarket -- --sybil-url http://localhost:3000 --m
 
 ## Key Design Decisions
 
-- **No sybil crate imports**: This crate is a standalone HTTP client. Sybil DTOs are duplicated in `sybil/types.rs`.
+- **API client boundary**: This process shares only the `sybil-client`/wire crates with the exchange; it never imports sequencer or solver state.
 - **Watch channel for prices**: Single-writer (FeedActor), multiple-reader pattern. Always has the latest snapshot.
 - **Flash liquidity**: MM submits all orders with `mm_budget_nanos` — the solver picks the welfare-optimal subset.
 - **WebSocket reconnect**: Proactive reconnect every 15 minutes to preempt Polymarket's known 18-22 minute zombie connection bug.

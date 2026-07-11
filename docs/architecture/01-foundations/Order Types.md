@@ -3,7 +3,7 @@ tags: [concept]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-01
+last_verified: 2026-07-11
 ---
 
 Users submit orders through the [[REST API]] using the `OrderSpec` enum — a user-friendly representation that gets converted to [[Payoff Vectors]] internally. The conversion happens at the API boundary: the user thinks in terms of "buy YES on market 3 at 55 cents for 10 shares," and the system converts this to a payoff vector over atomic states with a limit price in [[Nanos and Integer Arithmetic|nanos]] and a quantity in fixed-point share-units (`10 shares = 10_000` units).
@@ -12,7 +12,10 @@ The order types span from simple to fully custom. **BuyYes/BuyNo/SellYes/SellNo*
 
 The API exposes time-in-force names, but the core order model is expiry-only. `GTC` maps to no user expiry and may rest until cancelled or until the system TTL expires. `GTD` maps to a client-supplied `expires_at_block`, capped by the system TTL. `IOC` is immediate-or-cancel in FBA terms: the API maps it to the next eligible batch height, so any unfilled remainder is cancelled after that batch. Signed orders commit to the resolved `expires_at_block`; a signed IOC is therefore just a signed one-batch expiry.
 
-The conversion to payoff vectors is the key architectural insight. The solver never sees "BuyYes" or "Spread" — it just sees vectors and limit prices. This means adding a new order type (say, a butterfly or a conditional) only requires writing a new conversion function, not modifying the solver. The order builder in `matching-engine` provides factory functions for common patterns: `simple_yes_buy`, `spread`, `bundle_yes`, `butterfly`, `conditional_buy`. Each produces the same `Order` struct with a payoff array — the solver is agnostic to how it was created.
+The conversion to payoff vectors is the key architectural insight. The order builder in `matching-engine` provides factory functions for common patterns: `simple_yes_buy`, `spread`, `bundle_yes`, `butterfly`, and `conditional_buy`. Each produces the same `Order` struct, keeping the API and settlement model unified even where a solver supports only a subset of shapes.
+
+> [!warning] Current clearing limit
+> The API and engine can construct multi-market vectors, but the active LP-family and MILP implementations assert single-market binary orders. A new API shape may reuse the domain type, but multi-market execution still requires solver work.
 
 ## Key Properties
 - `OrderSpec` enum: BuyYes, BuyNo, SellYes, SellNo, Spread, BundleYes, BundleSell, Custom

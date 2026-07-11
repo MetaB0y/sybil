@@ -12,7 +12,7 @@ The **matching-sequencer** crate is the multi-batch block sequencer. It orchestr
 
 Before modifying this crate, read these vault notes (`docs/architecture/`):
 - [[Block Lifecycle]] — batch collection, solving, settlement, sealed block
-- [[Mempool]] — order buffering, segregation, and drain limits
+- [[Order Admission]] — order buffering, segregation, and drain limits
 - [[Settlement]] — fill settlement logic (simple and generic)
 - [[Fractional Quantities]] — `Qty` is fixed-point share-units
 - [[Pending Orders and TTL]] — cross-batch order persistence and expiry

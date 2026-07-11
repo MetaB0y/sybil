@@ -2,7 +2,7 @@
 tags: [concept, economics]
 layer: core
 status: current
-last_verified: 2026-07-01
+last_verified: 2026-07-11
 ---
 
 # Fractional Quantities
@@ -46,7 +46,7 @@ Rounding is a protocol decision, not a UI decision. The default rule should be c
 - API request/response schemas and generated clients
 - Python SDK convenience helpers and frontend display formatting
 
-The important invariant is that every protocol boundary agrees on the unit. Current Rust API DTOs still use the legacy field names `quantity`, `max_fill`, `fill_qty`, and `remaining_quantity`, but their values are share-units. User-facing clients such as the Python SDK and frontend convert between display shares and protocol units at their boundary.
+The important invariant is that every protocol boundary agrees on the unit. Rust API DTO fields such as `quantity`, `max_fill`, `fill_qty`, and `remaining_quantity` contain share-units. User-facing clients convert between display shares and protocol units at their boundary.
 
 ## API Shape
 

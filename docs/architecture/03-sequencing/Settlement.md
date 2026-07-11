@@ -20,7 +20,7 @@ from the witness. Synthetic orders/fills are not part of canonical block output:
 they would not correspond to a submitted order, an account signature, or an
 event-root leaf.
 
-Market resolution is also handled through settlement. When a market resolves via the [[Oracle Lifecycle|oracle]] (see [[Market Resolution]]), YES shares pay out `yes_payout_nanos` per share and NO shares pay out `NANOS_PER_DOLLAR - yes_payout_nanos`. Fractional resolution is supported — a market can resolve 70/30 instead of binary 100/0 — which allows for nuanced outcomes. Resolution is irreversible: once settled, positions are converted to balance and the market is marked as resolved. Resolutions are also emitted as `system_events` in the next block so the witness explains why pre-state changed between blocks. The [[Four-Layer Verification|settlement verification layer]] independently re-derives the post-state from pre-state plus fills to confirm correctness.
+Market resolution is also handled through settlement. When a market resolves via the [[Market Resolution|oracle]] (see [[Market Resolution]]), YES shares pay out `yes_payout_nanos` per share and NO shares pay out `NANOS_PER_DOLLAR - yes_payout_nanos`. Fractional resolution is supported — a market can resolve 70/30 instead of binary 100/0 — which allows for nuanced outcomes. Resolution is irreversible: once settled, positions are converted to balance and the market is marked as resolved. Resolutions are also emitted as `system_events` in the next block so the witness explains why pre-state changed between blocks. The [[Four-Layer Verification|settlement verification layer]] independently re-derives the post-state from pre-state plus fills to confirm correctness.
 
 ```mermaid
 flowchart TB
@@ -55,5 +55,5 @@ flowchart TB
 - [[Four-Layer Verification]] — Layer 2 independently verifies settlement
 - [[Fill History Persistence]] — durable per-account records derived from settled fills
 - [[Market Resolution]] — the oracle-triggered resolution process
-- [[Oracle Lifecycle]] — the state machine that triggers resolution decisions
+- [[Market Resolution]] — the state machine that triggers resolution decisions
 - [[Pending Orders and TTL]] — unfilled orders persist after settlement for future batches

@@ -38,7 +38,7 @@ sybil/
 │   ├── architecture-diagrams.md   #   [superseded] System overview diagrams
 │   ├── solver-benchmarks.md       #   Comparative solver evaluation
 │   └── welfare-vs-volume.md       #   Optimization objective tradeoffs (deep-dive)
-├── docs/architecture/             # Obsidian vault — canonical architecture spec (~35 notes)
+├── docs/architecture/             # Canonical architecture vault, grouped into numbered sections
 ├── scripts/check-vault.sh         # Vault validation (links, frontmatter, staleness)
 ├── AGENTS.md                      # This file
 ├── justfile                       # Task runner (run `just` to see all commands)
@@ -127,7 +127,7 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 - **Welfare maximization**: The objective is `Σ (limit_price - clearing_price) * fill_qty`, not volume.
 - **Fisher market structure**: MM budgets can be absorbed into the EG objective (no explicit budget constraints). See `paper.typ` in `~/github/prediction-markets-are-fisher-markets/` (pointer: `design/math-papers.md`).
 - **Verification** (`verifier.rs`): Validates solver output for correctness — designed for ZK proof integration.
-- **All integer arithmetic**: No floating point. Prices/quantities in nanos (1 dollar = 1,000,000,000 nanos).
+- **Integer protocol truth**: Prices, quantities, settlement, commitments, and verification use integers. Optimization libraries may search in floating point; only landed integer outputs are trusted.
 
 ## Architecture Knowledge Base
 
@@ -147,7 +147,7 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. ~
 |-------|-------|
 | Core model | Payoff Vectors, Binary Markets and Market Groups, Nanos and Integer Arithmetic, Order Types |
 | Solvers | Solver Landscape, LP Solver, EG Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
-| Sequencer | Block Lifecycle, Mempool, Settlement, Pending Orders and TTL |
+| Sequencer | Block Lifecycle, Order Admission, Settlement, Pending Orders and TTL |
 | API | REST API, SSE Block Stream, P256 Authentication |
 | Oracle | Oracle Lifecycle, Market Resolution |
 | Verification | Four-Layer Verification, Block Witness, ZK Integration Path |
@@ -191,7 +191,7 @@ just deploy-shell                  # SSH into server
 
 ## Development Notes
 
-- Do not use floating point numbers, use u64 etc.
+- Do not introduce floating point into protocol state, settlement, commitments, or verification. Solver-internal search may use it behind the integer landing/verifier boundary.
 - Use proptest for property-based/metamorphic tests but only where it makes sense
 - Always think about boundaries and reducing accidental complexity -- avoid tight coupling unless necessary
 - Prefer actor model using this pattern https://ryhl.io/blog/actors-with-tokio/ to mutex etc.

@@ -20,8 +20,9 @@ they explain almost everything.
 
 ## The one-paragraph version
 
-Orders arrive and wait in a mempool. Once per block the exchange takes every
-pending order and clears them **all at once** with a welfare-maximizing solver —
+Simple orders are validated and reserved in a resting book; atomic bundles and
+MM submissions are durably deferred to the next block. Once per block the
+exchange takes every eligible order and clears them **all at once** with a welfare-maximizing solver —
 no first-mover advantage, everyone in the batch gets the same price. The result
 (fills, prices, new balances) is sealed into a **block** with a cryptographic
 **state root**. A **verifier** re-derives that block from first principles, and a
@@ -34,9 +35,9 @@ bots that compete through the same public API.
 ```mermaid
 graph LR
     T["Traders &<br/>Bots"] -->|"signed orders (HTTP)"| API
-    subgraph core["Core exchange (Rust, all-integer)"]
-        API["API + WS stream"] --> MP["Mempool"]
-        MP --> SOLVE["Batch solve<br/>(welfare-max)"]
+    subgraph core["Core exchange (Rust, integer protocol truth)"]
+        API["API + WS stream"] --> MP["Admission<br/>resting + deferred"]
+        MP --> SOLVE["Batch solve<br/>(float search, integer landing)"]
         SOLVE --> SETTLE["Settle"]
         SETTLE --> BLOCK["Sealed block<br/>+ state root"]
         ORACLE["Oracle"] -.->|resolve| SETTLE
@@ -76,18 +77,19 @@ split is why the exchange can be both quick and **bit-for-bit reproducible** —
 essential for a system that gets proven. → [[Nanos and Integer Arithmetic]],
 [ADR-0004](adr/0004-float-search-integer-truth.md)
 
-**4. Every block is proven — the operator earns no trust.**
+**4. Every block is built to be proven — correctness need not trust the operator.**
 The same state-transition code runs natively *and* inside a zero-knowledge VM, so
-a block is checked by an independent verifier and then attested by a succinct
-proof on Ethereum. Correctness is a *property of the system*, not a promise. →
+a block is checked by an independent verifier and can be attested by a succinct
+proof on Ethereum. Native/guest verification and the contract path exist;
+production prover and verifier-adapter deployment are still operational work. →
 [[Four-Layer Verification]], [ADR-0003](adr/0003-guest-host-crate-split.md),
 [ADR-0006](adr/0006-witness-v3-full-snapshot.md)
 
-**5. Your money can always leave — even if the operator turns hostile.**
+**5. The architecture has conservative recovery and escape paths.**
 Because every block publishes enough data to rebuild the full state, a
-*replacement operator* can take over on the last good root (positions survive),
-and any user can prove their cash balance on L1 and withdraw it directly (an
-"escape claim") — no permission required. → [[L1 Settlement and Vault]],
+replacement tooling can rebuild the last good root, and the escape-claim path
+can prove a conservative cash floor on L1. Disaster recovery is implemented;
+hostile-operator replacement still needs governance and production DA. → [[L1 Settlement and Vault]],
 [ADR-0005](adr/0005-escape-via-operator-replacement.md)
 
 **6. Bots are first-class — the exchange is an agent arena.**

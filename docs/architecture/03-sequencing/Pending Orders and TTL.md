@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-04-10
+last_verified: 2026-07-11
 ---
 
 Not every order fills in its first batch. When a durable order isn't matched — perhaps the clearing price moved away from its limit, or there wasn't enough counterparty liquidity — the unfilled remainder becomes a **resting order** in the order book, automatically re-included in each subsequent [[Block Lifecycle|batch]] until it fills, expires, or is cancelled.
@@ -40,6 +40,6 @@ This design ensures that the "available balance" (`balance - reserved`) is alway
 
 ## See Also
 - [[Block Lifecycle]] — resting orders are expired and revalidated at block start
-- [[Mempool]] — deferred-submission buffering for orders that cannot be directly admitted
+- [[Order Admission]] — deferred-submission buffering for orders that cannot be directly admitted
 - [[Frequent Batch Auctions]] — the batching context for order persistence
-- [[Persistence]] — Tier 2 will persist the order book across restarts
+- [[Persistence]] — resting orders and reservations survive restarts

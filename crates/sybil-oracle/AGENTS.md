@@ -9,7 +9,7 @@ The **sybil-oracle** crate provides a pluggable resolution system for prediction
 ## Architecture Notes
 
 Before modifying this crate, read these vault notes (`docs/architecture/`):
-- [[Oracle Lifecycle]] — resolution flow: propose, challenge, finalize
+- [[Market Resolution]] — resolution flow: propose, challenge, finalize
 - [[Market Resolution]] — payout model and fractional resolution
 
 ## Market Lifecycle

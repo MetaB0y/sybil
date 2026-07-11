@@ -2,7 +2,7 @@
 tags: [arena]
 layer: arena
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-07-11
 ---
 
 The bot framework is a Python base class pattern for building trading agents. Every bot extends `BaseAgent` and implements a single method: `on_block(block: Block) -> list[OrderSpec]`. When a new block arrives via the [[SSE Block Stream]], the framework calls `on_block()` and submits any returned orders via the [[Python SDK]]. This event-driven design means bots are reactive — they make decisions in response to market state changes.

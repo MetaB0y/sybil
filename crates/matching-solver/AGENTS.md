@@ -27,7 +27,7 @@ Before modifying this crate, read these vault notes (`docs/architecture/`):
 | **ConicSolver** | `conic_solver.rs` | `conic` | Conic EG via Clarabel. |
 | **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Iterative LP with EG μ-boosted MM weights. |
 | **MilpSolver** | `milp.rs` | `milp` | MIQCQP via SCIP (russcip). Exact optimal with timeout. |
-| **DecomposedSolver** | `decomposed.rs` | `lp` (+`parallel`) | Per-market-group decomposition with mirror descent budget coordination. Wraps any ComponentSolver. |
+| **DecomposedSolver** | `decomposed.rs` | `lp` (+`parallel`) | Per-market-group decomposition with proportional-response budget coordination. Wraps any `Solver`. |
 
 All solvers return a `PipelineResult` which contains `MatchingResult` (fills + welfare), clearing prices, and timing data.
 
@@ -41,7 +41,6 @@ All solvers return a `PipelineResult` which contains `MatchingResult` (fills + w
 | `eg_solver.rs` | Eisenberg-Gale solver |
 | `conic_solver.rs` | Conic solver via Clarabel |
 | `milp.rs` | SCIP-based MIQCQP solver |
-| `verifier.rs` | Result verification for ZK integration |
 | `decomposed.rs` | Per-market-group decomposition with rayon parallelism (`parallel` feature) |
 | `viz.rs` | Visualization snapshots and ASCII output |
 
@@ -54,8 +53,8 @@ cargo test -p matching-solver --features lp,conic,milp  # All solvers
 
 ## Design Principles
 
-- **All integer arithmetic**: Prices/quantities in nanos (1 dollar = 1,000,000,000 nanos)
+- **Integer protocol output**: Solvers search in floating point; landed prices/quantities and trusted welfare use integers
 - **Payoff vectors**: Orders are payoff vectors over market states (single-market binary for now)
 - **Welfare maximization**: Objective is `Σ (limit_price - clearing_price) * fill_qty`
 - **Group minting**: LP/EG/Conic handle cross-market arbitrage via gmint variables
-- **Verification**: `verifier.rs` validates solver output for correctness (ZK-ready)
+- **Verification**: `sybil-verifier` is the single trusted verifier and owns the net-of-minting welfare definition

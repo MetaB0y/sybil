@@ -437,7 +437,7 @@ docs-check:
 
 # List notes with last_verified > 90 days
 docs-stale:
-    @for f in docs/architecture/*.md; do \
+    @find docs/architecture -type f -name '*.md' -print | sort | while IFS= read -r f; do \
         lv="$(awk '/^---$/{n++; next} n==1 && /^last_verified:/{print $2; exit}' "$f")"; \
         [ -z "$lv" ] && continue; \
         days=$(( ($(date +%s) - $(date -d "$lv" +%s 2>/dev/null || echo $(date +%s))) / 86400 )); \
@@ -446,14 +446,14 @@ docs-stale:
 
 # Search vault content
 docs-search term:
-    @grep -rni "{{term}}" docs/architecture/*.md --include='*.md' | sed 's|docs/architecture/||'
+    @grep -rni "{{term}}" docs/architecture --include='*.md' | sed 's|docs/architecture/||'
 
 # List all notes with layer + status
 docs-list:
-    @for f in docs/architecture/*.md; do \
+    @find docs/architecture -type f -name '*.md' -print | sort | while IFS= read -r f; do \
         layer="$(awk '/^---$/{n++; next} n==1 && /^layer:/{print $2; exit}' "$f")"; \
         status="$(awk '/^---$/{n++; next} n==1 && /^status:/{print $2; exit}' "$f")"; \
-        printf "  %-12s %-12s %s\n" "$layer" "$status" "$(basename "$f" .md)"; \
+        printf "  %-12s %-12s %s\n" "$layer" "$status" "${f#docs/architecture/}"; \
     done
 
 # Rename note and update wiki-links (requires notesmd-cli)

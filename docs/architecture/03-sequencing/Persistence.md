@@ -319,6 +319,7 @@ Do not add state to both stores unless there is a clear authority boundary and r
 
 ## Related Notes
 
+- [[Acknowledged-Write WAL Replay]] — table inventory, replay dependencies, and fixed ordering
 - [[Block Lifecycle]] — the transactional unit we persist at
 - [[Settlement]] — what mutates committed state
 - [[State Root and Parent Hash]] — integrity verification of committed state

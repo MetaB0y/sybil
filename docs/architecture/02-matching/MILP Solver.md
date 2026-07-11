@@ -3,14 +3,14 @@ tags: [solver, crate]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-03-15
+last_verified: 2026-07-11
 ---
 
-The MILP Solver is the only solver that finds the exact global optimum. It formulates the full matching problem — including [[MM Budget Constraint|MM budget constraints]] — as a Mixed-Integer Quadratically Constrained Program (MIQCQP) and solves it using SCIP, a state-of-the-art academic optimization solver accessed through the `russcip` Rust bindings.
+The MILP Solver formulates matching plus [[MM Budget Constraint|MM budget constraints]] as a mixed-integer quadratically constrained program and solves it with SCIP through `russcip`. It is the exact/reference route when SCIP reaches a proven optimum; with a timeout it may return the best feasible solution found so far.
 
 The bilinear `price * quantity` terms in MM budgets are handled natively by SCIP's branch-and-bound algorithm. Where the [[LP Solver]] approximates via iterative shading and the [[EG Solver]] relaxes via log-utility absorption, the MILP solver simply gives SCIP the exact non-convex problem and lets it find the global optimum through systematic enumeration with pruning. This is NP-hard in general, but with only 2-10 MMs the branching tree is manageable. A configurable timeout (default 60 seconds) ensures the solver doesn't run forever on pathological instances — it returns the best solution found so far.
 
-The MILP solver's particular strength is exploiting [[Minting|group minting]] structure. Because it models the full combinatorial space, it can find group minting opportunities that heuristic solvers miss — cases where minting across an entire [[Binary Markets and Market Groups|market group]] enables fills that per-market minting cannot. This advantage grows with the number of markets per group. The solver is feature-gated behind the `milp` feature flag because SCIP has external library dependencies that not all environments can satisfy. It's primarily used for benchmarking and validation: solving a batch with the MILP solver and comparing against the [[LP Solver]] output confirms how close the heuristic is to optimal.
+The solver is feature-gated because SCIP has external dependencies. Its primary role is benchmarking and validation against faster heuristics. The current implementation, like the LP family, asserts single-market binary orders.
 
 ## Key Properties
 - SCIP via `russcip` — MIQCQP branch-and-bound

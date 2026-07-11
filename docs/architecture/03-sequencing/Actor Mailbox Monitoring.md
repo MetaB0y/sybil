@@ -32,5 +32,5 @@ The same metric name is intentionally generic. Future bounded-channel actors suc
 
 ## See Also
 - [[REST API]] — API-to-sequencer message flow
-- [[Mempool]] — admission backpressure before mailbox pressure
+- [[Order Admission]] — admission backpressure before mailbox pressure
 - [[Block Lifecycle]] — actor tick and block production
