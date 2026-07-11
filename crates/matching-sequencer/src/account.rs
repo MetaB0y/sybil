@@ -6,8 +6,11 @@ use matching_engine::MarketId;
 /// records deliberately count toward this cap: keeping tombstones preserves
 /// stable ids/audit history while making add/revoke churn permanently bounded.
 pub const MAX_API_KEYS_PER_ACCOUNT: usize = 64;
-/// Labels are metadata, not an unbounded account-storage channel.
+/// Read-key labels are metadata, not an unbounded account-storage channel.
 pub const MAX_API_KEY_LABEL_BYTES: usize = 128;
+/// Signing-key labels share the read-key metadata budget. This is a UTF-8 byte
+/// limit; callers must not trim or normalize labels before applying it.
+pub const MAX_SIGNING_KEY_LABEL_BYTES: usize = MAX_API_KEY_LABEL_BYTES;
 /// Admission ceiling for the complete MessagePack-encoded recovery account.
 /// qMDB accepts 1 MiB values; 256 KiB leaves 75% headroom for codec/schema
 /// overhead and future account fields.

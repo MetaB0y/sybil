@@ -245,6 +245,7 @@ impl SequencerActorState {
         pubkey: PublicKey,
         meta: RegisteredPubkey,
     ) -> Result<(), SequencerError> {
+        RegisteredPubkey::validate_label(meta.label.as_deref())?;
         self.sequencer
             .can_register_first_pubkey(account_id, &pubkey)?;
         self.persist_control_plane(&ControlPlaneCommand::RegisterPubkeyWithMeta {
@@ -295,6 +296,7 @@ impl SequencerActorState {
         &mut self,
         authenticated: AuthenticatedKeyRegistration,
     ) -> Result<(), SequencerError> {
+        RegisteredPubkey::validate_label(authenticated.label.as_deref())?;
         // The signer must already be an active key on the target account. This
         // also implies the account has >= 1 key, so the signed path can never be
         // used to bootstrap the very first key (that stays on the service tier).

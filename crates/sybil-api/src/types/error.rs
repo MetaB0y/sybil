@@ -226,6 +226,7 @@ impl From<matching_sequencer::SequencerError> for AppError {
                 AppError::conflict(format!("{err}"))
             }
             matching_sequencer::SequencerError::ApiKeyLabelTooLong { .. }
+            | matching_sequencer::SequencerError::SigningKeyLabelTooLong { .. }
             | matching_sequencer::SequencerError::AccountStorageBudgetExceeded { .. } => {
                 AppError::bad_request(format!("{err}"))
             }

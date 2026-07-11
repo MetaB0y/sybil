@@ -38,6 +38,9 @@ authoritative today; scoped delegation is not active.
 ## Bootstrap and key mutation
 
 - Account creation can atomically install its initial key.
+- Initial and additional signing-key labels are optional metadata limited to
+  128 UTF-8 bytes. Admission measures the original bytes without trimming or
+  normalization and rejects oversized labels before account/key/WAL mutation.
 - `POST /v1/accounts/{id}/keys` is service-gated and can bootstrap only an
   account with zero keys.
 - Additional keys use `POST /v1/accounts/{id}/keys/register`; revocation uses

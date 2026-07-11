@@ -594,6 +594,186 @@ async fn webauthn_keyop_register_and_revoke_fixture_seals_valid_block() {
 
 // --- SYB-229 signed key registration ---------------------------------------
 
+#[tokio::test]
+async fn atomic_onboarding_rejects_oversized_signing_key_labels_without_allocating_account() {
+    let (app, handle) = test_app(true).await;
+    let primary = signing_key(80);
+    let cap = matching_sequencer::MAX_SIGNING_KEY_LABEL_BYTES;
+
+    for label in ["x".repeat(cap + 1), "é".repeat(cap / 2 + 1)] {
+        let (status, body) = post_json(
+            app.clone(),
+            "/v1/accounts",
+            json!({
+                "initial_balance_nanos": 100u64,
+                "initial_key": {
+                    "public_key_hex": pubkey_hex(&primary),
+                    "label": label,
+                }
+            }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{}",
+            String::from_utf8_lossy(&body)
+        );
+        assert!(
+            handle.get_account(AccountId(0)).await.unwrap().is_none(),
+            "invalid initial-key metadata must not allocate an account"
+        );
+    }
+
+    let exact = "é".repeat(cap / 2);
+    assert_eq!(exact.len(), cap);
+    let (status, body) = post_json(
+        app,
+        "/v1/accounts",
+        json!({
+            "initial_balance_nanos": 100u64,
+            "initial_key": {
+                "public_key_hex": pubkey_hex(&primary),
+                "label": exact,
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(parse(&body)["account_id"], 0);
+    let keys = handle.signing_keys_for_account(AccountId(0)).await.unwrap();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].1.label.as_deref(), Some(exact.as_str()));
+}
+
+#[tokio::test]
+async fn first_key_bootstrap_label_limit_precedes_key_mutation() {
+    let (app, handle) = test_app(true).await;
+    let (status, body) = post_with_bearer(
+        app.clone(),
+        "/v1/accounts",
+        SERVICE_TOKEN,
+        json!({ "initial_balance_nanos": 0u64 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let account_id = parse(&body)["account_id"].as_u64().unwrap();
+    let before = handle
+        .get_account(AccountId(account_id))
+        .await
+        .unwrap()
+        .unwrap();
+    let primary = signing_key(81);
+    let cap = matching_sequencer::MAX_SIGNING_KEY_LABEL_BYTES;
+
+    let (status, body) = post_with_bearer(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/keys"),
+        SERVICE_TOKEN,
+        json!({
+            "public_key_hex": pubkey_hex(&primary),
+            "label": "x".repeat(cap + 1),
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    assert!(
+        handle
+            .signing_keys_for_account(AccountId(account_id))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let after = handle
+        .get_account(AccountId(account_id))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.last_nonce, before.last_nonce);
+    assert_eq!(after.keys_digest, before.keys_digest);
+    assert_eq!(after.events_digest, before.events_digest);
+
+    let exact = "x".repeat(cap);
+    let (status, body) = post_with_bearer(
+        app,
+        &format!("/v1/accounts/{account_id}/keys"),
+        SERVICE_TOKEN,
+        json!({
+            "public_key_hex": pubkey_hex(&primary),
+            "label": exact,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let keys = handle
+        .signing_keys_for_account(AccountId(account_id))
+        .await
+        .unwrap();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].1.label.as_deref(), Some(exact.as_str()));
+}
+
+#[tokio::test]
+async fn signed_additional_key_label_limit_preserves_key_state_and_nonce() {
+    let (app, handle) = test_app(true).await;
+    let (account_id, primary) = account_with_key(&app, 82).await;
+    let genesis = ensure_genesis(&handle).await;
+    let candidate = signing_key(83);
+    let before = handle
+        .get_account(AccountId(account_id))
+        .await
+        .unwrap()
+        .unwrap();
+    let cap = matching_sequencer::MAX_SIGNING_KEY_LABEL_BYTES;
+
+    let status = register_extra_key(
+        &app,
+        account_id,
+        &primary,
+        &candidate,
+        &"x".repeat(cap + 1),
+        1,
+        genesis,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let after = handle
+        .get_account(AccountId(account_id))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.last_nonce, before.last_nonce);
+    assert_eq!(after.keys_digest, before.keys_digest);
+    assert_eq!(after.events_digest, before.events_digest);
+    assert_eq!(
+        handle
+            .signing_keys_for_account(AccountId(account_id))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let exact = "é".repeat(cap / 2);
+    let status =
+        register_extra_key(&app, account_id, &primary, &candidate, &exact, 2, genesis).await;
+    assert_eq!(status, StatusCode::OK);
+    let keys = handle
+        .signing_keys_for_account(AccountId(account_id))
+        .await
+        .unwrap();
+    assert_eq!(keys.len(), 2);
+    assert!(
+        keys.iter()
+            .any(|(_, meta)| meta.label.as_deref() == Some(exact.as_str()))
+    );
+}
+
 /// A fresh account rejects a SECOND unsigned key over the (now service-tier,
 /// dev-bypassed) first-key endpoint — the unsigned path is first-key only.
 #[tokio::test]

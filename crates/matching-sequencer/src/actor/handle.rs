@@ -2757,6 +2757,134 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oversized_signing_key_labels_are_rejected_before_wal_and_state_mutation() {
+        let path = temp_store_path("signing-key-label-limit");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(600),
+            ..SequencerConfig::default()
+        };
+        let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
+        sequencer.produce_block(Vec::new(), 1);
+        store.save_block(sequencer.snapshot()).await.unwrap();
+        let restored = store.load_state().await.unwrap().unwrap();
+        let sequencer = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+        let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+        let account = handle.create_account(0).await.unwrap();
+        let primary =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let oversized = "x".repeat(crate::account::MAX_SIGNING_KEY_LABEL_BYTES + 1);
+
+        let before = handle.get_account(account.id).await.unwrap().unwrap();
+        let error = handle
+            .register_pubkey_with_meta(
+                account.id,
+                PublicKey(*primary.verifying_key()),
+                crate::crypto::RegisteredPubkey {
+                    account_id: account.id,
+                    auth_scheme: AccountAuthScheme::RawP256,
+                    label: Some(oversized.clone()),
+                    scope: crate::crypto::KeyScope::Primary,
+                    created_at_ms: 1,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            SequencerError::SigningKeyLabelTooLong { .. }
+        ));
+        assert!(
+            handle
+                .signing_keys_for_account(account.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let after = handle.get_account(account.id).await.unwrap().unwrap();
+        assert_eq!(after.last_nonce, before.last_nonce);
+        assert_eq!(after.keys_digest, before.keys_digest);
+        assert_eq!(after.events_digest, before.events_digest);
+        assert_eq!(
+            store
+                .load_state()
+                .await
+                .unwrap()
+                .unwrap()
+                .control_plane_log
+                .len(),
+            1,
+            "only account creation may enter the WAL"
+        );
+
+        handle
+            .register_pubkey_with_meta(
+                account.id,
+                PublicKey(*primary.verifying_key()),
+                crate::crypto::RegisteredPubkey {
+                    account_id: account.id,
+                    auth_scheme: AccountAuthScheme::RawP256,
+                    label: Some("primary".to_string()),
+                    scope: crate::crypto::KeyScope::Primary,
+                    created_at_ms: 2,
+                },
+            )
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let candidate =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let before = handle.get_account(account.id).await.unwrap().unwrap();
+        let signed = crate::crypto::sign_key_registration(
+            account.id,
+            PublicKey(*candidate.verifying_key()),
+            AccountAuthScheme::RawP256,
+            Some(oversized),
+            crate::crypto::KeyScope::Agent,
+            before.keys_digest,
+            before.events_digest,
+            genesis_hash,
+            &primary,
+        );
+        let error = handle.register_key_signed(signed).await.unwrap_err();
+        assert!(matches!(
+            error,
+            SequencerError::SigningKeyLabelTooLong { .. }
+        ));
+        assert_eq!(
+            handle
+                .signing_keys_for_account(account.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let after = handle.get_account(account.id).await.unwrap().unwrap();
+        assert_eq!(after.last_nonce, before.last_nonce);
+        assert_eq!(after.keys_digest, before.keys_digest);
+        assert_eq!(after.events_digest, before.events_digest);
+        assert!(
+            store
+                .load_state()
+                .await
+                .unwrap()
+                .unwrap()
+                .control_plane_log
+                .is_empty(),
+            "rejected signed registration must not append a WAL row"
+        );
+
+        drop(handle);
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn onboarding_bootstrap_then_signed_key_allows_no_later_bootstrap() {
         let (sequencer, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(sequencer);

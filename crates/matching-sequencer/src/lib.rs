@@ -28,7 +28,7 @@ mod crash_harness;
 
 pub use account::{
     Account, AccountId, AccountProfile, AccountStore, ApiKeyRecord, MAX_API_KEY_LABEL_BYTES,
-    MAX_API_KEYS_PER_ACCOUNT, MAX_SERIALIZED_ACCOUNT_BYTES,
+    MAX_API_KEYS_PER_ACCOUNT, MAX_SERIALIZED_ACCOUNT_BYTES, MAX_SIGNING_KEY_LABEL_BYTES,
 };
 pub use account_storage::{
     AccountSnapshotSlot, QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts,

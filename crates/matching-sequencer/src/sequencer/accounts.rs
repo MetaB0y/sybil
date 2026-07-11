@@ -36,6 +36,7 @@ impl BlockSequencer {
         pubkey: crate::crypto::PublicKey,
         mut meta: crate::crypto::RegisteredPubkey,
     ) -> Result<(), SequencerError> {
+        crate::crypto::RegisteredPubkey::validate_label(meta.label.as_deref())?;
         if self.height != 0 {
             return Err(SequencerError::FirstKeyMustBeInitial);
         }
@@ -136,6 +137,7 @@ impl BlockSequencer {
         pubkey: crate::crypto::PublicKey,
         mut meta: crate::crypto::RegisteredPubkey,
     ) -> Result<(), SequencerError> {
+        crate::crypto::RegisteredPubkey::validate_label(meta.label.as_deref())?;
         self.can_register_first_pubkey(account_id, &pubkey)?;
         self.validate_quarantine_claim_for_account(account_id)?;
         meta.account_id = account_id;
@@ -171,6 +173,7 @@ impl BlockSequencer {
         mut meta: crate::crypto::RegisteredPubkey,
         authorization: sybil_verifier::KeyOpAuth,
     ) -> Result<(), SequencerError> {
+        crate::crypto::RegisteredPubkey::validate_label(meta.label.as_deref())?;
         self.can_register_authorized_pubkey(account_id, &pubkey)?;
         self.validate_quarantine_claim_for_account(account_id)?;
         self.capture_system_account_baseline(account_id);
@@ -378,13 +381,13 @@ impl BlockSequencer {
                 reason: RejectionReason::AccountNotFound,
             })
         })?;
-        if let Some(label) = label {
-            if label.len() > crate::account::MAX_API_KEY_LABEL_BYTES {
-                return Err(SequencerError::ApiKeyLabelTooLong {
-                    bytes: label.len(),
-                    limit: crate::account::MAX_API_KEY_LABEL_BYTES,
-                });
-            }
+        if let Some(label) = label
+            && label.len() > crate::account::MAX_API_KEY_LABEL_BYTES
+        {
+            return Err(SequencerError::ApiKeyLabelTooLong {
+                bytes: label.len(),
+                limit: crate::account::MAX_API_KEY_LABEL_BYTES,
+            });
         }
         if account.api_keys.len() >= crate::account::MAX_API_KEYS_PER_ACCOUNT {
             return Err(SequencerError::ApiKeyLimit {

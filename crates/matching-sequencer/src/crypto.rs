@@ -97,6 +97,19 @@ impl RegisteredPubkey {
             created_at_ms: 0,
         }
     }
+
+    /// Validate the optional persisted label without altering its bytes.
+    pub fn validate_label(label: Option<&str>) -> Result<(), SequencerError> {
+        if let Some(label) = label
+            && label.len() > crate::account::MAX_SIGNING_KEY_LABEL_BYTES
+        {
+            return Err(SequencerError::SigningKeyLabelTooLong {
+                bytes: label.len(),
+                limit: crate::account::MAX_SIGNING_KEY_LABEL_BYTES,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// A signed request to set/clear an account profile (SYB-60).
@@ -811,6 +824,32 @@ mod tests {
 
     fn crypto_rng() -> UnwrapErr<SysRng> {
         UnwrapErr(SysRng)
+    }
+
+    #[test]
+    fn signing_key_label_limit_counts_utf8_bytes_without_rewriting() {
+        let exact = "é".repeat(crate::account::MAX_SIGNING_KEY_LABEL_BYTES / 2);
+        assert_eq!(exact.len(), crate::account::MAX_SIGNING_KEY_LABEL_BYTES);
+        RegisteredPubkey::validate_label(Some(&exact)).unwrap();
+
+        let one_byte_over = "x".repeat(crate::account::MAX_SIGNING_KEY_LABEL_BYTES + 1);
+        assert!(matches!(
+            RegisteredPubkey::validate_label(Some(&one_byte_over)),
+            Err(SequencerError::SigningKeyLabelTooLong { bytes, limit })
+                if bytes == limit + 1 && limit == crate::account::MAX_SIGNING_KEY_LABEL_BYTES
+        ));
+
+        let multibyte_over = format!("{exact}é");
+        assert_eq!(
+            multibyte_over.len(),
+            crate::account::MAX_SIGNING_KEY_LABEL_BYTES + 2
+        );
+        assert!(matches!(
+            RegisteredPubkey::validate_label(Some(&multibyte_over)),
+            Err(SequencerError::SigningKeyLabelTooLong { bytes, limit })
+                if bytes == crate::account::MAX_SIGNING_KEY_LABEL_BYTES + 2
+                    && limit == crate::account::MAX_SIGNING_KEY_LABEL_BYTES
+        ));
     }
 
     #[test]

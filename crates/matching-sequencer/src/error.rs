@@ -189,6 +189,9 @@ pub enum SequencerError {
     /// A read API-key label exceeds its persisted byte limit.
     #[error("API-key label is too long: {bytes} bytes > {limit}")]
     ApiKeyLabelTooLong { bytes: usize, limit: usize },
+    /// A signing-key label exceeds its persisted byte limit.
+    #[error("signing-key label is too long: {bytes} bytes > {limit}")]
+    SigningKeyLabelTooLong { bytes: usize, limit: usize },
     /// A control-plane mutation would make the recovery account too large for
     /// its deliberately conservative qMDB admission budget.
     #[error("serialized account exceeds storage budget: {bytes} bytes > {limit}")]
