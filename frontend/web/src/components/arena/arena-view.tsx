@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type SelectHTMLAttributes,
+} from "react";
 import { BlockBarChart } from "@/components/dev/block-bar-chart";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -68,6 +74,20 @@ const EMPTY_DECISIONS: ArenaDecision[] = [];
 const EMPTY_TOKEN_USAGE: ArenaTokenUsage[] = [];
 
 type Tone = "yes" | "no" | "warn" | "accent" | "dim";
+
+type ArenaFilterSelectProps = Omit<
+  SelectHTMLAttributes<HTMLSelectElement>,
+  "aria-label"
+> & {
+  label: string;
+};
+
+export function ArenaFilterSelect({
+  label,
+  ...props
+}: ArenaFilterSelectProps) {
+  return <select aria-label={label} {...props} />;
+}
 
 function toneColor(tone: Tone): string {
   if (tone === "yes") return "var(--yes)";
@@ -719,7 +739,8 @@ function FvDriftPanel({
         title="FV Drift Monitor"
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <select
+            <ArenaFilterSelect
+              label="Filter fair value drift by bot"
               value={trader}
               onChange={(event) => onSelectTrader(event.target.value)}
               style={{ ...controlStyle, minWidth: 160 }}
@@ -732,8 +753,9 @@ function FvDriftPanel({
                   {name}
                 </option>
               ))}
-            </select>
-            <select
+            </ArenaFilterSelect>
+            <ArenaFilterSelect
+              label="Select fair value drift market"
               value={selectedMarketId}
               onChange={(event) => onSelectMarketId(event.target.value)}
               style={{ ...controlStyle, minWidth: 190 }}
@@ -746,7 +768,7 @@ function FvDriftPanel({
                   {option.marketName}
                 </option>
               ))}
-            </select>
+            </ArenaFilterSelect>
           </div>
         }
       />
@@ -1411,7 +1433,8 @@ function DecisionsPanel({
       <PanelHead
         title="Recent Decisions"
         actions={
-          <select
+          <ArenaFilterSelect
+            label="Filter recent decisions by bot"
             value={selectedTrader}
             onChange={(event) => onSelectTrader(event.target.value)}
             style={controlStyle}
@@ -1422,7 +1445,7 @@ function DecisionsPanel({
                 {name}
               </option>
             ))}
-          </select>
+          </ArenaFilterSelect>
         }
       />
       <PanelBody>
