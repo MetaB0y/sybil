@@ -321,9 +321,14 @@ seconds with a stable restart count and no OOM kill. A separate live probe of
 account 20 returned `GET /v1/accounts/20/keyop-state` as 200 with valid 64-hex
 key and event digests; the deployed OpenAPI contains the route.
 
-The remaining manual check is a real browser WebAuthn ceremony on the `app.`
-host. It is intentionally not represented as complete by the API and curl
-checks above.
+The live browser check subsequently passed in Chromium using Playwright's CDP
+virtual authenticator against the deployed `app.` origin. The journey created
+a resident passkey, disconnected the local session, recovered the same account
+through discoverable passkey sign-in, minted a read-scoped API key, and placed
+a WebAuthn-signed order. This exercised real browser WebAuthn ceremonies and
+the deployed RP/origin/challenge path; it was not a physical-device matrix.
+Agent-key registration/revocation remained covered by the focused integration
+checks described above rather than by this particular live Playwright journey.
 
 ## Gates run in this investigation
 
@@ -341,4 +346,4 @@ checks above.
 | Live post-deploy smoke gate | PASS — 47/47, no skips |
 | Restart-resilience gate | PASS — healthy in 19s, no OOM/restart loop |
 | Live `keyop-state` probe | PASS — 200 with valid 64-hex digests |
-| Live WebAuthn browser ceremony after redeploy | PENDING — requires a real browser authenticator |
+| Live Playwright Chromium WebAuthn journey after redeploy | PASS — CDP virtual authenticator; resident-passkey registration, disconnect, discoverable sign-in to the same account, read-key mint, and WebAuthn-signed order |
