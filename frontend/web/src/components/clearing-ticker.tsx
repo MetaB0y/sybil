@@ -294,7 +294,8 @@ function TickerCell({
         {formatPp(ppChange)}
       </span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
-        {formatAge(Math.max(0, now - ts))} ago
+        {/* Floor to 1m — the strip speaks in minutes, no per-second countdown. */}
+        {formatAge(Math.max(60_000, now - ts))} ago
       </span>
     </Link>
   );
