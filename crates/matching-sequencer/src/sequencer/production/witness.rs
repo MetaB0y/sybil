@@ -363,6 +363,7 @@ impl BlockSequencer {
         let witness = BlockWitness {
             header: header.to_witness_header(),
             previous_header,
+            genesis_hash: self.genesis_hash.unwrap_or_else(|| hash_header(&header)),
             orders: witness_orders,
             rejections: witness_rejections,
             system_events: system_event_witnesses,

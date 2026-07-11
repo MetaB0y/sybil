@@ -755,8 +755,14 @@ fn bridge_deposit_requires_next_l1_cursor() {
 
 #[test]
 fn quarantined_deposit_is_auto_claimed_on_witnessed_key_registration_across_blocks() {
+    use p256::ecdsa::signature::Signer as _;
+
     let (mut seq, aid) = make_sequencer(0);
-    let primary = fresh_public_key();
+    let primary_signing =
+        <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+            &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+        );
+    let primary = crate::crypto::PublicKey(*primary_signing.verifying_key());
     seq.register_pubkey_with_scheme(
         aid,
         primary.clone(),
@@ -783,6 +789,20 @@ fn quarantined_deposit_is_auto_claimed_on_witnessed_key_registration_across_bloc
     assert!(sybil_verifier::verify_full(&quarantine_block.witness, false).valid);
 
     let added = fresh_public_key();
+    let binding = seq.accounts.get(aid).unwrap().clone();
+    let added_record = sybil_verifier::KeyRecord {
+        auth_scheme: crate::crypto::AccountAuthScheme::RawP256.canonical_byte(),
+        pubkey_sec1: added.compressed_bytes().try_into().unwrap(),
+        capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+    };
+    let canonical = sybil_verifier::canonical_key_registration_bytes(
+        seq.genesis_hash().unwrap(),
+        aid.0,
+        &added_record,
+        binding.keys_digest,
+        binding.events_digest,
+    );
+    let signature: p256::ecdsa::Signature = primary_signing.sign(&canonical);
     let mut signer_pubkey = [0u8; 33];
     signer_pubkey.copy_from_slice(&primary.compressed_bytes());
     seq.register_pubkey_with_meta_authorized(
@@ -791,7 +811,7 @@ fn quarantined_deposit_is_auto_claimed_on_witnessed_key_registration_across_bloc
         crate::crypto::RegisteredPubkey::primary(aid, crate::crypto::AccountAuthScheme::RawP256),
         sybil_verifier::KeyOpAuth::RawP256 {
             signer_pubkey,
-            signature: [0; 64],
+            signature: signature.to_bytes().into(),
         },
     )
     .unwrap();

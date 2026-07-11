@@ -6,9 +6,13 @@ static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(super) fn temp_db_path(prefix: &str) -> PathBuf {
     let unique = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+    let run_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("test clock is after Unix epoch")
+        .as_nanos();
     std::env::temp_dir().join(format!(
-        "sybil-{prefix}-{}-{unique}.redb",
-        std::process::id()
+        "sybil-{prefix}-{}-{run_id}-{unique}.redb",
+        std::process::id(),
     ))
 }
 
@@ -47,6 +51,7 @@ pub(super) fn sample_witness(header: &BlockHeader) -> BlockWitness {
     BlockWitness {
         header: header.to_witness_header(),
         previous_header: None,
+        genesis_hash: [0u8; 32],
         orders: Vec::new(),
         rejections: Vec::new(),
         system_events: Vec::new(),

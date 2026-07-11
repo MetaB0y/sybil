@@ -47,6 +47,7 @@ Before modifying this crate, read these vault notes (`docs/architecture/`):
 struct BlockWitness {
     header: WitnessBlockHeader,
     previous_header: Option<WitnessBlockHeader>,
+    genesis_hash: [u8; 32],
     orders: Vec<WitnessOrder>,
     rejections: Vec<WitnessRejection>,
     system_events: Vec<SystemEventWitness>,

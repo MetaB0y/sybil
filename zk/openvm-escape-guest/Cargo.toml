@@ -1,0 +1,19 @@
+[package]
+name = "sybil-openvm-escape-guest"
+version = "0.1.0"
+edition = "2021"
+description = "OpenVM guest for Sybil Form-L escape claims"
+
+# Kept outside the root workspace so normal workspace tests do not require the
+# OpenVM toolchain.
+[workspace]
+
+[profile.release]
+overflow-checks = true
+
+[dependencies]
+openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0", features = ["std"] }
+openvm-algebra-guest = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0" }
+openvm-ecc-guest = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0" }
+openvm-p256 = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0", package = "p256", features = ["ecdsa"] }
+sybil-escape-claim = { path = "../../crates/sybil-escape-claim" }

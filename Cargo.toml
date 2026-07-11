@@ -16,6 +16,7 @@ members = [
     "crates/sybil-l1-protocol",
     "crates/sybil-verifier",
     "crates/sybil-zk",
+    "crates/sybil-escape-claim",
     "crates/sybil-prover",
     "crates/sybil-polymarket",
     "tools/golden-vectors",

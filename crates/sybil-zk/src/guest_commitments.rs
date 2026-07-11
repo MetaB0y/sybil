@@ -106,6 +106,75 @@ pub fn verify_qmdb_key_value_proof(
     verify_qmdb_operation_proof(root, &operation, &proof.operation)
 }
 
+/// Verify that `key` is absent from the ordered current-qMDB at `root`.
+///
+/// This mirrors commonware's ordered exclusion verifier while retaining the
+/// guest-safe proof representation used by Sybil. A non-empty database proves
+/// absence by authenticating the adjacent cyclic key span; an empty database
+/// proves it with the active commit whose inactivity floor equals its location.
+pub fn verify_qmdb_exclusion_proof(
+    root: &[u8; 32],
+    key: &[u8],
+    proof: &QmdbStateExclusionProof,
+) -> bool {
+    let (operation, operation_proof) = match proof {
+        QmdbStateExclusionProof::KeyValue {
+            operation,
+            span_key,
+            span_value,
+            span_next_key,
+        } => {
+            if span_key.as_slice() == key || !qmdb_span_contains(span_key, span_next_key, key) {
+                return false;
+            }
+            let Some(encoded) = encode_qmdb_update_operation(span_key, span_value, span_next_key)
+            else {
+                return false;
+            };
+            (encoded, operation)
+        }
+        QmdbStateExclusionProof::Commit {
+            operation,
+            metadata,
+        } => {
+            let Some(encoded) =
+                encode_qmdb_commit_floor_operation(metadata.as_deref(), operation.location)
+            else {
+                return false;
+            };
+            (encoded, operation)
+        }
+    };
+    verify_qmdb_operation_proof(root, &operation, operation_proof)
+}
+
+fn qmdb_span_contains(span_start: &[u8], span_end: &[u8], key: &[u8]) -> bool {
+    if span_start >= span_end {
+        key >= span_start || key < span_end
+    } else {
+        key >= span_start && key < span_end
+    }
+}
+
+fn encode_qmdb_commit_floor_operation(metadata: Option<&[u8]>, floor: u64) -> Option<Vec<u8>> {
+    const COMMIT_CONTEXT: u8 = 0xD3;
+    let metadata_len = match metadata {
+        Some(bytes) => encoded_len_size(bytes.len())?.checked_add(bytes.len())?,
+        None => 0,
+    };
+    let mut out = Vec::with_capacity(2usize.checked_add(metadata_len)?.checked_add(10)?);
+    out.push(COMMIT_CONTEXT);
+    match metadata {
+        Some(bytes) => {
+            out.push(1);
+            append_len_prefixed_bytes(&mut out, bytes)?;
+        }
+        None => out.push(0),
+    }
+    append_u64_varint(&mut out, floor);
+    Some(out)
+}
+
 pub fn compute_events_root(witness: &BlockWitness) -> Option<[u8; 32]> {
     let events = event_schema::event_leaf_values(
         &witness.system_events,
@@ -265,6 +334,14 @@ fn encoded_len_size(len: usize) -> Option<usize> {
 }
 
 fn append_u32_varint(out: &mut Vec<u8>, mut value: u32) {
+    while value >= 0x80 {
+        out.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
+}
+
+fn append_u64_varint(out: &mut Vec<u8>, mut value: u64) {
     while value >= 0x80 {
         out.push((value as u8) | 0x80);
         value >>= 7;

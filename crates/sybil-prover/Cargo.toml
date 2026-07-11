@@ -7,7 +7,7 @@ default-run = "sybil-prover"
 
 [features]
 default = []
-sequencer-store = ["dep:matching-engine", "dep:matching-sequencer", "dep:sybil-oracle"]
+sequencer-store = ["dep:matching-engine", "dep:matching-sequencer", "dep:p256", "dep:sybil-oracle"]
 mock-live = ["dep:reqwest", "dep:sybil-api-types"]
 
 [[bin]]
@@ -25,6 +25,7 @@ clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
 matching-engine = { path = "../matching-engine", optional = true }
 matching-sequencer = { path = "../matching-sequencer", optional = true }
+p256 = { version = "0.14.0-rc.7", features = ["ecdsa"], optional = true }
 rmp-serde = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 serde = { version = "1", features = ["derive"] }
@@ -34,6 +35,7 @@ sybil-api-types = { path = "../sybil-api-types", optional = true }
 sybil-oracle = { path = "../sybil-oracle", optional = true }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
+sybil-escape-claim = { path = "../sybil-escape-claim" }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 

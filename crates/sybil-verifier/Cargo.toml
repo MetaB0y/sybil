@@ -25,6 +25,12 @@ serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 thiserror = { workspace = true }
 
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+p256 = { version = "0.13", features = ["ecdsa"] }
+
+[target.'cfg(target_os = "zkvm")'.dependencies]
+openvm-p256 = { git = "https://github.com/openvm-org/openvm.git", tag = "v2.0.0", package = "p256", features = ["ecdsa"] }
+
 [dev-dependencies]
 proptest = "1.6"
 serde_json = "1"

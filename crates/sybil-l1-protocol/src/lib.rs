@@ -498,13 +498,17 @@ fn deposit_zero_hashes() -> [Bytes32; DEPOSIT_TREE_DEPTH + 1] {
     zero_hashes
 }
 
-enum AbiWord {
+/// One static ABI word following a leading dynamic domain string.
+///
+/// Kept here as the shared Rust twin of Solidity's `abi.encode` statement
+/// hashes; guest statements should consume this instead of minting encoders.
+pub enum AbiWord {
     Uint(u64),
     Address(EthAddress),
     Bytes32(Bytes32),
 }
 
-fn abi_encode_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Vec<u8> {
+pub fn abi_encode_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Vec<u8> {
     let head_words = 1 + words.len();
     let mut out = Vec::with_capacity(head_words * 32 + 32 + padded_len(domain.len()));
     out.extend_from_slice(&abi_usize_word(head_words * 32));
@@ -524,6 +528,11 @@ fn abi_encode_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Vec<u8> {
     out.extend_from_slice(domain);
     out.resize(out.len() + padded_len(domain.len()) - domain.len(), 0);
     out
+}
+
+/// Keccak-256 of [`abi_encode_domain_and_words`].
+pub fn abi_keccak256_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Bytes32 {
+    keccak256(&abi_encode_domain_and_words(domain, words))
 }
 
 fn abi_u64_word(value: u64) -> Bytes32 {

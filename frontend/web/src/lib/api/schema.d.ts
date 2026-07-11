@@ -4,5991 +4,6063 @@
  */
 
 export interface paths {
-    "/v1/accounts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * POST /v1/accounts — create an account with its initial signing key.
-         * @description Public onboarding must provide `initial_key`; account allocation and
-         *     first-key registration are serialized as one API operation. The legacy
-         *     bare request shape (no `initial_key`) is deprecated and service-tier only.
-         */
-        post: operations["create_account"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id} */
-        get: operations["get_account"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/api-keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id}/api-keys — list read API keys (metadata only) (SYB-60) */
-        get: operations["list_api_keys"];
-        put?: never;
-        /**
-         * POST /v1/accounts/{id}/api-keys — create a read API key (signed) (SYB-60)
-         * @description The bearer token is returned exactly once; only its blake3 hash is stored.
-         */
-        post: operations["create_api_key"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/api-keys/revoke": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/accounts/{id}/api-keys/revoke — revoke a read API key (signed) */
-        post: operations["revoke_api_key"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/bridge-key": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id}/bridge-key */
-        get: operations["account_key"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/equity": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id}/equity?range= */
-        get: operations["get_equity"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id}/events?limit&before&category */
-        get: operations["get_account_history"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/fills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id}/fills */
-        get: operations["get_account_fills"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/fund": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/accounts/{id}/fund */
-        post: operations["fund_account"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id}/keys — list registered signing keys with metadata */
-        get: operations["list_account_keys"];
-        put?: never;
-        /**
-         * POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
-         * @description SYB-229: public unsigned key registration is a critical auth hole — anyone
-         *     could attach their own key to any account and then sign as it. This endpoint
-         *     is service-token gated (like account creation) and accepts an UNSIGNED
-         *     registration ONLY when the account has zero registered keys. Once an account
-         *     has a key, every subsequent key must be added via the SIGNED path
-         *     (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
-         */
-        post: operations["register_key"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/keys/register": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * POST /v1/accounts/{id}/keys/register — register an additional signing key,
-         *     authorized by a signature from an existing account key (SYB-229).
-         * @description Mirrors the SYB-60 revoke shape: canonical bytes cover the account, the new
-         *     key (scheme + compressed SEC1), the signer, and a replay nonce, and are
-         *     domain-separated by `genesis_hash` (SYB-224). The `raw_p256` signer path
-         *     hands a `SignedKeyRegistration` to the sequencer (which re-verifies and burns
-         *     the nonce); the `webauthn` signer path verifies the assertion at the edge and
-         *     hands an already-authenticated intent.
-         */
-        post: operations["register_signed_key"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/keys/revoke": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60) */
-        post: operations["revoke_key"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/orders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id}/orders — pending orders for an account */
-        get: operations["get_account_orders"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/portfolio": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/accounts/{id}/portfolio */
-        get: operations["get_portfolio"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/private-summary": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
-         * @description Template endpoint demonstrating `Authorization: Bearer` gating. It returns
-         *     the same account data the public endpoints already expose, but only to a
-         *     read key that belongs to the requested account.
-         */
-        get: operations["get_private_summary"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{id}/profile": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/accounts/{id}/profile — set/clear opt-in profile (signed) (SYB-60) */
-        post: operations["set_profile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/activity/overview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/activity/overview */
-        get: operations["get_activity_overview"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/auto-resolutions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/admin/auto-resolutions — list every recorded proposal. */
-        get: operations["list_auto_resolutions"];
-        put?: never;
-        /**
-         * POST /v1/admin/auto-resolutions — record (or refresh) an auto-resolution
-         *     proposal. Never settles a market.
-         */
-        post: operations["submit_auto_resolution"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/auto-resolutions/{id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * POST /v1/admin/auto-resolutions/{id}/approve — approve a proposal so the
-         *     resolver finalizes it on its next poll (does not settle here).
-         */
-        post: operations["approve_auto_resolution"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/auto-resolutions/{id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * POST /v1/admin/auto-resolutions/{id}/reject — veto a proposal. Terminal: the
-         *     resolver will never finalize it.
-         */
-        post: operations["reject_auto_resolution"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/blocks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height. */
-        get: operations["get_recent_blocks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/blocks/latest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/blocks/latest */
-        get: operations["get_latest_block"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/blocks/stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/blocks/stream
-         * @description Third-party convenience SSE stream of block events. First-party clients should use GET /v1/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
-         */
-        get: operations["stream_blocks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/blocks/ws": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/blocks/ws
-         * @description First-party WebSocket block stream. Supports ?from_block=N to replay retained committed blocks from that height before following live blocks. If from_block is below the retained blocks_full floor, the stream emits a retention_gap envelope and closes so clients can cold-resync.
-         */
-        get: operations["ws_blocks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/blocks/{height}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/blocks/{height} */
-        get: operations["get_block_by_height"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bots/decisions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/bots/decisions
-         * @description Native arena / bot analytics feed. Public (unauthenticated) read route.
-         */
-        get: operations["get_bot_decisions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bots/equity-series": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/bots/equity-series
-         * @description Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
-         *     Public (unauthenticated) read route. Dense result sets are downsampled with a
-         *     naive stride after a bounded count query; the latest point is retained.
-         */
-        get: operations["get_bot_equity_series"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bridge/accounts/by-key/{key_hex}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/bridge/accounts/by-key/{key_hex} */
-        get: operations["account_by_key"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bridge/deposits": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/bridge/deposits */
-        post: operations["submit_l1_deposit"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bridge/l1-height": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/bridge/l1-height */
-        post: operations["observe_l1_height"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bridge/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/bridge/status */
-        get: operations["status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bridge/withdrawals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/bridge/withdrawals */
-        post: operations["create_withdrawal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bridge/withdrawals/l1-events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/bridge/withdrawals/l1-events */
-        post: operations["submit_l1_withdrawal_event"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bridge/withdrawals/signed": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/bridge/withdrawals/signed */
-        post: operations["create_signed_withdrawal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/bridge/withdrawals/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/bridge/withdrawals/{id} */
-        get: operations["get_withdrawal"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/da/{height}/manifest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/da/{height}/manifest
-         * @description Typed DA manifest for a retained canonical witness payload. Retention follows the store-backed block-history window: with SYBIL_DATA_DIR unset there are no retained DA artifacts; with pruning disabled rows are retained until the store is reset. Clients MUST verify the SYB-80 section 3 binding chain themselves: payload_root -> witness_root -> da_commitment -> L1 RootRecord, and must not trust this server.
-         */
-        get: operations["get_da_manifest"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/da/{height}/payload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/da/{height}/payload
-         * @description Canonical witness payload bytes for a retained height, served as application/octet-stream with Content-Length. Retention follows the store-backed block-history window: with SYBIL_DATA_DIR unset there are no retained DA artifacts; with pruning disabled rows are retained until the store is reset. Clients MUST verify the SYB-80 section 3 binding chain themselves: payload_root -> witness_root -> da_commitment -> L1 RootRecord, and must not trust this server.
-         */
-        get: operations["get_da_payload"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/events/{event_id}/raw": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/events/{event_id}/raw — return the stored event JSON, or 404.
-         *     Readable in any mode (only the PUT is dev-mode gated) so the frontend can
-         *     fetch snapshots without dev mode. Public read route.
-         */
-        get: operations["get_event_raw"];
-        /**
-         * PUT /v1/events/{event_id}/raw — store the full Polymarket event JSON.
-         *     Service/operator route. Body must be valid JSON.
-         */
-        put: operations["put_event_raw"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/events/{event_id}/traders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/events/{event_id}/traders */
-        get: operations["get_event_traders"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/feeds": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/feeds — list registered data feeds. */
-        get: operations["list_feeds"];
-        put?: never;
-        /** POST /v1/feeds — register a data feed. */
-        post: operations["register_feed"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/health
-         * @description Returns 200 when the sequencer is running, 503 when it is unavailable.
-         *     Downstream services and Docker healthchecks should treat any non-200 as
-         *     unhealthy and stop routing traffic.
-         */
-        get: operations["health"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/leaderboard": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/leaderboard?window&limit */
-        get: operations["get_leaderboard"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets */
-        get: operations["list_markets"];
-        put?: never;
-        /** POST /v1/markets */
-        post: operations["create_market"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/groups": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/groups */
-        get: operations["list_market_groups"];
-        put?: never;
-        /** POST /v1/markets/groups */
-        post: operations["create_market_group"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/groups/{group_id}/members": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/markets/groups/{group_id}/members */
-        post: operations["extend_market_group"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/prices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/prices */
-        get: operations["get_prices"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/prices/reference": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/markets/prices/reference — set reference prices from external system. */
-        post: operations["set_reference_prices"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/search */
-        get: operations["search_markets"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/summary": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * GET /v1/markets/summary
-         * @description Minimal market data for dashboard polling — drops metadata strings
-         *     (description, tags, resolution criteria, external URL). ~5-10x smaller
-         *     wire size than /v1/markets.
-         */
-        get: operations["list_markets_summary"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/{id} */
-        get: operations["get_market"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/{id}/metadata": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/markets/{id}/metadata — set external metadata for a market. */
-        post: operations["set_market_metadata"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/{id}/open-batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/{id}/open-batch */
-        get: operations["get_open_batch"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/{id}/orderbook": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode) */
-        get: operations["get_market_orderbook"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/{id}/prices/candles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/{id}/prices/candles */
-        get: operations["get_price_candles"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/{id}/prices/history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/{id}/prices/history */
-        get: operations["get_price_history"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/{id}/resolution": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/markets/{id}/resolution */
-        get: operations["get_resolution"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/markets/{id}/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/markets/{id}/resolve */
-        post: operations["resolve_market"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/orders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/orders */
-        post: operations["submit_orders"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/orders/cancel/signed": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/orders/cancel/signed */
-        post: operations["cancel_signed_order"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/orders/pending": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/orders/pending — all pending orders (dev mode) */
-        get: operations["get_all_pending_orders"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/orders/signed": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** POST /v1/orders/signed */
-        post: operations["submit_signed_order"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/proofs/state/{leaf_key_hex}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/proofs/state/{leaf_key_hex} */
-        get: operations["get_state_proof"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/simulation/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * POST /v1/simulation/pause
-         * @description Dev-mode only: pauses block production. Returns 403 outside dev mode.
-         */
-        post: operations["pause"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/simulation/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * POST /v1/simulation/resume
-         * @description Dev-mode only: resumes block production. Returns 403 outside dev mode.
-         */
-        post: operations["resume"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/state-root": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** GET /v1/state-root */
-        get: operations["state_root"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
+  "/v1/accounts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * POST /v1/accounts — create an account with its initial signing key.
+     * @description Public onboarding must provide `initial_key`; account allocation and
+     *     first-key registration are serialized as one API operation. The legacy
+     *     bare request shape (no `initial_key`) is deprecated and service-tier only.
+     */
+    post: operations["create_account"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id} */
+    get: operations["get_account"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/keyop-state": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/keyop-state */
+    get: operations["get_keyop_state"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/api-keys": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/api-keys — list read API keys (metadata only) (SYB-60) */
+    get: operations["list_api_keys"];
+    put?: never;
+    /**
+     * POST /v1/accounts/{id}/api-keys — create a read API key (signed) (SYB-60)
+     * @description The bearer token is returned exactly once; only its blake3 hash is stored.
+     */
+    post: operations["create_api_key"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/api-keys/revoke": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/accounts/{id}/api-keys/revoke — revoke a read API key (signed) */
+    post: operations["revoke_api_key"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/bridge-key": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/bridge-key */
+    get: operations["account_key"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/equity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/equity?range= */
+    get: operations["get_equity"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/events?limit&before&category */
+    get: operations["get_account_history"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/fills": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/fills */
+    get: operations["get_account_fills"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/fund": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/accounts/{id}/fund */
+    post: operations["fund_account"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/keys": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/keys — list registered signing keys with metadata */
+    get: operations["list_account_keys"];
+    put?: never;
+    /**
+     * POST /v1/accounts/{id}/keys — bootstrap the FIRST signing key (service tier).
+     * @description SYB-229: public unsigned key registration is a critical auth hole — anyone
+     *     could attach their own key to any account and then sign as it. This endpoint
+     *     is service-token gated (like account creation) and accepts an UNSIGNED
+     *     registration ONLY when the account has zero registered keys. Once an account
+     *     has a key, every subsequent key must be added via the SIGNED path
+     *     (`POST /v1/accounts/{id}/keys/register`), authorized by an existing key.
+     */
+    post: operations["register_key"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/keys/register": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * POST /v1/accounts/{id}/keys/register — register an additional signing key,
+     *     authorized by a signature from an existing account key (SYB-229).
+     * @description Canonical bytes cover the full new key record and the account's current
+     *     key/event digests, domain-separated by `genesis_hash`. Both signer schemes are
+     *     verified at ingress and again by the shared verifier used in the main guest.
+     */
+    post: operations["register_signed_key"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/keys/revoke": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/accounts/{id}/keys/revoke — revoke a signing key (signed) (SYB-60) */
+    post: operations["revoke_key"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/orders": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/orders — pending orders for an account */
+    get: operations["get_account_orders"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/portfolio": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/accounts/{id}/portfolio */
+    get: operations["get_portfolio"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/private-summary": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/accounts/{id}/private-summary — bearer-gated private read (SYB-60)
+     * @description Template endpoint demonstrating `Authorization: Bearer` gating. It returns
+     *     the same account data the public endpoints already expose, but only to a
+     *     read key that belongs to the requested account.
+     */
+    get: operations["get_private_summary"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/accounts/{id}/profile": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/accounts/{id}/profile — set/clear opt-in profile (signed) (SYB-60) */
+    post: operations["set_profile"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/activity/overview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/activity/overview */
+    get: operations["get_activity_overview"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/admin/auto-resolutions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/admin/auto-resolutions — list every recorded proposal. */
+    get: operations["list_auto_resolutions"];
+    put?: never;
+    /**
+     * POST /v1/admin/auto-resolutions — record (or refresh) an auto-resolution
+     *     proposal. Never settles a market.
+     */
+    post: operations["submit_auto_resolution"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/admin/auto-resolutions/{id}/approve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * POST /v1/admin/auto-resolutions/{id}/approve — approve a proposal so the
+     *     resolver finalizes it on its next poll (does not settle here).
+     */
+    post: operations["approve_auto_resolution"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/admin/auto-resolutions/{id}/reject": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * POST /v1/admin/auto-resolutions/{id}/reject — veto a proposal. Terminal: the
+     *     resolver will never finalize it.
+     */
+    post: operations["reject_auto_resolution"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/blocks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height. */
+    get: operations["get_recent_blocks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/blocks/latest": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/blocks/latest */
+    get: operations["get_latest_block"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/blocks/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/blocks/stream
+     * @description Third-party convenience SSE stream of block events. First-party clients should use GET /v1/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
+     */
+    get: operations["stream_blocks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/blocks/ws": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/blocks/ws
+     * @description First-party WebSocket block stream. Supports ?from_block=N to replay retained committed blocks from that height before following live blocks. If from_block is below the retained blocks_full floor, the stream emits a retention_gap envelope and closes so clients can cold-resync.
+     */
+    get: operations["ws_blocks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/blocks/{height}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/blocks/{height} */
+    get: operations["get_block_by_height"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bots/decisions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/bots/decisions
+     * @description Native arena / bot analytics feed. Public (unauthenticated) read route.
+     */
+    get: operations["get_bot_decisions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bots/equity-series": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/bots/equity-series
+     * @description Native arena per-bot portfolio-value time series from `portfolio_snapshots`.
+     *     Public (unauthenticated) read route. Dense result sets are downsampled with a
+     *     naive stride after a bounded count query; the latest point is retained.
+     */
+    get: operations["get_bot_equity_series"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bridge/accounts/by-key/{key_hex}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/bridge/accounts/by-key/{key_hex} */
+    get: operations["account_by_key"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bridge/deposits": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/bridge/deposits */
+    post: operations["submit_l1_deposit"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bridge/l1-height": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/bridge/l1-height */
+    post: operations["observe_l1_height"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bridge/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/bridge/status */
+    get: operations["status"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bridge/withdrawals": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/bridge/withdrawals */
+    post: operations["create_withdrawal"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bridge/withdrawals/l1-events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/bridge/withdrawals/l1-events */
+    post: operations["submit_l1_withdrawal_event"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bridge/withdrawals/signed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/bridge/withdrawals/signed */
+    post: operations["create_signed_withdrawal"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/bridge/withdrawals/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/bridge/withdrawals/{id} */
+    get: operations["get_withdrawal"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/da/{height}/manifest": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/da/{height}/manifest
+     * @description Typed DA manifest for a retained canonical witness payload. Retention follows the store-backed block-history window: with SYBIL_DATA_DIR unset there are no retained DA artifacts; with pruning disabled rows are retained until the store is reset. Clients MUST verify the SYB-80 section 3 binding chain themselves: payload_root -> witness_root -> da_commitment -> L1 RootRecord, and must not trust this server.
+     */
+    get: operations["get_da_manifest"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/da/{height}/payload": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/da/{height}/payload
+     * @description Canonical witness payload bytes for a retained height, served as application/octet-stream with Content-Length. Retention follows the store-backed block-history window: with SYBIL_DATA_DIR unset there are no retained DA artifacts; with pruning disabled rows are retained until the store is reset. Clients MUST verify the SYB-80 section 3 binding chain themselves: payload_root -> witness_root -> da_commitment -> L1 RootRecord, and must not trust this server.
+     */
+    get: operations["get_da_payload"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/events/{event_id}/raw": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/events/{event_id}/raw — return the stored event JSON, or 404.
+     *     Readable in any mode (only the PUT is dev-mode gated) so the frontend can
+     *     fetch snapshots without dev mode. Public read route.
+     */
+    get: operations["get_event_raw"];
+    /**
+     * PUT /v1/events/{event_id}/raw — store the full Polymarket event JSON.
+     *     Service/operator route. Body must be valid JSON.
+     */
+    put: operations["put_event_raw"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/events/{event_id}/traders": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/events/{event_id}/traders */
+    get: operations["get_event_traders"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/feeds": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/feeds — list registered data feeds. */
+    get: operations["list_feeds"];
+    put?: never;
+    /** POST /v1/feeds — register a data feed. */
+    post: operations["register_feed"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/health": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/health
+     * @description Returns 200 when the sequencer is running, 503 when it is unavailable.
+     *     Downstream services and Docker healthchecks should treat any non-200 as
+     *     unhealthy and stop routing traffic.
+     */
+    get: operations["health"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/leaderboard": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/leaderboard?window&limit */
+    get: operations["get_leaderboard"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets */
+    get: operations["list_markets"];
+    put?: never;
+    /** POST /v1/markets */
+    post: operations["create_market"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/groups": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/groups */
+    get: operations["list_market_groups"];
+    put?: never;
+    /** POST /v1/markets/groups */
+    post: operations["create_market_group"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/groups/{group_id}/members": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/markets/groups/{group_id}/members */
+    post: operations["extend_market_group"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/prices": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/prices */
+    get: operations["get_prices"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/prices/reference": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/markets/prices/reference — set reference prices from external system. */
+    post: operations["set_reference_prices"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/search */
+    get: operations["search_markets"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/summary": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/markets/summary
+     * @description Minimal market data for dashboard polling — drops metadata strings
+     *     (description, tags, resolution criteria, external URL). ~5-10x smaller
+     *     wire size than /v1/markets.
+     */
+    get: operations["list_markets_summary"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/{id} */
+    get: operations["get_market"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/{id}/metadata": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/markets/{id}/metadata — set external metadata for a market. */
+    post: operations["set_market_metadata"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/{id}/open-batch": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/{id}/open-batch */
+    get: operations["get_open_batch"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/{id}/orderbook": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/{id}/orderbook — all pending orders for a market (dev mode) */
+    get: operations["get_market_orderbook"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/{id}/prices/candles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/{id}/prices/candles */
+    get: operations["get_price_candles"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/{id}/prices/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/{id}/prices/history */
+    get: operations["get_price_history"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/{id}/resolution": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/markets/{id}/resolution */
+    get: operations["get_resolution"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/markets/{id}/resolve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/markets/{id}/resolve */
+    post: operations["resolve_market"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/orders": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/orders */
+    post: operations["submit_orders"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/orders/cancel/signed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/orders/cancel/signed */
+    post: operations["cancel_signed_order"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/orders/pending": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/orders/pending — all pending orders (dev mode) */
+    get: operations["get_all_pending_orders"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/orders/signed": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/orders/signed */
+    post: operations["submit_signed_order"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/proofs/state/{leaf_key_hex}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/proofs/state/{leaf_key_hex} */
+    get: operations["get_state_proof"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/simulation/pause": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * POST /v1/simulation/pause
+     * @description Dev-mode only: pauses block production. Returns 403 outside dev mode.
+     */
+    post: operations["pause"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/simulation/resume": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * POST /v1/simulation/resume
+     * @description Dev-mode only: resumes block production. Returns 403 outside dev mode.
+     */
+    post: operations["resume"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/state-root": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/state-root */
+    get: operations["state_root"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: {
-        AccountFillResponse: {
-            /** Format: int64 */
-            block_height: number;
-            /**
-             * @description Stable cursor for forward pagination (`GET .../fills?after=<cursor>`).
-             *     Opaque to clients; current encoding is `<block_height>.<order_id>`.
-             */
-            cursor: string;
-            /**
-             * Format: int64
-             * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            fill_price_nanos: string;
-            /**
-             * Format: int64
-             * @description Fill quantity. Integer share-units; 1000 units = 1 share.
-             */
-            fill_qty: number;
-            /** Format: int64 */
-            order_id: number;
-            position_deltas: components["schemas"]["PositionDeltaResponse"][];
-            /** Format: int64 */
-            timestamp_ms: number;
-        };
-        /** @description A registered signing key with SYB-60 management metadata. */
-        AccountKeyResponse: {
-            /** @description Authentication scheme: `raw_p256` or `webauthn`. */
-            auth_scheme: string;
-            /**
-             * Format: int64
-             * @description Registration time in Unix milliseconds (0 for keys predating SYB-60).
-             */
-            created_at_ms: number;
-            /** @description Optional human label. */
-            label?: string | null;
-            /** @description Hex-encoded compressed P256 public key (33 bytes). */
-            public_key_hex: string;
-            /** @description Scope tag: `primary`, `agent`, or `custom`. */
-            scope: string;
-        };
-        AccountResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Spendable account balance after live-order reservations. Integer
-             *     nanodollars; 1_000_000_000 = $1.
-             */
-            available_balance_nanos: string;
-            /** @description Optional deterministic identicon seed (SYB-60). */
-            avatar_seed?: string | null;
-            /**
-             * Format: int64
-             * @description Total (gross) account balance; see `available_balance_nanos` for spendable
-             *     funds. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            balance_nanos: string;
-            /**
-             * @description Optional opt-in display name (SYB-60). Not yet used for leaderboard
-             *     labels — that flip is a deliberate follow-up.
-             */
-            display_name?: string | null;
-            positions?: components["schemas"]["PositionResponse"][];
-            /**
-             * Format: int64
-             * @description Balance reserved by live resting orders. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             */
-            reserved_balance_nanos: string;
-        };
-        /** @description Response shape for `GET /v1/activity/overview`. All-time + 24h slices. */
-        ActivityOverviewResponse: {
-            all_time: components["schemas"]["OverviewBucketResponse"];
-            last_24h: components["schemas"]["OverviewBucketResponse"];
-        };
-        AdmitTimingViewResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /** Format: int64 */
-            admit_height: number;
-            /**
-             * Format: int64
-             * @description Admission timestamp in Unix epoch milliseconds.
-             */
-            admit_timestamp_ms: number;
-            is_mm: boolean;
-            is_new: boolean;
-            /** Format: int64 */
-            order_id: number;
-        };
-        /** @description A read-scoped bearer API key's metadata (never the token or its hash). */
-        ApiKeyResponse: {
-            /** Format: int64 */
-            created_at_ms: number;
-            /**
-             * Format: int64
-             * @description Stable id used to reference this key for revocation.
-             */
-            id: number;
-            label?: string | null;
-            /**
-             * Format: int64
-             * @description Revocation time in Unix milliseconds, if revoked.
-             */
-            revoked_at_ms?: number | null;
-        };
-        /** @enum {string} */
-        AuthScheme: "raw_p256" | "webauthn";
-        /**
-         * @description Which confidence tier a proposed automated resolution (SYB-48) landed in.
-         *     Mirrors the resolver-side confidence policy so the review board can render
-         *     and gate each entry consistently.
-         * @enum {string}
-         */
-        AutoResolutionActionDto: "propose" | "review" | "escalate";
-        /** @description One entry on the automated-resolution review board (SYB-48). */
-        AutoResolutionEntryResponse: {
-            /**
-             * @description Confidence tier the resolver assigned (`propose` | `review` |
-             *     `escalate`).
-             */
-            action: components["schemas"]["AutoResolutionActionDto"];
-            /**
-             * Format: double
-             * @description Model confidence in [0, 1].
-             */
-            confidence: number;
-            /**
-             * Format: int64
-             * @description When an operator approved/rejected, if they did. Unix milliseconds.
-             */
-            decided_at_ms?: number | null;
-            /**
-             * Format: int64
-             * @description Auto-finalize deadline for `propose` entries. Unix milliseconds.
-             */
-            eta_ms?: number | null;
-            /** @description Short verbatim excerpts from the fetched source. */
-            evidence_excerpts?: string[];
-            /** Format: int32 */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
-             *     Payouts are per-share probabilities in [0, 1e9].
-             */
-            payout_nanos: string;
-            /**
-             * Format: int64
-             * @description When the proposal was first recorded. Unix milliseconds.
-             */
-            proposed_at_ms: number;
-            /** @description Model's free-text justification. */
-            reasoning: string;
-            /**
-             * @description Display status derived at read time from the operator decision AND the
-             *     market's live on-chain state: one of `pending`, `needs_review`,
-             *     `escalated`, `approved`, `rejected`, `resolved`.
-             */
-            status: string;
-        };
-        /** @description Response body of `GET /v1/admin/auto-resolutions` (SYB-48). */
-        AutoResolutionListResponse: {
-            entries: components["schemas"]["AutoResolutionEntryResponse"][];
-        };
-        /**
-         * @description Nested per-market sidecar on `BlockResponse.by_market`. Grows append-only
-         *     across steps (each new field carries `#[serde(default)]` so partial
-         *     reverts stay clean). Volume/orders/welfare join in B2 / B6 / B7.
-         */
-        BlockMarketStats: {
-            /**
-             * Format: int32
-             * @description Resting orders touching this market that exited the book this
-             *     block AFTER at least one fill (B5's `has_been_matched`).
-             */
-            matched?: number;
-            /**
-             * Format: int32
-             * @description Non-MM admissions counted against this market in this block.
-             *     Multi-market orders credit each active market.
-             */
-            placed?: number;
-            /**
-             * Format: int32
-             * @description Unique placers (non-MM accounts) admitted touching this market in
-             *     the block. Multi-market orders credit each active market; the
-             *     platform `unique_placers` scalar counts the account once.
-             */
-            placers?: number;
-            /**
-             * Format: int32
-             * @description Resting orders touching this market that exited the book this
-             *     block WITHOUT any fill. Cancels are excluded.
-             */
-            unmatched?: number;
-            /**
-             * Format: int64
-             * @description Per-market volume contribution from this block's fills. Integer nanodollars;
-             *     1_000_000_000 = $1. Multi-market fills credit each active market with their
-             *     full notional; the platform `total_volume_nanos` scalar counts each fill once.
-             */
-            volume_nanos?: string;
-            /**
-             * Format: int64
-             * @description Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
-             *     1_000_000_000 = $1. Multi-market fills credit each active market with their
-             *     full welfare; the platform `total_welfare_nanos` counts each fill once.
-             *     Signed — solver rounding can yield small negatives.
-             */
-            welfare_nanos?: string;
-        };
-        BlockResponse: {
-            bridge?: components["schemas"]["BridgeBlockResponse"];
-            /**
-             * @description Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
-             *     `BlockMarketStats` carries the per-market splits for this block. Old
-             *     clients ignore it; new clients consume what they recognise.
-             */
-            by_market?: {
-                [key: string]: components["schemas"]["BlockMarketStats"];
-            };
-            /**
-             * @description Clearing price vectors by market/group. Integer nanodollars;
-             *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-             */
-            clearing_prices_nanos?: {
-                [key: string]: string[];
-            };
-            /**
-             * @description Unproven derived-view lifecycle sidecar. The field is exposed on the
-             *     same block surface as canonical data, but its `provenance` marks it as
-             *     derived read-model data rather than consensus-proven data.
-             */
-            derived_view_sidecar?: components["schemas"]["DerivedViewSidecarResponse"];
-            events_root: string;
-            /** Format: int32 */
-            fill_count: number;
-            fills?: components["schemas"]["FillResponse"][];
-            /** Format: int64 */
-            height: number;
-            /** Format: int32 */
-            order_count: number;
-            orders_filled: number;
-            parent_hash: string;
-            rejections?: components["schemas"]["RejectionResponse"][];
-            /** @description Post-block state root. Hex-encoded 32-byte qMDB root. */
-            state_root: string;
-            system_events?: components["schemas"]["SystemEventResponse"][];
-            /** Format: int64 */
-            timestamp_ms: number;
-            /**
-             * Format: int64
-             * @description Total traded notional in the block. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             */
-            total_volume_nanos: string;
-            /**
-             * Format: int64
-             * @description Total solver welfare in the block. Integer nanodollars;
-             *     1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
-             */
-            total_welfare_nanos: string;
-            /**
-             * Format: int32
-             * @description Unique placers (non-MM accounts) admitted into this block. Platform
-             *     scalar — `by_market[m].placers` is the per-market split.
-             */
-            unique_placers?: number;
-        };
-        BotDecisionFeedResponse: {
-            db_available: boolean;
-            db_path?: string | null;
-            decisions: components["schemas"]["BotDecisionResponse"][];
-            error?: string | null;
-            stats: components["schemas"]["BotStatsResponse"];
-            summaries: components["schemas"]["BotSummaryResponse"][];
-            token_usage: components["schemas"]["TokenUsageResponse"][];
-        };
-        BotDecisionResponse: {
-            analysis?: string | null;
-            article_urls: unknown;
-            /** Format: double */
-            balance?: number | null;
-            /** Format: double */
-            edge?: number | null;
-            /** Format: double */
-            fair_value?: number | null;
-            /** Format: int64 */
-            id: number;
-            /** Format: double */
-            llm_duration_s?: number | null;
-            /** Format: int64 */
-            market_id?: number | null;
-            market_name?: string | null;
-            /** Format: double */
-            market_price?: number | null;
-            motivation?: string | null;
-            /** Format: double */
-            no_pos?: number | null;
-            orders: unknown;
-            timestamp?: string | null;
-            trader_name: string;
-            /** Format: double */
-            yes_pos?: number | null;
-        };
-        BotEquityPointResponse: {
-            /** Format: double */
-            balance?: number | null;
-            /** Format: int64 */
-            id: number;
-            /** Format: double */
-            pnl?: number | null;
-            /** Format: double */
-            portfolio_value?: number | null;
-            timestamp?: string | null;
-            /** Format: int64 */
-            total_fills?: number | null;
-            /** Format: int64 */
-            total_orders?: number | null;
-            trader_name: string;
-        };
-        BotEquitySeriesResponse: {
-            db_available: boolean;
-            db_path?: string | null;
-            downsampled: boolean;
-            error?: string | null;
-            limit: number;
-            points: components["schemas"]["BotEquityPointResponse"][];
-            returned_rows: number;
-            server_cap: number;
-            since?: string | null;
-            source_rows: number;
-            stride: number;
-            trader?: string | null;
-        };
-        BotStatsResponse: {
-            /** Format: int64 */
-            articles: number;
-            /** Format: int64 */
-            decisions: number;
-            latest_decision_timestamp?: string | null;
-            /** Format: int64 */
-            snapshots: number;
-            /** Format: int64 */
-            token_usage: number;
-            traders: number;
-        };
-        BotSummaryResponse: {
-            /** Format: double */
-            avg_edge?: number | null;
-            /** Format: int64 */
-            decision_count: number;
-            /** Format: double */
-            latest_balance?: number | null;
-            /** Format: double */
-            latest_edge?: number | null;
-            /** Format: double */
-            latest_fair_value?: number | null;
-            /** Format: int64 */
-            latest_market_id?: number | null;
-            latest_market_name?: string | null;
-            /** Format: double */
-            latest_market_price?: number | null;
-            latest_timestamp?: string | null;
-            /** Format: double */
-            pnl?: number | null;
-            /** Format: double */
-            portfolio_value?: number | null;
-            snapshot_timestamp?: string | null;
-            /** Format: int64 */
-            total_fills?: number | null;
-            /** Format: int64 */
-            total_orders?: number | null;
-            trader_name: string;
-        };
-        BridgeAccountKeyResponse: {
-            /** Format: int64 */
-            account_id: number;
-            sybil_account_key_hex: string;
-        };
-        BridgeBlockResponse: {
-            consumed_deposits?: components["schemas"]["BridgeDepositEventResponse"][];
-            /** Format: int64 */
-            deposit_count: number;
-            deposit_root_hex: string;
-            withdrawal_leaves?: components["schemas"]["BridgeWithdrawalResponse"][];
-        };
-        BridgeDepositEventResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
-             */
-            amount_token_units: number;
-            /** Format: int64 */
-            deposit_id: number;
-            deposit_root_hex: string;
-        };
-        BridgeDepositResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            balance_nanos: string;
-            /** Format: int64 */
-            deposit_id: number;
-            deposit_root_hex: string;
-        };
-        BridgeStatusResponse: {
-            cancelled_withdrawal_count?: number;
-            /** Format: int64 */
-            deposit_cursor: number;
-            deposit_root_hex: string;
-            finalized_withdrawal_count?: number;
-            /** Format: int64 */
-            next_withdrawal_id: number;
-            /** Format: int64 */
-            observed_l1_height: number;
-            queued_withdrawal_count?: number;
-            refunded_withdrawal_count?: number;
-            withdrawal_count: number;
-        };
-        BridgeWithdrawalL1EventResponse: {
-            /**
-             * @description False when the terminal withdrawal was already pruned; the observation
-             *     is still accepted as an idempotent no-op.
-             */
-            active_withdrawal_found: boolean;
-            withdrawal?: null | components["schemas"]["BridgeWithdrawalResponse"];
-        };
-        /** @enum {string} */
-        BridgeWithdrawalL1Status: "not_requested" | "queued" | "finalized" | "cancelled" | "refunded";
-        BridgeWithdrawalResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Off-chain balance amount burned for the withdrawal. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             */
-            amount_nanos: string;
-            /**
-             * Format: int64
-             * @description Token base units released by the vault.
-             */
-            amount_token_units: number;
-            /** Format: int64 */
-            created_at_height: number;
-            /** Format: int64 */
-            expiry_height: number;
-            /** Format: int64 */
-            l1_cancelled_at_unix?: number | null;
-            /** Format: int64 */
-            l1_executable_at_unix?: number | null;
-            /** Format: int64 */
-            l1_finalized_at_unix?: number | null;
-            /** Format: int64 */
-            l1_requested_at_unix?: number | null;
-            l1_status?: components["schemas"]["BridgeWithdrawalL1Status"];
-            l1_tx_hash_hex?: string | null;
-            nullifier_hex: string;
-            recipient_hex: string;
-            token_hex: string;
-            /** Format: int64 */
-            withdrawal_id: number;
-            withdrawal_leaf_digest_hex: string;
-            withdrawal_leaf_hex: string;
-        };
-        CancelOrderResponse: {
-            cancelled: boolean;
-        };
-        CancelSignedOrderRequest: {
-            /**
-             * Format: int64
-             * @description Account ID claiming ownership of the order being cancelled.
-             */
-            account_id: number;
-            /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /**
-             * Format: int64
-             * @description Per-account replay nonce covered by the P256 signature.
-             */
-            nonce: number;
-            /**
-             * Format: int64
-             * @description The pending order to cancel.
-             */
-            order_id: number;
-            /**
-             * @description Hex-encoded raw P256 ECDSA signature over the canonical cancel payload.
-             *     Required when `auth_scheme` is `raw_p256`.
-             */
-            signature_hex?: string | null;
-            /** @description Hex-encoded compressed P256 public key of the signer. */
-            signer_pubkey_hex: string;
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
-        };
-        CreateAccountRequest: {
-            /**
-             * Format: int64
-             * @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
-             * @example 100000000000
-             */
-            initial_balance_nanos: string;
-            initial_key?: null | components["schemas"]["RegisterKeyRequest"];
-        };
-        /**
-         * @description Signed request to create a read-scoped bearer API key (SYB-60).
-         *
-         *     The bearer token is generated server-side, returned exactly once in the
-         *     response, and never recoverable afterwards (only its blake3 hash is stored).
-         */
-        CreateApiKeyRequest: {
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /** @description Optional human label, e.g. "grafana". */
-            label?: string | null;
-            /** Format: int64 */
-            nonce: number;
-            signature_hex?: string | null;
-            /**
-             * @description Hex-encoded signer key. WebAuthn login bootstrap may omit this field;
-             *     the server identifies the matching registered WebAuthn key by verifying
-             *     the assertion against the account's active WebAuthn keys.
-             */
-            signer_pubkey_hex?: string | null;
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
-        };
-        /**
-         * @description Response to creating a read API key (SYB-60). The plaintext `token` is shown
-         *     exactly once here and is not recoverable afterwards.
-         */
-        CreateApiKeyResponse: {
-            /** Format: int64 */
-            created_at_ms: number;
-            /** Format: int64 */
-            id: number;
-            label?: string | null;
-            /**
-             * @description The active signing key that authorized creation. This is especially
-             *     useful during discoverable WebAuthn login, where the browser assertion
-             *     does not itself expose the credential public key.
-             */
-            signer_pubkey_hex: string;
-            /** @description The bearer token. Store it now — the server keeps only its blake3 hash. */
-            token: string;
-        };
-        CreateBridgeWithdrawalRequest: {
-            /**
-             * Format: int64
-             * @description Sybil account whose available balance is burned.
-             */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Token base units released by the vault.
-             */
-            amount_token_units: number;
-            /**
-             * Format: int64
-             * @description Destination chain id.
-             */
-            chain_id: number;
-            /**
-             * Format: int64
-             * @description Last L1 block height at which this withdrawal leaf is valid.
-             */
-            expiry_height?: number | null;
-            /**
-             * Format: int64
-             * @description Per-account replay nonce. Required for signed bridge withdrawals.
-             */
-            nonce?: number | null;
-            /** @description Hex-encoded L1 recipient address (20 bytes). */
-            recipient_hex: string;
-            /** @description Hex-encoded token contract address (20 bytes). */
-            token_address_hex: string;
-            /** @description Hex-encoded vault contract address (20 bytes). */
-            vault_address_hex: string;
-        };
-        CreateMarketGroupRequest: {
-            /** @description Market IDs in the group. */
-            market_ids: number[];
-            /**
-             * @description Name for the group of mutually exclusive markets.
-             * @example 2024 Election
-             */
-            name: string;
-        };
-        CreateMarketRequest: {
-            /** @description Optional category (e.g., "sports", "politics", "crypto"). */
-            category?: string | null;
-            /** @description Optional description of the market. */
-            description?: string | null;
-            /**
-             * Format: int64
-             * @description Optional expiry timestamp in ms (0 = no expiry).
-             */
-            expiry_timestamp_ms?: number | null;
-            /**
-             * @description Name of the binary market.
-             * @example Will it rain tomorrow?
-             */
-            name: string;
-            /** @description Optional resolution criteria. */
-            resolution_criteria?: string | null;
-            /**
-             * @description Resolution template id to use for this market (e.g. "admin_immediate",
-             *     "polymarket_mirror"). `None` -> `admin_immediate`.
-             */
-            resolution_template?: string | null;
-            /** @description Optional tags for discovery. */
-            tags?: string[] | null;
-        };
-        CreateMarketResponse: {
-            /** Format: int32 */
-            market_id: number;
-            name: string;
-        };
-        CreateSignedBridgeWithdrawalRequest: {
-            /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /**
-             * @description Hex-encoded raw P256 ECDSA signature over the canonical withdrawal payload.
-             *     Required when `auth_scheme` is `raw_p256`.
-             */
-            signature_hex?: string | null;
-            /** @description Hex-encoded compressed P256 public key of the signer. */
-            signer_pubkey_hex: string;
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
-            /** @description Withdrawal payload covered by the P256 signature. */
-            withdrawal: components["schemas"]["CreateBridgeWithdrawalRequest"];
-        };
-        /**
-         * @description Typed DA manifest for retained witness payloads. SYB-120 will add encrypted
-         *     DA fields such as ciphertext hashes and key-custody metadata here, so this
-         *     must stay a structured DTO rather than ad-hoc JSON.
-         */
-        DaManifestResponse: {
-            /** @description Block hash bound into the state-transition public input. Hex-encoded 32-byte digest. */
-            block_hash: string;
-            /**
-             * @description DA commitment bound into the ZK public inputs and L1 RootRecord.
-             *     Hex-encoded 32-byte digest.
-             */
-            da_commitment: string;
-            /** Format: int64 */
-            height: number;
-            payload_encoding: string;
-            payload_kind: string;
-            /** Format: int64 */
-            payload_len: number;
-            /**
-             * @description Payload root = BLAKE3("sybil/da/witness-payload/v1" || len || bytes).
-             *     Hex-encoded 32-byte digest.
-             */
-            payload_root: string;
-            provider_refs?: components["schemas"]["DaProviderRefResponse"][];
-            provider_refs_encoding: string;
-            /** @description Hash of the canonical provider-reference byte list. Hex-encoded 32-byte digest. */
-            provider_refs_hash: string;
-            /** @description State-transition public input hash. Hex-encoded 32-byte digest. */
-            public_input_hash: string;
-            /** @description State root bound by the DA commitment. Hex-encoded 32-byte qMDB root. */
-            state_root: string;
-            /** Format: int32 */
-            version: number;
-            /** @description Witness root = BLAKE3("sybil/witness" || payload bytes). Hex-encoded 32-byte digest. */
-            witness_root: string;
-        };
-        DaProviderRefResponse: {
-            /** @description Hex-encoded canonical provider-reference bytes, 0x-prefixed. */
-            bytes: string;
-            encoding: string;
-            kind: string;
-            /** Format: int64 */
-            payload_len?: number | null;
-            /**
-             * @description Payload root repeated when the provider ref is content-addressed.
-             *     Hex-encoded 32-byte digest.
-             */
-            payload_root?: string | null;
-            uri?: string | null;
-        };
-        DerivedViewSidecarResponse: {
-            /**
-             * @description Admission timing rows. `is_new=false` means the order was carried from
-             *     a prior block's resting book; `is_new=true` means a distinct admission
-             *     first became visible to this block's view.
-             */
-            admits?: components["schemas"]["AdmitTimingViewResponse"][];
-            /**
-             * @description Always `derived_unproven`: this sidecar is sequencer-derived read-model
-             *     data and is not part of the witness, state root, events root, witness
-             *     root, DA commitment, or ZK guest input.
-             */
-            provenance: string;
-            /**
-             * @description Rejection rows that were intentionally mirrored into account history.
-             *     Canonical rejections remain in `BlockResponse.rejections`.
-             */
-            rejection_history?: components["schemas"]["RejectedOrderViewResponse"][];
-            /**
-             * @description Resting orders removed during block production. Derived/unproven view
-             *     rows used for analytics and lifecycle displays.
-             */
-            removed_orders?: components["schemas"]["RemovedOrderViewResponse"][];
-        };
-        EquityPointResponse: {
-            /**
-             * Format: int64
-             * @description Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            deposited_nanos: string;
-            /** Format: int64 */
-            height: number;
-            /**
-             * Format: int64
-             * @description Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            portfolio_value_nanos: string;
-            /** Format: int64 */
-            timestamp_ms: number;
-        };
-        EquitySeriesResponse: {
-            /** Format: int64 */
-            account_id: number;
-            points: components["schemas"]["EquityPointResponse"][];
-        };
-        /** @description Response shape for `GET /v1/events/{event_id}/traders`. */
-        EventTradersResponse: {
-            /** Format: int32 */
-            trader_count: number;
-        };
-        ExtendMarketGroupRequest: {
-            /**
-             * Format: int32
-             * @description Market ID to add to the existing group.
-             */
-            market_id: number;
-        };
-        FillResponse: {
-            /** Format: int64 */
-            account_id?: number;
-            /**
-             * Format: int64
-             * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            fill_price_nanos: string;
-            /**
-             * Format: int64
-             * @description Fill quantity. Integer share-units; 1000 units = 1 share.
-             */
-            fill_qty: number;
-            /** Format: int64 */
-            order_id: number;
-        };
-        FundAccountRequest: {
-            /**
-             * Format: int64
-             * @description Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1.
-             * @example 50000000000
-             */
-            amount_nanos: string;
-        };
-        HealthResponse: {
-            /** @description Hash of the height-1 block header. Hex-encoded 32-byte chain instance id. */
-            genesis_hash?: string | null;
-            /** Format: int64 */
-            height?: number | null;
-            status: string;
-        };
-        /** @description One entry in the per-account history feed (`GET /v1/accounts/{id}/events`). */
-        HistoryEventResponse: {
-            /**
-             * Format: int64
-             * @description Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            amount_nanos?: string | null;
-            /**
-             * Format: int64
-             * @description Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            available_nanos?: string | null;
-            /** Format: int64 */
-            block_height: number;
-            category: string;
-            id: string;
-            /** Format: int32 */
-            market_id?: number | null;
-            /** Format: int64 */
-            order_id?: number | null;
-            outcome?: string | null;
-            payout_outcome?: string | null;
-            /**
-             * Format: int64
-             * @description Event price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            price_nanos?: string | null;
-            /**
-             * Format: int64
-             * @description Event quantity. Integer share-units; 1000 units = 1 share.
-             */
-            qty?: number | null;
-            /**
-             * Format: int64
-             * @description Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            realized_pnl_nanos?: string | null;
-            /**
-             * @description Rejected only: reason code (`insufficient_balance` | `insufficient_position`
-             *     | `complete_set` | …).
-             */
-            reason?: string | null;
-            /**
-             * Format: int64
-             * @description Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            required_nanos?: string | null;
-            side?: string | null;
-            /** Format: int64 */
-            timestamp_ms: number;
-            type: string;
-        };
-        /**
-         * @description Scope tag for a registered signing key (SYB-60).
-         * @enum {string}
-         */
-        KeyScope: "primary" | "agent" | "custom";
-        LeaderboardEntryResponse: {
-            /**
-             * Format: int64
-             * @description Account identifier. Clients render this anonymously as `Trader #<id>`;
-             *     display-name opt-in awaits profiles (SYB-60).
-             */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 = $1.
-             */
-            equity_nanos: string;
-            /**
-             * Format: int32
-             * @description Distinct markets with a currently open position.
-             */
-            markets_traded: number;
-            /**
-             * Format: int64
-             * @description Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
-             */
-            pnl_nanos: string;
-            /**
-             * Format: int32
-             * @description 1-based rank within the returned window.
-             */
-            rank: number;
-            /**
-             * Format: int64
-             * @description Return on invested capital over the window, in basis points (100 = 1%).
-             */
-            roi_bps: number;
-        };
-        LeaderboardResponse: {
-            /** @description Ranked entries, best PnL first. Ties break by ascending account id. */
-            entries: components["schemas"]["LeaderboardEntryResponse"][];
-            /** @description Window this leaderboard was ranked over: `7d`, `30d`, or `all`. */
-            window: string;
-        };
-        MarketGroupResponse: {
-            /** Format: int64 */
-            group_id: number;
-            market_ids: number[];
-            name: string;
-        };
-        MarketPriceResponse: {
-            /**
-             * Format: int64
-             * @description NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            no_price_nanos: string;
-            /**
-             * Format: int64
-             * @description YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            yes_price_nanos: string;
-        };
-        MarketPricesResponse: {
-            /**
-             * @description Market price map. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            prices: {
-                [key: string]: components["schemas"]["MarketPriceResponse"];
-            };
-        };
-        MarketResponse: {
-            /**
-             * @description All category buckets the parent event matched on the mirror's
-             *     tag-to-bucket lookup (e.g. `["Sports", "Politics"]`). Frontend picks
-             *     one for display via its own priority list. None for sybil-native
-             *     markets (use the singular `category` field instead).
-             */
-            categories?: string[] | null;
-            category?: string | null;
-            /** Format: int64 */
-            challenge_deadline_ms?: number | null;
-            /**
-             * @description Whether Polymarket has closed this market. Off-block; the frontend
-             *     filters closed markets out of the listing.
-             */
-            closed?: boolean | null;
-            /** Format: int64 */
-            created_at_ms?: number | null;
-            description?: string | null;
-            /**
-             * Format: int64
-             * @description Event-level expected end date (epoch ms). Display only.
-             */
-            event_end_date_ms?: number | null;
-            /** @description Event-level icon URL (secondary image fallback). */
-            event_icon_url?: string | null;
-            /** @description Polymarket parent event id — frontend grouping key. */
-            event_id?: string | null;
-            /** @description Event-level image URL. */
-            event_image_url?: string | null;
-            /**
-             * Format: int64
-             * @description Parent event start date (epoch ms) from Polymarket. Display/sort only.
-             */
-            event_start_date_ms?: number | null;
-            /** @description Polymarket parent event title. */
-            event_title?: string | null;
-            /** Format: int64 */
-            expiry_timestamp_ms?: number | null;
-            /** @description External URL (e.g., Polymarket link). */
-            external_url?: string | null;
-            /**
-             * @description Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). Off-
-             *     block; the frontend uses it as the per-outcome name so it needn't fetch
-             *     the raw event JSON just for labels.
-             */
-            group_item_title?: string | null;
-            /**
-             * Format: int64
-             * @description Rolling last-10-batch band depth average. Integer nanodollars;
-             *     1_000_000_000 = $1. Zero for markets without a clearing price yet.
-             *     Pair with `liquidity_band_nanos` for labelling.
-             */
-            liquidity_avg10_nanos?: string;
-            /**
-             * Format: int64
-             * @description Width of the band the liquidity score uses (the ± in "$X ±$0.05").
-             *     Integer nanodollars; 1_000_000_000 = $1.
-             *     Always the live config value — `0` when no liquidity has been
-             *     recorded yet.
-             */
-            liquidity_band_nanos?: string;
-            /**
-             * Format: int64
-             * @description Per-market expected end date (epoch ms). Display only.
-             */
-            market_end_date_ms?: number | null;
-            /** @description Per-market icon URL (secondary image fallback). */
-            market_icon_url?: string | null;
-            /** Format: int32 */
-            market_id: number;
-            /** @description Per-market image URL. */
-            market_image_url?: string | null;
-            /**
-             * Format: int64
-             * @description Per-market start date (epoch ms) from Polymarket. Display/sort only.
-             */
-            market_start_date_ms?: number | null;
-            name: string;
-            /**
-             * Format: int64
-             * @description Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
-             *     Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            no_price_24h_ago_nanos?: string | null;
-            /**
-             * Format: int64
-             * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            no_price_nanos?: string | null;
-            /**
-             * Format: int64
-             * @description All-time admissions that received at least one fill (B5's
-             *     `has_been_matched` true at removal time). Cancels are NOT counted.
-             */
-            orders_matched_total?: number;
-            /**
-             * Format: int64
-             * @description All-time non-MM admissions counted against this market. Multi-market
-             *     orders credit every active market; sum-of-per-market over-counts vs.
-             *     the platform total — that's the documented attribution rule.
-             */
-            orders_placed_total?: number;
-            /**
-             * Format: int64
-             * @description All-time admissions that exited the book without any fill. Cancels
-             *     are tracked separately and do not count here.
-             */
-            orders_unmatched_total?: number;
-            /**
-             * Format: int64
-             * @description Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
-             *     Payouts are per-share probabilities in [0, 1e9].
-             */
-            payout_nanos?: string | null;
-            /**
-             * @description Polymarket on-chain condition id — FE join key into
-             *     `GET /v1/events/{event_id}/raw` `markets[].conditionId`. Off-block.
-             */
-            polymarket_condition_id?: string | null;
-            /**
-             * Format: int64
-             * @description Reference price from external system (e.g., Polymarket), display only.
-             *     Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            reference_price_nanos?: string | null;
-            resolution_criteria?: string | null;
-            status: string;
-            tags?: string[] | null;
-            /**
-             * Format: int32
-             * @description All-time unique trader count for this market (decision Q-table:
-             *     MM, MINT, multi-market split, etc.). Off-block — "since last
-             *     restart" until prod persistence is enabled.
-             */
-            trader_count?: number;
-            /**
-             * Format: int64
-             * @description Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
-             *     Off-block;
-             *     "since last restart" until prod persistence is enabled.
-             */
-            volume_24h_nanos?: string;
-            /**
-             * Format: int64
-             * @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            volume_nanos?: string;
-            /**
-             * Format: int64
-             * @description Clearing YES price ~24h ago, derived from the per-market
-             *     hourly snapshot. `None` for markets younger than 24h or wiped on
-             *     restart. FE computes the 24h delta as `current - snapshot`.
-             *     Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            yes_price_24h_ago_nanos?: string | null;
-            /**
-             * Format: int64
-             * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            yes_price_nanos?: string | null;
-        };
-        /** @description Query parameters for market search. */
-        MarketSearchParams: {
-            /** @description Exact category match. */
-            category?: string | null;
-            limit?: number | null;
-            /**
-             * Format: int64
-             * @description Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            max_yes_price?: number | null;
-            /**
-             * Format: int64
-             * @description Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            min_volume?: number | null;
-            /**
-             * Format: int64
-             * @description Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            min_yes_price?: number | null;
-            offset?: number | null;
-            /** @description Text search (searches name + description). */
-            q?: string | null;
-            /** @description Sort field: "volume", "created_at", "name", "price". */
-            sort?: string | null;
-            /** @description Status filter ("active" or "resolved"). */
-            status?: string | null;
-            /** @description Comma-separated tags to filter by. */
-            tags?: string | null;
-        };
-        /** @description Minimal market data for high-throughput dashboards (drops strings & metadata). */
-        MarketSummaryResponse: {
-            /**
-             * Format: int64
-             * @description Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
-             *     Mirrors `MarketResponse`.
-             */
-            liquidity_avg10_nanos?: string;
-            /**
-             * Format: int64
-             * @description Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
-             *     Mirrors `MarketResponse`.
-             */
-            liquidity_band_nanos?: string;
-            /** Format: int32 */
-            market_id: number;
-            name: string;
-            /**
-             * Format: int64
-             * @description Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            no_price_24h_ago_nanos?: string | null;
-            /**
-             * Format: int64
-             * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            no_price_nanos?: string | null;
-            /** Format: int64 */
-            orders_matched_total?: number;
-            /**
-             * Format: int64
-             * @description All-time placed/matched/unmatched (mirrors `MarketResponse`).
-             */
-            orders_placed_total?: number;
-            /** Format: int64 */
-            orders_unmatched_total?: number;
-            /**
-             * Format: int64
-             * @description Reference price from external system (e.g., Polymarket), display only.
-             *     Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            reference_price_nanos?: string | null;
-            status: string;
-            /**
-             * Format: int32
-             * @description All-time unique trader count (mirrors `MarketResponse.trader_count`).
-             */
-            trader_count?: number;
-            /**
-             * Format: int64
-             * @description Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
-             *     Mirrors
-             *     `MarketResponse.volume_24h_nanos`).
-             */
-            volume_24h_nanos?: string;
-            /**
-             * Format: int64
-             * @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            volume_nanos: string;
-            /**
-             * Format: int64
-             * @description Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            yes_price_24h_ago_nanos?: string | null;
-            /**
-             * Format: int64
-             * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            yes_price_nanos?: string | null;
-        };
-        ObserveL1HeightRequest: {
-            /**
-             * Format: int64
-             * @description Highest fully scanned and confirmed L1 block.
-             */
-            l1_block_height: number;
-        };
-        ObserveL1HeightResponse: {
-            /** Format: int64 */
-            observed_l1_height: number;
-            refunded_withdrawal_ids: number[];
-        };
-        /**
-         * @description Response shape for `GET /v1/markets/{id}/open-batch`. B1 populates
-         *     `unique_placers`; indicative fields stub `None`/`0` until C2.
-         */
-        OpenBatchResponse: {
-            /** Format: int64 */
-            indicative_computed_at_ms?: number;
-            /**
-             * Format: int64
-             * @description Indicative NO price for the open batch. Integer nanodollars;
-             *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-             */
-            indicative_no_price_nanos?: string | null;
-            /**
-             * Format: int64
-             * @description Indicative traded notional for the open batch. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             */
-            indicative_volume_nanos?: string;
-            /**
-             * Format: int64
-             * @description Indicative YES price for the open batch. Integer nanodollars;
-             *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-             */
-            indicative_yes_price_nanos?: string | null;
-            /** Format: int32 */
-            unique_placers: number;
-        };
-        OrderAcceptedResponse: {
-            accepted: boolean;
-            /** @description Sequencer-assigned IDs for the admitted orders, in request order. */
-            order_ids: number[];
-        };
-        /**
-         * @description Tagged enum representing public order types.
-         *
-         *     Public submission is intentionally limited to single-market binary orders.
-         *     Compound payoff-vector orders remain available inside `matching-engine` for
-         *     research and tests, but are not accepted at the HTTP API edge.
-         */
-        OrderSpec: {
-            /**
-             * Format: int64
-             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            limit_price_nanos: string;
-            /** Format: int32 */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Order quantity. Integer share-units; 1000 units = 1 share.
-             */
-            quantity: number;
-            /** @enum {string} */
-            type: "BuyYes";
-        } | {
-            /**
-             * Format: int64
-             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            limit_price_nanos: string;
-            /** Format: int32 */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Order quantity. Integer share-units; 1000 units = 1 share.
-             */
-            quantity: number;
-            /** @enum {string} */
-            type: "BuyNo";
-        } | {
-            /**
-             * Format: int64
-             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            limit_price_nanos: string;
-            /** Format: int32 */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Order quantity. Integer share-units; 1000 units = 1 share.
-             */
-            quantity: number;
-            /** @enum {string} */
-            type: "SellYes";
-        } | {
-            /**
-             * Format: int64
-             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            limit_price_nanos: string;
-            /** Format: int32 */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Order quantity. Integer share-units; 1000 units = 1 share.
-             */
-            quantity: number;
-            /** @enum {string} */
-            type: "SellNo";
-        };
-        /**
-         * @description Per-bucket platform totals returned by `/v1/activity/overview`. B1
-         *     populates `unique_traders` only; volume + orders join in B2 / B6 and
-         *     remain zero until then.
-         */
-        OverviewBucketResponse: {
-            orders?: components["schemas"]["OverviewOrderStatsResponse"];
-            /**
-             * Format: int64
-             * @description Total traded notional for this bucket. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             */
-            total_volume_nanos?: string;
-            /**
-             * Format: int64
-             * @description Cumulative platform welfare for this bucket. Integer nanodollars;
-             *     1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
-             *     once). Signed: solver rounding can yield small negatives.
-             */
-            total_welfare_nanos?: string;
-            /** Format: int64 */
-            unique_traders?: number;
-        };
-        OverviewOrderStatsResponse: {
-            /** Format: int64 */
-            matched?: number;
-            /** Format: int64 */
-            placed?: number;
-            /**
-             * Format: int64
-             * @description Distinct orders admitted (counted once per order at intake), all-time
-             *     or rolling 24h. `placed` above stays per-batch participation for
-             *     back-compat: a resting order counts once here but once per batch there.
-             */
-            placed_distinct?: number;
-            /** Format: int64 */
-            unmatched?: number;
-        };
-        PendingOrderResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /** Format: int64 */
-            created_at_block: number;
-            /**
-             * Format: int64
-             * @description Wall-clock admit time, ms since epoch. `0` for orders admitted before
-             *     this field shipped (#[serde(default)] forward compat).
-             */
-            created_at_ms?: number;
-            /** Format: int64 */
-            expires_at_block: number;
-            /**
-             * Format: int64
-             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            limit_price_nanos: string;
-            /** Format: int32 */
-            market_id: number;
-            /** Format: int64 */
-            order_id: number;
-            /**
-             * Format: int64
-             * @description Original `max_fill` at admit time. Integer share-units; 1000 units = 1 share.
-             *     Lets the FE render a partial-fill progress bar as
-             *     `(original - remaining) / original`.
-             *     `0` for orders persisted before B5/B8 (#[serde(default)] forward
-             *     compat).
-             */
-            original_quantity?: number;
-            /**
-             * Format: int64
-             * @description Remaining fill quantity. Integer share-units; 1000 units = 1 share.
-             */
-            remaining_quantity: number;
-            side: string;
-        };
-        PortfolioResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Spendable account balance after live-order reservations. Integer
-             *     nanodollars; 1_000_000_000 = $1.
-             */
-            available_balance_nanos: string;
-            /**
-             * Format: int64
-             * @description Total (gross) account balance; see `available_balance_nanos` for spendable
-             *     funds. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            balance_nanos: string;
-            /**
-             * Format: int64
-             * @description First-deposit timestamp in ms since epoch (B8). `0` for accounts
-             *     with no recorded deposit history (FE renders as "—"). Same
-             *     "since last restart" caveat as the other off-block aggregates
-             *     until persistence runs in prod.
-             */
-            first_deposit_ms?: number;
-            /**
-             * Format: int64
-             * @description Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            pnl_nanos: string;
-            /**
-             * Format: int64
-             * @description Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            portfolio_value_nanos: string;
-            positions: components["schemas"]["PositionValueResponse"][];
-            /**
-             * Format: int64
-             * @description Accumulated realized PnL across all closed positions (C1). Integer nanodollars;
-             *     1_000_000_000 = $1. Signed.
-             *     `pnl_nanos = realized + unrealized` once both fields populate, but
-             *     `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
-             */
-            realized_pnl_nanos?: string;
-            /**
-             * Format: int64
-             * @description Balance reserved by live resting orders. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             */
-            reserved_balance_nanos: string;
-            /**
-             * Format: int64
-             * @description Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            total_deposited_nanos: string;
-            /**
-             * Format: int64
-             * @description All-time fill count (B8). The bounded fill window in
-             *     `account_fills` may cap older trades; this counter never does,
-             *     so FE shows the real number instead of "200+".
-             */
-            total_fill_count?: number;
-            /**
-             * Format: int64
-             * @description Mark-to-market value of all positions. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             */
-            total_position_value_nanos: string;
-            /**
-             * Format: int64
-             * @description Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
-             *     1_000_000_000 = $1. Computed as
-             *     `sum((current_price - avg_entry) * quantity / SHARE_SCALE)` across positions.
-             */
-            unrealized_pnl_nanos?: string;
-        };
-        PositionDeltaResponse: {
-            /**
-             * Format: int64
-             * @description Position quantity delta. Integer share-units; 1000 units = 1 share.
-             */
-            delta: number;
-            /** Format: int32 */
-            market_id: number;
-            outcome: string;
-        };
-        PositionResponse: {
-            /** Format: int32 */
-            market_id: number;
-            outcome: string;
-            /**
-             * Format: int64
-             * @description Signed position quantity. Integer share-units; 1000 units = 1 share.
-             */
-            quantity: number;
-        };
-        PositionValueResponse: {
-            /**
-             * Format: int64
-             * @description Weighted-average entry price for this side of the market (C1). `0`
-             *     for positions opened before C1 landed (`#[serde(default)]` forward
-             *     compat). Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            avg_entry_price_nanos?: string;
-            /**
-             * Format: int64
-             * @description Current mark price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            current_price_nanos: string;
-            /** Format: int32 */
-            market_id: number;
-            outcome: string;
-            /**
-             * Format: int64
-             * @description Signed position quantity. Integer share-units; 1000 units = 1 share.
-             */
-            quantity: number;
-            /**
-             * Format: int64
-             * @description Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            value_nanos: string;
-        };
-        PriceCandleResponse: {
-            /** Format: int64 */
-            bucket_end_ms: number;
-            /** Format: int64 */
-            bucket_start_ms: number;
-            /**
-             * Format: int64
-             * @description Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            close_no_price_nanos: string;
-            /**
-             * Format: int64
-             * @description Bucket close YES price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            close_yes_price_nanos: string;
-            /** Format: int64 */
-            first_height: number;
-            /**
-             * Format: int64
-             * @description Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            high_no_price_nanos: string;
-            /**
-             * Format: int64
-             * @description Bucket high YES price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            high_yes_price_nanos: string;
-            /** Format: int64 */
-            last_height: number;
-            /**
-             * Format: int64
-             * @description Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            low_no_price_nanos: string;
-            /**
-             * Format: int64
-             * @description Bucket low YES price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            low_yes_price_nanos: string;
-            /**
-             * Format: int64
-             * @description Bucket open NO price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            open_no_price_nanos: string;
-            /**
-             * Format: int64
-             * @description Bucket open YES price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            open_yes_price_nanos: string;
-            /** Format: int64 */
-            point_count: number;
-            /**
-             * Format: int64
-             * @description Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            volume_nanos: string;
-        };
-        PriceCandlesResponse: {
-            candles: components["schemas"]["PriceCandleResponse"][];
-            /** Format: int32 */
-            market_id: number;
-            /** Format: int64 */
-            next_before_ms?: number | null;
-            /** Format: int32 */
-            resolution_secs: number;
-            /** Format: int64 */
-            retention_min_bucket_ms?: number | null;
-        };
-        PriceHistoryResponse: {
-            /** Format: int32 */
-            market_id: number;
-            /** Format: int64 */
-            next_before_height?: number | null;
-            points: components["schemas"]["PricePointResponse"][];
-            /** Format: int64 */
-            retention_min_height?: number | null;
-        };
-        PricePointResponse: {
-            /** Format: int64 */
-            height: number;
-            /**
-             * Format: int64
-             * @description NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            no_price_nanos: string;
-            /** Format: int64 */
-            timestamp_ms: number;
-            /**
-             * Format: int64
-             * @description Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            volume_nanos: string;
-            /**
-             * Format: int64
-             * @description YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            yes_price_nanos: string;
-        };
-        /** @description Private account summary served behind owner-or-service read auth (SYB-60/237). */
-        PrivateAccountSummaryResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Spendable account balance after live-order reservations. Integer
-             *     nanodollars; 1_000_000_000 = $1.
-             */
-            available_balance_nanos: string;
-            /**
-             * Format: int64
-             * @description Total (gross) account balance; see `available_balance_nanos` for spendable
-             *     funds. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            balance_nanos: string;
-            display_name?: string | null;
-            /**
-             * Format: int64
-             * @description Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            pnl_nanos: string;
-            /**
-             * Format: int64
-             * @description Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            portfolio_value_nanos: string;
-            positions?: components["schemas"]["PositionResponse"][];
-            /**
-             * Format: int64
-             * @description Balance reserved by live resting orders. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             */
-            reserved_balance_nanos: string;
-            /**
-             * Format: int64
-             * @description Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            total_deposited_nanos: string;
-        };
-        QmdbStateExclusionProofResponse: {
-            metadata_hex?: string | null;
-            operation: components["schemas"]["QmdbStateOperationProofResponse"];
-            span_key_hex?: string | null;
-            span_next_key_hex?: string | null;
-            span_value_hex?: string | null;
-            variant: string;
-        };
-        QmdbStateInclusionProofResponse: {
-            next_key_hex: string;
-            operation: components["schemas"]["QmdbStateOperationProofResponse"];
-        };
-        QmdbStateOperationProofResponse: {
-            activity_chunk_hex: string;
-            /** Format: int64 */
-            location: number;
-            range: components["schemas"]["QmdbStateRangeProofResponse"];
-        };
-        QmdbStateRangeProofResponse: {
-            digests_hex: string[];
-            /** Format: int64 */
-            leaves: number;
-            ops_root_hex: string;
-            partial_chunk_digest_hex?: string | null;
-            pre_prefix_acc_hex?: string | null;
-            unfolded_prefix_peaks_hex: string[];
-        };
-        RegisterFeedRequest: {
-            /** @description Human-readable name (e.g. "admin", "polymarket_mirror"). */
-            name: string;
-            /** @description Hex-encoded compressed P256 public key (33 bytes). */
-            pubkey_hex: string;
-        };
-        RegisterKeyRequest: {
-            /**
-             * @description Authentication scheme associated with this account key. Defaults to
-             *     `raw_p256` so existing bots, SDKs, and arena clients are unchanged.
-             */
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /**
-             * @description Base64url credential id for WebAuthn keys. Stored client-side today and
-             *     documented here so passkey clients can round-trip the registration payload.
-             */
-            credential_id_b64url?: string | null;
-            /** @description Optional human label for this key, e.g. "agent:pricer" (SYB-60). */
-            label?: string | null;
-            /**
-             * @description Hex-encoded compressed P256 public key (33 bytes).
-             * @example 02a1b2c3...
-             */
-            public_key_hex: string;
-            /**
-             * @description Scope tag describing what this key is for (SYB-60). Defaults to `primary`.
-             *     Register an agent trade key by passing `agent` with its own P256 keypair —
-             *     it then signs like any account key (bearer API keys are read-only and
-             *     cannot trade).
-             */
-            scope?: components["schemas"]["KeyScope"];
-            webauthn_registration?: null | components["schemas"]["WebAuthnRegistration"];
-        };
-        /** @description Registered data feed view, returned by GET/POST /v1/feeds. */
-        RegisteredFeedResponse: {
-            /** Format: int64 */
-            created_at_ms: number;
-            /** Format: int64 */
-            feed_id: number;
-            name: string;
-            pubkey_hex: string;
-        };
-        RejectedOrderViewResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /** Format: int64 */
-            order_id: number;
-            reason: string;
-        };
-        RejectionResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /** Format: int64 */
-            order_id: number;
-            reason: string;
-        };
-        RemovedOrderViewResponse: {
-            /** Format: int64 */
-            account_id: number;
-            active_markets?: number[];
-            exit_reason: string;
-            has_been_matched: boolean;
-            /** Format: int64 */
-            order_id: number;
-            phase: string;
-            rejection_reason?: string | null;
-            /**
-             * Format: int64
-             * @description Released reserved cash. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            reserved_balance_released: number;
-            reserved_positions_released?: components["schemas"]["ReservedPositionReleaseResponse"][];
-        };
-        ReservedPositionReleaseResponse: {
-            /** Format: int32 */
-            market_id: number;
-            /** Format: int32 */
-            outcome: number;
-            /**
-             * Format: int64
-             * @description Released reserved position quantity. Integer share-units; 1000 units = 1 share.
-             */
-            quantity: number;
-        };
-        /**
-         * @description Detailed view of a market's resolution state. Unresolved markets return
-         *     `status = "active"` (or `proposed`/`challenged` for future policies) with
-         *     `payout_nanos = None`.
-         */
-        ResolutionResponse: {
-            /** Format: int32 */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Resolution payout per YES share. Integer nanodollars;
-             *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
-             */
-            payout_nanos?: string | null;
-            /** Format: int64 */
-            resolved_at_ms?: number | null;
-            /** Format: int64 */
-            resolved_by_feed_id?: number | null;
-            resolved_by_feed_name?: string | null;
-            status: string;
-            template: string;
-        };
-        ResolveMarketRequest: {
-            attestation?: null | components["schemas"]["SignedAttestationDto"];
-            /**
-             * Format: int64
-             * @description Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
-             *     Payouts are per-share probabilities in [0, 1e9].
-             * @example 1000000000
-             */
-            payout_nanos: string;
-        };
-        ResolveMarketResponse: {
-            /** Format: int64 */
-            challenge_deadline_ms?: number | null;
-            /** Format: int32 */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Resolution payout per YES share. Integer nanodollars;
-             *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
-             */
-            payout_nanos: string;
-            status: string;
-        };
-        /** @description Signed request to revoke a read-scoped bearer API key by id (SYB-60). */
-        RevokeApiKeyRequest: {
-            /**
-             * Format: int64
-             * @description Id of the API key to revoke (from the API-key listing).
-             */
-            api_key_id: number;
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /** Format: int64 */
-            nonce: number;
-            signature_hex?: string | null;
-            signer_pubkey_hex: string;
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
-        };
-        /** @description Signed request to revoke a registered signing key (SYB-60). */
-        RevokeKeyRequest: {
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /** Format: int64 */
-            nonce: number;
-            signature_hex?: string | null;
-            /**
-             * @description Hex-encoded compressed P256 public key of the signer (any active key on
-             *     the account may authorize revocation, including the target itself as long
-             *     as another key remains).
-             */
-            signer_pubkey_hex: string;
-            /** @description Hex-encoded compressed P256 public key (33 bytes) of the key to revoke. */
-            target_pubkey_hex: string;
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
-        };
-        SetMarketMetadataRequest: {
-            /**
-             * @description All category buckets the parent event matched in the mirror's tag-to-
-             *     bucket lookup (e.g. `["Sports", "Politics"]` for an NBA + Trump
-             *     event). One per matched row; the frontend picks which to render
-             *     using its own priority list, so reordering display priority is
-             *     frontend-only.
-             */
-            categories?: string[] | null;
-            /**
-             * @description Single display category. **Legacy** — populated only for sybil-native
-             *     markets at create time. Mirrored markets now use `categories` (plural)
-             *     and let the frontend pick one for display via its own priority order.
-             */
-            category?: string | null;
-            /**
-             * @description Whether Polymarket has closed this market. The frontend hides closed
-             *     markets from the listing.
-             */
-            closed?: boolean | null;
-            /**
-             * Format: int64
-             * @description Event-level expected end date (epoch ms). Display only.
-             */
-            event_end_date_ms?: number | null;
-            /** @description Event-level icon URL (secondary; frontend uses as `onError` fallback). */
-            event_icon_url?: string | null;
-            /**
-             * @description Polymarket parent event id — used by the frontend to group sibling
-             *     markets (e.g., "Fed Decision in June" sub-questions). Distinct from the
-             *     matching engine's NegRisk `MarketGroup`, which it does not affect.
-             */
-            event_id?: string | null;
-            /** @description Event-level image URL (primary). */
-            event_image_url?: string | null;
-            /**
-             * Format: int64
-             * @description Parent event start date (epoch ms). Display/sort only.
-             */
-            event_start_date_ms?: number | null;
-            /** @description Polymarket parent event title — rendered as the MultiCard header. */
-            event_title?: string | null;
-            /** @description External URL (e.g., Polymarket link). */
-            external_url?: string | null;
-            /**
-             * @description Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). The
-             *     frontend renders this as the per-outcome name on multi-cards.
-             */
-            group_item_title?: string | null;
-            /**
-             * Format: int64
-             * @description Per-market expected end date (epoch ms). Display only; matching engine
-             *     does not enforce trading cutoffs at this time.
-             */
-            market_end_date_ms?: number | null;
-            /** @description Per-market icon URL (secondary; frontend uses as `onError` fallback). */
-            market_icon_url?: string | null;
-            /** @description Per-market image URL (primary). */
-            market_image_url?: string | null;
-            /**
-             * Format: int64
-             * @description Per-market start date (epoch ms). Display/sort only.
-             */
-            market_start_date_ms?: number | null;
-            /**
-             * @description Polymarket on-chain condition id — the FE join key into the event JSON
-             *     snapshot (`/v1/events/{id}/raw` `markets[].conditionId`).
-             */
-            polymarket_condition_id?: string | null;
-        };
-        /**
-         * @description Common P256/WebAuthn signature envelope shared by SYB-60 account-management
-         *     mutations. Mirrors the fields on `CreateSignedBridgeWithdrawalRequest`.
-         */
-        SetProfileRequest: {
-            /** @description Authentication scheme for this signer. Defaults to raw P256. */
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /** @description New identicon seed, or `null` to clear it. There is no image upload. */
-            avatar_seed?: string | null;
-            /**
-             * @description New display name, or `null` to clear it (SYB-60). Validated for
-             *     length (1-32) and charset at the API edge.
-             */
-            display_name?: string | null;
-            /**
-             * Format: int64
-             * @description Per-account replay nonce (strictly increasing).
-             */
-            nonce: number;
-            /**
-             * @description Hex-encoded raw P256 ECDSA signature over the canonical profile payload.
-             *     Required when `auth_scheme` is `raw_p256`.
-             */
-            signature_hex?: string | null;
-            /** @description Hex-encoded compressed P256 public key of the signer. */
-            signer_pubkey_hex: string;
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
-        };
-        SetReferencePricesRequest: {
-            /**
-             * @description Map of market_id -> reference price. Integer nanodollars;
-             *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
-             */
-            prices: {
-                [key: string]: number;
-            };
-        };
-        /** @description Wire form of a signed resolution attestation. */
-        SignedAttestationDto: {
-            /**
-             * Format: int64
-             * @description Nonce the signer chose (typically `timestamp_ms`).
-             */
-            nonce: number;
-            /** @description Hex-encoded compressed SEC1 P256 public key (33 bytes). */
-            pubkey_hex: string;
-            /** @description Hex-encoded P256 ECDSA signature over the canonical attestation bytes. */
-            signature_hex: string;
-        };
-        SignedOrderData: {
-            /**
-             * Format: int64
-             * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
-             *     Prices are per-share probabilities in [0, 1e9].
-             */
-            limit_price_nanos: string;
-            /** @description Market IDs this order spans. */
-            market_ids: number[];
-            /**
-             * Format: int64
-             * @description Maximum fill quantity. Integer share-units; 1000 units = 1 share.
-             */
-            max_fill: number;
-            /** @description Payoff vector. */
-            payoffs: number[];
-        };
-        /**
-         * @description Signed request to register a NEW signing key on an account (SYB-229).
-         *
-         *     Required whenever the account already has at least one registered key. The
-         *     first key is bootstrapped over the service tier (`POST /v1/accounts/{id}/keys`);
-         *     every subsequent key must be authorized by a signature from an existing
-         *     account key. Like orders/cancels, the canonical payload is domain-separated
-         *     by the chain `genesis_hash` (SYB-224).
-         */
-        SignedRegisterKeyRequest: {
-            /**
-             * @description Authentication scheme of the NEW key. Defaults to `raw_p256`. When
-             *     `webauthn`, `webauthn_registration` must prove possession of the new key.
-             */
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /** @description Base64url credential id for a WebAuthn new key. */
-            credential_id_b64url?: string | null;
-            /** @description Optional human label for the new key, e.g. "agent:pricer". */
-            label?: string | null;
-            /**
-             * Format: int64
-             * @description Per-account replay nonce (strictly increasing).
-             */
-            nonce: number;
-            /**
-             * @description Hex-encoded compressed P256 public key (33 bytes) of the NEW key.
-             * @example 02a1b2c3...
-             */
-            public_key_hex: string;
-            /** @description Scope tag for the new key. Defaults to `primary`. */
-            scope?: components["schemas"]["KeyScope"];
-            /**
-             * @description Hex-encoded raw P256 ECDSA signature over the canonical registration
-             *     payload. Required when `signer_auth_scheme` is `raw_p256`.
-             */
-            signature_hex?: string | null;
-            /** @description Authentication scheme of the SIGNER. Defaults to `raw_p256`. */
-            signer_auth_scheme?: components["schemas"]["AuthScheme"];
-            /**
-             * @description Hex-encoded compressed P256 public key of the SIGNER — an existing active
-             *     key on this account authorizing the registration.
-             */
-            signer_pubkey_hex: string;
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
-            webauthn_registration?: null | components["schemas"]["WebAuthnRegistration"];
-        };
-        StateProofResponse: {
-            /** Format: int64 */
-            block_height: number;
-            exclusion_proof?: null | components["schemas"]["QmdbStateExclusionProofResponse"];
-            inclusion_proof?: null | components["schemas"]["QmdbStateInclusionProofResponse"];
-            leaf_key_ascii?: string | null;
-            leaf_key_hex: string;
-            leaf_value_hex?: string | null;
-            proof_format: string;
-            proof_kind: string;
-            /** @description State root this proof is anchored to. Hex-encoded 32-byte qMDB root. */
-            state_root: string;
-            state_slot: string;
-            verified: boolean;
-        };
-        StateRootResponse: {
-            /** @description Current state root. Hex-encoded 32-byte qMDB root. */
-            state_root: string;
-        };
-        /**
-         * @description Body of `POST /v1/admin/auto-resolutions` (SYB-48). The auto-resolution
-         *     resolver (sybil-polymarket) submits one of these per market it has
-         *     evaluated with an LLM. This route NEVER settles a market: it only records a
-         *     reviewable proposal. Finalization always flows back through the existing
-         *     signed `POST /v1/markets/{id}/resolve` money path.
-         */
-        SubmitAutoResolutionRequest: {
-            /** @description Confidence tier the resolver's policy assigned. */
-            action: components["schemas"]["AutoResolutionActionDto"];
-            /**
-             * Format: double
-             * @description Model confidence in [0, 1].
-             */
-            confidence: number;
-            /**
-             * Format: int64
-             * @description Wall-clock deadline after which a `propose` entry may auto-finalize.
-             *     Unix milliseconds. Required for `propose`; ignored otherwise.
-             */
-            eta_ms?: number | null;
-            /** @description Short verbatim excerpts from the fetched source the model relied on. */
-            evidence_excerpts?: string[];
-            /**
-             * Format: int32
-             * @description Market the proposal is for.
-             */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
-             *     Payouts are per-share probabilities in [0, 1e9].
-             * @example 1000000000
-             */
-            payout_nanos: string;
-            /** @description Model's free-text justification. Stored verbatim for review. */
-            reasoning: string;
-        };
-        SubmitL1DepositRequest: {
-            /**
-             * Format: int64
-             * @description Sybil account receiving the credit.
-             */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
-             */
-            amount_token_units: number;
-            /**
-             * Format: int64
-             * @description Source chain id.
-             */
-            chain_id: number;
-            /**
-             * Format: int64
-             * @description Sequential L1 vault deposit id.
-             */
-            deposit_id: number;
-            /** @description Hex-encoded post-deposit L1 deposit tree root (32 bytes). */
-            deposit_root_hex: string;
-            /** @description Hex-encoded L1 sender address (20 bytes). */
-            sender_hex: string;
-            /** @description Optional Sybil bridge account key. If omitted, the API derives it for the account. */
-            sybil_account_key_hex?: string | null;
-            /** @description Hex-encoded token contract address (20 bytes). */
-            token_address_hex: string;
-            /** @description Hex-encoded vault contract address (20 bytes). */
-            vault_address_hex: string;
-        };
-        SubmitL1WithdrawalEventRequest: {
-            /**
-             * Format: int64
-             * @description Event timestamp from the vault event, in Unix seconds.
-             */
-            event_at_unix: number;
-            /**
-             * Format: int64
-             * @description Finalization ETA emitted by the vault, in Unix seconds.
-             */
-            executable_at_unix?: number | null;
-            /**
-             * Format: int64
-             * @description Confirmed L1 block number carrying the event.
-             */
-            l1_block_height: number;
-            /** @description Withdrawal nullifier emitted by SybilVault. */
-            nullifier_hex: string;
-            /** @description Queue state observed from the vault event. */
-            status: components["schemas"]["BridgeWithdrawalL1Status"];
-            /** @description L1 transaction hash carrying the event, if indexed from logs. */
-            tx_hash_hex?: string | null;
-        };
-        SubmitOrderRequest: {
-            /**
-             * Format: int64
-             * @description Account ID submitting the orders.
-             */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Last eligible block height for explicit-expiry orders.
-             */
-            expires_at_block?: number | null;
-            /**
-             * Format: int64
-             * @description If set, treat these orders as market maker orders with flash liquidity.
-             *     The value is the MM's total capital budget. Integer nanodollars;
-             *     1_000_000_000 = $1.
-             *     MM orders skip per-order balance validation; instead the solver enforces
-             *     the portfolio-level budget constraint at clearing time.
-             */
-            mm_budget_nanos?: string | null;
-            /** @description Orders to submit. */
-            orders: components["schemas"]["OrderSpec"][];
-            /** @description Time-in-force policy applied to all orders in this submission. */
-            time_in_force?: components["schemas"]["TimeInForce"];
-        };
-        SubmitSignedOrderRequest: {
-            /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
-            auth_scheme?: components["schemas"]["AuthScheme"];
-            /**
-             * Format: int64
-             * @description Last eligible block height, covered by the P256 signature. Required for signed IOC/GTD.
-             */
-            expires_at_block?: number | null;
-            /**
-             * Format: int64
-             * @description Per-account replay nonce covered by the P256 signature.
-             */
-            nonce: number;
-            /** @description The order to submit. */
-            order: components["schemas"]["SignedOrderData"];
-            /**
-             * @description Hex-encoded raw P256 ECDSA signature over the canonical order payload.
-             *     Required when `auth_scheme` is `raw_p256`.
-             */
-            signature_hex?: string | null;
-            /** @description Hex-encoded compressed P256 public key of the signer. */
-            signer_pubkey_hex: string;
-            /** @description API time-in-force policy. Signed IOC/GTD orders commit to `expires_at_block`. */
-            time_in_force?: components["schemas"]["TimeInForce"];
-            webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
-        };
-        SystemEventResponse: {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            initial_balance_nanos: string;
-            /** @enum {string} */
-            type: "create_account";
-        } | {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            amount_nanos: string;
-            /** @enum {string} */
-            type: "deposit";
-        } | {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            amount_nanos: string;
-            /** Format: int64 */
-            deposit_id: number;
-            deposit_root_hex: string;
-            sybil_account_key_hex: string;
-            /** @enum {string} */
-            type: "l1_deposit";
-        } | {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Account debit amount. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            amount_nanos: string;
-            nullifier_hex: string;
-            /** @enum {string} */
-            type: "withdrawal_created";
-            /** Format: int64 */
-            withdrawal_id: number;
-        } | {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Refunded account credit. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            amount_nanos: string;
-            reason: string;
-            /** @enum {string} */
-            type: "withdrawal_refunded";
-            /** Format: int64 */
-            withdrawal_id: number;
-        } | {
-            /** Format: int64 */
-            account_id: number;
-            /**
-             * Format: int64
-             * @description Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
-             */
-            amount_nanos: string;
-            /** @enum {string} */
-            type: "withdrawal_finalized";
-            /** Format: int64 */
-            withdrawal_id: number;
-        } | {
-            /** Format: int64 */
-            height: number;
-            /** @enum {string} */
-            type: "l1_block_observed";
-        } | {
-            affected_accounts: number[];
-            /** Format: int32 */
-            market_id: number;
-            /**
-             * Format: int64
-             * @description Resolution payout per YES share. Integer nanodollars;
-             *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
-             */
-            payout_nanos: string;
-            /** @enum {string} */
-            type: "market_resolved";
-        } | {
-            /** Format: int64 */
-            account_id: number;
-            market_ids: number[];
-            /** Format: int64 */
-            order_id: number;
-            /**
-             * Format: int64
-             * @description Cancelled order's unfilled quantity. Integer share-units;
-             *     1000 units = 1 share.
-             */
-            remaining_quantity: number;
-            side: string;
-            /** @enum {string} */
-            type: "order_cancelled";
-        } | {
-            /** Format: int64 */
-            group_id: number;
-            /** Format: int32 */
-            market_id: number;
-            /** @enum {string} */
-            type: "market_group_extended";
-        };
-        /** @enum {string} */
-        TimeInForce: "GTC" | "IOC" | "GTD";
-        TokenUsageResponse: {
-            /** Format: double */
-            avg_latency_s?: number | null;
-            /** Format: int64 */
-            calls: number;
-            /** Format: int64 */
-            completion_tokens: number;
-            latest_model?: string | null;
-            /** Format: int64 */
-            prompt_tokens: number;
-            trader_name: string;
-        };
-        WebAuthnAssertion: {
-            /** @description Base64url authenticatorData bytes from `navigator.credentials.get`. */
-            authenticator_data_b64url: string;
-            /** @description Base64url clientDataJSON bytes from `navigator.credentials.get`. */
-            client_data_json_b64url: string;
-            /** @description Base64url credential id returned by the authenticator. */
-            credential_id_b64url: string;
-            /** @description Base64url DER-encoded ECDSA signature from `navigator.credentials.get`. */
-            signature_b64url: string;
-            /** @description Optional base64url userHandle returned by the authenticator. */
-            user_handle_b64url?: string | null;
-        };
-        WebAuthnRegistration: {
-            /** @description Base64url-encoded WebAuthn attestationObject from `navigator.credentials.create`. */
-            attestation_object_b64url: string;
-            /** @description Base64url-encoded WebAuthn clientDataJSON from `navigator.credentials.create`. */
-            client_data_json_b64url: string;
-        };
+  schemas: {
+    AccountFillResponse: {
+      /** Format: int64 */
+      block_height: number;
+      /**
+       * @description Stable cursor for forward pagination (`GET .../fills?after=<cursor>`).
+       *     Opaque to clients; current encoding is `<block_height>.<order_id>`.
+       */
+      cursor: string;
+      /**
+       * Format: int64
+       * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      fill_price_nanos: string;
+      /**
+       * Format: int64
+       * @description Fill quantity. Integer share-units; 1000 units = 1 share.
+       */
+      fill_qty: number;
+      /** Format: int64 */
+      order_id: number;
+      position_deltas: components["schemas"]["PositionDeltaResponse"][];
+      /** Format: int64 */
+      timestamp_ms: number;
     };
-    responses: never;
-    parameters: never;
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
+    /** @description A registered signing key with SYB-60 management metadata. */
+    AccountKeyResponse: {
+      /** @description Authentication scheme: `raw_p256` or `webauthn`. */
+      auth_scheme: string;
+      /**
+       * Format: int64
+       * @description Registration time in Unix milliseconds (0 for keys predating SYB-60).
+       */
+      created_at_ms: number;
+      /** @description Optional human label. */
+      label?: string | null;
+      /** @description Hex-encoded compressed P256 public key (33 bytes). */
+      public_key_hex: string;
+      /** @description Scope tag: `primary`, `agent`, or `custom`. */
+      scope: string;
+    };
+    AccountResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Spendable account balance after live-order reservations. Integer
+       *     nanodollars; 1_000_000_000 = $1.
+       */
+      available_balance_nanos: string;
+      /** @description Optional deterministic identicon seed (SYB-60). */
+      avatar_seed?: string | null;
+      /**
+       * Format: int64
+       * @description Total (gross) account balance; see `available_balance_nanos` for spendable
+       *     funds. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      balance_nanos: string;
+      /**
+       * @description Optional opt-in display name (SYB-60). Not yet used for leaderboard
+       *     labels — that flip is a deliberate follow-up.
+       */
+      display_name?: string | null;
+      events_digest_hex: string;
+      keys_digest_hex: string;
+      positions?: components["schemas"]["PositionResponse"][];
+      /**
+       * Format: int64
+       * @description Balance reserved by live resting orders. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      reserved_balance_nanos: string;
+    };
+    /** @description Response shape for `GET /v1/activity/overview`. All-time + 24h slices. */
+    ActivityOverviewResponse: {
+      all_time: components["schemas"]["OverviewBucketResponse"];
+      last_24h: components["schemas"]["OverviewBucketResponse"];
+    };
+    AdmitTimingViewResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /** Format: int64 */
+      admit_height: number;
+      /**
+       * Format: int64
+       * @description Admission timestamp in Unix epoch milliseconds.
+       */
+      admit_timestamp_ms: number;
+      is_mm: boolean;
+      is_new: boolean;
+      /** Format: int64 */
+      order_id: number;
+    };
+    /** @description A read-scoped bearer API key's metadata (never the token or its hash). */
+    ApiKeyResponse: {
+      /** Format: int64 */
+      created_at_ms: number;
+      /**
+       * Format: int64
+       * @description Stable id used to reference this key for revocation.
+       */
+      id: number;
+      label?: string | null;
+      /**
+       * Format: int64
+       * @description Revocation time in Unix milliseconds, if revoked.
+       */
+      revoked_at_ms?: number | null;
+    };
+    /** @enum {string} */
+    AuthScheme: "raw_p256" | "webauthn";
+    /**
+     * @description Which confidence tier a proposed automated resolution (SYB-48) landed in.
+     *     Mirrors the resolver-side confidence policy so the review board can render
+     *     and gate each entry consistently.
+     * @enum {string}
+     */
+    AutoResolutionActionDto: "propose" | "review" | "escalate";
+    /** @description One entry on the automated-resolution review board (SYB-48). */
+    AutoResolutionEntryResponse: {
+      /**
+       * @description Confidence tier the resolver assigned (`propose` | `review` |
+       *     `escalate`).
+       */
+      action: components["schemas"]["AutoResolutionActionDto"];
+      /**
+       * Format: double
+       * @description Model confidence in [0, 1].
+       */
+      confidence: number;
+      /**
+       * Format: int64
+       * @description When an operator approved/rejected, if they did. Unix milliseconds.
+       */
+      decided_at_ms?: number | null;
+      /**
+       * Format: int64
+       * @description Auto-finalize deadline for `propose` entries. Unix milliseconds.
+       */
+      eta_ms?: number | null;
+      /** @description Short verbatim excerpts from the fetched source. */
+      evidence_excerpts?: string[];
+      /** Format: int32 */
+      market_id: number;
+      /**
+       * Format: int64
+       * @description Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
+       *     Payouts are per-share probabilities in [0, 1e9].
+       */
+      payout_nanos: string;
+      /**
+       * Format: int64
+       * @description When the proposal was first recorded. Unix milliseconds.
+       */
+      proposed_at_ms: number;
+      /** @description Model's free-text justification. */
+      reasoning: string;
+      /**
+       * @description Display status derived at read time from the operator decision AND the
+       *     market's live on-chain state: one of `pending`, `needs_review`,
+       *     `escalated`, `approved`, `rejected`, `resolved`.
+       */
+      status: string;
+    };
+    /** @description Response body of `GET /v1/admin/auto-resolutions` (SYB-48). */
+    AutoResolutionListResponse: {
+      entries: components["schemas"]["AutoResolutionEntryResponse"][];
+    };
+    /**
+     * @description Nested per-market sidecar on `BlockResponse.by_market`. Grows append-only
+     *     across steps (each new field carries `#[serde(default)]` so partial
+     *     reverts stay clean). Volume/orders/welfare join in B2 / B6 / B7.
+     */
+    BlockMarketStats: {
+      /**
+       * Format: int32
+       * @description Resting orders touching this market that exited the book this
+       *     block AFTER at least one fill (B5's `has_been_matched`).
+       */
+      matched?: number;
+      /**
+       * Format: int32
+       * @description Non-MM admissions counted against this market in this block.
+       *     Multi-market orders credit each active market.
+       */
+      placed?: number;
+      /**
+       * Format: int32
+       * @description Unique placers (non-MM accounts) admitted touching this market in
+       *     the block. Multi-market orders credit each active market; the
+       *     platform `unique_placers` scalar counts the account once.
+       */
+      placers?: number;
+      /**
+       * Format: int32
+       * @description Resting orders touching this market that exited the book this
+       *     block WITHOUT any fill. Cancels are excluded.
+       */
+      unmatched?: number;
+      /**
+       * Format: int64
+       * @description Per-market volume contribution from this block's fills. Integer nanodollars;
+       *     1_000_000_000 = $1. Multi-market fills credit each active market with their
+       *     full notional; the platform `total_volume_nanos` scalar counts each fill once.
+       */
+      volume_nanos?: string;
+      /**
+       * Format: int64
+       * @description Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
+       *     1_000_000_000 = $1. Multi-market fills credit each active market with their
+       *     full welfare; the platform `total_welfare_nanos` counts each fill once.
+       *     Signed — solver rounding can yield small negatives.
+       */
+      welfare_nanos?: string;
+    };
+    BlockResponse: {
+      bridge?: components["schemas"]["BridgeBlockResponse"];
+      /**
+       * @description Nested per-market scalars (decision Q1 in BACKEND_DATA_PLAN.md). Each
+       *     `BlockMarketStats` carries the per-market splits for this block. Old
+       *     clients ignore it; new clients consume what they recognise.
+       */
+      by_market?: {
+        [key: string]: components["schemas"]["BlockMarketStats"];
+      };
+      /**
+       * @description Clearing price vectors by market/group. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+       */
+      clearing_prices_nanos?: {
+        [key: string]: string[];
+      };
+      /**
+       * @description Unproven derived-view lifecycle sidecar. The field is exposed on the
+       *     same block surface as canonical data, but its `provenance` marks it as
+       *     derived read-model data rather than consensus-proven data.
+       */
+      derived_view_sidecar?: components["schemas"]["DerivedViewSidecarResponse"];
+      events_root: string;
+      /** Format: int32 */
+      fill_count: number;
+      fills?: components["schemas"]["FillResponse"][];
+      /** Format: int64 */
+      height: number;
+      /** Format: int32 */
+      order_count: number;
+      orders_filled: number;
+      parent_hash: string;
+      rejections?: components["schemas"]["RejectionResponse"][];
+      /** @description Post-block state root. Hex-encoded 32-byte qMDB root. */
+      state_root: string;
+      system_events?: components["schemas"]["SystemEventResponse"][];
+      /** Format: int64 */
+      timestamp_ms: number;
+      /**
+       * Format: int64
+       * @description Total traded notional in the block. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      total_volume_nanos: string;
+      /**
+       * Format: int64
+       * @description Total solver welfare in the block. Integer nanodollars;
+       *     1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
+       */
+      total_welfare_nanos: string;
+      /**
+       * Format: int32
+       * @description Unique placers (non-MM accounts) admitted into this block. Platform
+       *     scalar — `by_market[m].placers` is the per-market split.
+       */
+      unique_placers?: number;
+    };
+    BotDecisionFeedResponse: {
+      db_available: boolean;
+      db_path?: string | null;
+      decisions: components["schemas"]["BotDecisionResponse"][];
+      error?: string | null;
+      stats: components["schemas"]["BotStatsResponse"];
+      summaries: components["schemas"]["BotSummaryResponse"][];
+      token_usage: components["schemas"]["TokenUsageResponse"][];
+    };
+    BotDecisionResponse: {
+      analysis?: string | null;
+      article_urls: unknown;
+      /** Format: double */
+      balance?: number | null;
+      /** Format: double */
+      edge?: number | null;
+      /** Format: double */
+      fair_value?: number | null;
+      /** Format: int64 */
+      id: number;
+      /** Format: double */
+      llm_duration_s?: number | null;
+      /** Format: int64 */
+      market_id?: number | null;
+      market_name?: string | null;
+      /** Format: double */
+      market_price?: number | null;
+      motivation?: string | null;
+      /** Format: double */
+      no_pos?: number | null;
+      orders: unknown;
+      timestamp?: string | null;
+      trader_name: string;
+      /** Format: double */
+      yes_pos?: number | null;
+    };
+    BotEquityPointResponse: {
+      /** Format: double */
+      balance?: number | null;
+      /** Format: int64 */
+      id: number;
+      /** Format: double */
+      pnl?: number | null;
+      /** Format: double */
+      portfolio_value?: number | null;
+      timestamp?: string | null;
+      /** Format: int64 */
+      total_fills?: number | null;
+      /** Format: int64 */
+      total_orders?: number | null;
+      trader_name: string;
+    };
+    BotEquitySeriesResponse: {
+      db_available: boolean;
+      db_path?: string | null;
+      downsampled: boolean;
+      error?: string | null;
+      limit: number;
+      points: components["schemas"]["BotEquityPointResponse"][];
+      returned_rows: number;
+      server_cap: number;
+      since?: string | null;
+      source_rows: number;
+      stride: number;
+      trader?: string | null;
+    };
+    BotStatsResponse: {
+      /** Format: int64 */
+      articles: number;
+      /** Format: int64 */
+      decisions: number;
+      latest_decision_timestamp?: string | null;
+      /** Format: int64 */
+      snapshots: number;
+      /** Format: int64 */
+      token_usage: number;
+      traders: number;
+    };
+    BotSummaryResponse: {
+      /** Format: double */
+      avg_edge?: number | null;
+      /** Format: int64 */
+      decision_count: number;
+      /** Format: double */
+      latest_balance?: number | null;
+      /** Format: double */
+      latest_edge?: number | null;
+      /** Format: double */
+      latest_fair_value?: number | null;
+      /** Format: int64 */
+      latest_market_id?: number | null;
+      latest_market_name?: string | null;
+      /** Format: double */
+      latest_market_price?: number | null;
+      latest_timestamp?: string | null;
+      /** Format: double */
+      pnl?: number | null;
+      /** Format: double */
+      portfolio_value?: number | null;
+      snapshot_timestamp?: string | null;
+      /** Format: int64 */
+      total_fills?: number | null;
+      /** Format: int64 */
+      total_orders?: number | null;
+      trader_name: string;
+    };
+    BridgeAccountKeyResponse: {
+      /** Format: int64 */
+      account_id: number;
+      sybil_account_key_hex: string;
+    };
+    BridgeBlockResponse: {
+      consumed_deposits?: components["schemas"]["BridgeDepositEventResponse"][];
+      /** Format: int64 */
+      deposit_count: number;
+      deposit_root_hex: string;
+      withdrawal_leaves?: components["schemas"]["BridgeWithdrawalResponse"][];
+    };
+    BridgeDepositEventResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
+       */
+      amount_token_units: number;
+      /** Format: int64 */
+      deposit_id: number;
+      deposit_root_hex: string;
+    };
+    BridgeDepositResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      balance_nanos: string;
+      /** Format: int64 */
+      deposit_id: number;
+      deposit_root_hex: string;
+    };
+    BridgeStatusResponse: {
+      cancelled_withdrawal_count?: number;
+      /** Format: int64 */
+      deposit_cursor: number;
+      deposit_root_hex: string;
+      finalized_withdrawal_count?: number;
+      /** Format: int64 */
+      next_withdrawal_id: number;
+      /** Format: int64 */
+      observed_l1_height: number;
+      queued_withdrawal_count?: number;
+      refunded_withdrawal_count?: number;
+      withdrawal_count: number;
+    };
+    BridgeWithdrawalL1EventResponse: {
+      /**
+       * @description False when the terminal withdrawal was already pruned; the observation
+       *     is still accepted as an idempotent no-op.
+       */
+      active_withdrawal_found: boolean;
+      withdrawal?: null | components["schemas"]["BridgeWithdrawalResponse"];
+    };
+    /** @enum {string} */
+    BridgeWithdrawalL1Status:
+      | "not_requested"
+      | "queued"
+      | "finalized"
+      | "cancelled"
+      | "refunded";
+    BridgeWithdrawalResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Off-chain balance amount burned for the withdrawal. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      amount_nanos: string;
+      /**
+       * Format: int64
+       * @description Token base units released by the vault.
+       */
+      amount_token_units: number;
+      /** Format: int64 */
+      created_at_height: number;
+      /** Format: int64 */
+      expiry_height: number;
+      /** Format: int64 */
+      l1_cancelled_at_unix?: number | null;
+      /** Format: int64 */
+      l1_executable_at_unix?: number | null;
+      /** Format: int64 */
+      l1_finalized_at_unix?: number | null;
+      /** Format: int64 */
+      l1_requested_at_unix?: number | null;
+      l1_status?: components["schemas"]["BridgeWithdrawalL1Status"];
+      l1_tx_hash_hex?: string | null;
+      nullifier_hex: string;
+      recipient_hex: string;
+      token_hex: string;
+      /** Format: int64 */
+      withdrawal_id: number;
+      withdrawal_leaf_digest_hex: string;
+      withdrawal_leaf_hex: string;
+    };
+    CancelOrderResponse: {
+      cancelled: boolean;
+    };
+    CancelSignedOrderRequest: {
+      /**
+       * Format: int64
+       * @description Account ID claiming ownership of the order being cancelled.
+       */
+      account_id: number;
+      /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /**
+       * Format: int64
+       * @description Per-account replay nonce covered by the P256 signature.
+       */
+      nonce: number;
+      /**
+       * Format: int64
+       * @description The pending order to cancel.
+       */
+      order_id: number;
+      /**
+       * @description Hex-encoded raw P256 ECDSA signature over the canonical cancel payload.
+       *     Required when `auth_scheme` is `raw_p256`.
+       */
+      signature_hex?: string | null;
+      /** @description Hex-encoded compressed P256 public key of the signer. */
+      signer_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+    };
+    CreateAccountRequest: {
+      /**
+       * Format: int64
+       * @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
+       * @example 100000000000
+       */
+      initial_balance_nanos: string;
+      initial_key?: null | components["schemas"]["RegisterKeyRequest"];
+    };
+    /**
+     * @description Signed request to create a read-scoped bearer API key (SYB-60).
+     *
+     *     The bearer token is generated server-side, returned exactly once in the
+     *     response, and never recoverable afterwards (only its blake3 hash is stored).
+     */
+    CreateApiKeyRequest: {
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /** @description Optional human label, e.g. "grafana". */
+      label?: string | null;
+      /** Format: int64 */
+      nonce: number;
+      signature_hex?: string | null;
+      /**
+       * @description Hex-encoded signer key. WebAuthn login bootstrap may omit this field;
+       *     the server identifies the matching registered WebAuthn key by verifying
+       *     the assertion against the account's active WebAuthn keys.
+       */
+      signer_pubkey_hex?: string | null;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+    };
+    /**
+     * @description Response to creating a read API key (SYB-60). The plaintext `token` is shown
+     *     exactly once here and is not recoverable afterwards.
+     */
+    CreateApiKeyResponse: {
+      /** Format: int64 */
+      created_at_ms: number;
+      /** Format: int64 */
+      id: number;
+      label?: string | null;
+      /**
+       * @description The active signing key that authorized creation. This is especially
+       *     useful during discoverable WebAuthn login, where the browser assertion
+       *     does not itself expose the credential public key.
+       */
+      signer_pubkey_hex: string;
+      /** @description The bearer token. Store it now — the server keeps only its blake3 hash. */
+      token: string;
+    };
+    CreateBridgeWithdrawalRequest: {
+      /**
+       * Format: int64
+       * @description Sybil account whose available balance is burned.
+       */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Token base units released by the vault.
+       */
+      amount_token_units: number;
+      /**
+       * Format: int64
+       * @description Destination chain id.
+       */
+      chain_id: number;
+      /**
+       * Format: int64
+       * @description Last L1 block height at which this withdrawal leaf is valid.
+       */
+      expiry_height?: number | null;
+      /**
+       * Format: int64
+       * @description Per-account replay nonce. Required for signed bridge withdrawals.
+       */
+      nonce?: number | null;
+      /** @description Hex-encoded L1 recipient address (20 bytes). */
+      recipient_hex: string;
+      /** @description Hex-encoded token contract address (20 bytes). */
+      token_address_hex: string;
+      /** @description Hex-encoded vault contract address (20 bytes). */
+      vault_address_hex: string;
+    };
+    CreateMarketGroupRequest: {
+      /** @description Market IDs in the group. */
+      market_ids: number[];
+      /**
+       * @description Name for the group of mutually exclusive markets.
+       * @example 2024 Election
+       */
+      name: string;
+    };
+    CreateMarketRequest: {
+      /** @description Optional category (e.g., "sports", "politics", "crypto"). */
+      category?: string | null;
+      /** @description Optional description of the market. */
+      description?: string | null;
+      /**
+       * Format: int64
+       * @description Optional expiry timestamp in ms (0 = no expiry).
+       */
+      expiry_timestamp_ms?: number | null;
+      /**
+       * @description Name of the binary market.
+       * @example Will it rain tomorrow?
+       */
+      name: string;
+      /** @description Optional resolution criteria. */
+      resolution_criteria?: string | null;
+      /**
+       * @description Resolution template id to use for this market (e.g. "admin_immediate",
+       *     "polymarket_mirror"). `None` -> `admin_immediate`.
+       */
+      resolution_template?: string | null;
+      /** @description Optional tags for discovery. */
+      tags?: string[] | null;
+    };
+    CreateMarketResponse: {
+      /** Format: int32 */
+      market_id: number;
+      name: string;
+    };
+    CreateSignedBridgeWithdrawalRequest: {
+      /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /**
+       * @description Hex-encoded raw P256 ECDSA signature over the canonical withdrawal payload.
+       *     Required when `auth_scheme` is `raw_p256`.
+       */
+      signature_hex?: string | null;
+      /** @description Hex-encoded compressed P256 public key of the signer. */
+      signer_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+      /** @description Withdrawal payload covered by the P256 signature. */
+      withdrawal: components["schemas"]["CreateBridgeWithdrawalRequest"];
+    };
+    /**
+     * @description Typed DA manifest for retained witness payloads. SYB-120 will add encrypted
+     *     DA fields such as ciphertext hashes and key-custody metadata here, so this
+     *     must stay a structured DTO rather than ad-hoc JSON.
+     */
+    DaManifestResponse: {
+      /** @description Block hash bound into the state-transition public input. Hex-encoded 32-byte digest. */
+      block_hash: string;
+      /**
+       * @description DA commitment bound into the ZK public inputs and L1 RootRecord.
+       *     Hex-encoded 32-byte digest.
+       */
+      da_commitment: string;
+      /** Format: int64 */
+      height: number;
+      payload_encoding: string;
+      payload_kind: string;
+      /** Format: int64 */
+      payload_len: number;
+      /**
+       * @description Payload root = BLAKE3("sybil/da/witness-payload/v1" || len || bytes).
+       *     Hex-encoded 32-byte digest.
+       */
+      payload_root: string;
+      provider_refs?: components["schemas"]["DaProviderRefResponse"][];
+      provider_refs_encoding: string;
+      /** @description Hash of the canonical provider-reference byte list. Hex-encoded 32-byte digest. */
+      provider_refs_hash: string;
+      /** @description State-transition public input hash. Hex-encoded 32-byte digest. */
+      public_input_hash: string;
+      /** @description State root bound by the DA commitment. Hex-encoded 32-byte qMDB root. */
+      state_root: string;
+      /** Format: int32 */
+      version: number;
+      /** @description Witness root = BLAKE3("sybil/witness" || payload bytes). Hex-encoded 32-byte digest. */
+      witness_root: string;
+    };
+    DaProviderRefResponse: {
+      /** @description Hex-encoded canonical provider-reference bytes, 0x-prefixed. */
+      bytes: string;
+      encoding: string;
+      kind: string;
+      /** Format: int64 */
+      payload_len?: number | null;
+      /**
+       * @description Payload root repeated when the provider ref is content-addressed.
+       *     Hex-encoded 32-byte digest.
+       */
+      payload_root?: string | null;
+      uri?: string | null;
+    };
+    DerivedViewSidecarResponse: {
+      /**
+       * @description Admission timing rows. `is_new=false` means the order was carried from
+       *     a prior block's resting book; `is_new=true` means a distinct admission
+       *     first became visible to this block's view.
+       */
+      admits?: components["schemas"]["AdmitTimingViewResponse"][];
+      /**
+       * @description Always `derived_unproven`: this sidecar is sequencer-derived read-model
+       *     data and is not part of the witness, state root, events root, witness
+       *     root, DA commitment, or ZK guest input.
+       */
+      provenance: string;
+      /**
+       * @description Rejection rows that were intentionally mirrored into account history.
+       *     Canonical rejections remain in `BlockResponse.rejections`.
+       */
+      rejection_history?: components["schemas"]["RejectedOrderViewResponse"][];
+      /**
+       * @description Resting orders removed during block production. Derived/unproven view
+       *     rows used for analytics and lifecycle displays.
+       */
+      removed_orders?: components["schemas"]["RemovedOrderViewResponse"][];
+    };
+    EquityPointResponse: {
+      /**
+       * Format: int64
+       * @description Deposited amount at this point. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      deposited_nanos: string;
+      /** Format: int64 */
+      height: number;
+      /**
+       * Format: int64
+       * @description Portfolio value at this point. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      portfolio_value_nanos: string;
+      /** Format: int64 */
+      timestamp_ms: number;
+    };
+    EquitySeriesResponse: {
+      /** Format: int64 */
+      account_id: number;
+      points: components["schemas"]["EquityPointResponse"][];
+    };
+    /** @description Response shape for `GET /v1/events/{event_id}/traders`. */
+    EventTradersResponse: {
+      /** Format: int32 */
+      trader_count: number;
+    };
+    ExtendMarketGroupRequest: {
+      /**
+       * Format: int32
+       * @description Market ID to add to the existing group.
+       */
+      market_id: number;
+    };
+    FillResponse: {
+      /** Format: int64 */
+      account_id?: number;
+      /**
+       * Format: int64
+       * @description Fill price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      fill_price_nanos: string;
+      /**
+       * Format: int64
+       * @description Fill quantity. Integer share-units; 1000 units = 1 share.
+       */
+      fill_qty: number;
+      /** Format: int64 */
+      order_id: number;
+    };
+    FundAccountRequest: {
+      /**
+       * Format: int64
+       * @description Amount to add to the account balance. Integer nanodollars; 1_000_000_000 = $1.
+       * @example 50000000000
+       */
+      amount_nanos: string;
+    };
+    HealthResponse: {
+      /** @description Hash of the height-1 block header. Hex-encoded 32-byte chain instance id. */
+      genesis_hash?: string | null;
+      /** Format: int64 */
+      height?: number | null;
+      status: string;
+    };
+    /** @description One entry in the per-account history feed (`GET /v1/accounts/{id}/events`). */
+    HistoryEventResponse: {
+      /**
+       * Format: int64
+       * @description Event cash amount. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      amount_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Rejected-order available amount. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      available_nanos?: string | null;
+      /** Format: int64 */
+      block_height: number;
+      category: string;
+      id: string;
+      /** Format: int32 */
+      market_id?: number | null;
+      /** Format: int64 */
+      order_id?: number | null;
+      outcome?: string | null;
+      payout_outcome?: string | null;
+      /**
+       * Format: int64
+       * @description Event price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      price_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Event quantity. Integer share-units; 1000 units = 1 share.
+       */
+      qty?: number | null;
+      /**
+       * Format: int64
+       * @description Event realized PnL. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      realized_pnl_nanos?: string | null;
+      /**
+       * @description Rejected only: reason code (`insufficient_balance` | `insufficient_position`
+       *     | `complete_set` | …).
+       */
+      reason?: string | null;
+      /**
+       * Format: int64
+       * @description Rejected-order required amount. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      required_nanos?: string | null;
+      side?: string | null;
+      /** Format: int64 */
+      timestamp_ms: number;
+      type: string;
+    };
+    /**
+     * @description Scope tag for a registered signing key (SYB-60).
+     * @enum {string}
+     */
+    KeyScope: "primary" | "agent" | "custom";
+    LeaderboardEntryResponse: {
+      /**
+       * Format: int64
+       * @description Account identifier. Clients render this anonymously as `Trader #<id>`;
+       *     display-name opt-in awaits profiles (SYB-60).
+       */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 = $1.
+       */
+      equity_nanos: string;
+      /**
+       * Format: int32
+       * @description Distinct markets with a currently open position.
+       */
+      markets_traded: number;
+      /**
+       * Format: int64
+       * @description Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
+       */
+      pnl_nanos: string;
+      /**
+       * Format: int32
+       * @description 1-based rank within the returned window.
+       */
+      rank: number;
+      /**
+       * Format: int64
+       * @description Return on invested capital over the window, in basis points (100 = 1%).
+       */
+      roi_bps: number;
+    };
+    LeaderboardResponse: {
+      /** @description Ranked entries, best PnL first. Ties break by ascending account id. */
+      entries: components["schemas"]["LeaderboardEntryResponse"][];
+      /** @description Window this leaderboard was ranked over: `7d`, `30d`, or `all`. */
+      window: string;
+    };
+    MarketGroupResponse: {
+      /** Format: int64 */
+      group_id: number;
+      market_ids: number[];
+      name: string;
+    };
+    MarketPriceResponse: {
+      /**
+       * Format: int64
+       * @description NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      no_price_nanos: string;
+      /**
+       * Format: int64
+       * @description YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      yes_price_nanos: string;
+    };
+    MarketPricesResponse: {
+      /**
+       * @description Market price map. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      prices: {
+        [key: string]: components["schemas"]["MarketPriceResponse"];
+      };
+    };
+    MarketResponse: {
+      /**
+       * @description All category buckets the parent event matched on the mirror's
+       *     tag-to-bucket lookup (e.g. `["Sports", "Politics"]`). Frontend picks
+       *     one for display via its own priority list. None for sybil-native
+       *     markets (use the singular `category` field instead).
+       */
+      categories?: string[] | null;
+      category?: string | null;
+      /** Format: int64 */
+      challenge_deadline_ms?: number | null;
+      /**
+       * @description Whether Polymarket has closed this market. Off-block; the frontend
+       *     filters closed markets out of the listing.
+       */
+      closed?: boolean | null;
+      /** Format: int64 */
+      created_at_ms?: number | null;
+      description?: string | null;
+      /**
+       * Format: int64
+       * @description Event-level expected end date (epoch ms). Display only.
+       */
+      event_end_date_ms?: number | null;
+      /** @description Event-level icon URL (secondary image fallback). */
+      event_icon_url?: string | null;
+      /** @description Polymarket parent event id — frontend grouping key. */
+      event_id?: string | null;
+      /** @description Event-level image URL. */
+      event_image_url?: string | null;
+      /**
+       * Format: int64
+       * @description Parent event start date (epoch ms) from Polymarket. Display/sort only.
+       */
+      event_start_date_ms?: number | null;
+      /** @description Polymarket parent event title. */
+      event_title?: string | null;
+      /** Format: int64 */
+      expiry_timestamp_ms?: number | null;
+      /** @description External URL (e.g., Polymarket link). */
+      external_url?: string | null;
+      /**
+       * @description Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). Off-
+       *     block; the frontend uses it as the per-outcome name so it needn't fetch
+       *     the raw event JSON just for labels.
+       */
+      group_item_title?: string | null;
+      /**
+       * Format: int64
+       * @description Rolling last-10-batch band depth average. Integer nanodollars;
+       *     1_000_000_000 = $1. Zero for markets without a clearing price yet.
+       *     Pair with `liquidity_band_nanos` for labelling.
+       */
+      liquidity_avg10_nanos?: string;
+      /**
+       * Format: int64
+       * @description Width of the band the liquidity score uses (the ± in "$X ±$0.05").
+       *     Integer nanodollars; 1_000_000_000 = $1.
+       *     Always the live config value — `0` when no liquidity has been
+       *     recorded yet.
+       */
+      liquidity_band_nanos?: string;
+      /**
+       * Format: int64
+       * @description Per-market expected end date (epoch ms). Display only.
+       */
+      market_end_date_ms?: number | null;
+      /** @description Per-market icon URL (secondary image fallback). */
+      market_icon_url?: string | null;
+      /** Format: int32 */
+      market_id: number;
+      /** @description Per-market image URL. */
+      market_image_url?: string | null;
+      /**
+       * Format: int64
+       * @description Per-market start date (epoch ms) from Polymarket. Display/sort only.
+       */
+      market_start_date_ms?: number | null;
+      name: string;
+      /**
+       * Format: int64
+       * @description Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
+       *     Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      no_price_24h_ago_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      no_price_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description All-time admissions that received at least one fill (B5's
+       *     `has_been_matched` true at removal time). Cancels are NOT counted.
+       */
+      orders_matched_total?: number;
+      /**
+       * Format: int64
+       * @description All-time non-MM admissions counted against this market. Multi-market
+       *     orders credit every active market; sum-of-per-market over-counts vs.
+       *     the platform total — that's the documented attribution rule.
+       */
+      orders_placed_total?: number;
+      /**
+       * Format: int64
+       * @description All-time admissions that exited the book without any fill. Cancels
+       *     are tracked separately and do not count here.
+       */
+      orders_unmatched_total?: number;
+      /**
+       * Format: int64
+       * @description Resolution payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+       *     Payouts are per-share probabilities in [0, 1e9].
+       */
+      payout_nanos?: string | null;
+      /**
+       * @description Polymarket on-chain condition id — FE join key into
+       *     `GET /v1/events/{event_id}/raw` `markets[].conditionId`. Off-block.
+       */
+      polymarket_condition_id?: string | null;
+      /**
+       * Format: int64
+       * @description Reference price from external system (e.g., Polymarket), display only.
+       *     Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      reference_price_nanos?: string | null;
+      resolution_criteria?: string | null;
+      status: string;
+      tags?: string[] | null;
+      /**
+       * Format: int32
+       * @description All-time unique trader count for this market (decision Q-table:
+       *     MM, MINT, multi-market split, etc.). Off-block — "since last
+       *     restart" until prod persistence is enabled.
+       */
+      trader_count?: number;
+      /**
+       * Format: int64
+       * @description Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+       *     Off-block;
+       *     "since last restart" until prod persistence is enabled.
+       */
+      volume_24h_nanos?: string;
+      /**
+       * Format: int64
+       * @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      volume_nanos?: string;
+      /**
+       * Format: int64
+       * @description Clearing YES price ~24h ago, derived from the per-market
+       *     hourly snapshot. `None` for markets younger than 24h or wiped on
+       *     restart. FE computes the 24h delta as `current - snapshot`.
+       *     Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      yes_price_24h_ago_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      yes_price_nanos?: string | null;
+    };
+    /** @description Query parameters for market search. */
+    MarketSearchParams: {
+      /** @description Exact category match. */
+      category?: string | null;
+      limit?: number | null;
+      /**
+       * Format: int64
+       * @description Maximum YES price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      max_yes_price?: number | null;
+      /**
+       * Format: int64
+       * @description Minimum cumulative traded notional. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      min_volume?: number | null;
+      /**
+       * Format: int64
+       * @description Minimum YES price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      min_yes_price?: number | null;
+      offset?: number | null;
+      /** @description Text search (searches name + description). */
+      q?: string | null;
+      /** @description Sort field: "volume", "created_at", "name", "price". */
+      sort?: string | null;
+      /** @description Status filter ("active" or "resolved"). */
+      status?: string | null;
+      /** @description Comma-separated tags to filter by. */
+      tags?: string | null;
+    };
+    /** @description Minimal market data for high-throughput dashboards (drops strings & metadata). */
+    MarketSummaryResponse: {
+      /**
+       * Format: int64
+       * @description Liquidity depth score. Integer nanodollars; 1_000_000_000 = $1.
+       *     Mirrors `MarketResponse`.
+       */
+      liquidity_avg10_nanos?: string;
+      /**
+       * Format: int64
+       * @description Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
+       *     Mirrors `MarketResponse`.
+       */
+      liquidity_band_nanos?: string;
+      /** Format: int32 */
+      market_id: number;
+      name: string;
+      /**
+       * Format: int64
+       * @description Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      no_price_24h_ago_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      no_price_nanos?: string | null;
+      /** Format: int64 */
+      orders_matched_total?: number;
+      /**
+       * Format: int64
+       * @description All-time placed/matched/unmatched (mirrors `MarketResponse`).
+       */
+      orders_placed_total?: number;
+      /** Format: int64 */
+      orders_unmatched_total?: number;
+      /**
+       * Format: int64
+       * @description Reference price from external system (e.g., Polymarket), display only.
+       *     Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      reference_price_nanos?: string | null;
+      status: string;
+      /**
+       * Format: int32
+       * @description All-time unique trader count (mirrors `MarketResponse.trader_count`).
+       */
+      trader_count?: number;
+      /**
+       * Format: int64
+       * @description Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
+       *     Mirrors
+       *     `MarketResponse.volume_24h_nanos`).
+       */
+      volume_24h_nanos?: string;
+      /**
+       * Format: int64
+       * @description All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      volume_nanos: string;
+      /**
+       * Format: int64
+       * @description Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      yes_price_24h_ago_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      yes_price_nanos?: string | null;
+    };
+    ObserveL1HeightRequest: {
+      /**
+       * Format: int64
+       * @description Highest fully scanned and confirmed L1 block.
+       */
+      l1_block_height: number;
+    };
+    ObserveL1HeightResponse: {
+      /** Format: int64 */
+      observed_l1_height: number;
+      refunded_withdrawal_ids: number[];
+    };
+    /**
+     * @description Response shape for `GET /v1/markets/{id}/open-batch`. B1 populates
+     *     `unique_placers`; indicative fields stub `None`/`0` until C2.
+     */
+    OpenBatchResponse: {
+      /** Format: int64 */
+      indicative_computed_at_ms?: number;
+      /**
+       * Format: int64
+       * @description Indicative NO price for the open batch. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+       */
+      indicative_no_price_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Indicative traded notional for the open batch. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      indicative_volume_nanos?: string;
+      /**
+       * Format: int64
+       * @description Indicative YES price for the open batch. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+       */
+      indicative_yes_price_nanos?: string | null;
+      /** Format: int32 */
+      unique_placers: number;
+    };
+    OrderAcceptedResponse: {
+      accepted: boolean;
+      /** @description Sequencer-assigned IDs for the admitted orders, in request order. */
+      order_ids: number[];
+    };
+    /**
+     * @description Tagged enum representing public order types.
+     *
+     *     Public submission is intentionally limited to single-market binary orders.
+     *     Compound payoff-vector orders remain available inside `matching-engine` for
+     *     research and tests, but are not accepted at the HTTP API edge.
+     */
+    OrderSpec:
+      | {
+          /**
+           * Format: int64
+           * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+           *     Prices are per-share probabilities in [0, 1e9].
+           */
+          limit_price_nanos: string;
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Order quantity. Integer share-units; 1000 units = 1 share.
+           */
+          quantity: number;
+          /** @enum {string} */
+          type: "BuyYes";
+        }
+      | {
+          /**
+           * Format: int64
+           * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+           *     Prices are per-share probabilities in [0, 1e9].
+           */
+          limit_price_nanos: string;
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Order quantity. Integer share-units; 1000 units = 1 share.
+           */
+          quantity: number;
+          /** @enum {string} */
+          type: "BuyNo";
+        }
+      | {
+          /**
+           * Format: int64
+           * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+           *     Prices are per-share probabilities in [0, 1e9].
+           */
+          limit_price_nanos: string;
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Order quantity. Integer share-units; 1000 units = 1 share.
+           */
+          quantity: number;
+          /** @enum {string} */
+          type: "SellYes";
+        }
+      | {
+          /**
+           * Format: int64
+           * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+           *     Prices are per-share probabilities in [0, 1e9].
+           */
+          limit_price_nanos: string;
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Order quantity. Integer share-units; 1000 units = 1 share.
+           */
+          quantity: number;
+          /** @enum {string} */
+          type: "SellNo";
+        };
+    /**
+     * @description Per-bucket platform totals returned by `/v1/activity/overview`. B1
+     *     populates `unique_traders` only; volume + orders join in B2 / B6 and
+     *     remain zero until then.
+     */
+    OverviewBucketResponse: {
+      orders?: components["schemas"]["OverviewOrderStatsResponse"];
+      /**
+       * Format: int64
+       * @description Total traded notional for this bucket. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      total_volume_nanos?: string;
+      /**
+       * Format: int64
+       * @description Cumulative platform welfare for this bucket. Integer nanodollars;
+       *     1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
+       *     once). Signed: solver rounding can yield small negatives.
+       */
+      total_welfare_nanos?: string;
+      /** Format: int64 */
+      unique_traders?: number;
+    };
+    OverviewOrderStatsResponse: {
+      /** Format: int64 */
+      matched?: number;
+      /** Format: int64 */
+      placed?: number;
+      /**
+       * Format: int64
+       * @description Distinct orders admitted (counted once per order at intake), all-time
+       *     or rolling 24h. `placed` above stays per-batch participation for
+       *     back-compat: a resting order counts once here but once per batch there.
+       */
+      placed_distinct?: number;
+      /** Format: int64 */
+      unmatched?: number;
+    };
+    PendingOrderResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /** Format: int64 */
+      created_at_block: number;
+      /**
+       * Format: int64
+       * @description Wall-clock admit time, ms since epoch. `0` for orders admitted before
+       *     this field shipped (#[serde(default)] forward compat).
+       */
+      created_at_ms?: number;
+      /** Format: int64 */
+      expires_at_block: number;
+      /**
+       * Format: int64
+       * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      limit_price_nanos: string;
+      /** Format: int32 */
+      market_id: number;
+      /** Format: int64 */
+      order_id: number;
+      /**
+       * Format: int64
+       * @description Original `max_fill` at admit time. Integer share-units; 1000 units = 1 share.
+       *     Lets the FE render a partial-fill progress bar as
+       *     `(original - remaining) / original`.
+       *     `0` for orders persisted before B5/B8 (#[serde(default)] forward
+       *     compat).
+       */
+      original_quantity?: number;
+      /**
+       * Format: int64
+       * @description Remaining fill quantity. Integer share-units; 1000 units = 1 share.
+       */
+      remaining_quantity: number;
+      side: string;
+    };
+    PortfolioResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Spendable account balance after live-order reservations. Integer
+       *     nanodollars; 1_000_000_000 = $1.
+       */
+      available_balance_nanos: string;
+      /**
+       * Format: int64
+       * @description Total (gross) account balance; see `available_balance_nanos` for spendable
+       *     funds. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      balance_nanos: string;
+      /**
+       * Format: int64
+       * @description First-deposit timestamp in ms since epoch (B8). `0` for accounts
+       *     with no recorded deposit history (FE renders as "—"). Same
+       *     "since last restart" caveat as the other off-block aggregates
+       *     until persistence runs in prod.
+       */
+      first_deposit_ms?: number;
+      /**
+       * Format: int64
+       * @description Total profit and loss. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      pnl_nanos: string;
+      /**
+       * Format: int64
+       * @description Total portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      portfolio_value_nanos: string;
+      positions: components["schemas"]["PositionValueResponse"][];
+      /**
+       * Format: int64
+       * @description Accumulated realized PnL across all closed positions (C1). Integer nanodollars;
+       *     1_000_000_000 = $1. Signed.
+       *     `pnl_nanos = realized + unrealized` once both fields populate, but
+       *     `pnl_nanos` is kept for backward compatibility with pre-C1 clients.
+       */
+      realized_pnl_nanos?: string;
+      /**
+       * Format: int64
+       * @description Balance reserved by live resting orders. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      reserved_balance_nanos: string;
+      /**
+       * Format: int64
+       * @description Total account deposits. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      total_deposited_nanos: string;
+      /**
+       * Format: int64
+       * @description All-time fill count (B8). The bounded fill window in
+       *     `account_fills` may cap older trades; this counter never does,
+       *     so FE shows the real number instead of "200+".
+       */
+      total_fill_count?: number;
+      /**
+       * Format: int64
+       * @description Mark-to-market value of all positions. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      total_position_value_nanos: string;
+      /**
+       * Format: int64
+       * @description Mark-to-market PnL on currently open positions (C1). Integer nanodollars;
+       *     1_000_000_000 = $1. Computed as
+       *     `sum((current_price - avg_entry) * quantity / SHARE_SCALE)` across positions.
+       */
+      unrealized_pnl_nanos?: string;
+    };
+    PositionDeltaResponse: {
+      /**
+       * Format: int64
+       * @description Position quantity delta. Integer share-units; 1000 units = 1 share.
+       */
+      delta: number;
+      /** Format: int32 */
+      market_id: number;
+      outcome: string;
+    };
+    PositionResponse: {
+      /** Format: int32 */
+      market_id: number;
+      outcome: string;
+      /**
+       * Format: int64
+       * @description Signed position quantity. Integer share-units; 1000 units = 1 share.
+       */
+      quantity: number;
+    };
+    PositionValueResponse: {
+      /**
+       * Format: int64
+       * @description Weighted-average entry price for this side of the market (C1). `0`
+       *     for positions opened before C1 landed (`#[serde(default)]` forward
+       *     compat). Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      avg_entry_price_nanos?: string;
+      /**
+       * Format: int64
+       * @description Current mark price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      current_price_nanos: string;
+      /** Format: int32 */
+      market_id: number;
+      outcome: string;
+      /**
+       * Format: int64
+       * @description Signed position quantity. Integer share-units; 1000 units = 1 share.
+       */
+      quantity: number;
+      /**
+       * Format: int64
+       * @description Mark-to-market position value. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      value_nanos: string;
+    };
+    PriceCandleResponse: {
+      /** Format: int64 */
+      bucket_end_ms: number;
+      /** Format: int64 */
+      bucket_start_ms: number;
+      /**
+       * Format: int64
+       * @description Bucket close NO price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      close_no_price_nanos: string;
+      /**
+       * Format: int64
+       * @description Bucket close YES price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      close_yes_price_nanos: string;
+      /** Format: int64 */
+      first_height: number;
+      /**
+       * Format: int64
+       * @description Bucket high NO price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      high_no_price_nanos: string;
+      /**
+       * Format: int64
+       * @description Bucket high YES price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      high_yes_price_nanos: string;
+      /** Format: int64 */
+      last_height: number;
+      /**
+       * Format: int64
+       * @description Bucket low NO price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      low_no_price_nanos: string;
+      /**
+       * Format: int64
+       * @description Bucket low YES price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      low_yes_price_nanos: string;
+      /**
+       * Format: int64
+       * @description Bucket open NO price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      open_no_price_nanos: string;
+      /**
+       * Format: int64
+       * @description Bucket open YES price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      open_yes_price_nanos: string;
+      /** Format: int64 */
+      point_count: number;
+      /**
+       * Format: int64
+       * @description Bucket traded notional. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      volume_nanos: string;
+    };
+    PriceCandlesResponse: {
+      candles: components["schemas"]["PriceCandleResponse"][];
+      /** Format: int32 */
+      market_id: number;
+      /** Format: int64 */
+      next_before_ms?: number | null;
+      /** Format: int32 */
+      resolution_secs: number;
+      /** Format: int64 */
+      retention_min_bucket_ms?: number | null;
+    };
+    PriceHistoryResponse: {
+      /** Format: int32 */
+      market_id: number;
+      /** Format: int64 */
+      next_before_height?: number | null;
+      points: components["schemas"]["PricePointResponse"][];
+      /** Format: int64 */
+      retention_min_height?: number | null;
+    };
+    PricePointResponse: {
+      /** Format: int64 */
+      height: number;
+      /**
+       * Format: int64
+       * @description NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      no_price_nanos: string;
+      /** Format: int64 */
+      timestamp_ms: number;
+      /**
+       * Format: int64
+       * @description Traded notional at this point. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      volume_nanos: string;
+      /**
+       * Format: int64
+       * @description YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      yes_price_nanos: string;
+    };
+    /** @description Private account summary served behind owner-or-service read auth (SYB-60/237). */
+    PrivateAccountSummaryResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Spendable account balance after live-order reservations. Integer
+       *     nanodollars; 1_000_000_000 = $1.
+       */
+      available_balance_nanos: string;
+      /**
+       * Format: int64
+       * @description Total (gross) account balance; see `available_balance_nanos` for spendable
+       *     funds. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      balance_nanos: string;
+      display_name?: string | null;
+      /**
+       * Format: int64
+       * @description Portfolio value minus deposits. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      pnl_nanos: string;
+      /**
+       * Format: int64
+       * @description Current mark-to-market portfolio value. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      portfolio_value_nanos: string;
+      positions?: components["schemas"]["PositionResponse"][];
+      /**
+       * Format: int64
+       * @description Balance reserved by live resting orders. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      reserved_balance_nanos: string;
+      /**
+       * Format: int64
+       * @description Total deposited to date. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      total_deposited_nanos: string;
+    };
+    QmdbStateExclusionProofResponse: {
+      metadata_hex?: string | null;
+      operation: components["schemas"]["QmdbStateOperationProofResponse"];
+      span_key_hex?: string | null;
+      span_next_key_hex?: string | null;
+      span_value_hex?: string | null;
+      variant: string;
+    };
+    QmdbStateInclusionProofResponse: {
+      next_key_hex: string;
+      operation: components["schemas"]["QmdbStateOperationProofResponse"];
+    };
+    QmdbStateOperationProofResponse: {
+      activity_chunk_hex: string;
+      /** Format: int64 */
+      location: number;
+      range: components["schemas"]["QmdbStateRangeProofResponse"];
+    };
+    QmdbStateRangeProofResponse: {
+      digests_hex: string[];
+      /** Format: int64 */
+      leaves: number;
+      ops_root_hex: string;
+      partial_chunk_digest_hex?: string | null;
+      pre_prefix_acc_hex?: string | null;
+      unfolded_prefix_peaks_hex: string[];
+    };
+    RegisterFeedRequest: {
+      /** @description Human-readable name (e.g. "admin", "polymarket_mirror"). */
+      name: string;
+      /** @description Hex-encoded compressed P256 public key (33 bytes). */
+      pubkey_hex: string;
+    };
+    RegisterKeyRequest: {
+      /**
+       * @description Authentication scheme associated with this account key. Defaults to
+       *     `raw_p256` so existing bots, SDKs, and arena clients are unchanged.
+       */
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /**
+       * @description Base64url credential id for WebAuthn keys. Stored client-side today and
+       *     documented here so passkey clients can round-trip the registration payload.
+       */
+      credential_id_b64url?: string | null;
+      /** @description Optional human label for this key, e.g. "agent:pricer" (SYB-60). */
+      label?: string | null;
+      /**
+       * @description Hex-encoded compressed P256 public key (33 bytes).
+       * @example 02a1b2c3...
+       */
+      public_key_hex: string;
+      /**
+       * @description Scope tag describing what this key is for (SYB-60). Defaults to `primary`.
+       *     Register an agent trade key by passing `agent` with its own P256 keypair —
+       *     it then signs like any account key (bearer API keys are read-only and
+       *     cannot trade).
+       */
+      scope?: components["schemas"]["KeyScope"];
+      webauthn_registration?:
+        | null
+        | components["schemas"]["WebAuthnRegistration"];
+    };
+    /** @description Registered data feed view, returned by GET/POST /v1/feeds. */
+    RegisteredFeedResponse: {
+      /** Format: int64 */
+      created_at_ms: number;
+      /** Format: int64 */
+      feed_id: number;
+      name: string;
+      pubkey_hex: string;
+    };
+    RejectedOrderViewResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /** Format: int64 */
+      order_id: number;
+      reason: string;
+    };
+    RejectionResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /** Format: int64 */
+      order_id: number;
+      reason: string;
+    };
+    RemovedOrderViewResponse: {
+      /** Format: int64 */
+      account_id: number;
+      active_markets?: number[];
+      exit_reason: string;
+      has_been_matched: boolean;
+      /** Format: int64 */
+      order_id: number;
+      phase: string;
+      rejection_reason?: string | null;
+      /**
+       * Format: int64
+       * @description Released reserved cash. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      reserved_balance_released: number;
+      reserved_positions_released?: components["schemas"]["ReservedPositionReleaseResponse"][];
+    };
+    ReservedPositionReleaseResponse: {
+      /** Format: int32 */
+      market_id: number;
+      /** Format: int32 */
+      outcome: number;
+      /**
+       * Format: int64
+       * @description Released reserved position quantity. Integer share-units; 1000 units = 1 share.
+       */
+      quantity: number;
+    };
+    /**
+     * @description Detailed view of a market's resolution state. Unresolved markets return
+     *     `status = "active"` (or `proposed`/`challenged` for future policies) with
+     *     `payout_nanos = None`.
+     */
+    ResolutionResponse: {
+      /** Format: int32 */
+      market_id: number;
+      /**
+       * Format: int64
+       * @description Resolution payout per YES share. Integer nanodollars;
+       *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
+       */
+      payout_nanos?: string | null;
+      /** Format: int64 */
+      resolved_at_ms?: number | null;
+      /** Format: int64 */
+      resolved_by_feed_id?: number | null;
+      resolved_by_feed_name?: string | null;
+      status: string;
+      template: string;
+    };
+    ResolveMarketRequest: {
+      attestation?: null | components["schemas"]["SignedAttestationDto"];
+      /**
+       * Format: int64
+       * @description Payout per YES share. Integer nanodollars; 1_000_000_000 = $1.
+       *     Payouts are per-share probabilities in [0, 1e9].
+       * @example 1000000000
+       */
+      payout_nanos: string;
+    };
+    ResolveMarketResponse: {
+      /** Format: int64 */
+      challenge_deadline_ms?: number | null;
+      /** Format: int32 */
+      market_id: number;
+      /**
+       * Format: int64
+       * @description Resolution payout per YES share. Integer nanodollars;
+       *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
+       */
+      payout_nanos: string;
+      status: string;
+    };
+    /** @description Signed request to revoke a read-scoped bearer API key by id (SYB-60). */
+    RevokeApiKeyRequest: {
+      /**
+       * Format: int64
+       * @description Id of the API key to revoke (from the API-key listing).
+       */
+      api_key_id: number;
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /** Format: int64 */
+      nonce: number;
+      signature_hex?: string | null;
+      signer_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+    };
+    /** @description Signed request to revoke a registered signing key (SYB-60). */
+    RevokeKeyRequest: {
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      bound_events_digest_hex: string;
+      bound_keys_digest_hex: string;
+      signature_hex?: string | null;
+      /**
+       * @description Hex-encoded compressed P256 public key of the signer (any active key on
+       *     the account may authorize revocation, including the target itself as long
+       *     as another key remains).
+       */
+      signer_pubkey_hex: string;
+      /** @description Hex-encoded compressed P256 public key (33 bytes) of the key to revoke. */
+      target_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+    };
+    SetMarketMetadataRequest: {
+      /**
+       * @description All category buckets the parent event matched in the mirror's tag-to-
+       *     bucket lookup (e.g. `["Sports", "Politics"]` for an NBA + Trump
+       *     event). One per matched row; the frontend picks which to render
+       *     using its own priority list, so reordering display priority is
+       *     frontend-only.
+       */
+      categories?: string[] | null;
+      /**
+       * @description Single display category. **Legacy** — populated only for sybil-native
+       *     markets at create time. Mirrored markets now use `categories` (plural)
+       *     and let the frontend pick one for display via its own priority order.
+       */
+      category?: string | null;
+      /**
+       * @description Whether Polymarket has closed this market. The frontend hides closed
+       *     markets from the listing.
+       */
+      closed?: boolean | null;
+      /**
+       * Format: int64
+       * @description Event-level expected end date (epoch ms). Display only.
+       */
+      event_end_date_ms?: number | null;
+      /** @description Event-level icon URL (secondary; frontend uses as `onError` fallback). */
+      event_icon_url?: string | null;
+      /**
+       * @description Polymarket parent event id — used by the frontend to group sibling
+       *     markets (e.g., "Fed Decision in June" sub-questions). Distinct from the
+       *     matching engine's NegRisk `MarketGroup`, which it does not affect.
+       */
+      event_id?: string | null;
+      /** @description Event-level image URL (primary). */
+      event_image_url?: string | null;
+      /**
+       * Format: int64
+       * @description Parent event start date (epoch ms). Display/sort only.
+       */
+      event_start_date_ms?: number | null;
+      /** @description Polymarket parent event title — rendered as the MultiCard header. */
+      event_title?: string | null;
+      /** @description External URL (e.g., Polymarket link). */
+      external_url?: string | null;
+      /**
+       * @description Polymarket short outcome label (`groupItemTitle`, e.g. "May 15"). The
+       *     frontend renders this as the per-outcome name on multi-cards.
+       */
+      group_item_title?: string | null;
+      /**
+       * Format: int64
+       * @description Per-market expected end date (epoch ms). Display only; matching engine
+       *     does not enforce trading cutoffs at this time.
+       */
+      market_end_date_ms?: number | null;
+      /** @description Per-market icon URL (secondary; frontend uses as `onError` fallback). */
+      market_icon_url?: string | null;
+      /** @description Per-market image URL (primary). */
+      market_image_url?: string | null;
+      /**
+       * Format: int64
+       * @description Per-market start date (epoch ms). Display/sort only.
+       */
+      market_start_date_ms?: number | null;
+      /**
+       * @description Polymarket on-chain condition id — the FE join key into the event JSON
+       *     snapshot (`/v1/events/{id}/raw` `markets[].conditionId`).
+       */
+      polymarket_condition_id?: string | null;
+    };
+    /**
+     * @description Common P256/WebAuthn signature envelope shared by SYB-60 account-management
+     *     mutations. Mirrors the fields on `CreateSignedBridgeWithdrawalRequest`.
+     */
+    SetProfileRequest: {
+      /** @description Authentication scheme for this signer. Defaults to raw P256. */
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /** @description New identicon seed, or `null` to clear it. There is no image upload. */
+      avatar_seed?: string | null;
+      /**
+       * @description New display name, or `null` to clear it (SYB-60). Validated for
+       *     length (1-32) and charset at the API edge.
+       */
+      display_name?: string | null;
+      /**
+       * Format: int64
+       * @description Per-account replay nonce (strictly increasing).
+       */
+      nonce: number;
+      /**
+       * @description Hex-encoded raw P256 ECDSA signature over the canonical profile payload.
+       *     Required when `auth_scheme` is `raw_p256`.
+       */
+      signature_hex?: string | null;
+      /** @description Hex-encoded compressed P256 public key of the signer. */
+      signer_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+    };
+    SetReferencePricesRequest: {
+      /**
+       * @description Map of market_id -> reference price. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+       */
+      prices: {
+        [key: string]: number;
+      };
+    };
+    /** @description Wire form of a signed resolution attestation. */
+    SignedAttestationDto: {
+      /**
+       * Format: int64
+       * @description Nonce the signer chose (typically `timestamp_ms`).
+       */
+      nonce: number;
+      /** @description Hex-encoded compressed SEC1 P256 public key (33 bytes). */
+      pubkey_hex: string;
+      /** @description Hex-encoded P256 ECDSA signature over the canonical attestation bytes. */
+      signature_hex: string;
+    };
+    SignedOrderData: {
+      /**
+       * Format: int64
+       * @description Limit price. Integer nanodollars; 1_000_000_000 = $1.
+       *     Prices are per-share probabilities in [0, 1e9].
+       */
+      limit_price_nanos: string;
+      /** @description Market IDs this order spans. */
+      market_ids: number[];
+      /**
+       * Format: int64
+       * @description Maximum fill quantity. Integer share-units; 1000 units = 1 share.
+       */
+      max_fill: number;
+      /** @description Payoff vector. */
+      payoffs: number[];
+    };
+    /**
+     * @description Signed request to register a NEW signing key on an account (SYB-229).
+     *
+     *     Required whenever the account already has at least one registered key. The
+     *     first key is bootstrapped over the service tier (`POST /v1/accounts/{id}/keys`);
+     *     every subsequent key must be authorized by a signature from an existing
+     *     account key. Like orders/cancels, the canonical payload is domain-separated
+     *     by the chain `genesis_hash` (SYB-224).
+     */
+    SignedRegisterKeyRequest: {
+      /**
+       * @description Authentication scheme of the NEW key. Defaults to `raw_p256`. When
+       *     `webauthn`, `webauthn_registration` must prove possession of the new key.
+       */
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /** @description Base64url credential id for a WebAuthn new key. */
+      credential_id_b64url?: string | null;
+      /** @description Optional human label for the new key, e.g. "agent:pricer". */
+      label?: string | null;
+      bound_events_digest_hex: string;
+      bound_keys_digest_hex: string;
+      /**
+       * @description Hex-encoded compressed P256 public key (33 bytes) of the NEW key.
+       * @example 02a1b2c3...
+       */
+      public_key_hex: string;
+      /** @description Scope tag for the new key. Defaults to `primary`. */
+      scope?: components["schemas"]["KeyScope"];
+      /**
+       * @description Hex-encoded raw P256 ECDSA signature over the canonical registration
+       *     payload. Required when `signer_auth_scheme` is `raw_p256`.
+       */
+      signature_hex?: string | null;
+      /** @description Authentication scheme of the SIGNER. Defaults to `raw_p256`. */
+      signer_auth_scheme?: components["schemas"]["AuthScheme"];
+      /**
+       * @description Hex-encoded compressed P256 public key of the SIGNER — an existing active
+       *     key on this account authorizing the registration.
+       */
+      signer_pubkey_hex: string;
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+      webauthn_registration?:
+        | null
+        | components["schemas"]["WebAuthnRegistration"];
+    };
+    StateProofResponse: {
+      /** Format: int64 */
+      block_height: number;
+      exclusion_proof?:
+        | null
+        | components["schemas"]["QmdbStateExclusionProofResponse"];
+      inclusion_proof?:
+        | null
+        | components["schemas"]["QmdbStateInclusionProofResponse"];
+      leaf_key_ascii?: string | null;
+      leaf_key_hex: string;
+      leaf_value_hex?: string | null;
+      proof_format: string;
+      proof_kind: string;
+      /** @description State root this proof is anchored to. Hex-encoded 32-byte qMDB root. */
+      state_root: string;
+      state_slot: string;
+      verified: boolean;
+    };
+    KeyOpStateResponse: {
+      /** Format: int64 */
+      account_id: number;
+      events_digest_hex: string;
+      keys_digest_hex: string;
+    };
+    StateRootResponse: {
+      /** @description Current state root. Hex-encoded 32-byte qMDB root. */
+      state_root: string;
+    };
+    /**
+     * @description Body of `POST /v1/admin/auto-resolutions` (SYB-48). The auto-resolution
+     *     resolver (sybil-polymarket) submits one of these per market it has
+     *     evaluated with an LLM. This route NEVER settles a market: it only records a
+     *     reviewable proposal. Finalization always flows back through the existing
+     *     signed `POST /v1/markets/{id}/resolve` money path.
+     */
+    SubmitAutoResolutionRequest: {
+      /** @description Confidence tier the resolver's policy assigned. */
+      action: components["schemas"]["AutoResolutionActionDto"];
+      /**
+       * Format: double
+       * @description Model confidence in [0, 1].
+       */
+      confidence: number;
+      /**
+       * Format: int64
+       * @description Wall-clock deadline after which a `propose` entry may auto-finalize.
+       *     Unix milliseconds. Required for `propose`; ignored otherwise.
+       */
+      eta_ms?: number | null;
+      /** @description Short verbatim excerpts from the fetched source the model relied on. */
+      evidence_excerpts?: string[];
+      /**
+       * Format: int32
+       * @description Market the proposal is for.
+       */
+      market_id: number;
+      /**
+       * Format: int64
+       * @description Proposed YES payout per share. Integer nanodollars; 1_000_000_000 = $1.
+       *     Payouts are per-share probabilities in [0, 1e9].
+       * @example 1000000000
+       */
+      payout_nanos: string;
+      /** @description Model's free-text justification. Stored verbatim for review. */
+      reasoning: string;
+    };
+    SubmitL1DepositRequest: {
+      /**
+       * Format: int64
+       * @description Sybil account receiving the credit.
+       */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
+       */
+      amount_token_units: number;
+      /**
+       * Format: int64
+       * @description Source chain id.
+       */
+      chain_id: number;
+      /**
+       * Format: int64
+       * @description Sequential L1 vault deposit id.
+       */
+      deposit_id: number;
+      /** @description Hex-encoded post-deposit L1 deposit tree root (32 bytes). */
+      deposit_root_hex: string;
+      /** @description Hex-encoded L1 sender address (20 bytes). */
+      sender_hex: string;
+      /** @description Optional Sybil bridge account key. If omitted, the API derives it for the account. */
+      sybil_account_key_hex?: string | null;
+      /** @description Hex-encoded token contract address (20 bytes). */
+      token_address_hex: string;
+      /** @description Hex-encoded vault contract address (20 bytes). */
+      vault_address_hex: string;
+    };
+    SubmitL1WithdrawalEventRequest: {
+      /**
+       * Format: int64
+       * @description Event timestamp from the vault event, in Unix seconds.
+       */
+      event_at_unix: number;
+      /**
+       * Format: int64
+       * @description Finalization ETA emitted by the vault, in Unix seconds.
+       */
+      executable_at_unix?: number | null;
+      /**
+       * Format: int64
+       * @description Confirmed L1 block number carrying the event.
+       */
+      l1_block_height: number;
+      /** @description Withdrawal nullifier emitted by SybilVault. */
+      nullifier_hex: string;
+      /** @description Queue state observed from the vault event. */
+      status: components["schemas"]["BridgeWithdrawalL1Status"];
+      /** @description L1 transaction hash carrying the event, if indexed from logs. */
+      tx_hash_hex?: string | null;
+    };
+    SubmitOrderRequest: {
+      /**
+       * Format: int64
+       * @description Account ID submitting the orders.
+       */
+      account_id: number;
+      /**
+       * Format: int64
+       * @description Last eligible block height for explicit-expiry orders.
+       */
+      expires_at_block?: number | null;
+      /**
+       * Format: int64
+       * @description If set, treat these orders as market maker orders with flash liquidity.
+       *     The value is the MM's total capital budget. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       *     MM orders skip per-order balance validation; instead the solver enforces
+       *     the portfolio-level budget constraint at clearing time.
+       */
+      mm_budget_nanos?: string | null;
+      /** @description Orders to submit. */
+      orders: components["schemas"]["OrderSpec"][];
+      /** @description Time-in-force policy applied to all orders in this submission. */
+      time_in_force?: components["schemas"]["TimeInForce"];
+    };
+    SubmitSignedOrderRequest: {
+      /** @description Authentication scheme for this signer. Defaults to raw P256 for SDKs and bots. */
+      auth_scheme?: components["schemas"]["AuthScheme"];
+      /**
+       * Format: int64
+       * @description Last eligible block height, covered by the P256 signature. Required for signed IOC/GTD.
+       */
+      expires_at_block?: number | null;
+      /**
+       * Format: int64
+       * @description Per-account replay nonce covered by the P256 signature.
+       */
+      nonce: number;
+      /** @description The order to submit. */
+      order: components["schemas"]["SignedOrderData"];
+      /**
+       * @description Hex-encoded raw P256 ECDSA signature over the canonical order payload.
+       *     Required when `auth_scheme` is `raw_p256`.
+       */
+      signature_hex?: string | null;
+      /** @description Hex-encoded compressed P256 public key of the signer. */
+      signer_pubkey_hex: string;
+      /** @description API time-in-force policy. Signed IOC/GTD orders commit to `expires_at_block`. */
+      time_in_force?: components["schemas"]["TimeInForce"];
+      webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+    };
+    SystemEventResponse:
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /**
+           * Format: int64
+           * @description Initial account balance. Integer nanodollars; 1_000_000_000 = $1.
+           */
+          initial_balance_nanos: string;
+          /** @enum {string} */
+          type: "create_account";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /**
+           * Format: int64
+           * @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
+           */
+          amount_nanos: string;
+          /** @enum {string} */
+          type: "deposit";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /**
+           * Format: int64
+           * @description Account credit amount. Integer nanodollars; 1_000_000_000 = $1.
+           */
+          amount_nanos: string;
+          /** Format: int64 */
+          deposit_id: number;
+          deposit_root_hex: string;
+          sybil_account_key_hex: string;
+          /** @enum {string} */
+          type: "l1_deposit";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /**
+           * Format: int64
+           * @description Account debit amount. Integer nanodollars; 1_000_000_000 = $1.
+           */
+          amount_nanos: string;
+          nullifier_hex: string;
+          /** @enum {string} */
+          type: "withdrawal_created";
+          /** Format: int64 */
+          withdrawal_id: number;
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /**
+           * Format: int64
+           * @description Refunded account credit. Integer nanodollars; 1_000_000_000 = $1.
+           */
+          amount_nanos: string;
+          reason: string;
+          /** @enum {string} */
+          type: "withdrawal_refunded";
+          /** Format: int64 */
+          withdrawal_id: number;
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /**
+           * Format: int64
+           * @description Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
+           */
+          amount_nanos: string;
+          /** @enum {string} */
+          type: "withdrawal_finalized";
+          /** Format: int64 */
+          withdrawal_id: number;
+        }
+      | {
+          /** Format: int64 */
+          height: number;
+          /** @enum {string} */
+          type: "l1_block_observed";
+        }
+      | {
+          affected_accounts: number[];
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Resolution payout per YES share. Integer nanodollars;
+           *     1_000_000_000 = $1. Payouts are per-share probabilities in [0, 1e9].
+           */
+          payout_nanos: string;
+          /** @enum {string} */
+          type: "market_resolved";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          market_ids: number[];
+          /** Format: int64 */
+          order_id: number;
+          /**
+           * Format: int64
+           * @description Cancelled order's unfilled quantity. Integer share-units;
+           *     1000 units = 1 share.
+           */
+          remaining_quantity: number;
+          side: string;
+          /** @enum {string} */
+          type: "order_cancelled";
+        }
+      | {
+          /** Format: int64 */
+          group_id: number;
+          /** Format: int32 */
+          market_id: number;
+          /** @enum {string} */
+          type: "market_group_extended";
+        };
+    /** @enum {string} */
+    TimeInForce: "GTC" | "IOC" | "GTD";
+    TokenUsageResponse: {
+      /** Format: double */
+      avg_latency_s?: number | null;
+      /** Format: int64 */
+      calls: number;
+      /** Format: int64 */
+      completion_tokens: number;
+      latest_model?: string | null;
+      /** Format: int64 */
+      prompt_tokens: number;
+      trader_name: string;
+    };
+    WebAuthnAssertion: {
+      /** @description Base64url authenticatorData bytes from `navigator.credentials.get`. */
+      authenticator_data_b64url: string;
+      /** @description Base64url clientDataJSON bytes from `navigator.credentials.get`. */
+      client_data_json_b64url: string;
+      /** @description Base64url credential id returned by the authenticator. */
+      credential_id_b64url: string;
+      /** @description Base64url DER-encoded ECDSA signature from `navigator.credentials.get`. */
+      signature_b64url: string;
+      /** @description Optional base64url userHandle returned by the authenticator. */
+      user_handle_b64url?: string | null;
+    };
+    WebAuthnRegistration: {
+      /** @description Base64url-encoded WebAuthn attestationObject from `navigator.credentials.create`. */
+      attestation_object_b64url: string;
+      /** @description Base64url-encoded WebAuthn clientDataJSON from `navigator.credentials.create`. */
+      client_data_json_b64url: string;
+    };
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    create_account: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateAccountRequest"];
-            };
-        };
-        responses: {
-            /** @description Account and initial signing key created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountResponse"];
-                };
-            };
-            /** @description Invalid initial balance or key */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Bare creation requires the service token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid service token */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_account: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Account details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountResponse"];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Account not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_api_keys: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Read API keys */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiKeyResponse"][];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    create_api_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateApiKeyRequest"];
-            };
-        };
-        responses: {
-            /** @description API key created (token shown once) */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CreateApiKeyResponse"];
-                };
-            };
-            /** @description Invalid request or signature */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signer/account mismatch */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown signer */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Replay nonce is stale or duplicate */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    revoke_api_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RevokeApiKeyRequest"];
-            };
-        };
-        responses: {
-            /** @description API key revoked */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid request or signature */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signer/account mismatch */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown signer or API key */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Replay nonce is stale or duplicate */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    account_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Account bridge key */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BridgeAccountKeyResponse"];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Account not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_equity: {
-        parameters: {
-            query?: {
-                /** @description Time range: 24h | 7d | 30d | all (default all) */
-                range?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Per-account equity series */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EquitySeriesResponse"];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_account_history: {
-        parameters: {
-            query?: {
-                /** @description Max events (default 50, cap 500) */
-                limit?: number;
-                /** @description Cursor "<block>.<seq>"; returns events strictly before it */
-                before?: string;
-                /** @description trades | funding | settlement */
-                category?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Account history feed, newest-first */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HistoryEventResponse"][];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_account_fills: {
-        parameters: {
-            query?: {
-                /** @description Filter by market ID */
-                market_id?: number;
-                /** @description Stable cursor returned as `cursor` on each fill. When present, returns fills strictly after this cursor in ascending order. Use `0.0` to start from the beginning. */
-                after?: string;
-                /** @description Result limit (default 100, cap 500) */
-                limit?: number;
-                /**
-                 * @deprecated
-                 * @description Deprecated offset-from-newest pagination. Ignored when `after` is present.
-                 */
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Account fill history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountFillResponse"][];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    fund_account: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FundAccountRequest"];
-            };
-        };
-        responses: {
-            /** @description Account funded */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountResponse"];
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Account not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_account_keys: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Registered signing keys */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountKeyResponse"][];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    register_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegisterKeyRequest"];
-            };
-        };
-        responses: {
-            /** @description First key registered */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid key */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Account not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Account already has a key; use the signed register path */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    register_signed_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SignedRegisterKeyRequest"];
-            };
-        };
-        responses: {
-            /** @description Key registered */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid key or signature */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signer/account mismatch */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown signer or account */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Key already registered, or stale nonce */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    revoke_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RevokeKeyRequest"];
-            };
-        };
-        responses: {
-            /** @description Key revoked */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid request or signature */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signer/account mismatch */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown signer or key */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Cannot revoke the last key, or stale nonce */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_account_orders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Pending orders */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PendingOrderResponse"][];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_portfolio: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Portfolio summary */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PortfolioResponse"];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Account not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_private_summary: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Private account summary */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PrivateAccountSummaryResponse"];
-                };
-            };
-            /** @description Missing/invalid bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Token belongs to a different account */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Account not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    set_profile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Account ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetProfileRequest"];
-            };
-        };
-        responses: {
-            /** @description Profile updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountResponse"];
-                };
-            };
-            /** @description Invalid profile or signature */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signer/account mismatch */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown signer */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Replay nonce is stale or duplicate */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_activity_overview: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Platform-wide aggregates */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityOverviewResponse"];
-                };
-            };
-        };
-    };
-    list_auto_resolutions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Pending auto-resolutions */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AutoResolutionListResponse"];
-                };
-            };
-            /** @description Service token required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    submit_auto_resolution: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitAutoResolutionRequest"];
-            };
-        };
-        responses: {
-            /** @description Proposal recorded */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AutoResolutionEntryResponse"];
-                };
-            };
-            /** @description Invalid proposal */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Service token required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    approve_auto_resolution: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Proposal approved */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AutoResolutionEntryResponse"];
-                };
-            };
-            /** @description Service token required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description No proposal for this market */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    reject_auto_resolution: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Proposal rejected */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AutoResolutionEntryResponse"];
-                };
-            };
-            /** @description Service token required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description No proposal for this market */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_recent_blocks: {
-        parameters: {
-            query?: {
-                /** @description Recent blocks, newest-first; default 20, cap 500 */
-                limit?: number;
-                /** @description Return blocks with height strictly below this cursor */
-                before_height?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Blocks newest-first */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BlockResponse"][];
-                };
-            };
-        };
-    };
-    get_latest_block: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Latest block */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BlockResponse"];
-                };
-            };
-            /** @description No blocks produced yet */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    stream_blocks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Third-party convenience SSE stream of block events */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    ws_blocks: {
-        parameters: {
-            query?: {
-                /** @description Replay retained committed blocks from this height before switching to live */
-                from_block?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description First-party WebSocket upgrade for block streaming */
-            101: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_block_by_height: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Block height */
-                height: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Block at height */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BlockResponse"];
-                };
-            };
-            /** @description Block not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_bot_decisions: {
-        parameters: {
-            query?: {
-                /** @description Maximum returned decisions, clamped to 1..=500 (default 50) */
-                limit?: number;
-                /** @description Filter decisions to a single trader name */
-                trader?: string;
-                /** @description Filter decisions to one market ID. Combine with `trader` for FV-drift history. */
-                market_id?: number;
-                /** @description ISO-8601 lower-bound timestamp filter (`decisions.timestamp >= since`) for historical reads. */
-                since?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Bot decision feed */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BotDecisionFeedResponse"];
-                };
-            };
-        };
-    };
-    get_bot_equity_series: {
-        parameters: {
-            query?: {
-                /** @description Filter portfolio snapshots to a single trader name */
-                trader?: string;
-                /** @description ISO-8601 lower-bound timestamp filter (`portfolio_snapshots.timestamp >= since`) */
-                since?: string;
-                /** @description Maximum returned sampled points, clamped to 1..=1000 (default 200). Dense rows are downsampled by a naive stride. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Bot portfolio-value time series */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BotEquitySeriesResponse"];
-                };
-            };
-        };
-    };
-    account_by_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Hex-encoded Sybil bridge account key */
-                key_hex: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Account bridge key mapping */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BridgeAccountKeyResponse"];
-                };
-            };
-            /** @description Bridge key not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    submit_l1_deposit: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitL1DepositRequest"];
-            };
-        };
-        responses: {
-            /** @description L1 deposit accepted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BridgeDepositResponse"];
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    observe_l1_height: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ObserveL1HeightRequest"];
-            };
-        };
-        responses: {
-            /** @description Confirmed L1 height applied */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ObserveL1HeightResponse"];
-                };
-            };
-        };
-    };
-    status: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Bridge sidecar status */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BridgeStatusResponse"];
-                };
-            };
-        };
-    };
-    create_withdrawal: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateBridgeWithdrawalRequest"];
-            };
-        };
-        responses: {
-            /** @description Withdrawal leaf created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BridgeWithdrawalResponse"];
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    submit_l1_withdrawal_event: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitL1WithdrawalEventRequest"];
-            };
-        };
-        responses: {
-            /** @description L1 withdrawal queue status applied or idempotently ignored */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BridgeWithdrawalL1EventResponse"];
-                };
-            };
-            /** @description Invalid L1 withdrawal event */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Withdrawal not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    create_signed_withdrawal: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateSignedBridgeWithdrawalRequest"];
-            };
-        };
-        responses: {
-            /** @description Signed withdrawal leaf created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BridgeWithdrawalResponse"];
-                };
-            };
-            /** @description Invalid withdrawal or signature */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signer/account mismatch */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown signer */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Replay nonce is stale or duplicate */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_withdrawal: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Withdrawal ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Withdrawal leaf */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BridgeWithdrawalResponse"];
-                };
-            };
-            /** @description Withdrawal not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_da_manifest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Retained block height */
-                height: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description DA manifest */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DaManifestResponse"];
-                };
-            };
-            /** @description DA artifact not retained or unavailable for this height */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Stored DA artifact failed integrity verification */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_da_payload: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Retained block height */
-                height: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Canonical witness payload bytes */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": unknown;
-                };
-            };
-            /** @description DA artifact not retained or unavailable for this height */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Stored DA artifact failed integrity verification */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_event_raw: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Event identifier (alphanumeric, '_' or '-') */
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Stored raw event JSON */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Invalid event_id */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Snapshot not found or snapshots disabled */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    put_event_raw: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Event identifier (alphanumeric, '_' or '-') */
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        /** @description Raw event JSON snapshot */
-        requestBody: {
-            content: {
-                "application/json": unknown;
-            };
-        };
-        responses: {
-            /** @description Snapshot stored */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Invalid event_id or non-JSON body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing service bearer token */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Invalid service bearer token */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Event snapshots disabled */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_event_traders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Polymarket event id */
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Unique placers across the event's markets */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventTradersResponse"];
-                };
-            };
-        };
-    };
-    list_feeds: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Feeds */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegisteredFeedResponse"][];
-                };
-            };
-        };
-    };
-    register_feed: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegisterFeedRequest"];
-            };
-        };
-        responses: {
-            /** @description Feed registered */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegisteredFeedResponse"];
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    health: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Sequencer healthy */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-            /** @description Sequencer unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-        };
-    };
-    get_leaderboard: {
-        parameters: {
-            query?: {
-                /** @description Ranking window: 7d | 30d | all (default all) */
-                window?: string;
-                /** @description Result limit (default 50, cap 100) */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Ranked trader leaderboard, best PnL first */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LeaderboardResponse"];
-                };
-            };
-        };
-    };
-    list_markets: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List of markets */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarketResponse"][];
-                };
-            };
-        };
-    };
-    create_market: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateMarketRequest"];
-            };
-        };
-        responses: {
-            /** @description Market created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CreateMarketResponse"];
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_market_groups: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List of market groups */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarketGroupResponse"][];
-                };
-            };
-        };
-    };
-    create_market_group: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateMarketGroupRequest"];
-            };
-        };
-        responses: {
-            /** @description Market group created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarketGroupResponse"];
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    extend_market_group: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Current market group index */
-                group_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ExtendMarketGroupRequest"];
-            };
-        };
-        responses: {
-            /** @description Market group extended or already contained the member */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarketGroupResponse"];
-                };
-            };
-            /** @description Market group or market not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Market is resolved or already belongs to another group */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_prices: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Market prices */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarketPricesResponse"];
-                };
-            };
-        };
-    };
-    set_reference_prices: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetReferencePricesRequest"];
-            };
-        };
-        responses: {
-            /** @description Prices updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    search_markets: {
-        parameters: {
-            query?: {
-                /** @description Text search */
-                q?: string;
-                /** @description Comma-separated tags */
-                tags?: string;
-                /** @description Category filter */
-                category?: string;
-                /** @description Status filter */
-                status?: string;
-                /** @description Minimum volume */
-                min_volume?: number;
-                /** @description Sort field */
-                sort?: string;
-                /** @description Result limit */
-                limit?: number;
-                /** @description Result offset */
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Search results */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarketResponse"][];
-                };
-            };
-        };
-    };
-    list_markets_summary: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Slim list of markets */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarketSummaryResponse"][];
-                };
-            };
-        };
-    };
-    get_market: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Market details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarketResponse"];
-                };
-            };
-            /** @description Market not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    set_market_metadata: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetMarketMetadataRequest"];
-            };
-        };
-        responses: {
-            /** @description Metadata updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_open_batch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Open-batch state for this market */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpenBatchResponse"];
-                };
-            };
-        };
-    };
-    get_market_orderbook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Market order book */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PendingOrderResponse"][];
-                };
-            };
-        };
-    };
-    get_price_candles: {
-        parameters: {
-            query: {
-                /** @description Candle resolution: seconds or one of 1m, 5m, 1h */
-                resolution: string;
-                /** @description Start bucket timestamp filter */
-                from_ms?: number;
-                /** @description End bucket timestamp filter */
-                to_ms?: number;
-                /** @description Return candles with bucket_start_ms strictly below this cursor */
-                before_ms?: number;
-                /** @description Maximum returned candles, clamped server-side */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Price candles */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PriceCandlesResponse"];
-                };
-            };
-        };
-    };
-    get_price_history: {
-        parameters: {
-            query?: {
-                /** @description Start timestamp filter */
-                from_ms?: number;
-                /** @description End timestamp filter */
-                to_ms?: number;
-                /** @description Return points with height strictly below this cursor */
-                before_height?: number;
-                /** @description Maximum returned points, newest matching points first by cap, clamped server-side */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Price history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PriceHistoryResponse"];
-                };
-            };
-        };
-    };
-    get_resolution: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Resolution state */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ResolutionResponse"];
-                };
-            };
-            /** @description Market not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    resolve_market: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Market ID */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResolveMarketRequest"];
-            };
-        };
-        responses: {
-            /** @description Market resolved */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ResolveMarketResponse"];
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Market not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    submit_orders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitOrderRequest"];
-            };
-        };
-        responses: {
-            /** @description Orders accepted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrderAcceptedResponse"];
-                };
-            };
-            /** @description Invalid order */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Account not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    cancel_signed_order: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CancelSignedOrderRequest"];
-            };
-        };
-        responses: {
-            /** @description Signed cancel accepted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CancelOrderResponse"];
-                };
-            };
-            /** @description Invalid signature payload */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signer or owner mismatch */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown signer or pending order not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Replay nonce is stale or duplicate */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_all_pending_orders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description All pending orders */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PendingOrderResponse"][];
-                };
-            };
-        };
-    };
-    submit_signed_order: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubmitSignedOrderRequest"];
-            };
-        };
-        responses: {
-            /** @description Signed order accepted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrderAcceptedResponse"];
-                };
-            };
-            /** @description Invalid order or signature */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown signer */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Replay nonce is stale or duplicate */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_state_proof: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Hex-encoded canonical state leaf key */
-                leaf_key_hex: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description State leaf inclusion or exclusion proof */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StateProofResponse"];
-                };
-            };
-            /** @description Invalid state leaf key */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description No committed block yet */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Proof store unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    pause: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Block production paused */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    resume: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Block production resumed */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Dev mode required */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    state_root: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current state root */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StateRootResponse"];
-                };
-            };
-        };
-    };
+  create_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAccountRequest"];
+      };
+    };
+    responses: {
+      /** @description Account and initial signing key created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountResponse"];
+        };
+      };
+      /** @description Invalid initial balance or key */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bare creation requires the service token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid service token */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Account details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountResponse"];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Account not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_keyop_state: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current key-operation signing state */
+      200: {
+        headers: { [name: string]: unknown };
+        content: {
+          "application/json": components["schemas"]["KeyOpStateResponse"];
+        };
+      };
+      /** @description Account not found */
+      404: {
+        headers: { [name: string]: unknown };
+        content?: never;
+      };
+    };
+  };
+  list_api_keys: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Read API keys */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyResponse"][];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  create_api_key: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateApiKeyRequest"];
+      };
+    };
+    responses: {
+      /** @description API key created (token shown once) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreateApiKeyResponse"];
+        };
+      };
+      /** @description Invalid request or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Signer/account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown signer */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Replay nonce is stale or duplicate */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  revoke_api_key: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RevokeApiKeyRequest"];
+      };
+    };
+    responses: {
+      /** @description API key revoked */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Signer/account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown signer or API key */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Replay nonce is stale or duplicate */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  account_key: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Account bridge key */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeAccountKeyResponse"];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Account not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_equity: {
+    parameters: {
+      query?: {
+        /** @description Time range: 24h | 7d | 30d | all (default all) */
+        range?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Per-account equity series */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EquitySeriesResponse"];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_account_history: {
+    parameters: {
+      query?: {
+        /** @description Max events (default 50, cap 500) */
+        limit?: number;
+        /** @description Cursor "<block>.<seq>"; returns events strictly before it */
+        before?: string;
+        /** @description trades | funding | settlement */
+        category?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Account history feed, newest-first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HistoryEventResponse"][];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_account_fills: {
+    parameters: {
+      query?: {
+        /** @description Filter by market ID */
+        market_id?: number;
+        /** @description Stable cursor returned as `cursor` on each fill. When present, returns fills strictly after this cursor in ascending order. Use `0.0` to start from the beginning. */
+        after?: string;
+        /** @description Result limit (default 100, cap 500) */
+        limit?: number;
+        /**
+         * @deprecated
+         * @description Deprecated offset-from-newest pagination. Ignored when `after` is present.
+         */
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Account fill history */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountFillResponse"][];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  fund_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FundAccountRequest"];
+      };
+    };
+    responses: {
+      /** @description Account funded */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountResponse"];
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Account not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  list_account_keys: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Registered signing keys */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountKeyResponse"][];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  register_key: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RegisterKeyRequest"];
+      };
+    };
+    responses: {
+      /** @description First key registered */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid key */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Account not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Account already has a key; use the signed register path */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  register_signed_key: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignedRegisterKeyRequest"];
+      };
+    };
+    responses: {
+      /** @description Key registered */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid key or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Signer/account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown signer or account */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Key already registered, or stale state binding */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  revoke_key: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RevokeKeyRequest"];
+      };
+    };
+    responses: {
+      /** @description Key revoked */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Signer/account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown signer or key */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Cannot revoke the last key, or stale state binding */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_account_orders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pending orders */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PendingOrderResponse"][];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_portfolio: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Portfolio summary */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PortfolioResponse"];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Account not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_private_summary: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Private account summary */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PrivateAccountSummaryResponse"];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Account not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  set_profile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetProfileRequest"];
+      };
+    };
+    responses: {
+      /** @description Profile updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountResponse"];
+        };
+      };
+      /** @description Invalid profile or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Signer/account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown signer */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Replay nonce is stale or duplicate */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_activity_overview: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Platform-wide aggregates */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityOverviewResponse"];
+        };
+      };
+    };
+  };
+  list_auto_resolutions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pending auto-resolutions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AutoResolutionListResponse"];
+        };
+      };
+      /** @description Service token required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  submit_auto_resolution: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubmitAutoResolutionRequest"];
+      };
+    };
+    responses: {
+      /** @description Proposal recorded */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AutoResolutionEntryResponse"];
+        };
+      };
+      /** @description Invalid proposal */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Service token required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  approve_auto_resolution: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Proposal approved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AutoResolutionEntryResponse"];
+        };
+      };
+      /** @description Service token required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description No proposal for this market */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  reject_auto_resolution: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Proposal rejected */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AutoResolutionEntryResponse"];
+        };
+      };
+      /** @description Service token required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description No proposal for this market */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_recent_blocks: {
+    parameters: {
+      query?: {
+        /** @description Recent blocks, newest-first; default 20, cap 500 */
+        limit?: number;
+        /** @description Return blocks with height strictly below this cursor */
+        before_height?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Blocks newest-first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BlockResponse"][];
+        };
+      };
+    };
+  };
+  get_latest_block: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Latest block */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BlockResponse"];
+        };
+      };
+      /** @description No blocks produced yet */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  stream_blocks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Third-party convenience SSE stream of block events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  ws_blocks: {
+    parameters: {
+      query?: {
+        /** @description Replay retained committed blocks from this height before switching to live */
+        from_block?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description First-party WebSocket upgrade for block streaming */
+      101: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_block_by_height: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Block height */
+        height: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Block at height */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BlockResponse"];
+        };
+      };
+      /** @description Block not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_bot_decisions: {
+    parameters: {
+      query?: {
+        /** @description Maximum returned decisions, clamped to 1..=500 (default 50) */
+        limit?: number;
+        /** @description Filter decisions to a single trader name */
+        trader?: string;
+        /** @description Filter decisions to one market ID. Combine with `trader` for FV-drift history. */
+        market_id?: number;
+        /** @description ISO-8601 lower-bound timestamp filter (`decisions.timestamp >= since`) for historical reads. */
+        since?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Bot decision feed */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BotDecisionFeedResponse"];
+        };
+      };
+    };
+  };
+  get_bot_equity_series: {
+    parameters: {
+      query?: {
+        /** @description Filter portfolio snapshots to a single trader name */
+        trader?: string;
+        /** @description ISO-8601 lower-bound timestamp filter (`portfolio_snapshots.timestamp >= since`) */
+        since?: string;
+        /** @description Maximum returned sampled points, clamped to 1..=1000 (default 200). Dense rows are downsampled by a naive stride. */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Bot portfolio-value time series */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BotEquitySeriesResponse"];
+        };
+      };
+    };
+  };
+  account_by_key: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Hex-encoded Sybil bridge account key */
+        key_hex: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Account bridge key mapping */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeAccountKeyResponse"];
+        };
+      };
+      /** @description Bridge key not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  submit_l1_deposit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubmitL1DepositRequest"];
+      };
+    };
+    responses: {
+      /** @description L1 deposit accepted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeDepositResponse"];
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  observe_l1_height: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ObserveL1HeightRequest"];
+      };
+    };
+    responses: {
+      /** @description Confirmed L1 height applied */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ObserveL1HeightResponse"];
+        };
+      };
+    };
+  };
+  status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Bridge sidecar status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeStatusResponse"];
+        };
+      };
+    };
+  };
+  create_withdrawal: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateBridgeWithdrawalRequest"];
+      };
+    };
+    responses: {
+      /** @description Withdrawal leaf created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeWithdrawalResponse"];
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  submit_l1_withdrawal_event: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubmitL1WithdrawalEventRequest"];
+      };
+    };
+    responses: {
+      /** @description L1 withdrawal queue status applied or idempotently ignored */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeWithdrawalL1EventResponse"];
+        };
+      };
+      /** @description Invalid L1 withdrawal event */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Withdrawal not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  create_signed_withdrawal: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateSignedBridgeWithdrawalRequest"];
+      };
+    };
+    responses: {
+      /** @description Signed withdrawal leaf created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeWithdrawalResponse"];
+        };
+      };
+      /** @description Invalid withdrawal or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Signer/account mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown signer */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Replay nonce is stale or duplicate */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_withdrawal: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Withdrawal ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Withdrawal leaf */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeWithdrawalResponse"];
+        };
+      };
+      /** @description Withdrawal not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_da_manifest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Retained block height */
+        height: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description DA manifest */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DaManifestResponse"];
+        };
+      };
+      /** @description DA artifact not retained or unavailable for this height */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Stored DA artifact failed integrity verification */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_da_payload: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Retained block height */
+        height: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Canonical witness payload bytes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": unknown;
+        };
+      };
+      /** @description DA artifact not retained or unavailable for this height */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Stored DA artifact failed integrity verification */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_event_raw: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Event identifier (alphanumeric, '_' or '-') */
+        event_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stored raw event JSON */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Invalid event_id */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Snapshot not found or snapshots disabled */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  put_event_raw: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Event identifier (alphanumeric, '_' or '-') */
+        event_id: string;
+      };
+      cookie?: never;
+    };
+    /** @description Raw event JSON snapshot */
+    requestBody: {
+      content: {
+        "application/json": unknown;
+      };
+    };
+    responses: {
+      /** @description Snapshot stored */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Invalid event_id or non-JSON body */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Missing service bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid service bearer token */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Event snapshots disabled */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_event_traders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Polymarket event id */
+        event_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unique placers across the event's markets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EventTradersResponse"];
+        };
+      };
+    };
+  };
+  list_feeds: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Feeds */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RegisteredFeedResponse"][];
+        };
+      };
+    };
+  };
+  register_feed: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RegisterFeedRequest"];
+      };
+    };
+    responses: {
+      /** @description Feed registered */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RegisteredFeedResponse"];
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  health: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Sequencer healthy */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+      /** @description Sequencer unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
+  get_leaderboard: {
+    parameters: {
+      query?: {
+        /** @description Ranking window: 7d | 30d | all (default all) */
+        window?: string;
+        /** @description Result limit (default 50, cap 100) */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Ranked trader leaderboard, best PnL first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LeaderboardResponse"];
+        };
+      };
+    };
+  };
+  list_markets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List of markets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MarketResponse"][];
+        };
+      };
+    };
+  };
+  create_market: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateMarketRequest"];
+      };
+    };
+    responses: {
+      /** @description Market created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreateMarketResponse"];
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  list_market_groups: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List of market groups */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MarketGroupResponse"][];
+        };
+      };
+    };
+  };
+  create_market_group: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateMarketGroupRequest"];
+      };
+    };
+    responses: {
+      /** @description Market group created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MarketGroupResponse"];
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  extend_market_group: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Current market group index */
+        group_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ExtendMarketGroupRequest"];
+      };
+    };
+    responses: {
+      /** @description Market group extended or already contained the member */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MarketGroupResponse"];
+        };
+      };
+      /** @description Market group or market not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Market is resolved or already belongs to another group */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_prices: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Market prices */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MarketPricesResponse"];
+        };
+      };
+    };
+  };
+  set_reference_prices: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetReferencePricesRequest"];
+      };
+    };
+    responses: {
+      /** @description Prices updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  search_markets: {
+    parameters: {
+      query?: {
+        /** @description Text search */
+        q?: string;
+        /** @description Comma-separated tags */
+        tags?: string;
+        /** @description Category filter */
+        category?: string;
+        /** @description Status filter */
+        status?: string;
+        /** @description Minimum volume */
+        min_volume?: number;
+        /** @description Sort field */
+        sort?: string;
+        /** @description Result limit */
+        limit?: number;
+        /** @description Result offset */
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Search results */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MarketResponse"][];
+        };
+      };
+    };
+  };
+  list_markets_summary: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Slim list of markets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MarketSummaryResponse"][];
+        };
+      };
+    };
+  };
+  get_market: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Market details */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MarketResponse"];
+        };
+      };
+      /** @description Market not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  set_market_metadata: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetMarketMetadataRequest"];
+      };
+    };
+    responses: {
+      /** @description Metadata updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_open_batch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Open-batch state for this market */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OpenBatchResponse"];
+        };
+      };
+    };
+  };
+  get_market_orderbook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Market order book */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PendingOrderResponse"][];
+        };
+      };
+    };
+  };
+  get_price_candles: {
+    parameters: {
+      query: {
+        /** @description Candle resolution: seconds or one of 1m, 5m, 1h */
+        resolution: string;
+        /** @description Start bucket timestamp filter */
+        from_ms?: number;
+        /** @description End bucket timestamp filter */
+        to_ms?: number;
+        /** @description Return candles with bucket_start_ms strictly below this cursor */
+        before_ms?: number;
+        /** @description Maximum returned candles, clamped server-side */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Price candles */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PriceCandlesResponse"];
+        };
+      };
+    };
+  };
+  get_price_history: {
+    parameters: {
+      query?: {
+        /** @description Start timestamp filter */
+        from_ms?: number;
+        /** @description End timestamp filter */
+        to_ms?: number;
+        /** @description Return points with height strictly below this cursor */
+        before_height?: number;
+        /** @description Maximum returned points, newest matching points first by cap, clamped server-side */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Price history */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PriceHistoryResponse"];
+        };
+      };
+    };
+  };
+  get_resolution: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Resolution state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ResolutionResponse"];
+        };
+      };
+      /** @description Market not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  resolve_market: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Market ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResolveMarketRequest"];
+      };
+    };
+    responses: {
+      /** @description Market resolved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ResolveMarketResponse"];
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Market not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  submit_orders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubmitOrderRequest"];
+      };
+    };
+    responses: {
+      /** @description Orders accepted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrderAcceptedResponse"];
+        };
+      };
+      /** @description Invalid order */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Account not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  cancel_signed_order: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CancelSignedOrderRequest"];
+      };
+    };
+    responses: {
+      /** @description Signed cancel accepted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CancelOrderResponse"];
+        };
+      };
+      /** @description Invalid signature payload */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Signer or owner mismatch */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown signer or pending order not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Replay nonce is stale or duplicate */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_all_pending_orders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description All pending orders */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PendingOrderResponse"][];
+        };
+      };
+    };
+  };
+  submit_signed_order: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubmitSignedOrderRequest"];
+      };
+    };
+    responses: {
+      /** @description Signed order accepted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrderAcceptedResponse"];
+        };
+      };
+      /** @description Invalid order or signature */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown signer */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Replay nonce is stale or duplicate */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_state_proof: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Hex-encoded canonical state leaf key */
+        leaf_key_hex: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description State leaf inclusion or exclusion proof */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StateProofResponse"];
+        };
+      };
+      /** @description Invalid state leaf key */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description No committed block yet */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Proof store unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  pause: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Block production paused */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  resume: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Block production resumed */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Dev mode required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  state_root: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current state root */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StateRootResponse"];
+        };
+      };
+    };
+  };
 }

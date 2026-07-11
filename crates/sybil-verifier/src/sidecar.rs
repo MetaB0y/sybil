@@ -1210,6 +1210,7 @@ mod tests {
         BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -1240,6 +1241,7 @@ mod tests {
                 ..empty_header()
             },
             previous_header: Some(empty_header()),
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],

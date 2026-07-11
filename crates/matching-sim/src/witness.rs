@@ -48,6 +48,7 @@ pub fn build_witness(
             timestamp_ms: 0,
         },
         previous_header: None,
+        genesis_hash: [0u8; 32],
         orders: witness_orders,
         rejections: vec![],
         system_events: vec![],

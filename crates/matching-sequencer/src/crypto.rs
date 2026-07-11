@@ -121,9 +121,10 @@ pub struct AuthenticatedProfileUpdate {
 /// A signed request to revoke a registered signing key (SYB-60).
 pub struct SignedKeyRevocation {
     pub account_id: crate::account::AccountId,
-    /// Compressed SEC1 bytes (33) of the key being revoked.
-    pub target_pubkey: Vec<u8>,
-    pub nonce: u64,
+    /// Full validity record being revoked (the canonical payload covers it).
+    pub target_key: sybil_verifier::KeyRecord,
+    pub bound_keys_digest: [u8; 32],
+    pub bound_events_digest: [u8; 32],
     pub signer: PublicKey,
     pub signature: Signature,
 }
@@ -131,8 +132,9 @@ pub struct SignedKeyRevocation {
 /// A key revocation whose signature was verified before entering the sequencer.
 pub struct AuthenticatedKeyRevocation {
     pub account_id: crate::account::AccountId,
-    pub target_pubkey: Vec<u8>,
-    pub nonce: u64,
+    pub target_key: sybil_verifier::KeyRecord,
+    pub bound_keys_digest: [u8; 32],
+    pub bound_events_digest: [u8; 32],
     pub signer: PublicKey,
     pub authorization: sybil_verifier::KeyOpAuth,
 }
@@ -150,7 +152,8 @@ pub struct SignedKeyRegistration {
     pub new_auth_scheme: AccountAuthScheme,
     pub label: Option<String>,
     pub scope: KeyScope,
-    pub nonce: u64,
+    pub bound_keys_digest: [u8; 32],
+    pub bound_events_digest: [u8; 32],
     pub signer: PublicKey,
     pub signature: Signature,
 }
@@ -162,7 +165,8 @@ pub struct AuthenticatedKeyRegistration {
     pub new_auth_scheme: AccountAuthScheme,
     pub label: Option<String>,
     pub scope: KeyScope,
-    pub nonce: u64,
+    pub bound_keys_digest: [u8; 32],
+    pub bound_events_digest: [u8; 32],
     pub signer: PublicKey,
     pub authorization: sybil_verifier::KeyOpAuth,
 }
@@ -378,12 +382,19 @@ pub fn canonical_profile_update_bytes(
 /// Domain-separated by `genesis_hash` (SYB-231), mirroring orders/cancels
 /// (SYB-224) and key registrations (SYB-229).
 pub fn canonical_key_revocation_bytes(
-    account_id: crate::account::AccountId,
-    target_pubkey: &[u8],
-    nonce: u64,
     genesis_hash: [u8; 32],
+    account_id: crate::account::AccountId,
+    target_key: &sybil_verifier::KeyRecord,
+    bound_keys_digest: [u8; 32],
+    bound_events_digest: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_key_revocation_bytes(genesis_hash, account_id.0, target_pubkey, nonce)
+    sybil_verifier::canonical_key_revocation_bytes(
+        genesis_hash,
+        account_id.0,
+        target_key,
+        bound_keys_digest,
+        bound_events_digest,
+    )
 }
 
 /// Canonical bytes for a signed read API-key creation (SYB-60).
@@ -399,20 +410,18 @@ pub fn canonical_api_key_create_bytes(
 ///
 /// Domain-separated by `genesis_hash`, mirroring orders/cancels (SYB-224).
 pub fn canonical_key_registration_bytes(
-    account_id: crate::account::AccountId,
-    new_auth_scheme: AccountAuthScheme,
-    new_pubkey: &[u8],
-    signer_pubkey: &[u8],
-    nonce: u64,
     genesis_hash: [u8; 32],
+    account_id: crate::account::AccountId,
+    key: &sybil_verifier::KeyRecord,
+    bound_keys_digest: [u8; 32],
+    bound_events_digest: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_key_registration_bytes(
+    sybil_verifier::canonical_key_registration_bytes(
         genesis_hash,
         account_id.0,
-        new_auth_scheme.canonical_byte(),
-        new_pubkey,
-        signer_pubkey,
-        nonce,
+        key,
+        bound_keys_digest,
+        bound_events_digest,
     )
 }
 
@@ -449,10 +458,11 @@ pub fn verify_signed_key_revocation(
     genesis_hash: [u8; 32],
 ) -> Result<(), SequencerError> {
     let msg = canonical_key_revocation_bytes(
-        signed.account_id,
-        &signed.target_pubkey,
-        signed.nonce,
         genesis_hash,
+        signed.account_id,
+        &signed.target_key,
+        signed.bound_keys_digest,
+        signed.bound_events_digest,
     );
     signed
         .signer
@@ -467,12 +477,19 @@ pub fn verify_signed_key_registration(
     genesis_hash: [u8; 32],
 ) -> Result<(), SequencerError> {
     let msg = canonical_key_registration_bytes(
-        signed.account_id,
-        signed.new_auth_scheme,
-        &signed.new_pubkey.compressed_bytes(),
-        &signed.signer.compressed_bytes(),
-        signed.nonce,
         genesis_hash,
+        signed.account_id,
+        &sybil_verifier::KeyRecord {
+            auth_scheme: signed.new_auth_scheme.canonical_byte(),
+            pubkey_sec1: signed
+                .new_pubkey
+                .compressed_bytes()
+                .try_into()
+                .expect("compressed P-256 key is 33 bytes"),
+            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+        },
+        signed.bound_keys_digest,
+        signed.bound_events_digest,
     );
     signed
         .signer
@@ -676,17 +693,25 @@ pub fn sign_profile_update(
 /// Sign a signing-key revocation with a P256 signing key (testing / client use).
 pub fn sign_key_revocation(
     account_id: crate::account::AccountId,
-    target_pubkey: Vec<u8>,
-    nonce: u64,
+    target_key: sybil_verifier::KeyRecord,
+    bound_keys_digest: [u8; 32],
+    bound_events_digest: [u8; 32],
     genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> SignedKeyRevocation {
-    let msg = canonical_key_revocation_bytes(account_id, &target_pubkey, nonce, genesis_hash);
+    let msg = canonical_key_revocation_bytes(
+        genesis_hash,
+        account_id,
+        &target_key,
+        bound_keys_digest,
+        bound_events_digest,
+    );
     let signature: Signature = key.sign(&msg);
     SignedKeyRevocation {
         account_id,
-        target_pubkey,
-        nonce,
+        target_key,
+        bound_keys_digest,
+        bound_events_digest,
         signer: PublicKey(*key.verifying_key()),
         signature,
     }
@@ -700,18 +725,26 @@ pub fn sign_key_registration(
     new_auth_scheme: AccountAuthScheme,
     label: Option<String>,
     scope: KeyScope,
-    nonce: u64,
+    bound_keys_digest: [u8; 32],
+    bound_events_digest: [u8; 32],
     genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> SignedKeyRegistration {
     let signer = PublicKey(*key.verifying_key());
+    let key_record = sybil_verifier::KeyRecord {
+        auth_scheme: new_auth_scheme.canonical_byte(),
+        pubkey_sec1: new_pubkey
+            .compressed_bytes()
+            .try_into()
+            .expect("compressed P-256 key is 33 bytes"),
+        capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+    };
     let msg = canonical_key_registration_bytes(
-        account_id,
-        new_auth_scheme,
-        &new_pubkey.compressed_bytes(),
-        &signer.compressed_bytes(),
-        nonce,
         genesis_hash,
+        account_id,
+        &key_record,
+        bound_keys_digest,
+        bound_events_digest,
     );
     let signature: Signature = key.sign(&msg);
     SignedKeyRegistration {
@@ -720,7 +753,8 @@ pub fn sign_key_registration(
         new_auth_scheme,
         label,
         scope,
-        nonce,
+        bound_keys_digest,
+        bound_events_digest,
         signer,
         signature,
     }
@@ -1035,9 +1069,19 @@ mod tests {
     fn test_sign_verify_key_revocation_roundtrip() {
         let key =
             <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
-        let target = vec![0x02u8; 33];
-        let signed =
-            sign_key_revocation(crate::account::AccountId(7), target, 3, GENESIS_HASH, &key);
+        let target = sybil_verifier::KeyRecord {
+            auth_scheme: 0,
+            pubkey_sec1: [0x02u8; 33],
+            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+        };
+        let signed = sign_key_revocation(
+            crate::account::AccountId(7),
+            target,
+            [3; 32],
+            [4; 32],
+            GENESIS_HASH,
+            &key,
+        );
         assert!(verify_signed_key_revocation(&signed, GENESIS_HASH).is_ok());
     }
 
@@ -1047,9 +1091,19 @@ mod tests {
         // another, so a captured revocation cannot replay across a redeploy.
         let key =
             <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(&mut crypto_rng());
-        let target = vec![0x02u8; 33];
-        let signed =
-            sign_key_revocation(crate::account::AccountId(7), target, 3, GENESIS_HASH, &key);
+        let target = sybil_verifier::KeyRecord {
+            auth_scheme: 0,
+            pubkey_sec1: [0x02u8; 33],
+            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+        };
+        let signed = sign_key_revocation(
+            crate::account::AccountId(7),
+            target,
+            [3; 32],
+            [4; 32],
+            GENESIS_HASH,
+            &key,
+        );
 
         assert!(matches!(
             verify_signed_key_revocation(&signed, OTHER_GENESIS_HASH),

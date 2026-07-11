@@ -18,6 +18,9 @@ pub struct BlockWitness {
     pub header: WitnessBlockHeader,
     /// Previous block header (`None` for genesis).
     pub previous_header: Option<WitnessBlockHeader>,
+    /// Chain-instance domain used by validity-critical signed key operations.
+    /// This is a private guest input covered by every key-op signature.
+    pub genesis_hash: [u8; 32],
 
     // -- Orders --
     /// Orders accepted into this batch (with account mapping).
@@ -246,7 +249,10 @@ pub enum KeyOpAuth {
 }
 
 mod pubkey_bytes {
-    use serde::{Deserialize as _, Deserializer, Serializer};
+    use std::fmt;
+
+    use serde::de::{SeqAccess, Visitor};
+    use serde::{Deserializer, Serializer};
 
     pub fn serialize<S>(bytes: &[u8; 33], serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -259,15 +265,57 @@ mod pubkey_bytes {
     where
         D: Deserializer<'de>,
     {
-        let bytes = Vec::<u8>::deserialize(deserializer)?;
-        bytes
-            .try_into()
-            .map_err(|bytes: Vec<u8>| serde::de::Error::invalid_length(bytes.len(), &"33 bytes"))
+        deserializer.deserialize_bytes(FixedBytesVisitor::<33>)
+    }
+
+    struct FixedBytesVisitor<const N: usize>;
+
+    impl<'de, const N: usize> Visitor<'de> for FixedBytesVisitor<N> {
+        type Value = [u8; N];
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "exactly {N} bytes")
+        }
+
+        fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            value
+                .try_into()
+                .map_err(|_| E::invalid_length(value.len(), &self))
+        }
+
+        fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            self.visit_bytes(&value)
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut out = [0u8; N];
+            for (index, byte) in out.iter_mut().enumerate() {
+                *byte = sequence
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(index, &self))?;
+            }
+            if sequence.next_element::<u8>()?.is_some() {
+                return Err(serde::de::Error::invalid_length(N + 1, &self));
+            }
+            Ok(out)
+        }
     }
 }
 
 mod signature_bytes {
-    use serde::{Deserialize as _, Deserializer, Serializer};
+    use std::fmt;
+
+    use serde::de::{SeqAccess, Visitor};
+    use serde::{Deserializer, Serializer};
 
     pub fn serialize<S>(bytes: &[u8; 64], serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -280,10 +328,49 @@ mod signature_bytes {
     where
         D: Deserializer<'de>,
     {
-        let bytes = Vec::<u8>::deserialize(deserializer)?;
-        bytes
-            .try_into()
-            .map_err(|bytes: Vec<u8>| serde::de::Error::invalid_length(bytes.len(), &"64 bytes"))
+        deserializer.deserialize_bytes(FixedBytesVisitor::<64>)
+    }
+
+    struct FixedBytesVisitor<const N: usize>;
+
+    impl<'de, const N: usize> Visitor<'de> for FixedBytesVisitor<N> {
+        type Value = [u8; N];
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "exactly {N} bytes")
+        }
+
+        fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            value
+                .try_into()
+                .map_err(|_| E::invalid_length(value.len(), &self))
+        }
+
+        fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            self.visit_bytes(&value)
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut out = [0u8; N];
+            for (index, byte) in out.iter_mut().enumerate() {
+                *byte = sequence
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(index, &self))?;
+            }
+            if sequence.next_element::<u8>()?.is_some() {
+                return Err(serde::de::Error::invalid_length(N + 1, &self));
+            }
+            Ok(out)
+        }
     }
 }
 

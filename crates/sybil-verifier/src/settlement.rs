@@ -656,6 +656,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -760,6 +761,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -812,6 +814,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -887,6 +890,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -962,6 +966,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -1024,6 +1029,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -1072,6 +1078,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -1132,6 +1139,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -1199,6 +1207,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -1291,6 +1300,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -1367,6 +1377,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -1454,6 +1465,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,
@@ -1543,6 +1555,7 @@ mod tests {
         let witness = BlockWitness {
             header: empty_header(),
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order,
                 account_id: 0,

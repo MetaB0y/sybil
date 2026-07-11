@@ -76,102 +76,200 @@ describe("canonicalProfileUpdateBytes", () => {
 describe("canonicalKeyRevocationBytes (SYB-231)", () => {
   const genesis = fromHex("ab".repeat(32));
   const target = fromHex("02".repeat(33)); // 33-byte compressed pubkey
+  const keysDigest = fromHex("11".repeat(32));
+  const eventsDigest = fromHex("22".repeat(32));
 
-  it("matches the Rust insta snapshot (key_revocation.snap)", () => {
-    // Verbatim from
-    // crates/sybil-signing/src/snapshots/sybil_signing__tests__key_revocation.snap
-    // Inputs: genesis=[0xab;32], account_id=7, target=[0x02;33], nonce=42.
+  it("matches the verifier-owned state-bound raw concatenation", () => {
     const expected =
+      toHex(new TextEncoder().encode("sybil/keyop/revoke/v1")) +
       "ab".repeat(32) +
       u64le(7n) +
-      "21000000" +
+      "00" +
       "02".repeat(33) +
-      u64le(42n);
-    const got = toHex(canonicalKeyRevocationBytes(7n, target, 42n, genesis));
-    expect(got).toBe(expected);
-  });
-
-  it("encodes genesis, account_id, Vec<u8> (len prefix + bytes), nonce", () => {
-    const got = toHex(canonicalKeyRevocationBytes(7n, target, 42n, genesis));
-    // 32-byte genesis, then account_id, then Vec<u8> len (33 = 0x21) + bytes.
-    const expected =
-      "ab".repeat(32) + u64le(7n) + "21000000" + toHex(target) + u64le(42n);
-    expect(got).toBe(expected);
-  });
-
-  it("is deterministic and covers genesis and the target bytes", () => {
-    const a = toHex(canonicalKeyRevocationBytes(7n, target, 42n, genesis));
-    const b = toHex(canonicalKeyRevocationBytes(7n, target, 42n, genesis));
-    expect(a).toBe(b);
-    const otherGenesis = fromHex("cd".repeat(32));
-    expect(a).not.toBe(
-      toHex(canonicalKeyRevocationBytes(7n, target, 42n, otherGenesis)),
+      "ffffffff" +
+      "11".repeat(32) +
+      "22".repeat(32);
+    const got = toHex(
+      canonicalKeyRevocationBytes(
+        7n,
+        target,
+        "raw_p256",
+        genesis,
+        keysDigest,
+        eventsDigest,
+      ),
     );
-    const other = fromHex("03" + "cd".repeat(32));
-    expect(a).not.toBe(toHex(canonicalKeyRevocationBytes(7n, other, 42n, genesis)));
+    expect(got).toBe(expected);
+  });
+
+  it("is deterministic and covers scheme, genesis, target, and both bindings", () => {
+    const args = [
+      7n,
+      target,
+      "raw_p256",
+      genesis,
+      keysDigest,
+      eventsDigest,
+    ] as const;
+    const a = toHex(canonicalKeyRevocationBytes(...args));
+    const b = toHex(canonicalKeyRevocationBytes(...args));
+    expect(a).toBe(b);
+    expect(a).not.toBe(
+      toHex(
+        canonicalKeyRevocationBytes(
+          7n,
+          target,
+          "webauthn",
+          genesis,
+          keysDigest,
+          eventsDigest,
+        ),
+      ),
+    );
+    expect(a).not.toBe(
+      toHex(
+        canonicalKeyRevocationBytes(
+          7n,
+          target,
+          "raw_p256",
+          fromHex("cd".repeat(32)),
+          keysDigest,
+          eventsDigest,
+        ),
+      ),
+    );
+    expect(a).not.toBe(
+      toHex(
+        canonicalKeyRevocationBytes(
+          7n,
+          target,
+          "raw_p256",
+          genesis,
+          fromHex("33".repeat(32)),
+          eventsDigest,
+        ),
+      ),
+    );
   });
 });
 
 describe("canonicalKeyRegistrationBytes (SYB-229)", () => {
   const genesis = fromHex("ab".repeat(32));
   const newKey = fromHex("02".repeat(33));
-  const signer = fromHex("03".repeat(33));
+  const keysDigest = fromHex("11".repeat(32));
+  const eventsDigest = fromHex("22".repeat(32));
 
-  it("matches the Rust insta snapshot (key_registration.snap)", () => {
-    // Verbatim from
-    // crates/sybil-signing/src/snapshots/sybil_signing__tests__key_registration.snap
-    // Inputs: genesis=[0xab;32], account_id=7, scheme=webauthn(1),
-    //         new_key=[0x02;33], signer=[0x03;33], nonce=42.
+  it("matches the verifier-owned state-bound raw concatenation", () => {
     const expected =
+      toHex(new TextEncoder().encode("sybil/keyop/register/v1")) +
       "ab".repeat(32) +
       "0700000000000000" +
       "01" +
-      "21000000" +
       "02".repeat(33) +
-      "21000000" +
-      "03".repeat(33) +
-      "2a00000000000000";
+      "ffffffff" +
+      "11".repeat(32) +
+      "22".repeat(32);
     const got = toHex(
-      canonicalKeyRegistrationBytes(7n, "webauthn", newKey, signer, 42n, genesis),
+      canonicalKeyRegistrationBytes(
+        7n,
+        "webauthn",
+        newKey,
+        genesis,
+        keysDigest,
+        eventsDigest,
+      ),
     );
     expect(got).toBe(expected);
   });
 
   it("encodes raw_p256 as scheme byte 0x00", () => {
     const got = toHex(
-      canonicalKeyRegistrationBytes(7n, "raw_p256", newKey, signer, 42n, genesis),
+      canonicalKeyRegistrationBytes(
+        7n,
+        "raw_p256",
+        newKey,
+        genesis,
+        keysDigest,
+        eventsDigest,
+      ),
     );
-    // 32-byte genesis, then account_id, then the scheme byte.
-    expect(got.slice(64, 64 + 16)).toBe(u64le(7n));
-    expect(got.slice(80, 82)).toBe("00");
+    const prefixBytes = new TextEncoder().encode(
+      "sybil/keyop/register/v1",
+    ).length;
+    const schemeOffset = (prefixBytes + 32 + 8) * 2;
+    expect(got.slice(schemeOffset, schemeOffset + 2)).toBe("00");
   });
 
-  it("covers every field (genesis, account, scheme, keys, nonce)", () => {
+  it("covers every field", () => {
     const base = toHex(
-      canonicalKeyRegistrationBytes(7n, "raw_p256", newKey, signer, 42n, genesis),
-    );
-    const otherGenesis = fromHex("cd".repeat(32));
-    expect(base).not.toBe(
-      toHex(canonicalKeyRegistrationBytes(7n, "raw_p256", newKey, signer, 42n, otherGenesis)),
-    );
-    expect(base).not.toBe(
-      toHex(canonicalKeyRegistrationBytes(8n, "raw_p256", newKey, signer, 42n, genesis)),
-    );
-    expect(base).not.toBe(
-      toHex(canonicalKeyRegistrationBytes(7n, "webauthn", newKey, signer, 42n, genesis)),
-    );
-    expect(base).not.toBe(
-      toHex(
-        canonicalKeyRegistrationBytes(7n, "raw_p256", fromHex("04".repeat(33)), signer, 42n, genesis),
+      canonicalKeyRegistrationBytes(
+        7n,
+        "raw_p256",
+        newKey,
+        genesis,
+        keysDigest,
+        eventsDigest,
       ),
     );
     expect(base).not.toBe(
       toHex(
-        canonicalKeyRegistrationBytes(7n, "raw_p256", newKey, fromHex("05".repeat(33)), 42n, genesis),
+        canonicalKeyRegistrationBytes(
+          7n,
+          "raw_p256",
+          newKey,
+          fromHex("cd".repeat(32)),
+          keysDigest,
+          eventsDigest,
+        ),
       ),
     );
     expect(base).not.toBe(
-      toHex(canonicalKeyRegistrationBytes(7n, "raw_p256", newKey, signer, 43n, genesis)),
+      toHex(
+        canonicalKeyRegistrationBytes(
+          8n,
+          "raw_p256",
+          newKey,
+          genesis,
+          keysDigest,
+          eventsDigest,
+        ),
+      ),
+    );
+    expect(base).not.toBe(
+      toHex(
+        canonicalKeyRegistrationBytes(
+          7n,
+          "webauthn",
+          newKey,
+          genesis,
+          keysDigest,
+          eventsDigest,
+        ),
+      ),
+    );
+    expect(base).not.toBe(
+      toHex(
+        canonicalKeyRegistrationBytes(
+          7n,
+          "raw_p256",
+          fromHex("04".repeat(33)),
+          genesis,
+          keysDigest,
+          eventsDigest,
+        ),
+      ),
+    );
+    expect(base).not.toBe(
+      toHex(
+        canonicalKeyRegistrationBytes(
+          7n,
+          "raw_p256",
+          newKey,
+          genesis,
+          fromHex("33".repeat(32)),
+          eventsDigest,
+        ),
+      ),
     );
   });
 });

@@ -140,6 +140,9 @@ pub enum SequencerError {
         nonce: u64,
         last_nonce: u64,
     },
+    /// A key operation was signed against account digests that are no longer current.
+    #[error("stale key-operation state binding for account {}", .account_id.0)]
+    KeyOpStateStale { account_id: AccountId },
     /// Order/cancel signatures are chain-instance scoped; no instance hash exists yet.
     #[error("genesis hash unavailable until the genesis block is committed")]
     GenesisHashUnavailable,

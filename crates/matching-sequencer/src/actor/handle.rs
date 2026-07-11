@@ -2385,10 +2385,23 @@ mod tests {
         let genesis_b = seq_b.genesis_hash().unwrap();
         assert_ne!(genesis_a, genesis_b);
 
+        let account = seq_b.accounts.get(aid_b).unwrap().clone();
+        let target_key = sybil_verifier::KeyRecord {
+            auth_scheme: AccountAuthScheme::RawP256.canonical_byte(),
+            pubkey_sec1: target_bytes.try_into().unwrap(),
+            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+        };
+
         let handle_b = SequencerHandle::spawn(seq_b);
         // Revocation signed under genesis A replayed against genesis-B store.
-        let signed =
-            crate::crypto::sign_key_revocation(aid_b, target_bytes, 1, genesis_a, &signing_key);
+        let signed = crate::crypto::sign_key_revocation(
+            aid_b,
+            target_key,
+            account.keys_digest,
+            account.events_digest,
+            genesis_a,
+            &signing_key,
+        );
         let err = handle_b
             .revoke_signing_key_signed(signed)
             .await
@@ -2743,13 +2756,15 @@ mod tests {
         let second = <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
             &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
         );
+        let binding = handle.get_account(account.id).await.unwrap().unwrap();
         let signed = crate::crypto::sign_key_registration(
             account.id,
             PublicKey(*second.verifying_key()),
             AccountAuthScheme::RawP256,
             Some("backup".to_string()),
             crate::crypto::KeyScope::Custom,
-            1,
+            binding.keys_digest,
+            binding.events_digest,
             genesis_hash,
             &primary,
         );
@@ -2803,13 +2818,15 @@ mod tests {
         let agent = <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
             &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
         );
+        let binding = handle.get_account(account.id).await.unwrap().unwrap();
         let signed_register = crate::crypto::sign_key_registration(
             account.id,
             PublicKey(*agent.verifying_key()),
             AccountAuthScheme::RawP256,
             Some("restore-agent".to_string()),
             crate::crypto::KeyScope::Agent,
-            1,
+            binding.keys_digest,
+            binding.events_digest,
             genesis_hash,
             &primary,
         );
@@ -2822,14 +2839,22 @@ mod tests {
         ));
         assert!(sybil_verifier::verify_full(&register_witness, false).valid);
 
-        let signed_revoke = crate::crypto::sign_key_revocation(
-            account.id,
-            primary
+        let binding = handle.get_account(account.id).await.unwrap().unwrap();
+        let primary_record = sybil_verifier::KeyRecord {
+            auth_scheme: AccountAuthScheme::RawP256.canonical_byte(),
+            pubkey_sec1: primary
                 .verifying_key()
                 .to_sec1_point(true)
                 .as_bytes()
-                .to_vec(),
-            2,
+                .try_into()
+                .unwrap(),
+            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+        };
+        let signed_revoke = crate::crypto::sign_key_revocation(
+            account.id,
+            primary_record,
+            binding.keys_digest,
+            binding.events_digest,
             genesis_hash,
             &agent,
         );
@@ -3464,15 +3489,20 @@ mod tests {
             .await
             .unwrap();
 
-        // First indicative tick fires at +750ms; the solve + cache-write
-        // round-trip needs a little extra. 1500ms gives generous slack
-        // on a CI box.
-        tokio::time::sleep(Duration::from_millis(1500)).await;
-
-        let snap = handle.get_indicative(m0).await.unwrap();
-        assert!(
-            snap.computed_at_ms > 0,
-            "indicative tick should have written a snapshot by now"
-        );
+        // First indicative tick fires at +750ms. Poll instead of assuming the
+        // solve and actor round-trip fit a fixed wall-clock sleep: the full
+        // workspace suite can heavily contend on the persistence tests.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let snap = handle.get_indicative(m0).await.unwrap();
+            if snap.computed_at_ms > 0 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "indicative tick should have written a snapshot by now"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 }

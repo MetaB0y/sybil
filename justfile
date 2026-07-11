@@ -117,6 +117,29 @@ openvm-commit output_dir="target/openvm/sybil":
         --config zk/openvm-guest/openvm.toml \
         --output-dir {{output_dir}}
 
+# Build and print the independent Form-L escape guest commitments. This is a
+# commitment-only operation: it does not run setup, keygen, or proving.
+openvm-escape-commit output_dir="target/openvm/sybil-escape":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+    remap_flags="--remap-path-prefix=/__SYBIL_WORKSPACE_ROOT__=/sybil-src --remap-path-prefix=/__SYBIL_CARGO_HOME__=/cargo --remap-path-prefix=/__SYBIL_RUSTUP_HOME__=/rustc"
+    PATH="{{justfile_directory()}}/scripts:$PATH" \
+      SYBIL_WORKSPACE_ROOT="$(pwd -P)" \
+      SYBIL_CARGO_HOME="$cargo_home" \
+      SYBIL_RUSTUP_HOME="$rustup_home" \
+      RUSTC_WRAPPER="openvm-rustc-wrapper.sh" \
+      RUSTFLAGS="$remap_flags${RUSTFLAGS:+ $RUSTFLAGS}" \
+      cargo openvm commit \
+        --manifest-path zk/openvm-escape-guest/Cargo.toml \
+        --config zk/openvm-escape-guest/openvm.toml \
+        --output-dir {{output_dir}}
+
+openvm-commit-all:
+    just openvm-commit target/openvm/sybil
+    just openvm-escape-commit target/openvm/sybil-escape
+
 # Local from-source guest rebuild gate (SYB-233, CI-off era): regenerate the
 # guest commitment into a scratch dir, require byte-equality with the committed
 # commit.json, then run the fingerprint staleness check. Run before landing any
@@ -125,32 +148,69 @@ openvm-commit output_dir="target/openvm/sybil":
 zk-rebuild-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    release_dir="zk/openvm-guest/openvm/release"
-    committed="$release_dir/sybil-openvm-guest.commit.json"
-    # cargo openvm commit ALWAYS rewrites the canonical release files in
-    # addition to --output-dir, so snapshot the committed records first and
-    # restore them after — the gate must compare against the pre-rebuild
-    # state and never mutate the tree.
-    snapshot="$(mktemp -t zk-rebuild-check-commit.XXXXXX.json)"
-    baseline_snapshot="$(mktemp -t zk-rebuild-check-baseline.XXXXXX.json)"
-    cp "$committed" "$snapshot"
-    cp "$release_dir/sybil-openvm-guest.baseline.json" "$baseline_snapshot"
-    just openvm-commit target/openvm/zk-rebuild-check
-    cp "$snapshot" "$committed"
-    cp "$baseline_snapshot" "$release_dir/sybil-openvm-guest.baseline.json"
-    regenerated="target/openvm/zk-rebuild-check/sybil-openvm-guest.commit.json"
-    for field in app_exe_commit app_vm_commit; do
-        want="$(jq -r ".$field" "$snapshot")"
-        got="$(jq -r ".$field" "$regenerated")"
-        if [[ "$want" != "$got" ]]; then
-            echo "FAIL: $field mismatch — committed $want, regenerated $got" >&2
-            echo "      (source changed without a repin, or the build stopped reproducing)" >&2
-            exit 1
-        fi
-    done
-    rm -f "$snapshot" "$baseline_snapshot"
+    export TMPDIR="${TMPDIR:-/home/anonymous/.cache/tmp}"
+    check_guest() {
+        local label="$1" recipe="$2" release_dir="$3" package="$4" output_dir="$5"
+        local committed="$release_dir/$package.commit.json"
+        local baseline="$release_dir/$package.baseline.json"
+        local snapshot baseline_snapshot regenerated field want got
+        snapshot="$(mktemp "$TMPDIR/zk-rebuild-check-commit.XXXXXX.json")"
+        baseline_snapshot="$(mktemp "$TMPDIR/zk-rebuild-check-baseline.XXXXXX.json")"
+        cp "$committed" "$snapshot"
+        cp "$baseline" "$baseline_snapshot"
+        just "$recipe" "$output_dir"
+        cp "$snapshot" "$committed"
+        cp "$baseline_snapshot" "$baseline"
+        regenerated="$output_dir/$package.commit.json"
+        for field in app_exe_commit app_vm_commit; do
+            want="$(jq -r ".$field" "$snapshot")"
+            got="$(jq -r ".$field" "$regenerated")"
+            if [[ "$want" != "$got" ]]; then
+                echo "FAIL: $label $field mismatch — committed $want, regenerated $got" >&2
+                echo "      (source changed without a repin, or the build stopped reproducing)" >&2
+                exit 1
+            fi
+        done
+        rm -f "$snapshot" "$baseline_snapshot"
+        echo "OK: $label from-source rebuild reproduces committed commitments"
+    }
+    check_guest \
+      "main guest" \
+      "openvm-commit" \
+      "zk/openvm-guest/openvm/release" \
+      "sybil-openvm-guest" \
+      "target/openvm/zk-rebuild-check-main"
+    check_guest \
+      "escape guest" \
+      "openvm-escape-commit" \
+      "zk/openvm-escape-guest/openvm/release" \
+      "sybil-openvm-escape-guest" \
+      "target/openvm/zk-rebuild-check-escape"
     scripts/zk-guest-fingerprint.sh --check
-    echo "OK: from-source rebuild reproduces the committed commitment; fingerprint fresh"
+    echo "OK: both from-source rebuilds reproduce committed commitments; fingerprints fresh"
+
+# Build a persisted keyed/traded state, export selective qMDB proofs, and run
+# the Form-L guest. No setup, keygen, or proving is performed.
+zk-escape-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export TMPDIR="${TMPDIR:-/home/anonymous/.cache/tmp}"
+    workdir="$TMPDIR/sybil-escape-smoke-$PPID-$$"
+    store="$workdir/state.redb"
+    guest_input="$workdir/guest-input.msgpack"
+    openvm_input="$workdir/openvm-input.json"
+    mkdir -p "$workdir"
+    cargo run -p sybil-prover --features sequencer-store -- witgen escape-smoke \
+      --store "$store" --guest-input "$guest_input"
+    cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-escape-input \
+      --guest-input "$guest_input" --openvm-input "$openvm_input"
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" cargo openvm run \
+      --manifest-path zk/openvm-escape-guest/Cargo.toml \
+      --config zk/openvm-escape-guest/openvm.toml \
+      --output-dir target/openvm/sybil-escape \
+      --input "$openvm_input"
+    echo "escape_smoke_dir=$workdir"
+    echo "zk_escape_smoke=ok"
 
 # Convert a prepared guest input artifact into OpenVM CLI input JSON
 openvm-input guest_input="target/sybil-guest-input.msgpack" openvm_input="target/sybil-openvm-input.json":

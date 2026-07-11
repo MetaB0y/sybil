@@ -223,8 +223,10 @@ pub struct SignedRegisterKeyRequest {
     /// WebAuthn assertion envelope. Required when `signer_auth_scheme` is `webauthn`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webauthn_assertion: Option<WebAuthnAssertion>,
-    /// Per-account replay nonce (strictly increasing).
-    pub nonce: u64,
+    /// Hex account key-set digest the authorization is state-bound to.
+    pub bound_keys_digest_hex: String,
+    /// Hex account event-chain digest the authorization is state-bound to.
+    pub bound_events_digest_hex: String,
 }
 
 /// Scope tag for a registered signing key (SYB-60).
@@ -282,7 +284,10 @@ pub struct RevokeKeyRequest {
     pub signature_hex: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webauthn_assertion: Option<WebAuthnAssertion>,
-    pub nonce: u64,
+    /// Hex account key-set digest the authorization is state-bound to.
+    pub bound_keys_digest_hex: String,
+    /// Hex account event-chain digest the authorization is state-bound to.
+    pub bound_events_digest_hex: String,
 }
 
 /// Signed request to create a read-scoped bearer API key (SYB-60).

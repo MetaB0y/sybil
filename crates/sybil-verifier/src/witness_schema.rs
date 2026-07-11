@@ -25,7 +25,7 @@ use crate::types::{
     WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 8;
+pub const WITNESS_FORMAT_VERSION: u8 = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -37,7 +37,7 @@ pub enum WitnessDecodeError {
     },
     #[error("trailing bytes after canonical witness at offset {offset}: {trailing} bytes")]
     TrailingBytes { offset: usize, trailing: usize },
-    #[error("unknown witness format version {0}; only v8 is supported")]
+    #[error("unknown witness format version {0}; only v9 is supported")]
     UnknownVersion(u8),
     #[error("invalid tag for {field} at offset {offset}: {tag}")]
     InvalidTag {
@@ -80,6 +80,7 @@ pub fn decode_canonical_witness_bytes(bytes: &[u8]) -> Result<BlockWitness, Witn
             })
         }
     };
+    let genesis_hash = reader.read_hash32()?;
 
     let orders = reader.read_vec("orders", |reader| reader.read_witness_order())?;
     let rejections = reader.read_vec("rejections", |reader| reader.read_witness_rejection())?;
@@ -112,6 +113,7 @@ pub fn decode_canonical_witness_bytes(bytes: &[u8]) -> Result<BlockWitness, Witn
     let witness = BlockWitness {
         header,
         previous_header,
+        genesis_hash,
         orders,
         rejections,
         system_events,
@@ -985,6 +987,7 @@ pub fn canonical_witness_bytes(witness: &BlockWitness) -> Vec<u8> {
         }
         None => out.push(0),
     }
+    out.extend_from_slice(&witness.genesis_hash);
 
     let mut orders: Vec<_> = witness.orders.iter().collect();
     orders.sort_by_key(|order| order.order.id);
@@ -1188,6 +1191,7 @@ mod tests {
                 timestamp_ms: 1000,
             },
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -1209,7 +1213,7 @@ mod tests {
 
         let bytes = canonical_witness_bytes(&witness);
         assert_eq!(bytes[0], WITNESS_FORMAT_VERSION);
-        assert_eq!(bytes.len(), 1599);
+        assert_eq!(bytes.len(), 1631);
     }
 
     #[test]
@@ -1225,6 +1229,7 @@ mod tests {
                 timestamp_ms: 1000,
             },
             previous_header: None,
+            genesis_hash: [0u8; 32],
             orders: vec![],
             rejections: vec![],
             system_events: vec![],
@@ -1295,7 +1300,7 @@ mod tests {
         ));
 
         let mut bad_domain = bytes.clone();
-        let order_domain_offset = 1 + 120 + 1 + 120 + 8;
+        let order_domain_offset = 1 + 120 + 1 + 120 + 32 + 8;
         bad_domain[order_domain_offset] ^= 0xff;
         assert!(matches!(
             decode_canonical_witness_bytes(&bad_domain),
@@ -1402,6 +1407,7 @@ mod tests {
         BlockWitness {
             header,
             previous_header: Some(previous_header),
+            genesis_hash: [0u8; 32],
             orders: vec![WitnessOrder {
                 order: accepted_order.clone(),
                 account_id: 1001,
