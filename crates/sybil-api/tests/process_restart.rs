@@ -38,6 +38,66 @@ fn genesis_hash_from_health(health: &Value) -> [u8; 32] {
     bytes.try_into().expect("genesis_hash is 32 bytes")
 }
 
+fn admin_feed(feeds: &Value) -> &Value {
+    feeds
+        .as_array()
+        .expect("feed list is an array")
+        .iter()
+        .find(|feed| feed["name"].as_str() == Some("admin"))
+        .expect("admin feed is installed at startup")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn admin_feed_key_is_created_once_and_reused_after_process_restart() {
+    let root = ProcessTestRoot::new("admin-feed-key-restart");
+    assert!(
+        !root.admin_key_path().exists(),
+        "test starts without an admin feed key"
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+
+    let writer = spawn_api(root.data_dir(), root.admin_key_path(), 60_000).await;
+    wait_for_health(&client, &writer.base_url).await;
+
+    let first_key_hex = std::fs::read_to_string(root.admin_key_path())
+        .expect("first boot creates the configured admin feed key");
+    let first_key_bytes = hex::decode(first_key_hex.trim()).expect("admin key file contains hex");
+    let signing_key = SigningKey::from_slice(&first_key_bytes)
+        .expect("admin key file contains a valid P256 scalar");
+    let expected_pubkey_hex =
+        hex::encode(signing_key.verifying_key().to_sec1_point(true).as_bytes());
+    let first_feeds = get_json(&client, &writer.base_url, "/v1/feeds").await;
+    let first_admin = admin_feed(&first_feeds);
+    assert_eq!(
+        first_admin["pubkey_hex"].as_str(),
+        Some(expected_pubkey_hex.as_str()),
+        "registered admin feed uses the persisted key"
+    );
+    let first_feed_id = first_admin["feed_id"].as_u64();
+
+    let reader = restart_api(writer, &root, 60_000).await;
+    wait_for_health(&client, &reader.base_url).await;
+
+    let restarted_key_hex = std::fs::read_to_string(root.admin_key_path())
+        .expect("configured admin feed key remains readable after restart");
+    assert_eq!(
+        restarted_key_hex, first_key_hex,
+        "restart must reuse the first-boot key instead of rotating it"
+    );
+    let restarted_feeds = get_json(&client, &reader.base_url, "/v1/feeds").await;
+    let restarted_admin = admin_feed(&restarted_feeds);
+    assert_eq!(restarted_admin["feed_id"].as_u64(), first_feed_id);
+    assert_eq!(
+        restarted_admin["pubkey_hex"].as_str(),
+        Some(expected_pubkey_hex.as_str())
+    );
+
+    reader.kill().await;
+}
+
 fn signed_buy_yes_payload(
     market_id: u32,
     limit_price_nanos: u64,

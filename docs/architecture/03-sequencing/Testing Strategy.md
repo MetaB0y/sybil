@@ -111,7 +111,8 @@ slower to diagnose. Two deliberately small Compose gates cover packaging and
 the highest-value deployment contract:
 
 - `just compose-smoke` parses the production Compose profiles and checks the
-  prover-worker boundary without starting containers.
+  prover-worker boundary plus durable API/admin-feed-key wiring without
+  starting containers.
 - `just itest-compose` uses an isolated project and throwaway volumes, starts
   only `sybil-api`, runs the shared `sybil-client` `seed_book` fixture over real
   HTTP, and asserts exact statuses, fills, clearing prices, reservations, and

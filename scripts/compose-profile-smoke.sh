@@ -129,6 +129,53 @@ expected_retention_env=$(printf '%s\n' \
     || fail "production compose does not pin the seven-day history retention policy"
 pass "production compose pins seven-day block/DA, raw-price, and candle retention"
 
+durability_contract=$(
+    compose config | python3 -c '
+import re
+import sys
+
+keys = (
+    "SYBIL_DATA_DIR",
+    "SYBIL_MARKET_REF_DATA_PATH",
+    "SYBIL_ADMIN_FEED_KEY_PATH",
+)
+environment = {}
+service_lines = []
+in_api = False
+for line in sys.stdin:
+    if line.rstrip() == "  sybil-api:":
+        in_api = True
+        continue
+    if in_api and re.match(r"^  [^ ]", line):
+        break
+    if in_api:
+        service_lines.append(line)
+        match = re.match(r"^      ([A-Z0-9_]+): (.*)$", line.rstrip())
+        if match:
+            environment[match.group(1)] = match.group(2).strip("\"\047")
+for key in keys:
+    print(f"{key}={environment.get(key)}")
+service = "".join(service_lines)
+has_data_volume = (
+    "source: sybil-data" in service and "target: /data" in service
+) or re.search(r"^\s*-\s+sybil-data:/data(?::|$)", service, re.MULTILINE)
+data_volume = (
+    "sybil-data"
+    if has_data_volume
+    else None
+)
+print(f"SYBIL_DATA_VOLUME={data_volume}")
+'
+)
+expected_durability_contract=$(printf '%s\n' \
+    'SYBIL_DATA_DIR=/data' \
+    'SYBIL_MARKET_REF_DATA_PATH=/data/market_ref_data.json' \
+    'SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key' \
+    'SYBIL_DATA_VOLUME=sybil-data')
+[[ "$durability_contract" == "$expected_durability_contract" ]] \
+    || fail "production compose does not persist API state, mirror metadata, and the admin feed key in sybil-data"
+pass "production compose persists the admin feed key and API data in sybil-data"
+
 local_webauthn=$(
     unset SYBIL_WEBAUTHN_RP_ID SYBIL_WEBAUTHN_ORIGIN
     # Intentionally allow COMPOSE_CMD to contain a command plus arguments.

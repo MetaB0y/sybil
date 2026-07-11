@@ -26,6 +26,13 @@ flowchart LR
 
 The external signer may fetch arbitrary networks or use human/LLM review. None of that logic enters validity. The core sees only the signed result and the installed feed/template policy.
 
+In the production Compose profile, the admin feed's signing scalar is generated
+once at `/data/admin-feed.key` inside the persistent `sybil-data` volume and
+reloaded on restart. This keeps the installed `admin_immediate` feed identity
+stable across process/container replacement. Deleting that volume deliberately
+rotates the admin identity together with the chain state; production preflight
+rejects an unset key path.
+
 ## Implemented lifecycle
 
 ```mermaid

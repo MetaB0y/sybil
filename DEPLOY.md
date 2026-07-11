@@ -45,6 +45,13 @@ CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 `SYBIL_CORS_ORIGINS` may be set to a comma-separated browser-origin allowlist;
 empty/unset keeps CORS same-origin only.
 
+The admin resolution key is not supplied through `.env`. The production
+overlay pins `SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key`; `sybil-api`
+creates it on the first boot of the persistent `sybil-data` volume and reuses
+it on subsequent boots. A normal container restart therefore does not rotate
+the admin feed. `just deploy-reset-state CONFIRM` deletes `sybil-data`, so it
+also intentionally discards that key and creates a new chain/admin identity.
+
 `SYBIL_WEBAUTHN_RP_ID` is the web-app hostname only; `SYBIL_WEBAUTHN_ORIGIN` is
 the exact browser origin including `https://`. Both must match the app hostname
 baked into the web image via `NEXT_PUBLIC_WEBAUTHN_RP_ID`; changing them
@@ -82,8 +89,8 @@ its environment and exits with a clear error if it is missing.
 default `local`). `docker-compose.prod.yml` sets it to `prod`, which arms a
 startup preflight: the server refuses to boot if a dev-only knob is wired in
 (`SYBIL_DEV_MODE=true`, unset `SYBIL_SERVICE_TOKEN`, unset `SYBIL_DATA_DIR`, or
-`SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0`). Every profile logs a `deployment
-profile preflight` block naming knobs that diverge from the prod baseline.
+unset `SYBIL_ADMIN_FEED_KEY_PATH`). Every profile logs a `deployment profile
+preflight` block naming knobs that diverge from the prod baseline.
 
 Override deliberately (never steady state) with `SYBIL_ALLOW_DEV_KNOBS=1`.
 The checked-in production overlay sets the profile to `prod`; changing a shell
