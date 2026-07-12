@@ -23,8 +23,15 @@ import {
   type OrderSide,
   type SubmitTimeInForce,
 } from "@/lib/account/orders";
+import {
+  completeSetReason,
+  findCompleteSetBlockers,
+} from "@/lib/account/complete-set";
 import { humanizeOrderError } from "@/lib/account/order-errors";
-import type { AccountOrder } from "@/lib/account/use-account-orders";
+import {
+  useAccountOrders,
+  type AccountOrder,
+} from "@/lib/account/use-account-orders";
 import {
   formatShareUnits,
   notionalNanosCeil,
@@ -38,7 +45,11 @@ import {
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import { formatBatchSeconds, formatDollars } from "@/lib/format/nanos";
-import type { EventOutcome } from "@/lib/market-detail/use-event-group";
+import {
+  useEventGroup,
+  type EventOutcome,
+} from "@/lib/market-detail/use-event-group";
+import { useGroupMarkets } from "@/lib/markets/use-market-groups";
 import { useBatchCountdown } from "./use-batch-countdown";
 
 type Direction = "buy" | "sell";
@@ -75,6 +86,9 @@ export function BuyBox({
   const { availableNanos, isPending: balancePending } = useAvailableBalance(
     session?.accountId ?? null,
   );
+  const { data: openOrders } = useAccountOrders(session?.accountId ?? null);
+  const groupMarkets = useGroupMarkets(outcome.marketId);
+  const { group: displayGroup } = useEventGroup(outcome.marketId);
 
   // A never-traded market has no price yet (absent from /v1/markets/prices).
   // We still need a numeric seed for the limit slider, but we must NOT present
@@ -256,6 +270,28 @@ export function BuyBox({
     dir === "sell" &&
     positionsLoaded &&
     qtyUnits > BigInt(heldUnits);
+  const orderSide = orderSideFor(dir, outcomeSide);
+  const completeSetBlockers = connected
+    ? findCompleteSetBlockers({
+        groupMarkets,
+        restingOrders: openOrders ?? [],
+        marketId: outcome.marketId,
+        side: orderSide,
+      })
+    : null;
+  const completeSetBlocked =
+    completeSetBlockers != null && completeSetBlockers.length > 0;
+  const completeSetReasonText = completeSetBlocked
+    ? completeSetReason(
+        completeSetBlockers,
+        orderSide,
+        outcome.marketId,
+        (marketId) =>
+          displayGroup?.outcomes.find((item) => item.marketId === marketId)
+            ?.shortLabel ?? null,
+        "order",
+      )
+    : null;
   const ctaState = tradeCtaState({
     connected,
     submitting,
@@ -267,7 +303,8 @@ export function BuyBox({
     insufficientBuy,
     insufficientSell,
   });
-  const ctaOff = ctaState !== "connect" && ctaState !== "ready";
+  const ctaOff =
+    (ctaState !== "connect" && ctaState !== "ready") || completeSetBlocked;
 
   const ctaLabel = (() => {
     if (ctaState === "connect") return "Connect to trade";
@@ -278,6 +315,7 @@ export function BuyBox({
     if (ctaState === "positions_unavailable") return "Positions unavailable";
     if (ctaState === "insufficient_buy") return "Not enough funds";
     if (ctaState === "insufficient_sell") return "Not enough shares";
+    if (completeSetBlocked) return "Cancel your open order first";
     const sideWord = requireConfirmation
       ? confirming
         ? dir === "buy"
@@ -305,6 +343,7 @@ export function BuyBox({
     // above truthfully reports that balance/positions are unavailable.
     if (dir === "buy" && availableNanos == null) return;
     if (dir === "sell" && !positionsLoaded) return;
+    if (completeSetBlocked) return;
     setSubmitError(null);
     setAccepted(null);
 
@@ -1071,6 +1110,21 @@ export function BuyBox({
       >
         {ctaLabel}
       </button>
+
+      {completeSetReasonText && !submitError && (
+        <div
+          role="status"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            lineHeight: "16px",
+            color: "var(--fg-3)",
+            textAlign: "center",
+          }}
+        >
+          {completeSetReasonText}
+        </div>
+      )}
 
       {submitError && (
         <div

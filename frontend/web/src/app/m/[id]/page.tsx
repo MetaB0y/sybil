@@ -8,6 +8,7 @@ import {
   RANGE_MS,
   type ChartRange,
 } from "@/components/chart-range-bar";
+import { EventActivity } from "@/components/event-activity";
 import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
 import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
@@ -122,6 +123,7 @@ export default function MarketDetailPage({
                 <ChartSection marketId={marketId} />
                 <EventHoldings marketId={marketId} />
                 <DescriptionBlock market={market} />
+                <EventActivity marketId={marketId} />
               </div>
 
               <MarketRail marketId={marketId} />
