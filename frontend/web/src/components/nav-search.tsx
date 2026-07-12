@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
+import { X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -13,7 +14,7 @@ import {
 import { useMarketsIndex, type IndexMarket } from "@/lib/markets/use-markets";
 import { buildIndexCards } from "@/lib/markets/build-index-cards";
 import {
-  selectIndexCards,
+  searchResultCards,
   type CardItem,
 } from "@/lib/markets/select-index-cards";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
@@ -23,8 +24,6 @@ import { MarketThumb } from "./market-thumb";
 
 /** Rows rendered in the dropdown before the "see all" footer. */
 const MAX_RESULTS = 8;
-/** Trader counts don't matter for the volume-sorted preview. */
-const EMPTY_TRADERS: Map<string, number> = new Map();
 
 /**
  * Global search. Typing opens a dropdown preview of matching events/markets —
@@ -69,16 +68,7 @@ export function NavSearch() {
     [bundle],
   );
 
-  const results = useMemo(() => {
-    if (!q.trim()) return [] as CardItem[];
-    return selectIndexCards(items, {
-      query: q,
-      sort: "volume",
-      category: null,
-      showClosed: false,
-      eventTraders: EMPTY_TRADERS,
-    });
-  }, [items, q]);
+  const results = useMemo(() => searchResultCards(items, q), [items, q]);
   const top = results.slice(0, MAX_RESULTS);
   const showDropdown = open && q.trim().length > 0;
   const hasSearchData = dataState === "ready" || dataState === "stale";
@@ -118,6 +108,20 @@ export function NavSearch() {
     },
     [router, close],
   );
+
+  const clearSearch = useCallback(() => {
+    setQ("");
+    close();
+    if (urlQ) {
+      // Clearing the query must not silently discard the page's category,
+      // closed-market, or sort choices.
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("q");
+      const query = params.toString();
+      router.push(query ? `/?${query}` : "/", { scroll: false });
+    }
+    inputRef.current?.focus();
+  }, [close, urlQ, searchParams, router]);
 
   const onChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     setQ(e.target.value);
@@ -177,9 +181,6 @@ export function NavSearch() {
   return (
     <div ref={shellRef} style={{ position: "relative" }}>
       <div className="nav-search-shell" style={searchShellStyle}>
-        <span aria-hidden className="text-mono" style={searchSlashStyle}>
-          /
-        </span>
         <input
           ref={inputRef}
           value={q}
@@ -196,10 +197,32 @@ export function NavSearch() {
           aria-autocomplete="list"
           style={searchInputStyle}
         />
+        {q && (
+          <button
+            type="button"
+            aria-label="Clear search"
+            title="Clear search"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={clearSearch}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.color = "var(--fg-1)";
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.color = "var(--fg-4)";
+            }}
+            style={clearButtonStyle}
+          >
+            <X size={14} aria-hidden />
+          </button>
+        )}
       </div>
 
       {showDropdown && (
-        <div className="nav-search-dropdown" style={dropdownStyle}>
+        <div
+          className="nav-search-dropdown"
+          style={dropdownStyle}
+          onMouseLeave={() => setHighlight(-1)}
+        >
           {dataState === "loading" || dataState === "unavailable" ? (
             <NavSearchDataNotice
               state={dataState}
@@ -239,6 +262,15 @@ export function NavSearch() {
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => goToGrid(q)}
+                    onMouseEnter={(event) => {
+                      setHighlight(-1);
+                      event.currentTarget.style.background = "var(--surface-2)";
+                      event.currentTarget.style.color = "var(--fg-1)";
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.background = "transparent";
+                      event.currentTarget.style.color = "var(--fg-3)";
+                    }}
                     style={footerStyle}
                   >
                     <span>
@@ -333,7 +365,10 @@ function ResultRow({
   onPick: () => void;
   onHover: () => void;
 }) {
-  const name = item.kind === "binary" ? item.market.name : item.name;
+  const isBinary = item.kind === "binary";
+  const name = isBinary ? outcomeShortLabel(item.market) : item.name;
+  const eventTitle = isBinary ? item.market.event_title?.trim() : null;
+  const context = eventTitle && eventTitle !== name ? eventTitle : null;
   const thumb = thumbProps(item);
   const vol =
     item.volumeNanos > 0n ? formatCompactDollars(item.volumeNanos) : "—";
@@ -371,19 +406,22 @@ function ResultRow({
         size={28}
       />
       <span style={rowNameStyle}>
-        {item.primaryCategory && (
-          <span
-            aria-hidden
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: getCategoryColor(item.primaryCategory),
-              flexShrink: 0,
-            }}
-          />
-        )}
-        <span style={rowTitleStyle}>{name}</span>
+        <span style={rowTitleLineStyle}>
+          {item.primaryCategory && (
+            <span
+              aria-hidden
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: getCategoryColor(item.primaryCategory),
+                flexShrink: 0,
+              }}
+            />
+          )}
+          <span style={rowTitleStyle}>{name}</span>
+        </span>
+        {context && <span style={rowContextStyle}>{context}</span>}
       </span>
       <span className="text-mono tabular" style={rowMetaStyle}>
         <span style={{ color: "var(--fg-2)" }}>{detail}</span>
@@ -430,6 +468,20 @@ function thumbProps(item: CardItem): {
   };
 }
 
+function outcomeShortLabel(market: IndexMarket): string {
+  const groupItemTitle = market.group_item_title?.trim();
+  if (groupItemTitle) return groupItemTitle;
+  const eventTitle = market.event_title?.trim();
+  if (eventTitle && market.name.startsWith(eventTitle)) {
+    const rest = market.name
+      .slice(eventTitle.length)
+      .replace(/^[\s:]+/, "")
+      .trim();
+    if (rest) return rest;
+  }
+  return market.name;
+}
+
 function resultKey(item: CardItem): string {
   return item.kind === "binary"
     ? `m${item.market.market_id}`
@@ -437,13 +489,6 @@ function resultKey(item: CardItem): string {
 }
 
 const searchShellStyle: React.CSSProperties = {};
-
-const searchSlashStyle: React.CSSProperties = {
-  color: "var(--fg-4)",
-  fontSize: "var(--fs-12)",
-  letterSpacing: "var(--track-wide)",
-  marginRight: "var(--space-2)",
-};
 
 const searchInputStyle: React.CSSProperties = {
   flex: 1,
@@ -454,6 +499,24 @@ const searchInputStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "var(--fs-12)",
   padding: 0,
+  minWidth: 0,
+};
+
+const clearButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+  width: 18,
+  height: 18,
+  marginLeft: 4,
+  padding: 0,
+  border: 0,
+  borderRadius: "var(--radius-sm)",
+  background: "transparent",
+  color: "var(--fg-4)",
+  cursor: "pointer",
+  transition: "color var(--dur-fast) var(--ease-standard)",
 };
 
 const dropdownStyle: React.CSSProperties = {};
@@ -475,8 +538,27 @@ const rowStyle: React.CSSProperties = {
 
 const rowNameStyle: React.CSSProperties = {
   display: "flex",
+  flexDirection: "column",
+  justifyContent: "center",
+  gap: 1,
+  minWidth: 0,
+};
+
+const rowTitleLineStyle: React.CSSProperties = {
+  display: "flex",
   alignItems: "center",
   gap: "var(--space-2)",
+  minWidth: 0,
+};
+
+const rowContextStyle: React.CSSProperties = {
+  fontFamily: "var(--font-sans)",
+  fontSize: "11px",
+  lineHeight: 1.3,
+  color: "var(--fg-4)",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
   minWidth: 0,
 };
 
@@ -505,6 +587,8 @@ const emptyStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "var(--fs-12)",
   color: "var(--fg-3)",
+  transition:
+    "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
 };
 
 const dataNoticeStyle: React.CSSProperties = {

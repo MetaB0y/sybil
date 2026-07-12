@@ -363,8 +363,9 @@ function FeaturedOutcome({
         <span
           style={{
             fontFamily: "var(--font-sans)",
-            fontSize: "var(--fs-13)",
-            color: "var(--fg-2)",
+            fontSize: "var(--fs-16)",
+            fontWeight: 600,
+            color: "var(--fg-1)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",

@@ -271,7 +271,7 @@ function TickerCell({
         {formatPp(ppChange)}
       </span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
-        {formatAge(Math.max(0, now - ts))} ago
+        {formatAge(Math.max(60_000, now - ts))} ago
       </span>
     </Link>
   );

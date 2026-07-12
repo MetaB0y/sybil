@@ -45,6 +45,8 @@ export function BinaryCard({ market, price }: Props) {
   // Prices are odds → render as % (number is unchanged; see formatPercentPrecise).
   const yesCents = price ? formatPercentPrecise(price.yes) : "—";
   const noCents = price ? formatPercentPrecise(price.no) : "—";
+  const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
+  const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
 
   return (
     <Link
@@ -87,6 +89,7 @@ export function BinaryCard({ market, price }: Props) {
         delta24Cents={delta24Cents}
         points={points}
         tone={oddsColor(!!price)}
+        vol={vol}
       />
       <SideList
         market={market}
@@ -208,11 +211,13 @@ function FeaturedPriceRow({
   delta24Cents,
   points,
   tone,
+  vol,
 }: {
   cents: string;
   delta24Cents: number | null;
   points: import("@/lib/markets/use-card-history").PricePoint[];
   tone: string;
+  vol: string;
 }) {
   return (
     <div
@@ -227,12 +232,23 @@ function FeaturedPriceRow({
         border: "1px solid var(--border-1)",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+          minWidth: 0,
+        }}
+      >
         <span
           style={{
             fontFamily: "var(--font-sans)",
-            fontSize: "var(--fs-13)",
-            color: "var(--fg-2)",
+            fontSize: "var(--fs-16)",
+            fontWeight: 600,
+            color: "var(--fg-1)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           Yes
@@ -267,7 +283,29 @@ function FeaturedPriceRow({
           </span>
         </div>
       </div>
-      <Sparkline points={points} tone="yes" />
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-end",
+          gap: 4,
+        }}
+      >
+        <Sparkline points={points} />
+        <span
+          className="tabular"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "10px",
+            textTransform: "uppercase",
+            letterSpacing: "var(--track-wide)",
+            color: "var(--fg-3)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {`vol ${vol}`}
+        </span>
+      </div>
     </div>
   );
 }

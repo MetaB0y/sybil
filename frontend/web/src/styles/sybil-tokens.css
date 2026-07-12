@@ -136,6 +136,7 @@
   --dur-fast:       120ms;   /* @kind other */
   --dur-base:       200ms;   /* @kind other */
   --dur-slow:       320ms;   /* @kind other */
+  --dur-swap:       460ms;   /* market-detail focus/cross-fade @kind other */
   --dur-outcome-swap: 1500ms; /* deliberate slow blur when switching outcomes: rail picker + market-detail header @kind other */
 
   /* ── Backdrop ────────────────────────────────────────────────────────── */
@@ -442,6 +443,16 @@ hr {
     from { opacity: 1; filter: blur(0); }
     to   { opacity: 1; filter: blur(0); }
   }
+}
+
+@keyframes sybil-rot-in {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sybil-rot-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-100%); }
 }
 
 /* Rail mode swap (Lite ↔ Pro) — a plain opacity fade so the panel body eases in

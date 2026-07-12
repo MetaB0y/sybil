@@ -16,16 +16,16 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const CATEGORIES = [
   "All",
+  "AI",
+  "Finance",
   "Politics",
   "Geopolitics",
   "Elections",
-  "AI",
   "Tech",
   "Economy",
   "Culture",
   "Science",
   "World",
-  "Finance",
   "Business",
   "Weather",
   "Mentions",
@@ -72,6 +72,12 @@ export function CategoryTabs() {
             type="button"
             aria-pressed={isActive}
             onClick={() => select(cat)}
+            onMouseEnter={(event) => {
+              if (!isActive) event.currentTarget.style.color = "var(--fg-2)";
+            }}
+            onMouseLeave={(event) => {
+              if (!isActive) event.currentTarget.style.color = "var(--fg-3)";
+            }}
             style={{
               position: "relative",
               flexShrink: 0,
@@ -83,6 +89,7 @@ export function CategoryTabs() {
               fontWeight: 500,
               color: isActive ? "var(--fg-1)" : "var(--fg-3)",
               cursor: "pointer",
+              transition: "color var(--dur-fast) var(--ease-standard)",
             }}
           >
             {cat}

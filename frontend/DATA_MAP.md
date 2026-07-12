@@ -35,7 +35,7 @@ flowchart LR
 |---|---|---|
 | Global shell/connect | `/v1/health`, `/v1/accounts/{id}`, `/v1/accounts/{id}/portfolio`, `/v1/accounts/{id}/orders`, `/v1/markets`, `/v1/blocks/latest`, `/v1/blocks/ws` | Session identity, genesis signing domain, available cash, search, connection/countdown |
 | Market index | `/v1/markets`, `/v1/markets/prices`, `/v1/markets/{id}/prices/history`, `/v1/events/{event_id}/traders`, `/v1/events/{event_id}/raw` | Event grouping, category choice, sparkline/delta, sorting |
-| Market detail | `/v1/markets/{id}`, `/v1/markets`, `/v1/markets/{id}/prices/history`, `/v1/events/{event_id}/raw`, `/v1/blocks/ws` | Chart alignment, event outcome labels, live mark/age |
+| Market detail | `/v1/markets/{id}`, `/v1/markets`, `/v1/markets/groups`, `/v1/markets/{id}/prices/history`, `/v1/markets/{id}/prices/candles`, `/v1/events/{event_id}/raw`, `/v1/blocks/ws` | Chart alignment, event outcome labels, live mark/age, paged event-volume activity, complete-set admission preflight |
 | Activity | `/v1/activity/overview`, `/v1/blocks`, `/v1/blocks/{height}`, `/v1/markets`, `/v1/markets/summary`, `/v1/bots/decisions` | Recent block merge, per-market presentation, unmatched counts |
 | Leaderboard | `/v1/leaderboard` | Window selection and own-row highlight |
 | Arena | `/v1/bots/decisions`, `/v1/bots/equity-series`, `/v1/activity/overview`, `/v1/markets/summary`, `/v1/blocks/latest`, `/v1/blocks/{height}` | Strategy grouping, cost/tokens, FV drift, recent charts |

@@ -46,6 +46,8 @@ export type EventOutcome = {
   delta24Cents: number;
   /** Rolling 24h trading volume in nanos ($). Used to rank chart lines. */
   volume24hNanos: bigint;
+  /** All-time matched volume in nanos ($), used for event-level totals. */
+  volumeNanos?: bigint;
   /** Real market creation time (epoch ms), or `null` if unknown. Bounds how
    *  far back the price chart holds the line flat — never before the market
    *  existed. See `build-chart-series`. */
@@ -83,8 +85,8 @@ export function useEventGroup(marketId: number): {
 
     const siblings =
       currentMarket.event_id != null
-        ? bundle.groups.find((g) => g.eventId === currentMarket.event_id)
-            ?.markets ?? [currentMarket]
+        ? (bundle.groups.find((g) => g.eventId === currentMarket.event_id)
+            ?.markets ?? [currentMarket])
         : [currentMarket];
 
     // Short labels need the full sibling set — derive once, index-aligned.
@@ -94,11 +96,13 @@ export function useEventGroup(marketId: number): {
       const price = prices[m.market_id];
       const yesNanos = price?.yes ?? null;
       const noNanos = price?.no ?? null;
-      const yesCents = yesNanos == null ? null : Math.round(Number(yesNanos) / 1e7);
+      const yesCents =
+        yesNanos == null ? null : Math.round(Number(yesNanos) / 1e7);
       // Real 24h delta from the list snapshot (current YES − YES 24h ago), in
       // cents; both fields ride `/v1/markets`. Self-consistent (same payload)
       // and independent of the live store price.
-      const curYes = m.yes_price_nanos != null ? BigInt(m.yes_price_nanos) : null;
+      const curYes =
+        m.yes_price_nanos != null ? BigInt(m.yes_price_nanos) : null;
       const agoYes =
         m.yes_price_24h_ago_nanos != null
           ? BigInt(m.yes_price_24h_ago_nanos)
@@ -115,6 +119,7 @@ export function useEventGroup(marketId: number): {
         yesCents,
         delta24Cents,
         volume24hNanos: m.volume_24h_nanos ? BigInt(m.volume_24h_nanos) : 0n,
+        volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
         createdAtMs: m.created_at_ms ?? null,
         endDateMs: m.market_end_date_ms ?? m.expiry_timestamp_ms ?? null,
       };

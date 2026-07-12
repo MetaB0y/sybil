@@ -573,6 +573,26 @@ textarea {
   gap: var(--space-3);
 }
 
+/* Desktop ordering stays in the reviewed rail. Compact layouts get the modal
+   shortcut so order entry remains reachable before the rail reflows below the
+   long market content. */
+.market-detail-place-order {
+  display: none;
+  margin-left: auto;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--fg-on-accent);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
 .market-detail-title {
   font-family: var(--font-display);
   font-weight: 600;
@@ -989,6 +1009,12 @@ textarea {
 /* Market-detail page reflow keeps its own 1100px breakpoint, independent of the
    nav collapse above. */
 @media (max-width: 1100px) {
+  .market-detail-place-order {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   .market-detail-main {
     height: auto;
     min-height: calc(100dvh - var(--nav-height));

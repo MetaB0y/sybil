@@ -14,16 +14,32 @@ import { shouldCloseNavSheetOnPathChange } from "@/lib/responsive/nav";
 type NavTab = { href: string; label: string; match: (path: string) => boolean };
 
 const TABS: readonly NavTab[] = [
-  { href: "/", label: "Markets", match: (p) => p === "/" || p.startsWith("/m/") },
-  { href: "/activity", label: "Activity", match: (p) => p.startsWith("/activity") },
+  {
+    href: "/",
+    label: "Markets",
+    match: (p) => p === "/" || p.startsWith("/m/"),
+  },
+  {
+    href: "/activity",
+    label: "Activity",
+    match: (p) => p.startsWith("/activity"),
+  },
   { href: "/arena", label: "Arena", match: (p) => p.startsWith("/arena") },
   {
     href: "/leaderboard",
     label: "Leaderboard",
     match: (p) => p.startsWith("/leaderboard"),
   },
-  { href: "/portfolio", label: "Portfolio", match: (p) => p.startsWith("/portfolio") },
-  { href: "/settings", label: "Settings", match: (p) => p.startsWith("/settings") },
+  {
+    href: "/portfolio",
+    label: "Portfolio",
+    match: (p) => p.startsWith("/portfolio"),
+  },
+  {
+    href: "/settings",
+    label: "Settings",
+    match: (p) => p.startsWith("/settings"),
+  },
 ];
 
 export function GlobalNav() {
@@ -103,14 +119,14 @@ export function GlobalNav() {
 
   return (
     <header className="global-nav">
-      {/* Wordmark + status pill */}
+      {/* Wordmark */}
       <Link
         className="global-nav-brand"
         href="/"
         style={{
           display: "inline-flex",
           alignItems: "baseline",
-          gap: "var(--space-2)",
+          flexShrink: 0,
           textDecoration: "none",
           color: "var(--fg-1)",
         }}
@@ -126,24 +142,6 @@ export function GlobalNav() {
         >
           Sybil
         </span>
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            height: 18,
-            padding: "0 var(--space-2)",
-            background: "var(--warn-soft)",
-            color: "var(--warn)",
-            border: "1px solid color-mix(in srgb, var(--warn) 24%, transparent)",
-            borderRadius: "var(--radius-pill)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "10px",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-          }}
-        >
-          devnet
-        </span>
       </Link>
 
       {/* Route tabs */}
@@ -154,13 +152,14 @@ export function GlobalNav() {
         <DevZoneNav />
       </nav>
 
-      {/* Right side — search + batch status + account controls. */}
+      <div className="global-nav-search-desktop">
+        <Suspense fallback={<NavSearchSkeleton />}>
+          <NavSearch />
+        </Suspense>
+      </div>
+
+      {/* Right side — batch status + account controls. */}
       <div className="global-nav-right">
-        <div className="global-nav-search-desktop">
-          <Suspense fallback={<NavSearchSkeleton />}>
-            <NavSearch />
-          </Suspense>
-        </div>
         <ThemeToggle />
         <BatchPill />
         <AccountChip />
@@ -168,12 +167,18 @@ export function GlobalNav() {
           ref={menuButtonRef}
           type="button"
           className="global-nav-menu-button"
-          aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+          aria-label={
+            menuOpen ? "Close navigation menu" : "Open navigation menu"
+          }
           aria-expanded={menuOpen}
           aria-controls="global-nav-sheet"
           onClick={() => (menuOpen ? closeMenu() : openMenu())}
         >
-          {menuOpen ? <X size={18} aria-hidden /> : <Menu size={18} aria-hidden />}
+          {menuOpen ? (
+            <X size={18} aria-hidden />
+          ) : (
+            <Menu size={18} aria-hidden />
+          )}
         </button>
       </div>
       {menuOpen && (
