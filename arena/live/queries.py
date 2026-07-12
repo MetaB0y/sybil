@@ -6,18 +6,17 @@ Rendering is the caller's job.
 
 import json
 import os
-import re
 import sqlite3
+from hashlib import sha256
 
 import pandas as pd
 
+try:
+    from .personas import PERSONAS
+except ImportError:
+    from personas import PERSONAS  # type: ignore[no-redef]
+
 SYBIL_URL = os.environ.get("SYBIL_URL", "http://172.17.0.1:3000")
-
-_STAGE1_AB_TRADER_RE = re.compile(
-    r"^.+ \[SYB-114:(?P<experiment>[A-Za-z0-9][A-Za-z0-9._-]{0,63}):"
-    r"(?P<variant>control|stage1)\] \(Flat\)$"
-)
-
 
 def extract_strategy(name: str) -> str:
     if "(Kelly)" in name:
@@ -223,34 +222,24 @@ def get_live_experiment_status(conn: sqlite3.Connection) -> list[dict]:
             "GROUP BY trader_name"
         ).fetchall()
         for row in rows:
-            match = _STAGE1_AB_TRADER_RE.fullmatch(str(row[0]))
-            if match is None:
-                continue
-            experiment_id = match.group("experiment")
-            variant = match.group("variant")
-            arm = activity.setdefault(experiment_id, {}).setdefault(
-                variant,
+            trader_name = str(row[0])
+            record = activity.setdefault(trader_name, {}).setdefault(
+                count_key,
                 {
-                    "decision_count": 0,
-                    "decision_traders": set(),
-                    "first_decision_at": None,
-                    "last_decision_at": None,
-                    "snapshot_count": 0,
-                    "snapshot_traders": set(),
-                    "first_snapshot_at": None,
-                    "last_snapshot_at": None,
+                    "count": 0,
+                    "first_at": None,
+                    "last_at": None,
                 },
             )
-            arm[count_key] += int(row[1])
-            trader_key = count_key.replace("_count", "_traders")
-            arm[trader_key].add(str(row[0]))
-            prefix = count_key.replace("_count", "")
-            first_key = f"first_{prefix}_at"
-            last_key = f"last_{prefix}_at"
+            record["count"] += int(row[1])
             if row[2] is not None:
-                arm[first_key] = min(filter(None, (arm[first_key], str(row[2]))))
+                record["first_at"] = min(
+                    filter(None, (record["first_at"], str(row[2])))
+                )
             if row[3] is not None:
-                arm[last_key] = max(filter(None, (arm[last_key], str(row[3]))))
+                record["last_at"] = max(
+                    filter(None, (record["last_at"], str(row[3])))
+                )
 
     collect("decisions", "decision_count")
     collect("portfolio_snapshots", "snapshot_count")
@@ -259,25 +248,77 @@ def get_live_experiment_status(conn: sqlite3.Connection) -> list[dict]:
     for row in experiments:
         experiment_id = str(row[0])
         configuration = json.loads(str(row[3]))
-        expected_traders = len(configuration.get("personas", []))
+        persona_keys = configuration.get("personas")
+        display_hashes = configuration.get("persona_display_name_sha256")
+        identity_error = None
+        expected_names: dict[str, set[str]] = {"control": set(), "stage1": set()}
+        if (
+            not isinstance(persona_keys, list)
+            or not persona_keys
+            or not all(isinstance(persona_key, str) for persona_key in persona_keys)
+            or len(set(persona_keys)) != len(persona_keys)
+            or not isinstance(display_hashes, dict)
+        ):
+            identity_error = "experiment lacks immutable persona identity metadata"
+        else:
+            for persona_key in persona_keys:
+                persona = PERSONAS.get(persona_key) if isinstance(persona_key, str) else None
+                if persona is None:
+                    identity_error = f"unknown persisted persona identity: {persona_key!r}"
+                    break
+                display_name = str(persona["name"])
+                fingerprint = sha256(display_name.encode("utf-8")).hexdigest()
+                if display_hashes.get(persona_key) != fingerprint:
+                    identity_error = f"display-name fingerprint drift: {persona_key!r}"
+                    break
+                for variant in ("control", "stage1"):
+                    expected_names[variant].add(
+                        f"{display_name} [SYB-114:{experiment_id}:{variant}] (Flat)"
+                    )
+        expected_traders = 0 if identity_error else len(persona_keys)
         arms = {}
         for variant in ("control", "stage1"):
-            arm = activity.get(experiment_id, {}).get(variant, {})
-            decision_traders = len(arm.get("decision_traders", set()))
-            snapshot_traders = len(arm.get("snapshot_traders", set()))
+            expected = expected_names[variant] if identity_error is None else set()
+            decision_names = {
+                name for name in expected if activity.get(name, {}).get("decision_count")
+            }
+            snapshot_names = {
+                name for name in expected if activity.get(name, {}).get("snapshot_count")
+            }
+
+            def summarize(kind: str, names: set[str]) -> tuple[int, str | None, str | None]:
+                records = [activity[name][kind] for name in names]
+                return (
+                    sum(record["count"] for record in records),
+                    min(
+                        (record["first_at"] for record in records if record["first_at"]),
+                        default=None,
+                    ),
+                    max(
+                        (record["last_at"] for record in records if record["last_at"]),
+                        default=None,
+                    ),
+                )
+
+            decision_count, first_decision, last_decision = summarize(
+                "decision_count", decision_names
+            )
+            snapshot_count, first_snapshot, last_snapshot = summarize(
+                "snapshot_count", snapshot_names
+            )
             arms[variant] = {
-                "decision_count": arm.get("decision_count", 0),
-                "decision_traders": decision_traders,
-                "first_decision_at": arm.get("first_decision_at"),
-                "last_decision_at": arm.get("last_decision_at"),
-                "snapshot_count": arm.get("snapshot_count", 0),
-                "snapshot_traders": snapshot_traders,
-                "first_snapshot_at": arm.get("first_snapshot_at"),
-                "last_snapshot_at": arm.get("last_snapshot_at"),
+                "decision_count": decision_count,
+                "decision_traders": len(decision_names),
+                "first_decision_at": first_decision,
+                "last_decision_at": last_decision,
+                "snapshot_count": snapshot_count,
+                "snapshot_traders": len(snapshot_names),
+                "first_snapshot_at": first_snapshot,
+                "last_snapshot_at": last_snapshot,
                 "ready": (
-                    expected_traders > 0
-                    and decision_traders == expected_traders
-                    and snapshot_traders == expected_traders
+                    bool(expected)
+                    and decision_names == expected
+                    and snapshot_names == expected
                 ),
             }
         result.append(
@@ -287,6 +328,7 @@ def get_live_experiment_status(conn: sqlite3.Connection) -> list[dict]:
                 "started_at_utc": str(row[2]),
                 "configuration": configuration,
                 "expected_traders_per_arm": expected_traders,
+                "identity_error": identity_error,
                 "arms": arms,
             }
         )

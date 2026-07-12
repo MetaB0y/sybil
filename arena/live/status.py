@@ -56,6 +56,8 @@ def run(db_path: str | None = None, hours: int = 24):
                 f"    mode={experiment['mode']}  model={config.get('model', 'unknown')}"
                 f"  cohort={cohort}"
             )
+            if experiment["identity_error"] is not None:
+                print(f"    IDENTITY INVALID: {experiment['identity_error']}")
             expected = experiment["expected_traders_per_arm"]
             for variant in ("control", "stage1"):
                 arm = experiment["arms"][variant]
