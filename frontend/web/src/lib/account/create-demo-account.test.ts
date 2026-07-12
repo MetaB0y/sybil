@@ -6,20 +6,32 @@ import {
   useAccountStore,
 } from "./store";
 
-const mocks = vi.hoisted(() => ({
-  apiPost: vi.fn(),
-  createApiKey: vi.fn(),
-  createPasskeyForAccount: vi.fn(),
-  exportPrivateJwk: vi.fn(),
-  exportPublicKeyCompressedHex: vi.fn(),
-  generateKeyPair: vi.fn(),
-  importPrivateKey: vi.fn(),
-  readStoredAccount: vi.fn(),
-  readStoredAccountRevision: vi.fn(),
-  registerPasskey: vi.fn(),
-  revokeSigningKey: vi.fn(),
-  writeStoredAccount: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  class MockSettingsActionError extends Error {
+    constructor(
+      message: string,
+      public readonly status?: number,
+    ) {
+      super(message);
+      this.name = "SettingsActionError";
+    }
+  }
+  return {
+    apiPost: vi.fn(),
+    createApiKey: vi.fn(),
+    createPasskeyForAccount: vi.fn(),
+    exportPrivateJwk: vi.fn(),
+    exportPublicKeyCompressedHex: vi.fn(),
+    generateKeyPair: vi.fn(),
+    importPrivateKey: vi.fn(),
+    readStoredAccount: vi.fn(),
+    readStoredAccountRevision: vi.fn(),
+    registerPasskey: vi.fn(),
+    revokeSigningKey: vi.fn(),
+    SettingsActionError: MockSettingsActionError,
+    writeStoredAccount: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/api/client", () => ({
   api: { GET: vi.fn(), POST: mocks.apiPost },
@@ -42,7 +54,7 @@ vi.mock("./settings", () => ({
   createApiKey: mocks.createApiKey,
   registerPasskey: mocks.registerPasskey,
   revokeSigningKey: mocks.revokeSigningKey,
-  SettingsActionError: class SettingsActionError extends Error {},
+  SettingsActionError: mocks.SettingsActionError,
 }));
 
 vi.mock("./storage", () => ({
@@ -446,7 +458,12 @@ describe("createDemoAccount recovery checkpoints", () => {
 
   it("keeps the usable passkey session when bootstrap cleanup fails", async () => {
     mocks.createApiKey.mockResolvedValueOnce(readKey("sybk_passkey"));
-    mocks.revokeSigningKey.mockRejectedValue(new Error("revoke timed out"));
+    mocks.revokeSigningKey.mockRejectedValue(
+      new mocks.SettingsActionError(
+        "revoke_key failed (HTTP 409): cannot revoke the last signing key",
+        409,
+      ),
+    );
 
     await expect(
       createDemoAccount(500_000_000_000n, "passkey"),
@@ -464,6 +481,7 @@ describe("createDemoAccount recovery checkpoints", () => {
     expect(useAccountStore.getState().session).toEqual(storedAccount);
     expect(getKeyHandle(73)).toBeNull();
     expect(useAccountStore.getState().connectModalOpen).toBe(true);
+    expect(mocks.revokeSigningKey).toHaveBeenCalledOnce();
   });
 
   it("migrates a successful account only after both credentials are durable", async () => {
@@ -481,6 +499,45 @@ describe("createDemoAccount recovery checkpoints", () => {
     expect(mocks.writeStoredAccount.mock.invocationCallOrder[1]).toBeLessThan(
       mocks.revokeSigningKey.mock.invocationCallOrder[0]!,
     );
+    expect(useAccountStore.getState().session).toEqual({
+      accountId: 73,
+      publicKeyHex: "03passkey",
+      authScheme: "webauthn",
+      credentialIdB64url: "credential-73",
+      readApiKey: "sybk_passkey",
+    });
+    expect(getKeyHandle(73)).toBeNull();
+    expect(useAccountStore.getState().connectModalOpen).toBe(false);
+  });
+
+  it("refreshes bootstrap cleanup when the first revoke binding crosses a block", async () => {
+    mocks.createApiKey.mockResolvedValueOnce(readKey("sybk_passkey"));
+    mocks.revokeSigningKey
+      .mockRejectedValueOnce(
+        new mocks.SettingsActionError(
+          "revoke_key failed (HTTP 409): stale key-operation state binding for account 73",
+          409,
+        ),
+      )
+      .mockResolvedValueOnce(undefined);
+
+    await createDemoAccount(500_000_000_000n, "passkey");
+
+    expect(mocks.revokeSigningKey).toHaveBeenCalledTimes(2);
+    expect(mocks.revokeSigningKey).toHaveBeenNthCalledWith(1, {
+      accountId: 73,
+      publicKeyHex: "02bootstrap",
+      authScheme: "raw_p256",
+      targetPubkeyHex: "02bootstrap",
+      targetAuthScheme: "raw_p256",
+    });
+    expect(mocks.revokeSigningKey).toHaveBeenNthCalledWith(2, {
+      accountId: 73,
+      publicKeyHex: "02bootstrap",
+      authScheme: "raw_p256",
+      targetPubkeyHex: "02bootstrap",
+      targetAuthScheme: "raw_p256",
+    });
     expect(useAccountStore.getState().session).toEqual({
       accountId: 73,
       publicKeyHex: "03passkey",

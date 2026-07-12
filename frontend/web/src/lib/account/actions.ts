@@ -74,6 +74,36 @@ type PendingCreatedAccount = {
 };
 
 const pendingCreatedAccounts = new Map<number, PendingCreatedAccount>();
+const MAX_BOOTSTRAP_REVOKE_ATTEMPTS = 3;
+
+async function revokeOnboardingBootstrapKey(args: {
+  accountId: number;
+  publicKeyHex: string;
+}): Promise<void> {
+  for (let attempt = 0; attempt < MAX_BOOTSTRAP_REVOKE_ATTEMPTS; attempt += 1) {
+    try {
+      await revokeSigningKey({
+        accountId: args.accountId,
+        publicKeyHex: args.publicKeyHex,
+        authScheme: "raw_p256",
+        targetPubkeyHex: args.publicKeyHex,
+        targetAuthScheme: "raw_p256",
+      });
+      return;
+    } catch (error) {
+      // A newly-created account's pending create event can enter a block after
+      // revokeSigningKey reads its validity binding but before the signed POST.
+      // Refetch and re-sign that expected optimistic-concurrency conflict only.
+      const staleBinding =
+        error instanceof SettingsActionError &&
+        error.status === 409 &&
+        error.message.includes("stale key-operation state binding");
+      if (!staleBinding || attempt === MAX_BOOTSTRAP_REVOKE_ATTEMPTS - 1) {
+        throw error;
+      }
+    }
+  }
+}
 
 /**
  * Account creation always registers an initial key in the same request. The
@@ -231,12 +261,9 @@ export async function createDemoAccount(
     // Revoke only after the passkey is independently usable and durable. If
     // cleanup fails, the passkey session remains recoverable and the modal
     // offers a reconnect instead of allocating another funded account.
-    await revokeSigningKey({
+    await revokeOnboardingBootstrapKey({
       accountId,
       publicKeyHex: bootstrapPublicKeyHex,
-      authScheme: "raw_p256",
-      targetPubkeyHex: bootstrapPublicKeyHex,
-      targetAuthScheme: "raw_p256",
     });
     requireUnchangedStorageRevision(storageRevision);
     clearKeyHandleIfMatches(accountId, bootstrap.privateKey);

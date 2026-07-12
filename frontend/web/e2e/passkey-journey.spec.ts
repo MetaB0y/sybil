@@ -171,6 +171,22 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   page.on("pageerror", (e) => pageErrors.push(e.message));
 
   const authenticator = await enableVirtualAuthenticator(page);
+  let injectedStaleBootstrapBinding = false;
+  await page.route(
+    "**/v1/accounts/*/keys/revoke",
+    async (route) => {
+      injectedStaleBootstrapBinding = true;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "stale key-operation state binding for onboarding account",
+          code: "CONFLICT",
+        }),
+      });
+    },
+    { times: 1 },
+  );
 
   // 1. Land.
   await page.goto("/");
@@ -197,6 +213,10 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   //    connected chip is the menu button whose title recaps the portfolio
   //    (distinguishes it from the "Dev Zone" nav menu, which shares the role).
   await expect(connectDialog).toBeHidden({ timeout: 30_000 });
+  expect(
+    injectedStaleBootstrapBinding,
+    "onboarding should retry the intentionally stale bootstrap revoke",
+  ).toBe(true);
   const accountMenu = page.locator(
     'button[aria-haspopup="menu"][title*="Portfolio"]',
   );
