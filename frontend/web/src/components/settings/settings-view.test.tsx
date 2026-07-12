@@ -2,11 +2,26 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import {
+  Field,
   SettingsView,
   signingPublicKeysEqual,
   signingKeyRevocationPolicy,
 } from "./settings-view";
 import { settingsQueryKeys } from "@/lib/account/use-settings-data";
+
+describe("Field", () => {
+  it("programmatically associates its visible text with the form control", () => {
+    const html = renderToStaticMarkup(
+      <Field label="Display name">
+        <input type="text" />
+      </Field>,
+    );
+
+    expect(html).toMatch(
+      /^<label[^>]*>[\s\S]*Display name[\s\S]*<input[^>]*\/>[\s\S]*<\/label>$/,
+    );
+  });
+});
 
 describe("SettingsView", () => {
   const currentPublicKey = `02${"ab".repeat(32)}`;

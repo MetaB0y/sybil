@@ -1130,7 +1130,7 @@ function InfoLine({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Field({
+export function Field({
   label,
   children,
 }: {
@@ -1138,7 +1138,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div
+    <label
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1159,7 +1159,7 @@ function Field({
         {label}
       </span>
       {children}
-    </div>
+    </label>
   );
 }
 
