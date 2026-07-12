@@ -257,6 +257,9 @@ pub struct AppState {
     /// so retained-history serving cannot monopolize the sequencer/store.
     pub http_da_limiter: Arc<Mutex<HttpDaRateLimiter>>,
     pub http_da_concurrency: Arc<Semaphore>,
+    /// Hard lifetime cap for anonymous SSE and public WebSocket block streams.
+    /// A permit is held until the response stream/upgrade task is dropped.
+    pub http_public_stream_concurrency: Arc<Semaphore>,
     /// WebAuthn verifier policy for passkey account actions.
     pub webauthn: WebAuthnVerifierConfig,
     /// Serializes account creation and the deprecated first-key bootstrap.
@@ -327,6 +330,9 @@ impl AppState {
             http_order_limiter: Arc::new(Mutex::new(HttpOrderRateLimiter::new(config))),
             http_da_limiter: Arc::new(Mutex::new(HttpDaRateLimiter::new(config))),
             http_da_concurrency: Arc::new(Semaphore::new(config.http_da_max_concurrency.max(1))),
+            http_public_stream_concurrency: Arc::new(Semaphore::new(
+                config.http_public_stream_max_connections.max(1),
+            )),
             webauthn: WebAuthnVerifierConfig::from_api_config(config),
             account_bootstrap_lock: Arc::new(AsyncMutex::new(())),
             auto_resolutions: crate::auto_resolution::AutoResolutionStore::new(),

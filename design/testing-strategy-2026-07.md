@@ -124,8 +124,10 @@ and the golden-vector JSON. insta's review workflow makes intentional changes
 cheap and accidental ones loud.
 
 ### P2 — Durability + e2e blind spots
-- Crash harness is **single-seeded** (`0x5eed_0158`); widen to many seeds
-  (nightly) so crash *timing* is fuzzed against the proptest-driven paths.
+- Crash harness now runs three deterministic seeds (`0x5eed_0158` through
+  `0x5eed_015a`) by default across all nine durability boundaries. Continue to
+  widen `SYBIL_CRASH_SEEDS` in scheduled testing so crash *timing* is fuzzed
+  against the proptest-driven paths.
 - The **sim/scenario crates** (`matching-sim`, `sequencer-sim`) are exploratory,
   not asserting — no CI, no pass/fail. Wire a nightly job that runs a medium
   preset and **asserts the economic invariants** from `invariants.rs` hold at

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal stdlib WebSocket client for the post-deploy smoke test (SYB-223).
 
-Connects to `/v1/blocks/ws?from_block=N` and asserts the first-party replay
+Connects to `/v2/blocks/ws?from_block=N` and asserts the public replay
 contract: at least one *replayed* block frame (height <= head-at-connect) is
 delivered, followed by at least one *live* block frame (height > head).
 
@@ -123,8 +123,11 @@ def main():
     replay_seen = False
     live_seen = False
     replay_complete_seen = False
+    replay_up_to = None
     try:
-        while time.time() < deadline and not (replay_seen and live_seen):
+        while time.time() < deadline and not (
+            replay_seen and replay_complete_seen and live_seen
+        ):
             opcode, payload = frames.next(deadline)
             if opcode == 0x8:  # close
                 log("server closed the stream")
@@ -147,16 +150,21 @@ def main():
                 continue
             if kind == "replay_complete":
                 replay_complete_seen = True
-                log(f"replay_complete up_to_height={env.get('up_to_height')}")
+                replay_up_to = env.get("up_to_height")
+                log(f"replay_complete up_to_height={replay_up_to}")
                 continue
             if kind == "block":
                 height = env.get("data", {}).get("height")
                 if height is None:
                     continue
-                if height <= head:
+                if not replay_complete_seen and height <= head:
                     replay_seen = True
                     log(f"replay block height={height}")
-                else:
+                elif (
+                    replay_complete_seen
+                    and isinstance(replay_up_to, int)
+                    and height > replay_up_to
+                ):
                     live_seen = True
                     log(f"live block height={height}")
     except TimeoutError:
@@ -168,7 +176,7 @@ def main():
         f"replay_seen={replay_seen} replay_complete_seen={replay_complete_seen} "
         f"live_seen={live_seen}"
     )
-    if replay_seen and live_seen:
+    if replay_seen and replay_complete_seen and live_seen:
         print("ws_resume=pass")
         return 0
     print("ws_resume=fail")

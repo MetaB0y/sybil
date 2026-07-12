@@ -234,6 +234,40 @@ async fn public_da_manifest_reads_are_rate_limited_before_store_work() {
 }
 
 #[tokio::test]
+async fn public_sse_connection_cap_lives_with_the_response_body() {
+    let (app, _) = test_app_with_config(ApiConfig {
+        dev_mode: true,
+        http_public_stream_max_connections: 1,
+        ..ApiConfig::default()
+    })
+    .await;
+
+    let request = || {
+        axum::http::Request::builder()
+            .uri("/v1/blocks/stream")
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    let first = app.clone().oneshot(request()).await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = app.clone().oneshot(request()).await.unwrap();
+    assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        second
+            .headers()
+            .get(header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok()),
+        Some("1")
+    );
+
+    drop(first);
+    let third = app.oneshot(request()).await.unwrap();
+    assert_eq!(third.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn api_key_label_limit_is_rejected_at_http_admission() {
     let (app, _) = test_app(true).await;
     let (status, body) = post_json(

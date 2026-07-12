@@ -309,6 +309,41 @@ check_liveness() {
     fi
 }
 
+check_public_block_stream() {
+    section "1b. Public WebSocket replay + live handoff"
+
+    if [[ ! "$HEAD_HEIGHT" =~ ^[0-9]+$ || "$HEAD_HEIGHT" -le 0 ]]; then
+        fail "public WebSocket check needs a positive committed head height"
+        return
+    fi
+
+    local ws_base ws_url ws_timeout output
+    ws_base="$(python3 -c '
+import sys
+url = sys.argv[1]
+if url.startswith("https://"):
+    print("wss://" + url[8:])
+elif url.startswith("http://"):
+    print("ws://" + url[7:])
+else:
+    raise SystemExit("unsupported base URL")
+' "$BASE")" || {
+        fail "could not derive WebSocket URL from $BASE"
+        return
+    }
+    ws_url="${ws_base%/}/v2/blocks/ws?from_block=$HEAD_HEIGHT"
+    ws_timeout="$(python3 -c 'import sys; print(float(sys.argv[1]) * 3 + 10)' "$INTERVAL")" || {
+        fail "could not derive WebSocket timeout from block interval $INTERVAL"
+        return
+    }
+
+    if output="$(python3 "$SCRIPT_DIR/_ws_resume_check.py" "$ws_url" "$HEAD_HEIGHT" "$ws_timeout" 2>&1)"; then
+        pass "public /v2 block stream replayed height <= $HEAD_HEIGHT and followed live"
+    else
+        fail "public /v2 block stream replay/live check failed: $output"
+    fi
+}
+
 # Container health for every compose service. Local docker, or over ssh.
 docker_run() {
     smoke_docker_run "$DOCKER_SSH" "$*"
@@ -433,7 +468,7 @@ check_proof_freshness() {
 check_web_app() {
     section "2a. Deployed web app ($APP_ORIGIN)"
 
-    local code asset_url asset_meta asset_code asset_type asset_size
+    local code asset_url asset_meta asset_code asset_type asset_size bundle_failed=0
     if ! code="$(curl -sS -L -m 30 -o "$TMP/app.html" -w '%{http_code}' "$APP_ORIGIN/")"; then
         fail "GET $APP_ORIGIN/ failed (deployed web app unreachable)"
         return
@@ -489,6 +524,40 @@ PY
         pass "Next.js asset -> $asset_code ($asset_type, ${asset_size}B)"
     else
         fail "Next.js asset -> ${asset_code:-?} (${asset_type:-no content-type}, ${asset_size:-0}B)"
+    fi
+
+    # The privacy boundary moved public realtime from canonical v1 to sanitized
+    # v2. Fetch every shell-referenced JS chunk and pin that the deployed web
+    # bundle actually contains the v2 client path; API-only v2 health would not
+    # catch an old web image that still connects to service-gated v1.
+    python3 - "$APP_ORIGIN" "$TMP/app.html" >"$TMP/app-js-assets" <<'PY'
+import html
+import re
+import sys
+from pathlib import Path
+from urllib.parse import urljoin
+
+origin, path = sys.argv[1:]
+document = Path(path).read_text(encoding="utf-8", errors="replace")
+for value in re.findall(r'(?:src|href)="([^"]+)"', document):
+    value = html.unescape(value)
+    if "/_next/static/" in value and ".js" in value:
+        print(urljoin(f"{origin}/", value))
+PY
+    : >"$TMP/app-js-bundle"
+    while IFS= read -r js_url; do
+        [[ -z "$js_url" ]] && continue
+        if ! curl -fsS -L -m 30 "$js_url" >>"$TMP/app-js-bundle"; then
+            bundle_failed=1
+            break
+        fi
+    done <"$TMP/app-js-assets"
+    if (( bundle_failed == 1 )); then
+        fail "could not inspect every deployed Next.js shell chunk for realtime protocol"
+    elif grep -Fq '/v2/blocks/ws' "$TMP/app-js-bundle"; then
+        pass "deployed web bundle targets the public /v2 block stream"
+    else
+        fail "deployed web bundle does not contain /v2/blocks/ws (API/web protocol drift)"
     fi
 }
 
@@ -1035,6 +1104,7 @@ echo "  mirror gate: $([[ "$SKIP_MIRROR_READINESS" == "1" ]] && echo web-only-sk
 echo "  proof gate : $([[ "$REQUIRE_PROOF_FRESHNESS" == "1" ]] && echo "required (lag <= $PROOF_LAG_MAX)" || echo optional)"
 
 check_liveness
+check_public_block_stream
 check_services
 check_proof_freshness
 check_web_app

@@ -21,6 +21,12 @@ The canonical v1 `BlockResponse`, including account-attributed rows, remains at
 public replay protocol. See
 [ADR-0016](../../adr/0016-public-market-tape-and-recovery-da-boundaries.md).
 
+The public WebSocket and SSE endpoints share the
+`SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS` hard cap (default 256). A permit is
+held from successful admission until the upgraded connection task exits, and
+capacity exhaustion returns HTTP `429` before upgrading. The service-authenticated
+v1 stream does not consume this anonymous budget.
+
 The stream sits on top of a `tokio::sync::broadcast` channel fed by the sequencer actor. Each subscriber gets its own 64-block buffer. If a client falls behind that window, the server sends a final `lagged` envelope and closes the connection with code 1008 — the client reconnects with `?from_block=<last_sent_height + 1>` and the handler replays from block history before switching back to live. The hot in-memory ring is checked first; if the requested height has already been evicted, replay falls back to the durable `blocks_full` store. This is a deliberate "crash fast, recover cleanly" design: no silent block loss, no unbounded buffering.
 
 ## Message Envelope
@@ -71,7 +77,7 @@ The server sends a WebSocket Ping frame every 30 seconds. Any message from the c
 > `crates/sybil-api/src/ws.rs` — handler (subscribe, replay, lag detection, ping loop)
 > `crates/sybil-api-types/src/ws.rs` — public v2 and service v1 envelope schemas
 > `crates/sybil-api/src/routes/blocks.rs` — `/v2/blocks/ws` public and `/v1/blocks/ws` service wiring
-> `crates/sybil-api/tests/ws_integration.rs` — live-block, replay, and from-block-ahead-of-head tests
+> `crates/sybil-api/tests/ws_integration.rs` — live-block, replay, retention-gap, and connection-cap tests
 
 ## See Also
 - [[SSE Block Stream]] — simpler alternative at `/v1/blocks/stream`

@@ -24,7 +24,7 @@ use crate::order_book::reservation_snapshots_from_resting_orders;
 use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
 use crate::store::{RestoredState, Store, StoreFaultPoint};
 
-const DEFAULT_SEEDS: &[u64] = &[0x5eed_0158];
+const DEFAULT_SEEDS: &[u64] = &[0x5eed_0158, 0x5eed_0159, 0x5eed_015a];
 const DEFAULT_ITERATIONS: usize = 9;
 const INITIAL_ACCOUNTS: usize = 3;
 const INITIAL_BALANCE: i64 = 1_000 * NANOS_PER_DOLLAR as i64;

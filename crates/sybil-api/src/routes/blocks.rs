@@ -3,6 +3,7 @@ use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::response::sse::{Event, Sse};
+use tokio::sync::OwnedSemaphorePermit;
 
 use matching_sequencer::MAX_BLOCK_HISTORY_QUERY_BLOCKS;
 
@@ -12,6 +13,51 @@ use crate::types::error::AppError;
 use crate::types::response::PublicBlockResponse;
 
 const DEFAULT_BLOCK_HISTORY_QUERY_BLOCKS: usize = 20;
+
+pub(crate) struct PublicStreamPermit {
+    _permit: OwnedSemaphorePermit,
+    transport: &'static str,
+}
+
+impl PublicStreamPermit {
+    fn try_acquire(state: &AppState, transport: &'static str) -> Result<Self, AppError> {
+        match state
+            .http_public_stream_concurrency
+            .clone()
+            .try_acquire_owned()
+        {
+            Ok(permit) => {
+                metrics::gauge!(
+                    "sybil_public_stream_connections",
+                    "transport" => transport
+                )
+                .increment(1.0);
+                Ok(Self {
+                    _permit: permit,
+                    transport,
+                })
+            }
+            Err(_) => {
+                metrics::counter!(
+                    "sybil_public_stream_connections_rejected_total",
+                    "transport" => transport
+                )
+                .increment(1);
+                Err(AppError::rate_limited(1))
+            }
+        }
+    }
+}
+
+impl Drop for PublicStreamPermit {
+    fn drop(&mut self) {
+        metrics::gauge!(
+            "sybil_public_stream_connections",
+            "transport" => self.transport
+        )
+        .decrement(1.0);
+    }
+}
 
 #[derive(serde::Deserialize)]
 pub struct RecentBlocksQuery {
@@ -99,7 +145,8 @@ pub async fn stream_blocks(
     State(state): State<AppState>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>>, AppError>
 {
-    crate::sse::block_stream(&state.sequencer).await
+    let permit = PublicStreamPermit::try_acquire(&state, "sse")?;
+    crate::sse::block_stream(&state.sequencer, permit).await
 }
 
 /// GET /v2/blocks/ws
@@ -128,7 +175,12 @@ pub async fn ws_blocks(
     Query(query): Query<crate::ws::WsQuery>,
     State(state): State<AppState>,
 ) -> Response {
+    let permit = match PublicStreamPermit::try_acquire(&state, "websocket") {
+        Ok(permit) => permit,
+        Err(error) => return axum::response::IntoResponse::into_response(error),
+    };
     ws.on_upgrade(move |socket| async move {
+        let _permit = permit;
         crate::ws::handle_block_ws(
             socket,
             &state.sequencer,

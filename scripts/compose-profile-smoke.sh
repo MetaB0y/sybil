@@ -296,6 +296,16 @@ grep -Fq -- '--service-token' <<<"$deploy_verify_recipe" \
     || fail "deploy-verify lost the valid service-token gating checks"
 pass "deploy-verify fails closed when signed order/cancel smoke cannot run"
 
+grep -Fq 'check_public_block_stream' scripts/post-deploy-smoke.sh \
+    || fail "post-deploy smoke no longer runs the public block-stream check"
+grep -Fq '/v2/blocks/ws?from_block=' scripts/post-deploy-smoke.sh \
+    || fail "post-deploy smoke does not target the public v2 replay endpoint"
+grep -Fq '_ws_resume_check.py' scripts/post-deploy-smoke.sh \
+    || fail "post-deploy smoke lost the dependency-free WebSocket checker"
+grep -Fq 'deployed web bundle targets the public /v2 block stream' scripts/post-deploy-smoke.sh \
+    || fail "post-deploy smoke no longer checks the web bundle's realtime protocol"
+pass "post-deploy smoke requires matching web/API v2 realtime plus replay/live handoff"
+
 deploy_verify_scoped_recipe=$(
     awk '
         /^deploy-verify-scoped:/ { in_recipe = 1; next }

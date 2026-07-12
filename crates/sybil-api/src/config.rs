@@ -148,6 +148,16 @@ pub struct ApiConfig {
     #[arg(long, default_value = "4", env = "SYBIL_HTTP_DA_MAX_CONCURRENCY")]
     pub http_da_max_concurrency: usize,
 
+    /// Maximum anonymous public block streams held concurrently across SSE
+    /// and WebSocket. The authenticated service stream has a separate trust
+    /// boundary and does not consume this budget.
+    #[arg(
+        long,
+        default_value = "256",
+        env = "SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS"
+    )]
+    pub http_public_stream_max_connections: usize,
+
     /// WebAuthn relying-party id. For local frontend dev this is `localhost`.
     #[arg(long, default_value = "localhost", env = "SYBIL_WEBAUTHN_RP_ID")]
     pub webauthn_rp_id: String,
@@ -345,6 +355,7 @@ impl Default for ApiConfig {
             http_da_client_rps: 10,
             http_da_client_burst: 20,
             http_da_max_concurrency: 4,
+            http_public_stream_max_connections: 256,
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:3000".to_string(),
             webauthn_require_uv: true,

@@ -69,9 +69,11 @@ the intended accepted chain:
 ```bash
 H=12345
 SRC=https://172-104-31-54.nip.io
+SERVICE_TOKEN='replace-with-service-token'
 
-curl -fsS "$SRC/v1/da/$H" -o "da-$H.json"
-curl -fsS "$SRC/v1/da/$H/payload" -o "witness-$H.bin"
+curl -fsS "$SRC/v1/da/$H/manifest" -o "da-$H.json"
+curl -fsS -H "Authorization: Bearer $SERVICE_TOKEN" \
+  "$SRC/v1/da/$H/payload" -o "witness-$H.bin"
 curl -fsS "$SRC/v1/health" -o source-health.json
 
 EXPECT_STATE_ROOT=$(jq -r '.state_root' "da-$H.json")

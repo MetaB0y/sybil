@@ -16,10 +16,21 @@ use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
-use common::{test_app, test_app_with_store_config};
+use common::{test_app, test_app_with_config, test_app_with_store_config};
+use sybil_api::config::ApiConfig;
 
 async fn spawn_server() -> (SocketAddr, SequencerHandle) {
     let (app, handle) = test_app(true).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (addr, handle)
+}
+
+async fn spawn_server_with_api_config(config: ApiConfig) -> (SocketAddr, SequencerHandle) {
+    let (app, handle) = test_app_with_config(config).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -87,6 +98,54 @@ async fn ws_streams_live_block_envelope() {
         }
         other => panic!("expected block envelope, got {:?}", other),
     }
+}
+
+#[tokio::test]
+async fn public_ws_connection_cap_is_released_after_disconnect() {
+    let (addr, _handle) = spawn_server_with_api_config(ApiConfig {
+        dev_mode: true,
+        http_public_stream_max_connections: 1,
+        ..ApiConfig::default()
+    })
+    .await;
+    let url = format!("ws://{}/v2/blocks/ws", addr);
+
+    let (mut first, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let error = tokio_tungstenite::connect_async(&url).await.unwrap_err();
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), 429);
+            assert_eq!(
+                response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|value| value.to_str().ok()),
+                Some("1")
+            );
+        }
+        other => panic!("expected HTTP 429 handshake rejection, got {other:?}"),
+    }
+
+    first.close(None).await.unwrap();
+    drop(first);
+
+    let mut reconnected = None;
+    for _ in 0..20 {
+        match tokio_tungstenite::connect_async(&url).await {
+            Ok((stream, _)) => {
+                reconnected = Some(stream);
+                break;
+            }
+            Err(tokio_tungstenite::tungstenite::Error::Http(response))
+                if response.status() == 429 =>
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(other) => panic!("unexpected reconnect failure: {other:?}"),
+        }
+    }
+    let mut reconnected = reconnected.expect("stream capacity was not released after disconnect");
+    reconnected.close(None).await.unwrap();
 }
 
 #[tokio::test]

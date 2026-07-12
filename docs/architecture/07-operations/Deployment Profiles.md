@@ -73,6 +73,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_HTTP_DA_GLOBAL_RPS` / `BURST` | `20` / `40` | `20` / `40` | `20` / `40` | no |
 | `SYBIL_HTTP_DA_CLIENT_RPS` / `BURST` | `10` / `20` | `10` / `20` | `10` / `20` | no |
 | `SYBIL_HTTP_DA_MAX_CONCURRENCY` | `4` | `4` | `4` | no |
+| `SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS` | `256` | `256` | `256` | no |
 
 > Constraint note: the `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` compose value is
 > owned by a separate lane (SYB-193 / AR-5). This doc references it but does not

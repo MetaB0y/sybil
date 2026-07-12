@@ -1,9 +1,8 @@
 //! WebSocket block stream message schema.
 //!
-//! Versioned envelope used by `GET /v1/blocks/ws`. Clients should read
-//! `v` first and ignore messages whose version they don't understand —
-//! the server is allowed to add new message types or fields within the
-//! same `v`, but will bump `v` for any breaking change.
+//! Versioned envelopes used by the public `GET /v2/blocks/ws` stream and the
+//! authenticated canonical `GET /v1/blocks/ws` service stream. Clients should
+//! read `v` first and ignore messages whose version they don't understand.
 
 use serde::{Deserialize, Serialize};
 

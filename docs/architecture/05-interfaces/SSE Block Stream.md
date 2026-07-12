@@ -22,6 +22,13 @@ explicitly, and returns a `retention_gap` envelope when `from_block` is below
 the retained `blocks_full` floor. SSE intentionally does not provide those
 resume guarantees: it is a thin live re-encoding of the same block broadcast.
 
+Anonymous SSE and public WebSocket subscriptions share a configurable hard
+connection budget (`SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS`, default 256).
+The server acquires a permit before subscribing and holds it for the complete
+response lifetime; excess connections receive `429` with `Retry-After`. The
+authenticated canonical service stream is deliberately outside this anonymous
+budget so public saturation cannot evict recovery infrastructure.
+
 The endpoint remains useful for `curl`, quick scripts, and third-party clients
 that prefer plain HTTP streams over a WebSocket upgrade. Long-lived Sybil-owned
 clients should reconnect with WebSocket `?from_block=<last_seen_height + 1>`
@@ -34,6 +41,7 @@ instead.
 - Unidirectional: server → client only
 - No versioned envelope, replay cursor, lag signal, or retained-floor contract
 - First-party public clients use `GET /v2/blocks/ws?from_block=N`
+- Shares a lifetime-held anonymous connection cap with the public WebSocket
 - Simple proxy-friendly stream for external tooling
 
 ## Where This Lives
