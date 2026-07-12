@@ -8,6 +8,7 @@ import {
   RANGE_MS,
   type ChartRange,
 } from "@/components/chart-range-bar";
+import { EventActivity } from "@/components/event-activity";
 import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
 import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
@@ -23,11 +24,11 @@ import {
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
 import { SelectOutcomeProvider } from "@/lib/market-detail/active-outcome";
-import { detectStackable } from "@/lib/market-detail/build-chart-series";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
 import { useEventRaw } from "@/lib/markets/use-event-raw";
+import { useEventTraders } from "@/lib/markets/use-event-traders";
 import { selectLatestBlock, useStore } from "@/lib/store";
 
 type RouteParams = { id: string };
@@ -42,6 +43,7 @@ const chartSelectionByEvent = new Map<string, number[]>();
 
 /** Max simultaneous chart lines — matches the legend's `maxSelected`. */
 const MAX_CHART_LINES = 8;
+const STAT_W = { vol: 38, h24: 38, traders: 24, liq: 34, age: 28 } as const;
 
 /** Wrap gap (px) between legend chip rows — mirrors OutcomeLegend's `gap`. */
 const LEGEND_ROW_GAP = 10;
@@ -78,18 +80,13 @@ export default function MarketDetailPage({
 
   const marketQ = useMarket(marketId);
   const market = marketQ.data;
-
-  // Place-order modal (SYB-54) — launched from the header CTA, renders the
-  // shared BuyBox for the currently-selected outcome.
   const [orderOpen, setOrderOpen] = useState(false);
   const openOrder = useCallback(() => setOrderOpen(true), []);
   const closeOrder = useCallback(() => setOrderOpen(false), []);
 
   return (
     <SelectOutcomeProvider value={selectOutcome}>
-      <main
-        className="market-detail-main"
-      >
+      <main className="market-detail-main">
         {marketQ.isPending && <Placeholder>loading market…</Placeholder>}
         {marketQ.isError && !market && (
           <MarketNotFound onRetry={() => marketQ.refetch()} />
@@ -100,9 +97,7 @@ export default function MarketDetailPage({
             {/* Header band — fixed; the chart/rail split scrolls below it. Closed
                 state shows in the status pill + the rail's read-only notice, not
                 a separate banner row (which shifted the page). */}
-            <div
-              className="market-detail-header-pad"
-            >
+            <div className="market-detail-header-pad">
               <Header
                 marketId={marketId}
                 market={market}
@@ -116,12 +111,11 @@ export default function MarketDetailPage({
               className="market-detail-grid"
               data-testid="market-detail-grid"
             >
-              <div
-                className="no-scrollbar market-detail-content"
-              >
+              <div className="no-scrollbar market-detail-content">
                 <ChartSection marketId={marketId} />
                 <EventHoldings marketId={marketId} />
                 <DescriptionBlock market={market} />
+                <EventActivity marketId={marketId} />
               </div>
 
               <MarketRail marketId={marketId} />
@@ -165,22 +159,27 @@ function Header({
     market_icon_url?: string | null;
     event_image_url?: string | null;
     event_icon_url?: string | null;
+    event_id?: string | null;
     polymarket_condition_id?: string | null;
   };
-  /** Opens the place-order modal. Omitted (no button) when the market is closed. */
+  /** Mobile shortcut; desktop ordering stays in the visually vetted rail. */
   onPlaceOrder?: () => void;
 }) {
   const { stats } = useMarketStats(marketId);
   const { primary } = pickDisplayCategory(market.categories, market.category);
-  const resolvesMs = market.market_end_date_ms ?? market.expiry_timestamp_ms ?? null;
+  const resolvesMs =
+    market.market_end_date_ms ?? market.expiry_timestamp_ms ?? null;
   // Provenance (SYB-149): a `polymarket_condition_id` is the mirror linkage
   // (see `isMirror`); its absence means the market was created natively on Sybil.
   const origin = market.polymarket_condition_id != null ? "mirror" : "native";
+  const raw = useEventRaw(market.event_id ?? undefined, !!market.event_id).data;
+  const rawQuestion = market.polymarket_condition_id
+    ? raw?.get(market.polymarket_condition_id)?.question?.trim()
+    : undefined;
+  const title = rawQuestion || market.name;
 
   return (
-    <header
-      className="market-detail-header"
-    >
+    <header className="market-detail-header">
       <MarketThumb
         marketId={market.market_id}
         name={market.name}
@@ -190,9 +189,17 @@ function Header({
         }
         size={56}
       />
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-2)",
+          minWidth: 0,
+        }}
+      >
         {/* Breadcrumb: Markets / ● Category / resolves <date> · status */}
         <div
+          key={marketId}
           className="text-mono"
           style={{
             display: "flex",
@@ -214,7 +221,9 @@ function Header({
           </Link>
           <span style={{ color: "var(--fg-4)" }}>/</span>
           {primary ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
               <span
                 aria-hidden
                 style={{
@@ -240,37 +249,25 @@ function Header({
           <span>{origin}</span>
         </div>
 
-        {/* Title + status pill */}
-        <div
-          className="market-detail-title-row"
-          style={{
-          }}
-        >
+        {/* Ordering lives in the rail; active markets need no redundant badge. */}
+        <div className="market-detail-title-row">
           <h1
+            key={marketId}
             className="market-detail-title"
+            style={{
+              animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
+            }}
           >
-            {market.name}
+            {title}
           </h1>
-          <StatusPill status={market.status} closed={market.closed === true} />
+          {market.closed === true && (
+            <StatusPill status={market.status} closed />
+          )}
           {onPlaceOrder && (
             <button
               type="button"
+              className="market-detail-place-order"
               onClick={onPlaceOrder}
-              style={{
-                marginLeft: "auto",
-                flexShrink: 0,
-                minHeight: 40,
-                padding: "8px 16px",
-                borderRadius: "var(--radius-md)",
-                border: 0,
-                background: "var(--accent)",
-                color: "var(--fg-on-accent)",
-                fontFamily: "var(--font-sans)",
-                fontSize: "var(--fs-13)",
-                fontWeight: 600,
-                letterSpacing: "0.01em",
-                cursor: "pointer",
-              }}
             >
               Place order
             </button>
@@ -287,29 +284,32 @@ function Header({
             gap: "var(--space-4)",
             fontSize: "var(--fs-12)",
             color: "var(--fg-3)",
+            animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
           }}
         >
-          <MetaStat label="vol">
+          <MetaStat label="vol" valueWidth={STAT_W.vol}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
-              {market.volume_nanos ? formatCompactDollars(market.volume_nanos) : "—"}
+              {market.volume_nanos
+                ? formatCompactDollars(market.volume_nanos)
+                : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="24h">
+          <MetaStat label="24h" valueWidth={STAT_W.h24}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatCompactDollars(stats.volume24hNanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="traders">
+          <MetaStat label="traders" valueWidth={STAT_W.traders}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatInt(stats.traders) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="liq">
+          <MetaStat label="liq" valueWidth={STAT_W.liq}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatCompactDollars(stats.liquidityNanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="age">
+          <MetaStat label="age" valueWidth={STAT_W.age}>
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats?.marketAgeMs == null ? "—" : formatAge(stats.marketAgeMs)}
             </span>
@@ -323,14 +323,18 @@ function Header({
 function MetaStat({
   label,
   children,
+  valueWidth,
 }: {
   label: string;
   children: React.ReactNode;
+  valueWidth?: number;
 }) {
   return (
     <span style={{ display: "inline-flex", gap: 6 }}>
       <span style={{ color: "var(--fg-4)" }}>{label}</span>
-      {children}
+      <span style={{ display: "inline-block", minWidth: valueWidth }}>
+        {children}
+      </span>
     </span>
   );
 }
@@ -342,13 +346,7 @@ function MetaStat({
  * as does anything else non-tradeable. `closed` wins over `status` since the
  * backend may still report `status: "active"` for a resolved market.
  */
-function StatusPill({
-  status,
-  closed,
-}: {
-  status: string;
-  closed: boolean;
-}) {
+function StatusPill({ status, closed }: { status: string; closed: boolean }) {
   const isActive = !closed && status === "active";
   const label = closed ? "CLOSED" : (status || "active").toUpperCase();
   const color = isActive ? "var(--yes)" : "var(--warn)";
@@ -460,8 +458,8 @@ function ChartSection({ marketId }: { marketId: number }) {
     return base;
   }, [selectedIds, idSet, defaultIds, marketId]);
 
-  // Only emphasize a single line when there's more than one to distinguish it
-  // from. Binary (area) markets have one line, so highlighting is moot there.
+  // The selected outcome leads and receives the subtle legend treatment; chart
+  // lines themselves remain uniformly weighted.
   const highlightId = group?.isMultiOutcome ? marketId : undefined;
 
   // Fetch history only for the outcomes actually shown (legend caps at 8).
@@ -475,22 +473,9 @@ function ChartSection({ marketId }: { marketId: number }) {
     [outcomes, effectiveSelected],
   );
 
-  // Binary → area. Multi → stacked only for true NegRisk (mutually-exclusive)
-  // events, else overlaid independent lines. Use the real `negRisk` flag from
-  // the Polymarket event JSON (event-wide, so any market's value works); fall
-  // back to the price-sum heuristic only when the event has no /raw snapshot.
-  const rawMarkets = useEventRaw(
-    group?.eventId ?? undefined,
-    !!group?.eventId,
-  ).data;
-  const negRisk = rawMarkets
-    ? [...rawMarkets.values()][0]?.negRisk
-    : undefined;
-  const mode = !group?.isMultiOutcome
-    ? "area"
-    : (negRisk ?? detectStackable(outcomes))
-      ? "stacked"
-      : "lines";
+  // Human-vetted chart treatment: independent uniform lines are easier to
+  // read than stacked NegRisk bands, whose geometry obscured actual prices.
+  const mode = group?.isMultiOutcome ? "lines" : "area";
 
   // Latest committed block is our "now" reference — ticks each batch, so the
   // sliding range window stays current without a Date.now() call in render.
@@ -504,6 +489,17 @@ function ChartSection({ marketId }: { marketId: number }) {
   // live blocks), so a new line just pops in when its history resolves instead
   // of blanking and rebuilding the whole chart.
   const loading = groupPending;
+  const eventTraders = useEventTraders(
+    group?.isMultiOutcome ? (group.eventId ?? undefined) : undefined,
+  ).data;
+  const eventVolumeNanos = useMemo(
+    () => outcomes.reduce((sum, outcome) => sum + (outcome.volumeNanos ?? 0n), 0n),
+    [outcomes],
+  );
+  const eventVolume24hNanos = useMemo(
+    () => outcomes.reduce((sum, outcome) => sum + outcome.volume24hNanos, 0n),
+    [outcomes],
+  );
 
   return (
     <section
@@ -518,11 +514,7 @@ function ChartSection({ marketId }: { marketId: number }) {
         gap: "var(--space-3)",
       }}
     >
-      <div
-        className="market-detail-chart-head"
-        style={{
-        }}
-      >
+      <div className="market-detail-chart-head" style={{}}>
         {outcomes.length > 0 ? (
           <div
             style={{
@@ -551,7 +543,7 @@ function ChartSection({ marketId }: { marketId: number }) {
             />
           </div>
         ) : (
-          <div className="eyebrow">{"// yes probability"}</div>
+          <div className="eyebrow">yes probability</div>
         )}
         <div style={{ flexShrink: 0 }}>
           <ChartRangeBar value={range} onChange={setRange} />
@@ -584,11 +576,41 @@ function ChartSection({ marketId }: { marketId: number }) {
             mode={mode}
             sinceMs={sinceMs}
             nowMs={nowMs}
-            highlightId={highlightId}
             historyPending={history.isPending}
             historyUnavailable={history.unavailableCount > 0}
           />
         </>
+      )}
+
+      {!loading && group?.isMultiOutcome && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "var(--space-4)",
+            paddingTop: "var(--space-3)",
+            borderTop: "1px solid var(--border-1)",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--fs-12)",
+            color: "var(--fg-3)",
+          }}
+        >
+          <MetaStat label="event vol">
+            <span className="tabular" style={{ color: "var(--fg-2)" }}>
+              {formatCompactDollars(eventVolumeNanos)}
+            </span>
+          </MetaStat>
+          <MetaStat label="24h vol">
+            <span className="tabular" style={{ color: "var(--fg-2)" }}>
+              {formatCompactDollars(eventVolume24hNanos)}
+            </span>
+          </MetaStat>
+          <MetaStat label="traders">
+            <span className="tabular" style={{ color: "var(--fg-2)" }}>
+              {eventTraders != null ? formatInt(eventTraders) : "—"}
+            </span>
+          </MetaStat>
+        </div>
       )}
     </section>
   );
@@ -627,7 +649,9 @@ function DescriptionBlock({
   // Native markets (SYB-149/151) point `external_url` at the resolution source,
   // so name it as such; for mirrors the link is the upstream Gamma source page.
   const sourceLabel =
-    market.polymarket_condition_id != null ? "source link" : "resolution source";
+    market.polymarket_condition_id != null
+      ? "source link"
+      : "resolution source";
 
   return (
     <section
@@ -645,7 +669,7 @@ function DescriptionBlock({
       {description && (
         <div>
           <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-            {"// description"}
+            description
           </div>
           <p
             style={{
@@ -663,7 +687,7 @@ function DescriptionBlock({
       {resolutionCriteria && (
         <div>
           <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-            {"// resolution"}
+            resolution
           </div>
           <p
             style={{
@@ -680,7 +704,7 @@ function DescriptionBlock({
       )}
       <div>
         <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-          {"// " + sourceLabel}
+          {sourceLabel}
         </div>
         {sourceUrl ? (
           <a
@@ -806,7 +830,13 @@ function MarketNotFound({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function Placeholder({ children, error }: { children: React.ReactNode; error?: boolean }) {
+function Placeholder({
+  children,
+  error,
+}: {
+  children: React.ReactNode;
+  error?: boolean;
+}) {
   return (
     <div
       className="text-mono"

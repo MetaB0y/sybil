@@ -12,7 +12,12 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
+import { MockValue } from "@/components/mock-value";
+import {
+  Pager,
+  usePaged,
+  PORTFOLIO_PAGE_SIZE,
+} from "@/components/event-list-pager";
 import {
   CATEGORY_OF,
   type HistoryCategory,
@@ -20,12 +25,12 @@ import {
   type HistoryEventType,
 } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
-import { notionalNanosCeil } from "@/lib/account/quantity";
+import { formatShareUnits, notionalNanosCeil } from "@/lib/account/quantity";
 import type { components } from "@/lib/api/schema";
 import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
-import { SidePill } from "./side-pill";
+import { SidePill, valueChipStyle } from "./side-pill";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -33,6 +38,9 @@ interface Props {
   tabs: React.ReactNode;
   events: HistoryEvent[];
   marketsById: Map<number, Market>;
+  /** market_id → natural question title (see `portfolio/page.tsx`). */
+  titleByMarket: Map<number, string>;
+  isMock?: boolean;
 }
 
 const CHIPS: { id: HistoryCategory; label: string }[] = [
@@ -85,7 +93,12 @@ function nextSort(prev: Sort | null, key: SortKey): Sort {
   if (prev && prev.key === key) {
     return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
   }
-  const numeric = key === "qty" || key === "price" || key === "amount" || key === "block" || key === "time";
+  const numeric =
+    key === "qty" ||
+    key === "price" ||
+    key === "amount" ||
+    key === "block" ||
+    key === "time";
   return { key, dir: numeric ? "desc" : "asc" };
 }
 
@@ -130,7 +143,13 @@ function compareBy(a: HistoryRow, b: HistoryRow, key: SortKey): number {
   }
 }
 
-export function HistoryFeed({ tabs, events, marketsById }: Props) {
+export function HistoryFeed({
+  tabs,
+  events,
+  marketsById,
+  titleByMarket,
+  isMock,
+}: Props) {
   const [category, setCategory] = useState<HistoryCategory>("all");
   const [type, setType] = useState<HistoryEventType | "all">("all");
   const [marketId, setMarketId] = useState<number | "all">("all");
@@ -143,13 +162,18 @@ export function HistoryFeed({ tabs, events, marketsById }: Props) {
     const ids = new Map<number, string>();
     for (const e of events) {
       if (e.marketId != null && !ids.has(e.marketId)) {
-        ids.set(e.marketId, marketsById.get(e.marketId)?.name ?? `#${e.marketId}`);
+        ids.set(
+          e.marketId,
+          titleByMarket.get(e.marketId) ??
+            marketsById.get(e.marketId)?.name ??
+            `#${e.marketId}`,
+        );
       }
     }
     return [...ids.entries()]
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [events, marketsById]);
+  }, [events, marketsById, titleByMarket]);
 
   const rows = useMemo<HistoryRow[]>(() => {
     const q = query.trim().toLowerCase();
@@ -164,18 +188,34 @@ export function HistoryFeed({ tabs, events, marketsById }: Props) {
       event: e,
       marketName:
         e.marketId != null
-          ? marketsById.get(e.marketId)?.name ?? `#${e.marketId}`
+          ? (titleByMarket.get(e.marketId) ??
+            marketsById.get(e.marketId)?.name ??
+            `#${e.marketId}`)
           : "",
     }));
     if (q) {
-      decorated = decorated.filter((r) => r.marketName.toLowerCase().includes(q));
+      decorated = decorated.filter((r) =>
+        r.marketName.toLowerCase().includes(q),
+      );
     }
     if (!sort) {
-      return decorated.sort((a, b) => b.event.timestampMs - a.event.timestampMs);
+      return decorated.sort(
+        (a, b) => b.event.timestampMs - a.event.timestampMs,
+      );
     }
     const factor = sort.dir === "asc" ? 1 : -1;
     return decorated.sort((a, b) => compareBy(a, b, sort.key) * factor);
-  }, [events, marketsById, category, type, marketId, side, query, sort]);
+  }, [
+    events,
+    marketsById,
+    titleByMarket,
+    category,
+    type,
+    marketId,
+    side,
+    query,
+    sort,
+  ]);
 
   const paged = usePaged(rows, PORTFOLIO_PAGE_SIZE);
 
@@ -186,7 +226,13 @@ export function HistoryFeed({ tabs, events, marketsById }: Props) {
 
   const noData = events.length === 0;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-3)",
+      }}
+    >
       {/* Tabs + controls share one row. Controls (search + category chips +
           type / market / side dropdowns) only show once there's history. */}
       <PortfolioToolbar
@@ -203,6 +249,16 @@ export function HistoryFeed({ tabs, events, marketsById }: Props) {
           )
         }
       >
+        {isMock && (
+          <span>
+            <MockValue
+              hint="history feed is mocked; pending backend /events endpoint (per-account event log)"
+              variant="pill"
+            >
+              {" "}
+            </MockValue>
+          </span>
+        )}
         {!noData && (
           <div style={{ display: "flex", gap: 6 }}>
             {CHIPS.map((c) => (
@@ -227,7 +283,10 @@ export function HistoryFeed({ tabs, events, marketsById }: Props) {
                 setType(v as HistoryEventType | "all");
                 paged.setPage(0);
               }}
-              options={TYPE_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
+              options={TYPE_OPTIONS.map((o) => ({
+                value: String(o.value),
+                label: o.label,
+              }))}
             />
             <FilterDropdown
               ariaLabel="Filter by market"
@@ -238,7 +297,10 @@ export function HistoryFeed({ tabs, events, marketsById }: Props) {
               }}
               options={[
                 { value: "all", label: "All markets" },
-                ...marketOptions.map((m) => ({ value: String(m.id), label: m.name })),
+                ...marketOptions.map((m) => ({
+                  value: String(m.id),
+                  label: m.name,
+                })),
               ]}
             />
             <FilterDropdown
@@ -306,13 +368,16 @@ function EventRow({ row }: { row: HistoryRow }) {
           fontFamily: "var(--font-sans)",
           fontSize: 13,
         }}
-        title={marketName || undefined}
       >
         {marketName || "—"}
       </span>
       <ActionCell side={event.side} />
-      <span>{event.outcome ? <SidePill outcome={event.outcome} /> : <Muted>—</Muted>}</span>
-      <RightCell mono>{event.qty ?? "—"}</RightCell>
+      {event.outcome ? <SidePill outcome={event.outcome} /> : <Muted>—</Muted>}
+      {/* `qty` is in SHARE_SCALE units (1000 = 1 share) — printing it raw showed
+          a 12.5-share fill as "12500". */}
+      <RightCell mono>
+        {event.qty == null ? "—" : formatShareUnits(event.qty)}
+      </RightCell>
       <RightCell mono>{priceLabel(event)}</RightCell>
       <AmountCell event={event} />
       <RightCell mono>
@@ -372,7 +437,11 @@ function priceLabel(event: HistoryEvent): React.ReactNode {
 
 function AmountCell({ event }: { event: HistoryEvent }) {
   const bold = ["deposit", "withdrawal", "partial_fill", "filled", "resolved"];
-  if (event.amountNanos != null && event.amountNanos !== 0n && bold.includes(event.type)) {
+  if (
+    event.amountNanos != null &&
+    event.amountNanos !== 0n &&
+    bold.includes(event.type)
+  ) {
     const positive = event.amountNanos > 0n;
     return (
       <RightCell mono>
@@ -383,11 +452,15 @@ function AmountCell({ event }: { event: HistoryEvent }) {
     );
   }
   // placed (reserved margin) / cancelled / expired / created → muted reserve or —
-  if (event.type === "placed" && event.priceNanos != null && event.qty != null) {
+  if (
+    event.type === "placed" &&
+    event.priceNanos != null &&
+    event.qty != null
+  ) {
     const reserved = notionalNanosCeil(event.priceNanos, event.qty);
     return (
       <RightCell mono>
-        <span style={{ color: "var(--fg-4)" }} title="reserved margin">
+        <span style={{ color: "var(--fg-4)" }}>
           {formatDollars(reserved, { decimals: 2 })}
         </span>
       </RightCell>
@@ -400,30 +473,31 @@ function AmountCell({ event }: { event: HistoryEvent }) {
   );
 }
 
-/** Date over wall-clock time, like the closed-orders close stamp. */
+/** Wall-clock time then a faded short date, on one line — the same stamp the
+ *  market-detail closed-orders list uses. Full timestamp on hover. */
 function TimeCell({ ms }: { ms: number }) {
   const d = new Date(ms);
-  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const date = d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
   return (
     <span
+      title={d.toLocaleString()}
       style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        gap: 1,
         fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        color: "var(--fg-2)",
+        whiteSpace: "nowrap",
       }}
     >
-      <span style={{ fontSize: 11, color: "var(--fg-2)" }}>{date}</span>
-      <span
-        style={{
-          fontSize: 9.5,
-          color: "var(--fg-4)",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {time}
-      </span>
+      {time}
+      <span style={{ color: "var(--fg-4)" }}>{` ${date}`}</span>
     </span>
   );
 }
@@ -437,8 +511,14 @@ function TypeBadge({
 }) {
   const { label, tone } = badgeMeta(type, side);
   const palette: Record<string, { fg: string; bg: string }> = {
-    yes: { fg: "var(--yes)", bg: "color-mix(in srgb, var(--yes) 14%, transparent)" },
-    no: { fg: "var(--no)", bg: "color-mix(in srgb, var(--no) 14%, transparent)" },
+    yes: {
+      fg: "var(--yes)",
+      bg: "color-mix(in srgb, var(--yes) 14%, transparent)",
+    },
+    no: {
+      fg: "var(--no)",
+      bg: "color-mix(in srgb, var(--no) 14%, transparent)",
+    },
     accent: {
       fg: "var(--accent)",
       bg: "color-mix(in srgb, var(--accent) 14%, transparent)",
@@ -446,19 +526,12 @@ function TypeBadge({
     muted: { fg: "var(--fg-3)", bg: "var(--fill-subtle)" },
   };
   const c = palette[tone]!;
+  // Same chip as the side pill / status badge (regular weight), left-aligned.
   return (
     <span
       style={{
+        ...valueChipStyle({ color: c.fg, bg: c.bg }),
         justifySelf: "start",
-        padding: "1px 7px",
-        background: c.bg,
-        color: c.fg,
-        borderRadius: 3,
-        fontFamily: "var(--font-mono)",
-        fontSize: 9.5,
-        fontWeight: 600,
-        letterSpacing: "var(--track-wide)",
-        whiteSpace: "nowrap",
       }}
     >
       {label}
@@ -508,7 +581,6 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(col.key)}
-      title={`Sort by ${col.label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -558,7 +630,8 @@ function Chip({
         padding: "4px 12px",
         background: active ? "var(--accent)" : "transparent",
         border: active ? 0 : "1px solid var(--border-1)",
-        borderRadius: 999,
+        // Rectangular (radius-sm) to match the markets filter buttons, not a pill.
+        borderRadius: "var(--radius-sm)",
         color: active ? "var(--bg-1)" : "var(--fg-3)",
         fontFamily: "var(--font-mono)",
         fontSize: 11,
@@ -575,8 +648,9 @@ function Chip({
 function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
+    // Time is 96px: it holds "14:42 Jul 10" on one line rather than stacked.
     gridTemplateColumns:
-      "64px 84px minmax(0, 1fr) 52px 44px 50px 56px 92px 84px",
+      "96px 84px minmax(0, 1fr) 52px 44px 56px 56px 92px 84px",
     gap: 10,
     alignItems: "center",
     padding: "9px 14px",
@@ -587,7 +661,13 @@ function rowGrid(color: string): React.CSSProperties {
   };
 }
 
-function RightCell({ children, mono }: { children: React.ReactNode; mono?: boolean }) {
+function RightCell({
+  children,
+  mono,
+}: {
+  children: React.ReactNode;
+  mono?: boolean;
+}) {
   return (
     <span
       style={{

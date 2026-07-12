@@ -54,6 +54,16 @@ describe("humanizeOrderError", () => {
     expect(humanizeOrderError(raw, "order")).not.toMatch(/HTTP|nonce|replay/);
   });
 
+  it("tells a complete-set rejection what to cancel, not just that it failed", () => {
+    const raw = new Error(
+      "submit_signed failed (HTTP 400): order 692574 rejected: CompleteSetFormation",
+    );
+    const out = humanizeOrderError(raw, "bet");
+    expect(out).toMatch(/cover the other outcomes/i);
+    expect(out).toMatch(/cancel one/i);
+    expect(out).not.toMatch(/CompleteSetFormation|HTTP/);
+  });
+
   it("falls back to a generic line and never echoes the raw string", () => {
     const raw = new Error(
       "submit_signed failed (HTTP 500): kaboom internal panic",

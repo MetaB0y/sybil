@@ -20,6 +20,7 @@ export function DataTable({
       }}
     >
       <table
+        className="dev-data-table"
         style={{
           width: "100%",
           borderCollapse: "collapse",

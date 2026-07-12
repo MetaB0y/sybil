@@ -14,6 +14,10 @@ export interface DegenProgressProps {
   targetQty: bigint;
   /** The dollar amount the user bet (the full intended stake). */
   betUsd: number;
+  /** Volume-weighted average fill price (nanos), or null before any priced
+   *  fill. With `filledQty` this yields the ACTUAL dollars spent — usually below
+   *  the nominal stake because the batch clears at a better price than the limit. */
+  avgPriceNanos?: bigint | null;
   onBetAgain: () => void;
   /** Cancel the in-flight bet (tracking phase only). Omit to hide the control. */
   onCancel?: () => void;
@@ -29,6 +33,34 @@ function money(n: number): string {
 }
 
 export function DegenProgress(props: DegenProgressProps) {
+  // Dollar value filled so far — the filled fraction of the intended stake,
+  // rounded to cents to avoid float dust. Drives both the live "placing"
+  // readout and the partial-fill result line below.
+  const filledUsd =
+    props.targetQty > 0n
+      ? Math.round(
+          ((props.betUsd * Number(props.filledQty)) / Number(props.targetQty)) *
+            100,
+        ) / 100
+      : 0;
+
+  // What the user ACTUALLY spent = filled shares × the average price they really
+  // got (usually below their limit, so below the nominal stake). `filledQty` is
+  // in share-units (1000 = 1 share); `avgPriceNanos` is a per-share price in
+  // nanos (1e9 = $1). Falls back to the nominal proportional before any priced
+  // fill. `savedUsd` is the welfare — what the better-than-limit clear saved.
+  const actualUsd =
+    props.avgPriceNanos != null &&
+    props.avgPriceNanos > 0n &&
+    props.filledQty > 0n
+      ? Math.round(
+          (Number(props.filledQty) / 1000) *
+            (Number(props.avgPriceNanos) / 1e9) *
+            100,
+        ) / 100
+      : filledUsd;
+  const savedUsd = Math.max(0, Math.round((filledUsd - actualUsd) * 100) / 100);
+
   if (props.phase === "tracking") {
     return (
       <div style={cardStyle}>
@@ -46,9 +78,17 @@ export function DegenProgress(props: DegenProgressProps) {
             }}
           />
         </div>
+        {/* One number the eye can land on — how much of the stake has gone in —
+            then the share target as a quiet aside. The old "$0 / $10 · 0 / 15.11
+            shares" read as two competing fractions; this reads as a sentence. */}
         <div style={monoStyle}>
-          {formatShareUnits(props.filledQty)} /{" "}
-          {formatShareUnits(props.targetQty)} shares bought
+          <span style={{ color: "var(--fg-1)", fontWeight: 600 }}>
+            {money(actualUsd)}
+          </span>
+          {` of ${money(props.betUsd)} in`}
+          <span style={{ color: "var(--fg-4)" }}>
+            {`  ·  ${formatShareUnits(props.targetQty)} shares`}
+          </span>
         </div>
         {props.onCancel && (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -56,11 +96,6 @@ export function DegenProgress(props: DegenProgressProps) {
               type="button"
               onClick={props.onCancel}
               disabled={!props.canCancel || props.cancelling}
-              title={
-                props.canCancel
-                  ? "Cancel this bet"
-                  : "Cancel unlocks the moment your order registers (about a second)."
-              }
               style={{
                 ...cancelStyle,
                 cursor:
@@ -84,16 +119,7 @@ export function DegenProgress(props: DegenProgressProps) {
     );
   }
 
-  // Partial fill: the filled portion of the intended stake, proportional to
-  // shares filled (rounded to cents to avoid float dust).
-  const filledUsd =
-    props.targetQty > 0n
-      ? Math.round(
-          ((props.betUsd * Number(props.filledQty)) / Number(props.targetQty)) *
-            100,
-        ) / 100
-      : 0;
-  // Success (full or partial fill) always reads green; an expiry reads red
+  // Success (full or partial fill) always reads green; a miss always reads red
   // — independent of whether the user bet YES or NO, so the colour signals
   // outcome, not side. A user-initiated cancel is neither win nor loss, so it
   // reads neutral rather than red.
@@ -106,9 +132,9 @@ export function DegenProgress(props: DegenProgressProps) {
       : "var(--no)";
   const result =
     props.phase === "filled"
-      ? `Successfully bet ${money(props.betUsd)} on ${props.side}!`
+      ? `Successfully bet ${money(actualUsd)} on ${props.side}!`
       : props.phase === "partial"
-        ? `◐ Partly matched: ${money(filledUsd)} of ${money(props.betUsd)} on ${props.side}. The rest is back in your balance.`
+        ? `◐ Partly matched: bet ${money(actualUsd)} of ${money(props.betUsd)} on ${props.side} — the rest is back in your balance.`
         : cancelled
           ? `Bet cancelled.`
           : `No match within ~2 min — your funds are back in your balance. Try again.`;
@@ -126,6 +152,11 @@ export function DegenProgress(props: DegenProgressProps) {
           {result}
         </span>
       </div>
+      {success && savedUsd >= 0.01 && (
+        <div style={{ ...monoStyle, color: "var(--fg-3)" }}>
+          {`better price · saved ${money(savedUsd)}`}
+        </div>
+      )}
       <button type="button" onClick={props.onBetAgain} style={betAgainStyle}>
         Bet again
       </button>

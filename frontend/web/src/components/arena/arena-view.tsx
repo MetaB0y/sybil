@@ -39,18 +39,6 @@ import { useActivityOverview } from "@/lib/activity/use-activity-overview";
 import { formatCompactDollars, formatCompactDollarsCents } from "@/lib/format/nanos";
 import { useDevRecentBlocks } from "@/lib/dev/use-recent-blocks";
 
-const controlStyle: CSSProperties = {
-  border: "1px solid var(--border-2)",
-  background: "var(--surface-1)",
-  color: "var(--fg-1)",
-  borderRadius: 6,
-  minHeight: 40,
-  padding: "7px 9px",
-  fontFamily: "inherit",
-  fontSize: 12,
-  minWidth: 180,
-};
-
 const truncCell: CSSProperties = {
   padding: "7px 9px",
   borderBottom: "1px solid var(--border-2)",
@@ -527,6 +515,7 @@ function DataTable({
       }}
     >
       <table
+        className="arena-data-table"
         style={{
           width: "100%",
           borderCollapse: "collapse",
@@ -1068,7 +1057,8 @@ function FvDriftPanel({
               label="Filter fair value drift by bot"
               value={trader}
               onChange={(event) => onSelectTrader(event.target.value)}
-              style={{ ...controlStyle, minWidth: 160 }}
+              className="arena-select"
+              style={{ minWidth: 160 }}
             >
               {traderNames.length === 0 ? (
                 <option value="">No bots</option>
@@ -1083,7 +1073,8 @@ function FvDriftPanel({
               label="Select fair value drift market"
               value={selectedMarketId}
               onChange={(event) => onSelectMarketId(event.target.value)}
-              style={{ ...controlStyle, minWidth: 190 }}
+              className="arena-select"
+              style={{ minWidth: 190 }}
             >
               {marketOptions.length === 0 ? (
                 <option value="">No markets</option>
@@ -1169,23 +1160,9 @@ function BotRosterPanel({
               <button
                 key={bot.trader_name}
                 type="button"
+                className="arena-bot-card"
+                data-active={active}
                 onClick={() => onSelectTrader(active ? "" : bot.trader_name)}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                  minHeight: 40,
-                  padding: 14,
-                  textAlign: "left",
-                  borderRadius: "var(--radius-lg)",
-                  border: `1px solid ${active ? "var(--accent)" : "var(--border-1)"}`,
-                  background: active
-                    ? "color-mix(in srgb, var(--accent) 9%, var(--surface-1))"
-                    : "var(--surface-1)",
-                  color: "var(--fg-1)",
-                  cursor: "pointer",
-                  boxShadow: "var(--shadow-inset-top)",
-                }}
               >
                 <div
                   style={{
@@ -1771,7 +1748,7 @@ function DecisionsPanel({
             label="Filter recent decisions by bot"
             value={selectedTrader}
             onChange={(event) => onSelectTrader(event.target.value)}
-            style={controlStyle}
+            className="arena-select"
           >
             <option value="">All bots</option>
             {traderNames.map((name) => (

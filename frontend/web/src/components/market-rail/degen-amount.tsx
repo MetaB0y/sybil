@@ -104,13 +104,7 @@ export function DegenAmount({
         }}
       >
         {availableDollars != null && (
-          <span
-            title={
-              reservedDollars > 0
-                ? `$${reservedDollars.toFixed(2)} reserved by your open orders`
-                : undefined
-            }
-          >
+          <span>
             available ${availableDollars.toFixed(2)}
             {reservedDollars > 0 && (
               <span style={{ opacity: 0.7 }}>
@@ -155,11 +149,6 @@ export function DegenAmount({
           onClick={() => {
             if (availableDollars != null) setAmount(availableDollars.toFixed(2));
           }}
-          title={
-            availableDollars == null
-              ? "Connect to bet your full balance"
-              : "Bet your full available balance"
-          }
           style={{
             minHeight: 40,
             padding: "8px 0",

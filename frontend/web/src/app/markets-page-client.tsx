@@ -13,7 +13,6 @@ import {
 import { useMarketsIndex, type IndexMarket } from "@/lib/markets/use-markets";
 import { useEventTradersMap } from "@/lib/markets/use-event-traders";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
-import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 import { selectIndexCards } from "@/lib/markets/select-index-cards";
 import { buildIndexCards } from "@/lib/markets/build-index-cards";
 
@@ -108,7 +107,7 @@ function MarketsPageInner({
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // Header counts — same "{markets} markets · {events} events" shape whether or
+  // Header counts — same "{events} events · {markets} markets" shape whether or
   // not a filter is active. Derived from `filtered` (≡ all cards when nothing
   // is filtered), so picking a category just narrows both numbers instead of
   // switching to a different "N of M cards" wording. Summing markets per card
@@ -155,10 +154,19 @@ function MarketsPageInner({
           >
             All markets
           </h1>
-          <p className="text-annotation">
+          <p
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--fs-13)",
+              lineHeight: "var(--lh-18)",
+              color: "var(--fg-3)",
+              fontVariantNumeric: "tabular-nums",
+              margin: 0,
+            }}
+          >
             {bundle == null
               ? "loading…"
-              : `${shownMarkets} markets · ${shownEvents} events · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
+              : `${shownEvents} events · ${shownMarkets} markets`}
           </p>
         </header>
 

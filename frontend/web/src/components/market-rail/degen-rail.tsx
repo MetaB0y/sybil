@@ -8,6 +8,11 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  completeSetReason,
+  findCompleteSetBlockers,
+  type OrderSideName,
+} from "@/lib/account/complete-set";
 import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
 import {
   humanizeCancelError,
@@ -19,6 +24,7 @@ import {
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
 import type { AccountEvent } from "@/lib/account/use-account-events";
+import { useAccountOrders } from "@/lib/account/use-account-orders";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
 import {
   ONE_DOLLAR_NANOS,
@@ -34,6 +40,7 @@ import type { PendingOrder } from "@/lib/markets/use-pending-orders";
 import { ResearchNudge } from "./research-nudge";
 import { parseNanos } from "@/lib/format/nanos";
 import type { EventGroup } from "@/lib/market-detail/use-event-group";
+import { useGroupMarkets } from "@/lib/markets/use-market-groups";
 import { usePriceHistory } from "@/lib/markets/use-price-history";
 import {
   selectLatestBlockAnchor,
@@ -86,6 +93,7 @@ export function DegenRail({
     reservedNanos,
     isPending: balancePending,
   } = useAvailableBalance(session?.accountId ?? null);
+  const { data: openOrders } = useAccountOrders(session?.accountId ?? null);
   const availableDollars =
     availableNanos == null ? null : Number(availableNanos) / 1e9;
   const reservedDollars = Number(reservedNanos) / 1e9;
@@ -93,6 +101,7 @@ export function DegenRail({
   const selected =
     group.outcomes.find((o) => o.marketId === group.currentMarketId) ??
     group.outcomes[0];
+  const groupMarkets = useGroupMarkets(selected?.marketId ?? null);
 
   const { data: pricePoints } = usePriceHistory(selected?.marketId ?? -1);
   const tracking = useDegenBetTracker(active);
@@ -126,6 +135,29 @@ export function DegenRail({
 
   if (!selected) return null;
 
+  const connected = session !== null;
+  const orderSide: OrderSideName = side === "YES" ? "BuyYes" : "BuyNo";
+  const completeSetBlockers = connected
+    ? findCompleteSetBlockers({
+        groupMarkets,
+        restingOrders: openOrders ?? [],
+        marketId: selected.marketId,
+        side: orderSide,
+      })
+    : null;
+  const completeSetBlocked =
+    completeSetBlockers != null && completeSetBlockers.length > 0;
+  const completeSetReasonText = completeSetBlocked
+    ? completeSetReason(
+        completeSetBlockers,
+        orderSide,
+        selected.marketId,
+        (marketId) =>
+          group.outcomes.find((outcome) => outcome.marketId === marketId)
+            ?.shortLabel ?? null,
+      )
+    : null;
+
   async function onBet() {
     if (!session) {
       openConnectModal(true);
@@ -134,7 +166,8 @@ export function DegenRail({
     if (availableNanos == null) return;
     // selected is narrowed to non-undefined by the early return above, but
     // TypeScript can't see across the function boundary — guard here too.
-    if (!selected || !built?.ok || latestHeight == null) return;
+    if (!selected || !built?.ok || latestHeight == null || completeSetBlocked)
+      return;
     // Freeze the open batch's block-clock anchor so the progress card shows ONE
     // countdown to the next batch clear (the live current-batch timeline).
     // Carried in DegenActive so it survives a Degen↔Pro toggle.
@@ -260,7 +293,6 @@ export function DegenRail({
     }
   }
 
-  const connected = session !== null;
   // A never-traded market has no clearing price and no price history — the mark
   // then falls back to a neutral 50¢, which we must NOT present as a real quote.
   // Surface it as a "seed the book" state instead of a fabricated payout.
@@ -287,7 +319,9 @@ export function DegenRail({
     insufficient,
   });
   const ctaLabel =
-    ctaState === "connect"
+    ctaState === "ready" && completeSetBlocked
+      ? "Cancel your open order first"
+      : ctaState === "connect"
       ? "Connect to bet"
       : ctaState === "waiting_batch"
         ? "Waiting for latest batch…"
@@ -302,7 +336,8 @@ export function DegenRail({
                 : ctaState === "insufficient"
                   ? "Not enough funds"
                   : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
-  const ctaDisabled = ctaState !== "connect" && ctaState !== "ready";
+  const ctaDisabled =
+    (ctaState !== "connect" && ctaState !== "ready") || completeSetBlocked;
 
   // Explainer slot below the form/progress area:
   //  - while a bet is in flight ("tracking"): a compact WaitingAlert with the
@@ -393,6 +428,21 @@ export function DegenRail({
           >
             {ctaLabel}
           </button>
+
+          {completeSetReasonText && !submitError && (
+            <div
+              role="status"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                lineHeight: "16px",
+                color: "var(--fg-3)",
+                textAlign: "center",
+              }}
+            >
+              {completeSetReasonText}
+            </div>
+          )}
 
           {submitError && (
             <div

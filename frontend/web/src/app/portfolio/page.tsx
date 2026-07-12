@@ -52,6 +52,7 @@ import {
 import { usePnlSplit } from "@/lib/account/use-pnl-split";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import { parseNanos } from "@/lib/format/nanos";
+import { useEventQuestions } from "@/lib/markets/use-event-raw";
 import { useMarketsList } from "@/lib/markets/use-markets";
 
 const FILLS_PAGE = 200;
@@ -103,7 +104,7 @@ function Connected({
   const markets = useMarketsList();
 
   const fillsData = fills.data ?? [];
-  const ordersData = orders.data ?? [];
+  const ordersData = useMemo(() => orders.data ?? [], [orders.data]);
   const portfolioData = portfolio.data ?? null;
   const pnlSplit = usePnlSplit(portfolioData);
 
@@ -112,6 +113,42 @@ function Connected({
     [markets.bundle],
   );
   const history = useAccountHistory(accountId);
+
+  const touchedMarketIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const position of portfolioData?.positions ?? []) {
+      ids.add(position.market_id);
+    }
+    for (const order of ordersData) ids.add(order.market_id);
+    for (const event of history.events) {
+      if (event.marketId != null) ids.add(event.marketId);
+    }
+    return ids;
+  }, [portfolioData, ordersData, history.events]);
+
+  const eventIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const marketId of touchedMarketIds) {
+      const market = marketsById.get(marketId);
+      if (market?.event_id && market.polymarket_condition_id) {
+        ids.add(market.event_id);
+      }
+    }
+    return [...ids];
+  }, [touchedMarketIds, marketsById]);
+
+  const questionByCondition = useEventQuestions(eventIds);
+  const titleByMarket = useMemo(() => {
+    const titles = new Map<number, string>();
+    for (const marketId of touchedMarketIds) {
+      const market = marketsById.get(marketId);
+      const question = market?.polymarket_condition_id
+        ? questionByCondition.get(market.polymarket_condition_id)
+        : undefined;
+      titles.set(marketId, question ?? market?.name ?? `#${marketId}`);
+    }
+    return titles;
+  }, [touchedMarketIds, marketsById, questionByCondition]);
 
   const [range, setRange] = useState<EquityRange>("ALL");
   const [tab, setTab] = useState<PortfolioTab>("positions");
@@ -222,8 +259,6 @@ function Connected({
           portfolio={portfolioData}
           pnlSplit={pnlSplit}
           curve={curve}
-          tradeCount={tradesCount}
-          tradeCountCapped={history.hasMore}
           rangeLabel={RANGE_COPY[range]}
         />
 
@@ -245,6 +280,7 @@ function Connected({
           positions={portfolioData?.positions ?? []}
           fills={fillsData}
           marketsById={marketsById}
+          titleByMarket={titleByMarket}
         />
       )}
       {tab === "orders" && (
@@ -255,6 +291,7 @@ function Connected({
           orders={ordersData}
           fillsByOrder={fillsByOrder}
           marketsById={marketsById}
+          titleByMarket={titleByMarket}
         />
       )}
       {tab === "trades" && (
@@ -262,6 +299,7 @@ function Connected({
           tabs={tabsStrip}
           events={history.events}
           marketsById={marketsById}
+          titleByMarket={titleByMarket}
         />
       )}
       {tab === "pnl" && (
@@ -272,6 +310,7 @@ function Connected({
           tabs={tabsStrip}
           events={history.events}
           marketsById={marketsById}
+          titleByMarket={titleByMarket}
         />
       )}
     </>

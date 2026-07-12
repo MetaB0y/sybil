@@ -95,7 +95,7 @@ export function WaitingAlert() {
           flexShrink: 0,
         }}
       >
-        ⓘ
+        ?
       </button>
       {open && (
         <div

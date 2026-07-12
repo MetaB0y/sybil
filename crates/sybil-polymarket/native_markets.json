@@ -1,266 +1,1890 @@
 {
-  "description": "Native Sybil AI benchmark market catalog (SYB-151). Entries are research-backed (2026-07-06 snapshot, see docs in the Linear ticket): every source access path was exercised live; resolution criteria are frontend-displayable and name the binding source, read time, tie-breaks, and discontinuation handling. openrouter_top_app_dec_2026 ships disabled until its outcome set is refreshed against the live apps board.",
+  "description": "CANDIDATE native Sybil market catalog (rev 3, 2026-07-11). EXTENDED schema (threshold ladders + images; see SCHEMA-PATCH.md). Trimmed from 33->25 templates; subscription-price markets dropped (API-cost theme); Anthropic flagship = Fable 5; company markets capped to top-4 + Other; images via Google favicon service.",
   "markets": [
     {
-      "id": "aa_intelligence_leader_2026",
+      "id": "aa_intelligence_leader_eoy2026",
       "enabled": true,
-      "title": "Which company will lead the Artificial Analysis Intelligence Index at end of 2026?",
+      "title": "Which company has the top model on the Artificial Analysis Intelligence Index at end of 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
-            "id": "anthropic",
+            "id": "aa_intelligence_leader_eoy2026_anthropic",
             "title": "Anthropic",
             "enabled": true,
-            "quote_range": { "min": 0.45, "max": 0.80, "initial": 0.62 }
+            "quote_range": {
+              "min": 0.25,
+              "max": 0.62,
+              "initial": 0.4
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
           },
           {
-            "id": "openai",
+            "id": "aa_intelligence_leader_eoy2026_openai",
             "title": "OpenAI",
             "enabled": true,
-            "quote_range": { "min": 0.08, "max": 0.40, "initial": 0.20 }
+            "quote_range": {
+              "min": 0.22,
+              "max": 0.58,
+              "initial": 0.36
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
           },
           {
-            "id": "google",
+            "id": "aa_intelligence_leader_eoy2026_google",
             "title": "Google",
             "enabled": true,
-            "quote_range": { "min": 0.04, "max": 0.25, "initial": 0.10 }
+            "quote_range": {
+              "min": 0.03,
+              "max": 0.3,
+              "initial": 0.09
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
           },
           {
-            "id": "z_ai",
-            "title": "Z AI",
+            "id": "aa_intelligence_leader_eoy2026_xai",
+            "title": "xAI",
             "enabled": true,
-            "quote_range": { "min": 0.02, "max": 0.12, "initial": 0.03 }
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.2,
+              "initial": 0.04
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=x.ai&sz=128"
           },
           {
-            "id": "other",
+            "id": "aa_intelligence_leader_eoy2026_other",
             "title": "Other",
             "enabled": true,
-            "quote_range": { "min": 0.02, "max": 0.20, "initial": 0.05 }
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.05
+            }
           }
         ]
       },
       "units": "probability",
       "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Resolves to the AI provider whose model occupies rank #1 on the Artificial Analysis 'Intelligence Index' leaderboard at https://artificialanalysis.ai/leaderboards/models as read at 2026-12-31 23:59 UTC. Attribution is to the model's provider organization (any Claude model = Anthropic, any GPT model = OpenAI, any Gemini model = Google). If the top provider is not among the listed outcomes it resolves Other. Tie-break: if two models share the highest integer index score, the one listed higher in AA's own page ordering wins. If Artificial Analysis discontinues the leaderboard, renames the metric, or ships a new index methodology before the read date, resolution uses the highest-numbered 'Intelligence Index' variant still displayed on that page; if no such leaderboard exists, the market voids.",
+      "resolution_criteria": "Resolves to the company whose model holds the #1 position (highest Artificial Analysis Intelligence Index score) on the Artificial Analysis model leaderboard, as read on Artificial Analysis (https://artificialanalysis.ai/leaderboards/models) at 2026-12-31 23:59 UTC. Model-to-company mapping: any Claude model = Anthropic, any GPT/o-series model = OpenAI, any Gemini model = Google, any Grok model = xAI, any DeepSeek model = DeepSeek. If the top model's provider is not a listed outcome, resolves Other. Tie-break: if two models share the identical top Index score, the one listed higher (nearer the top) on the leaderboard wins. Continuity: if the Index is renamed or its methodology is re-versioned, use the successor headline intelligence ranking on the same page; if Artificial Analysis discontinues the Index with no successor ranking, the market voids.",
       "source_url": "https://artificialanalysis.ai/leaderboards/models",
       "category": "AI",
       "resolution_source": {
         "type": "api_poll",
         "endpoint": "https://artificialanalysis.ai/api/v2/data/llms/models",
         "method": "GET",
-        "notes": "Requires an AA API key (free tier: 100 req/day, internal use + attribution only; redistribution needs a Commercial license). Resolve by provider of the top Intelligence Index model; the public leaderboard page is the human-readable backstop. Snapshot 2026-07-06: #1 Claude Fable 5 (index 60), Anthropic holds 4 of top 5."
-      }
+        "notes": "Endpoint is machine-readable JSON but requires a free API key (unauthenticated WebFetch returned HTTP 401). Field is the model's headline Artificial Analysis Intelligence Index value; creator/provider field identifies the company. Fallback: If the API is unavailable or the key cannot be obtained, read the #1 model and its provider directly off the public leaderboard page https://artificialanalysis.ai/leaderboards/models (Artificial Analysis Intelligence Index column, sorted descending) at the read time."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=artificialanalysis.ai&sz=128"
     },
     {
-      "id": "openrouter_top_model_dec_2026",
+      "id": "openrouter_top_model_dec_2026_v2",
       "enabled": true,
-      "title": "Which model will be #1 by token usage on OpenRouter for the final week of 2026?",
+      "title": "Which company leads OpenRouter LLM usage in December 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
-            "id": "deepseek",
-            "title": "A DeepSeek model",
+            "id": "or_txtllm_google",
+            "title": "Google",
             "enabled": true,
-            "quote_range": { "min": 0.10, "max": 0.45, "initial": 0.25 }
+            "quote_range": {
+              "min": 0.12,
+              "max": 0.34,
+              "initial": 0.19
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
           },
           {
-            "id": "xiaomi",
-            "title": "A Xiaomi model",
+            "id": "or_txtllm_deepseek",
+            "title": "DeepSeek",
             "enabled": true,
-            "quote_range": { "min": 0.08, "max": 0.40, "initial": 0.20 }
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.32,
+              "initial": 0.18
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=deepseek.com&sz=128"
           },
           {
-            "id": "minimax",
-            "title": "A MiniMax model",
+            "id": "or_txtllm_anthropic",
+            "title": "Anthropic",
             "enabled": true,
-            "quote_range": { "min": 0.05, "max": 0.35, "initial": 0.15 }
+            "quote_range": {
+              "min": 0.07,
+              "max": 0.26,
+              "initial": 0.14
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
           },
           {
-            "id": "z_ai_glm",
-            "title": "A Z AI (GLM) model",
+            "id": "or_txtllm_openai",
+            "title": "OpenAI",
             "enabled": true,
-            "quote_range": { "min": 0.03, "max": 0.25, "initial": 0.10 }
+            "quote_range": {
+              "min": 0.06,
+              "max": 0.24,
+              "initial": 0.12
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
           },
           {
-            "id": "anthropic",
-            "title": "An Anthropic model",
-            "enabled": true,
-            "quote_range": { "min": 0.02, "max": 0.20, "initial": 0.08 }
-          },
-          {
-            "id": "google",
-            "title": "A Google model",
-            "enabled": true,
-            "quote_range": { "min": 0.02, "max": 0.15, "initial": 0.05 }
-          },
-          {
-            "id": "openai",
-            "title": "An OpenAI model",
-            "enabled": true,
-            "quote_range": { "min": 0.02, "max": 0.15, "initial": 0.05 }
-          },
-          {
-            "id": "other",
+            "id": "or_txtllm_other",
             "title": "Other",
             "enabled": true,
-            "quote_range": { "min": 0.05, "max": 0.30, "initial": 0.12 }
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.32,
+              "initial": 0.29
+            }
           }
         ]
       },
       "units": "probability",
       "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Resolves to the authoring organization of the model with the highest total token usage on OpenRouter aggregated over the 7 UTC days 2026-12-25 through 2026-12-31 inclusive, per OpenRouter's daily rankings dataset (summed across those days), with the public weekly rankings page https://openrouter.ai/rankings as the human-readable backstop. If the top vendor is not a listed outcome, resolves Other. Tie-break: higher single-day peak inside the window. If OpenRouter stops publishing the rankings dataset before the read date, resolution uses the last complete published week of 2026; if no 2026 data is retrievable, the market voids.",
+      "resolution_criteria": "Resolves to the authoring organization with the largest share of text LLM token volume on OpenRouter over December 2026, per the 'Market Share' (share by model author) view. As read on OpenRouter LLM Rankings (https://openrouter.ai/rankings) at 2026-12-31 23:59 UTC, with the window set to the calendar month December 2026 (2026-12-01..2026-12-31 UTC), or the trailing 30-day 'Month' view if no calendar-month filter is offered. Models map to their author: any Gemini = Google, any GPT/o-series = OpenAI, any Claude = Anthropic, any DeepSeek model = DeepSeek, any Qwen = Alibaba, any Grok = xAI, any MiniMax model = MiniMax; if the leading author is not a listed outcome, resolves Other. Tie-break: the org with the higher absolute token count over the window; if still tied, the alphabetically first org name. If OpenRouter renames the page, changes its author-attribution methodology, or merges the tab, use the closest successor share-by-author view; if the text ranking is discontinued or shows no December 2026 data, the market voids (N/A).",
       "source_url": "https://openrouter.ai/rankings",
       "category": "AI",
       "resolution_source": {
-        "type": "api_poll",
-        "endpoint": "https://openrouter.ai/docs/api/api-reference/datasets/get-rankings-daily",
-        "method": "GET",
-        "notes": "Dataset endpoint requires an OpenRouter API key (held for the arena bots); unauthenticated path guesses 404, so the endpoint URL here points at the dataset's API documentation - the adapter must follow the documented authenticated path. Snapshot 2026-07-05: #1 Xiaomi Mimo V2.5 (623.6B tok/day), DeepSeek V4 Flash 618.5B, MiniMax M3 528.6B; Chinese-origin models are over 45% of traffic."
-      }
+        "type": "manual",
+        "instructions": "Open OpenRouter LLM Rankings, select the 'Market Share' tab (share by model author), set the range to December 2026, and record the model author with the highest token share.\n\nFallback: If the page is unreachable, use the OpenRouter datasets rankings API aggregated by model author (requires an OpenRouter API key), or the Web Archive snapshot of https://openrouter.ai/rankings nearest 2026-12-31 23:59 UTC."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
     },
     {
-      "id": "openrouter_top_app_dec_2026",
-      "enabled": false,
-      "title": "What will be the #1 app by token usage on OpenRouter for the final week of 2026?",
+      "id": "openrouter_top_app_dec_2026_v2",
+      "enabled": true,
+      "title": "Which app leads OpenRouter usage in December 2026?",
       "outcome_set": {
         "type": "categorical",
         "outcomes": [
           {
-            "id": "cline",
-            "title": "Cline",
-            "enabled": true,
-            "quote_range": { "min": 0.10, "max": 0.45, "initial": 0.25 }
-          },
-          {
-            "id": "roo_code",
-            "title": "Roo Code",
-            "enabled": true,
-            "quote_range": { "min": 0.08, "max": 0.40, "initial": 0.20 }
-          },
-          {
-            "id": "kilo_code",
+            "id": "or_apps_kilocode",
             "title": "Kilo Code",
             "enabled": true,
-            "quote_range": { "min": 0.05, "max": 0.35, "initial": 0.15 }
+            "quote_range": {
+              "min": 0.14,
+              "max": 0.4,
+              "initial": 0.24
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=kilocode.ai&sz=128"
           },
           {
-            "id": "sillytavern",
-            "title": "SillyTavern",
+            "id": "or_apps_cline",
+            "title": "Cline",
             "enabled": true,
-            "quote_range": { "min": 0.03, "max": 0.25, "initial": 0.10 }
+            "quote_range": {
+              "min": 0.06,
+              "max": 0.26,
+              "initial": 0.13
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=cline.bot&sz=128"
           },
           {
-            "id": "openrouter_direct",
-            "title": "OpenRouter (direct)",
+            "id": "or_apps_hermes",
+            "title": "Hermes",
             "enabled": true,
-            "quote_range": { "min": 0.03, "max": 0.25, "initial": 0.10 }
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.26,
+              "initial": 0.12
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=nousresearch.com&sz=128"
           },
           {
-            "id": "other",
+            "id": "or_apps_roocode",
+            "title": "Roo Code",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.04,
+              "max": 0.22,
+              "initial": 0.1
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=roocode.com&sz=128"
+          },
+          {
+            "id": "or_apps_other",
             "title": "Other",
             "enabled": true,
-            "quote_range": { "min": 0.08, "max": 0.40, "initial": 0.20 }
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.35,
+              "initial": 0.32
+            }
           }
         ]
       },
       "units": "probability",
       "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Resolves to the app ranked #1 by token usage on OpenRouter's public app rankings for the 7 UTC days 2026-12-25 through 2026-12-31, per OpenRouter's app-rankings dataset, with https://openrouter.ai/rankings/apps as the human-readable backstop. If the #1 app is not a listed outcome, resolves Other. Tie-break: higher trailing-week total. Voids if OpenRouter discontinues app rankings and no 2026 data is retrievable.",
-      "source_url": "https://openrouter.ai/rankings/apps",
+      "resolution_criteria": "Resolves to the public app with the largest total token usage (prompt + completion) on OpenRouter over December 2026, per the App & Agent Rankings 'popular' (total token volume) view. As read on OpenRouter App Rankings (https://openrouter.ai/apps) at 2026-12-31 23:59 UTC, with the window set to the calendar month December 2026 (2026-12-01..2026-12-31 UTC), or the trailing 30-day 'Month' view if no calendar-month filter is offered. Apps are identified by their canonical OpenRouter app name; traffic from related aliases is merged into the canonical visible app and hidden/private apps are excluded; if the leading app is not a listed outcome, resolves Other. Tie-break: the app with the higher absolute token count over the window; if still tied, the alphabetically first app name. If OpenRouter renames or restructures the apps board or changes its token-counting methodology, use the closest successor total-token ranking; if the apps ranking is discontinued or shows no December 2026 data, the market voids (N/A).",
+      "source_url": "https://openrouter.ai/apps",
       "category": "AI",
       "resolution_source": {
-        "type": "api_poll",
-        "endpoint": "https://openrouter.ai/docs/api/api-reference/datasets/get-app-rankings",
-        "method": "GET",
-        "notes": "DISABLED until the outcome set is refreshed against the live apps board (the 2026-07-06 research pass could not re-verify it; the listed apps are historically prominent OpenRouter coding agents). Dataset requires the OpenRouter API key."
-      }
+        "type": "manual",
+        "instructions": "Open OpenRouter App & Agent Rankings sorted by 'popular' (total token volume), set the range to December 2026, and record the top-ranked app.\n\nFallback: If unreachable, use the OpenRouter app-rankings dataset endpoint (requires an API key) for the December 2026 window, or the Web Archive snapshot of https://openrouter.ai/apps nearest 2026-12-31 23:59 UTC."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
     },
     {
-      "id": "metr_time_horizon_8h_eoy2026",
+      "id": "openrouter_top_image_company_dec_2026",
       "enabled": true,
-      "title": "Will the best model exceed an 8-hour 50% time horizon on METR Time Horizons at end of 2026?",
+      "title": "Which company leads OpenRouter image-model usage in December 2026?",
       "outcome_set": {
-        "type": "binary",
-        "yes": "Yes",
-        "no": "No"
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "or_img_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.2,
+              "max": 0.55,
+              "initial": 0.34
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "or_img_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.08,
+              "max": 0.3,
+              "initial": 0.16
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "or_img_bfl",
+            "title": "Black Forest Labs",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.26,
+              "initial": 0.12
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=blackforestlabs.ai&sz=128"
+          },
+          {
+            "id": "or_img_bytedance",
+            "title": "ByteDance",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.04,
+              "max": 0.22,
+              "initial": 0.1
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=bytedance.com&sz=128"
+          },
+          {
+            "id": "or_img_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.03,
+              "max": 0.23,
+              "initial": 0.2
+            }
+          }
+        ]
       },
       "units": "probability",
       "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Resolves YES if, on the METR Task-Completion Time Horizons leaderboard at https://metr.org/time-horizons/ read at 2026-12-31 23:59 UTC, the highest 50% time horizon among all displayed models is greater than 480 minutes (8 hours); otherwise NO. The value is read from the interactive chart and accompanying data by a designated human resolver (no public API exists). If METR displays a point estimate above its stated reliability ceiling (currently '>16 hrs unreliable'), the displayed central estimate still governs. If METR replaces the current methodology version with a later one, the then-current official 50% time-horizon leaderboard is used. Voids only if METR removes the time-horizon leaderboard entirely with no successor.",
+      "resolution_criteria": "Resolves to the authoring organization with the largest share of image generation request volume on OpenRouter over December 2026, per the 'Market Share' (share by model author) view. As read on OpenRouter Image Model Rankings (https://openrouter.ai/rankings/image) at 2026-12-31 23:59 UTC, with the window set to the calendar month December 2026 (2026-12-01..2026-12-31 UTC), or the trailing 30-day 'Month' view if no calendar-month filter is offered. Models map to their author: any Gemini/Imagen/Nano-Banana = Google, any GPT-Image/DALL-E = OpenAI, any FLUX = Black Forest Labs, any Seedream/Seededit = ByteDance, any Stable Diffusion = Stability AI; if the leading author is not a listed outcome, resolves Other. Tie-break: the org with the higher absolute request count over the window; if still tied, the alphabetically first org name. If OpenRouter renames the page or changes its author attribution, use the closest successor share-by-author view; if the image ranking is discontinued or shows no December 2026 data, the market voids (N/A).",
+      "source_url": "https://openrouter.ai/rankings/image",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open OpenRouter Image Model Rankings, select the 'Market Share' tab (share by model author), set the range to December 2026, and record the author with the highest request share.\n\nFallback: If unreachable, use the OpenRouter datasets image-rankings aggregated by author (requires an API key), or the Web Archive snapshot of https://openrouter.ai/rankings/image nearest 2026-12-31 23:59 UTC."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
+    },
+    {
+      "id": "openrouter_top_embeddings_company_dec_2026",
+      "enabled": true,
+      "title": "Which company leads OpenRouter embeddings usage in December 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "or_emb_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.16,
+              "max": 0.5,
+              "initial": 0.3
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "or_emb_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.09,
+              "max": 0.33,
+              "initial": 0.18
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "or_emb_alibaba",
+            "title": "Alibaba (Qwen)",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.26,
+              "initial": 0.12
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=alibaba.com&sz=128"
+          },
+          {
+            "id": "or_emb_cohere",
+            "title": "Cohere",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.04,
+              "max": 0.22,
+              "initial": 0.1
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=cohere.com&sz=128"
+          },
+          {
+            "id": "or_emb_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.03,
+              "max": 0.26,
+              "initial": 0.23
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the authoring organization with the largest share of embedding request volume on OpenRouter over December 2026, per the 'Market Share' (share by model author) view. As read on OpenRouter Embedding Model Rankings (https://openrouter.ai/rankings/embeddings) at 2026-12-31 23:59 UTC, with the window set to the calendar month December 2026 (2026-12-01..2026-12-31 UTC), or the trailing 30-day 'Month' view if no calendar-month filter is offered. Models map to their author: any text-embedding-3/ada = OpenAI, any Gemini/text-embedding-004 = Google, any Qwen-Embedding = Alibaba, any Cohere embed = Cohere, any Mistral-Embed = Mistral, any voyage = Voyage AI, any BGE = BAAI; if the leading author is not a listed outcome, resolves Other. Tie-break: the org with the higher absolute request count over the window; if still tied, the alphabetically first org name. If OpenRouter renames the page or changes its author attribution, use the closest successor share-by-author view; if the embeddings ranking is discontinued or shows no December 2026 data, the market voids (N/A).",
+      "source_url": "https://openrouter.ai/rankings/embeddings",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open OpenRouter Embedding Model Rankings, select the 'Market Share' tab (share by model author), set the range to December 2026, and record the author with the highest request share.\n\nFallback: If unreachable, use the OpenRouter datasets embeddings rankings aggregated by author (requires an API key), or the Web Archive snapshot of https://openrouter.ai/rankings/embeddings nearest 2026-12-31 23:59 UTC."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
+    },
+    {
+      "id": "gpqa_diamond_leader_company_eoy2026",
+      "enabled": true,
+      "title": "Which company has the top GPQA Diamond score at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "gpqa_leader_anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.15,
+              "max": 0.45,
+              "initial": 0.28
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+          },
+          {
+            "id": "gpqa_leader_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.14,
+              "max": 0.42,
+              "initial": 0.26
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "gpqa_leader_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.35,
+              "initial": 0.2
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "gpqa_leader_xai",
+            "title": "xAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.05
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=x.ai&sz=128"
+          },
+          {
+            "id": "gpqa_leader_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.08
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the provider whose model holds the #1 (highest) score on the GPQA Diamond leaderboard, as read on the LLM-Stats GPQA Diamond leaderboard (https://llm-stats.com/benchmarks/gpqa-diamond) at 2026-12-31 23:59 UTC. Model-to-company mapping: any Claude model = Anthropic, any GPT/o-series = OpenAI, any Gemini = Google, any Grok = xAI, any DeepSeek model = DeepSeek, any Qwen model = Alibaba. If the top model's provider is not a listed outcome, resolves Other. Tie-break: if scores are identical, the provider of the model listed higher on the page wins. If LLM-Stats renames or re-versions the benchmark, use its closest successor; if the leaderboard is discontinued with no successor, read Artificial Analysis's equivalent eval; if neither is available, the market voids.",
+      "source_url": "https://llm-stats.com/benchmarks/gpqa-diamond",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://llm-stats.com/benchmarks/gpqa-diamond, sort by score descending, and record the provider of the single highest-scoring model. Map the model to a company using the aliases in the resolution criteria.\n\nFallback: If llm-stats is down or the page changed, read the #1 model on Artificial Analysis GPQA Diamond (https://artificialanalysis.ai/evaluations/gpqa-diamond)."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=llm-stats.com&sz=128"
+    },
+    {
+      "id": "swebench_verified_leader_company_eoy2026",
+      "enabled": true,
+      "title": "Which company has the top SWE-bench Verified score at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "swe_leader_anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.32,
+              "max": 0.68,
+              "initial": 0.5
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+          },
+          {
+            "id": "swe_leader_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.08,
+              "max": 0.34,
+              "initial": 0.18
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "swe_leader_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.26,
+              "initial": 0.12
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "swe_leader_deepseek",
+            "title": "DeepSeek",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.16,
+              "initial": 0.06
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=deepseek.com&sz=128"
+          },
+          {
+            "id": "swe_leader_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.14,
+              "initial": 0.07
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the provider whose model holds the #1 (highest) score on the SWE-bench Verified leaderboard, as read on the LLM-Stats SWE-bench Verified leaderboard (https://llm-stats.com/benchmarks/swe-bench-verified) at 2026-12-31 23:59 UTC. Model-to-company mapping: any Claude model = Anthropic, any GPT/o-series = OpenAI, any Gemini = Google, any Grok = xAI, any DeepSeek model = DeepSeek, any Qwen model = Alibaba. If the top model's provider is not a listed outcome, resolves Other. Tie-break: if scores are identical, the provider of the model listed higher on the page wins. If LLM-Stats renames or re-versions the benchmark, use its closest successor; if the leaderboard is discontinued with no successor, read Artificial Analysis's equivalent eval; if neither is available, the market voids.",
+      "source_url": "https://llm-stats.com/benchmarks/swe-bench-verified",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://llm-stats.com/benchmarks/swe-bench-verified, sort by score descending, and record the provider of the single highest-scoring model, mapped via the aliases in the resolution criteria.\n\nFallback: If llm-stats is unavailable, read the #1 model on Artificial Analysis SWE-bench Verified (https://artificialanalysis.ai/evaluations/swe-bench-verified) or the official swebench.com Verified leaderboard."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=llm-stats.com&sz=128"
+    },
+    {
+      "id": "swebench_verified_max_score_eoy2026",
+      "enabled": true,
+      "title": "What will the top SWE-bench Verified score be at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "swe_max_below93",
+            "title": "Below 93%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.1,
+              "initial": 0.03
+            }
+          },
+          {
+            "id": "swe_max_93_95",
+            "title": "93-95%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.03,
+              "max": 0.18,
+              "initial": 0.07
+            }
+          },
+          {
+            "id": "swe_max_95_97",
+            "title": "95-97%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.16,
+              "max": 0.48,
+              "initial": 0.3
+            }
+          },
+          {
+            "id": "swe_max_97_99",
+            "title": "97-99%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.26,
+              "max": 0.6,
+              "initial": 0.42
+            }
+          },
+          {
+            "id": "swe_max_above99",
+            "title": "Above 99%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.32,
+              "initial": 0.15
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the bucket containing the single highest score shown on the SWE-bench Verified leaderboard, as read on the LLM-Stats SWE-bench Verified leaderboard (https://llm-stats.com/benchmarks/swe-bench-verified) at 2026-12-31 23:59 UTC. The score is read as a percentage (0-100%); a 0-1 decimal is multiplied by 100. Only the top (maximum) score across all listed models counts, regardless of provider. Buckets are disjoint, lower-bound inclusive and upper-bound exclusive; a value exactly on a boundary falls in the higher bucket (e.g. 95.0% maps to '95-97%'). If LLM-Stats renames or re-versions the benchmark, use its closest successor; if discontinued, read Artificial Analysis's equivalent eval; if neither is available, the market voids.",
+      "source_url": "https://llm-stats.com/benchmarks/swe-bench-verified",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://llm-stats.com/benchmarks/swe-bench-verified, take the highest score across all models, convert to a percentage, and select the bucket.\n\nFallback: If llm-stats is unavailable, take the top score from Artificial Analysis SWE-bench Verified (https://artificialanalysis.ai/evaluations/swe-bench-verified) or swebench.com."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=llm-stats.com&sz=128"
+    },
+    {
+      "id": "hle_leader_company_eoy2026",
+      "enabled": true,
+      "title": "Which company has the top Humanity's Last Exam score at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "hle_leader_anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.15,
+              "max": 0.45,
+              "initial": 0.28
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+          },
+          {
+            "id": "hle_leader_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.14,
+              "max": 0.42,
+              "initial": 0.26
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "hle_leader_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.35,
+              "initial": 0.2
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "hle_leader_xai",
+            "title": "xAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.16,
+              "initial": 0.06
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=x.ai&sz=128"
+          },
+          {
+            "id": "hle_leader_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.08
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the provider whose model holds the #1 (highest) score on the Humanity's Last Exam (HLE) leaderboard, as read on the LLM-Stats Humanity's Last Exam leaderboard (https://llm-stats.com/benchmarks/hle) at 2026-12-31 23:59 UTC. Model-to-company mapping: any Claude model = Anthropic, any GPT/o-series = OpenAI, any Gemini = Google, any Grok = xAI, any DeepSeek model = DeepSeek, any Qwen model = Alibaba. If the top model's provider is not a listed outcome, resolves Other. Tie-break: if scores are identical, the provider of the model listed higher on the page wins. If LLM-Stats renames or re-versions the benchmark, use its closest successor (the apostrophe path https://llm-stats.com/benchmarks/humanity's-last-exam is the same page and may be used as a secondary reference); if the leaderboard is discontinued with no successor, read Artificial Analysis's equivalent eval; if neither is available, the market voids.",
+      "source_url": "https://llm-stats.com/benchmarks/hle",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open the LLM-Stats HLE leaderboard at https://llm-stats.com/benchmarks/hle, sort by score descending, and record the provider of the single highest-scoring model, mapped via the aliases in the resolution criteria. The apostrophe path https://llm-stats.com/benchmarks/humanity's-last-exam resolves to the same page if needed.\n\nFallback: If llm-stats is unavailable, read the #1 model on Artificial Analysis Humanity's Last Exam (https://artificialanalysis.ai/evaluations/humanitys-last-exam)."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=llm-stats.com&sz=128"
+    },
+    {
+      "id": "hle_max_score_eoy2026",
+      "enabled": true,
+      "title": "What will the top Humanity's Last Exam score be at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "hle_max_below55",
+            "title": "Below 55%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.05
+            }
+          },
+          {
+            "id": "hle_max_55_65",
+            "title": "55-65%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.4,
+              "initial": 0.22
+            }
+          },
+          {
+            "id": "hle_max_65_75",
+            "title": "65-75%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.2,
+              "max": 0.52,
+              "initial": 0.35
+            }
+          },
+          {
+            "id": "hle_max_75_85",
+            "title": "75-85%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.12,
+              "max": 0.42,
+              "initial": 0.25
+            }
+          },
+          {
+            "id": "hle_max_above85",
+            "title": "Above 85%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.03,
+              "max": 0.2,
+              "initial": 0.08
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the bucket containing the single highest score shown on the Humanity's Last Exam (HLE) leaderboard, as read on the LLM-Stats Humanity's Last Exam leaderboard (https://llm-stats.com/benchmarks/hle) at 2026-12-31 23:59 UTC. The score is read as a percentage (0-100%); a 0-1 decimal is multiplied by 100. Only the top (maximum) score across all listed models counts, regardless of provider. Buckets are disjoint, lower-bound inclusive and upper-bound exclusive; a value exactly on a boundary falls in the higher bucket (e.g. 65.0% maps to '65-75%'). If LLM-Stats renames or re-versions the benchmark, use its closest successor (the apostrophe path https://llm-stats.com/benchmarks/humanity's-last-exam is the same page and may be used as a secondary reference); if discontinued, read Artificial Analysis's equivalent eval; if neither is available, the market voids.",
+      "source_url": "https://llm-stats.com/benchmarks/hle",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open the LLM-Stats HLE leaderboard at https://llm-stats.com/benchmarks/hle, take the highest score across all models, convert to a percentage, and select the bucket. The apostrophe path https://llm-stats.com/benchmarks/humanity's-last-exam resolves to the same page if needed.\n\nFallback: If llm-stats is unavailable, take the top score from Artificial Analysis Humanity's Last Exam (https://artificialanalysis.ai/evaluations/humanitys-last-exam)."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=llm-stats.com&sz=128"
+    },
+    {
+      "id": "mmlu_pro_leader_company_eoy2026",
+      "enabled": true,
+      "title": "Which company has the top MMLU-Pro score at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "mmlu_leader_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.12,
+              "max": 0.38,
+              "initial": 0.22
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "mmlu_leader_alibaba",
+            "title": "Alibaba",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.36,
+              "initial": 0.2
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=alibaba.com&sz=128"
+          },
+          {
+            "id": "mmlu_leader_anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.09,
+              "max": 0.34,
+              "initial": 0.18
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+          },
+          {
+            "id": "mmlu_leader_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.07,
+              "max": 0.3,
+              "initial": 0.15
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "mmlu_leader_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.16,
+              "initial": 0.13
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the provider whose model holds the #1 (highest) score on the MMLU-Pro leaderboard, as read on the LLM-Stats MMLU-Pro leaderboard (https://llm-stats.com/benchmarks/mmlu-pro) at 2026-12-31 23:59 UTC. Model-to-company mapping: any Claude model = Anthropic, any GPT/o-series = OpenAI, any Gemini = Google, any Grok = xAI, any DeepSeek model = DeepSeek, any Qwen model = Alibaba. If the top model's provider is not a listed outcome, resolves Other. Tie-break: if scores are identical, the provider of the model listed higher on the page wins. If LLM-Stats renames or re-versions the benchmark, use its closest successor; if the leaderboard is discontinued with no successor, read Artificial Analysis's equivalent eval; if neither is available, the market voids.",
+      "source_url": "https://llm-stats.com/benchmarks/mmlu-pro",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://llm-stats.com/benchmarks/mmlu-pro, sort by score descending, and record the provider of the single highest-scoring model, mapped via the aliases in the resolution criteria.\n\nFallback: If llm-stats is unavailable, read the #1 model on Artificial Analysis MMLU-Pro (https://artificialanalysis.ai/evaluations/mmlu-pro)."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=llm-stats.com&sz=128"
+    },
+    {
+      "id": "livecodebench_leader_company_eoy2026",
+      "enabled": true,
+      "title": "Which company has the top LiveCodeBench score at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "lcb_leader_deepseek",
+            "title": "DeepSeek",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.15,
+              "max": 0.45,
+              "initial": 0.28
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=deepseek.com&sz=128"
+          },
+          {
+            "id": "lcb_leader_alibaba",
+            "title": "Alibaba",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.09,
+              "max": 0.34,
+              "initial": 0.18
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=alibaba.com&sz=128"
+          },
+          {
+            "id": "lcb_leader_anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.07,
+              "max": 0.3,
+              "initial": 0.15
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+          },
+          {
+            "id": "lcb_leader_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.06,
+              "max": 0.28,
+              "initial": 0.13
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "lcb_leader_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.19,
+              "initial": 0.16
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the provider whose model holds the #1 (highest) score on the LiveCodeBench leaderboard, as read on the LLM-Stats LiveCodeBench leaderboard (https://llm-stats.com/benchmarks/livecodebench) at 2026-12-31 23:59 UTC. Model-to-company mapping: any Claude model = Anthropic, any GPT/o-series = OpenAI, any Gemini = Google, any Grok = xAI, any DeepSeek model = DeepSeek, any Qwen model = Alibaba. If the top model's provider is not a listed outcome, resolves Other. Tie-break: if scores are identical, the provider of the model listed higher on the page wins. If LLM-Stats renames or re-versions the benchmark, use its closest successor; if the leaderboard is discontinued with no successor, read Artificial Analysis's equivalent eval; if neither is available, the market voids.",
+      "source_url": "https://llm-stats.com/benchmarks/livecodebench",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://llm-stats.com/benchmarks/livecodebench, sort by score descending, and record the provider of the single highest-scoring model, mapped via the aliases in the resolution criteria.\n\nFallback: If llm-stats is unavailable, read the #1 model on Artificial Analysis LiveCodeBench (https://artificialanalysis.ai/evaluations/livecodebench) or livecodebench.github.io."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=llm-stats.com&sz=128"
+    },
+    {
+      "id": "livecodebench_max_score_eoy2026",
+      "enabled": true,
+      "title": "What will the top LiveCodeBench score be at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "lcb_max_below90",
+            "title": "Below 90%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.1,
+              "initial": 0.03
+            }
+          },
+          {
+            "id": "lcb_max_90_93",
+            "title": "90-93%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.03,
+              "max": 0.2,
+              "initial": 0.08
+            }
+          },
+          {
+            "id": "lcb_max_93_96",
+            "title": "93-96%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.18,
+              "max": 0.5,
+              "initial": 0.32
+            }
+          },
+          {
+            "id": "lcb_max_96_99",
+            "title": "96-99%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.24,
+              "max": 0.58,
+              "initial": 0.4
+            }
+          },
+          {
+            "id": "lcb_max_above99",
+            "title": "Above 99%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.04,
+              "max": 0.28,
+              "initial": 0.12
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the bucket containing the single highest score shown on the LiveCodeBench leaderboard, as read on the LLM-Stats LiveCodeBench leaderboard (https://llm-stats.com/benchmarks/livecodebench) at 2026-12-31 23:59 UTC. The score is read as a percentage (0-100%); a 0-1 decimal is multiplied by 100. Only the top (maximum) score across all listed models counts, regardless of provider. Buckets are disjoint, lower-bound inclusive and upper-bound exclusive; a value exactly on a boundary falls in the higher bucket (e.g. 96.0% maps to '96-99%'). If LLM-Stats renames or re-versions the benchmark, use its closest successor; if discontinued, read Artificial Analysis's equivalent eval; if neither is available, the market voids.",
+      "source_url": "https://llm-stats.com/benchmarks/livecodebench",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://llm-stats.com/benchmarks/livecodebench, take the highest score across all models, convert to a percentage, and select the bucket.\n\nFallback: If llm-stats is unavailable, take the top score from Artificial Analysis LiveCodeBench (https://artificialanalysis.ai/evaluations/livecodebench) or livecodebench.github.io."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=llm-stats.com&sz=128"
+    },
+    {
+      "id": "metr_time_horizon_50pct_leader_eoy2026",
+      "enabled": true,
+      "title": "Which company has the longest METR 50% time horizon at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "metr_th50_leader_anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.32,
+              "max": 0.6,
+              "initial": 0.44
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+          },
+          {
+            "id": "metr_th50_leader_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.34,
+              "initial": 0.2
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "metr_th50_leader_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.36,
+              "initial": 0.22
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "metr_th50_leader_xai",
+            "title": "xAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.12,
+              "initial": 0.05
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=x.ai&sz=128"
+          },
+          {
+            "id": "metr_th50_leader_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.05
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the company whose best-performing model has the longest measured 50%-task-completion time horizon on the METR Time Horizon 1.1 leaderboard, as read on the METR Task-Completion Time Horizons page (https://metr.org/time-horizons/) at 2026-12-31 23:59 UTC. Model-to-company mapping: any Claude model = Anthropic, any GPT/o-series model = OpenAI, any Gemini model = Google, any Grok model = xAI. If the leading model's provider is not a listed outcome, resolves Other. Tie-break: if two providers' top models are within measurement noise, the higher point estimate wins; on an exact numeric tie, the model with the earlier METR publication date. If METR renames the page or versions the methodology (e.g. 1.2), read the successor 50% leaderboard; if the measurement is discontinued with no successor at the read time, the market voids.",
       "source_url": "https://metr.org/time-horizons/",
-      "quote_range": { "min": 0.50, "max": 0.88, "initial": 0.70 },
       "category": "AI",
       "resolution_source": {
         "type": "manual",
-        "instructions": "Manual read-off of the METR time-horizons chart at the read date: take the maximum 50% time-horizon central estimate across all displayed models; YES iff strictly greater than 480 minutes. No machine-readable endpoint exists (chart is JS-rendered; the public GitHub repo gates computed values behind DVC). Snapshot 2026-07-06: TH1.1 blog leader Claude Opus 4.5 at 320 min; live board carries newer, higher entries."
-      }
+        "instructions": "Open https://metr.org/time-horizons/, select the 50% time-horizon view, and identify the single model with the highest 50%-task-completion time horizon among all models listed at the read time. Map that model to its provider using the mapping in the resolution criteria and resolve to that company (or Other).\n\nFallback: If the interactive chart fails to load, use Epoch AI's mirror at https://epoch.ai/benchmarks/metr-time-horizons, or the most recent METR blog post reporting the same 50%-horizon figure."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=metr.org&sz=128"
     },
     {
-      "id": "context_window_above_10m_eoy2026",
+      "id": "metr_time_horizon_50pct_ladder_eoy2026",
       "enabled": true,
-      "title": "Will any generally-available model advertise a context window larger than 10,000,000 tokens by end of 2026?",
+      "title": "How long is the longest METR 50% time horizon at end of 2026?",
       "outcome_set": {
-        "type": "binary",
-        "yes": "Yes",
-        "no": "No"
+        "type": "threshold",
+        "direction": "above",
+        "unit": "hours",
+        "outcomes": [
+          {
+            "id": "metr_th50_8h_eoy2026",
+            "title": "≥ 8 hours",
+            "enabled": true,
+            "threshold": 8,
+            "quote_range": {
+              "min": 0.9,
+              "max": 0.985,
+              "initial": 0.96
+            }
+          },
+          {
+            "id": "metr_th50_12h_eoy2026",
+            "title": "≥ 12 hours",
+            "enabled": true,
+            "threshold": 12,
+            "quote_range": {
+              "min": 0.68,
+              "max": 0.92,
+              "initial": 0.82
+            }
+          },
+          {
+            "id": "metr_th50_16h_eoy2026",
+            "title": "≥ 16 hours",
+            "enabled": true,
+            "threshold": 16,
+            "quote_range": {
+              "min": 0.32,
+              "max": 0.7,
+              "initial": 0.5
+            }
+          },
+          {
+            "id": "metr_th50_24h_eoy2026",
+            "title": "≥ 24 hours",
+            "enabled": true,
+            "threshold": 24,
+            "quote_range": {
+              "min": 0.1,
+              "max": 0.42,
+              "initial": 0.22
+            }
+          },
+          {
+            "id": "metr_th50_40h_eoy2026",
+            "title": "≥ 40 hours",
+            "enabled": true,
+            "threshold": 40,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.2,
+              "initial": 0.08
+            }
+          }
+        ]
       },
       "units": "probability",
       "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Resolves YES if, by 2026-12-31 23:59 UTC, at least one generally-available AI model (usable via a public API or downloadable open weights; research-preview or waitlist-only access excluded) officially advertises a maximum context window strictly greater than 10,000,000 tokens, confirmed on that model's official provider documentation or launch announcement. Third-party trackers may surface the candidate, but the provider's own documentation is the binding source. Otherwise NO. The metric is the advertised maximum context window; benchmarked quality retention is not required.",
+      "resolution_criteria": "Each rung resolves YES if the longest 50%-task-completion time horizon of any model on the METR Time Horizon 1.1 leaderboard is at least the rung's threshold (in hours), as read on the METR Task-Completion Time Horizons page (https://metr.org/time-horizons/) at 2026-12-31 23:59 UTC. The value is the maximum 50%-horizon point estimate across all listed models, regardless of provider. Tie-break: a value exactly equal to a rung threshold counts as meeting it (>=). METR notes measurements above 16 hours are unreliable with the current task suite; the published point estimate is still used as-is. If METR renames the page or versions the methodology (e.g. 1.2), read the successor 50% leaderboard; if the measurement is discontinued with no successor at the read time, all rungs void.",
+      "source_url": "https://metr.org/time-horizons/",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://metr.org/time-horizons/, select the 50% time-horizon view, and read the maximum 50%-horizon point estimate across all models plotted at the read time. Convert to hours and mark each rung YES whose threshold is <= that value.\n\nFallback: If the interactive chart fails to load, use Epoch AI's mirror at https://epoch.ai/benchmarks/metr-time-horizons, or the most recent METR blog post reporting the leading 50%-horizon figure."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=metr.org&sz=128"
+    },
+    {
+      "id": "metr_time_horizon_80pct_ladder_eoy2026",
+      "enabled": true,
+      "title": "How long is the longest METR 80% time horizon at end of 2026?",
+      "outcome_set": {
+        "type": "threshold",
+        "direction": "above",
+        "unit": "hours",
+        "outcomes": [
+          {
+            "id": "metr_th80_2h_eoy2026",
+            "title": "≥ 2 hours",
+            "enabled": true,
+            "threshold": 2,
+            "quote_range": {
+              "min": 0.9,
+              "max": 0.985,
+              "initial": 0.96
+            }
+          },
+          {
+            "id": "metr_th80_4h_eoy2026",
+            "title": "≥ 4 hours",
+            "enabled": true,
+            "threshold": 4,
+            "quote_range": {
+              "min": 0.4,
+              "max": 0.8,
+              "initial": 0.6
+            }
+          },
+          {
+            "id": "metr_th80_8h_eoy2026",
+            "title": "≥ 8 hours",
+            "enabled": true,
+            "threshold": 8,
+            "quote_range": {
+              "min": 0.14,
+              "max": 0.5,
+              "initial": 0.3
+            }
+          },
+          {
+            "id": "metr_th80_12h_eoy2026",
+            "title": "≥ 12 hours",
+            "enabled": true,
+            "threshold": 12,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.3,
+              "initial": 0.14
+            }
+          },
+          {
+            "id": "metr_th80_16h_eoy2026",
+            "title": "≥ 16 hours",
+            "enabled": true,
+            "threshold": 16,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.18,
+              "initial": 0.07
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Each rung resolves YES if the longest 80%-task-completion time horizon of any model on the METR Time Horizon 1.1 leaderboard is at least the rung's threshold (in hours), as read on the METR Task-Completion Time Horizons page (https://metr.org/time-horizons/) at 2026-12-31 23:59 UTC. The value is the maximum 80%-horizon point estimate across all listed models, regardless of provider. Tie-break: a value exactly equal to a rung threshold counts as meeting it (>=). The 80%-horizon rises far more slowly than the 50% horizon (currently ~3–4 hours for the leading model); the published point estimate is used as-is, and METR notes estimates above 16 hours are unreliable with the current task suite. If METR renames the page or versions the methodology (e.g. 1.2), read the successor 80% leaderboard; if the measurement is discontinued with no successor at the read time, all rungs void.",
+      "source_url": "https://metr.org/time-horizons/",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://metr.org/time-horizons/, select the 80% time-horizon view, and read the maximum 80%-horizon point estimate across all models plotted at the read time. Convert to hours and mark each rung YES whose threshold is <= that value.\n\nFallback: If the interactive chart fails to load, use Epoch AI's mirror at https://epoch.ai/benchmarks/metr-time-horizons, or the most recent METR blog post reporting the leading 80%-horizon figure."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=metr.org&sz=128"
+    },
+    {
+      "id": "context_window_max_advertised_eoy2026",
+      "enabled": true,
+      "title": "How large will the biggest public-API model context window be at end of 2026?",
+      "outcome_set": {
+        "type": "threshold",
+        "direction": "above",
+        "unit": "tokens",
+        "outcomes": [
+          {
+            "id": "context_window_above_2m_eoy2026",
+            "title": "≥ 2M tokens",
+            "enabled": true,
+            "threshold": 2000000,
+            "quote_range": {
+              "min": 0.3,
+              "max": 0.7,
+              "initial": 0.5
+            }
+          },
+          {
+            "id": "context_window_above_3m_eoy2026",
+            "title": "≥ 3M tokens",
+            "enabled": true,
+            "threshold": 3000000,
+            "quote_range": {
+              "min": 0.14,
+              "max": 0.48,
+              "initial": 0.28
+            }
+          },
+          {
+            "id": "context_window_above_5m_eoy2026",
+            "title": "≥ 5M tokens",
+            "enabled": true,
+            "threshold": 5000000,
+            "quote_range": {
+              "min": 0.06,
+              "max": 0.3,
+              "initial": 0.15
+            }
+          },
+          {
+            "id": "context_window_above_10m_eoy2026",
+            "title": "≥ 10M tokens",
+            "enabled": true,
+            "threshold": 10000000,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.16,
+              "initial": 0.06
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Each rung resolves YES if, at 2026-12-31 23:59 UTC, the largest maximum context window advertised for a generally-available model served on a standard public API by a major frontier lab (Anthropic, OpenAI, Google, xAI, DeepSeek, and peers) is at least that rung's token threshold. 'Generally-available on a standard public API' excludes downloadable open-weights / self-hosted-only models (e.g. Llama Scout's 10M), research previews, waitlist or private-beta access, and enterprise-gated tiers that are not on the standard API (e.g. Vertex-only large-context SKUs). The binding source is the leading provider's own official API model documentation; the WhatLLM largest-context tracker (https://whatllm.org/largest-context-window-llm), which scopes to API frontier models, is the cross-check and backstop. 'Advertised' means the officially listed maximum input context length, counting the headline figure even if effective/usable context is lower. Tie-break: a value exactly equal to a threshold counts as meeting it. If a listed provider's docs are renamed or discontinued, use the tracker backstop or the next independently documented figure; void only if no major-lab public-API context figure is documented and no tracker is available.",
       "source_url": "https://whatllm.org/largest-context-window-llm",
-      "quote_range": { "min": 0.18, "max": 0.55, "initial": 0.35 },
       "category": "AI",
       "resolution_source": {
         "type": "manual",
-        "instructions": "Manual resolution by a designated resolver: identify the largest advertised context window among generally-available models via trackers (whatllm.org, morphllm.com) and confirm on the provider's official docs; YES iff strictly greater than 10,000,000 tokens. Snapshot 2026-07-06: current ceiling is Llama 4 Scout at exactly 10,000,000 (open weights), so the threshold sits strictly above today's maximum."
-      }
+        "instructions": "At read time, determine the single largest advertised maximum context window (in tokens) across all generally-available LLMs. Check the docs/model cards of the current context leaders — Meta Llama (https://ai.meta.com/blog/llama-4-multimodal-intelligence/ ; Llama 4 Scout = 10M today), Google Gemini (https://ai.google.dev/gemini-api/docs/models), Anthropic, OpenAI, plus any newer entrant — and take the maximum headline figure from a GA model (public API or open weights; exclude research-preview, waitlist, and enterprise-gated-only tiers). Cross-check against the whatllm.org tracker. Resolve each rung YES iff that maximum >= the rung's threshold.\n\nFallback: If a provider page is unreachable, use the WhatLLM.org largest-context tracker (https://whatllm.org/largest-context-window-llm) or the OpenRouter model list (https://openrouter.ai/models, sorted by context length) for the leading open-weights/API figure."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=whatllm.org&sz=128"
     },
     {
-      "id": "anthropic_opus_input_below_5_eoy2026",
+      "id": "anthropic_flagship_input_price_below_eoy2026",
       "enabled": true,
-      "title": "Will Anthropic's flagship Opus base input API price be below $5/MTok at end of 2026?",
+      "title": "How low will Anthropic's flagship Claude API input price be at end of 2026?",
       "outcome_set": {
-        "type": "binary",
-        "yes": "Yes",
-        "no": "No"
+        "type": "threshold",
+        "direction": "below",
+        "unit": "$/MTok",
+        "outcomes": [
+          {
+            "id": "anthropic_input_le_15",
+            "title": "≤ $15 / MTok",
+            "enabled": true,
+            "threshold": 15,
+            "quote_range": {
+              "min": 0.9,
+              "max": 0.985,
+              "initial": 0.96
+            }
+          },
+          {
+            "id": "anthropic_input_le_10",
+            "title": "≤ $10 / MTok",
+            "enabled": true,
+            "threshold": 10,
+            "quote_range": {
+              "min": 0.55,
+              "max": 0.88,
+              "initial": 0.72
+            }
+          },
+          {
+            "id": "anthropic_input_le_8",
+            "title": "≤ $8 / MTok",
+            "enabled": true,
+            "threshold": 8,
+            "quote_range": {
+              "min": 0.22,
+              "max": 0.62,
+              "initial": 0.42
+            }
+          },
+          {
+            "id": "anthropic_input_le_5",
+            "title": "≤ $5 / MTok",
+            "enabled": true,
+            "threshold": 5,
+            "quote_range": {
+              "min": 0.06,
+              "max": 0.34,
+              "initial": 0.16
+            }
+          },
+          {
+            "id": "anthropic_input_le_3",
+            "title": "≤ $3 / MTok",
+            "enabled": true,
+            "threshold": 3,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.18,
+              "initial": 0.05
+            }
+          }
+        ]
       },
       "units": "probability",
       "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Resolves YES if, on Anthropic's official pricing documentation (https://platform.claude.com/docs/en/about-claude/pricing, mirror https://claude.com/pricing#api) read at 2026-12-31 23:59 UTC, the standard Base Input Tokens price of the current flagship Opus model (the highest-numbered non-deprecated Claude Opus entry) is strictly less than $5.00 per million tokens; otherwise NO. Use the standard global-inference, non-cached, non-batch price cell. If Anthropic retires the Opus line entirely, resolves NO.",
+      "resolution_criteria": "Resolves each rung YES if Anthropic's flagship (most-capable) Claude model — currently the Fable line (Fable 5) — has a standard base API input price at or below the rung's dollar threshold per million input tokens, as read on Anthropic's official pricing page (https://platform.claude.com/docs/en/about-claude/pricing) at 2026-12-31 23:59 UTC. Use the standard global, non-cached, non-batch input price of that model. If Anthropic renames or replaces the flagship line, use the then-current most-capable Claude model's standard input price. Tie-break: a price exactly equal to a threshold counts as at-or-below. If the pricing page is unreachable, use the OpenRouter/aggregator listing for the same model as backstop; void only if no price is published.",
       "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "quote_range": { "min": 0.10, "max": 0.45, "initial": 0.25 },
       "category": "AI",
       "resolution_source": {
-        "type": "api_poll",
-        "endpoint": "https://platform.claude.com/docs/en/about-claude/pricing",
-        "method": "GET",
-        "notes": "Anthropic's pricing page is clean, structured, and fetches 200 to automated clients. Snapshot 2026-07-06: Opus 4.8 base input $5/MTok (output $25) - a genuine price-cut market."
-      }
+        "type": "manual",
+        "instructions": "Fetch the pricing page and read the standard input $/MTok for the highest-numbered non-deprecated Opus model. Compare against each rung threshold.\n\nFallback: If the docs page is unreachable, read the Opus input price from https://www.anthropic.com/pricing or the Opus model card at https://www.anthropic.com/claude/opus."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
     },
     {
-      "id": "openai_flagship_input_at_most_5_eoy2026",
+      "id": "openai_flagship_input_price_below_eoy2026",
       "enabled": true,
-      "title": "Will OpenAI's flagship model standard input API price be at or below $5/MTok at end of 2026?",
+      "title": "How low will OpenAI's flagship GPT API input price be at end of 2026?",
       "outcome_set": {
-        "type": "binary",
-        "yes": "Yes",
-        "no": "No"
+        "type": "threshold",
+        "direction": "below",
+        "unit": "$/MTok",
+        "outcomes": [
+          {
+            "id": "openai_input_le_15",
+            "title": "≤ $15/MTok",
+            "enabled": true,
+            "threshold": 15,
+            "quote_range": {
+              "min": 0.9,
+              "max": 0.985,
+              "initial": 0.96
+            }
+          },
+          {
+            "id": "openai_input_le_8",
+            "title": "≤ $8/MTok",
+            "enabled": true,
+            "threshold": 8,
+            "quote_range": {
+              "min": 0.8,
+              "max": 0.96,
+              "initial": 0.9
+            }
+          },
+          {
+            "id": "openai_input_le_5",
+            "title": "≤ $5/MTok",
+            "enabled": true,
+            "threshold": 5,
+            "quote_range": {
+              "min": 0.66,
+              "max": 0.92,
+              "initial": 0.82
+            }
+          },
+          {
+            "id": "openai_input_le_3",
+            "title": "≤ $3/MTok",
+            "enabled": true,
+            "threshold": 3,
+            "quote_range": {
+              "min": 0.16,
+              "max": 0.52,
+              "initial": 0.32
+            }
+          },
+          {
+            "id": "openai_input_le_2",
+            "title": "≤ $2/MTok",
+            "enabled": true,
+            "threshold": 2,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.32,
+              "initial": 0.15
+            }
+          }
+        ]
       },
       "units": "probability",
       "end_time": "2027-01-01T00:00:00Z",
-      "resolution_criteria": "Resolves YES if, on OpenAI's official API pricing documentation read at 2026-12-31 23:59 UTC, the standard short-context input price of OpenAI's then-current flagship general model (the highest-tier successor in the GPT-5.x/GPT-6 line) is at or below $5.00 per million input tokens; otherwise NO. The canonical page https://openai.com/api/pricing/ blocks automated fetches, so resolution reads the machine-readable mirror https://developers.openai.com/api/docs/pricing or is performed manually. Use the standard non-priority, non-batch, short-context input cell.",
+      "resolution_criteria": "Resolves each rung YES if OpenAI's flagship model — the highest-numbered non-deprecated top GPT model (currently GPT-5.5) — has a standard base API input price at or below the rung's dollar threshold per million input tokens, as read on OpenAI's official API pricing page (https://developers.openai.com/api/docs/pricing) at 2026-12-31 23:59 UTC. Use the standard list price (non-batch, non-priority, non-flex, short-context ≤272K tier), excluding the Pro variant; any GPT/o-series flagship = OpenAI's top line. If multiple top models are current, use the highest-numbered one. Tie-break: a price exactly on a threshold resolves that rung YES (≤ inclusive). If the page is renamed or the flagship rebranded, use the successor official page and equivalent flagship; if no official base input price is published, the market voids.",
       "source_url": "https://developers.openai.com/api/docs/pricing",
-      "quote_range": { "min": 0.40, "max": 0.80, "initial": 0.60 },
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Read the standard short-context input $/MTok for the highest-numbered non-deprecated GPT flagship (the base model, not the Pro variant, not batch/priority/flex). Compare against each rung threshold.\n\nFallback: If the OpenAI pricing page is JS-blocked or unreachable, read the flagship's input price from https://openrouter.ai/openai or https://pricepertoken.com (OpenAI section), preferring the figure that matches OpenAI's own standard list price."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+    },
+    {
+      "id": "google_flagship_input_price_below_eoy2026",
+      "enabled": true,
+      "title": "How low will Google's flagship Gemini API input price be at end of 2026?",
+      "outcome_set": {
+        "type": "threshold",
+        "direction": "below",
+        "unit": "$/MTok",
+        "outcomes": [
+          {
+            "id": "google_input_le_8",
+            "title": "≤ $8/MTok",
+            "enabled": true,
+            "threshold": 8,
+            "quote_range": {
+              "min": 0.9,
+              "max": 0.985,
+              "initial": 0.96
+            }
+          },
+          {
+            "id": "google_input_le_4",
+            "title": "≤ $4/MTok",
+            "enabled": true,
+            "threshold": 4,
+            "quote_range": {
+              "min": 0.82,
+              "max": 0.97,
+              "initial": 0.92
+            }
+          },
+          {
+            "id": "google_input_le_2",
+            "title": "≤ $2/MTok",
+            "enabled": true,
+            "threshold": 2,
+            "quote_range": {
+              "min": 0.62,
+              "max": 0.92,
+              "initial": 0.8
+            }
+          },
+          {
+            "id": "google_input_le_1_5",
+            "title": "≤ $1.50/MTok",
+            "enabled": true,
+            "threshold": 1.5,
+            "quote_range": {
+              "min": 0.16,
+              "max": 0.55,
+              "initial": 0.34
+            }
+          },
+          {
+            "id": "google_input_le_1",
+            "title": "≤ $1/MTok",
+            "enabled": true,
+            "threshold": 1,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.32,
+              "initial": 0.15
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves each rung YES if Google's flagship Gemini model — the highest-numbered non-deprecated Gemini Pro model (currently Gemini 3.1 Pro) — has a standard base API input price at or below the rung's dollar threshold per million input tokens, as read on the Gemini Developer API pricing page (https://ai.google.dev/gemini-api/docs/pricing) at 2026-12-31 23:59 UTC. Use the paid-tier standard rate for prompts ≤200K tokens (the base context tier), excluding the higher long-context (>200K) rate; any Gemini Pro flagship = Google's top line. If multiple Pro-tier models are current, use the highest-numbered one. Tie-break: a price exactly on a threshold resolves that rung YES (≤ inclusive). If the page is renamed or the flagship rebranded, use the successor official page and equivalent flagship; if no official base input price is published, the market voids.",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Read the paid-tier standard input $/MTok for the highest-numbered non-deprecated Gemini Pro flagship at ≤200K context (the base tier, not the >200K long-context rate). Compare against each rung threshold.\n\nFallback: If the Gemini pricing page is JS-blocked or unreachable, read the flagship's ≤200K input price from https://openrouter.ai/google or https://pricepertoken.com (Google/Gemini section), preferring the figure matching Google's own base list price."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+    },
+    {
+      "id": "remote_labor_index_top_automation_eoy2026",
+      "enabled": true,
+      "title": "What will the top Remote Labor Index automation rate be at end of 2026?",
+      "outcome_set": {
+        "type": "threshold",
+        "direction": "above",
+        "unit": "percent",
+        "outcomes": [
+          {
+            "id": "rli_top_ge_15pct_eoy2026",
+            "title": "≥ 15%",
+            "enabled": true,
+            "threshold": 15,
+            "quote_range": {
+              "min": 0.8,
+              "max": 0.97,
+              "initial": 0.9
+            }
+          },
+          {
+            "id": "rli_top_ge_20pct_eoy2026",
+            "title": "≥ 20%",
+            "enabled": true,
+            "threshold": 20,
+            "quote_range": {
+              "min": 0.5,
+              "max": 0.85,
+              "initial": 0.68
+            }
+          },
+          {
+            "id": "rli_top_ge_25pct_eoy2026",
+            "title": "≥ 25%",
+            "enabled": true,
+            "threshold": 25,
+            "quote_range": {
+              "min": 0.3,
+              "max": 0.65,
+              "initial": 0.45
+            }
+          },
+          {
+            "id": "rli_top_ge_30pct_eoy2026",
+            "title": "≥ 30%",
+            "enabled": true,
+            "threshold": 30,
+            "quote_range": {
+              "min": 0.15,
+              "max": 0.45,
+              "initial": 0.28
+            }
+          },
+          {
+            "id": "rli_top_ge_40pct_eoy2026",
+            "title": "≥ 40%",
+            "enabled": true,
+            "threshold": 40,
+            "quote_range": {
+              "min": 0.04,
+              "max": 0.25,
+              "initial": 0.12
+            }
+          },
+          {
+            "id": "rli_top_ge_50pct_eoy2026",
+            "title": "≥ 50%",
+            "enabled": true,
+            "threshold": 50,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.05
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Each rung resolves YES if the single highest automation rate (%) held by any agent on the Remote Labor Index (RLI) leaderboard is at least the rung's threshold percent, as read on the Remote Labor Index leaderboard (https://www.remotelabor.ai/) at 2026-12-31 23:59 UTC. The RLI value is the top-ranked agent's automation rate — the share of the ~240 real remote-freelance projects it completes to client-acceptable quality; an entry scored on a partial subset counts only if it is the highest-ranked row shown. Tie-break: if two agents share the top rate, use that shared value. If remotelabor.ai is unreachable, read the mirrored leaderboard at Scale Labs (https://labs.scale.com/leaderboard/rli) or dashboard.safe.ai. If RLI is discontinued or renamed with no methodology-continuous successor, the market voids.",
+      "source_url": "https://www.remotelabor.ai/",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://www.remotelabor.ai/ and wait for the leaderboard to finish loading (it renders client-side, showing 'Loading leaderboard results...' until populated). Read the automation rate (%) of the single top-ranked agent — that is the RLI value. Resolve each ladder rung YES if that value ≥ the rung threshold. Use the highest row shown even if its note flags a partial-project run.\n\nFallback: If remotelabor.ai fails to render or is down, read the same RLI leaderboard mirror at https://labs.scale.com/leaderboard/rli, or the CAIS/Scale dashboard at https://dashboard.safe.ai; take the top agent's automation rate. If all mirrors are unavailable at read time, void."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=remotelabor.ai&sz=128"
+    },
+    {
+      "id": "kernelbench_mega_top_company_eoy2026",
+      "enabled": true,
+      "title": "Which company tops KernelBench-Mega at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "kbmega_company_anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.4,
+              "initial": 0.55,
+              "max": 0.75
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+          },
+          {
+            "id": "kbmega_company_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.05,
+              "initial": 0.15,
+              "max": 0.35
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "kbmega_company_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "initial": 0.05,
+              "max": 0.15
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "kbmega_company_xai",
+            "title": "xAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "initial": 0.04,
+              "max": 0.14
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=x.ai&sz=128"
+          },
+          {
+            "id": "kbmega_company_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "initial": 0.14,
+              "max": 0.17
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the company whose model holds the single highest recorded decode speedup (the `score`/peak_fraction column — decode speedup over the optimized-PyTorch baseline) on the KernelBench-Mega published board (problem 02_kimi_linear_decode, best score per model across all GPUs), as read on KernelBench-Mega (https://kernelbench.com/mega, machine-readable source public/data/mega/results.csv) at 2026-12-31 23:59 UTC. Any Claude model (Opus/Sonnet/Fable) = Anthropic; any GPT/o-series/Codex = OpenAI; any Gemini = Google; any Grok = xAI; any GLM = Z.ai; any DeepSeek = DeepSeek; any Kimi = Moonshot. If the leader's provider is not a listed outcome, resolves Other. Tie-break: if two models tie on score to three decimals, the higher decode tok/s (`tok_s`) wins; if still tied, the earlier `run_id` timestamp. If the board is renamed or re-versioned, follow the successor board scoring decode speedup for the Kimi-Linear W4A16 decode megakernel; voids only if no KernelBench-Mega decode board is publicly readable at the read time.",
+      "source_url": "https://kernelbench.com/mega",
       "category": "AI",
       "resolution_source": {
         "type": "api_poll",
-        "endpoint": "https://developers.openai.com/api/docs/pricing",
+        "endpoint": "https://raw.githubusercontent.com/Infatoshi/kernelbench.com/master/public/data/mega/results.csv",
         "method": "GET",
-        "notes": "openai.com/api/pricing returns 403 to bots; the developers.openai.com mirror is the automatable source (manual read as fallback). Snapshot 2026-07-06: GPT-5.5 standard input $5/MTok (output $30), short-context tier at or below 272K."
-      }
+        "notes": "Filter rows to problem == 02_kimi_linear_decode with correct == true and a numeric `score`; take the max `score` per model, then the global max; map that model to its company via the mapping in resolution_criteria. `score` = peak_fraction = decode speedup over the PyTorch baseline. Fallback: If the CSV path/branch changes or 404s, read the rendered leaderboard at https://kernelbench.com/mega, or the table in https://github.com/Infatoshi/kernelbench.com/blob/master/benchmarks/mega/LEADERBOARD.md, and take the model with the highest score for problem 02_kimi_linear_decode."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=kernelbench.com&sz=128"
+    },
+    {
+      "id": "kernelbench_mega_max_speedup_eoy2026",
+      "enabled": true,
+      "title": "What will the top KernelBench-Mega decode speedup be at end of 2026?",
+      "outcome_set": {
+        "type": "threshold",
+        "direction": "above",
+        "unit": "x",
+        "outcomes": [
+          {
+            "id": "kbmega_speedup_ge15x",
+            "title": "≥ 15x",
+            "enabled": true,
+            "threshold": 15,
+            "quote_range": {
+              "min": 0.85,
+              "initial": 0.96,
+              "max": 0.98
+            }
+          },
+          {
+            "id": "kbmega_speedup_ge20x",
+            "title": "≥ 20x",
+            "enabled": true,
+            "threshold": 20,
+            "quote_range": {
+              "min": 0.45,
+              "initial": 0.68,
+              "max": 0.88
+            }
+          },
+          {
+            "id": "kbmega_speedup_ge25x",
+            "title": "≥ 25x",
+            "enabled": true,
+            "threshold": 25,
+            "quote_range": {
+              "min": 0.2,
+              "initial": 0.4,
+              "max": 0.65
+            }
+          },
+          {
+            "id": "kbmega_speedup_ge30x",
+            "title": "≥ 30x",
+            "enabled": true,
+            "threshold": 30,
+            "quote_range": {
+              "min": 0.1,
+              "initial": 0.24,
+              "max": 0.45
+            }
+          },
+          {
+            "id": "kbmega_speedup_ge40x",
+            "title": "≥ 40x",
+            "enabled": true,
+            "threshold": 40,
+            "quote_range": {
+              "min": 0.04,
+              "initial": 0.11,
+              "max": 0.28
+            }
+          },
+          {
+            "id": "kbmega_speedup_ge50x",
+            "title": "≥ 50x",
+            "enabled": true,
+            "threshold": 50,
+            "quote_range": {
+              "min": 0.02,
+              "initial": 0.06,
+              "max": 0.18
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Each rung resolves YES if the maximum recorded decode speedup — the highest value in the `score`/peak_fraction column (decode speedup over the optimized-PyTorch baseline), across all models and GPUs on the KernelBench-Mega published board (problem 02_kimi_linear_decode) — is greater than or equal to that rung's threshold, as read on KernelBench-Mega (https://kernelbench.com/mega, machine-readable source public/data/mega/results.csv) at 2026-12-31 23:59 UTC. Only rows marked correct with a numeric score count; runs removed by the contamination tripwire do not count. Tie-break: exact equality to a rung's threshold resolves that rung YES. If the board is renamed or re-versioned, or the scored problem changes, follow the successor decode-speedup board for the Kimi-Linear W4A16 decode megakernel; voids only if no KernelBench-Mega decode board is publicly readable at the read time.",
+      "source_url": "https://kernelbench.com/mega",
+      "category": "AI",
+      "resolution_source": {
+        "type": "api_poll",
+        "endpoint": "https://raw.githubusercontent.com/Infatoshi/kernelbench.com/master/public/data/mega/results.csv",
+        "method": "GET",
+        "notes": "Parse the `score` column for rows where problem == 02_kimi_linear_decode and correct == true; take the global maximum. Current max = 19.351 (claude-opus-4-8, B200). Compare that max against each rung threshold. Fallback: If the CSV path/branch changes or 404s, read the rendered board at https://kernelbench.com/mega or the table in https://github.com/Infatoshi/kernelbench.com/blob/master/benchmarks/mega/LEADERBOARD.md and take the single highest score for problem 02_kimi_linear_decode."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=kernelbench.com&sz=128"
+    },
+    {
+      "id": "osworld2_leader_company_eoy2026",
+      "enabled": true,
+      "title": "Which company tops OSWorld 2.0 at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "osworld2_leader_anthropic",
+            "title": "Anthropic",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.45,
+              "max": 0.9,
+              "initial": 0.66
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=anthropic.com&sz=128"
+          },
+          {
+            "id": "osworld2_leader_openai",
+            "title": "OpenAI",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.04,
+              "max": 0.45,
+              "initial": 0.16
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=openai.com&sz=128"
+          },
+          {
+            "id": "osworld2_leader_google",
+            "title": "Google",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.3,
+              "initial": 0.05
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=google.com&sz=128"
+          },
+          {
+            "id": "osworld2_leader_alibaba",
+            "title": "Alibaba",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.15,
+              "initial": 0.02
+            },
+            "image_url": "https://www.google.com/s2/favicons?domain=alibaba.com&sz=128"
+          },
+          {
+            "id": "osworld2_leader_other",
+            "title": "Other",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.25,
+              "initial": 0.08
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the company whose model/agent holds the #1 rank by binary completion (strict end-to-end task success rate, 500-step budget) as read on the Snorkel AI OSWorld 2.0 leaderboard (https://snorkel.ai/leaderboard/os-world-2-0/) at 2026-12-31 23:59 UTC. Mapping: any Claude model = Anthropic, any GPT/o-series model = OpenAI, any Gemini model = Google, any Qwen model = Alibaba, any Kimi model = Moonshot AI, any Seed/Doubao model = ByteDance. If the leader is not a listed outcome, resolves Other. Tie-break: if two entries tie on binary completion, the higher partial score ranks first; if still tied, the entry printed higher on the page. Continuity: if the leaderboard is renamed or its methodology re-versioned, read the successor OSWorld 2.0 success-rate table at the same host. Voids if no such leaderboard publishes a rank-ordered binary-completion result by the read time.",
+      "source_url": "https://snorkel.ai/leaderboard/os-world-2-0/",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://snorkel.ai/leaderboard/os-world-2-0/ at the read time. In the main results table, find the row with the highest 'binary completion' (end-to-end success) percentage at the 500-step budget. Map that row's model name to its company per the mapping rule and resolve that outcome; if unmapped, resolve Other.\n\nFallback: If the Snorkel page is unreachable or restructured, use the OSWorld 2.0 results table in the Snorkel research paper (https://snorkel.ai/research-paper/os-world-2/) or the XLang OSWorld 2.0 page (https://osworld-v2.xlang.ai/), reading the same binary end-to-end success column. Do NOT substitute an OSWorld-Verified or partial-score leaderboard."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=snorkel.ai&sz=128"
+    },
+    {
+      "id": "osworld2_top_binary_score_eoy2026",
+      "enabled": true,
+      "title": "What will the top binary success rate be on the Snorkel OSWorld 2.0 leaderboard at end of 2026?",
+      "outcome_set": {
+        "type": "categorical",
+        "outcomes": [
+          {
+            "id": "osworld2_max_below20",
+            "title": "Below 20%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.25,
+              "initial": 0.07
+            }
+          },
+          {
+            "id": "osworld2_max_20_25",
+            "title": "20-25%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.05,
+              "max": 0.4,
+              "initial": 0.18
+            }
+          },
+          {
+            "id": "osworld2_max_25_30",
+            "title": "25-30%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.06,
+              "max": 0.45,
+              "initial": 0.23
+            }
+          },
+          {
+            "id": "osworld2_max_30_40",
+            "title": "30-40%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.06,
+              "max": 0.5,
+              "initial": 0.25
+            }
+          },
+          {
+            "id": "osworld2_max_40_50",
+            "title": "40-50%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.3,
+              "initial": 0.11
+            }
+          },
+          {
+            "id": "osworld2_max_above50",
+            "title": "Above 50%",
+            "enabled": true,
+            "quote_range": {
+              "min": 0.02,
+              "max": 0.25,
+              "initial": 0.06
+            }
+          }
+        ]
+      },
+      "units": "probability",
+      "end_time": "2027-01-01T00:00:00Z",
+      "resolution_criteria": "Resolves to the bucket containing the single highest binary completion score (strict end-to-end task success rate, 500-step budget) listed across all systems on the Snorkel AI OSWorld 2.0 leaderboard (https://snorkel.ai/leaderboard/os-world-2-0/) at 2026-12-31 23:59 UTC. The score read is the 'binary completion' percentage, NOT the partial-credit score; the top value over every listed entry is used. The score is read as a percentage (0-100%); a 0-1 decimal is multiplied by 100. Buckets are disjoint intervals, lower-bound inclusive and upper-bound exclusive; a value exactly on a boundary falls in the higher bucket (e.g. 25.0% resolves '25-30%'). Continuity: if the leaderboard is renamed or its methodology re-versioned, read the successor OSWorld 2.0 binary-success table at the same host. Voids if no OSWorld 2.0 leaderboard (or successor) publishes a binary end-to-end success rate by the read time.",
+      "source_url": "https://snorkel.ai/leaderboard/os-world-2-0/",
+      "category": "AI",
+      "resolution_source": {
+        "type": "manual",
+        "instructions": "Open https://snorkel.ai/leaderboard/os-world-2-0/ at the read time. Read the 'binary completion' (end-to-end success) column at the 500-step budget, take the maximum value across all rows, and resolve the bucket that contains it (boundary values go to the higher bucket).\n\nFallback: If the Snorkel page is unreachable or restructured, use the OSWorld 2.0 results table in the Snorkel research paper (https://snorkel.ai/research-paper/os-world-2/) or the XLang OSWorld 2.0 page (https://osworld-v2.xlang.ai/), reading the same binary end-to-end success column. Do NOT use an OSWorld-Verified or partial-score number."
+      },
+      "event_image_url": "https://www.google.com/s2/favicons?domain=snorkel.ai&sz=128"
     }
   ]
 }

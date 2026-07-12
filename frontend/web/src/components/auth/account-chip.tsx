@@ -7,6 +7,7 @@
  * copy account id / copy JWK.
  */
 
+import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { disconnect } from "@/lib/account/actions";
 import { readStoredAccount } from "@/lib/account/storage";
@@ -42,10 +43,9 @@ export function AccountChip() {
   if (!session) {
     return (
       <button
-        className="account-chip"
+        className="account-chip nav-chip"
         type="button"
         onClick={() => setOpen(true)}
-        style={chipButtonStyle(false)}
         title="Create or import an account"
       >
         connect
@@ -85,7 +85,9 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
 
   const total =
     portfolio != null
-      ? formatDollars(parseNanos(portfolio.portfolio_value_nanos), { decimals: 2 })
+      ? formatDollars(parseNanos(portfolio.portfolio_value_nanos), {
+          decimals: 2,
+        })
       : "—";
   // "Cash" is the AVAILABLE (spendable) balance — total minus funds reserved by
   // open orders — so the chip never implies more buying power than the engine
@@ -95,8 +97,13 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
     availableNanos != null
       ? formatDollars(availableNanos, { decimals: 2 })
       : "—";
-  const reserved =
-    reservedNanos > 0n ? formatDollars(reservedNanos, { decimals: 2 }) : null;
+  const reserved = formatDollars(reservedNanos, { decimals: 2 });
+  const positions =
+    portfolio != null
+      ? formatDollars(parseNanos(portfolio.total_position_value_nanos), {
+          decimals: 2,
+        })
+      : "—";
 
   useEffect(() => {
     if (!open) return;
@@ -118,23 +125,28 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
       <button
-        className="account-chip"
+        className="account-chip nav-chip"
         type="button"
+        data-connected="true"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        style={chipButtonStyle(true)}
-        title={`Portfolio ${total} · Available ${cash}${reserved ? ` · Reserved ${reserved}` : ""} · Account #${accountId}`}
+        title={`Portfolio ${total} · Available ${cash} · Reserved ${reserved} · Positions ${positions} · Account #${accountId}`}
       >
         <span
           className="account-chip-balance"
           style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
         >
           <span style={{ color: "var(--fg-1)" }}>{total}</span>
-          <span aria-hidden style={{ color: "var(--fg-4)" }}>
-            /
+          <span
+            className="account-chip-cash"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+          >
+            <span aria-hidden style={{ color: "var(--fg-4)" }}>
+              /
+            </span>
+            <span style={{ color: "var(--fg-3)" }}>{cash}</span>
           </span>
-          <span style={{ color: "var(--fg-3)" }}>{cash}</span>
         </span>
         <span aria-hidden style={{ marginLeft: 6, color: "var(--fg-4)" }}>
           ▾
@@ -146,8 +158,8 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
+            left: 0,
             right: 0,
-            minWidth: 200,
             background: "var(--surface-1)",
             border: "1px solid var(--border-1)",
             borderRadius: 8,
@@ -159,10 +171,20 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
           <div style={{ padding: "6px 10px 8px" }}>
             <InfoRow label="Portfolio" value={total} strong />
             <InfoRow label="Available" value={cash} />
-            {reserved && <InfoRow label="Reserved" value={reserved} />}
+            <InfoRow label="Reserved" value={reserved} />
+            <InfoRow label="Positions" value={positions} />
             <InfoRow label="Account" value={`#${accountId}`} />
           </div>
-          <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
+          <div
+            style={{
+              height: 1,
+              background: "var(--border-1)",
+              margin: "4px 0",
+            }}
+          />
+          <MenuItem href="/settings" onClick={() => setOpen(false)}>
+            Settings
+          </MenuItem>
           <MenuItem
             onClick={() => {
               void navigator.clipboard?.writeText(String(accountId));
@@ -188,7 +210,13 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
               Copy private key (backup)
             </MenuItem>
           )}
-          <div style={{ height: 1, background: "var(--border-1)", margin: "4px 0" }} />
+          <div
+            style={{
+              height: 1,
+              background: "var(--border-1)",
+              margin: "4px 0",
+            }}
+          />
           <MenuItem
             onClick={() => {
               disconnect();
@@ -297,37 +325,60 @@ function PasskeyNotice() {
 function MenuItem({
   children,
   onClick,
+  href,
   danger,
 }: {
   children: React.ReactNode;
   onClick: () => void;
+  href?: string;
   danger?: boolean;
 }) {
+  const style: React.CSSProperties = {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    padding: "8px 10px",
+    background: "transparent",
+    border: 0,
+    borderRadius: 4,
+    color: danger ? "var(--no)" : "var(--fg-2)",
+    fontFamily: "var(--font-sans)",
+    fontSize: 13,
+    textDecoration: "none",
+    cursor: "pointer",
+    boxSizing: "border-box",
+  };
+  const onEnter = (event: React.MouseEvent<HTMLElement>) => {
+    event.currentTarget.style.background = "var(--surface-2)";
+  };
+  const onLeave = (event: React.MouseEvent<HTMLElement>) => {
+    event.currentTarget.style.background = "transparent";
+  };
+
+  if (href) {
+    return (
+      <Link
+        className="account-chip"
+        href={href}
+        role="menuitem"
+        onClick={onClick}
+        style={style}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+      >
+        {children}
+      </Link>
+    );
+  }
   return (
     <button
       className="account-chip"
       type="button"
       role="menuitem"
       onClick={onClick}
-      style={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        padding: "8px 10px",
-        background: "transparent",
-        border: 0,
-        borderRadius: 4,
-        color: danger ? "var(--no)" : "var(--fg-2)",
-        fontFamily: "var(--font-sans)",
-        fontSize: 13,
-        cursor: "pointer",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--surface-2)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-      }}
+      style={style}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
     >
       {children}
     </button>
@@ -339,30 +390,10 @@ function ChipShell({ label, disabled }: { label: string; disabled?: boolean }) {
     <button
       type="button"
       disabled={disabled}
-      style={chipButtonStyle(false)}
+      className="nav-chip"
       aria-hidden={disabled}
     >
       {label}
     </button>
   );
-}
-
-function chipButtonStyle(connected: boolean): React.CSSProperties {
-  return {
-    height: 32,
-    padding: "0 var(--space-3)",
-    background: connected ? "var(--accent-soft, var(--surface-2))" : "var(--surface-2)",
-    border: connected
-      ? "1px solid color-mix(in srgb, var(--accent) 40%, transparent)"
-      : "1px solid var(--border-2)",
-    borderRadius: "var(--radius-md)",
-    color: connected ? "var(--fg-1)" : "var(--fg-2)",
-    fontFamily: "var(--font-mono)",
-    fontSize: "var(--fs-12)",
-    letterSpacing: "var(--track-wide)",
-    textTransform: "uppercase",
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-  };
 }

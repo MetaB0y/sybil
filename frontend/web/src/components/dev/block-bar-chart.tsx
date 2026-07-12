@@ -10,17 +10,20 @@ interface BlockBarChartProps {
   height?: number;
 }
 
-const BAR_COLOR: Record<BlockBarChartProps["metric"], string> = {
+// Canvas can't read CSS custom properties directly, so the palette is resolved
+// from the live theme tokens at draw time (see `draw`). Each metric maps to a
+// design token; the hex is only a fallback for SSR / a missing var. A redraw is
+// triggered on theme flips via a MutationObserver on <html>'s data-theme.
+const BAR_TOKEN: Record<BlockBarChartProps["metric"], string> = {
+  volume: "--accent",
+  orders: "--warn",
+  fills: "--yes",
+};
+const BAR_FALLBACK: Record<BlockBarChartProps["metric"], string> = {
   volume: "#3FB6D9",
   orders: "#E8B447",
   fills: "#5BD99A",
 };
-
-const ZERO_BAR_COLOR = "#1D242E";
-const GRIDLINE_COLOR = "#161C24";
-const CHART_BG_COLOR = "#0A0E12";
-const LABEL_TEXT_COLOR = "#8b93a6";
-const EMPTY_TEXT_COLOR = "#5C6578";
 
 export function BlockBarChart({
   blocks,
@@ -44,8 +47,20 @@ export function BlockBarChart({
     ctx.scale(dpr, dpr);
     const w = rect.width;
     const h = rect.height;
+    // Resolve the palette from the live theme tokens (canvas can't read CSS
+    // vars) so the chart tracks light/dark like the rest of the app. The hex is
+    // only a last-resort fallback if a var doesn't resolve.
+    const cs = getComputedStyle(canvas);
+    const tok = (name: string, fallback: string) =>
+      cs.getPropertyValue(name).trim() || fallback;
+    const chartBg = tok("--bg-1", "#0A0E12");
+    const gridline = tok("--border-2", "#161C24");
+    const zeroBar = tok("--border-3", "#1D242E");
+    const labelText = tok("--fg-3", "#8b93a6");
+    const emptyText = tok("--fg-4", "#5C6578");
+    const barColor = tok(BAR_TOKEN[metric], BAR_FALLBACK[metric]);
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = CHART_BG_COLOR;
+    ctx.fillStyle = chartBg;
     ctx.fillRect(0, 0, w, h);
     const pad = { l: 46, r: 14, t: 18, b: 28 };
     const plotW = w - pad.l - pad.r;
@@ -56,7 +71,7 @@ export function BlockBarChart({
       return Number(b.fill_count || 0);
     });
     const max = Math.max(...values, 1);
-    ctx.strokeStyle = GRIDLINE_COLOR;
+    ctx.strokeStyle = gridline;
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
       const y = pad.t + (plotH * i) / 4;
@@ -69,11 +84,10 @@ export function BlockBarChart({
     values.forEach((v, i) => {
       const x = pad.l + i * (plotW / values.length);
       const bh = Math.max(1, (v / max) * plotH);
-      ctx.fillStyle = BAR_COLOR[metric];
-      if (v === 0) ctx.fillStyle = ZERO_BAR_COLOR;
+      ctx.fillStyle = v === 0 ? zeroBar : barColor;
       ctx.fillRect(x, pad.t + plotH - bh, barW, bh);
     });
-    ctx.fillStyle = LABEL_TEXT_COLOR;
+    ctx.fillStyle = labelText;
     ctx.font = "11px ui-monospace, monospace";
     ctx.fillText(
       metric +
@@ -89,7 +103,7 @@ export function BlockBarChart({
     ctx.fillText("#" + last, w - pad.r, h - 8);
     ctx.textAlign = "left";
     if (values.every((v) => v === 0)) {
-      ctx.fillStyle = EMPTY_TEXT_COLOR;
+      ctx.fillStyle = emptyText;
       ctx.fillText("no " + metric + " in this window", pad.l + 10, pad.t + 22);
     }
   }, [blocks, metric]);
@@ -98,10 +112,19 @@ export function BlockBarChart({
     draw();
     const canvas = canvasRef.current;
     const parent = canvas?.parentElement;
-    if (!parent) return;
-    const observer = new ResizeObserver(() => draw());
-    observer.observe(parent);
-    return () => observer.disconnect();
+    const resizeObserver = parent ? new ResizeObserver(() => draw()) : null;
+    if (parent && resizeObserver) resizeObserver.observe(parent);
+    // Redraw when the theme flips (data-theme on <html>): the palette is read
+    // from CSS tokens at draw time, so re-reading repaints it for light/dark.
+    const themeObserver = new MutationObserver(() => draw());
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    return () => {
+      resizeObserver?.disconnect();
+      themeObserver.disconnect();
+    };
   }, [draw, height]);
 
   return (

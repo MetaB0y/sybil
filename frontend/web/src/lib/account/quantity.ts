@@ -9,10 +9,13 @@ export function unitsToShares(units: number | bigint): number {
   return Number(units) / Number(SHARE_SCALE);
 }
 
-export function formatShareUnits(units: number | bigint): string {
+export function formatShareUnits(
+  units: number | bigint,
+  maxFractionDigits = 3,
+): string {
   const shares = unitsToShares(units);
   return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 3,
+    maximumFractionDigits: maxFractionDigits,
   }).format(shares);
 }
 

@@ -115,7 +115,7 @@ function SettingsSectionReadState({
               type="button"
               onClick={onRetry}
               disabled={retrying}
-              style={secondaryButtonStyle(retrying)}
+              className="settings-btn settings-btn--secondary"
             >
               {retrying ? "Retrying…" : "Retry"}
             </button>
@@ -240,7 +240,7 @@ function ProfileSection({
                 maxLength={32}
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="e.g. alice"
-                style={inputStyle}
+                className="settings-input"
               />
             </Field>
             <Field label="Identicon seed">
@@ -249,7 +249,7 @@ function ProfileSection({
                 value={avatarSeed}
                 onChange={(e) => setAvatarSeed(e.target.value)}
                 placeholder="any string — drives the avatar above"
-                style={inputStyle}
+                className="settings-input"
               />
             </Field>
           </div>
@@ -262,7 +262,7 @@ function ProfileSection({
             type="button"
             onClick={() => save.mutate()}
             disabled={busy}
-            style={primaryButtonStyle(busy)}
+            className="settings-btn settings-btn--primary"
           >
             {save.isPending ? "Saving…" : "Save"}
           </button>
@@ -270,7 +270,7 @@ function ProfileSection({
             type="button"
             onClick={() => clear.mutate()}
             disabled={busy}
-            style={secondaryButtonStyle(busy)}
+            className="settings-btn settings-btn--secondary"
           >
             {clear.isPending ? "Clearing…" : "Clear"}
           </button>
@@ -424,7 +424,7 @@ function SigningKeysSection({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="e.g. agent:pricer"
-              style={inputStyle}
+              className="settings-input"
             />
           </Field>
           <button
@@ -432,7 +432,7 @@ function SigningKeysSection({
             type="button"
             onClick={() => add.mutate()}
             disabled={add.isPending}
-            style={primaryButtonStyle(add.isPending)}
+            className="settings-btn settings-btn--primary"
           >
             {add.isPending ? "Adding…" : "Add agent key"}
           </button>
@@ -532,7 +532,7 @@ function BackupPasskeyControl({
             addBackup.mutate();
           }}
           disabled={unavailable || addBackup.isPending}
-          style={primaryButtonStyle(unavailable || addBackup.isPending)}
+          className="settings-btn settings-btn--primary"
         >
           {addBackup.isPending ? "Adding passkey…" : "Add backup passkey"}
         </button>
@@ -614,7 +614,7 @@ function SigningKeyRow({
           onClick={onRevoke}
           disabled={!revokePolicy.canRevoke || revoking}
           title={revokePolicy.title}
-          style={dangerButtonStyle(!revokePolicy.canRevoke || revoking)}
+          className="settings-btn settings-btn--danger"
         >
           {revoking ? "Revoking…" : "Revoke"}
         </button>
@@ -771,7 +771,7 @@ function ReadApiKeysSection({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="e.g. grafana"
-              style={inputStyle}
+              className="settings-input"
             />
           </Field>
           <button
@@ -779,7 +779,7 @@ function ReadApiKeysSection({
             type="button"
             onClick={() => create.mutate()}
             disabled={create.isPending}
-            style={primaryButtonStyle(create.isPending)}
+            className="settings-btn settings-btn--primary"
           >
             {create.isPending ? "Creating…" : "Create API key"}
           </button>
@@ -853,7 +853,7 @@ function ApiKeyRow({
             type="button"
             onClick={onRevoke}
             disabled={revoking}
-            style={dangerButtonStyle(revoking)}
+            className="settings-btn settings-btn--danger"
           >
             {revoking ? "Revoking…" : "Revoke"}
           </button>
@@ -1071,7 +1071,7 @@ function ShowOnceModal({
               onClick={() => void onCopy()}
               aria-disabled={copyState === "copying"}
               aria-busy={copyState === "copying"}
-              style={primaryButtonStyle(copyState === "copying")}
+              className="settings-btn settings-btn--primary"
             >
               {copyState === "copied"
                 ? "Copied ✓"
@@ -1084,7 +1084,7 @@ function ShowOnceModal({
             <button
               type="button"
               onClick={onClose}
-              style={secondaryButtonStyle(false)}
+              className="settings-btn settings-btn--secondary"
             >
               Done
             </button>
@@ -1384,52 +1384,3 @@ const copyFailureStyle: React.CSSProperties = {
   fontSize: 12,
   lineHeight: 1.45,
 };
-
-function primaryButtonStyle(busy: boolean): React.CSSProperties {
-  return {
-    minHeight: 40,
-    padding: "9px 14px",
-    background: busy ? "var(--surface-2)" : "var(--accent)",
-    border: 0,
-    borderRadius: 8,
-    color: busy ? "var(--fg-3)" : "var(--bg-1)",
-    fontFamily: "var(--font-sans)",
-    fontWeight: 600,
-    fontSize: 13,
-    cursor: busy ? "not-allowed" : "pointer",
-    whiteSpace: "nowrap",
-  };
-}
-
-function secondaryButtonStyle(busy: boolean): React.CSSProperties {
-  return {
-    minHeight: 40,
-    padding: "9px 14px",
-    background: "var(--surface-2)",
-    border: "1px solid var(--border-1)",
-    borderRadius: 8,
-    color: busy ? "var(--fg-4)" : "var(--fg-2)",
-    fontFamily: "var(--font-sans)",
-    fontWeight: 600,
-    fontSize: 13,
-    cursor: busy ? "not-allowed" : "pointer",
-    whiteSpace: "nowrap",
-  };
-}
-
-function dangerButtonStyle(disabled: boolean): React.CSSProperties {
-  return {
-    minHeight: 40,
-    padding: "6px 12px",
-    background: "transparent",
-    border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
-    borderRadius: 6,
-    color: disabled ? "var(--fg-4)" : "var(--no)",
-    fontFamily: "var(--font-mono)",
-    fontSize: 11,
-    letterSpacing: "var(--track-wide)",
-    textTransform: "uppercase",
-    cursor: disabled ? "not-allowed" : "pointer",
-    whiteSpace: "nowrap",
-  };
-}

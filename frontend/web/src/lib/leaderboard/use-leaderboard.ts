@@ -73,7 +73,9 @@ export function useLeaderboard(
     queryKey: ["leaderboard", window],
     queryFn: async () => {
       const { data, error } = await api.GET("/v1/leaderboard", {
-        params: { query: { window: WINDOW_QUERY[window] } },
+        // Pull the full ranked set (server cap is 100) so the client can sort
+        // and paginate across everyone, not just the default top 50.
+        params: { query: { window: WINDOW_QUERY[window], limit: 100 } },
       });
       if (error || !data) throw new Error("/v1/leaderboard failed");
       return data;

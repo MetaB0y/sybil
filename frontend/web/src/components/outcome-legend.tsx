@@ -14,17 +14,32 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getCategoryColor } from "@/lib/categorize";
-import { formatCentsPrecise } from "@/lib/format/nanos";
 import { useSelectOutcome } from "@/lib/market-detail/active-outcome";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 
 // Reuse the category palette for outcome accents. Binary YES/NO use the
 // semantic --yes / --no tokens.
+// Ten hue-separated accents for multi-outcome lines. The first eight — the set
+// normally on the chart — are spread across the wheel so no two read alike; the
+// old palette collapsed to near-identical blues/purples. Ordered so the busiest
+// (favourite-first) outcomes land on the most distinct colours.
+const OUTCOME_PALETTE = [
+  "#5FC98A", // green
+  "#E7B84A", // amber
+  "#5B8AF0", // blue
+  "#E86FB0", // pink
+  "#3FC6D6", // cyan
+  "#EE7A3C", // orange
+  "#9B6BEA", // purple
+  "#B9C94F", // lime
+  "#E85D6B", // coral
+  "#37B49E", // teal
+];
+
 export function colorForOutcome(o: EventOutcome, index: number): string {
   if (o.label.toLowerCase() === "yes") return "var(--yes)";
   if (o.label.toLowerCase() === "no") return "var(--no)";
-  const PALETTE = ["#6FCC8A", "#E8B447", "#E89D9F", "#7E9AE8", "#5BC4E0", "#9F8FE8"];
-  return PALETTE[index % PALETTE.length] ?? getCategoryColor(null);
+  return OUTCOME_PALETTE[index % OUTCOME_PALETTE.length] ?? getCategoryColor(null);
 }
 
 export function OutcomeLegend({
@@ -64,9 +79,16 @@ export function OutcomeLegend({
 
   const sel = new Set(selectedIds);
   const colorOf = (o: EventOutcome) => colorForOutcome(o, outcomes.indexOf(o));
-  // Keep the group's favourite-first order; the chosen outcome is highlighted
-  // in place rather than floated to the front.
-  const shown = outcomes.filter((o) => sel.has(o.marketId));
+  // Float the chosen outcome (the market in the URL) to the front so it always
+  // leads the list above the chart; the rest keep their favourite-first order.
+  const shownAll = outcomes.filter((o) => sel.has(o.marketId));
+  const shown =
+    highlightId == null
+      ? shownAll
+      : [
+          ...shownAll.filter((o) => o.marketId === highlightId),
+          ...shownAll.filter((o) => o.marketId !== highlightId),
+        ];
   const hidden = outcomes.filter((o) => !sel.has(o.marketId));
   const atCap = shown.length >= maxSelected;
   const interactive = outcomes.length > 1;
@@ -81,13 +103,23 @@ export function OutcomeLegend({
   }, [shown.length, interactive, onRowHeight]);
 
   const remove = (id: number) => {
-    // The pinned (chosen) outcome can't be removed.
-    if (id !== highlightId && shown.length > 1) {
+    if (shown.length <= 1) return;
+    if (id === highlightId) {
+      // Closing the outcome you're viewing: drop its line from the chart and
+      // switch the page to the first remaining outcome in the list.
+      const next = shown.find((o) => o.marketId !== id);
       onChange(selectedIds.filter((x) => x !== id));
+      if (next) selectOutcome(next.marketId);
+      return;
     }
+    onChange(selectedIds.filter((x) => x !== id));
   };
   const add = (id: number) => {
-    if (!atCap) onChange([...selectedIds, id]);
+    if (atCap) return;
+    onChange([...selectedIds, id]);
+    // Adding an outcome's line also makes it the selected/active outcome, so the
+    // rail + page switch to what you just pulled onto the chart.
+    selectOutcome(id);
   };
 
   return (
@@ -106,9 +138,10 @@ export function OutcomeLegend({
         const color = colorOf(o);
         const isHighlight = o.marketId === highlightId;
         const isClosed = o.closed;
-        // The chosen outcome is pinned: shown but not removable. The "+N more"
-        // dropdown is the only way it could leave, and it's excluded there too.
-        const removable = interactive && shown.length > 1 && !isHighlight;
+        // Every shown outcome — including the chosen one — can be closed while
+        // more than one line remains. Closing the chosen one also switches the
+        // page to the next outcome (see `remove`).
+        const removable = interactive && shown.length > 1;
         return (
           // Chip = a styled container holding two sibling buttons (kept
           // separate so the ✕ isn't nested inside the navigate button):
@@ -123,18 +156,17 @@ export function OutcomeLegend({
               flexShrink: 0,
               overflow: "hidden",
               borderRadius: 4,
+              // The chosen outcome gets a subtle tint + colour-matched border so
+              // you can see which one you're viewing, without shouting.
               border: isHighlight
-                ? `1px solid ${color}`
+                ? `1px solid color-mix(in srgb, ${color} 60%, var(--border-1))`
                 : "1px solid var(--border-1)",
               background: isHighlight
-                ? `color-mix(in srgb, ${color} 16%, transparent)`
+                ? `color-mix(in srgb, ${color} 12%, var(--bg-2))`
                 : "var(--bg-2)",
-              boxShadow: isHighlight
-                ? `0 0 0 1px color-mix(in srgb, ${color} 45%, transparent)`
-                : "none",
               fontFamily: "var(--font-sans)",
               fontSize: 12,
-              fontWeight: isHighlight ? 600 : 400,
+              fontWeight: isHighlight ? 500 : 400,
               color: isHighlight ? "var(--fg-1)" : "var(--fg-2)",
               opacity: isClosed ? 0.5 : 1,
             }}
@@ -144,11 +176,6 @@ export function OutcomeLegend({
               onClick={() => {
                 if (!isHighlight) selectOutcome(o.marketId);
               }}
-              title={
-                isHighlight
-                  ? `${o.label} — current outcome`
-                  : `${o.label} — switch to this outcome`
-              }
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -176,26 +203,30 @@ export function OutcomeLegend({
               >
                 {o.shortLabel}
               </span>
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  color: isClosed ? "var(--fg-4)" : color,
-                  flexShrink: 0,
-                }}
-              >
-                {isClosed
-                  ? "closed"
-                  : o.yesPriceNanos == null
-                    ? "—"
-                    : formatCentsPrecise(o.yesPriceNanos)}
-              </span>
+              {/* Price now reads off each line's right-edge tag on the chart;
+                  the chip only flags a resolved outcome. */}
+              {isClosed && (
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    color: "var(--fg-4)",
+                    flexShrink: 0,
+                  }}
+                >
+                  closed
+                </span>
+              )}
             </button>
             {removable && (
               <button
                 type="button"
                 onClick={() => remove(o.marketId)}
-                aria-label={`Remove ${o.label} from chart`}
-                title={`${o.label} — remove from chart`}
+                aria-label={
+                  isHighlight
+                    ? `Remove ${o.label} and switch outcome`
+                    : `Remove ${o.label} from chart`
+                }
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -313,7 +344,6 @@ export function OutcomeLegend({
                         fontSize: 13,
                         color: "var(--fg-1)",
                       }}
-                      title={o.label}
                     >
                       {o.shortLabel}
                     </span>

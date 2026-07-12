@@ -7,6 +7,7 @@
  * `showClosed`, and always sink below open cards regardless of the active sort.
  */
 
+import { binaryCardOf } from "./build-index-cards";
 import type { IndexMarket } from "./use-markets";
 import type { SortKey } from "./sort";
 
@@ -97,4 +98,42 @@ export function selectIndexCards(
     return compareBySort(a, b, opts.sort, opts.eventTraders);
   });
   return out;
+}
+
+/** Resolve dropdown matches to an event or, for outcome-only matches, the
+ * specific binary markets. The full grid remains grouped by event. */
+export function searchResultCards(
+  items: CardItem[],
+  query: string,
+): CardItem[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return [];
+  const matches: CardItem[] = [];
+  for (const item of items) {
+    if (item.kind === "binary") {
+      if (item.sortKey.includes(normalized)) matches.push(item);
+    } else if (item.name.toLowerCase().includes(normalized)) {
+      matches.push(item);
+    } else {
+      for (const market of item.markets) {
+        if (
+          [market.name, market.group_item_title]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(normalized)
+        ) {
+          matches.push(binaryCardOf(market));
+        }
+      }
+    }
+  }
+  return matches
+    .filter((item) => !item.closed)
+    .sort((a, b) => {
+      if (a.volumeNanos !== b.volumeNanos) {
+        return a.volumeNanos < b.volumeNanos ? 1 : -1;
+      }
+      return sizeOf(b) - sizeOf(a);
+    });
 }

@@ -67,13 +67,21 @@
   --radius-pill: var(--radius-pill);
 }
 
-/* Smooth the dark↔light theme switch — only color properties, and respect
- * reduced-motion. Keeps the flip from being jarring without animating layout. */
+/* Smooth the dark↔light theme switch. ThemeProvider adds `.theme-transition`
+ * to <html> only for the duration of the flip, so the whole surface (cards,
+ * borders, text, icons) crossfades together — but hovers and other everyday
+ * interactions never pay for a global transition. Colors only; layout is never
+ * animated, and reduced-motion opts out entirely. */
 @media (prefers-reduced-motion: no-preference) {
-  html[data-theme],
-  html:not([data-theme]) {
-    transition: background-color 200ms var(--ease-standard, ease),
-      color 200ms var(--ease-standard, ease);
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition: background-color var(--dur-slow) var(--ease-standard),
+      border-color var(--dur-slow) var(--ease-standard),
+      color var(--dur-slow) var(--ease-standard),
+      fill var(--dur-slow) var(--ease-standard),
+      stroke var(--dur-slow) var(--ease-standard) !important;
   }
 }
 
@@ -157,6 +165,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .global-nav-tab {
@@ -170,6 +179,8 @@ textarea {
   font-size: var(--fs-13);
   font-weight: 500;
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
   border-radius: var(--radius-md);
   background: transparent;
   transition: color var(--dur-fast) var(--ease-standard),
@@ -181,20 +192,202 @@ textarea {
   background: var(--surface-2);
 }
 
+/* Interactive header controls — subtle hover/press feedback so they read as
+ * clickable (route tabs, Dev Zone, theme toggle, connect chip). `@media
+ * (hover: hover)` keeps touch devices from getting a stuck hover state. */
+.nav-devzone,
+.nav-icon-btn,
+.nav-chip {
+  transition: color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .global-nav-tab:hover {
+    color: var(--fg-1);
+    background: var(--surface-2);
+    text-decoration: none;
+  }
+  .nav-devzone:hover {
+    color: var(--fg-1);
+    background: var(--surface-2);
+  }
+  .nav-icon-btn:hover {
+    color: var(--fg-1);
+    border-color: var(--border-3);
+    background: var(--surface-2);
+  }
+  .nav-chip:hover {
+    color: var(--fg-1);
+    border-color: var(--border-3);
+    background: var(--surface-3);
+  }
+  .nav-chip[data-connected="true"]:hover {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    background: var(--accent-soft);
+  }
+}
+
+/* The disconnected/placeholder chip shouldn't invite a press. */
+.nav-chip:disabled {
+  pointer-events: none;
+}
+
+/* Theme toggle — 32px square icon button. Never shrinks below 32px. */
+.nav-icon-btn {
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fg-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* Account / connect chip. */
+.nav-chip {
+  height: 32px;
+  padding: 0 var(--space-3);
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.nav-chip[data-connected="true"] {
+  background: var(--accent-soft, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--fg-1);
+}
+
+/* Dev Zone dropdown trigger — sits among the route tabs, matches their feel.
+   Never wraps to two lines, never shrinks. */
+.nav-devzone {
+  position: relative;
+  height: 32px;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  border: 0;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+
+.nav-devzone[data-active="true"],
+.nav-devzone[data-state="open"] {
+  color: var(--fg-1);
+  background: var(--surface-2);
+}
+
+/* Rows-per-page dropdown on the Activity pager. Same trigger + menu language as
+   the Dev Zone nav dropdown above, sized for a mono table control: the trigger
+   fills on hover/open, the menu lifts on --surface-3, the row under the cursor
+   and the checked row both take --surface-2. */
+.activity-rows-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 12px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.activity-rows-trigger:hover,
+.activity-rows-trigger[data-state="open"] {
+  background: var(--surface-2);
+}
+
+.activity-rows-item {
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-3);
+  outline: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.activity-rows-item[data-highlighted],
+.activity-rows-item[data-state="checked"] {
+  background: var(--surface-2);
+  color: var(--fg-1);
+}
+
 .global-nav-right {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+  flex-shrink: 0;
+  /* Hug the right edge. The search caps at 600px, so on wide screens the
+     leftover row space would otherwise pile up to the RIGHT of these controls,
+     leaving the connect chip floating off the corner. `auto` absorbs that slack
+     into the gap before the controls instead, pinning them to the edge. */
+  margin-left: auto;
+}
+
+/* The desktop search fills the middle of the bar — it grows into whatever space
+   the pinned wordmark, tabs and right-side controls leave, and is the one
+   element that absorbs horizontal squeeze (down to a usable 160px) before the
+   nav collapses to the hamburger. Everything else in the bar is pinned. */
+.global-nav-search-desktop {
+  flex: 1 1 auto;
+  min-width: 160px;
+  max-width: 600px;
+}
+
+.global-nav-search-desktop .nav-search-shell {
+  width: 100%;
+}
+
+/* Batch pill never shrinks or wraps (it's hidden entirely in hamburger mode).
+   Height pinned to 32px so it lines up with the theme toggle / chip / search. */
+.batch-pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+  height: 32px;
 }
 
 .global-nav-menu-button {
   display: none;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
   border: 1px solid var(--border-2);
   border-radius: var(--radius-md);
   background: var(--surface-1);
@@ -243,19 +436,40 @@ textarea {
 .nav-search-shell {
   display: flex;
   align-items: center;
-  height: 40px;
+  height: 32px;
   width: min(280px, 28vw);
   padding: 0 var(--space-3);
   background: var(--surface-1);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+/* Pointer focus gets a quiet border change. Keyboard focus remains explicit on
+   the shell even though the nested input's ring is suppressed to avoid a
+   clipped inner outline. */
+.nav-search-shell:focus-within {
+  border-color: var(--border-3);
+}
+
+.nav-search-shell:has(input:focus-visible) {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus-ring);
+}
+
+.nav-search-shell input:focus,
+.nav-search-shell input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .nav-search-dropdown {
   position: absolute;
   top: calc(100% + var(--space-2));
+  /* Span the full width of the search field (its positioned parent) so the
+     results list always lines up with the input, however wide it flexes. */
+  left: 0;
   right: 0;
-  width: min(340px, calc(100vw - 2 * var(--space-4)));
   max-height: min(70vh, 480px);
   overflow-y: auto;
   padding: var(--space-2);
@@ -267,6 +481,37 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* Portfolio table search mirrors `.nav-search-shell`, including its distinct
+   pointer and keyboard focus affordances. */
+.portfolio-search-shell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  width: 240px;
+  max-width: 100%;
+  padding: 0 var(--space-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+.portfolio-search-shell:focus-within {
+  border-color: var(--border-3);
+}
+
+.portfolio-search-shell:has(input:focus-visible) {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus-ring);
+}
+
+.portfolio-search-shell input:focus,
+.portfolio-search-shell input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .markets-grid {
@@ -328,6 +573,26 @@ textarea {
   gap: var(--space-3);
 }
 
+/* Desktop ordering stays in the reviewed rail. Compact layouts get the modal
+   shortcut so order entry remains reachable before the rail reflows below the
+   long market content. */
+.market-detail-place-order {
+  display: none;
+  margin-left: auto;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--fg-on-accent);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
 .market-detail-title {
   font-family: var(--font-display);
   font-weight: 600;
@@ -383,8 +648,20 @@ textarea {
 
 .activity-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 48px;
+  /* Vertically centre the two $ heroes against the taller 2x2 stat grid,
+     rather than pinning them to the top with dead space below. */
+  align-items: center;
+}
+
+/* The two hero $ numbers sit in a 2-col grid that mirrors the right-hand
+   .activity-hero-stats grid, so the columns line up across the divider and the
+   left pair fills its half instead of clustering at the left edge. */
+.activity-hero-numbers {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 36px;
   align-items: start;
 }
 
@@ -393,14 +670,14 @@ textarea {
   grid-template-columns: 1fr 1fr;
   column-gap: 36px;
   row-gap: 22px;
-  align-self: start;
-  padding-top: 24px;
 }
 
 .activity-pulse-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  border-top: 1px solid var(--border-1);
+  grid-template-columns: repeat(4, 1fr);
+  /* Only the divider *after* the 24h section — the one after the main summary
+     is the hero's own border-bottom. No top border and no inter-cell verticals
+     (see below), so the 24h numbers read as a plain band, not a boxed grid. */
   border-bottom: 1px solid var(--border-1);
 }
 
@@ -417,6 +694,45 @@ textarea {
 .leaderboard-grid-table > *,
 .portfolio-grid-table > * {
   min-width: 860px;
+}
+
+/* Dev-zone sub-nav tabs — same hover / active feedback as the global route
+   tabs, kept compact for the dev toolbar's density. */
+.dev-sub-nav-tab {
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--fg-3);
+  background: transparent;
+  transition: color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+}
+.dev-sub-nav-tab[data-active="true"] {
+  color: var(--fg-1);
+  background: var(--surface-2);
+}
+@media (hover: hover) {
+  .dev-sub-nav-tab:hover {
+    color: var(--fg-1);
+    background: var(--surface-2);
+  }
+}
+
+/* Dev + arena DataTable rows pick up the same hover feedback the public
+   tables have. */
+.dev-data-table tbody tr,
+.arena-data-table tbody tr {
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+@media (hover: hover) {
+  .dev-data-table tbody tr:hover,
+  .arena-data-table tbody tr:hover {
+    background: var(--surface-2);
+  }
 }
 
 .activity-batch-row {
@@ -469,6 +785,62 @@ textarea {
   gap: 10px;
 }
 
+/* Arena bot-selector dropdowns — hover / focus border feedback + transition,
+   matching the app's input convention (nav-search, settings inputs). */
+.arena-select {
+  min-height: 40px;
+  min-width: 180px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--fg-1);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+.arena-select:hover {
+  border-color: var(--border-3);
+}
+.arena-select:focus,
+.arena-select:focus-visible {
+  border-color: var(--border-focus);
+}
+
+/* Arena Bot Roster cards — resting look unchanged; adds the hover / press
+   feedback + transition an interactive card should have (inline styles beat a
+   stylesheet :hover, so the visuals live here). Active card keeps the accent. */
+.arena-bot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 40px;
+  padding: 14px;
+  text-align: left;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-1);
+  background: var(--surface-1);
+  color: var(--fg-1);
+  cursor: pointer;
+  box-shadow: var(--shadow-inset-top);
+  transition: border-color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
+}
+.arena-bot-card[data-active="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-1));
+}
+.arena-bot-card:active {
+  transform: translateY(1px);
+}
+@media (hover: hover) {
+  .arena-bot-card:not([data-active="true"]):hover {
+    border-color: var(--border-3);
+    background: var(--surface-2);
+  }
+}
+
 .settings-inline-form,
 .settings-profile-grid,
 .settings-row {
@@ -492,10 +864,109 @@ textarea {
   border-bottom: 1px solid var(--border-2);
 }
 
-/* The full desktop chrome exceeds a 1280px viewport once the connected account
- * chip is populated. Treat 1280 as the compact-nav boundary so every control
- * and its anchored menu stays inside the viewport. */
-@media (max-width: 1280px) {
+/* Settings form controls. Resting appearance is identical to the inline styles
+   these replaced — the point of moving them into the cascade is the hover /
+   press / focus feedback the rest of the app's interactive elements carry.
+   (Inline background/border beat a stylesheet :hover by specificity, so the old
+   inline controls were inert on hover; class-based styling fixes that.) */
+.settings-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+.settings-input:hover {
+  border-color: var(--border-3);
+}
+.settings-input:focus,
+.settings-input:focus-visible {
+  border-color: var(--border-focus);
+}
+
+.settings-btn {
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    filter var(--dur-fast) var(--ease-standard);
+}
+.settings-btn:disabled {
+  cursor: not-allowed;
+}
+.settings-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Primary + secondary share the same box; danger is a smaller mono pill. */
+.settings-btn--primary,
+.settings-btn--secondary {
+  min-height: 40px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 13px;
+}
+.settings-btn--primary {
+  background: var(--accent);
+  border: 0;
+  color: var(--bg-1);
+}
+.settings-btn--primary:disabled {
+  background: var(--surface-2);
+  color: var(--fg-3);
+}
+.settings-btn--secondary {
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  color: var(--fg-2);
+}
+.settings-btn--secondary:disabled {
+  color: var(--fg-4);
+}
+.settings-btn--danger {
+  min-height: 40px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--no) 32%, transparent);
+  border-radius: 6px;
+  color: var(--no);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+}
+.settings-btn--danger:disabled {
+  color: var(--fg-4);
+}
+
+@media (hover: hover) {
+  .settings-btn--primary:not(:disabled):hover {
+    filter: brightness(1.08);
+  }
+  .settings-btn--secondary:not(:disabled):hover {
+    background: var(--surface-3);
+    border-color: var(--border-3);
+  }
+  .settings-btn--danger:not(:disabled):hover {
+    background: color-mix(in srgb, var(--no) 12%, transparent);
+    border-color: color-mix(in srgb, var(--no) 48%, transparent);
+  }
+}
+
+/* Nav collapses to the hamburger once the full bar (pinned wordmark + tabs +
+   right controls + a floor-width 160px search) no longer fits — measured at
+   ~1330px for the current tab set, and now also carries the connected account
+   chip + bots stat. Keep this in sync if tabs are added. */
+@media (max-width: 1330px) {
   .global-nav {
     gap: var(--space-3);
     padding: 0 var(--space-4);
@@ -510,8 +981,18 @@ textarea {
     display: inline-flex;
   }
 
+  /* Search + tabs are gone, so push the controls back to the right edge. */
   .global-nav-right {
     gap: var(--space-2);
+    margin-left: auto;
+  }
+
+  /* Hamburger mode: drop the ambient batch pill so the wordmark, theme
+     toggle, account chip and menu button always fit without overflowing
+     (the live block also shows in the RECENT TRADES strip below the nav).
+     !important overrides the pill's inline `display: inline-flex`. */
+  .batch-pill {
+    display: none !important;
   }
 
   .global-nav-sheet-search .nav-search-shell {
@@ -525,7 +1006,15 @@ textarea {
   }
 }
 
+/* Market-detail page reflow keeps its own 1100px breakpoint, independent of the
+   nav collapse above. */
 @media (max-width: 1100px) {
+  .market-detail-place-order {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   .market-detail-main {
     height: auto;
     min-height: calc(100dvh - var(--nav-height));
@@ -566,12 +1055,8 @@ textarea {
     gap: var(--space-5);
   }
 
-  .activity-hero-stats {
-    padding-top: 0;
-  }
-
   .activity-pulse-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .market-detail-chart-head {
@@ -677,11 +1162,14 @@ textarea {
     flex: 1 0 100%;
   }
 
-  .portfolio-toolbar-search,
-  .portfolio-toolbar-actions {
+  .portfolio-toolbar-controls {
     flex: 1 0 100%;
     justify-content: flex-start !important;
     margin-left: 0 !important;
+  }
+
+  .portfolio-toolbar-search {
+    flex: 1 0 100%;
   }
 
   .portfolio-toolbar-search > * {
@@ -709,6 +1197,7 @@ textarea {
   }
 
   .activity-hero-numbers {
+    grid-template-columns: 1fr;
     gap: var(--space-5) !important;
   }
 
@@ -720,11 +1209,6 @@ textarea {
   .activity-table-head > .text-annotation {
     flex: 1 0 100%;
     order: 3;
-  }
-
-  .activity-pulse-cell {
-    border-right: 0 !important;
-    border-bottom: 1px solid var(--border-1);
   }
 
   .arena-main {
@@ -806,6 +1290,7 @@ textarea {
   textarea,
   [role="button"],
   [role="tab"],
+  [role="menuitem"],
   summary {
     min-height: 44px !important;
   }

@@ -25,23 +25,8 @@ export function DevZoneNav() {
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          style={{
-            position: "relative",
-            padding: "0 var(--space-3)",
-            height: 32,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "var(--space-2)",
-            color: inDevZone ? "var(--fg-1)" : "var(--fg-3)",
-            fontFamily: "var(--font-sans)",
-            fontSize: "var(--fs-13)",
-            fontWeight: 500,
-            border: 0,
-            cursor: "pointer",
-            borderRadius: "var(--radius-md)",
-            background: inDevZone ? "var(--surface-2)" : "transparent",
-            transition: "color var(--dur-fast) var(--ease-standard)",
-          }}
+          className="nav-devzone"
+          data-active={inDevZone}
         >
           Dev Zone
           <ChevronDown size={14} aria-hidden />

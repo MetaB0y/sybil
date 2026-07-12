@@ -8,7 +8,9 @@
  *  - totalVolume: REAL (MarketResponse.volume_nanos)
  *  - 24h volume: REAL (MarketResponse.volume_24h_nanos, B2)
  *  - traders: REAL (MarketResponse.trader_count, B1)
- *  - liquidity: REAL (MarketResponse.liquidity_avg10_nanos, B4)
+ *  - liquidity: REAL (MarketResponse.liquidity_avg10_nanos, B4), divided by the
+ *    ring length so we show the average band depth per batch — see
+ *    `avgLiquidityNanos`. The wire field is a 10-block sum despite its name.
  *  - marketAgeMs: REAL timestamp delta (created_at_ms → latest block).
  *
  * Each "REAL" field is `#[serde(default)]` on the wire — markets with no
@@ -18,6 +20,7 @@
  */
 
 import { parseNanos } from "../format/nanos";
+import { avgLiquidityNanos } from "../markets/liquidity";
 import type { Block, Market, MarketStats } from "./types";
 
 export function deriveMarketStats(
@@ -34,7 +37,7 @@ export function deriveMarketStats(
     totalVolumeNanos,
     volume24hNanos: parseNanos(market.volume_24h_nanos ?? 0),
     traders: market.trader_count ?? 0,
-    liquidityNanos: parseNanos(market.liquidity_avg10_nanos ?? 0),
+    liquidityNanos: avgLiquidityNanos(parseNanos(market.liquidity_avg10_nanos ?? 0)),
     marketAgeMs: marketAgeMs(market, latestBlock),
     mocked: {
       volume24h: false,

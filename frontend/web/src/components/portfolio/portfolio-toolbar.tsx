@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * One-row portfolio toolbar: the tab strip on the left, the search box right
- * after it, and any filters right-aligned on the same line — all sharing the
- * 1px divider under the row. The tab strip is passed in by the page (it owns
- * the active-tab state) and rendered here so tabs + controls read as a single
- * bar instead of two stacked rows. Items bottom-align so each tab's active
- * underline sits on the divider; controls float just above it.
+ * One-row portfolio toolbar: the tab strip on the left, and the controls —
+ * filters first, then the search box on the far right — right-aligned on the
+ * same line, all sharing the 1px divider under the row. The tab strip is passed
+ * in by the page (it owns the active-tab state) and rendered here so tabs +
+ * controls read as a single bar instead of two stacked rows. Items bottom-align
+ * so each tab's active underline sits on the divider; controls float just above
+ * it. Search sits to the right of the filters, in the same place on every tab.
  */
 
 export function PortfolioToolbar({
@@ -15,9 +16,9 @@ export function PortfolioToolbar({
   children,
 }: {
   tabs: React.ReactNode;
-  /** Rendered immediately after the tabs, on the left. */
+  /** Rendered last in the right-aligned control group (to the right of filters). */
   search?: React.ReactNode;
-  /** Filters etc., right-aligned at the far end of the row. */
+  /** Filters etc., right-aligned before the search on the same line. */
   children?: React.ReactNode;
 }) {
   return (
@@ -32,17 +33,9 @@ export function PortfolioToolbar({
       }}
     >
       {tabs}
-      {search && (
+      {(search || children) && (
         <div
-          className="portfolio-toolbar-search"
-          style={{ display: "flex", alignItems: "center", paddingBottom: 8 }}
-        >
-          {search}
-        </div>
-      )}
-      {children && (
-        <div
-          className="portfolio-toolbar-actions"
+          className="portfolio-toolbar-controls"
           style={{
             display: "flex",
             alignItems: "center",
@@ -54,6 +47,14 @@ export function PortfolioToolbar({
           }}
         >
           {children}
+          {search && (
+            <div
+              className="portfolio-toolbar-search"
+              style={{ display: "flex", alignItems: "center" }}
+            >
+              {search}
+            </div>
+          )}
         </div>
       )}
     </div>

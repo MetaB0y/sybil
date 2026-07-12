@@ -37,7 +37,11 @@ import {
   unitsToShares,
 } from "@/lib/account/quantity";
 import { usePortfolio, type Portfolio } from "@/lib/account/use-portfolio";
-import { formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
+import {
+  formatCentsPrecise,
+  formatDollarsRounded,
+  parseNanos,
+} from "@/lib/format/nanos";
 import {
   useEventGroup,
   type EventOutcome,
@@ -391,7 +395,7 @@ export function EventHoldings({ marketId }: { marketId: number }) {
             flexWrap: "wrap",
           }}
         >
-          <div className="eyebrow">{"// your positions & orders"}</div>
+          <div className="eyebrow">{"your positions & orders"}</div>
           {outcomes.length > 1 && (
             <OutcomeFilter
               outcomes={outcomes}
@@ -627,7 +631,6 @@ function OutcomeFilter({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="Filter by outcome"
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -713,7 +716,6 @@ function OutcomeFilter({
             <OutcomeOption
               key={o.marketId}
               label={o.shortLabel}
-              title={o.label}
               color={colorForOutcome(o, i)}
               selected={selected === o.marketId}
               onClick={() => pick(o.marketId)}
@@ -727,13 +729,11 @@ function OutcomeFilter({
 
 function OutcomeOption({
   label,
-  title,
   color,
   selected,
   onClick,
 }: {
   label: string;
-  title?: string;
   color?: string;
   selected: boolean;
   onClick: () => void;
@@ -744,7 +744,6 @@ function OutcomeOption({
       role="option"
       aria-selected={selected}
       onClick={onClick}
-      title={title ?? label}
       style={{
         display: "flex",
         alignItems: "center",
@@ -838,7 +837,6 @@ function HeaderCell({
         letterSpacing: "var(--track-wide)",
         color: active ? "var(--fg-2)" : "var(--fg-4)",
       }}
-      title={`Sort by ${col.label}`}
     >
       <span>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
@@ -854,7 +852,6 @@ function HoldingRow({ holding }: { holding: Holding }) {
   return (
     <Row>
       <span
-        title={label}
         style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -866,16 +863,22 @@ function HoldingRow({ holding }: { holding: Holding }) {
       >
         {label}
       </span>
-      <span>
-        <SidePill outcome={outcome} />
-      </span>
-      <Right mono>{formatShareUnits(quantity)}</Right>
+      <SidePill outcome={outcome} />
+      <Right mono>{formatShareUnits(quantity, 1)}</Right>
       <Right mono>
-        {avgNanos == null
-          ? formatCentsPrecise(markNanos)
-          : `${formatCentsPrecise(avgNanos)} → ${formatCentsPrecise(markNanos)}`}
+        {avgNanos == null ? (
+          formatCentsPrecise(markNanos)
+        ) : (
+          // entry → mark. Fade the entry (what you paid, historical) so the eye
+          // lands on the mark — the live price that's actually true right now.
+          <span>
+            <span style={{ color: "var(--fg-4)" }}>{formatCentsPrecise(avgNanos)}</span>
+            <span style={{ color: "var(--fg-4)" }}>{" → "}</span>
+            {formatCentsPrecise(markNanos)}
+          </span>
+        )}
       </Right>
-      <Right mono>{formatDollars(valueNanos, { decimals: 2 })}</Right>
+      <Right mono>{formatDollarsRounded(valueNanos, { decimals: 1 })}</Right>
       <Right>
         <span
           style={{
@@ -891,7 +894,7 @@ function HoldingRow({ holding }: { holding: Holding }) {
         >
           {pnlNanos == null
             ? "—"
-            : formatDollars(pnlNanos, { decimals: 2, sign: true })}
+            : formatDollarsRounded(pnlNanos, { decimals: 1, sign: true })}
         </span>
       </Right>
     </Row>

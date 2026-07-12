@@ -363,8 +363,9 @@ function FeaturedOutcome({
         <span
           style={{
             fontFamily: "var(--font-sans)",
-            fontSize: "var(--fs-13)",
-            color: "var(--fg-2)",
+            fontSize: "var(--fs-16)",
+            fontWeight: 600,
+            color: "var(--fg-1)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -386,7 +387,7 @@ function FeaturedOutcome({
             style={{
               fontSize: "var(--fs-32)",
               lineHeight: "var(--lh-32)",
-              color: deltaTone(delta24Cents, !!price),
+              color: oddsColor(!!price),
               letterSpacing: "var(--track-mono)",
             }}
           >
@@ -493,7 +494,7 @@ function SecondaryRow({
   // Same logic as the leader: real 24h delta from price history, lazy-loaded
   // when the card scrolls into view.
   const { delta24Cents } = useCardHistory(market.market_id, inView);
-  const tone = deltaTone(delta24Cents, !!price);
+  const tone = oddsColor(!!price);
   const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   return (
@@ -618,13 +619,11 @@ function FooterRow({
 }
 
 /**
- * Color an outcome's odds by delta sign (handoff convention).
- * No price → fg-4 (dim). No delta yet → neutral fg-1.
+ * Odds are neutral values. Directional green/red belongs only to the separate
+ * 24h-delta token so a probability is not mistaken for a gain or loss.
  */
-function deltaTone(delta: number | null, hasPrice: boolean): string {
-  if (!hasPrice) return "var(--fg-4)";
-  if (delta == null) return "var(--fg-1)";
-  return delta >= 0 ? "var(--yes)" : "var(--no)";
+function oddsColor(hasPrice: boolean): string {
+  return hasPrice ? "var(--fg-1)" : "var(--fg-4)";
 }
 
 /**

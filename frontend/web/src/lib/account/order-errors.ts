@@ -41,8 +41,11 @@ export function humanizeOrderError(
   if (/market not found/i.test(m))
     return "This market isn't available right now.";
   if (/account not found/i.test(m)) return "Account not found — reconnect.";
+  // NegRisk self-trade prevention: this order would give the account buy-side
+  // coverage of every outcome in the group. Explain the recovery action without
+  // leaking the engine enum into product copy.
   if (/CompleteSetFormation/i.test(m))
-    return `That ${noun} can't be placed right now.`;
+    return `Your open orders in this event already cover the other outcomes — cancel one to place this ${noun}.`;
 
   return `Couldn't place your ${noun}. Try again.`;
 }

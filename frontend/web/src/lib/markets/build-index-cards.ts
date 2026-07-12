@@ -35,38 +35,35 @@ export function buildIndexCards(
         eventId: g.eventId,
         markets: g.markets,
         volumeNanos: sumVolume(g.markets),
-        sortKey: g.name.toLowerCase(),
+        sortKey: [g.name, ...g.markets.map((market) => market.name)]
+          .join(" ")
+          .toLowerCase(),
         createdMs: eventNewnessMs(g.markets),
         primaryCategory: primary,
         closed: !eventVisibleOnIndex(g.markets),
       });
     } else {
-      for (const m of g.markets) {
-        all.push({
-          kind: "binary",
-          market: m,
-          volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
-          sortKey: m.name.toLowerCase(),
-          createdMs: marketNewnessMs(m),
-          primaryCategory: pickDisplayCategory(m.categories, m.category)
-            .primary,
-          closed: isClosed(m),
-        });
-      }
+      for (const market of g.markets) all.push(binaryCardOf(market));
     }
   }
-  for (const m of bundle.ungrouped) {
-    all.push({
-      kind: "binary",
-      market: m,
-      volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
-      sortKey: m.name.toLowerCase(),
-      createdMs: m.created_at_ms ?? 0,
-      primaryCategory: pickDisplayCategory(m.categories, m.category).primary,
-      closed: isClosed(m),
-    });
-  }
+  for (const market of bundle.ungrouped) all.push(binaryCardOf(market));
   return all;
+}
+
+export function binaryCardOf(market: IndexMarket): CardItem {
+  return {
+    kind: "binary",
+    market,
+    volumeNanos: market.volume_nanos ? BigInt(market.volume_nanos) : 0n,
+    sortKey: [market.name, market.event_title]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase(),
+    createdMs: marketNewnessMs(market),
+    primaryCategory: pickDisplayCategory(market.categories, market.category)
+      .primary,
+    closed: isClosed(market),
+  };
 }
 
 export function sumVolume(markets: IndexMarket[]): bigint {
