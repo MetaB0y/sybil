@@ -57,6 +57,18 @@ meaning take precedence; see the canonical
 [`LLM Trader`](../docs/architecture/06-agents/LLM%20Trader.md) note for the run
 and measurement contract.
 
+An active Stage 1 experiment automatically queries authoritative Sybil
+resolution endpoints for its exact frozen cohort immediately and every 15
+minutes, recording immutable labels in `market_outcomes`. Override the positive
+cadence with `ARENA_OUTCOME_RECORD_INTERVAL_S` or
+`--outcome-record-interval-s`; the CLI flag is rejected without an active
+experiment, while a dormant env value is ignored. Ordinary live runs start no recorder. The manual
+`python -m scripts.record_outcomes` command still derives markets from decisions
+unless an exact `--market-ids` cohort is supplied. Automatic writes verify the
+persisted experiment genesis before fetching and again immediately before the
+transaction. A chain mismatch or a 404 for an exact-cohort market disarms the
+recorder without writing; decisions-derived manual mode retains legacy 404-as-missing behavior.
+
 ## Layout
 
 | Path | Responsibility |

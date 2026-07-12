@@ -357,6 +357,7 @@ def test_experiment_metadata_rejects_all_resumes_and_diagnoses_drift(tmp_path, e
         assert persisted["configuration"]["llm_pause_threshold_usd_per_analyst"] == 5.0
         assert persisted["configuration"]["llm_pause_threshold_usd_per_persona"] == 10.0
         assert persisted["configuration"]["configured_llm_pause_threshold_usd_total"] == 10.0
+        assert persisted["configuration"]["outcome_record_interval_s"] == 900
         assert persisted["configuration"]["llm_generation_parameters"] == llm_generation_parameters()
         variants = persisted["configuration"]["variants"]
         assert [variant["prompt_contract_sha256"] for variant in variants] == [

@@ -8,6 +8,7 @@ Usage:
 import argparse
 import asyncio
 import logging
+import math
 import os
 import re
 import signal
@@ -29,6 +30,7 @@ from .fair_value_bus import FairValueBus
 from .market_selection import MarketProfile, select_markets
 from .metrics import ArenaMetrics, start_metrics_server
 from .news_feed import NewsFeed, PairedNewsBatchBarrier
+from .outcomes import DEFAULT_OUTCOME_RECORD_INTERVAL_S, record_outcomes_loop
 from .personas import PERSONAS
 from .strategy import FairValueFreshnessConfig, FlatStrategy, KellyStrategy
 from .synthetic import (
@@ -94,6 +96,8 @@ class LiveConfig:
     # Opt-in concurrent Stage 1 A/B. Supplying an id enables the experiment;
     # the ordinary one-analyst + Kelly/Flat topology remains the default.
     stage1_ab_experiment_id: str | None = None
+    # Only active in Stage 1 A/B mode; ordinary topology starts no recorder task.
+    outcome_record_interval_s: float = DEFAULT_OUTCOME_RECORD_INTERVAL_S
 
 
 @dataclass
@@ -109,6 +113,8 @@ def _validate_stage1_ab_config(config: LiveConfig) -> str | None:
     """Validate opt-in experiment identity and its frozen market cohort."""
     if config.stage1_ab_experiment_id is None:
         return None
+    if not math.isfinite(config.outcome_record_interval_s) or config.outcome_record_interval_s <= 0:
+        raise ValueError("outcome record interval must be a positive finite number")
 
     experiment_id = config.stage1_ab_experiment_id
     if not experiment_id or experiment_id != experiment_id.strip():
@@ -192,6 +198,7 @@ def _stage1_ab_configuration(
         "fair_value_ttl_s": config.fair_value_ttl_s,
         "fair_value_half_life_s": config.fair_value_half_life_s,
         "fair_value_hard_expiry_s": config.fair_value_hard_expiry_s,
+        "outcome_record_interval_s": config.outcome_record_interval_s,
     }
 
 
@@ -270,6 +277,33 @@ def _env_market_profile(name: str, default: MarketProfile = "all") -> MarketProf
     if raw in ("all", "important-news"):
         return raw
     raise ValueError(f"{name} must be one of: all, important-news")
+
+
+def _resolve_outcome_record_interval(
+    cli_value: float | None,
+    environ: Mapping[str, str] | None = None,
+    *,
+    experiment_active: bool = True,
+) -> float:
+    """Resolve the positive finite outcome cadence with CLI precedence."""
+    env = os.environ if environ is None else environ
+    if not experiment_active:
+        if cli_value is not None:
+            raise ValueError(
+                "--outcome-record-interval-s requires an active Stage 1 A/B experiment"
+            )
+        return float(DEFAULT_OUTCOME_RECORD_INTERVAL_S)
+    if cli_value is not None:
+        interval_s = cli_value
+    else:
+        raw = env.get("ARENA_OUTCOME_RECORD_INTERVAL_S", "").strip()
+        try:
+            interval_s = float(raw) if raw else float(DEFAULT_OUTCOME_RECORD_INTERVAL_S)
+        except ValueError as exc:
+            raise ValueError("outcome record interval must be a positive finite number") from exc
+    if not math.isfinite(interval_s) or interval_s <= 0:
+        raise ValueError("outcome record interval must be a positive finite number")
+    return interval_s
 
 
 def _env_stage1_market_ids(environ: Mapping[str, str]) -> list[int] | None:
@@ -714,6 +748,32 @@ async def _start_live_tasks(
     return tasks
 
 
+def _start_outcome_recorder_task(
+    config: LiveConfig,
+    db_path: str,
+    stop_event: asyncio.Event,
+    expected_genesis_hash: str | None = None,
+) -> asyncio.Task | None:
+    """Start the authoritative recorder only for an exact Stage 1 cohort."""
+    if config.stage1_ab_experiment_id is None:
+        return None
+    if not config.market_ids:
+        raise ValueError("Stage 1 outcome recorder requires an explicit market cohort")
+    if expected_genesis_hash is None:
+        raise ValueError("Stage 1 outcome recorder requires persisted experiment genesis")
+    return asyncio.create_task(
+        record_outcomes_loop(
+            db_path,
+            config.sybil_url,
+            tuple(config.market_ids),
+            stop_event,
+            expected_genesis_hash=expected_genesis_hash,
+            interval_s=config.outcome_record_interval_s,
+        ),
+        name="outcome_recorder",
+    )
+
+
 async def run_live(config: LiveConfig):
     """Main entry point for live trading."""
     experiment_id = _validate_stage1_ab_config(config)
@@ -810,6 +870,7 @@ async def run_live(config: LiveConfig):
         # alternate topology; without an id, preserve the ordinary live graph
         # and names exactly (one analyst feeding Kelly + Flat per persona).
         startup_reference_prices = {}
+        experiment_genesis_hash = None
         if experiment_id is not None:
             startup_reference_prices = _require_stage1_ab_startup_reference_prices(active)
             genesis_hash = await _require_committed_genesis_hash(client)
@@ -824,6 +885,7 @@ async def run_live(config: LiveConfig):
                 experiment_config,
             )
             _require_new_experiment(metadata)
+            experiment_genesis_hash = str(metadata["configuration"]["genesis_hash"])
             log.info(
                 "SYB-114 Stage 1 A/B enabled: id=%s start=%s cohort=%s "
                 "genesis=%s model=%s variants=control,stage1 analysts=%d",
@@ -981,6 +1043,14 @@ async def run_live(config: LiveConfig):
                 {trader.name for trader in traders} if experiment_id is not None else None
             ),
         )
+        outcome_recorder_task = _start_outcome_recorder_task(
+            config,
+            db_path,
+            stop_event,
+            experiment_genesis_hash,
+        )
+        if outcome_recorder_task is not None:
+            tasks.append(outcome_recorder_task)
 
         # Graceful shutdown
         def _signal_handler():
@@ -1204,6 +1274,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--outcome-record-interval-s",
+        type=float,
+        default=None,
+        help=(
+            "Seconds between authoritative outcome checks during Stage 1 A/B. "
+            "Defaults to ARENA_OUTCOME_RECORD_INTERVAL_S or 900; must be positive. "
+            "Rejected unless a Stage 1 experiment is active."
+        ),
+    )
+    parser.add_argument(
         "--mapping-path", default=None, help="Path to polymarket_mapping.json for reference prices"
     )
     parser.add_argument("--log-level", default="INFO")
@@ -1285,6 +1365,10 @@ def main():
             args.stage1_ab_experiment_id,
             args.market_ids,
         )
+        outcome_record_interval_s = _resolve_outcome_record_interval(
+            args.outcome_record_interval_s,
+            experiment_active=stage1_ab_experiment_id is not None,
+        )
     except ValueError as e:
         parser.error(str(e))
 
@@ -1342,6 +1426,7 @@ def main():
         market_ids=market_ids,
         mapping_path=args.mapping_path,
         stage1_ab_experiment_id=stage1_ab_experiment_id,
+        outcome_record_interval_s=outcome_record_interval_s,
     )
 
     try:

@@ -88,6 +88,24 @@ ordinary topology exactly. Environment activation fails closed unless both varia
 `ARENA_MARKET_IDS` alone never changes ordinary automatic market selection. The CLI continues to
 allow `--market-ids` by itself for non-experiment manual selection.
 
+An active experiment also starts an Arena-owned authoritative outcome recorder for exactly the
+frozen `market_ids` cohort. It checks immediately and then every 900 seconds by default; operators
+can set a positive `--outcome-record-interval-s` or `ARENA_OUTCOME_RECORD_INTERVAL_S` value. The
+CLI cadence flag is rejected without an active experiment; a dormant environment value is ignored.
+The ordinary topology starts no recorder task. Resolution labels come from Sybil's
+`/v1/markets/{id}/resolution` endpoint and are inserted immutably into `market_outcomes` through a
+WAL writer. Before a sweep and again immediately before its write transaction, the recorder
+requires `/v1/health` to match the nonzero 32-byte genesis hash persisted in the experiment
+metadata. A reset between those checks cannot land old-chain labels. Exact-cohort 404s are fatal
+drift; the manual decisions-derived compatibility mode may still treat 404 as missing. Cooperative
+stop checks before and after health calls, between market fetches, and before writes bound shutdown
+and prevent later cohort requests or commits after stop. Network/HTTP and SQLite operational
+failures warn and retry at the next interval. A chain mismatch, invalid response, changed outcome,
+or unexpected recorder defect emits a critical log and
+permanently disarms only the recorder while it remains alive until shutdown; analyst and trading
+tasks continue. The standalone `scripts.record_outcomes` CLI retains decisions-derived scope by
+default and accepts `--market-ids` for an exact manual cohort.
+
 Before resolving any experiment account, startup requires `/v1/health` to report height at least 1
 and a nonzero 32-byte `genesis_hash`. On first start, `live_experiments` in `decisions.db` records
 that chain identity together with the experiment mode, UTC start, exact normalized market-id cohort,
@@ -178,6 +196,7 @@ uv run python -m scripts.calibration_compare \
 > `arena/live/trader.py` — mechanical live sizer (`LiveLlmTrader`)
 > `arena/live/strategy.py` — Kelly/Flat sizing and fair-value freshness
 > `arena/live/db.py` — immutable `live_experiments` restart metadata
+> `arena/live/outcomes.py` — authoritative immutable outcome recording and experiment loop
 > `arena/live/runner.py` — default and opt-in concurrent Stage 1 topologies
 > `arena/scripts/calibration.py` — offline forecast and PnL comparison
 > `arena/scripts/calibration_compare.py` — exact-cohort, exact-account window deltas
