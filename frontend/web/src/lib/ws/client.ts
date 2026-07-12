@@ -306,14 +306,17 @@ export class BlockStream {
 
 // ── Singleton ─────────────────────────────────────────────────────────────
 
+export const DEFAULT_WS_BASE = "wss://172-104-31-54.nip.io";
+
+export function resolveBlockStreamBase(configured: string | undefined): string {
+  const trimmed = configured?.trim();
+  return trimmed || DEFAULT_WS_BASE;
+}
+
 function makeSingleton(): BlockStream {
-  const base = process.env.NEXT_PUBLIC_WS_BASE;
-  if (!base) {
-    throw new Error(
-      "NEXT_PUBLIC_WS_BASE is not set. Copy .env.example to .env.local."
-    );
-  }
-  return new BlockStream(base);
+  return new BlockStream(
+    resolveBlockStreamBase(process.env.NEXT_PUBLIC_WS_BASE),
+  );
 }
 
 // Lazy so SSR doesn't choke on missing env vars at module load.
