@@ -2,7 +2,7 @@
 tags: [zk, validium, data-availability]
 layer: verification
 status: current
-last_verified: 2026-07-06
+last_verified: 2026-07-12
 ---
 
 # Data Availability
@@ -15,9 +15,12 @@ DA commitment says which block payload the operator claims was made available.
 The current implementation binds a concrete DA envelope into the OpenVM public
 input hash for proof-pipeline testing. Its file-backed witness payload is
 local scaffolding, not the final privacy-preserving validium recovery design.
-Production recovery DA is expected to use encrypted snapshots or encrypted
-deltas with an emergency disclosure protocol; that design is tracked in
-SYB-120.
+Production recovery DA is split into two future products by
+[ADR-0016](../../adr/0016-public-market-tape-and-recovery-da-boundaries.md):
+credential-recipient encrypted user bundles for private exit, and a complete
+encrypted epoch snapshot with independent release/retention policy for operator
+replacement. The current service-gated plaintext artifact implements neither;
+that work remains tracked in SYB-120 and the operator-replacement tranche.
 
 ## Commitment
 

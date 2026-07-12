@@ -6,7 +6,7 @@
 import type { components } from "../api/schema";
 
 export type Market = components["schemas"]["MarketResponse"];
-export type Block = components["schemas"]["BlockResponse"];
+export type Block = components["schemas"]["PublicBlockResponse"];
 
 /** Aggregate stats panel for one market. */
 export type MarketStats = {

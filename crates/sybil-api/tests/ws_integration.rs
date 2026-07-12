@@ -1,4 +1,4 @@
-//! WebSocket block stream integration tests (`/v1/blocks/ws`).
+//! Public WebSocket block stream integration tests (`/v2/blocks/ws`).
 //!
 //! Spins up a real HTTP server on an ephemeral port so we can exercise the
 //! WebSocket upgrade flow end-to-end with `tokio-tungstenite`.
@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use matching_sequencer::{SequencerConfig, SequencerHandle};
-use sybil_api_types::ws::{BlockStreamMessage, BlockStreamPayload};
+use sybil_api_types::ws::{PublicBlockStreamMessage, PublicBlockStreamPayload};
 use sybil_client::SybilClient;
 use tokio::net::TcpListener;
 use tokio::time::timeout;
@@ -38,7 +38,7 @@ async fn spawn_store_server(config: SequencerConfig) -> (SocketAddr, SequencerHa
     (addr, handle)
 }
 
-async fn recv_envelope<S>(stream: &mut S) -> BlockStreamMessage
+async fn recv_envelope<S>(stream: &mut S) -> PublicBlockStreamMessage
 where
     S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
 {
@@ -57,7 +57,7 @@ where
 #[tokio::test]
 async fn ws_streams_live_block_envelope() {
     let (addr, handle) = spawn_server().await;
-    let url = format!("ws://{}/v1/blocks/ws", addr);
+    let url = format!("ws://{}/v2/blocks/ws", addr);
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let (_sink, mut stream) = ws.split();
 
@@ -66,10 +66,24 @@ async fn ws_streams_live_block_envelope() {
     let block = handle.produce_block().await.unwrap();
 
     let msg = recv_envelope(&mut stream).await;
-    assert_eq!(msg.v, 1);
+    assert_eq!(msg.v, 2);
     match msg.payload {
-        BlockStreamPayload::Block { data } => {
-            assert_eq!(data.height, block.canonical.header.height)
+        PublicBlockStreamPayload::Block { data } => {
+            assert_eq!(data.height, block.canonical.header.height);
+            let value = serde_json::to_value(&data).unwrap();
+            for forbidden in [
+                "fills",
+                "rejections",
+                "system_events",
+                "derived_view_sidecar",
+            ] {
+                assert!(
+                    value.get(forbidden).is_none(),
+                    "public v2 stream leaked {forbidden}"
+                );
+            }
+            assert!(value["bridge"].get("consumed_deposits").is_none());
+            assert!(value["bridge"].get("withdrawal_leaves").is_none());
         }
         other => panic!("expected block envelope, got {:?}", other),
     }
@@ -86,7 +100,7 @@ async fn ws_from_block_replays_history_then_goes_live() {
 
     let from = b0.canonical.header.height;
     let head_at_connect = _b2.canonical.header.height;
-    let url = format!("ws://{}/v1/blocks/ws?from_block={}", addr, from);
+    let url = format!("ws://{}/v2/blocks/ws?from_block={}", addr, from);
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let (_sink, mut stream) = ws.split();
 
@@ -95,7 +109,7 @@ async fn ws_from_block_replays_history_then_goes_live() {
     for _ in 0..3 {
         let msg = recv_envelope(&mut stream).await;
         match msg.payload {
-            BlockStreamPayload::Block { data } => seen_heights.push(data.height),
+            PublicBlockStreamPayload::Block { data } => seen_heights.push(data.height),
             other => panic!("expected block during replay, got {:?}", other),
         }
     }
@@ -110,7 +124,7 @@ async fn ws_from_block_replays_history_then_goes_live() {
 
     let complete = recv_envelope(&mut stream).await;
     match complete.payload {
-        BlockStreamPayload::ReplayComplete { up_to_height } => {
+        PublicBlockStreamPayload::ReplayComplete { up_to_height } => {
             assert_eq!(up_to_height, head_at_connect);
         }
         other => panic!("expected replay_complete, got {:?}", other),
@@ -120,7 +134,9 @@ async fn ws_from_block_replays_history_then_goes_live() {
     let live = handle.produce_block().await.unwrap();
     let msg = recv_envelope(&mut stream).await;
     match msg.payload {
-        BlockStreamPayload::Block { data } => assert_eq!(data.height, live.canonical.header.height),
+        PublicBlockStreamPayload::Block { data } => {
+            assert_eq!(data.height, live.canonical.header.height)
+        }
         other => panic!("expected live block after replay, got {:?}", other),
     }
 }
@@ -145,7 +161,7 @@ async fn ws_from_block_replays_store_history_beyond_hot_ring() {
     );
 
     let url = format!(
-        "ws://{}/v1/blocks/ws?from_block={}",
+        "ws://{}/v2/blocks/ws?from_block={}",
         addr, b0.canonical.header.height
     );
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
@@ -155,7 +171,7 @@ async fn ws_from_block_replays_store_history_beyond_hot_ring() {
     for _ in 0..3 {
         let msg = recv_envelope(&mut stream).await;
         match msg.payload {
-            BlockStreamPayload::Block { data } => seen_heights.push(data.height),
+            PublicBlockStreamPayload::Block { data } => seen_heights.push(data.height),
             other => panic!("expected durable replay block, got {:?}", other),
         }
     }
@@ -170,7 +186,7 @@ async fn ws_from_block_replays_store_history_beyond_hot_ring() {
 
     let complete = recv_envelope(&mut stream).await;
     match complete.payload {
-        BlockStreamPayload::ReplayComplete { up_to_height } => {
+        PublicBlockStreamPayload::ReplayComplete { up_to_height } => {
             assert_eq!(up_to_height, b2.canonical.header.height);
         }
         other => panic!("expected replay_complete, got {:?}", other),
@@ -194,7 +210,7 @@ async fn ws_from_block_older_than_retention_sends_gap_envelope() {
     let b2 = handle.produce_block().await.unwrap();
 
     let url = format!(
-        "ws://{}/v1/blocks/ws?from_block={}",
+        "ws://{}/v2/blocks/ws?from_block={}",
         addr, b0.canonical.header.height
     );
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
@@ -202,7 +218,7 @@ async fn ws_from_block_older_than_retention_sends_gap_envelope() {
 
     let msg = recv_envelope(&mut stream).await;
     match msg.payload {
-        BlockStreamPayload::RetentionGap {
+        PublicBlockStreamPayload::RetentionGap {
             requested_height,
             retention_min_height,
             head_height,
@@ -257,7 +273,7 @@ async fn ws_from_block_ahead_of_head_announces_complete() {
 
     // No blocks produced — head is None; any from_block value should result in
     // no replay blocks and the handler transitioning straight to the live loop.
-    let url = format!("ws://{}/v1/blocks/ws?from_block=5", addr);
+    let url = format!("ws://{}/v2/blocks/ws?from_block=5", addr);
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let (mut sink, mut stream) = ws.split();
 

@@ -25,8 +25,8 @@ pub struct AccountResponse {
     pub events_digest_hex: String,
     #[serde(default)]
     pub positions: Vec<PositionResponse>,
-    /// Optional opt-in display name (SYB-60). Not yet used for leaderboard
-    /// labels — that flip is a deliberate follow-up.
+    /// Optional public display name. A non-empty value opts this account into
+    /// publication of its leaderboard financial row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
     /// Optional deterministic identicon seed (SYB-60).
@@ -593,6 +593,60 @@ pub struct RejectedOrderViewResponse {
     pub reason: String,
 }
 
+/// Privacy-preserving projection of a committed block for public REST and
+/// streaming clients. Account-attributed fills, rejections, system events,
+/// bridge leaves, and order-lifecycle rows deliberately do not exist on this
+/// type; canonical full blocks remain available only to authenticated service
+/// consumers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PublicBlockResponse {
+    pub height: u64,
+    pub parent_hash: String,
+    /// Post-block state root. Hex-encoded 32-byte qMDB root.
+    pub state_root: String,
+    pub events_root: String,
+    pub order_count: u32,
+    pub fill_count: u32,
+    /// Number of rejected orders without identities, order ids, or reasons.
+    pub rejection_count: u32,
+    pub timestamp_ms: u64,
+    /// Clearing price vectors by market/group. Integer nanodollars;
+    /// 1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+    #[serde(default)]
+    pub clearing_prices_nanos: HashMap<String, Vec<u64>>,
+    /// Public bridge commitment/count only. Individual deposits and
+    /// withdrawals remain private.
+    pub bridge: PublicBridgeBlockResponse,
+    /// Market ids resolved in this block. The account-bearing affected-account
+    /// list from the canonical event is intentionally omitted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved_market_ids: Vec<u32>,
+    /// Total solver welfare in the block. Integer nanodollars;
+    /// 1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
+    pub total_welfare_nanos: i64,
+    /// Total traded notional in the block. Integer nanodollars;
+    /// 1_000_000_000 = $1.
+    pub total_volume_nanos: u64,
+    pub orders_filled: usize,
+    /// Unique non-MM accounts admitted into this block. This is an aggregate,
+    /// never an account identifier list.
+    #[serde(default)]
+    pub unique_placers: u32,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub by_market: HashMap<String, BlockMarketStats>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PublicBridgeBlockResponse {
+    pub deposit_count: u64,
+    pub deposit_root_hex: String,
+}
+
+/// Authenticated service projection of a canonical block. This contains
+/// account-attributed private data and must never be returned by a public
+/// route. Public clients use [`PublicBlockResponse`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BlockResponse {
@@ -1140,6 +1194,11 @@ pub struct LeaderboardEntryResponse {
     /// Account identifier. Clients render this anonymously as `Trader #<id>`;
     /// display-name opt-in awaits profiles (SYB-60).
     pub account_id: u64,
+    /// Signed opt-in public profile name. Its presence is the publication
+    /// consent boundary for this entire financial row.
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_seed: Option<String>,
     /// Net PnL over the window (realized + unrealized). Integer nanodollars; 1_000_000_000 = $1.
     pub pnl_nanos: i64,
     /// Return on invested capital over the window, in basis points (100 = 1%).

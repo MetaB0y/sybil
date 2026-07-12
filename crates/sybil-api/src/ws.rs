@@ -8,9 +8,12 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{Instant, MissedTickBehavior, interval};
 
 use matching_sequencer::{SequencerError, SequencerHandle};
-use sybil_api_types::ws::{BLOCK_STREAM_VERSION, BlockStreamMessage, BlockStreamPayload};
+use sybil_api_types::ws::{
+    BLOCK_STREAM_VERSION, BlockStreamMessage, BlockStreamPayload, PUBLIC_BLOCK_STREAM_VERSION,
+    PublicBlockStreamMessage, PublicBlockStreamPayload,
+};
 
-use crate::convert::block_to_response;
+use crate::convert::{block_to_response, public_block_to_response};
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// Close the connection if we don't hear anything from the client for this long.
@@ -28,7 +31,18 @@ pub struct WsQuery {
     pub from_block: Option<u64>,
 }
 
-pub async fn handle_block_ws(mut socket: WebSocket, handle: &SequencerHandle, query: WsQuery) {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlockStreamVisibility {
+    Public,
+    Service,
+}
+
+pub async fn handle_block_ws(
+    mut socket: WebSocket,
+    handle: &SequencerHandle,
+    query: WsQuery,
+    visibility: BlockStreamVisibility,
+) {
     // Subscribe BEFORE fetching head so that the live channel already
     // holds any block committed while we replay, and we can dedupe by
     // `last_sent_height` after the handoff.
@@ -43,7 +57,7 @@ pub async fn handle_block_ws(mut socket: WebSocket, handle: &SequencerHandle, qu
     let mut last_sent_height: Option<u64> = None;
 
     if let Some(from) = query.from_block {
-        match replay(&mut socket, handle, from).await {
+        match replay(&mut socket, handle, from, visibility).await {
             ReplayOutcome::Streamed(high_water) => {
                 last_sent_height = Some(high_water);
             }
@@ -77,13 +91,13 @@ pub async fn handle_block_ws(mut socket: WebSocket, handle: &SequencerHandle, qu
                     if replay_watermark.is_some_and(|w| h <= w) {
                         continue;
                     }
-                    if !send_block(&mut socket, &block).await {
+                    if !send_block(&mut socket, &block, visibility).await {
                         return;
                     }
                     last_sent_height = Some(h);
                 }
                 Err(RecvError::Lagged(n)) => {
-                    send_lagged_and_close(&mut socket, n, last_sent_height).await;
+                    send_lagged_and_close(&mut socket, n, last_sent_height, visibility).await;
                     return;
                 }
                 Err(RecvError::Closed) => break,
@@ -121,7 +135,12 @@ enum ReplayOutcome {
     Error(String),
 }
 
-async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> ReplayOutcome {
+async fn replay(
+    socket: &mut WebSocket,
+    handle: &SequencerHandle,
+    from: u64,
+    visibility: BlockStreamVisibility,
+) -> ReplayOutcome {
     let head = match handle.get_latest_block().await {
         Ok(Some(b)) => b.canonical.header.height,
         Ok(None) => return ReplayOutcome::NoBlocks,
@@ -130,7 +149,7 @@ async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> 
     if from > head {
         // Client claims to be ahead of us. Nothing to replay; just announce
         // completion at our current head and let them pick up the live stream.
-        if !send_replay_complete(socket, head).await {
+        if !send_replay_complete(socket, head, visibility).await {
             return ReplayOutcome::ClientGone;
         }
         return ReplayOutcome::Streamed(head);
@@ -144,13 +163,12 @@ async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> 
                 requested_height,
                 retention_min_height,
             }) => {
-                if !send_envelope(
+                if !send_retention_gap(
                     socket,
-                    BlockStreamPayload::RetentionGap {
-                        requested_height,
-                        retention_min_height,
-                        head_height: head,
-                    },
+                    requested_height,
+                    retention_min_height,
+                    head,
+                    visibility,
                 )
                 .await
                 {
@@ -162,12 +180,12 @@ async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> 
             }
             Err(e) => return ReplayOutcome::Error(format!("replay failed at height {h}: {e}")),
         };
-        if !send_block(socket, &block).await {
+        if !send_block(socket, &block, visibility).await {
             return ReplayOutcome::ClientGone;
         }
         h += 1;
     }
-    if !send_replay_complete(socket, head).await {
+    if !send_replay_complete(socket, head, visibility).await {
         return ReplayOutcome::ClientGone;
     }
     ReplayOutcome::Streamed(head)
@@ -176,15 +194,47 @@ async fn replay(socket: &mut WebSocket, handle: &SequencerHandle, from: u64) -> 
 async fn send_block(
     socket: &mut WebSocket,
     block: &matching_sequencer::block::SealedBlock,
+    visibility: BlockStreamVisibility,
 ) -> bool {
-    let payload = BlockStreamPayload::Block {
-        data: Box::new(block_to_response(block)),
-    };
-    send_envelope(socket, payload).await
+    match visibility {
+        BlockStreamVisibility::Public => {
+            send_public_envelope(
+                socket,
+                PublicBlockStreamPayload::Block {
+                    data: Box::new(public_block_to_response(block)),
+                },
+            )
+            .await
+        }
+        BlockStreamVisibility::Service => {
+            send_envelope(
+                socket,
+                BlockStreamPayload::Block {
+                    data: Box::new(block_to_response(block)),
+                },
+            )
+            .await
+        }
+    }
 }
 
-async fn send_replay_complete(socket: &mut WebSocket, up_to_height: u64) -> bool {
-    send_envelope(socket, BlockStreamPayload::ReplayComplete { up_to_height }).await
+async fn send_replay_complete(
+    socket: &mut WebSocket,
+    up_to_height: u64,
+    visibility: BlockStreamVisibility,
+) -> bool {
+    match visibility {
+        BlockStreamVisibility::Public => {
+            send_public_envelope(
+                socket,
+                PublicBlockStreamPayload::ReplayComplete { up_to_height },
+            )
+            .await
+        }
+        BlockStreamVisibility::Service => {
+            send_envelope(socket, BlockStreamPayload::ReplayComplete { up_to_height }).await
+        }
+    }
 }
 
 async fn send_envelope(socket: &mut WebSocket, payload: BlockStreamPayload) -> bool {
@@ -198,19 +248,78 @@ async fn send_envelope(socket: &mut WebSocket, payload: BlockStreamPayload) -> b
     socket.send(Message::Text(json.into())).await.is_ok()
 }
 
+async fn send_public_envelope(socket: &mut WebSocket, payload: PublicBlockStreamPayload) -> bool {
+    let msg = PublicBlockStreamMessage {
+        v: PUBLIC_BLOCK_STREAM_VERSION,
+        payload,
+    };
+    let Ok(json) = serde_json::to_string(&msg) else {
+        return false;
+    };
+    socket.send(Message::Text(json.into())).await.is_ok()
+}
+
+async fn send_retention_gap(
+    socket: &mut WebSocket,
+    requested_height: u64,
+    retention_min_height: u64,
+    head_height: u64,
+    visibility: BlockStreamVisibility,
+) -> bool {
+    match visibility {
+        BlockStreamVisibility::Public => {
+            send_public_envelope(
+                socket,
+                PublicBlockStreamPayload::RetentionGap {
+                    requested_height,
+                    retention_min_height,
+                    head_height,
+                },
+            )
+            .await
+        }
+        BlockStreamVisibility::Service => {
+            send_envelope(
+                socket,
+                BlockStreamPayload::RetentionGap {
+                    requested_height,
+                    retention_min_height,
+                    head_height,
+                },
+            )
+            .await
+        }
+    }
+}
+
 async fn send_lagged_and_close(
     socket: &mut WebSocket,
     skipped: u64,
     last_sent_height: Option<u64>,
+    visibility: BlockStreamVisibility,
 ) {
-    let _ = send_envelope(
-        socket,
-        BlockStreamPayload::Lagged {
-            skipped,
-            last_sent_height,
-        },
-    )
-    .await;
+    let _ = match visibility {
+        BlockStreamVisibility::Public => {
+            send_public_envelope(
+                socket,
+                PublicBlockStreamPayload::Lagged {
+                    skipped,
+                    last_sent_height,
+                },
+            )
+            .await
+        }
+        BlockStreamVisibility::Service => {
+            send_envelope(
+                socket,
+                BlockStreamPayload::Lagged {
+                    skipped,
+                    last_sent_height,
+                },
+            )
+            .await
+        }
+    };
     let reason = match last_sent_height {
         Some(h) => format!(
             "stream lagged; reconnect with ?from_block={}",

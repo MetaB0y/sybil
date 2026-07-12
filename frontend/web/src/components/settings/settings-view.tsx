@@ -217,9 +217,10 @@ function ProfileSection({
       <PanelHead title="Profile" />
       <PanelBody style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <p style={{ ...bodyText, margin: 0 }}>
-          An opt-in display name and a deterministic identicon seed. Both are
-          public and covered by your signature. Leave blank and Save (or Clear)
-          to remove them.
+          A display name opts your account into the public leaderboard and
+          publishes your account ID, PnL, ROI, open-market count, and equity.
+          The name and identicon seed are public and covered by your signature.
+          Clear the display name to remove future leaderboard publication.
         </p>
 
         <div className="settings-profile-grid">

@@ -493,7 +493,7 @@ export interface paths {
     };
     /**
      * GET /v1/blocks/stream
-     * @description Third-party convenience SSE stream of block events. First-party clients should use GET /v1/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
+     * @description Third-party convenience SSE stream of public block aggregates. First-party clients should use GET /v2/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
      */
     get: operations["stream_blocks"];
     put?: never;
@@ -512,10 +512,10 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * GET /v1/blocks/ws
-     * @description First-party WebSocket block stream. Supports ?from_block=N to replay retained committed blocks from that height before following live blocks. If from_block is below the retained blocks_full floor, the stream emits a retention_gap envelope and closes so clients can cold-resync.
+     * GET /v1/blocks/ws — authenticated canonical service stream.
+     * @description Authenticated service WebSocket stream containing the full canonical block response.
      */
-    get: operations["ws_blocks"];
+    get: operations["ws_service_blocks"];
     put?: never;
     post?: never;
     delete?: never;
@@ -702,23 +702,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/bridge/withdrawals/{id}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** GET /v1/bridge/withdrawals/{id} */
-    get: operations["get_withdrawal"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v1/da/{height}/manifest": {
     parameters: {
       query?: never;
@@ -828,7 +811,9 @@ export interface paths {
     };
     /**
      * GET /v1/health
-     * @description Returns 200 when the sequencer is running, 503 when it is unavailable.
+     * @description Returns 200 when one atomic sequencer snapshot is available, 503 when it is
+     *     unavailable. Height and genesis hash are never assembled from separate
+     *     mailbox reads.
      *     Downstream services and Docker healthchecks should treat any non-200 as
      *     unhealthy and stop routing traffic.
      */
@@ -1262,6 +1247,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v2/blocks/ws": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v2/blocks/ws
+     * @description Privacy-preserving public WebSocket block stream. Supports ?from_block=N replay and exposes only commitments, prices, aggregate analytics, and sanitized market lifecycle.
+     */
+    get: operations["ws_blocks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1325,8 +1330,8 @@ export interface components {
        */
       balance_nanos: string;
       /**
-       * @description Optional opt-in display name (SYB-60). Not yet used for leaderboard
-       *     labels — that flip is a deliberate follow-up.
+       * @description Optional public display name. A non-empty value opts this account into
+       *     publication of its leaderboard financial row.
        */
       display_name?: string | null;
       /** @description Current event-chain digest used to make every key operation one-shot. */
@@ -1516,6 +1521,11 @@ export interface components {
        */
       welfare_nanos?: string;
     };
+    /**
+     * @description Authenticated service projection of a canonical block. This contains
+     *     account-attributed private data and must never be returned by a public
+     *     route. Public clients use [`PublicBlockResponse`].
+     */
     BlockResponse: {
       bridge?: components["schemas"]["BridgeBlockResponse"];
       /**
@@ -1748,11 +1758,7 @@ export interface components {
     };
     /** @enum {string} */
     BridgeWithdrawalL1Status:
-      | "not_requested"
-      | "queued"
-      | "finalized"
-      | "cancelled"
-      | "refunded";
+      "not_requested" | "queued" | "finalized" | "cancelled" | "refunded";
     BridgeWithdrawalResponse: {
       /** Format: int64 */
       account_id: number;
@@ -2166,6 +2172,12 @@ export interface components {
        *     display-name opt-in awaits profiles (SYB-60).
        */
       account_id: number;
+      avatar_seed?: string | null;
+      /**
+       * @description Signed opt-in public profile name. Its presence is the publication
+       *     consent boundary for this entire financial row.
+       */
+      display_name: string;
       /**
        * Format: int64
        * @description Current portfolio equity (balance + marked positions). Integer nanodollars; 1_000_000_000 = $1.
@@ -2971,6 +2983,76 @@ export interface components {
        */
       total_deposited_nanos: string;
     };
+    /**
+     * @description Privacy-preserving projection of a committed block for public REST and
+     *     streaming clients. Account-attributed fills, rejections, system events,
+     *     bridge leaves, and order-lifecycle rows deliberately do not exist on this
+     *     type; canonical full blocks remain available only to authenticated service
+     *     consumers.
+     */
+    PublicBlockResponse: {
+      /**
+       * @description Public bridge commitment/count only. Individual deposits and
+       *     withdrawals remain private.
+       */
+      bridge: components["schemas"]["PublicBridgeBlockResponse"];
+      by_market?: {
+        [key: string]: components["schemas"]["BlockMarketStats"];
+      };
+      /**
+       * @description Clearing price vectors by market/group. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+       */
+      clearing_prices_nanos?: {
+        [key: string]: string[];
+      };
+      events_root: string;
+      /** Format: int32 */
+      fill_count: number;
+      /** Format: int64 */
+      height: number;
+      /** Format: int32 */
+      order_count: number;
+      orders_filled: number;
+      parent_hash: string;
+      /**
+       * Format: int32
+       * @description Number of rejected orders without identities, order ids, or reasons.
+       */
+      rejection_count: number;
+      /**
+       * @description Market ids resolved in this block. The account-bearing affected-account
+       *     list from the canonical event is intentionally omitted.
+       */
+      resolved_market_ids?: number[];
+      /** @description Post-block state root. Hex-encoded 32-byte qMDB root. */
+      state_root: string;
+      /** Format: int64 */
+      timestamp_ms: number;
+      /**
+       * Format: int64
+       * @description Total traded notional in the block. Integer nanodollars;
+       *     1_000_000_000 = $1.
+       */
+      total_volume_nanos: string;
+      /**
+       * Format: int64
+       * @description Total solver welfare in the block. Integer nanodollars;
+       *     1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
+       */
+      total_welfare_nanos: string;
+      /**
+       * Format: int32
+       * @description Unique non-MM accounts admitted into this block. This is an aggregate,
+       *     never an account identifier list.
+       */
+      unique_placers?: number;
+    };
+    PublicBridgeBlockResponse: {
+      /** Format: int64 */
+      deposit_count: number;
+      deposit_root_hex: string;
+    };
     QmdbStateExclusionProofResponse: {
       metadata_hex?: string | null;
       operation: components["schemas"]["QmdbStateOperationProofResponse"];
@@ -3033,8 +3115,7 @@ export interface components {
        */
       scope?: components["schemas"]["KeyScope"];
       webauthn_registration?:
-        | null
-        | components["schemas"]["WebAuthnRegistration"];
+        null | components["schemas"]["WebAuthnRegistration"];
     };
     /** @description Registered data feed view, returned by GET/POST /v1/feeds. */
     RegisteredFeedResponse: {
@@ -3347,18 +3428,15 @@ export interface components {
       signer_pubkey_hex: string;
       webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
       webauthn_registration?:
-        | null
-        | components["schemas"]["WebAuthnRegistration"];
+        null | components["schemas"]["WebAuthnRegistration"];
     };
     StateProofResponse: {
       /** Format: int64 */
       block_height: number;
       exclusion_proof?:
-        | null
-        | components["schemas"]["QmdbStateExclusionProofResponse"];
+        null | components["schemas"]["QmdbStateExclusionProofResponse"];
       inclusion_proof?:
-        | null
-        | components["schemas"]["QmdbStateInclusionProofResponse"];
+        null | components["schemas"]["QmdbStateInclusionProofResponse"];
       leaf_key_ascii?: string | null;
       leaf_key_hex: string;
       leaf_value_hex?: string | null;
@@ -4810,13 +4888,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Blocks newest-first */
+      /** @description Public block market tape, newest-first */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["BlockResponse"][];
+          "application/json": components["schemas"]["PublicBlockResponse"][];
         };
       };
     };
@@ -4830,13 +4908,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Latest block */
+      /** @description Latest public block market tape */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["BlockResponse"];
+          "application/json": components["schemas"]["PublicBlockResponse"];
         };
       };
       /** @description No blocks produced yet */
@@ -4866,7 +4944,7 @@ export interface operations {
       };
     };
   };
-  ws_blocks: {
+  ws_service_blocks: {
     parameters: {
       query?: {
         /** @description Replay retained committed blocks from this height before switching to live */
@@ -4878,7 +4956,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description First-party WebSocket upgrade for block streaming */
+      /** @description Authenticated service WebSocket upgrade */
       101: {
         headers: {
           [name: string]: unknown;
@@ -4899,13 +4977,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Block at height */
+      /** @description Public block market tape at height */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["BlockResponse"];
+          "application/json": components["schemas"]["PublicBlockResponse"];
         };
       };
       /** @description Block not found */
@@ -5199,36 +5277,6 @@ export interface operations {
       };
     };
   };
-  get_withdrawal: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Withdrawal ID */
-        id: number;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Withdrawal leaf */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["BridgeWithdrawalResponse"];
-        };
-      };
-      /** @description Withdrawal not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
   get_da_manifest: {
     parameters: {
       query?: never;
@@ -5479,7 +5527,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Sequencer healthy */
+      /** @description Atomic sequencer health and chain-identity snapshot */
       200: {
         headers: {
           [name: string]: unknown;
@@ -5488,7 +5536,7 @@ export interface operations {
           "application/json": components["schemas"]["HealthResponse"];
         };
       };
-      /** @description Sequencer unavailable */
+      /** @description Sequencer unavailable or chain identity inconsistent */
       503: {
         headers: {
           [name: string]: unknown;
@@ -6274,6 +6322,27 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["StateRootResponse"];
         };
+      };
+    };
+  };
+  ws_blocks: {
+    parameters: {
+      query?: {
+        /** @description Replay retained committed blocks from this height before switching to live */
+        from_block?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description First-party WebSocket upgrade for block streaming */
+      101: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

@@ -4,7 +4,11 @@ mod common;
 
 use axum::http::StatusCode;
 use common::{get, post_json, test_app};
-use matching_sequencer::SequencerHandle;
+use matching_sequencer::{
+    AccountAuthScheme, AccountId, AuthenticatedProfileUpdate, PublicKey, RegisteredPubkey,
+    SequencerHandle,
+};
+use p256::ecdsa::SigningKey;
 use serde_json::Value;
 use serde_json::json;
 
@@ -27,8 +31,24 @@ fn account_ids(entries: &[Value]) -> Vec<u64> {
 }
 
 async fn create_ranked_pair(app: &axum::Router, handle: &SequencerHandle) -> (u64, u64) {
-    let yes = handle.create_account(1_000_000_000).await.unwrap();
-    let no = handle.create_account(1_000_000_000).await.unwrap();
+    let yes_key = SigningKey::from_slice(&[1; 32]).unwrap();
+    let no_key = SigningKey::from_slice(&[2; 32]).unwrap();
+    let yes = handle
+        .create_account_with_initial_key(
+            1_000_000_000,
+            PublicKey(*yes_key.verifying_key()),
+            RegisteredPubkey::primary(AccountId(0), AccountAuthScheme::RawP256),
+        )
+        .await
+        .unwrap();
+    let no = handle
+        .create_account_with_initial_key(
+            1_000_000_000,
+            PublicKey(*no_key.verifying_key()),
+            RegisteredPubkey::primary(AccountId(0), AccountAuthScheme::RawP256),
+        )
+        .await
+        .unwrap();
     let market_id = handle
         .create_market("Leaderboard market".into())
         .await
@@ -56,6 +76,19 @@ async fn create_ranked_pair(app: &axum::Router, handle: &SequencerHandle) -> (u6
     }
     let block = handle.produce_block().await.unwrap();
     assert_eq!(block.canonical.fills.len(), 2);
+    for (account_id, signing_key) in [(yes.id, yes_key), (no.id, no_key)] {
+        let signer = PublicKey(*signing_key.verifying_key());
+        handle
+            .set_profile_authenticated(AuthenticatedProfileUpdate {
+                account_id,
+                display_name: Some(format!("trader-{}", account_id.0)),
+                avatar_seed: None,
+                nonce: 1,
+                signer,
+            })
+            .await
+            .unwrap();
+    }
     (yes.id.0, no.id.0)
 }
 
@@ -72,7 +105,8 @@ async fn leaderboard_ranks_deterministically_and_excludes_system_accounts() {
     let entries = body["entries"].as_array().unwrap();
 
     // Funding is onboarding state, not trading activity. Only accounts with a
-    // durable fill rank; never-traded, never-funded, and MINT stay out.
+    // durable fill and signed public profile opt-in rank; never-traded,
+    // never-funded, non-opted-in, and MINT stay out.
     let ids = account_ids(entries);
     assert_eq!(ids, vec![yes, no], "filled accounts only, id tie-break asc");
     assert!(
@@ -88,11 +122,34 @@ async fn leaderboard_ranks_deterministically_and_excludes_system_accounts() {
     // Ranks are 1-based and sequential; equal PnL breaks by ascending id.
     for (index, entry) in entries.iter().enumerate() {
         assert_eq!(entry["rank"].as_u64().unwrap(), (index as u64) + 1);
+        assert_eq!(
+            entry["display_name"],
+            json!(format!("trader-{}", entry["account_id"].as_u64().unwrap()))
+        );
     }
 
     // Determinism: identical requests return identical ordering.
     let again = leaderboard(&app, "").await;
     assert_eq!(again["entries"], body["entries"]);
+
+    // Clearing the signed display name withdraws publication consent without
+    // changing trading state.
+    let yes_key = SigningKey::from_slice(&[1; 32]).unwrap();
+    handle
+        .set_profile_authenticated(AuthenticatedProfileUpdate {
+            account_id: AccountId(yes),
+            display_name: None,
+            avatar_seed: None,
+            nonce: 2,
+            signer: PublicKey(*yes_key.verifying_key()),
+        })
+        .await
+        .unwrap();
+    let after_clear = leaderboard(&app, "").await;
+    assert_eq!(
+        account_ids(after_clear["entries"].as_array().unwrap()),
+        vec![no]
+    );
 }
 
 #[tokio::test]

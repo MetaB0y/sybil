@@ -5,7 +5,7 @@
 
 import type { components } from "../api/schema";
 
-export type Block = components["schemas"]["BlockResponse"];
+export type Block = components["schemas"]["PublicBlockResponse"];
 
 /** One row in the batches table (collapsed). */
 export type BatchRow = {

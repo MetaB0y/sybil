@@ -668,7 +668,7 @@ async fn fund_account_increases_balance() {
 }
 
 #[tokio::test]
-async fn bridge_deposit_and_withdrawal_surface_in_block_response() {
+async fn bridge_commitment_is_public_but_individual_rows_stay_private() {
     let (app, handle) = test_app(true).await;
 
     let (status, body) = post_json(
@@ -779,14 +779,19 @@ async fn bridge_deposit_and_withdrawal_surface_in_block_response() {
     assert_eq!(status, StatusCode::OK);
     let block = parse_json(&body);
     assert_eq!(block["bridge"]["deposit_count"], json!(1));
-    assert_eq!(
-        block["bridge"]["consumed_deposits"][0]["deposit_id"],
-        json!(1)
-    );
-    assert_eq!(
-        block["bridge"]["withdrawal_leaves"][0]["withdrawal_id"],
-        json!(1)
-    );
+    assert!(block["bridge"].get("consumed_deposits").is_none());
+    assert!(block["bridge"].get("withdrawal_leaves").is_none());
+    for forbidden in [
+        "fills",
+        "rejections",
+        "system_events",
+        "derived_view_sidecar",
+    ] {
+        assert!(
+            block.get(forbidden).is_none(),
+            "public block leaked {forbidden}"
+        );
+    }
 }
 
 #[tokio::test]

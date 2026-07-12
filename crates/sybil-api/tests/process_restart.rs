@@ -790,10 +790,22 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
         Some(3),
         "restarted block should contain the replayed direct order plus two rejected deferred orders"
     );
-    let rejections = restored_block["rejections"]
+    assert_eq!(restored_block["rejection_count"].as_u64(), Some(2));
+    let owner_events = get_json(
+        &client,
+        &committer.base_url,
+        &format!("/v1/accounts/{account_id}/events?limit=50"),
+    )
+    .await;
+    let rejections: Vec<&Value> = owner_events
         .as_array()
-        .expect("block rejections response is an array");
-    assert_eq!(rejections.len(), 2, "restored block={restored_block}");
+        .expect("account events response is an array")
+        .iter()
+        .filter(|event| {
+            event["type"] == "rejected" && event["block_height"].as_u64() == Some(target_height)
+        })
+        .collect();
+    assert_eq!(rejections.len(), 2, "owner events={owner_events}");
     let mut rejection_ids: Vec<u64> = rejections
         .iter()
         .map(|rejection| rejection["order_id"].as_u64().unwrap())
@@ -805,10 +817,9 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
         "restored deferred bundle must allocate fresh IDs after the replayed direct admit"
     );
     assert!(rejections.iter().all(|rejection| {
-        rejection["account_id"].as_u64() == Some(account_id)
-            && rejection["reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains("InsufficientBalance"))
+        rejection["reason"]
+            .as_str()
+            .is_some_and(|reason| reason == "insufficient_balance")
     }));
 
     let post_restart_pending = get_json(

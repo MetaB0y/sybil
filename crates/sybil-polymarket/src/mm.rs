@@ -719,17 +719,15 @@ impl MmActor {
 
     /// Untrack every market the block reports resolved. Pure state mutation
     /// (no IO) so it is unit-testable in isolation.
-    fn untrack_resolved(&mut self, block: &BlockResponse) {
-        for event in &block.system_events {
-            if let SystemEventResponse::MarketResolved { market_id, .. } = event {
-                self.untrack_market(*market_id, "market_resolved");
-            }
+    fn untrack_resolved(&mut self, block: &PublicBlockResponse) {
+        for market_id in &block.resolved_market_ids {
+            self.untrack_market(*market_id, "market_resolved");
         }
     }
 
     // ----- Per-block quote generation ------------------------------------- //
 
-    async fn on_block(&mut self, block: &BlockResponse) {
+    async fn on_block(&mut self, block: &PublicBlockResponse) {
         let snapshot = self.price_rx.borrow().clone();
         let now = now_ms();
 
@@ -993,33 +991,24 @@ mod tests {
         });
     }
 
-    fn block_resolving(market_ids: &[u32]) -> BlockResponse {
-        BlockResponse {
+    fn block_resolving(market_ids: &[u32]) -> PublicBlockResponse {
+        PublicBlockResponse {
             height: 1,
             parent_hash: String::new(),
             state_root: String::new(),
             events_root: String::new(),
             order_count: 0,
             fill_count: 0,
+            rejection_count: 0,
             timestamp_ms: 0,
-            system_events: market_ids
-                .iter()
-                .map(|&market_id| SystemEventResponse::MarketResolved {
-                    market_id,
-                    payout_nanos: 0,
-                    affected_accounts: Vec::new(),
-                })
-                .collect(),
-            fills: Vec::new(),
             clearing_prices_nanos: Default::default(),
-            rejections: Vec::new(),
             bridge: Default::default(),
+            resolved_market_ids: market_ids.to_vec(),
             total_welfare_nanos: 0,
             total_volume_nanos: 0,
             orders_filled: 0,
             unique_placers: 0,
             by_market: Default::default(),
-            derived_view_sidecar: Default::default(),
         }
     }
 

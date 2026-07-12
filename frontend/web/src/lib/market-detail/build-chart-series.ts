@@ -12,7 +12,7 @@
 import type { components } from "@/lib/api/schema";
 import type { PricePoint } from "@/lib/markets/use-price-history";
 
-type Block = components["schemas"]["BlockResponse"];
+type Block = components["schemas"]["PublicBlockResponse"];
 
 export type ChartSeries = {
   /** Grid timestamps (ms), ascending. Starts at the first real clearing —

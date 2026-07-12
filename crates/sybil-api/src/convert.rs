@@ -346,7 +346,8 @@ fn removed_order_exit_reason(reason: matching_sequencer::RemovedOrderExitReason)
     }
 }
 
-/// Convert a sealed block to a BlockResponse.
+/// Convert a sealed block to the authenticated service response. This contains
+/// account-attributed data and must not be called from public routes.
 pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
     let fills = block
         .canonical
@@ -424,6 +425,44 @@ pub fn block_to_response(block: &SealedBlock) -> BlockResponse {
         unique_placers: block.analytics.unique_placers,
         by_market,
         derived_view_sidecar: derived_view_sidecar_to_response(&block.derived_view_sidecar),
+    }
+}
+
+/// Convert a sealed block to the allowlisted public market tape. The return
+/// type makes it impossible for a public handler to accidentally serialize
+/// account-attributed canonical rows.
+pub fn public_block_to_response(block: &SealedBlock) -> PublicBlockResponse {
+    let full = block_to_response(block);
+    let resolved_market_ids = block
+        .canonical
+        .system_events
+        .iter()
+        .filter_map(|event| match event {
+            matching_sequencer::SystemEvent::MarketResolved { market_id, .. } => Some(market_id.0),
+            _ => None,
+        })
+        .collect();
+
+    PublicBlockResponse {
+        height: full.height,
+        parent_hash: full.parent_hash,
+        state_root: full.state_root,
+        events_root: full.events_root,
+        order_count: full.order_count,
+        fill_count: full.fill_count,
+        rejection_count: full.rejections.len() as u32,
+        timestamp_ms: full.timestamp_ms,
+        clearing_prices_nanos: full.clearing_prices_nanos,
+        bridge: PublicBridgeBlockResponse {
+            deposit_count: full.bridge.deposit_count,
+            deposit_root_hex: full.bridge.deposit_root_hex,
+        },
+        resolved_market_ids,
+        total_welfare_nanos: full.total_welfare_nanos,
+        total_volume_nanos: full.total_volume_nanos,
+        orders_filled: full.orders_filled,
+        unique_placers: full.unique_placers,
+        by_market: full.by_market,
     }
 }
 

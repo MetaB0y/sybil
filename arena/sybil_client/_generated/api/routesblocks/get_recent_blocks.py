@@ -8,7 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.block_response import BlockResponse
+from ...models.public_block_response import PublicBlockResponse
 from ...types import UNSET, Unset
 from typing import cast
 
@@ -45,12 +45,12 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> list[BlockResponse] | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> list[PublicBlockResponse] | None:
     if response.status_code == 200:
         response_200 = []
         _response_200 = response.json()
         for response_200_item_data in (_response_200):
-            response_200_item = BlockResponse.from_dict(response_200_item_data)
+            response_200_item = PublicBlockResponse.from_dict(response_200_item_data)
 
 
 
@@ -64,7 +64,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[list[BlockResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[list[PublicBlockResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -79,7 +79,7 @@ def sync_detailed(
     limit: int | Unset = UNSET,
     before_height: int | Unset = UNSET,
 
-) -> Response[list[BlockResponse]]:
+) -> Response[list[PublicBlockResponse]]:
     """ GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 
     Args:
@@ -91,7 +91,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[BlockResponse]]
+        Response[list[PublicBlockResponse]]
      """
 
 
@@ -113,7 +113,7 @@ def sync(
     limit: int | Unset = UNSET,
     before_height: int | Unset = UNSET,
 
-) -> list[BlockResponse] | None:
+) -> list[PublicBlockResponse] | None:
     """ GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 
     Args:
@@ -125,7 +125,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[BlockResponse]
+        list[PublicBlockResponse]
      """
 
 
@@ -142,7 +142,7 @@ async def asyncio_detailed(
     limit: int | Unset = UNSET,
     before_height: int | Unset = UNSET,
 
-) -> Response[list[BlockResponse]]:
+) -> Response[list[PublicBlockResponse]]:
     """ GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 
     Args:
@@ -154,7 +154,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[list[BlockResponse]]
+        Response[list[PublicBlockResponse]]
      """
 
 
@@ -176,7 +176,7 @@ async def asyncio(
     limit: int | Unset = UNSET,
     before_height: int | Unset = UNSET,
 
-) -> list[BlockResponse] | None:
+) -> list[PublicBlockResponse] | None:
     """ GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 
     Args:
@@ -188,7 +188,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        list[BlockResponse]
+        list[PublicBlockResponse]
      """
 
 

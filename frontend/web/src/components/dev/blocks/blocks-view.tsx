@@ -22,7 +22,7 @@ function blockSummary(b: DevBlock | null): string {
       state_root: b.state_root,
       parent_hash: b.parent_hash,
       clearing_prices: Object.keys(b.clearing_prices_nanos ?? {}).length,
-      system_events: (b.system_events ?? []).length,
+      resolved_markets: b.resolved_market_ids ?? [],
       bridge: b.bridge ?? {},
     },
     null,
@@ -148,7 +148,7 @@ export function BlocksView() {
         <PanelBody>
           {selected == null ? (
             <div style={emptyStyle}>
-              Select a block to inspect fills, rejections, prices, and roots.
+              Select a block to inspect public commitments, prices, and aggregates.
             </div>
           ) : (
             <>
@@ -167,14 +167,14 @@ export function BlocksView() {
               </StatGrid>
               <h3 style={sectionTitleStyle}>Root And Prices</h3>
               <pre style={preStyle}>{blockSummary(selected)}</pre>
-              <h3 style={sectionTitleStyle}>Fills</h3>
-              <pre style={preStyle}>
-                {JSON.stringify((selected.fills ?? []).slice(0, 12), null, 2)}
-              </pre>
-              <h3 style={sectionTitleStyle}>Rejections</h3>
+              <h3 style={sectionTitleStyle}>Privacy Boundary</h3>
               <pre style={preStyle}>
                 {JSON.stringify(
-                  (selected.rejections ?? []).slice(0, 12),
+                  {
+                    rejection_count: selected.rejection_count ?? 0,
+                    resolved_market_ids: selected.resolved_market_ids ?? [],
+                    private_rows: "owner/service authenticated",
+                  },
                   null,
                   2,
                 )}

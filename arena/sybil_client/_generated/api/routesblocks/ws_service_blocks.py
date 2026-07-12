@@ -31,7 +31,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/v2/blocks/ws",
+        "url": "/v1/blocks/ws",
         "params": params,
     }
 
@@ -61,14 +61,13 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 def sync_detailed(
     *,
-    client: AuthenticatedClient | Client,
+    client: AuthenticatedClient,
     from_block: int | Unset = UNSET,
 
 ) -> Response[Any]:
-    """ GET /v2/blocks/ws
+    """ GET /v1/blocks/ws — authenticated canonical service stream.
 
-     Privacy-preserving public WebSocket block stream. Supports ?from_block=N replay and exposes only
-    commitments, prices, aggregate analytics, and sanitized market lifecycle.
+     Authenticated service WebSocket stream containing the full canonical block response.
 
     Args:
         from_block (int | Unset):
@@ -96,14 +95,13 @@ def sync_detailed(
 
 async def asyncio_detailed(
     *,
-    client: AuthenticatedClient | Client,
+    client: AuthenticatedClient,
     from_block: int | Unset = UNSET,
 
 ) -> Response[Any]:
-    """ GET /v2/blocks/ws
+    """ GET /v1/blocks/ws — authenticated canonical service stream.
 
-     Privacy-preserving public WebSocket block stream. Supports ?from_block=N replay and exposes only
-    commitments, prices, aggregate analytics, and sanitized market lifecycle.
+     Authenticated service WebSocket stream containing the full canonical block response.
 
     Args:
         from_block (int | Unset):

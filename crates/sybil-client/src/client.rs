@@ -7,7 +7,9 @@ use serde::de::DeserializeOwned;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::error::Error;
-use sybil_api_types::ws::{BLOCK_STREAM_VERSION, BlockStreamMessage, BlockStreamPayload};
+use sybil_api_types::ws::{
+    PUBLIC_BLOCK_STREAM_VERSION, PublicBlockStreamMessage, PublicBlockStreamPayload,
+};
 use sybil_api_types::*;
 
 /// Result of checking the server's enclave attestation endpoint.
@@ -62,7 +64,7 @@ impl SybilClient {
     }
 
     fn block_ws_url(&self, from_block: Option<u64>) -> Result<String, Error> {
-        let http_url = self.url("/v1/blocks/ws");
+        let http_url = self.url("/v2/blocks/ws");
         let mut url = if let Some(rest) = http_url.strip_prefix("http://") {
             format!("ws://{rest}")
         } else if let Some(rest) = http_url.strip_prefix("https://") {
@@ -541,13 +543,16 @@ impl SybilClient {
 
     /// Stream blocks via the first-party WebSocket transport.
     ///
-    /// Returns an async iterator of `BlockResponse`. The caller should handle
+    /// Returns an async iterator of privacy-preserving `PublicBlockResponse`.
+    /// Account-attributed canonical rows are never present on this stream.
+    /// The caller should handle
     /// reconnection on error; callers tracking a last seen height should use
     /// [`SybilClient::stream_blocks_from_block`] so reconnects replay missed
     /// committed blocks before switching back to live.
     pub async fn stream_blocks(
         &self,
-    ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>> + use<>, Error> {
+    ) -> Result<impl futures_util::Stream<Item = Result<PublicBlockResponse, Error>> + use<>, Error>
+    {
         self.stream_blocks_from_block(None).await
     }
 
@@ -562,7 +567,8 @@ impl SybilClient {
     pub async fn stream_blocks_from_block(
         &self,
         from_block: Option<u64>,
-    ) -> Result<impl futures_util::Stream<Item = Result<BlockResponse, Error>> + use<>, Error> {
+    ) -> Result<impl futures_util::Stream<Item = Result<PublicBlockResponse, Error>> + use<>, Error>
+    {
         let url = self.block_ws_url(from_block)?;
         let (socket, _) = tokio_tungstenite::connect_async(&url)
             .await
@@ -645,26 +651,26 @@ fn classify_attestation(
     })
 }
 
-fn decode_block_stream_message(text: &str) -> Result<Option<BlockResponse>, Error> {
-    let msg: BlockStreamMessage = serde_json::from_str(text)?;
-    if msg.v != BLOCK_STREAM_VERSION {
+fn decode_block_stream_message(text: &str) -> Result<Option<PublicBlockResponse>, Error> {
+    let msg: PublicBlockStreamMessage = serde_json::from_str(text)?;
+    if msg.v != PUBLIC_BLOCK_STREAM_VERSION {
         return Err(Error::Protocol(format!(
             "unsupported block stream version {}; expected {}",
-            msg.v, BLOCK_STREAM_VERSION
+            msg.v, PUBLIC_BLOCK_STREAM_VERSION
         )));
     }
 
     match msg.payload {
-        BlockStreamPayload::Block { data } => Ok(Some(*data)),
-        BlockStreamPayload::ReplayComplete { .. } => Ok(None),
-        BlockStreamPayload::Lagged {
+        PublicBlockStreamPayload::Block { data } => Ok(Some(*data)),
+        PublicBlockStreamPayload::ReplayComplete { .. } => Ok(None),
+        PublicBlockStreamPayload::Lagged {
             skipped,
             last_sent_height,
         } => Err(Error::BlockStreamLagged {
             skipped,
             last_sent_height,
         }),
-        BlockStreamPayload::RetentionGap {
+        PublicBlockStreamPayload::RetentionGap {
             requested_height,
             retention_min_height,
             head_height,

@@ -111,7 +111,7 @@ fn build_request(method: Method, uri: &str, token: Option<&str>) -> Request<Body
 }
 
 /// Read only the response *status*, never the body. Streaming public routes
-/// (`/v1/blocks/stream`, `/v1/blocks/ws`) never complete their body, so
+/// (`/v1/blocks/stream`, `/v2/blocks/ws`) never complete their body, so
 /// collecting it would hang; the status is available as soon as the handler
 /// returns the response head.
 async fn status_only(

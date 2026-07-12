@@ -492,25 +492,3 @@ pub async fn observe_l1_height(
             .collect(),
     }))
 }
-
-/// GET /v1/bridge/withdrawals/{id}
-#[utoipa::path(
-    get,
-    path = "/v1/bridge/withdrawals/{id}",
-    params(("id" = u64, Path, description = "Withdrawal ID")),
-    responses(
-        (status = 200, description = "Withdrawal leaf", body = BridgeWithdrawalResponse),
-        (status = 404, description = "Withdrawal not found")
-    )
-)]
-pub async fn get_withdrawal(
-    State(state): State<AppState>,
-    Path(id): Path<u64>,
-) -> Result<Json<BridgeWithdrawalResponse>, AppError> {
-    let withdrawal = state
-        .sequencer
-        .get_bridge_withdrawal(id)
-        .await?
-        .ok_or_else(|| AppError::not_found(format!("Withdrawal {id} not found")))?;
-    Ok(Json(bridge_withdrawal_to_response(&withdrawal)))
-}

@@ -7,15 +7,11 @@ import { Panel, PanelBody, PanelHead } from "@/components/dev/primitives/panel";
 import { Pill } from "@/components/dev/primitives/pill";
 import { Stat, StatGrid } from "@/components/dev/primitives/stat";
 import {
-  cancelMarketLabel,
-  cancelMarketTitle,
-  cancelSideClass,
   fmtLiquidity,
   fmtYesDelta24h,
   latestBlockByMarketRows,
   marketIndex,
   orderStatsSub,
-  recentCancellations,
   topMarketsByVolume24h,
   yesDelta24hClass,
 } from "@/lib/dev/derive";
@@ -79,8 +75,11 @@ export function AggregatesView() {
 
   const mIdx = marketIndex(markets);
   const topMarkets = topMarketsByVolume24h(markets);
-  const cancellations = recentCancellations(blocks);
   const blockRows = latestBlockByMarketRows(latestBlock, mIdx);
+  const recentRejections = blocks.reduce(
+    (sum, block) => sum + (block.rejection_count ?? 0),
+    0,
+  );
 
   const openBatchOptions = markets
     .slice()
@@ -126,13 +125,13 @@ export function AggregatesView() {
           sub={orderStatsSub(allTime)}
         />
         <Stat
-          label="Cancels (recent window)"
-          value={fmtInt(cancellations.length)}
+          label="Rejections (recent window)"
+          value={fmtInt(recentRejections)}
           tone="warn"
           sub={
             <>
               {blocks.length + " blocks scanned"} ·{" "}
-              <span style={{ color: "var(--fg-4)" }}>D1 OrderCancelled</span>
+              <span style={{ color: "var(--fg-4)" }}>aggregate only</span>
             </>
           }
         />
@@ -300,68 +299,12 @@ export function AggregatesView() {
         </Panel>
 
         <Panel>
-          <PanelHead
-            title="Recent Cancellations"
-            actions={
-              <span style={mutedSpan}>
-                {cancellations.length + " in last " + blocks.length + " blocks"}
-              </span>
-            }
-          />
+          <PanelHead title="Private Lifecycle" />
           <PanelBody>
-            <DataTable maxHeight={320}>
-              <thead>
-                <tr>
-                  <Th align="right">Block</Th>
-                  <Th align="right">Acct</Th>
-                  <Th align="right">Order</Th>
-                  <Th>Market(s)</Th>
-                  <Th>Side</Th>
-                  <Th align="right">Remaining</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {cancellations.slice(0, 50).map((evt) => {
-                  const sideTone = cancelSideClass(evt.side);
-                  return (
-                  <tr key={evt.row_key}>
-                    <Td mono tone="dim" align="right">
-                      {"#" + evt.block_height}
-                    </Td>
-                    <Td mono align="right">
-                      {evt.account_id}
-                    </Td>
-                    <Td mono tone="dim" align="right">
-                      {evt.order_id}
-                    </Td>
-                    <td
-                      style={truncCell}
-                      title={cancelMarketTitle(evt, mIdx)}
-                    >
-                      {cancelMarketLabel(evt, mIdx)}
-                    </td>
-                    <Td>
-                      {sideTone ? (
-                        <Pill tone={sideTone}>{evt.side}</Pill>
-                      ) : (
-                        <Pill>{evt.side}</Pill>
-                      )}
-                    </Td>
-                    <Td mono align="right">
-                      {fmtInt(evt.remaining_quantity)}
-                    </Td>
-                  </tr>
-                  );
-                })}
-                {cancellations.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={emptyMsg}>
-                      No OrderCancelled events in the recent block window.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </DataTable>
+            <div style={emptyMsg}>
+              Account-attributed cancellations, fills, and rejections are
+              available only through owner-authenticated account history.
+            </div>
           </PanelBody>
         </Panel>
       </div>

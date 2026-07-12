@@ -1,11 +1,21 @@
 ---
 tags: [design, privacy, data-availability, escape, security, vision]
 layer: core
-status: proposed
+status: superseded
 date: 2026-07-07
 ---
 
 # Data availability for a private validium — the concrete scheme
+
+> **Superseded in part by
+> [ADR-0016](../docs/adr/0016-public-market-tape-and-recovery-da-boundaries.md).**
+> The privacy classification remains useful, but the passkey-PRF “stable
+> per-account view key” construction below is not implementable as written:
+> PRF is optional and credential-specific, WebAuthn signing keys cannot do
+> ECDH, and add/revoke semantics were unspecified. User-private recovery bundles
+> and full operator-replacement snapshots are now explicitly separate future
+> protocols. Do not implement the key construction below without a new reviewed
+> recipient-registration design and physical authenticator tests.
 
 Resolves the open fork in [ADR-0012 §Decision-4](../docs/adr/0012-privacy-and-data-availability.md)
 (self-custody vs encrypted-DA) with a specific construction, its cost, and — the

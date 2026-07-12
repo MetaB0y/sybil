@@ -164,9 +164,13 @@ impl PendingOrderInfo {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct LeaderboardBase {
     pub account_id: AccountId,
+    /// A non-empty display name is explicit publication consent for the
+    /// account's leaderboard financial row.
+    pub display_name: String,
+    pub avatar_seed: Option<String>,
     /// All-time net PnL (portfolio value − total deposited), nanos.
     pub pnl_nanos: i64,
     /// Current portfolio equity (balance + marked positions), nanos.
@@ -179,9 +183,11 @@ pub struct LeaderboardBase {
 
 /// One ranked leaderboard entry over a window (SYB-59). `pnl_nanos` and
 /// `roi_bps` are already windowed; the actor assigns the final ordering.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct LeaderboardRow {
     pub account_id: AccountId,
+    pub display_name: String,
+    pub avatar_seed: Option<String>,
     /// Windowed net PnL, nanos.
     pub pnl_nanos: i64,
     /// Windowed return on capital, basis points (100 = 1%).

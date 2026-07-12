@@ -29,9 +29,9 @@ impl AccountId {
 ///
 /// Set/cleared only via a P256-signed, nonce-protected mutation (see
 /// `sequencer::set_profile`). Purely descriptive: it never affects balances,
-/// matching, or settlement. `display_name` is intended to eventually replace
-/// the "Trader #id" leaderboard label (SYB-59), but that wiring is a deliberate
-/// follow-up — nothing reads `display_name` for ranking yet.
+/// matching, or settlement. A non-empty `display_name` is explicit consent to
+/// publish the account's leaderboard financial row; clearing it withdraws that
+/// account from future leaderboard reads.
 #[derive(Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccountProfile {
     /// Optional display name (validated for length/charset at the API edge).

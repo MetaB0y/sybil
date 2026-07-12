@@ -7,10 +7,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::response::BlockResponse;
+use crate::response::{BlockResponse, PublicBlockResponse};
 
 /// Current schema version for the block stream envelope.
 pub const BLOCK_STREAM_VERSION: u32 = 1;
+/// Privacy-preserving public stream version served from `/v2/blocks/ws`.
+pub const PUBLIC_BLOCK_STREAM_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockStreamMessage {
@@ -41,6 +43,36 @@ pub enum BlockStreamPayload {
     /// Requested replay starts before durable retention. This is the last
     /// message on the stream; the server closes the connection immediately
     /// after.
+    RetentionGap {
+        requested_height: u64,
+        retention_min_height: u64,
+        head_height: u64,
+    },
+}
+
+/// Public v2 block-stream envelope. It is intentionally a distinct type from
+/// the authenticated v1 service stream so private canonical rows cannot be
+/// introduced through an additive field by accident.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicBlockStreamMessage {
+    pub v: u32,
+    #[serde(flatten)]
+    pub payload: PublicBlockStreamPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PublicBlockStreamPayload {
+    Block {
+        data: Box<PublicBlockResponse>,
+    },
+    ReplayComplete {
+        up_to_height: u64,
+    },
+    Lagged {
+        skipped: u64,
+        last_sent_height: Option<u64>,
+    },
     RetentionGap {
         requested_height: u64,
         retention_min_height: u64,

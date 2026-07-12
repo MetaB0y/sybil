@@ -3,17 +3,20 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-04-30
+last_verified: 2026-07-12
 ---
 
 The SSE (Server-Sent Events) block stream is a third-party convenience endpoint
 for simple tooling and HTTP-native consumers. When a client connects to
 `GET /v1/blocks/stream`, they receive a persistent HTTP connection that pushes
-each new block as it's produced — fills, clearing prices, rejections, and state
-updates. This is a one-way channel: the server pushes, the client listens.
+each new block's public market-tape projection as it's produced: commitments,
+clearing prices, aggregate statistics, bridge root/count, and sanitized market
+resolution ids. Account-attributed fills, rejections, and lifecycle rows do not
+exist in this DTO. This is a one-way channel: the server pushes, the client
+listens.
 
 First-party clients use the [[WebSocket Block Stream]] at
-`GET /v1/blocks/ws?from_block=N`. The WebSocket transport is versioned, can
+`GET /v2/blocks/ws?from_block=N`. The WebSocket transport is versioned, can
 replay retained committed blocks from a requested height, signals lag
 explicitly, and returns a `retention_gap` envelope when `from_block` is below
 the retained `blocks_full` floor. SSE intentionally does not provide those
@@ -26,10 +29,11 @@ instead.
 
 ## Key Properties
 - `GET /v1/blocks/stream` — third-party convenience HTTP stream with server push
-- Each block event includes fills, clearing prices, rejections, state root, and events root
+- Each block event includes commitments, clearing prices, safe lifecycle ids, and aggregate analytics
+- Individual fills, rejections, accounts, keys, and bridge leaves are absent by type
 - Unidirectional: server → client only
 - No versioned envelope, replay cursor, lag signal, or retained-floor contract
-- First-party clients use `GET /v1/blocks/ws?from_block=N`
+- First-party public clients use `GET /v2/blocks/ws?from_block=N`
 - Simple proxy-friendly stream for external tooling
 
 ## Where This Lives

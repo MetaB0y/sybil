@@ -93,10 +93,6 @@ fn exact_public_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
-            path: "/v1/bridge/withdrawals/{id}",
-        },
-        RouteMount {
-            method: "GET",
             path: "/v1/markets/search",
         },
         RouteMount {
@@ -173,7 +169,7 @@ fn exact_public_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
-            path: "/v1/blocks/ws",
+            path: "/v2/blocks/ws",
         },
         RouteMount {
             method: "GET",
@@ -233,6 +229,10 @@ fn exact_owner_routes() -> &'static [RouteMount] {
 
 fn exact_service_routes() -> &'static [RouteMount] {
     &[
+        RouteMount {
+            method: "GET",
+            path: "/v1/blocks/ws",
+        },
         RouteMount {
             method: "POST",
             path: "/v1/orders",
@@ -746,7 +746,19 @@ async fn account_reads_enforce_owner_or_service_matrix() {
     let (owner_id, owner_token) = create_owner_with_read_key(app.clone(), 21).await;
     let (_, wrong_owner_token) = create_owner_with_read_key(app.clone(), 22).await;
 
-    for suffix in ["", "/portfolio", "/orders", "/withdrawals"] {
+    for suffix in [
+        "",
+        "/portfolio",
+        "/fills",
+        "/equity",
+        "/events",
+        "/orders",
+        "/keys",
+        "/api-keys",
+        "/bridge-key",
+        "/withdrawals",
+        "/private-summary",
+    ] {
         let uri = format!("/v1/accounts/{owner_id}{suffix}");
 
         let (status, _) = request_json(app.clone(), Method::GET, &uri, None, json!({})).await;

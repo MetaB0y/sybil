@@ -503,7 +503,7 @@ function BatchHistoryBars({
   blocks,
 }: {
   marketId: number;
-  blocks: import("@/lib/api/schema").components["schemas"]["BlockResponse"][];
+  blocks: import("@/lib/api/schema").components["schemas"]["PublicBlockResponse"][];
 }) {
   const [hover, setHover] = useState<{ height: number; rect: DOMRect } | null>(
     null,

@@ -1505,6 +1505,9 @@ async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
         ],
         1_000,
     );
+    seq.set_profile(buyer, Some("buyer".into()), None).unwrap();
+    seq.set_profile(seller, Some("seller".into()), None)
+        .unwrap();
 
     assert!(
         !seq.analytics().account_fills(buyer, None, 10, 0).is_empty(),

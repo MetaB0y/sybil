@@ -19,7 +19,7 @@
  *     `{event_id}` vs `{height}` never trip it.
  *   - Doc-only glob rows (e.g. `/v1/bridge/*`, `/v1/proofs/state/*`) are skipped
  *     in check A — they intentionally stand in for a family of endpoints.
- *   - The WebSocket (`/v1/blocks/ws`) is reached through `ws/client.ts`, not the
+ *   - The WebSocket (`/v2/blocks/ws`) is reached through `ws/client.ts`, not the
  *     `api` client, so check B does not see it; it is a normal schema key so
  *     check A still validates it when the map names it.
  *   - Test/smoke harness files are excluded from check B — they hit liveness /

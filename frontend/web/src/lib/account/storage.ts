@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * localStorage I/O for the connected demo account.
+ * Browser storage I/O for the connected demo account.
  *
  * Keys are namespaced under `sybil:auth:`. The private key is stored as JWK
  * — extractable so the user can disconnect/reconnect across sessions. This is
  * the raw-P256 compatibility path; WebAuthn credentials use the browser's
- * authenticator instead.
+ * authenticator instead. Revocable read bearer tokens are session-scoped and
+ * never persisted in localStorage.
  */
 
 export const STORAGE_KEYS = {
@@ -40,7 +41,7 @@ export function readStoredAccount(): StoredAccount | null {
   const credentialIdB64url = window.localStorage.getItem(
     STORAGE_KEYS.CREDENTIAL_ID,
   );
-  const readApiKey = window.localStorage.getItem(STORAGE_KEYS.READ_API_KEY);
+  const readApiKey = window.sessionStorage.getItem(STORAGE_KEYS.READ_API_KEY);
   if (!idRaw || !pubHex) return null;
   try {
     const accountId = Number.parseInt(idRaw, 10);
@@ -82,10 +83,13 @@ export function writeStoredAccount(s: StoredAccount): void {
   window.localStorage.setItem(STORAGE_KEYS.PUBKEY, s.publicKeyHex);
   window.localStorage.setItem(STORAGE_KEYS.AUTH_SCHEME, s.authScheme);
   if (s.readApiKey) {
-    window.localStorage.setItem(STORAGE_KEYS.READ_API_KEY, s.readApiKey);
+    window.sessionStorage.setItem(STORAGE_KEYS.READ_API_KEY, s.readApiKey);
   } else {
-    window.localStorage.removeItem(STORAGE_KEYS.READ_API_KEY);
+    window.sessionStorage.removeItem(STORAGE_KEYS.READ_API_KEY);
   }
+  // One-way cleanup for sessions created before the privacy boundary moved
+  // bearer tokens out of persistent storage.
+  window.localStorage.removeItem(STORAGE_KEYS.READ_API_KEY);
   if (s.authScheme === "webauthn") {
     window.localStorage.setItem(
       STORAGE_KEYS.CREDENTIAL_ID,
@@ -105,19 +109,21 @@ export function clearStoredAccount(): void {
   window.localStorage.removeItem(STORAGE_KEYS.AUTH_SCHEME);
   window.localStorage.removeItem(STORAGE_KEYS.JWK);
   window.localStorage.removeItem(STORAGE_KEYS.CREDENTIAL_ID);
+  window.sessionStorage.removeItem(STORAGE_KEYS.READ_API_KEY);
   window.localStorage.removeItem(STORAGE_KEYS.READ_API_KEY);
   bumpStoredAccountRevision();
 }
 
 export function readStoredReadApiKey(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(STORAGE_KEYS.READ_API_KEY);
+  return window.sessionStorage.getItem(STORAGE_KEYS.READ_API_KEY);
 }
 
 /** Invalidate only the revocable read session. Signing credentials remain so
  * the same account can mint a replacement token. */
 export function clearStoredReadApiKey(): void {
-  if (window.localStorage.getItem(STORAGE_KEYS.READ_API_KEY) === null) return;
+  if (window.sessionStorage.getItem(STORAGE_KEYS.READ_API_KEY) === null) return;
+  window.sessionStorage.removeItem(STORAGE_KEYS.READ_API_KEY);
   window.localStorage.removeItem(STORAGE_KEYS.READ_API_KEY);
   bumpStoredAccountRevision();
 }

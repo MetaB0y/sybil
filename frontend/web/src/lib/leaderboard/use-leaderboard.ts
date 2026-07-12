@@ -5,8 +5,8 @@
  * selected window. Ordering + ranks are computed server-side (`/v1/leaderboard`)
  * — this hook only maps the wire rows into display rows with bigint money.
  *
- * Traders are anonymous by default ("Trader #<id>"); opt-in display names await
- * profiles (SYB-60).
+ * Only signed-profile opt-ins are returned. The display name is the explicit
+ * publication boundary for the row's account ID and financial statistics.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -29,17 +29,12 @@ type ApiResponse = components["schemas"]["LeaderboardResponse"];
 export interface LeaderboardRow {
   rank: number;
   accountId: number;
-  /** Anonymous display label, e.g. `Trader #42`. */
+  /** Signed public display name. */
   label: string;
   pnlNanos: bigint;
   roiBps: number;
   marketsTraded: number;
   equityNanos: bigint;
-}
-
-/** Anonymous label for an account. Display-name opt-in awaits SYB-60. */
-export function traderLabel(accountId: number): string {
-  return `Trader #${accountId}`;
 }
 
 /** Pure mapper: wire response → display rows. Exported for unit tests. */
@@ -50,7 +45,7 @@ export function toLeaderboardRows(
   return data.entries.map((e: ApiEntry) => ({
     rank: e.rank,
     accountId: e.account_id,
-    label: traderLabel(e.account_id),
+    label: e.display_name,
     pnlNanos: parseNanos(e.pnl_nanos),
     roiBps: e.roi_bps,
     marketsTraded: e.markets_traded,

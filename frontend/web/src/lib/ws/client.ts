@@ -1,5 +1,5 @@
 /**
- * BlockStream — singleton WebSocket client for /v1/blocks/ws.
+ * BlockStream — singleton WebSocket client for the public /v2/blocks/ws tape.
  *
  * Owns the lifecycle of a single connection to the Sybil block stream.
  * No React / Zustand coupling here — Milestone B wires this to a store.
@@ -138,7 +138,7 @@ export class BlockStream {
       } catch {
         return; // ignore malformed
       }
-      if (envelope.v !== 1) return; // unknown version → skip per spec
+      if (envelope.v !== 2) return; // unknown version → skip per spec
       this.handleEnvelope(envelope);
     };
 
@@ -154,7 +154,7 @@ export class BlockStream {
   }
 
   private buildUrl(): string {
-    const base = `${this.wsBase}/v1/blocks/ws`;
+    const base = `${this.wsBase}/v2/blocks/ws`;
     if (this.lastSeenHeight != null) {
       const from = this.lastSeenHeight + 1;
       return `${base}?from_block=${from}`;
@@ -197,6 +197,14 @@ export class BlockStream {
           skipped: envelope.skipped,
           lastSentHeight: envelope.last_sent_height,
         });
+        break;
+      }
+      case "retention_gap": {
+        // The retained prefix is gone. Drop the replay cursor; after the
+        // server's policy close we reconnect at the current public head and
+        // consumers rebuild their derived caches from REST.
+        this.lastSeenHeight = null;
+        this.replayWatermark = null;
         break;
       }
     }

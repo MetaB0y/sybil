@@ -65,15 +65,6 @@ export interface DevBlockMarketStats {
   welfare_nanos?: number | string | null;
 }
 
-export interface DevSystemEvent {
-  type?: string;
-  order_id?: number;
-  account_id?: number;
-  market_ids?: number[];
-  side?: string;
-  remaining_quantity?: number;
-}
-
 export interface DevBlock {
   height: number;
   timestamp_ms?: number;
@@ -81,13 +72,14 @@ export interface DevBlock {
   parent_hash?: string | null;
   order_count?: number;
   fill_count?: number;
+  rejection_count?: number;
   total_volume_nanos?: number | string | null;
   total_welfare_nanos?: number | string | null;
   unique_placers?: number;
   clearing_prices_nanos?: Record<string, unknown>;
   fills?: unknown[];
   rejections?: unknown[];
-  system_events?: DevSystemEvent[];
+  resolved_market_ids?: number[];
   by_market?: Record<string, DevBlockMarketStats>;
   bridge?: unknown;
 }

@@ -6,7 +6,6 @@ import {
   pendingIndex,
   topMarketsByVolume24h,
   latestBlockByMarketRows,
-  recentCancellations,
   buildInsights,
   fmtLiquidity,
   fmtYesDelta24h,
@@ -67,16 +66,6 @@ describe("dev/derive", () => {
     const block: DevBlock = { height: 5, by_market: { "7": { placers: 2, volume_nanos: 30, matched: 1 } } };
     const rows = latestBlockByMarketRows(block, new Map());
     expect(rows[0]).toMatchObject({ market_id: 7, placers: 2, matched: 1 });
-  });
-
-  it("recentCancellations pulls order_cancelled system events newest-first", () => {
-    const blocks: DevBlock[] = [
-      { height: 1, system_events: [{ type: "order_cancelled", order_id: 11 }] },
-      { height: 2, system_events: [{ type: "order_cancelled", order_id: 22 }] },
-    ];
-    const out = recentCancellations(blocks);
-    expect(out.map((c) => c.order_id)).toEqual([22, 11]);
-    expect(out[0]?.block_height).toBe(2);
   });
 
   it("buildInsights always reports price coverage", () => {

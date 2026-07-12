@@ -56,8 +56,8 @@ def sync_detailed(
 ) -> Response[Any]:
     """ GET /v1/blocks/stream
 
-     Third-party convenience SSE stream of block events. First-party clients should use GET
-    /v1/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
+     Third-party convenience SSE stream of public block aggregates. First-party clients should use GET
+    /v2/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -86,8 +86,8 @@ async def asyncio_detailed(
 ) -> Response[Any]:
     """ GET /v1/blocks/stream
 
-     Third-party convenience SSE stream of block events. First-party clients should use GET
-    /v1/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
+     Third-party convenience SSE stream of public block aggregates. First-party clients should use GET
+    /v2/blocks/ws?from_block=N for replay/resume, versioned envelopes, and lag/retention-gap signalling.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

@@ -55,7 +55,6 @@ use crate::util::now_ms;
         routes::bridge::create_signed_withdrawal,
         routes::bridge::submit_l1_withdrawal_event,
         routes::bridge::observe_l1_height,
-        routes::bridge::get_withdrawal,
         routes::markets::list_markets,
         routes::markets::list_markets_summary,
         routes::markets::get_market,
@@ -84,6 +83,7 @@ use crate::util::now_ms;
         routes::blocks::get_block_by_height,
         routes::blocks::stream_blocks,
         routes::blocks::ws_blocks,
+        routes::blocks::ws_service_blocks,
         routes::aggregates::get_activity_overview,
         routes::aggregates::get_open_batch,
         routes::aggregates::get_event_traders,
@@ -158,6 +158,8 @@ use crate::util::now_ms;
         FillResponse,
         RejectionResponse,
         BlockResponse,
+        PublicBlockResponse,
+        PublicBridgeBlockResponse,
         HealthResponse,
         AttestationResponse,
         StateRootResponse,
@@ -595,10 +597,6 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
-        path: "/v1/bridge/withdrawals/{id}",
-    },
-    RouteMount {
-        method: "GET",
         path: "/v1/markets/search",
     },
     RouteMount {
@@ -675,7 +673,7 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
-        path: "/v1/blocks/ws",
+        path: "/v2/blocks/ws",
     },
     RouteMount {
         method: "GET",
@@ -732,6 +730,10 @@ pub const OWNER_ROUTE_TABLE: &[RouteMount] = &[
 ];
 
 pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
+    RouteMount {
+        method: "GET",
+        path: "/v1/blocks/ws",
+    },
     RouteMount {
         method: "POST",
         path: "/v1/orders",
@@ -961,10 +963,6 @@ fn public_routes(state: &AppState) -> Router<AppState> {
             "/v1/bridge/status",
             axum::routing::get(routes::bridge::status),
         )
-        .route(
-            "/v1/bridge/withdrawals/{id}",
-            axum::routing::get(routes::bridge::get_withdrawal),
-        )
         // Markets — search & summary MUST come before {id} to avoid path param capture
         .route(
             "/v1/markets/search",
@@ -1044,7 +1042,7 @@ fn public_routes(state: &AppState) -> Router<AppState> {
             axum::routing::get(routes::blocks::stream_blocks),
         )
         .route(
-            "/v1/blocks/ws",
+            "/v2/blocks/ws",
             axum::routing::get(routes::blocks::ws_blocks),
         )
         .route(
@@ -1055,6 +1053,10 @@ fn public_routes(state: &AppState) -> Router<AppState> {
 
 fn service_routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/v1/blocks/ws",
+            axum::routing::get(routes::blocks::ws_service_blocks),
+        )
         // Unsigned orders can name arbitrary accounts (and MM budgets), so
         // production admission is restricted to trusted service clients.
         .route(

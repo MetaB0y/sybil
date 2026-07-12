@@ -17,7 +17,6 @@ import type {
   DevPosition,
   DevAccountPortfolio,
   DevBlock,
-  DevSystemEvent,
   DevBlockMarketStats,
   DevOverviewBucket,
 } from "./types";
@@ -229,29 +228,6 @@ export function latestBlockByMarketRows(
     );
 }
 
-export type CancellationRow = DevSystemEvent & { block_height: number; row_key: string };
-
-/** Newest-block-first list of `order_cancelled` system events. */
-export function recentCancellations(
-  blocks: DevBlock[],
-): CancellationRow[] {
-  const out: CancellationRow[] = [];
-  for (const b of blocks) {
-    const evts = b.system_events || [];
-    for (let i = 0; i < evts.length; i++) {
-      const e = evts[i];
-      if (e && e.type === "order_cancelled") {
-        out.push({
-          ...e,
-          block_height: b.height,
-          row_key: b.height + ":" + (e.order_id ?? i),
-        });
-      }
-    }
-  }
-  return out.reverse();
-}
-
 export function fmtLiquidity(m: DevMarket): string {
   if (!m.liquidity_avg10_nanos) return "—";
   const avg = "$" + (n(m.liquidity_avg10_nanos) / 1e9).toFixed(2);
@@ -277,35 +253,6 @@ export function orderStatsSub(bucket: DevOverviewBucket | null | undefined): str
   return (
     "placed " + fmtInt(bucket.orders.placed) + " · unmatched " + fmtInt(bucket.orders.unmatched)
   );
-}
-
-export function cancelMarketLabel(
-  evt: DevSystemEvent,
-  marketIdx: Map<number, DevMarket>,
-): string {
-  const ids = evt.market_ids || [];
-  if (!ids.length) return "—";
-  if (ids.length === 1) {
-    const first = ids[0]!;
-    return "#" + first + " · " + marketName(marketIdx, first);
-  }
-  return ids.length + " markets";
-}
-
-export function cancelMarketTitle(
-  evt: DevSystemEvent,
-  marketIdx: Map<number, DevMarket>,
-): string {
-  const ids = evt.market_ids || [];
-  return ids.map((id) => "#" + id + " " + marketName(marketIdx, id)).join("\n");
-}
-
-export function cancelSideClass(side: string | undefined): "yes" | "no" | "" {
-  if (side === "BuyYes") return "yes";
-  if (side === "SellYes") return "no";
-  if (side === "BuyNo") return "no";
-  if (side === "SellNo") return "yes";
-  return "";
 }
 
 // ── positions / orders / articles (index.html:1520-1548) ──────────────

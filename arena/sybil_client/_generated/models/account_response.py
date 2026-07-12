@@ -36,8 +36,8 @@ class AccountResponse:
             reserved_balance_nanos (int): Balance reserved by live resting orders. Integer nanodollars;
                 1_000_000_000 = $1.
             avatar_seed (None | str | Unset): Optional deterministic identicon seed (SYB-60).
-            display_name (None | str | Unset): Optional opt-in display name (SYB-60). Not yet used for leaderboard
-                labels — that flip is a deliberate follow-up.
+            display_name (None | str | Unset): Optional public display name. A non-empty value opts this account into
+                publication of its leaderboard financial row.
             positions (list[PositionResponse] | Unset):
      """
 

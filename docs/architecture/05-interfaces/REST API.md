@@ -8,14 +8,24 @@ last_verified: 2026-07-12
 
 The REST API is the external interface to the exchange. Built with Axum (a Rust async web framework), it exposes endpoints for account management, market operations, order submission, and block retrieval. An OpenAPI schema is auto-generated for client code generation. The API communicates with the sequencer via message passing through a `SequencerHandle` — no shared mutable state.
 
-The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, first-party [[WebSocket Block Stream|WebSocket stream]] with `?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
+The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
 
 Per-account reads (`/accounts/{id}`, portfolio, fills, equity, events, orders,
 signing-key metadata, read-key metadata, bridge key, active withdrawals, and private summary) require
 either an active read-scoped bearer owned by `{id}` or the service token. A
 wrong-account read bearer is `403`; missing, invalid, or revoked read credentials
 are `401`. Public market, activity, aggregate-statistics, and leaderboard reads
-remain unauthenticated.
+remain unauthenticated. Leaderboard rows are limited to accounts that
+explicitly opt in by signing a non-empty public display name; the settings UI
+discloses the financial fields that choice publishes.
+
+Public block REST/SSE responses are an allowlisted market tape: header
+commitments, prices, aggregate analytics, the bridge deposit root/count, and
+sanitized resolved-market ids. They do not contain fills, rejection rows,
+account-bearing system events, individual bridge leaves, or derived order
+lifecycle rows. The old full v1 WebSocket response is service-authenticated;
+public replay uses the distinct v2 endpoint and DTO. See
+[ADR-0016](../../adr/0016-public-market-tape-and-recovery-da-boundaries.md).
 
 `GET /v1/accounts/{id}/keyop-state` is intentionally public and exposes only
 the current committed `keys_digest` and `events_digest`. Clients fetch it just
@@ -47,7 +57,9 @@ account balance exactly once, and retires the leaf in the same committed block.
 `refunded` is exposed as a withdrawal status while the terminal event is
 pending; replays after pruning are accepted as no-ops.
 
-`GET /v1/accounts/{id}/withdrawals` is the owner-scoped current-status view.
+`GET /v1/accounts/{id}/withdrawals` is the only account withdrawal-detail read
+and is owner-scoped. The formerly enumerable
+`GET /v1/bridge/withdrawals/{id}` route is removed.
 It returns active leaves, including a terminal status during the short interval
 before the next block retires that leaf. Historical block responses preserve
 the immutable creation-time leaf and are not a current withdrawal-status API.
@@ -86,7 +98,7 @@ closing when `?from_block=` starts before durable block retention. SSE remains
 a live-only convenience stream and does not expose a replay cursor or retained
 floor.
 
-The API is stateless — all exchange state lives in the `SequencerActor`. Order-write endpoints first pass through a cheap HTTP token bucket keyed globally and by client address/header. This happens before JSON parsing and P256 signature verification, so malformed or invalid signed traffic cannot consume unbounded CPU. When an order submission arrives at `POST /v1/orders`, the API handler converts the [[Order Types|OrderSpec]] to the engine's internal representation and sends it to the sequencer via a channel. The sequencer either directly admits simple single-market orders into the resting book or defers MM / bundle / multi-market submissions via the [[Order Admission|deferred-submission buffer]]. When a client queries `GET /v1/blocks/latest`, the API reads the latest sealed block from the sequencer's state, including both `state_root` and `events_root`. A sealed block is a canonical `Block` plus the derived [[Block Data Boundaries|`BlockAnalytics` sidecar]]; the API joins them into one client response, but verifier/prover paths should consume canonical block and witness data, not product analytics. This actor-model architecture (inspired by Tokio actor patterns) means the API layer can be horizontally scaled without coordination — all instances talk to the same sequencer actor.
+The API is stateless — all exchange state lives in the `SequencerActor`. Order-write endpoints first pass through a cheap HTTP token bucket keyed globally and by client address/header. This happens before JSON parsing and P256 signature verification, so malformed or invalid signed traffic cannot consume unbounded CPU. When an order submission arrives at `POST /v1/orders`, the API handler converts the [[Order Types|OrderSpec]] to the engine's internal representation and sends it to the sequencer via a channel. The sequencer either directly admits simple single-market orders into the resting book or defers MM / bundle / multi-market submissions via the [[Order Admission|deferred-submission buffer]]. When a client queries `GET /v1/blocks/latest`, the API reads the latest sealed block and projects only its public commitments, prices, and analytics. A sealed block remains a canonical `Block` plus the derived [[Block Data Boundaries|`BlockAnalytics` sidecar]] internally; verifier/prover and authenticated service paths consume canonical data without making it public. This actor-model architecture (inspired by Tokio actor patterns) means the API layer can be horizontally scaled without coordination — all instances talk to the same sequencer actor.
 
 The sequencer message path is monitored by [[Actor Mailbox Monitoring]]. The API exports `sybil_actor_queue_depth{actor="sequencer"}` from `/metrics`, with configurable warning and critical thresholds, so operator alerts distinguish actor backlog from solver latency or HTTP rejection pressure.
 
@@ -124,6 +136,7 @@ hard in-flight concurrency cap before dispatching store work.
 - Retained DA reads return `429` when their dedicated rate or concurrency budget is exhausted
 - State proof endpoint returns inclusion or exclusion proofs for the latest committed qMDB root
 - DA endpoints expose public typed manifests and service-gated retained witness payload bytes
+- Public block endpoints expose a typed market-tape projection; canonical account rows are service-only
 - Order submissions support GTC, IOC, and GTD time-in-force
 - Stateless API layer — all state in sequencer
 - CORS is permissive only in dev mode; production uses `SYBIL_CORS_ORIGINS` and defaults to same-origin only
@@ -136,7 +149,7 @@ hard in-flight concurrency cap before dispatching store work.
 
 ## See Also
 - [[Order Types]] — the `OrderSpec` enum submitted via the API
-- [[WebSocket Block Stream]] — first-party block stream at `/v1/blocks/ws` with replay + backpressure
+- [[WebSocket Block Stream]] — public v2 market tape and authenticated v1 canonical stream
 - [[SSE Block Stream]] — third-party convenience stream via `/v1/blocks/stream`
 - [[Block Data Boundaries]] — API composition vs. canonical protocol data
 - [[P256 Authentication]] — signed order submission

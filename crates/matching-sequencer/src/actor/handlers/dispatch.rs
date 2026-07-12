@@ -594,6 +594,8 @@ impl Actor for SequencerActor {
                         };
                         LeaderboardRow {
                             account_id: base.account_id,
+                            display_name: base.display_name,
+                            avatar_seed: base.avatar_seed,
                             pnl_nanos,
                             roi_bps,
                             markets_traded: base.markets_traded,

@@ -1,17 +1,17 @@
 /**
- * Wire types for the /v1/blocks/ws envelope. Mirrors
+ * Wire types for the privacy-preserving /v2/blocks/ws envelope. Mirrors
  * `crates/sybil-api-types/src/ws.rs` (BlockStreamMessage / BlockStreamPayload).
  *
  * The serde annotation `#[serde(flatten)]` on the payload + `tag = "type"`
  * on the enum produces a flat JSON shape:
- *   {"v": 1, "type": "block",            "data": {...BlockResponse}}
- *   {"v": 1, "type": "replay_complete",  "up_to_height": N}
- *   {"v": 1, "type": "lagged",           "skipped": N, "last_sent_height": N | null}
+ *   {"v": 2, "type": "block",            "data": {...PublicBlockResponse}}
+ *   {"v": 2, "type": "replay_complete",  "up_to_height": N}
+ *   {"v": 2, "type": "lagged",           "skipped": N, "last_sent_height": N | null}
  */
 
 import type { components } from "../api/schema";
 
-export type Block = components["schemas"]["BlockResponse"];
+export type Block = components["schemas"]["PublicBlockResponse"];
 
 export type WsEnvelope =
   | { v: number; type: "block"; data: Block }
@@ -21,6 +21,13 @@ export type WsEnvelope =
       type: "lagged";
       skipped: number;
       last_sent_height: number | null;
+    }
+  | {
+      v: number;
+      type: "retention_gap";
+      requested_height: number;
+      retention_min_height: number;
+      head_height: number;
     };
 
 /** High-level connection state visible to the rest of the app. */

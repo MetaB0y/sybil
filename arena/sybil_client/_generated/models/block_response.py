@@ -43,7 +43,10 @@ T = TypeVar("T", bound="BlockResponse")
 
 @_attrs_define
 class BlockResponse:
-    """ 
+    """ Authenticated service projection of a canonical block. This contains
+    account-attributed private data and must never be returned by a public
+    route. Public clients use [`PublicBlockResponse`].
+
         Attributes:
             events_root (str):
             fill_count (int):

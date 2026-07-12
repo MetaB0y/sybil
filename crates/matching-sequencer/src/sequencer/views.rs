@@ -181,12 +181,11 @@ impl BlockSequencer {
     /// returns the all-time PnL/equity plus the deposited basis and the
     /// distinct-market count.
     ///
-    /// The system MINT account, never-funded accounts, and accounts that have
-    /// never filled are excluded. Funding alone is onboarding state, not
-    /// leaderboard activity; during normal operation and store restart, an
-    /// account with a durable fill remains ranked even after closing every
-    /// position. Bot and user accounts are indistinguishable server-side, so
-    /// both are included.
+    /// The system MINT account, never-funded accounts, accounts that have never
+    /// filled, and accounts without an opt-in display name are excluded.
+    /// Publishing a display name is explicit consent to publish the associated
+    /// leaderboard financial row; clearing it removes the account from future
+    /// reads. Funding alone is onboarding state, not leaderboard activity.
     /// `markets_traded` counts distinct markets with a currently open position
     /// (exact lifetime distinct-markets-traded would require a per-account fill
     /// history scan, which is not retained cheaply — see SYB-59).
@@ -198,6 +197,7 @@ impl BlockSequencer {
                 if account.total_deposited <= 0 || self.analytics.total_fills(*id) == 0 {
                     return None;
                 }
+                let display_name = account.profile.display_name.clone()?;
                 let summary = self.portfolio_summary(*id).ok()?;
                 let markets: HashSet<MarketId> = account
                     .positions
@@ -207,6 +207,8 @@ impl BlockSequencer {
                     .collect();
                 Some(LeaderboardBase {
                     account_id: *id,
+                    display_name,
+                    avatar_seed: account.profile.avatar_seed.clone(),
                     pnl_nanos: summary.pnl_nanos,
                     equity_nanos: summary.portfolio_value_nanos,
                     deposited_nanos: summary.total_deposited_nanos,

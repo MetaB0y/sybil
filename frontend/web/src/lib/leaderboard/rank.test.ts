@@ -1,15 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { formatRoiBps, formatSignedDollars, signColor } from "./format";
-import { toLeaderboardRows, traderLabel } from "./use-leaderboard";
+import { toLeaderboardRows } from "./use-leaderboard";
 
 const DOLLAR = 1_000_000_000n;
-
-describe("traderLabel", () => {
-  it("renders anonymous labels", () => {
-    expect(traderLabel(42)).toBe("Trader #42");
-    expect(traderLabel(0)).toBe("Trader #0");
-  });
-});
 
 describe("formatSignedDollars", () => {
   it("signs positive and negative PnL, keeps zero clean", () => {
@@ -47,6 +40,7 @@ describe("toLeaderboardRows", () => {
         {
           rank: 1,
           account_id: 7,
+          display_name: "alice",
           pnl_nanos: (3n * DOLLAR).toString(),
           roi_bps: 500,
           markets_traded: 4,
@@ -55,6 +49,7 @@ describe("toLeaderboardRows", () => {
         {
           rank: 2,
           account_id: 3,
+          display_name: "bob",
           pnl_nanos: (-1n * DOLLAR).toString(),
           roi_bps: -50,
           markets_traded: 2,
@@ -66,7 +61,7 @@ describe("toLeaderboardRows", () => {
     expect(rows.map((r) => r.rank)).toEqual([1, 2]);
     expect(rows[0]).toMatchObject({
       accountId: 7,
-      label: "Trader #7",
+      label: "alice",
       pnlNanos: 3n * DOLLAR,
       roiBps: 500,
       marketsTraded: 4,

@@ -68,6 +68,8 @@ pub async fn get_leaderboard(
         .map(|(index, row)| LeaderboardEntryResponse {
             rank: (index as u32) + 1,
             account_id: row.account_id.0,
+            display_name: row.display_name,
+            avatar_seed: row.avatar_seed,
             pnl_nanos: row.pnl_nanos,
             roi_bps: row.roi_bps,
             markets_traded: row.markets_traded,

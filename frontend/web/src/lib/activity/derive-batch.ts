@@ -9,9 +9,6 @@ import type { BatchMarketRow, BatchRow, Block } from "./types";
 
 /** Derive the collapsed-row data for one block. */
 export function deriveBatchRow(block: Block): BatchRow {
-  const fills = block.fills ?? [];
-  const rejections = block.rejections ?? [];
-
   const ordersPlaced = block.order_count;
   const ordersMatched = block.orders_filled;
   // Rejections never reach the matching stage, so the "unmatched (during clearing)"
@@ -19,10 +16,10 @@ export function deriveBatchRow(block: Block): BatchRow {
   // during matching" (cancelled is not modeled today).
   const ordersUnmatched = Math.max(
     0,
-    ordersPlaced - ordersMatched - rejections.length
+    ordersPlaced - ordersMatched - (block.rejection_count ?? 0)
   );
 
-  const uniqueTraders = countUniqueAccountIds(fills);
+  const uniqueTraders = block.unique_placers ?? 0;
 
   const clearingPrices = block.clearing_prices_nanos ?? {};
   const marketsTouched = Object.keys(clearingPrices).length;
@@ -94,14 +91,4 @@ export function deriveBatchMarketRows(
       ordersMatched: stats?.matched ?? 0,
     };
   });
-}
-
-function countUniqueAccountIds(
-  fills: { account_id?: number | null }[]
-): number {
-  const set = new Set<number>();
-  for (const f of fills) {
-    if (f.account_id != null) set.add(f.account_id);
-  }
-  return set.size;
 }
