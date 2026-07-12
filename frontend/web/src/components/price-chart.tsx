@@ -52,6 +52,11 @@ type Props = {
   /** The chosen outcome (market in the URL). Its line is drawn bold and on
    *  top; the others dim back. Omit (or single-line modes) for no emphasis. */
   highlightId?: number | undefined;
+  /** The first history request is still resolving. Live block data may still
+   * be sufficient to draw the chart while this is true. */
+  historyPending?: boolean;
+  /** At least one selected history lane has no saved data after failure. */
+  historyUnavailable?: boolean;
 };
 
 export function PriceChart({
@@ -61,6 +66,8 @@ export function PriceChart({
   sinceMs,
   nowMs,
   highlightId,
+  historyPending = false,
+  historyUnavailable = false,
 }: Props) {
   const recent = useStore(selectRecentBlocks);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -78,9 +85,13 @@ export function PriceChart({
   if (!series.hasData || N < 2) {
     return (
       <ChartMessage>
-        {series.hasData
-          ? "no activity in this range — pick a wider window."
-          : "no clearing history yet — chart will populate as batches clear."}
+        {!series.hasData && historyPending
+          ? "loading clearing history…"
+          : !series.hasData && historyUnavailable
+            ? "clearing history unavailable — retry above."
+            : series.hasData
+              ? "no activity in this range — pick a wider window."
+              : "no clearing history yet — chart will populate as batches clear."}
       </ChartMessage>
     );
   }
@@ -372,6 +383,64 @@ export function PriceChart({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+export function PriceHistoryNotice({
+  failureCount,
+  unavailableCount,
+  retrying,
+  onRetry,
+}: {
+  failureCount: number;
+  unavailableCount: number;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  if (failureCount === 0) return null;
+  const incomplete = unavailableCount > 0;
+
+  return (
+    <div
+      role={incomplete ? "alert" : "status"}
+      aria-live={incomplete ? undefined : "polite"}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--space-3)",
+        padding: "var(--space-2) var(--space-3)",
+        border:
+          "1px solid color-mix(in srgb, var(--warn) 45%, var(--border-1))",
+        borderRadius: "var(--radius-sm)",
+        color: "var(--warn)",
+        fontFamily: "var(--font-mono)",
+        fontSize: "var(--fs-12)",
+      }}
+    >
+      <span>
+        {incomplete
+          ? `failed to load price history for ${failureCount} ${failureCount === 1 ? "outcome" : "outcomes"} · chart may be incomplete`
+          : `price history refresh failed for ${failureCount} ${failureCount === 1 ? "outcome" : "outcomes"} · showing saved data`}
+      </span>
+      <button
+        type="button"
+        disabled={retrying}
+        onClick={onRetry}
+        style={{
+          minHeight: 32,
+          padding: "0 var(--space-3)",
+          border: "1px solid var(--border-2)",
+          borderRadius: "var(--radius-sm)",
+          background: "var(--surface-2)",
+          color: "var(--fg-1)",
+          font: "inherit",
+          cursor: retrying ? "wait" : "pointer",
+        }}
+      >
+        {retrying ? "retrying…" : "retry"}
+      </button>
     </div>
   );
 }

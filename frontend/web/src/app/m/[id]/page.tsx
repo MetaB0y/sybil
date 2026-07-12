@@ -13,7 +13,7 @@ import { MarketRail } from "@/components/market-rail";
 import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
-import { PriceChart } from "@/components/price-chart";
+import { PriceChart, PriceHistoryNotice } from "@/components/price-chart";
 import {
   formatAge,
   formatCompactDollars,
@@ -461,7 +461,7 @@ function ChartSection({ marketId }: { marketId: number }) {
   const highlightId = group?.isMultiOutcome ? marketId : undefined;
 
   // Fetch history only for the outcomes actually shown (legend caps at 8).
-  const { byMarket } = useEventPriceHistory(effectiveSelected);
+  const history = useEventPriceHistory(effectiveSelected);
 
   const drawn = useMemo(
     () =>
@@ -567,14 +567,24 @@ function ChartSection({ marketId }: { marketId: number }) {
           loading…
         </div>
       ) : (
-        <PriceChart
-          drawn={drawn}
-          byMarket={byMarket}
-          mode={mode}
-          sinceMs={sinceMs}
-          nowMs={nowMs}
-          highlightId={highlightId}
-        />
+        <>
+          <PriceHistoryNotice
+            failureCount={history.failureCount}
+            unavailableCount={history.unavailableCount}
+            retrying={history.isRetrying}
+            onRetry={() => void history.retryFailed()}
+          />
+          <PriceChart
+            drawn={drawn}
+            byMarket={history.byMarket}
+            mode={mode}
+            sinceMs={sinceMs}
+            nowMs={nowMs}
+            highlightId={highlightId}
+            historyPending={history.isPending}
+            historyUnavailable={history.unavailableCount > 0}
+          />
+        </>
       )}
     </section>
   );
