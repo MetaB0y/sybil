@@ -1520,6 +1520,15 @@ async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
     assert_eq!(fills.len(), 1);
     assert_eq!(fills[0].fill_qty, 5);
     assert_eq!(fills[0].block_height, 1);
+    assert_eq!(restored_seq.analytics().total_fills(buyer), 1);
+    assert_eq!(restored_seq.analytics().total_fills(seller), 1);
+    let ranked: Vec<_> = restored_seq
+        .leaderboard_bases()
+        .into_iter()
+        .map(|base| base.account_id)
+        .collect();
+    assert!(ranked.contains(&buyer));
+    assert!(ranked.contains(&seller));
 }
 
 #[tokio::test]

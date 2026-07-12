@@ -181,8 +181,12 @@ impl BlockSequencer {
     /// returns the all-time PnL/equity plus the deposited basis and the
     /// distinct-market count.
     ///
-    /// The system MINT account and never-funded accounts are excluded. Bot and
-    /// user accounts are indistinguishable server-side, so both are included.
+    /// The system MINT account, never-funded accounts, and accounts that have
+    /// never filled are excluded. Funding alone is onboarding state, not
+    /// leaderboard activity; during normal operation and store restart, an
+    /// account with a durable fill remains ranked even after closing every
+    /// position. Bot and user accounts are indistinguishable server-side, so
+    /// both are included.
     /// `markets_traded` counts distinct markets with a currently open position
     /// (exact lifetime distinct-markets-traded would require a per-account fill
     /// history scan, which is not retained cheaply — see SYB-59).
@@ -191,7 +195,7 @@ impl BlockSequencer {
             .iter()
             .filter(|(id, _)| **id != AccountId::MINT)
             .filter_map(|(id, account)| {
-                if account.total_deposited <= 0 {
+                if account.total_deposited <= 0 || self.analytics.total_fills(*id) == 0 {
                     return None;
                 }
                 let summary = self.portfolio_summary(*id).ok()?;
