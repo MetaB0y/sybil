@@ -275,7 +275,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
           `/v1/accounts/${accountId}/orders`,
           { headers: ownerReadHeaders(readKey.body.token) },
         ),
-        rest<unknown[]>(
+        rest<{ fills: unknown[] }>(
           `/v1/accounts/${accountId}/fills?limit=10`,
           { headers: ownerReadHeaders(readKey.body.token) },
         ),
@@ -289,11 +289,11 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
         `portfolio: balance=${balanceAfter}, positions=${portfolio.body.positions?.length ?? 0}`,
       );
       log(`open orders: ${openOrders.body.length}`);
-      log(`fills: ${fills.body.length}`);
+      log(`fills: ${fills.body.fills.length}`);
 
       const balanceChanged = balanceAfter < INITIAL_BALANCE_NANOS;
       const hasPending = openOrders.body.length > 0;
-      const hasFill = fills.body.length > 0;
+      const hasFill = fills.body.fills.length > 0;
       expect(
         balanceChanged || hasPending || hasFill,
         "order had no effect — signature may have failed verify",

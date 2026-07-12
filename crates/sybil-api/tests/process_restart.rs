@@ -234,9 +234,9 @@ async fn submit_crossing_trade(client: &reqwest::Client, base_url: &str, trade: 
 }
 
 fn assert_funding_history_once(history: &Value) {
-    let events = history
+    let events = history["events"]
         .as_array()
-        .expect("funding history response is an array");
+        .expect("funding history response contains an events array");
     let created: Vec<_> = events
         .iter()
         .filter(|event| event["type"].as_str() == Some("created"))
@@ -797,9 +797,9 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
         &format!("/v1/accounts/{account_id}/events?limit=50"),
     )
     .await;
-    let rejections: Vec<&Value> = owner_events
+    let rejections: Vec<&Value> = owner_events["events"]
         .as_array()
-        .expect("account events response is an array")
+        .expect("account events response contains an events array")
         .iter()
         .filter(|event| {
             event["type"] == "rejected" && event["block_height"].as_u64() == Some(target_height)

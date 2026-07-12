@@ -1,11 +1,50 @@
 use super::*;
 
 pub(super) fn fill_history_key(account_id: AccountId, record: &AccountFillRecord) -> [u8; 24] {
+    fill_history_primary_key(account_id, record.block_height, record.order_id)
+}
+
+pub(super) fn fill_history_primary_key(
+    account_id: AccountId,
+    block_height: u64,
+    order_id: u64,
+) -> [u8; 24] {
     let mut key = [0u8; 24];
     key[0..8].copy_from_slice(&account_id.0.to_be_bytes());
-    key[8..16].copy_from_slice(&record.block_height.to_be_bytes());
-    key[16..24].copy_from_slice(&record.order_id.to_be_bytes());
+    key[8..16].copy_from_slice(&block_height.to_be_bytes());
+    key[16..24].copy_from_slice(&order_id.to_be_bytes());
     key
+}
+
+pub(super) fn fill_history_parts_from_key(key: &[u8]) -> Option<(AccountId, u64, u64)> {
+    Some((
+        AccountId(u64::from_be_bytes(key.get(..8)?.try_into().ok()?)),
+        u64::from_be_bytes(key.get(8..16)?.try_into().ok()?),
+        u64::from_be_bytes(key.get(16..24)?.try_into().ok()?),
+    ))
+}
+
+pub(super) fn fill_history_by_time_key(
+    timestamp_ms: u64,
+    account_id: AccountId,
+    block_height: u64,
+    order_id: u64,
+) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    key[..8].copy_from_slice(&timestamp_ms.to_be_bytes());
+    key[8..16].copy_from_slice(&account_id.0.to_be_bytes());
+    key[16..24].copy_from_slice(&block_height.to_be_bytes());
+    key[24..].copy_from_slice(&order_id.to_be_bytes());
+    key
+}
+
+pub(super) fn fill_history_by_time_parts(key: &[u8]) -> Option<(u64, AccountId, u64, u64)> {
+    Some((
+        u64::from_be_bytes(key.get(..8)?.try_into().ok()?),
+        AccountId(u64::from_be_bytes(key.get(8..16)?.try_into().ok()?)),
+        u64::from_be_bytes(key.get(16..24)?.try_into().ok()?),
+        u64::from_be_bytes(key.get(24..32)?.try_into().ok()?),
+    ))
 }
 
 /// Inclusive `[lo, hi]` bounds covering every fill-history key for one account
@@ -26,12 +65,70 @@ pub(super) fn equity_key(account_id: AccountId, height: u64) -> [u8; 16] {
     k
 }
 
+pub(super) fn equity_parts_from_key(key: &[u8]) -> Option<(AccountId, u64)> {
+    Some((
+        AccountId(u64::from_be_bytes(key.get(..8)?.try_into().ok()?)),
+        u64::from_be_bytes(key.get(8..16)?.try_into().ok()?),
+    ))
+}
+
+pub(super) fn equity_by_time_key(
+    timestamp_ms: u64,
+    account_id: AccountId,
+    height: u64,
+) -> [u8; 24] {
+    let mut key = [0u8; 24];
+    key[..8].copy_from_slice(&timestamp_ms.to_be_bytes());
+    key[8..16].copy_from_slice(&account_id.0.to_be_bytes());
+    key[16..].copy_from_slice(&height.to_be_bytes());
+    key
+}
+
+pub(super) fn equity_by_time_parts(key: &[u8]) -> Option<(u64, AccountId, u64)> {
+    Some((
+        u64::from_be_bytes(key.get(..8)?.try_into().ok()?),
+        AccountId(u64::from_be_bytes(key.get(8..16)?.try_into().ok()?)),
+        u64::from_be_bytes(key.get(16..24)?.try_into().ok()?),
+    ))
+}
+
 pub(super) fn history_event_key(account_id: AccountId, block_height: u64, seq: u64) -> [u8; 24] {
     let mut k = [0u8; 24];
     k[..8].copy_from_slice(&account_id.0.to_be_bytes());
     k[8..16].copy_from_slice(&block_height.to_be_bytes());
     k[16..].copy_from_slice(&seq.to_be_bytes());
     k
+}
+
+pub(super) fn history_event_parts_from_key(key: &[u8]) -> Option<(AccountId, u64, u64)> {
+    Some((
+        AccountId(u64::from_be_bytes(key.get(..8)?.try_into().ok()?)),
+        u64::from_be_bytes(key.get(8..16)?.try_into().ok()?),
+        u64::from_be_bytes(key.get(16..24)?.try_into().ok()?),
+    ))
+}
+
+pub(super) fn history_event_by_time_key(
+    timestamp_ms: u64,
+    account_id: AccountId,
+    block_height: u64,
+    seq: u64,
+) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    key[..8].copy_from_slice(&timestamp_ms.to_be_bytes());
+    key[8..16].copy_from_slice(&account_id.0.to_be_bytes());
+    key[16..24].copy_from_slice(&block_height.to_be_bytes());
+    key[24..].copy_from_slice(&seq.to_be_bytes());
+    key
+}
+
+pub(super) fn history_event_by_time_parts(key: &[u8]) -> Option<(u64, AccountId, u64, u64)> {
+    Some((
+        u64::from_be_bytes(key.get(..8)?.try_into().ok()?),
+        AccountId(u64::from_be_bytes(key.get(8..16)?.try_into().ok()?)),
+        u64::from_be_bytes(key.get(16..24)?.try_into().ok()?),
+        u64::from_be_bytes(key.get(24..32)?.try_into().ok()?),
+    ))
 }
 
 pub(super) fn price_point_key(market_id: MarketId, height: u64) -> [u8; 12] {

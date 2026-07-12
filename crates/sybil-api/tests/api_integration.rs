@@ -1903,7 +1903,7 @@ async fn end_to_end_trade_lifecycle() {
     assert_eq!(status, StatusCode::OK);
     let fills = parse_json(&body);
     assert!(
-        !fills.as_array().unwrap().is_empty(),
+        !fills["fills"].as_array().unwrap().is_empty(),
         "Account A should have fill records"
     );
 
@@ -2058,37 +2058,34 @@ async fn fills_paginated_correctly() {
     // Get all fills
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills").await;
     let all_fills = parse_json(&body);
-    let total = all_fills.as_array().unwrap().len();
+    let total = all_fills["fills"].as_array().unwrap().len();
     assert!(total >= 2, "Expected at least 2 fills across 2 blocks");
 
     // Paginate: limit=1
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills?limit=1").await;
     let page1 = parse_json(&body);
-    assert_eq!(page1.as_array().unwrap().len(), 1);
-    assert!(page1.as_array().unwrap()[0]["cursor"].as_str().is_some());
+    assert_eq!(page1["fills"].as_array().unwrap().len(), 1);
+    assert!(page1["fills"][0]["cursor"].as_str().is_some());
 
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills?limit=0").await;
-    assert!(parse_json(&body).as_array().unwrap().is_empty());
+    assert!(parse_json(&body)["fills"].as_array().unwrap().is_empty());
 
     // Paginate: offset=1, limit=1
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills?offset=1&limit=1").await;
     let page2 = parse_json(&body);
-    assert_eq!(page2.as_array().unwrap().len(), 1);
+    assert_eq!(page2["fills"].as_array().unwrap().len(), 1);
 
     // Pages should be different fills
-    assert_ne!(
-        page1.as_array().unwrap()[0]["order_id"],
-        page2.as_array().unwrap()[0]["order_id"],
-    );
+    assert_ne!(page1["fills"][0]["order_id"], page2["fills"][0]["order_id"],);
 
     // Cursor pagination: after=0.0 returns oldest-first, then strictly after
     // the returned cursor advances without offset-from-newest shifting.
     let (_, body) = get(app.clone(), "/v1/accounts/0/fills?after=0.0&limit=1").await;
     let first_forward = parse_json(&body);
-    assert_eq!(first_forward.as_array().unwrap().len(), 1);
-    let cursor = first_forward.as_array().unwrap()[0]["cursor"]
-        .as_str()
-        .unwrap();
+    assert_eq!(first_forward["fills"].as_array().unwrap().len(), 1);
+    assert_eq!(first_forward["cursor_gap"], false);
+    assert!(first_forward["next_after"].as_str().is_some());
+    let cursor = first_forward["fills"][0]["cursor"].as_str().unwrap();
     let (_, body) = get(
         app.clone(),
         &format!("/v1/accounts/0/fills?after={cursor}&limit=10"),
@@ -2096,11 +2093,12 @@ async fn fills_paginated_correctly() {
     .await;
     let rest_forward = parse_json(&body);
     assert!(
-        !rest_forward.as_array().unwrap().is_empty(),
+        !rest_forward["fills"].as_array().unwrap().is_empty(),
         "expected at least one fill after first cursor"
     );
+    assert!(rest_forward["next_after"].is_null());
     assert!(
-        rest_forward
+        rest_forward["fills"]
             .as_array()
             .unwrap()
             .iter()
@@ -2441,10 +2439,15 @@ async fn account_history_shows_placed_then_cancelled() {
     assert!(parse_json(&body)["cancelled"].as_bool().unwrap());
 
     // Assert the history feed
-    let (status, body) = get(app, &format!("/v1/accounts/{}/events?limit=20", account_id)).await;
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/{}/events?limit=20", account_id),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let events = parse_json(&body);
-    let events = events.as_array().unwrap();
+    assert!(events["next_before"].is_null());
+    let events = events["events"].as_array().unwrap();
     let types: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
     assert!(types.contains(&"placed"), "history: {types:?}");
     assert!(types.contains(&"cancelled"), "history: {types:?}");
@@ -2452,6 +2455,12 @@ async fn account_history_shows_placed_then_cancelled() {
     let pc = types.iter().position(|t| *t == "cancelled").unwrap();
     let pp = types.iter().position(|t| *t == "placed").unwrap();
     assert!(pc < pp, "expected cancelled newest-first: {types:?}");
+    let (status, _) = get(
+        app,
+        &format!("/v1/accounts/{account_id}/events?before=not-a-cursor"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -2557,7 +2566,7 @@ async fn account_fills_persist_to_store_with_zero_hot_cap() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let fills = parse_json(&body);
-    let fills = fills.as_array().unwrap();
+    let fills = fills["fills"].as_array().unwrap();
     assert!(
         !fills.is_empty(),
         "fills must come back from redb at hot cap 0"
@@ -2591,7 +2600,7 @@ async fn account_history_persists_to_store() {
     let (status, body) = get(app, &format!("/v1/accounts/{account_id}/events?limit=20")).await;
     assert_eq!(status, StatusCode::OK);
     let v = parse_json(&body);
-    let arr = v.as_array().unwrap();
+    let arr = v["events"].as_array().unwrap();
     assert!(!arr.is_empty(), "history must come back from redb: {v}");
     assert!(
         arr.iter().any(|e| e["type"] == "placed"),

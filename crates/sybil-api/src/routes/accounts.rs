@@ -651,9 +651,11 @@ pub async fn get_portfolio(
         ("offset" = Option<usize>, Query, deprecated, description = "Deprecated offset-from-newest pagination. Ignored when `after` is present."),
     ),
     responses(
-        (status = 200, description = "Account fill history", body = Vec<AccountFillResponse>),
+        (status = 200, description = "Retained account fill history", body = AccountFillPageResponse),
+        (status = 400, description = "Invalid cursor"),
         (status = 401, description = "Missing/invalid bearer token"),
-        (status = 403, description = "Token belongs to a different account")
+        (status = 403, description = "Token belongs to a different account"),
+        (status = 500, description = "Durable history unavailable")
     ),
     security(("bearer_read" = []))
 )]
@@ -662,28 +664,49 @@ pub async fn get_account_fills(
     Path(id): Path<u64>,
     headers: HeaderMap,
     Query(params): Query<AccountFillParams>,
-) -> Result<Json<Vec<AccountFillResponse>>, AppError> {
+) -> Result<Json<AccountFillPageResponse>, AppError> {
     authorize_account_read(&state, &headers, AccountId(id)).await?;
     let market_id = params.market_id.map(MarketId::new);
     let limit = account_fill_query_limit(params.limit);
-    let fills = if let Some(after) = params.after.as_deref() {
+    let request_limit = limit.saturating_add(1);
+    let forward = params.after.is_some();
+    let mut requested_cursor = None;
+    let page = if let Some(after) = params.after.as_deref() {
         let cursor = AccountFillCursor::parse(after)
             .ok_or_else(|| AppError::bad_request("Invalid fill cursor"))?;
+        requested_cursor = Some(cursor);
         state
             .sequencer
-            .get_account_fills_after(AccountId(id), market_id, Some(cursor), limit)
+            .get_account_fills_after(AccountId(id), market_id, Some(cursor), request_limit)
             .await?
     } else {
         let offset = params.offset.unwrap_or(0);
         state
             .sequencer
-            .get_account_fills(AccountId(id), market_id, limit, offset)
+            .get_account_fills(AccountId(id), market_id, request_limit, offset)
             .await?
     };
 
-    let response: Vec<AccountFillResponse> = fills.into_iter().map(account_fill_response).collect();
+    let retention_min_timestamp_ms = page.retention_min_timestamp_ms;
+    let pruned_through_height = page.pruned_through_height;
+    let durable = page.durable;
+    let mut fills: Vec<AccountFillResponse> =
+        page.items.into_iter().map(account_fill_response).collect();
+    let has_more = fills.len() > limit;
+    fills.truncate(limit);
+    let next_after = (forward && has_more)
+        .then(|| fills.last().map(|fill| fill.cursor.clone()))
+        .flatten();
 
-    Ok(Json(response))
+    Ok(Json(AccountFillPageResponse {
+        fills,
+        next_after,
+        retention_min_timestamp_ms,
+        pruned_through_height,
+        cursor_gap: fill_cursor_has_gap(requested_cursor, pruned_through_height),
+        history_truncated: !durable || retention_min_timestamp_ms.is_some(),
+        history_scope: if durable { "durable" } else { "memory" }.to_string(),
+    }))
 }
 
 fn account_fill_response(f: AccountFillRecord) -> AccountFillResponse {
@@ -735,9 +758,11 @@ fn parse_cursor(s: &str) -> Option<(u64, u64)> {
         ("category" = Option<String>, Query, description = "trades | funding | settlement"),
     ),
     responses(
-        (status = 200, description = "Account history feed, newest-first", body = [HistoryEventResponse]),
+        (status = 200, description = "Retained account history feed, newest-first", body = AccountHistoryPageResponse),
+        (status = 400, description = "Invalid cursor"),
         (status = 401, description = "Missing/invalid bearer token"),
-        (status = 403, description = "Token belongs to a different account")
+        (status = 403, description = "Token belongs to a different account"),
+        (status = 500, description = "Durable history unavailable")
     ),
     security(("bearer_read" = []))
 )]
@@ -746,15 +771,29 @@ pub async fn get_account_history(
     Path(id): Path<u64>,
     headers: HeaderMap,
     Query(params): Query<HistoryParams>,
-) -> Result<Json<Vec<HistoryEventResponse>>, AppError> {
+) -> Result<Json<AccountHistoryPageResponse>, AppError> {
     authorize_account_read(&state, &headers, AccountId(id)).await?;
     let limit = params.limit.unwrap_or(50).min(500);
-    let before = params.before.as_deref().and_then(parse_cursor);
-    let events = state
+    let before = params
+        .before
+        .as_deref()
+        .map(|cursor| {
+            parse_cursor(cursor).ok_or_else(|| AppError::bad_request("Invalid event cursor"))
+        })
+        .transpose()?;
+    let page = state
         .sequencer
-        .get_account_events(AccountId(id), limit, before, params.category)
+        .get_account_events(
+            AccountId(id),
+            limit.saturating_add(1),
+            before,
+            params.category,
+        )
         .await?;
-    let out: Vec<HistoryEventResponse> = events
+    let retention_min_timestamp_ms = page.retention_min_timestamp_ms;
+    let durable = page.durable;
+    let mut events: Vec<HistoryEventResponse> = page
+        .items
         .into_iter()
         .map(|e| HistoryEventResponse {
             id: e.id(),
@@ -776,7 +815,18 @@ pub async fn get_account_history(
             available_nanos: e.available_nanos,
         })
         .collect();
-    Ok(Json(out))
+    let has_more = events.len() > limit;
+    events.truncate(limit);
+    let next_before = has_more
+        .then(|| events.last().map(|event| event.id.clone()))
+        .flatten();
+    Ok(Json(AccountHistoryPageResponse {
+        events,
+        next_before,
+        retention_min_timestamp_ms,
+        history_truncated: !durable || retention_min_timestamp_ms.is_some(),
+        history_scope: if durable { "durable" } else { "memory" }.to_string(),
+    }))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -791,6 +841,15 @@ fn account_fill_query_limit(limit: Option<usize>) -> usize {
     limit
         .unwrap_or(DEFAULT_ACCOUNT_FILL_QUERY_LIMIT)
         .min(MAX_ACCOUNT_FILL_QUERY_LIMIT)
+}
+
+fn fill_cursor_has_gap(
+    cursor: Option<AccountFillCursor>,
+    pruned_through_height: Option<u64>,
+) -> bool {
+    cursor.is_some_and(|cursor| {
+        pruned_through_height.is_some_and(|height| cursor.block_height <= height)
+    })
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -810,7 +869,8 @@ pub struct EquityRangeParams {
     responses(
         (status = 200, description = "Per-account equity series", body = EquitySeriesResponse),
         (status = 401, description = "Missing/invalid bearer token"),
-        (status = 403, description = "Token belongs to a different account")
+        (status = 403, description = "Token belongs to a different account"),
+        (status = 500, description = "Durable history unavailable")
     ),
     security(("bearer_read" = []))
 )]
@@ -828,11 +888,16 @@ pub async fn get_equity(
         Some("30d") => now_ms.saturating_sub(30 * 24 * 3_600_000),
         _ => 0,
     };
-    let points = state
+    let page = state
         .sequencer
         .get_equity_series(AccountId(id), since_ms)
         .await?;
-    let points: Vec<EquityPointResponse> = points
+    let retention_min_timestamp_ms = page.retention_min_timestamp_ms;
+    let durable = page.durable;
+    let source_points = page.source_points;
+    let downsampled = page.downsampled;
+    let points: Vec<EquityPointResponse> = page
+        .items
         .into_iter()
         .map(|p| EquityPointResponse {
             timestamp_ms: p.timestamp_ms,
@@ -844,6 +909,12 @@ pub async fn get_equity(
     Ok(Json(EquitySeriesResponse {
         account_id: id,
         points,
+        retention_min_timestamp_ms,
+        history_truncated: !durable
+            || retention_min_timestamp_ms.is_some_and(|floor| since_ms < floor),
+        history_scope: if durable { "durable" } else { "memory" }.to_string(),
+        source_points,
+        downsampled,
     }))
 }
 
@@ -1385,5 +1456,19 @@ mod tests {
             account_fill_query_limit(Some(MAX_ACCOUNT_FILL_QUERY_LIMIT + 1)),
             MAX_ACCOUNT_FILL_QUERY_LIMIT
         );
+    }
+
+    #[test]
+    fn fill_cursor_gap_includes_start_sentinel_after_pruning() {
+        assert!(fill_cursor_has_gap(Some(AccountFillCursor::MIN), Some(1)));
+        assert!(fill_cursor_has_gap(
+            Some(AccountFillCursor::new(4, 9)),
+            Some(4)
+        ));
+        assert!(!fill_cursor_has_gap(
+            Some(AccountFillCursor::new(5, 1)),
+            Some(4)
+        ));
+        assert!(!fill_cursor_has_gap(None, Some(4)));
     }
 }

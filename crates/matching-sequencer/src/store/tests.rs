@@ -1,10 +1,322 @@
 use std::sync::Arc;
 
+use crate::aggregates::{EquityPoint, HistoryEvent, HistoryKind, StoredHistoryEvent};
 use matching_engine::MarketSet;
 use redb::{Database, TableDefinition};
 
 use super::testutil::*;
 use super::*;
+
+#[tokio::test]
+async fn account_fill_history_prunes_by_age_and_global_row_cap() {
+    let path = temp_db_path("account-fill-retention");
+    let store = Store::open(&path).unwrap();
+    let account_id = AccountId(7);
+    let records = [1_000, 2_000, 3_000].map(|timestamp_ms| AccountFillRecord {
+        order_id: timestamp_ms,
+        fill_qty: 1,
+        fill_price: Nanos(500_000_000),
+        block_height: timestamp_ms / 1_000,
+        timestamp_ms,
+        position_deltas: vec![],
+    });
+    store
+        .seed_fill_history_for_test(
+            &records
+                .iter()
+                .cloned()
+                .map(|record| (account_id, record))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+
+    let no_delete = store
+        .prune_history(
+            4,
+            4_000,
+            HistoryRetentionPolicy {
+                fill_history_retention_secs: 10,
+                prune_interval_blocks: 1,
+                prune_max_rows: 10,
+                ..HistoryRetentionPolicy::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(no_delete.fill_history_pruned, 0);
+    assert_eq!(
+        store.account_history_retention(account_id).unwrap(),
+        AccountHistoryRetention::default()
+    );
+
+    let report = store
+        .prune_history(
+            4,
+            4_000,
+            HistoryRetentionPolicy {
+                fill_history_retention_secs: 2,
+                prune_interval_blocks: 1,
+                prune_max_rows: 10,
+                ..HistoryRetentionPolicy::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.fill_history_pruned, 1);
+    assert_eq!(report.meta.fill_history_min_timestamp_ms, Some(2_000));
+    assert_eq!(report.meta.fill_history_pruned_through_height, Some(1));
+    assert_eq!(
+        store
+            .account_history_retention(account_id)
+            .unwrap()
+            .fill_pruned_through_height,
+        Some(1)
+    );
+    assert_eq!(
+        store.account_history_retention(AccountId(8)).unwrap(),
+        AccountHistoryRetention::default(),
+        "a new account must not inherit another account's retention gap"
+    );
+    assert_eq!(
+        store
+            .account_fills(account_id, None, 10, 0)
+            .unwrap()
+            .into_iter()
+            .map(|fill| fill.timestamp_ms)
+            .collect::<Vec<_>>(),
+        vec![3_000, 2_000],
+    );
+
+    let report = store
+        .prune_history(
+            4,
+            4_000,
+            HistoryRetentionPolicy {
+                max_durable_fill_rows: 1,
+                prune_interval_blocks: 1,
+                prune_max_rows: 10,
+                ..HistoryRetentionPolicy::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.fill_history_pruned, 1);
+    assert_eq!(report.meta.fill_history_min_timestamp_ms, Some(3_000));
+    assert_eq!(report.meta.fill_history_pruned_through_height, Some(2));
+}
+
+#[tokio::test]
+async fn equity_and_account_events_share_honest_age_retention() {
+    let path = temp_db_path("account-derived-retention");
+    let store = Store::open(&path).unwrap();
+    let account_id = AccountId(9);
+    let points = [1_000, 2_000].map(|timestamp_ms| EquityPoint {
+        height: timestamp_ms / 1_000,
+        timestamp_ms,
+        portfolio_value_nanos: timestamp_ms as i64,
+        deposited_nanos: 0,
+    });
+    let mut old = HistoryEvent::new(account_id, HistoryKind::Placed, 1, 1_000);
+    old.seq = 1;
+    let mut boundary = HistoryEvent::new(account_id, HistoryKind::Filled, 2, 2_000);
+    boundary.seq = 2;
+    let events = [
+        StoredHistoryEvent::from_event(&old),
+        StoredHistoryEvent::from_event(&boundary),
+    ];
+    store
+        .append_offblock_rows(
+            &points
+                .iter()
+                .map(|point| (account_id, *point))
+                .collect::<Vec<_>>(),
+            &events,
+        )
+        .unwrap();
+
+    let report = store
+        .prune_history(
+            3,
+            3_000,
+            HistoryRetentionPolicy {
+                equity_retention_secs: 1,
+                account_event_retention_secs: 1,
+                prune_interval_blocks: 1,
+                prune_max_rows: 10,
+                ..HistoryRetentionPolicy::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.equity_points_pruned, 1);
+    assert_eq!(report.history_events_pruned, 1);
+    assert_eq!(report.meta.equity_points_min_timestamp_ms, Some(2_000));
+    assert_eq!(report.meta.history_events_min_timestamp_ms, Some(2_000));
+    assert_eq!(store.equity_series(account_id, 0).unwrap(), vec![points[1]]);
+    assert_eq!(
+        store
+            .account_events(account_id, 10, None, None)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    store
+        .prune_history(
+            5,
+            5_000,
+            HistoryRetentionPolicy {
+                equity_retention_secs: 1,
+                account_event_retention_secs: 1,
+                prune_interval_blocks: 1,
+                prune_max_rows: 10,
+                ..HistoryRetentionPolicy::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(store.equity_series(account_id, 0).unwrap().is_empty());
+    assert!(
+        store
+            .account_events(account_id, 10, None, None)
+            .unwrap()
+            .is_empty()
+    );
+    let retention = store.account_history_retention(account_id).unwrap();
+    assert_eq!(retention.equity_pruned_through_timestamp_ms, Some(2_000));
+    assert_eq!(retention.events_pruned_through_timestamp_ms, Some(2_000));
+    assert_eq!(
+        store.account_history_retention(AccountId(10)).unwrap(),
+        AccountHistoryRetention::default()
+    );
+}
+
+#[tokio::test]
+async fn later_commits_do_not_resurrect_pruned_hot_fill_rows() {
+    let path = temp_db_path("fill-retention-no-resurrection");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let markets = MarketSet::new();
+    let mut accounts = AccountStore::new();
+    let account_id = accounts.create_account(100);
+    let env = TestEnv::new();
+    let old = AccountFillRecord {
+        order_id: 1,
+        fill_qty: 1,
+        fill_price: Nanos(1),
+        block_height: 1,
+        timestamp_ms: 1_000,
+        position_deltas: vec![],
+    };
+    let new = AccountFillRecord {
+        order_id: 2,
+        block_height: 2,
+        timestamp_ms: 2_000,
+        ..old.clone()
+    };
+    let header2 = sample_header(2);
+    let mut initial = env.snapshot_with_fills(
+        &accounts,
+        &markets,
+        &lifecycle,
+        &header2,
+        vec![(account_id, old.clone()), (account_id, new.clone())],
+    );
+    initial.durable_history_row_caps.fills = 1;
+    store.save_block(initial).await.unwrap();
+    assert_eq!(
+        store
+            .history_retention_meta()
+            .unwrap()
+            .fill_history_pruned_through_height,
+        Some(1)
+    );
+    assert_eq!(
+        store.account_fills(account_id, None, 10, 0).unwrap(),
+        vec![new.clone()]
+    );
+
+    let header3 = sample_header(3);
+    let mut snapshot = env.snapshot(&accounts, &markets, &lifecycle, &header3, 3, None, vec![]);
+    snapshot.analytics.account_fills = vec![(account_id, old)];
+    store.save_block(snapshot).await.unwrap();
+    assert_eq!(
+        store.account_fills(account_id, None, 10, 0).unwrap(),
+        vec![new]
+    );
+}
+
+#[test]
+fn reopen_rebuilds_account_history_indexes_from_primary_rows() {
+    let path = temp_db_path("account-index-backfill");
+    let account_id = AccountId(11);
+    let record = AccountFillRecord {
+        order_id: 9,
+        fill_qty: 1,
+        fill_price: Nanos(1),
+        block_height: 3,
+        timestamp_ms: 3_000,
+        position_deltas: vec![],
+    };
+    {
+        let store = Store::open(&path).unwrap();
+        let txn = store.db.begin_write().unwrap();
+        let key = fill_history_key(account_id, &record);
+        let bytes = rmp_serde::to_vec(&record).unwrap();
+        txn.open_table(FILL_HISTORY)
+            .unwrap()
+            .insert(key.as_slice(), bytes.as_slice())
+            .unwrap();
+        txn.open_table(FILL_HISTORY_BY_TIME)
+            .unwrap()
+            .retain(|_, _| false)
+            .unwrap();
+        txn.open_table(HISTORY_META)
+            .unwrap()
+            .remove(KEY_ACCOUNT_HISTORY_INDEX_VERSION)
+            .unwrap();
+        txn.commit().unwrap();
+    }
+
+    let reopened = Store::open(&path).unwrap();
+    let txn = reopened.db.begin_read().unwrap();
+    assert_eq!(
+        txn.open_table(FILL_HISTORY_BY_TIME).unwrap().len().unwrap(),
+        1
+    );
+    assert_eq!(
+        reopened.account_fills(account_id, None, 10, 0).unwrap(),
+        vec![record]
+    );
+}
+
+#[test]
+fn equity_query_is_downsampled_with_first_and_latest_preserved() {
+    let path = temp_db_path("equity-query-bound");
+    let store = Store::open(&path).unwrap();
+    let account_id = AccountId(12);
+    let rows = (1..=6_001)
+        .map(|height| {
+            (
+                account_id,
+                EquityPoint {
+                    height,
+                    timestamp_ms: height,
+                    portfolio_value_nanos: height as i64,
+                    deposited_nanos: 0,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    store.append_offblock_rows(&rows, &[]).unwrap();
+
+    let (points, source_points) = store.equity_series_page(account_id, 0).unwrap();
+    assert_eq!(source_points, 6_001);
+    assert_eq!(points.len(), Store::MAX_EQUITY_QUERY_POINTS);
+    assert_eq!(points.first().unwrap().height, 1);
+    assert_eq!(points.last().unwrap().height, 6_001);
+}
 use crate::AdminOracle;
 use crate::account::AccountStore;
 use crate::market_lifecycle::MarketLifecycle;
@@ -146,6 +458,7 @@ async fn history_pruning_deletes_blocks_and_price_points_with_metadata() {
                 price_candle_retention_secs: Vec::new(),
                 prune_interval_blocks: 1,
                 prune_max_rows: 10,
+                ..HistoryRetentionPolicy::default()
             },
         )
         .await
@@ -244,6 +557,7 @@ async fn history_pruning_partial_budget_keeps_metadata_at_oldest_remaining_row()
                 price_candle_retention_secs: Vec::new(),
                 prune_interval_blocks: 1,
                 prune_max_rows: 2,
+                ..HistoryRetentionPolicy::default()
             },
         )
         .await
@@ -317,6 +631,7 @@ async fn price_candle_pruning_deletes_by_resolution_with_metadata() {
                 price_candle_retention_secs: vec![300, 600],
                 prune_interval_blocks: 1,
                 prune_max_rows: 100,
+                ..HistoryRetentionPolicy::default()
             },
         )
         .await
@@ -404,6 +719,7 @@ async fn price_candle_pruning_obeys_batch_limit_and_keeps_floor_actual() {
                 price_candle_retention_secs: vec![60],
                 prune_interval_blocks: 1,
                 prune_max_rows: 1,
+                ..HistoryRetentionPolicy::default()
             },
         )
         .await
@@ -2515,6 +2831,8 @@ fn equity_and_history_rows_roundtrip() {
     // Equity: oldest-first, all points.
     let got = store.equity_series(aid, 0).unwrap();
     assert_eq!(got, pts);
+    assert_eq!(store.equity_series(aid, 1_500).unwrap(), pts);
+    assert_eq!(store.equity_series(aid, 2_500).unwrap(), vec![pts[1]]);
 
     // History: newest-first, filtered + paged like AccountEventLog::query.
     let all = store.account_events(aid, 10, None, None).unwrap();

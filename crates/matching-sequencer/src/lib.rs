@@ -63,6 +63,7 @@ pub use error::{Rejection, RejectionReason, SequencerError};
 pub use market_info::{
     AccountFillCursor, AccountFillRecord, MarketMetadata, MarketSearchQuery, MarketSortField,
     PriceCandle, PriceCandlePage, PriceHistoryPage, PricePoint, ResolutionConfig,
+    RetainedHistoryPage,
 };
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{

@@ -31,7 +31,7 @@ export function useAccountEvents(accountId: number | null) {
         params: { path: { id: accountId } },
       });
       if (error || !data) throw new Error("fetch account events failed");
-      return data;
+      return data.events;
     },
     staleTime: 0,
     refetchOnWindowFocus: false,

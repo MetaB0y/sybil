@@ -214,20 +214,21 @@ more data. The sequencer config controls the recent block ring, price-history
 points retained per market, fill records retained per account, and the
 in-memory fallback windows for account events/equity. Production deployments
 serve account events/equity from redb and set those fallback windows to zero.
-Persisted fill-history, event-history, and equity rows are not pruned yet;
-long-lived deployments should add store retention policies or paginated indexed
-scans before exposing unbounded historical query windows.
+Persisted fill-history, event-history, and equity rows use timestamp-first
+retention indexes, production age windows, and global row ceilings. Their HTTP
+surfaces describe retained history rather than promising unbounded archives.
 
 Raw price-history rows and full block replay rows are durable and have
 opt-in bounded retention. `history_meta` records the lowest retained
-`blocks_full` and `price_points` heights plus the last prune attempt height.
+`blocks_full` and `price_points` heights, account-history timestamp boundaries,
+and the last prune attempt height.
 Pruning runs after a successful block save, deletes rows under a per-run row
 budget, and advances metadata only in the same committed redb transaction as
 the deletes. See [[Historical Data Serving]] for the longer candle/history
-roadmap. The production Compose overlay opts the current devnet into a
+contract. The production Compose overlay opts the current devnet into a
 seven-day target for full blocks and their paired DA rows, raw prices, and all
-three candle resolutions. It deliberately does not extend pruning to recovery
-state or the still-append-only account-event, fill, and equity tables.
+three candle resolutions, plus 30/31-day account-history age windows and
+global row ceilings. It never prunes canonical recovery state.
 
 ## Recovery Order
 

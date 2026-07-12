@@ -8,7 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.account_fill_response import AccountFillResponse
+from ...models.account_fill_page_response import AccountFillPageResponse
 from ...types import UNSET, Unset
 from typing import cast
 
@@ -52,18 +52,17 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | list[AccountFillResponse] | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> AccountFillPageResponse | Any | None:
     if response.status_code == 200:
-        response_200 = []
-        _response_200 = response.json()
-        for response_200_item_data in (_response_200):
-            response_200_item = AccountFillResponse.from_dict(response_200_item_data)
+        response_200 = AccountFillPageResponse.from_dict(response.json())
 
 
-
-            response_200.append(response_200_item)
 
         return response_200
+
+    if response.status_code == 400:
+        response_400 = cast(Any, None)
+        return response_400
 
     if response.status_code == 401:
         response_401 = cast(Any, None)
@@ -73,13 +72,17 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         response_403 = cast(Any, None)
         return response_403
 
+    if response.status_code == 500:
+        response_500 = cast(Any, None)
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | list[AccountFillResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[AccountFillPageResponse | Any]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -97,7 +100,7 @@ def sync_detailed(
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
-) -> Response[Any | list[AccountFillResponse]]:
+) -> Response[AccountFillPageResponse | Any]:
     """ GET /v1/accounts/{id}/fills
 
     Args:
@@ -112,7 +115,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | list[AccountFillResponse]]
+        Response[AccountFillPageResponse | Any]
      """
 
 
@@ -140,7 +143,7 @@ def sync(
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
-) -> Any | list[AccountFillResponse] | None:
+) -> AccountFillPageResponse | Any | None:
     """ GET /v1/accounts/{id}/fills
 
     Args:
@@ -155,7 +158,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | list[AccountFillResponse]
+        AccountFillPageResponse | Any
      """
 
 
@@ -178,7 +181,7 @@ async def asyncio_detailed(
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
-) -> Response[Any | list[AccountFillResponse]]:
+) -> Response[AccountFillPageResponse | Any]:
     """ GET /v1/accounts/{id}/fills
 
     Args:
@@ -193,7 +196,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | list[AccountFillResponse]]
+        Response[AccountFillPageResponse | Any]
      """
 
 
@@ -221,7 +224,7 @@ async def asyncio(
     limit: int | Unset = UNSET,
     offset: int | Unset = UNSET,
 
-) -> Any | list[AccountFillResponse] | None:
+) -> AccountFillPageResponse | Any | None:
     """ GET /v1/accounts/{id}/fills
 
     Args:
@@ -236,7 +239,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | list[AccountFillResponse]
+        AccountFillPageResponse | Any
      """
 
 

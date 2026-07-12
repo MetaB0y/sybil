@@ -5,13 +5,10 @@
  *
  * Backed by `GET /v1/accounts/{id}/equity?range=` — the backend samples each
  * account's portfolio value at block finalize (on every fill) plus a periodic
- * 60s sweep, into a bounded ring (~30 days). Each point carries the real
+ * 60s sweep, into durable retained history. Each point carries the real
  * timestamp, portfolio value, and net-deposits baseline.
  *
- * Caveats (both backend, until off-block aggregates are persisted):
- *   - The series resets on backend restart, so it reaches back only to the last
- *     restart, not to account creation.
- *   - Sampling starts at an account's first fill; a deposited-but-never-traded
+ * Caveat: sampling starts at an account's first fill; a deposited-but-never-traded
  *     account returns an empty series. We surface that as `isEmpty`.
  */
 
@@ -51,6 +48,8 @@ export interface EquityCurve {
   error: Error | null;
   refetch: () => Promise<unknown>;
   isEmpty: boolean; // fewer than 2 points → nothing to draw
+  /** Requested range starts before the server's retained boundary. */
+  historyTruncated: boolean;
   /** Previous points remain visible, softened, while the next range loads. */
   isSwapping: boolean;
 }
@@ -81,7 +80,7 @@ export function useEquityCurve(args: {
         },
       });
       if (error || !data) throw new Error("fetch equity series failed");
-      return { range, points: data.points };
+      return { range, points: data.points, historyTruncated: data.history_truncated };
     },
     placeholderData: (previous) => previous,
     staleTime: 0,
@@ -123,6 +122,7 @@ export function useEquityCurve(args: {
       error: q.error,
       refetch: q.refetch,
       isEmpty: points.length < 2,
+      historyTruncated: q.data?.historyTruncated ?? false,
       isSwapping: q.isPlaceholderData,
     };
   }, [

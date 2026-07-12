@@ -200,6 +200,26 @@ pub struct ApiConfig {
     #[arg(long, default_value = "0", env = "SYBIL_RAW_PRICE_RETENTION_BLOCKS")]
     pub raw_price_retention_blocks: u64,
 
+    /// Durable account-history age limits. 0 disables age pruning.
+    #[arg(long, default_value = "0", env = "SYBIL_FILL_HISTORY_RETENTION_SECS")]
+    pub fill_history_retention_secs: u64,
+    #[arg(long, default_value = "0", env = "SYBIL_EQUITY_RETENTION_SECS")]
+    pub equity_retention_secs: u64,
+    #[arg(long, default_value = "0", env = "SYBIL_ACCOUNT_EVENT_RETENTION_SECS")]
+    pub account_event_retention_secs: u64,
+
+    /// Global durable account-history row ceilings. 0 disables the ceiling.
+    #[arg(long, default_value = "0", env = "SYBIL_MAX_DURABLE_FILL_ROWS")]
+    pub max_durable_fill_rows: usize,
+    #[arg(long, default_value = "0", env = "SYBIL_MAX_DURABLE_EQUITY_ROWS")]
+    pub max_durable_equity_rows: usize,
+    #[arg(
+        long,
+        default_value = "0",
+        env = "SYBIL_MAX_DURABLE_ACCOUNT_EVENT_ROWS"
+    )]
+    pub max_durable_account_event_rows: usize,
+
     /// Block cadence for retention maintenance. 0 disables scheduled pruning.
     #[arg(
         long,
@@ -363,6 +383,12 @@ impl Default for ApiConfig {
             max_price_history_points_per_market: 2_000,
             block_history_retention_blocks: 0,
             raw_price_retention_blocks: 0,
+            fill_history_retention_secs: 0,
+            equity_retention_secs: 0,
+            account_event_retention_secs: 0,
+            max_durable_fill_rows: 0,
+            max_durable_equity_rows: 0,
+            max_durable_account_event_rows: 0,
             history_prune_interval_blocks: 1_000,
             history_prune_max_rows: 10_000,
             price_candle_resolutions_secs: vec![60, 300, 3_600],

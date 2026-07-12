@@ -3,7 +3,7 @@ tags: [infrastructure, storage]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-03
+last_verified: 2026-07-12
 ---
 
 # Fill History Persistence
@@ -28,17 +28,32 @@ key   = account_id || block_height || order_id
 value = msgpack(AccountFillRecord)
 ```
 
-All key components are big-endian `u64`, so lexicographic order groups records by account and then by block height. The table is additive: `save_block()` re-inserts the in-memory recorder snapshot and overwrites identical keys, making the operation idempotent across retry paths.
+All key components are big-endian `u64`, so lexicographic order groups records
+by account and then by block height. `save_block()` inserts the untrimmed delta
+produced by the committing block; post-commit callers may contribute only cache
+rows whose height equals that block. It never replays older hot-cache rows,
+because that would resurrect rows removed by retention.
+
+The timestamp-first `fill_history_by_time` index is committed atomically with
+the primary row. It supports global age and row-ceiling eviction without an
+all-table scan.
 
 The public cursor is the stable string `"<block_height>.<order_id>"`, returned
 on each fill as `cursor`. `GET /v1/accounts/{id}/fills?after=<cursor>&limit=N`
 returns matching fills strictly after that cursor in ascending cursor order.
-`0.0` is the start sentinel. The older `offset` query remains for compatibility
-but is offset-from-newest and should not be used for tailing.
+`0.0` is the start sentinel. The older `offset` query remains deprecated. The
+response envelope includes `fills`, `next_after`,
+`retention_min_timestamp_ms`, `pruned_through_height`, `cursor_gap`, and
+`history_truncated`; start means all retained history, not an indefinite
+archive. Bot clients stop and reconcile canonical portfolio state when a saved
+forward cursor falls at or below the pruned-through height.
 
 ## Recovery
 
-Startup reads all `fill_history` rows, decodes the account id from the key, and hydrates `FillRecorder` before the actor starts serving traffic. Store-backed deployments serve account-fill history directly from redb; the bounded `FillRecorder` window is the no-store fallback and hot in-process cache.
+Startup reads retained `fill_history` rows, decodes the account id from the key,
+and hydrates `FillRecorder` before the actor starts serving traffic. Store-backed
+deployments serve directly from redb; durable read failures are errors, never
+fake empty hot-cache responses.
 
 Market filtering remains in memory for now by checking each record's `position_deltas`. That is acceptable at current scale and keeps the first implementation simple. If fill history grows enough to make scans expensive, add a second index keyed by `(account_id, market_id, block_height, order_id)` rather than changing the API.
 
@@ -56,6 +71,7 @@ The table is derived, not validity-critical. It must match committed blocks, but
 - Reconstructing history from old block witnesses on startup.
 - Persisting price history or SSE replay buffers.
 - Adding a market-level fill index before there is evidence the account-level scan is too slow.
+- Treating derived fill rows as canonical balances or an indefinite audit archive.
 
 ## See Also
 

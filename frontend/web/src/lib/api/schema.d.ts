@@ -1271,6 +1271,23 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    AccountFillPageResponse: {
+      /** @description The supplied forward cursor may have skipped pruned fills. */
+      cursor_gap: boolean;
+      fills: components["schemas"]["AccountFillResponse"][];
+      history_scope: string;
+      /** @description True means rows older than the retention boundary are unavailable. */
+      history_truncated: boolean;
+      /** @description Cursor to continue forward pagination, when this was a forward page. */
+      next_after?: string | null;
+      /**
+       * Format: int64
+       * @description Highest block from which this account had a fill row removed.
+       */
+      pruned_through_height?: number | null;
+      /** Format: int64 */
+      retention_min_timestamp_ms?: number | null;
+    };
     AccountFillResponse: {
       /** Format: int64 */
       block_height: number;
@@ -1295,6 +1312,14 @@ export interface components {
       position_deltas: components["schemas"]["PositionDeltaResponse"][];
       /** Format: int64 */
       timestamp_ms: number;
+    };
+    AccountHistoryPageResponse: {
+      events: components["schemas"]["HistoryEventResponse"][];
+      history_scope: string;
+      history_truncated: boolean;
+      next_before?: string | null;
+      /** Format: int64 */
+      retention_min_timestamp_ms?: number | null;
     };
     /** @description A registered signing key with SYB-60 management metadata. */
     AccountKeyResponse: {
@@ -2054,7 +2079,20 @@ export interface components {
     EquitySeriesResponse: {
       /** Format: int64 */
       account_id: number;
+      downsampled: boolean;
+      /** @description `durable` for redb-backed history, `memory` for bounded dev fallback. */
+      history_scope: string;
+      /** @description True when the requested range begins before the retained boundary. */
+      history_truncated: boolean;
       points: components["schemas"]["EquityPointResponse"][];
+      /**
+       * Format: int64
+       * @description Oldest timestamp for which durable history is guaranteed complete.
+       *     `None` means retention is disabled.
+       */
+      retention_min_timestamp_ms?: number | null;
+      /** @description Number of retained source samples represented by `points`. */
+      source_points: number;
     };
     /** @description Response shape for `GET /v1/events/{event_id}/traders`. */
     EventTradersResponse: {
@@ -4123,6 +4161,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Durable history unavailable */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   get_account_history: {
@@ -4144,13 +4189,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Account history feed, newest-first */
+      /** @description Retained account history feed, newest-first */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HistoryEventResponse"][];
+          "application/json": components["schemas"]["AccountHistoryPageResponse"];
         };
       };
       /** @description Missing/invalid bearer token */
@@ -4162,6 +4207,13 @@ export interface operations {
       };
       /** @description Token belongs to a different account */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Durable history unavailable */
+      500: {
         headers: {
           [name: string]: unknown;
         };
@@ -4193,13 +4245,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Account fill history */
+      /** @description Retained account fill history */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["AccountFillResponse"][];
+          "application/json": components["schemas"]["AccountFillPageResponse"];
         };
       };
       /** @description Missing/invalid bearer token */
@@ -4211,6 +4263,13 @@ export interface operations {
       };
       /** @description Token belongs to a different account */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Durable history unavailable */
+      500: {
         headers: {
           [name: string]: unknown;
         };

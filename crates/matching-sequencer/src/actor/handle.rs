@@ -935,9 +935,9 @@ impl SequencerHandle {
         market_id: Option<MarketId>,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<AccountFillRecord>, SequencerError> {
+    ) -> Result<RetainedHistoryPage<AccountFillRecord>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply))
-            .await
+            .await?
     }
 
     pub async fn get_account_fills_after(
@@ -946,23 +946,23 @@ impl SequencerHandle {
         market_id: Option<MarketId>,
         after: Option<AccountFillCursor>,
         limit: usize,
-    ) -> Result<Vec<AccountFillRecord>, SequencerError> {
+    ) -> Result<RetainedHistoryPage<AccountFillRecord>, SequencerError> {
         self.rpc(|reply| {
             SequencerMsg::GetAccountFillsAfter(account_id, market_id, after, limit, reply)
         })
-        .await
+        .await?
     }
 
     /// Equity series for an account, restricted to points with
-    /// `timestamp_ms >= since_ms` (pass `0` for the full series). The range is
-    /// applied in the durable store scan rather than by the caller.
+    /// `timestamp_ms >= since_ms` plus one opening anchor immediately before the
+    /// range (pass `0` for the full series). The range is applied in storage.
     pub async fn get_equity_series(
         &self,
         account_id: AccountId,
         since_ms: u64,
-    ) -> Result<Vec<crate::aggregates::EquityPoint>, SequencerError> {
+    ) -> Result<RetainedHistoryPage<crate::aggregates::EquityPoint>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetEquitySeries(account_id, since_ms, reply))
-            .await
+            .await?
     }
 
     /// Ranked leaderboard (SYB-59) over a window. `since_ms == 0` is all-time;
@@ -975,7 +975,7 @@ impl SequencerHandle {
         limit: usize,
     ) -> Result<Vec<LeaderboardRow>, SequencerError> {
         self.rpc(|reply| SequencerMsg::Leaderboard(since_ms, limit, reply))
-            .await
+            .await?
     }
 
     pub async fn get_account_events(
@@ -984,9 +984,9 @@ impl SequencerHandle {
         limit: usize,
         before: Option<(u64, u64)>,
         category: Option<String>,
-    ) -> Result<Vec<crate::aggregates::HistoryEvent>, SequencerError> {
+    ) -> Result<RetainedHistoryPage<crate::aggregates::HistoryEvent>, SequencerError> {
         self.rpc(|reply| SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply))
-            .await
+            .await?
     }
 
     pub async fn list_auto_resolution_records(

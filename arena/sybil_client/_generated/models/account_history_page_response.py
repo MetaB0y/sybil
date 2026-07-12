@@ -12,37 +12,31 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.equity_point_response import EquityPointResponse
+  from ..models.history_event_response import HistoryEventResponse
 
 
 
 
 
-T = TypeVar("T", bound="EquitySeriesResponse")
+T = TypeVar("T", bound="AccountHistoryPageResponse")
 
 
 
 @_attrs_define
-class EquitySeriesResponse:
+class AccountHistoryPageResponse:
     """ 
         Attributes:
-            account_id (int):
-            downsampled (bool):
-            history_scope (str): `durable` for redb-backed history, `memory` for bounded dev fallback.
-            history_truncated (bool): True when the requested range begins before the retained boundary.
-            points (list[EquityPointResponse]):
-            source_points (int): Number of retained source samples represented by `points`.
-            retention_min_timestamp_ms (int | None | Unset): Oldest timestamp for which durable history is guaranteed
-                complete.
-                `None` means retention is disabled.
+            events (list[HistoryEventResponse]):
+            history_scope (str):
+            history_truncated (bool):
+            next_before (None | str | Unset):
+            retention_min_timestamp_ms (int | None | Unset):
      """
 
-    account_id: int
-    downsampled: bool
+    events: list[HistoryEventResponse]
     history_scope: str
     history_truncated: bool
-    points: list[EquityPointResponse]
-    source_points: int
+    next_before: None | str | Unset = UNSET
     retention_min_timestamp_ms: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -51,23 +45,23 @@ class EquitySeriesResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.equity_point_response import EquityPointResponse
-        account_id = self.account_id
+        from ..models.history_event_response import HistoryEventResponse
+        events = []
+        for events_item_data in self.events:
+            events_item = events_item_data.to_dict()
+            events.append(events_item)
 
-        downsampled = self.downsampled
+
 
         history_scope = self.history_scope
 
         history_truncated = self.history_truncated
 
-        points = []
-        for points_item_data in self.points:
-            points_item = points_item_data.to_dict()
-            points.append(points_item)
-
-
-
-        source_points = self.source_points
+        next_before: None | str | Unset
+        if isinstance(self.next_before, Unset):
+            next_before = UNSET
+        else:
+            next_before = self.next_before
 
         retention_min_timestamp_ms: int | None | Unset
         if isinstance(self.retention_min_timestamp_ms, Unset):
@@ -79,13 +73,12 @@ class EquitySeriesResponse:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "account_id": account_id,
-            "downsampled": downsampled,
+            "events": events,
             "history_scope": history_scope,
             "history_truncated": history_truncated,
-            "points": points,
-            "source_points": source_points,
         })
+        if next_before is not UNSET:
+            field_dict["next_before"] = next_before
         if retention_min_timestamp_ms is not UNSET:
             field_dict["retention_min_timestamp_ms"] = retention_min_timestamp_ms
 
@@ -95,27 +88,31 @@ class EquitySeriesResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.equity_point_response import EquityPointResponse
+        from ..models.history_event_response import HistoryEventResponse
         d = dict(src_dict)
-        account_id = d.pop("account_id")
+        events = []
+        _events = d.pop("events")
+        for events_item_data in (_events):
+            events_item = HistoryEventResponse.from_dict(events_item_data)
 
-        downsampled = d.pop("downsampled")
+
+
+            events.append(events_item)
+
 
         history_scope = d.pop("history_scope")
 
         history_truncated = d.pop("history_truncated")
 
-        points = []
-        _points = d.pop("points")
-        for points_item_data in (_points):
-            points_item = EquityPointResponse.from_dict(points_item_data)
+        def _parse_next_before(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
 
+        next_before = _parse_next_before(d.pop("next_before", UNSET))
 
-
-            points.append(points_item)
-
-
-        source_points = d.pop("source_points")
 
         def _parse_retention_min_timestamp_ms(data: object) -> int | None | Unset:
             if data is None:
@@ -127,19 +124,17 @@ class EquitySeriesResponse:
         retention_min_timestamp_ms = _parse_retention_min_timestamp_ms(d.pop("retention_min_timestamp_ms", UNSET))
 
 
-        equity_series_response = cls(
-            account_id=account_id,
-            downsampled=downsampled,
+        account_history_page_response = cls(
+            events=events,
             history_scope=history_scope,
             history_truncated=history_truncated,
-            points=points,
-            source_points=source_points,
+            next_before=next_before,
             retention_min_timestamp_ms=retention_min_timestamp_ms,
         )
 
 
-        equity_series_response.additional_properties = d
-        return equity_series_response
+        account_history_page_response.additional_properties = d
+        return account_history_page_response
 
     @property
     def additional_keys(self) -> list[str]:

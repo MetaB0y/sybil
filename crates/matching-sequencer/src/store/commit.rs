@@ -46,9 +46,17 @@ pub struct SequencerSnapshot<'a> {
     pub pubkey_registry: &'a HashMap<crate::crypto::PublicKey, crate::crypto::RegisteredPubkey>,
     pub analytics: AnalyticsSnapshot<'a>,
     pub price_candle_resolutions_secs: &'a [u32],
+    pub durable_history_row_caps: DurableHistoryRowCaps,
     /// Owned because the snapshot clones the live book — cheap for bounded sizes.
     pub resting_orders: Vec<RestingOrder>,
     pub bridge_state: &'a BridgeState,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DurableHistoryRowCaps {
+    pub fills: usize,
+    pub equity: usize,
+    pub account_events: usize,
 }
 
 struct RedbBlockCommit {
@@ -65,10 +73,11 @@ struct RedbBlockCommit {
     clearing_price_rows: Vec<(u32, Vec<u8>)>,
     market_volume_rows: Vec<(u32, u64)>,
     resting_orders_bytes: Vec<u8>,
-    fill_history_rows: Vec<([u8; 24], Vec<u8>)>,
-    equity_point_rows: Vec<([u8; 16], Vec<u8>)>,
-    history_event_rows: Vec<([u8; 24], Vec<u8>)>,
+    fill_history_rows: Vec<([u8; 24], [u8; 32], Vec<u8>)>,
+    equity_point_rows: Vec<([u8; 16], [u8; 24], Vec<u8>)>,
+    history_event_rows: Vec<([u8; 24], [u8; 32], Vec<u8>)>,
     history_event_next_seq: u64,
+    durable_history_row_caps: DurableHistoryRowCaps,
     price_point_rows: Vec<RedbPricePointRow>,
     price_candle_resolutions_secs: Vec<u32>,
     data_feed_rows: Vec<(u64, Vec<u8>)>,
@@ -91,6 +100,177 @@ struct RedbPricePointRow {
     point: PricePoint,
     key: [u8; 12],
     bytes: Vec<u8>,
+}
+
+fn enforce_durable_history_row_caps(
+    txn: &redb::WriteTransaction,
+    caps: DurableHistoryRowCaps,
+) -> Result<(), StoreError> {
+    let mut floors = Vec::new();
+    let mut fill_pruned_through_height = None;
+    let mut fill_pruned_timestamps = HashMap::new();
+    let mut fill_pruned_heights = HashMap::new();
+    let mut equity_pruned_timestamps = HashMap::new();
+    let mut event_pruned_timestamps = HashMap::new();
+
+    if caps.fills > 0 {
+        let mut primary = txn.open_table(FILL_HISTORY)?;
+        let mut index = txn.open_table(FILL_HISTORY_BY_TIME)?;
+        let excess = index.len()?.saturating_sub(caps.fills as u64) as usize;
+        let mut remaining_excess = excess;
+        while remaining_excess > 0 {
+            let keys = index
+                .iter()?
+                .take(remaining_excess.min(10_000))
+                .map(|entry| entry.map(|(key, _)| key.value().to_vec()))
+                .collect::<Result<Vec<_>, _>>()?;
+            if keys.is_empty() {
+                break;
+            }
+            for key in &keys {
+                if let Some((timestamp_ms, account_id, height, order_id)) =
+                    fill_history_by_time_parts(key)
+                {
+                    primary.remove(
+                        fill_history_primary_key(account_id, height, order_id).as_slice(),
+                    )?;
+                    fill_pruned_through_height =
+                        Some(fill_pruned_through_height.map_or(height, |old: u64| old.max(height)));
+                    fill_pruned_timestamps
+                        .entry(account_id.0)
+                        .and_modify(|old: &mut u64| *old = (*old).max(timestamp_ms))
+                        .or_insert(timestamp_ms);
+                    fill_pruned_heights
+                        .entry(account_id.0)
+                        .and_modify(|old: &mut u64| *old = (*old).max(height))
+                        .or_insert(height);
+                }
+                index.remove(key.as_slice())?;
+            }
+            remaining_excess -= keys.len();
+        }
+        if excess > 0 {
+            let floor =
+                index.iter()?.next().transpose()?.and_then(|(key, _)| {
+                    fill_history_by_time_parts(key.value()).map(|parts| parts.0)
+                });
+            floors.push((KEY_FILL_HISTORY_MIN_TIMESTAMP_MS, floor));
+        }
+    }
+
+    if caps.equity > 0 {
+        let mut primary = txn.open_table(EQUITY_POINTS)?;
+        let mut index = txn.open_table(EQUITY_POINTS_BY_TIME)?;
+        let excess = index.len()?.saturating_sub(caps.equity as u64) as usize;
+        let mut remaining_excess = excess;
+        while remaining_excess > 0 {
+            let keys = index
+                .iter()?
+                .take(remaining_excess.min(10_000))
+                .map(|entry| entry.map(|(key, _)| key.value().to_vec()))
+                .collect::<Result<Vec<_>, _>>()?;
+            if keys.is_empty() {
+                break;
+            }
+            for key in &keys {
+                if let Some((timestamp_ms, account_id, height)) = equity_by_time_parts(key) {
+                    primary.remove(equity_key(account_id, height).as_slice())?;
+                    equity_pruned_timestamps
+                        .entry(account_id.0)
+                        .and_modify(|old: &mut u64| *old = (*old).max(timestamp_ms))
+                        .or_insert(timestamp_ms);
+                }
+                index.remove(key.as_slice())?;
+            }
+            remaining_excess -= keys.len();
+        }
+        if excess > 0 {
+            let floor = index
+                .iter()?
+                .next()
+                .transpose()?
+                .and_then(|(key, _)| equity_by_time_parts(key.value()).map(|parts| parts.0));
+            floors.push((KEY_EQUITY_POINTS_MIN_TIMESTAMP_MS, floor));
+        }
+    }
+
+    if caps.account_events > 0 {
+        let mut primary = txn.open_table(HISTORY_EVENTS)?;
+        let mut index = txn.open_table(HISTORY_EVENTS_BY_TIME)?;
+        let excess = index.len()?.saturating_sub(caps.account_events as u64) as usize;
+        let mut remaining_excess = excess;
+        while remaining_excess > 0 {
+            let keys = index
+                .iter()?
+                .take(remaining_excess.min(10_000))
+                .map(|entry| entry.map(|(key, _)| key.value().to_vec()))
+                .collect::<Result<Vec<_>, _>>()?;
+            if keys.is_empty() {
+                break;
+            }
+            for key in &keys {
+                if let Some((timestamp_ms, account_id, height, seq)) =
+                    history_event_by_time_parts(key)
+                {
+                    primary.remove(history_event_key(account_id, height, seq).as_slice())?;
+                    event_pruned_timestamps
+                        .entry(account_id.0)
+                        .and_modify(|old: &mut u64| *old = (*old).max(timestamp_ms))
+                        .or_insert(timestamp_ms);
+                }
+                index.remove(key.as_slice())?;
+            }
+            remaining_excess -= keys.len();
+        }
+        if excess > 0 {
+            let floor =
+                index.iter()?.next().transpose()?.and_then(|(key, _)| {
+                    history_event_by_time_parts(key.value()).map(|parts| parts.0)
+                });
+            floors.push((KEY_HISTORY_EVENTS_MIN_TIMESTAMP_MS, floor));
+        }
+    }
+    for (table, updates) in [
+        (FILL_HISTORY_PRUNED_TIMESTAMP, &fill_pruned_timestamps),
+        (EQUITY_HISTORY_PRUNED_TIMESTAMP, &equity_pruned_timestamps),
+        (ACCOUNT_EVENTS_PRUNED_TIMESTAMP, &event_pruned_timestamps),
+    ] {
+        let mut highwaters = txn.open_table(table)?;
+        for (&account_id, &timestamp_ms) in updates {
+            let previous = highwaters
+                .get(account_id)?
+                .map(|value| value.value())
+                .unwrap_or(0);
+            highwaters.insert(account_id, previous.max(timestamp_ms))?;
+        }
+    }
+    if !fill_pruned_heights.is_empty() {
+        let mut highwaters = txn.open_table(FILL_HISTORY_PRUNED_HEIGHT)?;
+        for (&account_id, &height) in &fill_pruned_heights {
+            let previous = highwaters
+                .get(account_id)?
+                .map(|value| value.value())
+                .unwrap_or(0);
+            highwaters.insert(account_id, previous.max(height))?;
+        }
+    }
+
+    if !floors.is_empty() || fill_pruned_through_height.is_some() {
+        let mut meta = txn.open_table(HISTORY_META)?;
+        for (key, floor) in floors {
+            if let Some(floor) = floor {
+                meta.insert(key, floor)?;
+            }
+        }
+        if let Some(height) = fill_pruned_through_height {
+            let previous = meta
+                .get(KEY_FILL_HISTORY_PRUNED_THROUGH_HEIGHT)?
+                .map(|value| value.value())
+                .unwrap_or(0);
+            meta.insert(KEY_FILL_HISTORY_PRUNED_THROUGH_HEIGHT, previous.max(height))?;
+        }
+    }
+    Ok(())
 }
 
 fn build_redb_block_commit(
@@ -143,28 +323,56 @@ fn build_redb_block_commit(
         .collect();
 
     let mut fill_history_rows = Vec::new();
+    // A post-commit caller may have cleared the explicit delta already, so
+    // retain hot-cache rows only when they belong to this exact block. Older
+    // cache rows must never be replayed: that would resurrect pruned history.
     for (account_id, record) in &snapshot.analytics.account_fills {
+        if record.block_height != snapshot.header.height {
+            continue;
+        }
         fill_history_rows.push((
             fill_history_key(*account_id, record),
+            fill_history_by_time_key(
+                record.timestamp_ms,
+                *account_id,
+                record.block_height,
+                record.order_id,
+            ),
             rmp_serde::to_vec(record)?,
         ));
     }
     for (account_id, record) in &snapshot.analytics.fill_history_delta {
         fill_history_rows.push((
             fill_history_key(*account_id, record),
+            fill_history_by_time_key(
+                record.timestamp_ms,
+                *account_id,
+                record.block_height,
+                record.order_id,
+            ),
             rmp_serde::to_vec(record)?,
         ));
     }
 
     let mut equity_point_rows = Vec::new();
     for (aid, point) in &snapshot.analytics.equity_points_delta {
-        equity_point_rows.push((equity_key(*aid, point.height), rmp_serde::to_vec(point)?));
+        equity_point_rows.push((
+            equity_key(*aid, point.height),
+            equity_by_time_key(point.timestamp_ms, *aid, point.height),
+            rmp_serde::to_vec(point)?,
+        ));
     }
 
     let mut history_event_rows = Vec::new();
     for event in &snapshot.analytics.history_events_delta {
         history_event_rows.push((
             history_event_key(AccountId(event.account_id), event.block_height, event.seq),
+            history_event_by_time_key(
+                event.timestamp_ms,
+                AccountId(event.account_id),
+                event.block_height,
+                event.seq,
+            ),
             rmp_serde::to_vec(event)?,
         ));
     }
@@ -223,6 +431,7 @@ fn build_redb_block_commit(
         equity_point_rows,
         history_event_rows,
         history_event_next_seq: snapshot.analytics.history_event_next_seq,
+        durable_history_row_caps: snapshot.durable_history_row_caps,
         price_point_rows,
         price_candle_resolutions_secs: snapshot.price_candle_resolutions_secs.to_vec(),
         data_feed_rows,
@@ -380,28 +589,36 @@ where
 
     {
         let mut table = txn.open_table(FILL_HISTORY)?;
-        for (key, bytes) in &commit.fill_history_rows {
+        let mut by_time = txn.open_table(FILL_HISTORY_BY_TIME)?;
+        for (key, time_key, bytes) in &commit.fill_history_rows {
             table.insert(key.as_slice(), bytes.as_slice())?;
+            by_time.insert(time_key.as_slice(), 0)?;
         }
     }
 
     {
         let mut table = txn.open_table(EQUITY_POINTS)?;
-        for (key, bytes) in &commit.equity_point_rows {
+        let mut by_time = txn.open_table(EQUITY_POINTS_BY_TIME)?;
+        for (key, time_key, bytes) in &commit.equity_point_rows {
             table.insert(key.as_slice(), bytes.as_slice())?;
+            by_time.insert(time_key.as_slice(), 0)?;
         }
     }
 
     {
         let mut table = txn.open_table(HISTORY_EVENTS)?;
-        for (key, bytes) in &commit.history_event_rows {
+        let mut by_time = txn.open_table(HISTORY_EVENTS_BY_TIME)?;
+        for (key, time_key, bytes) in &commit.history_event_rows {
             table.insert(key.as_slice(), bytes.as_slice())?;
+            by_time.insert(time_key.as_slice(), 0)?;
         }
     }
     {
         let mut counters = txn.open_table(COUNTERS)?;
         counters.insert(KEY_HISTORY_EVENT_NEXT_SEQ, commit.history_event_next_seq)?;
     }
+
+    enforce_durable_history_row_caps(&txn, commit.durable_history_row_caps)?;
 
     {
         let mut table = txn.open_table(PRICE_POINTS)?;
@@ -598,8 +815,15 @@ impl Store {
         txn.open_table(ADMIT_LOG)?;
         txn.open_table(CONTROL_PLANE_LOG)?;
         txn.open_table(FILL_HISTORY)?;
+        txn.open_table(FILL_HISTORY_BY_TIME)?;
         txn.open_table(EQUITY_POINTS)?;
+        txn.open_table(EQUITY_POINTS_BY_TIME)?;
         txn.open_table(HISTORY_EVENTS)?;
+        txn.open_table(HISTORY_EVENTS_BY_TIME)?;
+        txn.open_table(FILL_HISTORY_PRUNED_HEIGHT)?;
+        txn.open_table(FILL_HISTORY_PRUNED_TIMESTAMP)?;
+        txn.open_table(EQUITY_HISTORY_PRUNED_TIMESTAMP)?;
+        txn.open_table(ACCOUNT_EVENTS_PRUNED_TIMESTAMP)?;
         txn.open_table(DATA_FEEDS)?;
         txn.open_table(RESOLUTION_TEMPLATES)?;
         txn.open_table(BRIDGE_STATE)?;
@@ -623,7 +847,7 @@ impl Store {
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
-        backfill_price_history_indexes(&db)?;
+        backfill_history_indexes(&db)?;
         if prune_historical_block_rows(&db)? {
             match db.compact() {
                 Ok(true) => info!(?path, "compacted store after pruning historical block rows"),

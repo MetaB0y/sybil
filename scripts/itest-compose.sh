@@ -160,8 +160,8 @@ filled=0
 for _ in $(seq 1 30); do
     http_json GET "/v1/accounts/$YES_ACCOUNT/fills?after=0.0" "$WORK/yes-fills.json" 200
     http_json GET "/v1/accounts/$NO_ACCOUNT/fills?after=0.0" "$WORK/no-fills.json" 200
-    if [[ "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$WORK/yes-fills.json")" == "1" \
-       && "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$WORK/no-fills.json")" == "1" ]]; then
+    if [[ "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["fills"]))' "$WORK/yes-fills.json")" == "1" \
+       && "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["fills"]))' "$WORK/no-fills.json")" == "1" ]]; then
         filled=1
         break
     fi
@@ -169,7 +169,7 @@ for _ in $(seq 1 30); do
 done
 [[ "$filled" -eq 1 ]] || { echo "fixture fills did not appear within 30 seconds" >&2; exit 1; }
 
-BLOCK_HEIGHT="$(jget "$WORK/yes-fills.json" 0.block_height)"
+BLOCK_HEIGHT="$(jget "$WORK/yes-fills.json" fills.0.block_height)"
 http_json GET "/v1/blocks/$BLOCK_HEIGHT" "$WORK/block.json" 200
 http_json GET "/v1/accounts/$YES_ACCOUNT" "$WORK/yes-account.json" 200
 http_json GET "/v1/accounts/$NO_ACCOUNT" "$WORK/no-account.json" 200

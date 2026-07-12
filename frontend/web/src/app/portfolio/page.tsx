@@ -246,12 +246,24 @@ function Connected({
   // The tab strip is rendered inside the active list's toolbar so tabs +
   // search + filters share one row (see PortfolioToolbar).
   const tabsStrip = (
-    <PortfolioTabs value={tab} onChange={setTab} counts={counts} />
+    <PortfolioTabs
+      value={tab}
+      onChange={setTab}
+      counts={counts}
+      retentionLimited={history.retentionLimited}
+    />
   );
 
   return (
     <>
       <IdentityHeader publicKeyHex={publicKeyHex} />
+
+      {history.retentionLimited && (
+        <p style={{ color: "var(--fg-3)", fontSize: 12, margin: "8px 0" }}>
+          Older activity is outside retained history. Trade and history counts
+          are lower bounds; CSV export contains retained rows only.
+        </p>
+      )}
 
       <section className="portfolio-hero-grid" style={{}}>
         {/* Left: portfolio hero. */}
@@ -300,6 +312,7 @@ function Connected({
           events={history.events}
           marketsById={marketsById}
           titleByMarket={titleByMarket}
+          retentionLimited={history.retentionLimited}
         />
       )}
       {tab === "pnl" && (

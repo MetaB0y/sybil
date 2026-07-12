@@ -85,10 +85,23 @@ post-seal traded notional, and empty buckets are omitted. This preserves the
 private-batch boundary because no in-flight order-book information is exposed.
 
 Account fill history is served by `GET /v1/accounts/{id}/fills`. New clients
-tail with `after=<cursor>&limit=N`, where each response row includes an opaque
-stable `cursor` string (`0.0` starts at the beginning) and results are returned
-oldest-to-newest. The older `offset` query remains compatibility-only and pages
-newest-first.
+tail with `after=<cursor>&limit=N`. The response envelope contains `fills`,
+`next_after`, `retention_min_timestamp_ms`, `pruned_through_height`,
+`cursor_gap`, and `history_truncated`; rows are oldest-to-newest and each
+contains an opaque stable cursor. The older `offset` query remains
+compatibility-only and pages newest-first.
+
+`cursor_gap` is account-specific and includes the `0.0` start sentinel after
+that account has lost fills. Clients must reconcile canonical portfolio state
+instead of silently accepting a partial fill stream.
+
+`GET /v1/accounts/{id}/events` uses the analogous `events`/`next_before`
+envelope. Equity responses carry the same retained-boundary fields. `all`
+means all retained derived history. Persistent-store read failures propagate
+as errors and are never replaced by an empty in-memory response.
+In-memory-only development responses declare `history_scope=memory`. Equity is
+bounded to 5,000 represented points and reports `source_points` plus
+`downsampled`.
 
 Block history reads distinguish missing data from retained-history gaps:
 `GET /v1/blocks/{height}` returns `410 Gone` with code `RETENTION_GONE` when

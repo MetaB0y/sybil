@@ -172,8 +172,13 @@ class SybilClient:
         data = await self._request(
             "GET", f"/v1/accounts/{account_id}/fills", params=params
         )
+        if data.get("cursor_gap"):
+            raise SybilClientError(
+                410,
+                "fill cursor predates retained history; reconcile from canonical portfolio state",
+            )
         fills: list[AccountFill] = []
-        for item in data:
+        for item in data["fills"]:
             f = AccountFillResponse.from_dict(item)
             cursor = f.additional_properties.get(
                 "cursor",

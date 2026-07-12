@@ -24,10 +24,18 @@ impl Store {
         let txn = self.db.begin_write()?;
         {
             let mut table = txn.open_table(FILL_HISTORY)?;
+            let mut by_time = txn.open_table(FILL_HISTORY_BY_TIME)?;
             for (account_id, record) in records {
                 let key = fill_history_key(*account_id, record);
+                let time_key = fill_history_by_time_key(
+                    record.timestamp_ms,
+                    *account_id,
+                    record.block_height,
+                    record.order_id,
+                );
                 let value = rmp_serde::to_vec(record)?;
                 table.insert(key.as_slice(), value.as_slice())?;
+                by_time.insert(time_key.as_slice(), 0)?;
             }
         }
         txn.commit()?;
@@ -214,6 +222,7 @@ impl TestEnv {
                 history_events_delta: Vec::new(),
             },
             price_candle_resolutions_secs: &[],
+            durable_history_row_caps: Default::default(),
             bridge_state: &self.bridge_state,
             resting_orders,
         }
@@ -239,7 +248,7 @@ impl TestEnv {
             analytics: AnalyticsSnapshot {
                 last_clearing_prices: &self.empty_prices,
                 market_volumes: &self.empty_volumes,
-                account_fills,
+                account_fills: account_fills.clone(),
                 trader_tracker: Default::default(),
                 price_tracker_volume: Default::default(),
                 price_tracker_clearing_history: Default::default(),
@@ -250,12 +259,13 @@ impl TestEnv {
                 fill_total_counts: HashMap::new(),
                 cost_basis_tracker: Default::default(),
                 history_event_next_seq: 0,
-                fill_history_delta: Vec::new(),
+                fill_history_delta: account_fills,
                 equity_points_delta: Vec::new(),
                 price_points_delta: Vec::new(),
                 history_events_delta: Vec::new(),
             },
             price_candle_resolutions_secs: &[],
+            durable_history_row_caps: Default::default(),
             bridge_state: &self.bridge_state,
             resting_orders: Vec::new(),
         }
@@ -298,6 +308,7 @@ impl TestEnv {
                 history_events_delta: Vec::new(),
             },
             price_candle_resolutions_secs: &[60, 300, 3_600],
+            durable_history_row_caps: Default::default(),
             bridge_state: &self.bridge_state,
             resting_orders: Vec::new(),
         }
@@ -341,6 +352,7 @@ impl TestEnv {
                 history_events_delta,
             },
             price_candle_resolutions_secs: &[],
+            durable_history_row_caps: Default::default(),
             bridge_state: &self.bridge_state,
             resting_orders: Vec::new(),
         }

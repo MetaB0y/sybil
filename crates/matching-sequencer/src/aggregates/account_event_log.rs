@@ -1,8 +1,8 @@
 //! Off-block per-account history feed (the Portfolio "History" tab).
 //!
-//! Append-on-hook log of an account's lifecycle events. In-memory bounded
-//! ring per account; resets on restart (same caveat as the other off-block
-//! aggregates). Never enters state_root/events_root.
+//! Append-on-hook log of an account's lifecycle events. The in-memory bounded
+//! ring is a hot cache; block deltas are committed to bounded durable history.
+//! Never enters state_root/events_root.
 
 use std::collections::{HashMap, VecDeque};
 

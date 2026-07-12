@@ -1,17 +1,17 @@
 "use client";
 
 /**
- * Unified portfolio history feed (event log) — the account's FULL history.
+ * Unified portfolio history feed (event log) — the account's retained history.
  *
  * Backed by `GET /v1/accounts/{id}/events` — a per-account, off-block event log
  * merging order lifecycle (placed / partial_fill / filled / cancelled /
  * expired / rejected), funding (created / deposit / withdrawal) and settlement
  * (resolved), newest-first. In prod this is served from the DURABLE, append-only
- * redb `history_events` table — uncapped and restart-safe; the in-memory ring is
- * 0 there and only a read-error fallback. See `frontend/DATA_MAP.md`.
+ * redb `history_events` table. It is restart-safe and explicitly age/stock
+ * bounded; durable read failures are surfaced instead of replaced by empty data.
  *
  * We walk the `before` cursor (`"<block>.<seq>"`, an event's `id`) to load the
- * account's ENTIRE history — not just the newest page. Fetching a single page
+ * account's entire retained history — not just the newest page. Fetching a single page
  * made the History count saturate at the page size and the Trades count (fills
  * within that page) *shrink* as `placed`/`rejected` events evicted older fills
  * from the window — even though no data was lost. `MAX_PAGES` bounds the walk;
@@ -103,6 +103,8 @@ export interface AccountHistory {
   // (i.e. older events exist beyond what we loaded); `loadMore` raises the cap.
   hasMore: boolean;
   loadMore: () => void;
+  /** Older durable rows were removed by the server's retention policy. */
+  retentionLimited: boolean;
 }
 
 export function useAccountHistory(accountId: number | null): AccountHistory {
@@ -126,6 +128,7 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
     queryFn: async (): Promise<{
       events: HistoryEvent[];
       truncated: boolean;
+      retentionLimited: boolean;
     }> => {
       if (accountId === null) throw new Error("no account");
       // Walk the `before` cursor from the newest event to the oldest, paging in
@@ -133,6 +136,7 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
       const all: HistoryEvent[] = [];
       let before: string | undefined;
       let truncated = false;
+      let retentionLimited = false;
       for (let page = 0; ; page += 1) {
         const { data, error } = await api.GET("/v1/accounts/{id}/events", {
           params: {
@@ -141,18 +145,17 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
           },
         });
         if (error || !data) throw new Error("fetch account history failed");
-        for (const r of data) all.push(mapEvent(r));
-        if (data.length < HISTORY_PAGE) break; // reached the oldest event
+        retentionLimited ||= data.history_truncated;
+        for (const r of data.events) all.push(mapEvent(r));
+        if (!data.next_before) break; // reached the retained boundary
         if (page + 1 >= maxPages) {
           truncated = true; // hit the safety cap; older events not loaded
           break;
         }
         // The oldest event of this page is the exclusive cursor for the next.
-        const oldest = data[data.length - 1];
-        if (!oldest) break;
-        before = oldest.id;
+        before = data.next_before;
       }
-      return { events: all, truncated };
+      return { events: all, truncated, retentionLimited };
     },
     staleTime: 0,
     refetchOnWindowFocus: false,
@@ -168,6 +171,7 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
     refetch: q.refetch,
     hasMore: q.data?.truncated ?? false,
     loadMore: () => setMaxPages((p) => p + MAX_PAGES),
+    retentionLimited: q.data?.retentionLimited ?? false,
   };
 }
 
@@ -180,9 +184,8 @@ export interface OrderFillAgg {
 /**
  * Aggregate an account's `partial_fill` + `filled` history events by `order_id`
  * into a per-order fill count and volume-weighted average fill price. This is
- * the authoritative fill source for the UI: the `/v1/accounts/{id}/fills`
- * endpoint returns `[]` in prod (it reads an in-memory recorder), but these fill
- * events live in the durable, full history log loaded by `useAccountHistory`.
+ * a retained-history source for the UI. Both `/fills` and these events are
+ * durable; canonical portfolio state remains authoritative for current totals.
  * Used by Open Orders' "Avg fill" column and the hero trade count.
  */
 export function fillAggByOrder(

@@ -35,7 +35,7 @@ use crate::crypto::{
 use crate::error::SequencerError;
 use crate::market_info::{
     AccountFillCursor, AccountFillRecord, MarketMetadata, MarketSearchQuery, PriceCandle,
-    PriceCandlePage, PriceHistoryPage, PricePoint,
+    PriceCandlePage, PriceHistoryPage, PricePoint, RetainedHistoryPage,
 };
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{

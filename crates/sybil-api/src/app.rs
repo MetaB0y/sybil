@@ -178,6 +178,8 @@ use crate::util::now_ms;
         PriceHistoryResponse,
         PricePointResponse,
         AccountFillResponse,
+        AccountFillPageResponse,
+        AccountHistoryPageResponse,
         EquityPointResponse,
         EquitySeriesResponse,
         LeaderboardResponse,

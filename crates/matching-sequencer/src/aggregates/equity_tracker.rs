@@ -2,8 +2,8 @@
 //!
 //! Sampled at block finalize: always for accounts that traded this block,
 //! plus a periodic sweep over known accounts so price-driven equity changes
-//! land between trades. In-memory only (resets on restart) — same caveat as
-//! the other off-block aggregates.
+//! land between trades. The in-memory ring is a hot cache; block deltas are
+//! committed to bounded durable history.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 

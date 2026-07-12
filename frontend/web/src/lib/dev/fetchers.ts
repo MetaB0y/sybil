@@ -148,8 +148,10 @@ export function useDevAccountFills(ids: number[]) {
     queryFn: async () => {
       const entries = await Promise.all(
         sorted.map(async (id) => {
-          const rows = await rawGet<unknown[]>(`/v1/accounts/${id}/fills?limit=25`);
-          return [id, rows ?? []] as const;
+          const page = await rawGet<{ fills: unknown[] }>(
+            `/v1/accounts/${id}/fills?limit=25`,
+          );
+          return [id, page?.fills ?? []] as const;
         })
       );
       return Object.fromEntries(entries) as Record<number, unknown[]>;

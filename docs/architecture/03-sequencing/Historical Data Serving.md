@@ -2,7 +2,7 @@
 tags: [infrastructure, storage, history]
 layer: sequencer
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-12
 ---
 
 # Historical data serving
@@ -12,8 +12,8 @@ last_verified: 2026-07-11
 > actor keeps small hot caches; redb stores committed blocks, DA, prices,
 > candles, account/fill/equity history, and aggregate read models. Historical
 > rows are written only with a committed block and never feed validity. Reads
-> are bounded and expose retention gaps explicitly—but several append tables
-> still need production byte/age budgets.
+> are bounded and expose retention gaps explicitly. Derived account history is
+> age-bounded and globally row-capped in production.
 
 ## Data path
 
@@ -58,8 +58,14 @@ rebuild command for every table.
   `retention_gap` when the requested height is no longer retained.
 - Raw market prices page by time/height and return `retention_min_height`.
 - Candles return committed sparse buckets; empty buckets are omitted.
-- Account fills use opaque stable cursors; account events/equity are bounded
-  query surfaces over durable tables.
+- Account fills use opaque stable cursors. Fill/event response envelopes and
+  equity responses expose `retention_min_timestamp_ms` and
+  `history_truncated`; durable read failure is an error, not an empty page.
+- Account truncation comes from per-account deletion high-water marks, not a
+  global oldest row. In-memory dev fallback declares `history_scope=memory`.
+- Equity ranges include the last retained point before the requested boundary
+  as an opening anchor for chart and leaderboard arithmetic, and represent at
+  most 5,000 samples with explicit `source_points` / `downsampled` metadata.
 
 SSE remains a live convenience stream without replay guarantees. A missing row
 inside retention, a height below retention, and an in-memory deployment with no
@@ -67,39 +73,40 @@ durable history are distinct API outcomes; see [[REST API]].
 
 ## Retention
 
-Block/DA, raw-price, and candle retention are configured independently. `0`
-currently means unbounded retention for the corresponding family. Pruning must:
+Block/DA, raw-price, candle, fill, equity, and account-event retention are
+configured independently. `0` means unbounded for that knob. Pruning must:
 
 1. delete only rows older than the committed policy floor;
 2. update metadata in the same transaction;
 3. preserve rows required by the live head/fence and recovery invariants;
 4. make API gap semantics agree with the committed floor.
 
-`docker-compose.prod.yml` sets the current devnet production posture to seven
-days for every family the job supports. At its 10-second block cadence that is
+`docker-compose.prod.yml` retains block/DA, raw-price, and candle data for seven
+days. At its 10-second block cadence that is
 60,480 `blocks_full` heights and their paired DA artifact/manifest rows, plus
 60,480 raw-price heights per market. Candle windows are 604,800 seconds for
 the 60-, 300-, and 3,600-second resolutions (10,080, 2,016, and 168 buckets per
 market respectively). Local/base configuration retains the binary defaults;
 it does not inherit these production values.
 
-The overlay schedules pruning every 60 blocks (ten minutes) and keeps the
+The overlay schedules age pruning every 60 blocks (ten minutes) and keeps the
 existing 10,000-row ceiling per pass. This is deliberately more frequent than
 the local 1,000-block default so per-market raw rows are less likely to outrun
 the bounded worker; it remains possible to lag if sustained ingress exceeds
 that delete throughput.
 
-Account events, fills, and equity are append tables without complete production
-byte/age budgets today. Combined with permissionless churn, this is an open
-availability issue documented in the [resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md).
+Fills and account events retain 30 days and at most 1,000,000 global rows each.
+Equity retains 31 days and at most 2,000,000 rows so the existing 30-day view
+fits within the age policy. Timestamp-first indexes make age eviction ordered;
+the global stock ceilings are enforced in each block commit transaction, so
+ingress cannot outrun the periodic maintenance pass.
 
-The seven-day setting is a target floor, not a hard byte quota: per-row sizes
+The age settings are target floors, not physical redb byte quotas: per-row sizes
 vary, market count multiplies price/candle stock, and the bounded maintenance
 pass can temporarily lag. It does not prune canonical fenced state, the
-latest-only recovery header/witness, account or live-order state, fills,
-account events, or equity rows, and it does not promise that the redb file
-immediately shrinks after deletion. Thus the setting is only a partial
-mitigation of audit finding 5.
+latest-only recovery header/witness, account or live-order state, and it does
+not promise that the redb file immediately shrinks after deletion. Global row
+ceilings nevertheless bound logical stock for the three account-history tables.
 
 Retention is not DA availability. Deleting the only canonical payload can make
 an accepted validium root unrecoverable even if product history remains. The

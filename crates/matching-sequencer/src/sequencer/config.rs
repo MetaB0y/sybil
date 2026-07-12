@@ -65,6 +65,14 @@ pub struct SequencerConfig {
     /// Durable raw price-point rows retained by bounded pruning. 0 means do
     /// not prune this stream.
     pub raw_price_retention_blocks: u64,
+    /// Age limits for durable per-account history. 0 means unbounded.
+    pub fill_history_retention_secs: u64,
+    pub equity_retention_secs: u64,
+    pub account_event_retention_secs: u64,
+    /// Global row ceilings for durable per-account history. 0 means unbounded.
+    pub max_durable_fill_rows: usize,
+    pub max_durable_equity_rows: usize,
+    pub max_durable_account_event_rows: usize,
     /// Block cadence for retention maintenance. 0 disables scheduled pruning.
     pub history_prune_interval_blocks: u64,
     /// Maximum durable history rows deleted in one maintenance pass.
@@ -122,6 +130,12 @@ impl Default for SequencerConfig {
                 crate::price_tracker::DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET,
             block_history_retention_blocks: 0,
             raw_price_retention_blocks: 0,
+            fill_history_retention_secs: 0,
+            equity_retention_secs: 0,
+            account_event_retention_secs: 0,
+            max_durable_fill_rows: 0,
+            max_durable_equity_rows: 0,
+            max_durable_account_event_rows: 0,
             history_prune_interval_blocks: 1_000,
             history_prune_max_rows: 10_000,
             price_candle_resolutions_secs: vec![60, 300, 3_600],

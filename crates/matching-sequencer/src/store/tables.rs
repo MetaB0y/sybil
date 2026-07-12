@@ -109,16 +109,36 @@ pub(super) const CONTROL_PLANE_LOG: TableDefinition<u64, &[u8]> =
 /// msgpack(AccountFillRecord). The byte key keeps records clustered by
 /// account and ordered by block for efficient restoration and future scans.
 pub(super) const FILL_HISTORY: TableDefinition<&[u8], &[u8]> = TableDefinition::new("fill_history");
+/// Timestamp-first retention index for `FILL_HISTORY`.
+pub(super) const FILL_HISTORY_BY_TIME: TableDefinition<&[u8], u64> =
+    TableDefinition::new("fill_history_by_time");
 
 /// Per-account equity series. Key = account_id(8B BE) ++ height(8B BE); one
 /// point per (account, block). Value = rmp-serde EquityPoint. Off-block.
 pub(super) const EQUITY_POINTS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("equity_points");
+/// Timestamp-first retention index for `EQUITY_POINTS`.
+pub(super) const EQUITY_POINTS_BY_TIME: TableDefinition<&[u8], u64> =
+    TableDefinition::new("equity_points_by_time");
 
 /// Per-account history feed. Key = account_id(8B BE) ++ block_height(8B BE) ++
 /// seq(8B BE). Value = rmp-serde StoredHistoryEvent. Off-block.
 pub(super) const HISTORY_EVENTS: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("history_events");
+/// Timestamp-first retention index for `HISTORY_EVENTS`.
+pub(super) const HISTORY_EVENTS_BY_TIME: TableDefinition<&[u8], u64> =
+    TableDefinition::new("history_events_by_time");
+
+/// Per-account retention high-water marks. Their presence means this account
+/// has actually lost rows; unlike global floors they do not mark new accounts.
+pub(super) const FILL_HISTORY_PRUNED_HEIGHT: TableDefinition<u64, u64> =
+    TableDefinition::new("fill_history_pruned_height");
+pub(super) const FILL_HISTORY_PRUNED_TIMESTAMP: TableDefinition<u64, u64> =
+    TableDefinition::new("fill_history_pruned_timestamp");
+pub(super) const EQUITY_HISTORY_PRUNED_TIMESTAMP: TableDefinition<u64, u64> =
+    TableDefinition::new("equity_history_pruned_timestamp");
+pub(super) const ACCOUNT_EVENTS_PRUNED_TIMESTAMP: TableDefinition<u64, u64> =
+    TableDefinition::new("account_events_pruned_timestamp");
 
 /// L1 bridge sidecar state: consumed deposit cursor/root and withdrawal leaves.
 pub(super) const BRIDGE_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("bridge_state");
@@ -237,7 +257,13 @@ pub(super) const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
 pub(super) const KEY_HISTORY_EVENT_NEXT_SEQ: &str = "history_event_next_seq";
 pub(super) const KEY_BLOCKS_FULL_MIN_HEIGHT: &str = "blocks_full_min_height";
 pub(super) const KEY_PRICE_POINTS_MIN_HEIGHT: &str = "price_points_min_height";
+pub(super) const KEY_FILL_HISTORY_MIN_TIMESTAMP_MS: &str = "fill_history_min_timestamp_ms";
+pub(super) const KEY_FILL_HISTORY_PRUNED_THROUGH_HEIGHT: &str =
+    "fill_history_pruned_through_height";
+pub(super) const KEY_EQUITY_POINTS_MIN_TIMESTAMP_MS: &str = "equity_points_min_timestamp_ms";
+pub(super) const KEY_HISTORY_EVENTS_MIN_TIMESTAMP_MS: &str = "history_events_min_timestamp_ms";
 pub(super) const KEY_LAST_HISTORY_PRUNE_HEIGHT: &str = "last_history_prune_height";
+pub(super) const KEY_ACCOUNT_HISTORY_INDEX_VERSION: &str = "account_history_index_version";
 pub(super) const KEY_PRICE_CANDLES_MIN_BUCKET_MS_PREFIX: &str = "price_candles_min_bucket_ms:";
 
 pub(super) const STORE_LAYOUT_VERSION: u64 = 1;

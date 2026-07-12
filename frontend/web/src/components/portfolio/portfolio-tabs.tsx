@@ -26,10 +26,12 @@ export function PortfolioTabs({
   value,
   onChange,
   counts,
+  retentionLimited = false,
 }: {
   value: PortfolioTab;
   onChange: (id: PortfolioTab) => void;
   counts: Record<PortfolioTab, number>;
+  retentionLimited?: boolean;
 }) {
   return (
     <div
@@ -78,7 +80,9 @@ export function PortfolioTabs({
                   color: "var(--fg-4)",
                 }}
               >
-                {counts[t.id]}
+                {retentionLimited && (t.id === "trades" || t.id === "history")
+                  ? `≥${counts[t.id]}`
+                  : counts[t.id]}
               </span>
             )}
           </button>

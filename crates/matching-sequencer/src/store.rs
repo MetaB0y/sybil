@@ -113,11 +113,13 @@ use self::restore::{
     AccountStateFence, PersistedCoreCounters, initialize_or_validate_layout,
     read_account_state_fence, read_recovery_metadata, validate_witness_header, write_core_counters,
 };
-use self::retention::{backfill_price_history_indexes, prune_historical_block_rows};
+use self::retention::{backfill_history_indexes, prune_historical_block_rows};
 use self::tables::*;
 
 pub use self::auto_resolution::{AutoResolutionAction, AutoResolutionRecord};
-pub use self::commit::{AnalyticsSnapshot, SequencerSnapshot, Store, StoreError};
+pub use self::commit::{
+    AnalyticsSnapshot, DurableHistoryRowCaps, SequencerSnapshot, Store, StoreError,
+};
 pub use self::da::{
     DA_FILE_PROVIDER_REF_ENCODING, DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
     DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact, DaArtifactIntegrityError, DaArtifactLookup,
@@ -127,5 +129,7 @@ pub use self::da::{
 pub(crate) use self::fault::StoreFaultPoint;
 pub use self::import::WitnessImportSummary;
 pub use self::restore::{AnalyticsRestoredState, RestoredState};
-pub use self::retention::{HistoryPruneReport, HistoryRetentionMeta, HistoryRetentionPolicy};
+pub use self::retention::{
+    AccountHistoryRetention, HistoryPruneReport, HistoryRetentionMeta, HistoryRetentionPolicy,
+};
 pub use self::wal::ControlPlaneCommand;

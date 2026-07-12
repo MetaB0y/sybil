@@ -47,9 +47,17 @@ services:
       # * 60 * 24 * 7 = 60,480 blocks. Full blocks and their paired DA
       # artifact/manifest rows share the first floor; raw prices use the same
       # height window. Every supported candle resolution gets 604,800 seconds.
-      # This does not prune account events, fills, or equity points.
       SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS: "60480"
       SYBIL_RAW_PRICE_RETENTION_BLOCKS: "60480"
+      # Account-derived history is durable but not forever. Fills/events retain
+      # 30 days and equity retains 31 days so the 30-day chart remains complete.
+      # Global stock ceilings bound disk even under sustained churn.
+      SYBIL_FILL_HISTORY_RETENTION_SECS: "2592000"
+      SYBIL_EQUITY_RETENTION_SECS: "2678400"
+      SYBIL_ACCOUNT_EVENT_RETENTION_SECS: "2592000"
+      SYBIL_MAX_DURABLE_FILL_ROWS: "1000000"
+      SYBIL_MAX_DURABLE_EQUITY_ROWS: "2000000"
+      SYBIL_MAX_DURABLE_ACCOUNT_EVENT_ROWS: "1000000"
       # Run a bounded maintenance pass every ten minutes (60 blocks) so raw
       # price rows from the current market set do not accumulate behind the
       # target floor. One pass still deletes at most 10,000 rows.

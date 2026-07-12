@@ -210,31 +210,35 @@ pub enum SequencerMsg {
         Option<MarketId>,
         usize,
         usize,
-        RpcReplyPort<Vec<AccountFillRecord>>,
+        RpcReplyPort<Result<RetainedHistoryPage<AccountFillRecord>, SequencerError>>,
     ),
     GetAccountFillsAfter(
         AccountId,
         Option<MarketId>,
         Option<AccountFillCursor>,
         usize,
-        RpcReplyPort<Vec<AccountFillRecord>>,
+        RpcReplyPort<Result<RetainedHistoryPage<AccountFillRecord>, SequencerError>>,
     ),
     GetEquitySeries(
         AccountId,
         u64,
-        RpcReplyPort<Vec<crate::aggregates::EquityPoint>>,
+        RpcReplyPort<Result<RetainedHistoryPage<crate::aggregates::EquityPoint>, SequencerError>>,
     ),
     /// Ranked leaderboard over a window (SYB-59). `since_ms == 0` is all-time
     /// (fully in-memory); a non-zero `since_ms` reads per-account windowed
     /// baselines from the durable equity store. Returns at most `limit` rows,
     /// already sorted (PnL desc, then account id asc).
-    Leaderboard(u64, usize, RpcReplyPort<Vec<LeaderboardRow>>),
+    Leaderboard(
+        u64,
+        usize,
+        RpcReplyPort<Result<Vec<LeaderboardRow>, SequencerError>>,
+    ),
     GetAccountEvents(
         AccountId,
         usize,
         Option<(u64, u64)>,
         Option<String>,
-        RpcReplyPort<Vec<crate::aggregates::HistoryEvent>>,
+        RpcReplyPort<Result<RetainedHistoryPage<crate::aggregates::HistoryEvent>, SequencerError>>,
     ),
     ListAutoResolutionRecords(RpcReplyPort<Result<Vec<AutoResolutionRecord>, SequencerError>>),
     PutAutoResolutionRecord(

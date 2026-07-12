@@ -143,6 +143,19 @@ pub struct AccountFillRecord {
     pub position_deltas: Vec<(MarketId, u8, i64)>,
 }
 
+/// A durable derived-history page plus the oldest timestamp for which the
+/// server can claim complete retention. `None` means retention is disabled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetainedHistoryPage<T> {
+    pub items: Vec<T>,
+    pub retention_min_timestamp_ms: Option<u64>,
+    /// Fill-history only: this account's high-water block removed by retention.
+    pub pruned_through_height: Option<u64>,
+    pub durable: bool,
+    pub source_points: usize,
+    pub downsampled: bool,
+}
+
 /// Stable per-account fill cursor.
 ///
 /// The HTTP representation is `"<block_height>.<order_id>"`. `order_id` is

@@ -71,7 +71,7 @@ Read API keys cannot authorize any mutation.
 |---|---|
 | Balances, positions, markets, groups, lifecycle, orders/reservations, bridge/withdrawal state | Committed exchange state; restored from fenced store/witness |
 | Blocks and canonical witnesses | Durable store rows, subject to configured retention |
-| Fills, candles, account events/equity, platform aggregates | Durable derived tables; never validity inputs |
+| Fills, candles, account events/equity, platform aggregates | Durable retained derived tables; never validity inputs. Account-history APIs expose their retained boundary and may not be treated as all-time. |
 | Market reference/display metadata | Off-block persisted JSON; mirror/operator supplied |
 | Arena decisions/equity | Separate arena SQLite database |
 | Browser session, selected tabs/filters | Local browser only |

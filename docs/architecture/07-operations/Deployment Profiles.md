@@ -67,6 +67,8 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_BLOCK_HISTORY_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
 | `SYBIL_RAW_PRICE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
+| Account-history retention seconds (fills / equity / events) | `0 / 0 / 0` | same as default | `2592000 / 2678400 / 2592000` | no |
+| Global durable rows (fills / equity / events) | `0 / 0 / 0` | same as default | `1000000 / 2000000 / 1000000` | no |
 | `SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS` / `MAX_ROWS` | `1000` / `10000` | same as default | `60` / `10000` | no |
 | `SYBIL_PRICE_CANDLE_RETENTION_SECS` | `2592000,15552000,0` | same as default | `604800,604800,604800` | no |
 | `SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS` | `1000000` | `1000000` | `1000000` | no |
@@ -75,9 +77,11 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_HTTP_DA_MAX_CONCURRENCY` | `4` | `4` | `4` | no |
 | `SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS` | `256` | `256` | `256` | no |
 
-> Constraint note: the `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` compose value is
-> owned by a separate lane (SYB-193 / AR-5). This doc references it but does not
-> change it.
+The per-account values above are hot-cache limits only. Durable stock is bounded
+globally by row ceilings and age; canonical portfolio state is unaffected.
+Enabling the durable row ceilings for the first time on devnet requires the
+fresh-genesis redeploy runbook rather than live convergence of an unbounded
+legacy history store.
 
 ### Prover
 

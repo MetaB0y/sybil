@@ -566,12 +566,12 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   //    proves the signature verified server-side.
   await expect(async () => {
     const [orders, fills, pf] = await Promise.all([
-      getJson<unknown[]>(
+      getJson<{ fills: unknown[] }>(
         request,
         `${REQUEST_API_BASE}/v1/accounts/${accountId}/orders`,
         readToken!,
       ),
-      getJson<unknown[]>(
+      getJson<{ fills: unknown[] }>(
         request,
         `${REQUEST_API_BASE}/v1/accounts/${accountId}/fills?limit=10`,
         readToken!,
@@ -583,7 +583,7 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
       ),
     ]);
     const hasPending = Array.isArray(orders) && orders.length > 0;
-    const hasFill = Array.isArray(fills) && fills.length > 0;
+    const hasFill = Array.isArray(fills.fills) && fills.fills.length > 0;
     const hasPosition = Array.isArray(pf.positions) && pf.positions.length > 0;
     const balanceDropped = BigInt(pf.balance_nanos) < balance0;
     expect(

@@ -36,6 +36,11 @@ impl BlockSequencer {
             pubkey_registry: &self.pubkey_registry,
             analytics: self.analytics.snapshot(),
             price_candle_resolutions_secs: &self.config.price_candle_resolutions_secs,
+            durable_history_row_caps: crate::store::DurableHistoryRowCaps {
+                fills: self.config.max_durable_fill_rows,
+                equity: self.config.max_durable_equity_rows,
+                account_events: self.config.max_durable_account_event_rows,
+            },
             resting_orders: self.order_book.snapshot(),
             bridge_state: &self.bridge,
         }

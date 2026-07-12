@@ -208,25 +208,29 @@ interface Props {
   marketsById: Map<number, Market>;
   /** market_id → natural question title (see `portfolio/page.tsx`). */
   titleByMarket: Map<number, string>;
+  retentionLimited?: boolean;
 }
 
 /**
- * Client-side "Export CSV" of the account's full fill history (one row per
+ * Client-side CSV export of the account's retained fill history (one row per
  * fill). Pure browser Blob download — no server call. Disabled when there are
  * no fills to export.
  */
 function ExportCsvButton({
   events,
   marketsById,
+  retentionLimited = false,
 }: {
   events: HistoryEvent[];
   marketsById: Map<number, Market>;
+  retentionLimited?: boolean;
 }) {
   const count = useMemo(() => fillRowCount(events), [events]);
   const onExport = () => {
     if (count === 0) return;
     const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    downloadCsv(`sybil-fills-${stamp}.csv`, fillsToCsv(events, marketsById));
+    const scope = retentionLimited ? "retained-fills" : "fills";
+    downloadCsv(`sybil-${scope}-${stamp}.csv`, fillsToCsv(events, marketsById));
   };
   return (
     <button
@@ -251,7 +255,7 @@ function ExportCsvButton({
       }}
     >
       <Download size={13} aria-hidden />
-      Export CSV
+      {retentionLimited ? "Export retained CSV" : "Export CSV"}
     </button>
   );
 }
@@ -261,6 +265,7 @@ export function TradesList({
   events,
   marketsById,
   titleByMarket,
+  retentionLimited = false,
 }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [query, setQuery] = useState("");
@@ -438,7 +443,11 @@ export function TradesList({
                 })),
               ]}
             />
-            <ExportCsvButton events={events} marketsById={marketsById} />
+            <ExportCsvButton
+              events={events}
+              marketsById={marketsById}
+              retentionLimited={retentionLimited}
+            />
           </>
         )}
       </PortfolioToolbar>

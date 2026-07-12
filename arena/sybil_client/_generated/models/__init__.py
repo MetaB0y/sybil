@@ -1,6 +1,8 @@
 """ Contains all the data models used in inputs/outputs """
 
+from .account_fill_page_response import AccountFillPageResponse
 from .account_fill_response import AccountFillResponse
+from .account_history_page_response import AccountHistoryPageResponse
 from .account_key_response import AccountKeyResponse
 from .account_response import AccountResponse
 from .activity_overview_response import ActivityOverviewResponse
@@ -154,7 +156,9 @@ from .web_authn_assertion import WebAuthnAssertion
 from .web_authn_registration import WebAuthnRegistration
 
 __all__ = (
+    "AccountFillPageResponse",
     "AccountFillResponse",
+    "AccountHistoryPageResponse",
     "AccountKeyResponse",
     "AccountResponse",
     "ActivityOverviewResponse",

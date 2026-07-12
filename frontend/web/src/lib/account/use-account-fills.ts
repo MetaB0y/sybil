@@ -52,7 +52,7 @@ export function useAccountFills(
         },
       });
       if (error || !data) throw new Error("fetch account fills failed");
-      return data;
+      return data.fills;
     },
     staleTime: 0,
     refetchOnWindowFocus: false,

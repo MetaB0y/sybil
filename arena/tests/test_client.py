@@ -183,6 +183,23 @@ def test_submit_orders_can_set_ioc_time_in_force(monkeypatch):
     ]
 
 
+def test_fill_cursor_gap_requires_reconciliation(monkeypatch):
+    import asyncio
+    import pytest
+
+    from sybil_client.client import SybilClient, SybilClientError
+
+    client = SybilClient("http://example.invalid")
+
+    async def fake_request(method, path, **kwargs):
+        return {"fills": [], "cursor_gap": True}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    with pytest.raises(SybilClientError) as error:
+        asyncio.run(client.get_account_fills(42, after="1.7"))
+    assert error.value.status_code == 410
+
+
 class _FakeStreamCM:
     """Async context manager mimicking httpx's client.stream(...)."""
 

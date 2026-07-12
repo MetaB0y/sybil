@@ -1,6 +1,7 @@
 use super::*;
 
 impl Store {
+    pub const MAX_EQUITY_QUERY_POINTS: usize = 5_000;
     /// Recover at most `cap` of the newest durable fills for each account.
     ///
     /// Fill-history keys cluster records by account and sort them oldest-first,
@@ -297,16 +298,27 @@ impl Store {
         let txn = self.db.begin_write()?;
         {
             let mut t = txn.open_table(EQUITY_POINTS)?;
+            let mut t_by_time = txn.open_table(EQUITY_POINTS_BY_TIME)?;
             for (aid, p) in equity {
                 let key = equity_key(*aid, p.height);
+                let time_key = equity_by_time_key(p.timestamp_ms, *aid, p.height);
                 let bytes = rmp_serde::to_vec(p)?;
                 t.insert(key.as_slice(), bytes.as_slice())?;
+                t_by_time.insert(time_key.as_slice(), 0)?;
             }
             let mut h = txn.open_table(HISTORY_EVENTS)?;
+            let mut h_by_time = txn.open_table(HISTORY_EVENTS_BY_TIME)?;
             for ev in history {
                 let key = history_event_key(AccountId(ev.account_id), ev.block_height, ev.seq);
+                let time_key = history_event_by_time_key(
+                    ev.timestamp_ms,
+                    AccountId(ev.account_id),
+                    ev.block_height,
+                    ev.seq,
+                );
                 let bytes = rmp_serde::to_vec(ev)?;
                 h.insert(key.as_slice(), bytes.as_slice())?;
+                h_by_time.insert(time_key.as_slice(), 0)?;
             }
         }
         txn.commit()?;
@@ -314,27 +326,57 @@ impl Store {
     }
 
     /// Equity points for an account, oldest-first (matches `EquityTracker::series`),
-    /// keeping only points with `timestamp_ms >= since_ms`. Pass `since_ms == 0`
-    /// for the full series. Points are keyed by height, so the timestamp range is
-    /// applied while scanning rather than as a key bound.
-    pub fn equity_series(
+    /// keeping points at/after `since_ms` plus the last point before the boundary
+    /// as an opening anchor. Pass `since_ms == 0` for the full series. Points are
+    /// keyed by height, so the timestamp range is applied while scanning.
+    pub fn equity_series_page(
         &self,
         account_id: AccountId,
         since_ms: u64,
-    ) -> Result<Vec<crate::aggregates::EquityPoint>, StoreError> {
+    ) -> Result<(Vec<crate::aggregates::EquityPoint>, usize), StoreError> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(EQUITY_POINTS)?;
         let lo = equity_key(account_id, 0);
         let hi = equity_key(account_id, u64::MAX);
         let mut out = Vec::new();
+        let mut opening_anchor = None;
+        let mut source_points = 0usize;
         for entry in table.range::<&[u8]>(lo.as_slice()..=hi.as_slice())? {
             let (_k, v) = entry?;
             let point: crate::aggregates::EquityPoint = rmp_serde::from_slice(v.value())?;
             if point.timestamp_ms >= since_ms {
                 out.push(point);
+                source_points += 1;
+            } else if since_ms > 0 {
+                opening_anchor = Some(point);
+            }
+            if out.len() > Self::MAX_EQUITY_QUERY_POINTS * 2 {
+                let latest = out.pop().expect("equity output is non-empty");
+                out = out.into_iter().step_by(2).collect();
+                out.push(latest);
             }
         }
-        Ok(out)
+        if let Some(anchor) = opening_anchor {
+            out.insert(0, anchor);
+            source_points += 1;
+        }
+        if out.len() > Self::MAX_EQUITY_QUERY_POINTS {
+            let last = out.len() - 1;
+            out = (0..Self::MAX_EQUITY_QUERY_POINTS)
+                .map(|index| out[index * last / (Self::MAX_EQUITY_QUERY_POINTS - 1)])
+                .collect();
+        }
+        debug_assert!(out.len() <= Self::MAX_EQUITY_QUERY_POINTS);
+        Ok((out, source_points))
+    }
+
+    pub fn equity_series(
+        &self,
+        account_id: AccountId,
+        since_ms: u64,
+    ) -> Result<Vec<crate::aggregates::EquityPoint>, StoreError> {
+        self.equity_series_page(account_id, since_ms)
+            .map(|(points, _)| points)
     }
 
     /// Newest-first page of an account's history, replicating

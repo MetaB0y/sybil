@@ -488,24 +488,34 @@ impl Actor for SequencerActor {
                 let _ = reply.send(result);
             }
             SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply) => {
-                // Serve from the durable store (full persisted history); the
-                // in-memory recorder is a bounded window that's empty under prod
-                // retention caps. Fall back to memory on read error or when no
-                // store is configured. Mirrors GetEquitySeries / GetAccountEvents.
                 let result = match &state.store {
                     Some(store) => store
                         .account_fills(account_id, market_id, limit, offset)
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(error = %e, account_id = account_id.0, "account_fills read failed; falling back to memory");
-                            state
-                                .sequencer
-                                .analytics()
-                                .account_fills(account_id, market_id, limit, offset)
-                        }),
-                    None => state
-                        .sequencer
-                        .analytics()
-                        .account_fills(account_id, market_id, limit, offset),
+                        .and_then(|items| {
+                            let retention = store.account_history_retention(account_id)?;
+                            Ok(RetainedHistoryPage {
+                                source_points: items.len(),
+                                downsampled: false,
+                                items,
+                                retention_min_timestamp_ms: retention
+                                    .fill_pruned_through_timestamp_ms
+                                    .map(|timestamp| timestamp.saturating_add(1)),
+                                pruned_through_height: retention.fill_pruned_through_height,
+                                durable: true,
+                            })
+                        })
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(RetainedHistoryPage {
+                        source_points: 0,
+                        downsampled: false,
+                        items: state
+                            .sequencer
+                            .analytics()
+                            .account_fills(account_id, market_id, limit, offset),
+                        retention_min_timestamp_ms: None,
+                        pruned_through_height: None,
+                        durable: false,
+                    }),
                 };
                 let _ = reply.send(result);
             }
@@ -513,68 +523,115 @@ impl Actor for SequencerActor {
                 let result = match &state.store {
                     Some(store) => store
                         .account_fills_after(account_id, market_id, after, limit)
-                        .unwrap_or_else(|e| {
-                            tracing::warn!(error = %e, account_id = account_id.0, "account_fills_after read failed; falling back to memory");
-                            state
-                                .sequencer
-                                .analytics()
-                                .account_fills_after(account_id, market_id, after, limit)
-                        }),
-                    None => state
-                        .sequencer
-                        .analytics()
-                        .account_fills_after(account_id, market_id, after, limit),
+                        .and_then(|items| {
+                            let retention = store.account_history_retention(account_id)?;
+                            Ok(RetainedHistoryPage {
+                                source_points: items.len(),
+                                downsampled: false,
+                                items,
+                                retention_min_timestamp_ms: retention
+                                    .fill_pruned_through_timestamp_ms
+                                    .map(|timestamp| timestamp.saturating_add(1)),
+                                pruned_through_height: retention.fill_pruned_through_height,
+                                durable: true,
+                            })
+                        })
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => Ok(RetainedHistoryPage {
+                        source_points: 0,
+                        downsampled: false,
+                        items: state
+                            .sequencer
+                            .analytics()
+                            .account_fills_after(account_id, market_id, after, limit),
+                        retention_min_timestamp_ms: None,
+                        pruned_through_height: None,
+                        durable: false,
+                    }),
                 };
                 let _ = reply.send(result);
             }
             SequencerMsg::GetEquitySeries(account_id, since_ms, reply) => {
-                // NOTE: in prod the in-memory caps are 0, so this fallback returns
-                // an empty series. A persistent store read error therefore surfaces
-                // as an empty (200 OK) response plus the warn! below — not an error.
-                // The `since_ms` range is pushed into the store scan; the in-memory
-                // fallback re-applies it so both paths return the same window.
                 let result = match &state.store {
-                    Some(store) => store.equity_series(account_id, since_ms).unwrap_or_else(|e| {
-                        tracing::warn!(error = %e, account_id = account_id.0, "equity_series read failed; falling back to memory");
-                        state
-                            .sequencer
-                            .analytics()
-                            .equity_series(account_id)
-                            .into_iter()
-                            .filter(|point| point.timestamp_ms >= since_ms)
-                            .collect()
-                    }),
-                    None => state
-                        .sequencer
-                        .analytics()
-                        .equity_series(account_id)
-                        .into_iter()
-                        .filter(|point| point.timestamp_ms >= since_ms)
-                        .collect(),
+                    Some(store) => store
+                        .equity_series_page(account_id, since_ms)
+                        .and_then(|(items, source_points)| {
+                            let retention = store.account_history_retention(account_id)?;
+                            Ok(RetainedHistoryPage {
+                                downsampled: source_points > items.len(),
+                                source_points,
+                                items,
+                                retention_min_timestamp_ms: retention
+                                    .equity_pruned_through_timestamp_ms
+                                    .map(|timestamp| timestamp.saturating_add(1)),
+                                pruned_through_height: None,
+                                durable: true,
+                            })
+                        })
+                        .map_err(|error| SequencerError::Persistence(error.to_string())),
+                    None => {
+                        let points = state.sequencer.analytics().equity_series(account_id);
+                        let first = points.partition_point(|point| point.timestamp_ms < since_ms);
+                        let items = points[first.saturating_sub(usize::from(first > 0))..].to_vec();
+                        Ok(RetainedHistoryPage {
+                            source_points: items.len(),
+                            items,
+                            downsampled: false,
+                            retention_min_timestamp_ms: None,
+                            pruned_through_height: None,
+                            durable: false,
+                        })
+                    }
                 };
                 let _ = reply.send(result);
             }
             SequencerMsg::Leaderboard(since_ms, limit, reply) => {
                 // All-time inputs come from live in-memory state in one pass.
                 let bases = state.sequencer.leaderboard_bases();
-                let mut rows: Vec<LeaderboardRow> = bases
-                    .into_iter()
-                    .map(|base| {
-                        // For a windowed request, the baseline is the earliest
-                        // equity sample at/after the window start (durable store;
+                let result = (|| -> Result<Vec<LeaderboardRow>, SequencerError> {
+                    let mut rows = Vec::with_capacity(bases.len());
+                    for base in bases {
+                        // For a windowed request, the baseline is the opening
+                        // equity anchor at/before the window start (durable store;
                         // in-memory retention is 0 in prod). `net = value −
                         // deposited` at a point is that point's cumulative PnL,
                         // so windowed PnL = net(now) − net(window_start).
                         let (pnl_nanos, basis_nanos) = if since_ms == 0 {
                             (base.pnl_nanos, base.deposited_nanos)
                         } else {
-                            let baseline = state
-                                .store
-                                .as_ref()
-                                .and_then(|store| {
-                                    store.equity_series(base.account_id, since_ms).ok()
-                                })
-                                .and_then(|points| points.into_iter().next());
+                            let baseline = match &state.store {
+                                Some(store) => {
+                                    let retention =
+                                        store.account_history_retention(base.account_id).map_err(
+                                            |error| SequencerError::Persistence(error.to_string()),
+                                        )?;
+                                    if retention
+                                        .equity_pruned_through_timestamp_ms
+                                        .is_some_and(|timestamp| timestamp >= since_ms)
+                                    {
+                                        return Err(SequencerError::Persistence(
+                                            "leaderboard window predates retained equity history"
+                                                .to_string(),
+                                        ));
+                                    }
+                                    store
+                                        .equity_series(base.account_id, since_ms)
+                                        .map_err(|error| {
+                                            SequencerError::Persistence(error.to_string())
+                                        })?
+                                        .into_iter()
+                                        .next()
+                                }
+                                None => {
+                                    let points =
+                                        state.sequencer.analytics().equity_series(base.account_id);
+                                    let first = points
+                                        .partition_point(|point| point.timestamp_ms < since_ms);
+                                    points
+                                        .get(first.saturating_sub(usize::from(first > 0)))
+                                        .copied()
+                                }
+                            };
                             match baseline {
                                 Some(point) => (
                                     base.pnl_nanos
@@ -592,7 +649,7 @@ impl Actor for SequencerActor {
                         } else {
                             0
                         };
-                        LeaderboardRow {
+                        rows.push(LeaderboardRow {
                             account_id: base.account_id,
                             display_name: base.display_name,
                             avatar_seed: base.avatar_seed,
@@ -600,17 +657,18 @@ impl Actor for SequencerActor {
                             roi_bps,
                             markets_traded: base.markets_traded,
                             equity_nanos: base.equity_nanos,
-                        }
-                    })
-                    .collect();
-                // Deterministic ranking: PnL descending, account id ascending.
-                rows.sort_by(|a, b| {
-                    b.pnl_nanos
-                        .cmp(&a.pnl_nanos)
-                        .then(a.account_id.0.cmp(&b.account_id.0))
-                });
-                rows.truncate(limit);
-                let _ = reply.send(rows);
+                        });
+                    }
+                    // Deterministic ranking: PnL descending, account id ascending.
+                    rows.sort_by(|a, b| {
+                        b.pnl_nanos
+                            .cmp(&a.pnl_nanos)
+                            .then(a.account_id.0.cmp(&b.account_id.0))
+                    });
+                    rows.truncate(limit);
+                    Ok(rows)
+                })();
+                let _ = reply.send(result);
             }
             SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply) => {
                 let result = match &state.store {
@@ -627,25 +685,36 @@ impl Actor for SequencerActor {
                                 });
                                 events.dedup_by_key(|e| (e.account_id.0, e.block_height, e.seq));
                                 events.truncate(limit);
-                                events
+                                store
+                                    .account_history_retention(account_id)
+                                    .map(|retention| RetainedHistoryPage {
+                                        source_points: events.len(),
+                                        downsampled: false,
+                                        items: events,
+                                        retention_min_timestamp_ms: retention
+                                            .events_pruned_through_timestamp_ms
+                                            .map(|timestamp| timestamp.saturating_add(1)),
+                                        pruned_through_height: None,
+                                        durable: true,
+                                    })
+                                    .map_err(|error| SequencerError::Persistence(error.to_string()))
                             }
-                            Err(e) => {
-                                tracing::warn!(error = %e, account_id = account_id.0, "account_events read failed; falling back to memory");
-                                state.sequencer.analytics().account_history(
-                                    account_id,
-                                    limit,
-                                    before,
-                                    category.as_deref(),
-                                )
-                            }
+                            Err(error) => Err(SequencerError::Persistence(error.to_string())),
                         }
                     }
-                    None => state.sequencer.analytics().account_history(
-                        account_id,
-                        limit,
-                        before,
-                        category.as_deref(),
-                    ),
+                    None => Ok(RetainedHistoryPage {
+                        source_points: 0,
+                        downsampled: false,
+                        items: state.sequencer.analytics().account_history(
+                            account_id,
+                            limit,
+                            before,
+                            category.as_deref(),
+                        ),
+                        retention_min_timestamp_ms: None,
+                        pruned_through_height: None,
+                        durable: false,
+                    }),
                 };
                 let _ = reply.send(result);
             }

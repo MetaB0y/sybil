@@ -1173,6 +1173,16 @@ pub struct EquityPointResponse {
 pub struct EquitySeriesResponse {
     pub account_id: u64,
     pub points: Vec<EquityPointResponse>,
+    /// Oldest timestamp for which durable history is guaranteed complete.
+    /// `None` means retention is disabled.
+    pub retention_min_timestamp_ms: Option<u64>,
+    /// True when the requested range begins before the retained boundary.
+    pub history_truncated: bool,
+    /// `durable` for redb-backed history, `memory` for bounded dev fallback.
+    pub history_scope: String,
+    /// Number of retained source samples represented by `points`.
+    pub source_points: usize,
+    pub downsampled: bool,
 }
 
 // --- Leaderboard (SYB-59) ---
@@ -1230,11 +1240,37 @@ pub struct AccountFillResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AccountFillPageResponse {
+    pub fills: Vec<AccountFillResponse>,
+    /// Cursor to continue forward pagination, when this was a forward page.
+    pub next_after: Option<String>,
+    pub retention_min_timestamp_ms: Option<u64>,
+    /// Highest block from which this account had a fill row removed.
+    pub pruned_through_height: Option<u64>,
+    /// The supplied forward cursor may have skipped pruned fills.
+    pub cursor_gap: bool,
+    /// True means rows older than the retention boundary are unavailable.
+    pub history_truncated: bool,
+    pub history_scope: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PositionDeltaResponse {
     pub market_id: u32,
     pub outcome: String,
     /// Position quantity delta. Integer share-units; 1000 units = 1 share.
     pub delta: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AccountHistoryPageResponse {
+    pub events: Vec<HistoryEventResponse>,
+    pub next_before: Option<String>,
+    pub retention_min_timestamp_ms: Option<u64>,
+    pub history_truncated: bool,
+    pub history_scope: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -129,6 +129,12 @@ keys = (
     "SYBIL_BLOCK_INTERVAL_MS",
     "SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS",
     "SYBIL_RAW_PRICE_RETENTION_BLOCKS",
+    "SYBIL_FILL_HISTORY_RETENTION_SECS",
+    "SYBIL_EQUITY_RETENTION_SECS",
+    "SYBIL_ACCOUNT_EVENT_RETENTION_SECS",
+    "SYBIL_MAX_DURABLE_FILL_ROWS",
+    "SYBIL_MAX_DURABLE_EQUITY_ROWS",
+    "SYBIL_MAX_DURABLE_ACCOUNT_EVENT_ROWS",
     "SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS",
     "SYBIL_HISTORY_PRUNE_MAX_ROWS",
     "SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS",
@@ -154,13 +160,19 @@ expected_retention_env=$(printf '%s\n' \
     'SYBIL_BLOCK_INTERVAL_MS=10000' \
     'SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS=60480' \
     'SYBIL_RAW_PRICE_RETENTION_BLOCKS=60480' \
+    'SYBIL_FILL_HISTORY_RETENTION_SECS=2592000' \
+    'SYBIL_EQUITY_RETENTION_SECS=2678400' \
+    'SYBIL_ACCOUNT_EVENT_RETENTION_SECS=2592000' \
+    'SYBIL_MAX_DURABLE_FILL_ROWS=1000000' \
+    'SYBIL_MAX_DURABLE_EQUITY_ROWS=2000000' \
+    'SYBIL_MAX_DURABLE_ACCOUNT_EVENT_ROWS=1000000' \
     'SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS=60' \
     'SYBIL_HISTORY_PRUNE_MAX_ROWS=10000' \
     'SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS=60,300,3600' \
     'SYBIL_PRICE_CANDLE_RETENTION_SECS=604800,604800,604800')
 [[ "$retention_env" == "$expected_retention_env" ]] \
-    || fail "production compose does not pin the seven-day history retention policy"
-pass "production compose pins seven-day block/DA, raw-price, and candle retention"
+    || fail "production compose does not pin the durable history retention policy"
+pass "production compose pins market and bounded account-history retention"
 
 durability_contract=$(
     compose config | python3 -c '
