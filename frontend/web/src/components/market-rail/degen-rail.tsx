@@ -108,12 +108,13 @@ export function DegenRail({
 
   const amountNum = parseFloat(amount) || 0;
   const built = useMemo(() => {
+    if (latestHeight == null) return null;
     const betUsdNanos = BigInt(Math.round(amountNum * 1e9));
     return buildDegenOrder({
       side,
       betUsdNanos,
       markNanos,
-      latestHeight: BigInt(latestHeight ?? 0),
+      latestHeight: BigInt(latestHeight),
     });
   }, [amountNum, side, markNanos, latestHeight]);
 
@@ -126,7 +127,7 @@ export function DegenRail({
     }
     // selected is narrowed to non-undefined by the early return above, but
     // TypeScript can't see across the function boundary — guard here too.
-    if (!selected || !built.ok || latestHeight == null) return;
+    if (!selected || !built?.ok || latestHeight == null) return;
     // Freeze the open batch's block-clock anchor so the progress card shows ONE
     // countdown to the next batch clear (the live current-batch timeline).
     // Carried in DegenActive so it survives a Degen↔Pro toggle.
@@ -258,24 +259,34 @@ export function DegenRail({
     (pricePoints != null && pricePoints.length > 0);
   // Cash the engine would reserve for this bet. Block the CTA when it exceeds
   // what's available so we never trip a server-side InsufficientBalance rejection.
-  const requiredNanos = built.ok
+  const requiredNanos = built?.ok
     ? notionalNanosCeil(built.order.limitPriceNanos, built.order.maxFill)
     : 0n;
   const insufficient =
     connected &&
-    built.ok &&
+    built?.ok === true &&
     availableNanos != null &&
     requiredNanos > availableNanos;
-  const ctaLabel = !connected
-    ? "Connect to bet"
-    : signing
-      ? "Signing…"
-      : !built.ok
-        ? "Raise your bet"
-        : insufficient
-          ? "Not enough funds"
-          : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
-  const ctaDisabled = connected && (signing || !built.ok || insufficient);
+  const ctaState = degenCtaState({
+    connected,
+    latestBatchReady: latestHeight != null,
+    signing,
+    orderReady: built?.ok === true,
+    insufficient,
+  });
+  const ctaLabel =
+    ctaState === "connect"
+      ? "Connect to bet"
+      : ctaState === "waiting_batch"
+        ? "Waiting for latest batch…"
+        : ctaState === "signing"
+          ? "Signing…"
+          : ctaState === "raise_bet"
+            ? "Raise your bet"
+            : ctaState === "insufficient"
+              ? "Not enough funds"
+              : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
+  const ctaDisabled = ctaState !== "connect" && ctaState !== "ready";
 
   // Explainer slot below the form/progress area:
   //  - while a bet is in flight ("tracking"): a compact WaitingAlert with the
@@ -333,7 +344,7 @@ export function DegenRail({
             <DegenAmount
               amount={amount}
               setAmount={setAmount}
-              maxFill={built.ok ? built.order.maxFill : null}
+              maxFill={built?.ok ? built.order.maxFill : null}
               availableDollars={availableDollars}
               reservedDollars={reservedDollars}
               seeding={!hasPrice}
@@ -386,6 +397,35 @@ export function DegenRail({
       {showExpired && <WhyWaiting variant="expired" />}
     </div>
   );
+}
+
+export type DegenCtaState =
+  | "connect"
+  | "waiting_batch"
+  | "signing"
+  | "raise_bet"
+  | "insufficient"
+  | "ready";
+
+export function degenCtaState({
+  connected,
+  latestBatchReady,
+  signing,
+  orderReady,
+  insufficient,
+}: {
+  connected: boolean;
+  latestBatchReady: boolean;
+  signing: boolean;
+  orderReady: boolean;
+  insufficient: boolean;
+}): DegenCtaState {
+  if (!connected) return "connect";
+  if (!latestBatchReady) return "waiting_batch";
+  if (signing) return "signing";
+  if (!orderReady) return "raise_bet";
+  if (insufficient) return "insufficient";
+  return "ready";
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
