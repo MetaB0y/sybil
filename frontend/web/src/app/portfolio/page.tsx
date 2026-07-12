@@ -15,6 +15,7 @@ import {
   TradesList,
   tradeOrderCount,
 } from "@/components/portfolio/trades-list";
+import { DisconnectedAccountPrompt } from "@/components/auth/disconnected-account-prompt";
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryFeed } from "@/components/portfolio/history-feed";
 import { IdentityHeader } from "@/components/portfolio/identity-header";
@@ -280,59 +281,16 @@ function Connected({
 function Disconnected() {
   const openModal = useSetConnectModalOpen();
   return (
-    <div
-      style={{
-        padding: "48px 24px",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-1)",
-        borderRadius: 10,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 16,
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 18,
-          color: "var(--fg-1)",
-        }}
-      >
-        Connect to view your portfolio
-      </div>
-      <p
-        style={{
-          margin: 0,
-          color: "var(--fg-3)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-          maxWidth: 400,
-          lineHeight: 1.5,
-        }}
-      >
-        Create a demo account with a passkey or a local browser key. Your key
-        material stays on this device.
-      </p>
-      <button
-        type="button"
-        onClick={() => openModal(true)}
-        style={{
-          padding: "10px 18px",
-          background: "var(--accent)",
-          border: 0,
-          borderRadius: 8,
-          color: "var(--bg-1)",
-          fontFamily: "var(--font-sans)",
-          fontWeight: 600,
-          fontSize: 14,
-          cursor: "pointer",
-        }}
-      >
-        Connect
-      </button>
-    </div>
+    <DisconnectedAccountPrompt
+      title="Connect to view your portfolio"
+      message={
+        <>
+          Create a demo account with a passkey or a local browser key. Your key
+          material stays on this device.
+        </>
+      }
+      onConnect={() => openModal(true)}
+    />
   );
 }
 

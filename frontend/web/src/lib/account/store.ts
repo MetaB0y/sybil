@@ -29,19 +29,26 @@ interface AccountStore {
   hydrated: boolean;
   /** Whether the connect modal is currently open. */
   connectModalOpen: boolean;
+  /** True only when an invalid read token forced the modal open. */
+  connectModalRecovery: boolean;
 
   setSession: (s: AccountSession | null) => void;
   setHydrated: (h: boolean) => void;
   setConnectModalOpen: (open: boolean) => void;
+  openReadAuthRecovery: () => void;
 }
 
 export const useAccountStore = create<AccountStore>((set) => ({
   session: null,
   hydrated: false,
   connectModalOpen: false,
+  connectModalRecovery: false,
   setSession: (session) => set({ session }),
   setHydrated: (hydrated) => set({ hydrated }),
-  setConnectModalOpen: (connectModalOpen) => set({ connectModalOpen }),
+  setConnectModalOpen: (connectModalOpen) =>
+    set({ connectModalOpen, connectModalRecovery: false }),
+  openReadAuthRecovery: () =>
+    set({ connectModalOpen: true, connectModalRecovery: true }),
 }));
 
 // --- non-serializable key handle registry --------------------------------
@@ -58,6 +65,15 @@ export function getKeyHandle(accountId: number): CryptoKey | null {
 
 export function clearKeyHandle(accountId: number): void {
   KEY_HANDLES.delete(accountId);
+}
+
+/** Remove a transient key only if it is still the handle installed by the
+ * caller. A newer same-id session must survive an older async cleanup. */
+export function clearKeyHandleIfMatches(
+  accountId: number,
+  expected: CryptoKey,
+): void {
+  if (KEY_HANDLES.get(accountId) === expected) KEY_HANDLES.delete(accountId);
 }
 
 export function clearAllKeyHandles(): void {

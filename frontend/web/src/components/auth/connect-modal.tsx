@@ -18,6 +18,7 @@ import {
   createDemoAccount,
   importExistingAccount,
   signInWithDiscoverablePasskey,
+  signInWithStoredAccount,
   signInWithStoredPasskey,
 } from "@/lib/account/actions";
 import { readStoredAccount } from "@/lib/account/storage";
@@ -35,7 +36,7 @@ const BALANCE_OPTIONS: Array<{ label: string; nanos: bigint }> = [
   { label: "$5,000", nanos: 5_000_000_000_000n },
 ];
 
-type Tab = "create" | "passkey" | "import";
+type Tab = "saved" | "create" | "passkey" | "import";
 
 export function ConnectModal() {
   const open = useConnectModalOpen();
@@ -114,7 +115,8 @@ function ConnectModalBody({
   closeButtonRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("create");
+  const saved = readStoredAccount();
+  const [tab, setTab] = useState<Tab>(() => (saved ? "saved" : "create"));
 
   return (
     <div
@@ -174,10 +176,16 @@ function ConnectModalBody({
       <div
         style={{
           display: "flex",
+          flexWrap: "wrap",
           gap: 4,
           padding: "10px 18px 0",
         }}
       >
+        {saved && (
+          <TabButton active={tab === "saved"} onClick={() => setTab("saved")}>
+            Saved account
+          </TabButton>
+        )}
         <TabButton active={tab === "create"} onClick={() => setTab("create")}>
           Create demo
         </TabButton>
@@ -190,7 +198,12 @@ function ConnectModalBody({
       </div>
 
       <div style={{ padding: "16px 18px 18px" }}>
-        {tab === "create" ? (
+        {tab === "saved" && saved ? (
+          <SavedAccountTab
+            accountId={saved.accountId}
+            authScheme={saved.authScheme}
+          />
+        ) : tab === "create" ? (
           <CreateTab />
         ) : tab === "passkey" ? (
           <PasskeyTab />
@@ -198,6 +211,53 @@ function ConnectModalBody({
           <ImportTab />
         )}
       </div>
+    </div>
+  );
+}
+
+function SavedAccountTab({
+  accountId,
+  authScheme,
+}: {
+  accountId: number;
+  authScheme: "raw_p256" | "webauthn";
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit() {
+    setError(null);
+    setBusy(true);
+    try {
+      await signInWithStoredAccount();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Saved-account reconnect failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <p style={{ ...bodyText, margin: 0 }}>
+        Reconnect account #{accountId} with its saved{" "}
+        {authScheme === "webauthn" ? "passkey" : "local browser key"}. Sybil
+        will mint a fresh read-only session; your signing credential stays on
+        this device.
+      </p>
+
+      {error && <ErrorRow>{error}</ErrorRow>}
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={busy}
+        style={primaryButtonStyle(busy)}
+      >
+        {busy ? "Reconnecting…" : "Reconnect saved account"}
+      </button>
     </div>
   );
 }

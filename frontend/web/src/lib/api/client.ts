@@ -1,6 +1,6 @@
 import createClient from "openapi-fetch";
 import {
-  clearStoredAccount,
+  clearStoredReadApiKey,
   readStoredReadApiKey,
 } from "@/lib/account/storage";
 import type { paths } from "./schema";
@@ -23,12 +23,17 @@ api.use({
   onResponse({ request, response }) {
     // A revoked/invalid read key is a 401. A 403 means the key is valid but the
     // caller asked for another account, so it must not destroy the session.
+    const authorization = request.headers.get("authorization");
+    const requestToken = authorization?.startsWith("Bearer sybk_")
+      ? authorization.slice("Bearer ".length)
+      : null;
     if (
       request.method === "GET" &&
       response.status === 401 &&
-      request.headers.get("authorization")?.startsWith("Bearer sybk_")
+      requestToken !== null &&
+      readStoredReadApiKey() === requestToken
     ) {
-      clearStoredAccount();
+      clearStoredReadApiKey();
       globalThis.dispatchEvent?.(new Event(READ_AUTH_INVALID_EVENT));
     }
   },

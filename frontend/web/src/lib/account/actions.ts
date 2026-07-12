@@ -25,10 +25,17 @@ import {
   revokeSigningKey,
   SettingsActionError,
 } from "./settings";
-import { clearKeyHandle, setKeyHandle, useAccountStore } from "./store";
+import {
+  clearKeyHandle,
+  clearKeyHandleIfMatches,
+  setKeyHandle,
+  useAccountStore,
+} from "./store";
 import {
   clearStoredAccount,
+  clearStoredReadApiKey,
   readStoredAccount,
+  readStoredAccountRevision,
   writeStoredAccount,
 } from "./storage";
 
@@ -42,6 +49,7 @@ export class AccountError extends Error {
       | "account_not_found"
       | "key_register_failed"
       | "webauthn_unavailable"
+      | "session_changed"
       | "unknown",
   ) {
     super(message);
@@ -157,14 +165,12 @@ export async function createDemoAccount(
     jwk,
     readApiKey: readKey.token,
   });
-  useAccountStore
-    .getState()
-    .setSession({
-      accountId,
-      publicKeyHex: bootstrapPublicKeyHex,
-      authScheme: "raw_p256",
-      readApiKey: readKey.token,
-    });
+  useAccountStore.getState().setSession({
+    accountId,
+    publicKeyHex: bootstrapPublicKeyHex,
+    authScheme: "raw_p256",
+    readApiKey: readKey.token,
+  });
   useAccountStore.getState().setConnectModalOpen(false);
 }
 
@@ -211,29 +217,44 @@ export async function importExistingAccount(
     jwk,
     readApiKey: readKey.token,
   });
-  useAccountStore
-    .getState()
-    .setSession({
-      accountId,
-      publicKeyHex,
-      authScheme: "raw_p256",
-      readApiKey: readKey.token,
-    });
+  useAccountStore.getState().setSession({
+    accountId,
+    publicKeyHex,
+    authScheme: "raw_p256",
+    readApiKey: readKey.token,
+  });
   useAccountStore.getState().setConnectModalOpen(false);
 }
 
 export async function signInWithStoredPasskey(): Promise<void> {
+  const storageRevision = readStoredAccountRevision();
   const stored = readStoredAccount();
   if (stored?.authScheme !== "webauthn" || !stored.credentialIdB64url) {
     throw new AccountError("No saved passkey account", "account_not_found");
   }
-  const readKey = await createApiKey({
-    accountId: stored.accountId,
-    publicKeyHex: stored.publicKeyHex,
-    authScheme: "webauthn",
-    credentialIdB64url: stored.credentialIdB64url,
-    label: "web session",
-  });
+  let readKey;
+  try {
+    readKey = await createApiKey({
+      accountId: stored.accountId,
+      publicKeyHex: stored.publicKeyHex,
+      authScheme: "webauthn",
+      credentialIdB64url: stored.credentialIdB64url,
+      label: "web session",
+    });
+  } catch (error) {
+    requireUnchangedStorageRevision(storageRevision);
+    if (
+      error instanceof SettingsActionError &&
+      (error.status === 401 || error.status === 404)
+    ) {
+      throw new AccountError(
+        `Saved account #${stored.accountId} is not registered on this devnet. Its passkey was kept.`,
+        "account_not_found",
+      );
+    }
+    throw error;
+  }
+  requireUnchangedStorageRevision(storageRevision);
   openPasskeySession({
     accountId: stored.accountId,
     publicKeyHex: stored.publicKeyHex,
@@ -241,6 +262,71 @@ export async function signInWithStoredPasskey(): Promise<void> {
     credentialIdB64url: stored.credentialIdB64url,
     readApiKey: readKey.token,
   });
+}
+
+/** Mint a new read session from whichever signing identity is already saved in
+ * this browser. This is the recovery path for a revoked/stale read token; it
+ * never replaces or deletes the underlying signing credential. */
+export async function signInWithStoredAccount(): Promise<void> {
+  const storageRevision = readStoredAccountRevision();
+  const stored = readStoredAccount();
+  if (!stored) {
+    throw new AccountError(
+      "No saved account in this browser",
+      "account_not_found",
+    );
+  }
+  if (stored.authScheme === "webauthn") {
+    await signInWithStoredPasskey();
+    return;
+  }
+  if (!stored.jwk) {
+    throw new AccountError(
+      "Saved local account is missing its private key",
+      "invalid_jwk",
+    );
+  }
+
+  let privateKey: CryptoKey;
+  try {
+    privateKey = await importPrivateKey(stored.jwk);
+  } catch {
+    throw new AccountError("Saved local account key is invalid", "invalid_jwk");
+  }
+  requireUnchangedStorageRevision(storageRevision);
+  setKeyHandle(stored.accountId, privateKey);
+
+  try {
+    const readKey = await createApiKey({
+      accountId: stored.accountId,
+      publicKeyHex: stored.publicKeyHex,
+      authScheme: "raw_p256",
+      label: "web session",
+    });
+    const session = {
+      accountId: stored.accountId,
+      publicKeyHex: stored.publicKeyHex,
+      authScheme: "raw_p256" as const,
+      readApiKey: readKey.token,
+    };
+    requireUnchangedStorageRevision(storageRevision);
+    writeStoredAccount({ ...stored, readApiKey: readKey.token });
+    useAccountStore.getState().setSession(session);
+    useAccountStore.getState().setConnectModalOpen(false);
+  } catch (error) {
+    clearKeyHandleIfMatches(stored.accountId, privateKey);
+    requireUnchangedStorageRevision(storageRevision);
+    if (
+      error instanceof SettingsActionError &&
+      (error.status === 401 || error.status === 404)
+    ) {
+      throw new AccountError(
+        `Saved account #${stored.accountId} is not registered on this devnet. Its local signing credential was kept.`,
+        "account_not_found",
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -285,21 +371,52 @@ export async function signInWithDiscoverablePasskey(): Promise<void> {
 
 export function disconnect(): void {
   const cur = useAccountStore.getState().session;
-  if (cur) clearKeyHandle(cur.accountId);
+  const stored = readStoredAccount();
+  const accountId = cur?.accountId ?? stored?.accountId;
+  if (accountId !== undefined) clearKeyHandle(accountId);
   clearStoredAccount();
   useAccountStore.getState().setSession(null);
+}
+
+/** Drop a rejected read token while preserving the signing identity. The user
+ * is sent to the reconnect flow, which can mint a replacement read token with
+ * the saved local key or passkey. Explicit `disconnect()` remains destructive. */
+export function invalidateReadSession(): void {
+  const cur = useAccountStore.getState().session;
+  if (cur) clearKeyHandle(cur.accountId);
+  clearStoredReadApiKey();
+  useAccountStore.getState().setSession(null);
+  useAccountStore.getState().openReadAuthRecovery();
 }
 
 /** Re-hydrate from localStorage (called by AccountProvider on mount and on
  * `storage` events from other tabs). */
 export async function rehydrateFromStorage(): Promise<void> {
+  const storageRevision = readStoredAccountRevision();
   const stored = readStoredAccount();
+  const current = useAccountStore.getState().session;
   if (!stored) {
+    if (current) clearKeyHandle(current.accountId);
+    useAccountStore.getState().setSession(null);
+    if (useAccountStore.getState().connectModalRecovery) {
+      useAccountStore.getState().setConnectModalOpen(false);
+    }
+    return;
+  }
+  if (!stored.readApiKey) {
+    if (current) clearKeyHandle(current.accountId);
     useAccountStore.getState().setSession(null);
     return;
   }
-  const current = useAccountStore.getState().session;
-  if (current && current.accountId === stored.accountId) return;
+  if (
+    current &&
+    current.accountId === stored.accountId &&
+    current.readApiKey === stored.readApiKey
+  )
+    return;
+  if (current && current.accountId !== stored.accountId) {
+    clearKeyHandle(current.accountId);
+  }
   try {
     if (stored.authScheme === "webauthn") {
       if (!stored.credentialIdB64url)
@@ -311,9 +428,11 @@ export async function rehydrateFromStorage(): Promise<void> {
         credentialIdB64url: stored.credentialIdB64url,
         readApiKey: stored.readApiKey,
       });
+      useAccountStore.getState().setConnectModalOpen(false);
     } else {
       if (!stored.jwk) throw new Error("missing raw P256 private key");
       const privateKey = await importPrivateKey(stored.jwk);
+      if (readStoredAccountRevision() !== storageRevision) return;
       setKeyHandle(stored.accountId, privateKey);
       useAccountStore.getState().setSession({
         accountId: stored.accountId,
@@ -321,12 +440,23 @@ export async function rehydrateFromStorage(): Promise<void> {
         authScheme: "raw_p256",
         readApiKey: stored.readApiKey,
       });
+      useAccountStore.getState().setConnectModalOpen(false);
     }
   } catch (e) {
+    if (readStoredAccountRevision() !== storageRevision) return;
     console.warn("[account] stored account corrupt; clearing", e);
+    clearKeyHandle(stored.accountId);
     clearStoredAccount();
     useAccountStore.getState().setSession(null);
   }
+}
+
+function requireUnchangedStorageRevision(expected: string | null): void {
+  if (readStoredAccountRevision() === expected) return;
+  throw new AccountError(
+    "The saved account changed in another tab. Reopen Connect and try again.",
+    "session_changed",
+  );
 }
 
 // --- helpers --------------------------------------------------------------
