@@ -94,6 +94,7 @@ export const CATEGORY_OF: Record<
 
 export interface AccountHistory {
   events: HistoryEvent[];
+  hasData: boolean;
   isPending: boolean;
   isFetching: boolean;
   error: Error | null;
@@ -160,6 +161,7 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
   const events = q.data?.events ?? [];
   return {
     events,
+    hasData: q.data !== undefined,
     isPending: q.isPending,
     isFetching: q.isFetching,
     error: q.error,

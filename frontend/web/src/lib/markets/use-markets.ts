@@ -123,7 +123,13 @@ export function useMarketsList(initialData?: Market[]) {
     bundle = assemble(marketsQ.data);
   }
 
-  return { bundle, isPending, error, refetch: marketsQ.refetch };
+  return {
+    bundle,
+    isPending,
+    isFetching: marketsQ.isFetching,
+    error,
+    refetch: marketsQ.refetch,
+  };
 }
 
 /**
