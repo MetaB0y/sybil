@@ -58,7 +58,11 @@ export function NavSearch() {
     setQ(urlQ);
   }
 
-  const { bundle } = useMarketsIndex();
+  const { bundle, isFetching, error, refetch } = useMarketsIndex();
+  const dataState = deriveNavSearchDataState({
+    hasBundle: bundle !== null,
+    hasError: error != null,
+  });
   const prices = useStore(selectPricesByMarketId);
   const items = useMemo(
     () => (bundle ? buildIndexCards(bundle) : []),
@@ -76,6 +80,9 @@ export function NavSearch() {
     });
   }, [items, q]);
   const top = results.slice(0, MAX_RESULTS);
+  const showDropdown = open && q.trim().length > 0;
+  const hasSearchData = dataState === "ready" || dataState === "stale";
+  const hasOptions = showDropdown && hasSearchData && top.length > 0;
 
   const close = useCallback(() => {
     setOpen(false);
@@ -167,8 +174,6 @@ export function NavSearch() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [open, close]);
 
-  const showDropdown = open && q.trim().length > 0;
-
   return (
     <div ref={shellRef} style={{ position: "relative" }}>
       <div className="nav-search-shell" style={searchShellStyle}>
@@ -186,48 +191,64 @@ export function NavSearch() {
           placeholder="search events, markets"
           aria-label="search markets"
           role="combobox"
-          aria-expanded={showDropdown}
-          aria-controls="nav-search-results"
+          aria-expanded={hasOptions}
+          aria-controls={hasOptions ? "nav-search-options" : undefined}
           aria-autocomplete="list"
           style={searchInputStyle}
         />
       </div>
 
       {showDropdown && (
-        <div
-          id="nav-search-results"
-          role="listbox"
-          className="nav-search-dropdown"
-          style={dropdownStyle}
-        >
-          {top.length === 0 ? (
-            <div style={emptyStyle}>
-              no events or markets match “{q.trim()}”
-            </div>
+        <div className="nav-search-dropdown" style={dropdownStyle}>
+          {dataState === "loading" || dataState === "unavailable" ? (
+            <NavSearchDataNotice
+              state={dataState}
+              retrying={isFetching}
+              onRetry={() => void refetch()}
+            />
           ) : (
             <>
-              {top.map((item, i) => (
-                <ResultRow
-                  key={resultKey(item)}
-                  item={item}
-                  prices={prices}
-                  active={i === highlight}
-                  onPick={() => goToItem(item)}
-                  onHover={() => setHighlight(i)}
+              {dataState === "stale" && (
+                <NavSearchDataNotice
+                  state="stale"
+                  retrying={isFetching}
+                  onRetry={() => void refetch()}
                 />
-              ))}
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => goToGrid(q)}
-                style={footerStyle}
-              >
-                <span>
-                  see all {results.length} result
-                  {results.length === 1 ? "" : "s"}
-                </span>
-                <span aria-hidden>↵</span>
-              </button>
+              )}
+              {top.length === 0 ? (
+                <div style={emptyStyle}>
+                  {dataState === "stale"
+                    ? `no matches in saved market data for “${q.trim()}”`
+                    : `no events or markets match “${q.trim()}”`}
+                </div>
+              ) : (
+                <>
+                  <div id="nav-search-options" role="listbox">
+                    {top.map((item, i) => (
+                      <ResultRow
+                        key={resultKey(item)}
+                        item={item}
+                        prices={prices}
+                        active={i === highlight}
+                        onPick={() => goToItem(item)}
+                        onHover={() => setHighlight(i)}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => goToGrid(q)}
+                    style={footerStyle}
+                  >
+                    <span>
+                      see all {results.length} result
+                      {results.length === 1 ? "" : "s"}
+                    </span>
+                    <span aria-hidden>↵</span>
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -239,6 +260,63 @@ export function NavSearch() {
 export function NavSearchSkeleton() {
   return (
     <div className="nav-search-shell" style={searchShellStyle} aria-hidden />
+  );
+}
+
+export type NavSearchDataState = "loading" | "unavailable" | "stale" | "ready";
+
+export function deriveNavSearchDataState({
+  hasBundle,
+  hasError,
+}: {
+  hasBundle: boolean;
+  hasError: boolean;
+}): NavSearchDataState {
+  if (hasBundle) return hasError ? "stale" : "ready";
+  if (hasError) return "unavailable";
+  return "loading";
+}
+
+export function NavSearchDataNotice({
+  state,
+  retrying,
+  onRetry,
+}: {
+  state: Exclude<NavSearchDataState, "ready">;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  if (state === "loading") {
+    return (
+      <div role="status" aria-live="polite" style={emptyStyle}>
+        loading market search…
+      </div>
+    );
+  }
+
+  const stale = state === "stale";
+
+  return (
+    <div
+      role={stale ? "status" : "alert"}
+      aria-live={stale ? "polite" : undefined}
+      style={dataNoticeStyle}
+    >
+      <span>
+        {stale
+          ? "market search update failed · showing saved results"
+          : "market search unavailable"}
+      </span>
+      <button
+        type="button"
+        disabled={retrying}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRetry}
+        style={retryStyle}
+      >
+        {retrying ? (stale ? "refreshing…" : "retrying…") : "retry"}
+      </button>
+    </div>
   );
 }
 
@@ -425,6 +503,26 @@ const emptyStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "var(--fs-12)",
   color: "var(--fg-3)",
+};
+
+const dataNoticeStyle: React.CSSProperties = {
+  ...emptyStyle,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "var(--space-3)",
+  color: "var(--warn)",
+};
+
+const retryStyle: React.CSSProperties = {
+  minHeight: 32,
+  padding: "0 var(--space-3)",
+  border: "1px solid var(--border-2)",
+  borderRadius: "var(--radius-sm)",
+  background: "var(--surface-2)",
+  color: "var(--fg-1)",
+  font: "inherit",
+  cursor: "pointer",
 };
 
 const footerStyle: React.CSSProperties = {

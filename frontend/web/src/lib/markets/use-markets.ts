@@ -146,7 +146,13 @@ export function useMarketsIndex(initialData?: IndexMarket[]) {
   const error = marketsQ.error;
   const bundle = marketsQ.data ? assemble(marketsQ.data) : null;
 
-  return { bundle, isPending, error, refetch: marketsQ.refetch };
+  return {
+    bundle,
+    isPending,
+    isFetching: marketsQ.isFetching,
+    error,
+    refetch: marketsQ.refetch,
+  };
 }
 
 export function assemble<M extends IndexMarket>(
