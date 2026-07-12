@@ -103,25 +103,38 @@ snapshot for every live, fast, and noise account. An experiment-arm snapshot fai
 and invalidates that id; default and synthetic snapshot failures remain warning-only and retry on
 the periodic loop. This time-zero row ensures first-interval PnL is included in the half-open window.
 
-After at least a day (and once explicit outcomes exist), compare both durable variant names over the
-persisted half-open window and frozen cohort:
+After at least a day, generate the strict report for both durable variants over the persisted
+half-open window and frozen cohort:
 
 ```bash
 cd arena
-uv run python scripts/calibration.py \
+uv run python -m scripts.calibration \
   --db live/decisions.db \
-  --since <started_at_utc-from-live_experiments> \
+  --experiment-id stage1-2026-07-12-a \
   --until <exclusive-utc-window-end> \
-  --market-ids <comma-separated-frozen-ids> \
   --json-out stage1-ab-calibration.json
 ```
 
-The calibration report keeps `[...]control]` and `[...]stage1]` trader identities distinct for
-Brier, reliability, rejection, and per-trader Flat-arm PnL comparison. `token_usage` uses the same
-durable variant identity for a direct spend audit. Starting a different cohort requires a new
-experiment id. Per-trader PnL can be read during an unresolved experiment; Brier, reliability, and
-rejection counterfactuals require explicit resolved outcomes and should not be treated as final
-before those labels exist. Each fair-value update and decision also persists a deterministic
+The strict report derives its inclusive start and cohort from `live_experiments`; supplying
+`--since` or `--market-ids` alongside the experiment id is rejected. It fingerprint-checks and
+allowlists the exact experiment analyst/Flat identities, then reports per-arm calls, USD spend,
+cost per decision and analysis batch, matched-batch coverage, Stage1-minus-control spend deltas,
+and Flat PnL. Windows shorter than 24 hours are refused unless
+`--exploratory-short-window` is explicitly supplied; that override is recorded in text and JSON
+and is not launch evidence. A non-exploratory report also proves that every exact Flat arm has
+durable portfolio snapshots across the requested window: its first row must be within ten minutes
+of the persisted start, its latest within ten minutes of the exclusive end, and no consecutive gap
+may exceed ten minutes against the normal 300-second cadence. Per-arm first/latest timestamps,
+maximum gap, and status are emitted in text and JSON; incomplete coverage is rejected. Exploratory
+reports retain but loudly label incomplete coverage. PnL and spend remain available before
+resolution. The exclusive end must not be in the future; endpoint tolerance can absorb snapshot
+cadence jitter but can never turn a future interval into evidence. Brier, reliability, and
+rejection counterfactuals use explicit outcomes only in strict experiment mode. Outcome rows are
+filtered to the frozen cohort before their source/count is reported, so unrelated labels cannot
+hide that the experiment itself remains unresolved. Starting a different cohort requires a new
+experiment id.
+
+Each fair-value update and decision also persists a deterministic
 `analysis_batch_id` derived from the market id, snapped reference price, and sorted article URLs.
 The same snapped price is persisted as `analysis_reference_price` and supplies both arms' prompt,
 resolution check, and matched market-price baseline even if the provider moves between drains.
@@ -154,6 +167,8 @@ uv run python -m scripts.calibration_compare \
 - Persistent per-analyst spend thresholds pause only that analyst's later calls
 - Decision and outcome records support windowed, cohort-pinned calibration
 - Opt-in Stage 1 A/B uses paired evidence batches, isolated Flat arms, and single-run ids
+- Persisted Stage 1 reports lock scope to immutable metadata and fail closed on identity drift
+- Strict Stage 1 evidence requires uninterrupted durable snapshot coverage for every Flat arm
 - Simulation remains backtestable through `SimulatedClock` time compression
 
 ## Where This Lives

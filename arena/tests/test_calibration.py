@@ -1,7 +1,11 @@
 import sqlite3
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
 
 import pytest
 
+from live.personas import PERSONAS
 from scripts.calibration import _parse_market_ids, analyze_decisions_db, format_report
 
 
@@ -70,6 +74,69 @@ def _fixture_db(path):
     """)
     conn.commit()
     conn.close()
+
+
+def _add_stage1_experiment(conn, experiment_id="exp-strict"):
+    display_name = PERSONAS["news_trader"]["name"]
+    configuration = {
+        "market_ids": [1, 2],
+        "personas": ["news_trader"],
+        "persona_display_name_sha256": {"news_trader": sha256(display_name.encode()).hexdigest()},
+        "variants": [{"id": "control"}, {"id": "stage1"}],
+    }
+    conn.executescript("""
+        CREATE TABLE live_experiments (
+            experiment_id TEXT PRIMARY KEY,
+            mode TEXT NOT NULL,
+            started_at_utc TEXT NOT NULL,
+            configuration_json TEXT NOT NULL
+        );
+        CREATE TABLE token_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trader_name TEXT,
+            timestamp TEXT,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            model TEXT,
+            duration_s REAL,
+            usd_cost REAL,
+            cost_source TEXT
+        );
+    """)
+    conn.execute(
+        "INSERT INTO live_experiments VALUES (?, ?, ?, ?)",
+        (
+            experiment_id,
+            "syb-114-stage1-ab",
+            "2026-01-01T00:00:00Z",
+            json.dumps(configuration),
+        ),
+    )
+    return display_name
+
+
+def _add_covered_stage1_snapshots(
+    conn,
+    display_name,
+    *,
+    experiment_id="exp-strict",
+    duration_minutes=24 * 60,
+):
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    names = [
+        f"{display_name} [SYB-114:{experiment_id}:{variant}] (Flat)"
+        for variant in ("control", "stage1")
+    ]
+    conn.executemany(
+        """INSERT INTO portfolio_snapshots
+           (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+           VALUES (?, ?, 0, 0, 0, '{}')""",
+        [
+            (trader_name, (start + timedelta(minutes=minute)).isoformat())
+            for trader_name in names
+            for minute in range(0, duration_minutes, 5)
+        ],
+    )
 
 
 def test_calibration_harness_computes_brier_reliability_and_noise_baseline(tmp_path):
@@ -200,9 +267,7 @@ def test_window_pnl_includes_movement_after_in_window_startup_baseline(tmp_path)
         until="2026-01-01T00:03:00Z",
     )
 
-    assert result["portfolio_pnl_by_trader"]["flat"] == {
-        "Fresh Experiment (Flat)": 6.5
-    }
+    assert result["portfolio_pnl_by_trader"]["flat"] == {"Fresh Experiment (Flat)": 6.5}
 
 
 def test_calibration_keeps_stage1_ab_flat_variants_separate(tmp_path):
@@ -408,6 +473,294 @@ def test_calibration_pins_and_reports_exact_market_cohort(tmp_path):
     report = format_report(result)
     assert "Pinned forecast cohort: 2" in report
     assert "Portfolio PnL scope: all trader positions" in report
+
+
+def test_persisted_stage1_report_locks_scope_and_keeps_pnl_without_outcomes(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    display_name = _add_stage1_experiment(conn)
+    conn.execute("DELETE FROM market_outcomes")
+    conn.execute("DELETE FROM decisions")
+    conn.execute("DELETE FROM portfolio_snapshots")
+    control_flat = f"{display_name} [SYB-114:exp-strict:control] (Flat)"
+    stage1_flat = f"{display_name} [SYB-114:exp-strict:stage1] (Flat)"
+    control_analyst = f"{display_name} [SYB-114:exp-strict:control] (Analyst)"
+    stage1_analyst = f"{display_name} [SYB-114:exp-strict:stage1] (Analyst)"
+    conn.executemany(
+        """INSERT INTO decisions
+           (trader_name, market_id, market_name, timestamp, fair_value,
+            market_price, orders, analysis_batch_id, analysis_reference_price)
+           VALUES (?, 1, 'M1', ?, ?, ?, '[]', ?, 0.45)""",
+        [
+            (control_flat, "2026-01-01T01:00:00Z", 0.55, 0.40, "shared"),
+            (control_flat, "2026-01-01T01:05:00Z", 0.56, 0.41, "shared"),
+            (stage1_flat, "2026-01-01T01:00:00Z", 0.60, 0.40, "shared"),
+            (
+                "News Trader [SYB-114:other:control] (Flat)",
+                "2026-01-01T01:00:00Z",
+                0.99,
+                0.99,
+                "foreign",
+            ),
+        ],
+    )
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    snapshot_rows = []
+    for trader_name, final_pnl in ((control_flat, 3.0), (stage1_flat, 6.0)):
+        snapshot_rows.extend(
+            (
+                trader_name,
+                (start + timedelta(minutes=minute)).isoformat(),
+                final_pnl * minute / 1555,
+            )
+            for minute in range(0, 1560, 5)
+        )
+    snapshot_rows.append(
+        (
+            "News Trader [SYB-114:other:control] (Flat)",
+            "2026-01-02T01:00:00Z",
+            999.0,
+        )
+    )
+    conn.executemany(
+        """INSERT INTO portfolio_snapshots
+           (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+           VALUES (?, ?, 0, 0, ?, '{}')""",
+        snapshot_rows,
+    )
+    conn.executemany(
+        """INSERT INTO token_usage
+           (trader_name, timestamp, prompt_tokens, completion_tokens, model,
+            duration_s, usd_cost, cost_source)
+           VALUES (?, ?, ?, ?, 'model', 1, ?, 'response')""",
+        [
+            (control_analyst, "2026-01-01T01:00:00Z", 100, 10, 0.10),
+            (control_analyst, "2026-01-01T02:00:00Z", 200, 20, 0.20),
+            (stage1_analyst, "2026-01-01T01:00:00Z", 120, 12, 0.15),
+            ("News Trader [SYB-114:other:control] (Analyst)", "2026-01-01T01:00:00Z", 1, 1, 99.0),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = analyze_decisions_db(
+        str(db_path),
+        experiment_id="exp-strict",
+        until="2026-01-02T02:00:00Z",
+    )
+
+    assert result["overall"]["n"] == 0
+    assert result["outcomes"]["count"] == 0
+    assert result["cohort"]["requested_market_ids"] == [1, 2]
+    assert result["window"]["since"] == "2026-01-01T00:00:00+00:00"
+    comparison = result["experiment"]["comparisons"][0]
+    assert comparison["matched_analysis_batch_count"] == 1
+    assert comparison["control"]["calls"] == 2
+    assert comparison["control"]["usd"] == pytest.approx(0.30)
+    assert comparison["control"]["decision_rows"] == 2
+    assert comparison["control"]["analysis_batch_count"] == 1
+    assert comparison["control"]["usd_per_decision"] == pytest.approx(0.15)
+    assert comparison["stage1"]["calls"] == 1
+    assert comparison["stage1"]["pnl"] == 6.0
+    assert comparison["stage1_minus_control"]["pnl"] == 3.0
+    coverage = result["experiment"]["snapshot_coverage"]
+    assert coverage["coverage_complete"] is True
+    assert coverage["expected_cadence_seconds"] == 300
+    assert coverage["maximum_allowed_gap_seconds"] == 600
+    assert {arm["snapshot_count"] for arm in coverage["arms"]} == {312}
+    assert {arm["max_consecutive_gap_seconds"] for arm in coverage["arms"]} == {300.0}
+    assert {arm["end_lag_seconds"] for arm in coverage["arms"]} == {300.0}
+    assert result["experiment"]["flat_pnl_by_durable_identity"] == {
+        control_flat: 3.0,
+        stage1_flat: 6.0,
+    }
+    report = format_report(result)
+    assert "strict >=24h window" in report
+    assert "calls=2 usd=0.30000" in report
+    assert "pnl=6.00" in report
+    assert "Portfolio snapshot window coverage: complete" in report
+    assert "No explicit outcomes: forecast metrics are unavailable" in report
+    assert "999" not in report
+
+
+def test_persisted_stage1_report_requires_24h_or_records_exploratory_override(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    _add_stage1_experiment(conn)
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ValueError, match="at least 24 hours"):
+        analyze_decisions_db(
+            str(db_path),
+            experiment_id="exp-strict",
+            until="2026-01-01T06:00:00Z",
+        )
+
+    result = analyze_decisions_db(
+        str(db_path),
+        experiment_id="exp-strict",
+        until="2026-01-01T06:00:00Z",
+        exploratory_short_window=True,
+    )
+    assert result["experiment"]["window"]["exploratory_short_window_override"] is True
+    assert result["experiment"]["snapshot_coverage"]["coverage_complete"] is False
+    assert "EXPLORATORY SHORT-WINDOW OVERRIDE" in format_report(result)
+    assert "INCOMPLETE (exploratory report only)" in format_report(result)
+
+    with pytest.raises(ValueError, match="derives --since"):
+        analyze_decisions_db(
+            str(db_path),
+            experiment_id="exp-strict",
+            since="2026-01-01T00:00:00Z",
+            until="2026-01-02T01:00:00Z",
+        )
+    with pytest.raises(ValueError, match="derives the frozen cohort"):
+        analyze_decisions_db(
+            str(db_path),
+            experiment_id="exp-strict",
+            until="2026-01-02T01:00:00Z",
+            market_ids={1, 2},
+        )
+
+
+def test_strict_stage1_report_rejects_requested_26h_with_only_early_snapshots(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    display_name = _add_stage1_experiment(conn)
+    conn.executemany(
+        """INSERT INTO portfolio_snapshots
+           (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+           VALUES (?, ?, 0, 0, 0, '{}')""",
+        [
+            (
+                f"{display_name} [SYB-114:exp-strict:{variant}] (Flat)",
+                timestamp,
+            )
+            for variant in ("control", "stage1")
+            for timestamp in ("2026-01-01T00:00:00Z", "2026-01-01T00:05:00Z")
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ValueError, match="window coverage incomplete"):
+        analyze_decisions_db(
+            str(db_path),
+            experiment_id="exp-strict",
+            until="2026-01-02T02:00:00Z",
+        )
+
+    exploratory = analyze_decisions_db(
+        str(db_path),
+        experiment_id="exp-strict",
+        until="2026-01-02T02:00:00Z",
+        exploratory_short_window=True,
+    )
+    coverage = exploratory["experiment"]["snapshot_coverage"]
+    assert coverage["coverage_complete"] is False
+    assert all(arm["latest_snapshot_utc"] is not None for arm in coverage["arms"])
+    assert all(arm["end_lag_seconds"] == 93300.0 for arm in coverage["arms"])
+
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        """INSERT INTO portfolio_snapshots
+           (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+           VALUES (?, '2026-01-02T01:55:00Z', 0, 0, 0, '{}')""",
+        [
+            (f"{display_name} [SYB-114:exp-strict:{variant}] (Flat)",)
+            for variant in ("control", "stage1")
+        ],
+    )
+    conn.commit()
+    conn.close()
+    with pytest.raises(ValueError, match="maximum consecutive snapshot gap"):
+        analyze_decisions_db(
+            str(db_path),
+            experiment_id="exp-strict",
+            until="2026-01-02T02:00:00Z",
+        )
+
+
+def test_experiment_report_rejects_future_until_before_snapshot_tolerance(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    display_name = _add_stage1_experiment(conn)
+    # At start+23h55, these snapshots satisfy every endpoint/gap tolerance
+    # for a requested 24h interval. The future end must still fail first.
+    _add_covered_stage1_snapshots(conn, display_name)
+    conn.commit()
+    conn.close()
+
+    now = datetime(2026, 1, 1, 23, 55, tzinfo=timezone.utc)
+    for exploratory in (False, True):
+        with pytest.raises(ValueError, match="--until cannot be in the future"):
+            analyze_decisions_db(
+                str(db_path),
+                experiment_id="exp-strict",
+                until="2026-01-02T00:00:00Z",
+                exploratory_short_window=exploratory,
+                now=now,
+            )
+
+
+def test_strict_experiment_outcomes_are_filtered_to_frozen_cohort(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    display_name = _add_stage1_experiment(conn)
+    _add_covered_stage1_snapshots(conn, display_name)
+    conn.execute("DELETE FROM market_outcomes")
+    conn.execute("INSERT INTO market_outcomes (market_id, outcome) VALUES (99, 1.0)")
+    conn.commit()
+    conn.close()
+
+    report_args = {
+        "experiment_id": "exp-strict",
+        "until": "2026-01-02T00:00:00Z",
+        "now": datetime(2026, 1, 2, 1, tzinfo=timezone.utc),
+    }
+    foreign_only = analyze_decisions_db(str(db_path), **report_args)
+    assert foreign_only["outcomes"]["source"] == "explicit_unavailable"
+    assert foreign_only["outcomes"]["count"] == 0
+    assert "No explicit outcomes" in format_report(foreign_only)
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("INSERT INTO market_outcomes (market_id, outcome) VALUES (1, 1.0)")
+    conn.commit()
+    conn.close()
+    mixed = analyze_decisions_db(str(db_path), **report_args)
+    assert mixed["outcomes"]["source"] == "explicit"
+    assert mixed["outcomes"]["count"] == 1
+    assert "No explicit outcomes" not in format_report(mixed)
+
+
+def test_persisted_stage1_report_fails_closed_on_identity_fingerprint_drift(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    _add_stage1_experiment(conn)
+    configuration = json.loads(
+        conn.execute("SELECT configuration_json FROM live_experiments").fetchone()[0]
+    )
+    configuration["persona_display_name_sha256"]["news_trader"] = "0" * 64
+    conn.execute(
+        "UPDATE live_experiments SET configuration_json = ?",
+        (json.dumps(configuration),),
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ValueError, match="display-name fingerprint drifted"):
+        analyze_decisions_db(
+            str(db_path),
+            experiment_id="exp-strict",
+            until="2026-01-02T01:00:00Z",
+        )
 
 
 def test_market_id_filter_parser_is_strict_and_deduplicates():

@@ -204,6 +204,19 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
   rows, and expose unmatched arm batches. Primary Brier/baseline deltas use only the exact matched
   batch intersection; full-arm metrics are diagnostic. Experiment ids cannot resume; any restart
   requires a new window/id.
+- **Persisted concurrent report**: run `calibration.py --experiment-id <id> --until <exclusive
+  ISO-UTC>`. It derives the start/cohort from `live_experiments`, fingerprint-checks an exact
+  analyst/Flat identity allowlist, and reports calls, USD, cost per decision/batch, matched-batch
+  coverage, spend deltas, and Flat PnL. It refuses windows under 24 hours unless
+  `--exploratory-short-window` is explicitly supplied; the labeled text/JSON override cannot meet
+  the Done criterion. A strict report also requires every exact Flat arm's first/latest portfolio
+  snapshots to fall within ten minutes of the persisted start/exclusive end and its maximum
+  consecutive gap to stay at or below ten minutes (normal cadence: 300 seconds). The report records
+  each arm's endpoints, maximum gap, and coverage status; incomplete coverage fails strict mode and
+  is only retained with the exploratory label. Strict experiment Brier uses explicit outcomes only,
+  filtered to the frozen cohort before source/count reporting, while spend and PnL remain
+  meaningful before resolution. The exclusive end may not be in the future; snapshot endpoint
+  tolerance never authorizes future evidence.
 - **Guardrail**: any stage that raises analyst spend must show cost per decision; abort a stage
   if projected spend exceeds 2× baseline. Configured thresholds are $5–10, not hard ceilings;
   each analyst may overshoot by one completed call.
