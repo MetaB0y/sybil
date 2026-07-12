@@ -373,7 +373,7 @@ function PasskeyTab() {
   );
 }
 
-function ImportTab() {
+export function ImportTab() {
   const [accountIdRaw, setAccountIdRaw] = useState("");
   const [jwkRaw, setJwkRaw] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -412,8 +412,9 @@ function ImportTab() {
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <Label>Account id</Label>
+        <Label htmlFor="connect-import-account-id">Account id</Label>
         <input
+          id="connect-import-account-id"
           type="text"
           value={accountIdRaw}
           onChange={(e) => setAccountIdRaw(e.target.value)}
@@ -423,8 +424,11 @@ function ImportTab() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <Label>Private key (JWK JSON)</Label>
+        <Label htmlFor="connect-import-private-key">
+          Private key (JWK JSON)
+        </Label>
         <textarea
+          id="connect-import-private-key"
           value={jwkRaw}
           onChange={(e) => setJwkRaw(e.target.value)}
           placeholder='{"kty":"EC","crv":"P-256","x":"…","y":"…","d":"…"}'
@@ -453,9 +457,16 @@ function ImportTab() {
 
 // --- styles ---------------------------------------------------------------
 
-function Label({ children }: { children: React.ReactNode }) {
+function Label({
+  children,
+  htmlFor,
+}: {
+  children: React.ReactNode;
+  htmlFor?: string;
+}) {
   return (
     <label
+      htmlFor={htmlFor}
       style={{
         fontFamily: "var(--font-mono)",
         fontSize: 10,
