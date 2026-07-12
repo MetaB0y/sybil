@@ -205,7 +205,11 @@ function Header({
             color: "var(--fg-3)",
           }}
         >
-          <Link href="/" style={{ color: "var(--fg-4)", textDecoration: "none" }}>
+          <Link
+            className="mobile-action-link"
+            href="/"
+            style={{ color: "var(--fg-4)", textDecoration: "none" }}
+          >
             markets
           </Link>
           <span style={{ color: "var(--fg-4)" }}>/</span>

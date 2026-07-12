@@ -401,7 +401,31 @@ async function proxyApiForLocalRun(page: Page) {
   if (host !== "127.0.0.1" && host !== "localhost") return;
 
   await page.route(`${API_BASE}/**`, async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response });
+    // Playwright 1.61 on Node 24 can receive an empty peer-certificate object
+    // in its API request context, then crash while reading subject.CN. Keep
+    // that transport out of this local-only CORS bridge; production/browser
+    // networking is unchanged.
+    const request = route.request();
+    const method = request.method();
+    const init: RequestInit = {
+      method,
+      headers: request.headers(),
+    };
+    const postData = request.postData();
+    if (!["GET", "HEAD"].includes(method) && postData != null) {
+      init.body = postData;
+    }
+    const response = await fetch(request.url(), init);
+    const headers = Object.fromEntries(response.headers);
+    // Native fetch decodes compressed bodies but retains these wire headers.
+    // Forwarding them would make the browser try to decode the plain body again.
+    delete headers["content-encoding"];
+    delete headers["content-length"];
+    delete headers["transfer-encoding"];
+    await route.fulfill({
+      status: response.status,
+      headers,
+      body: Buffer.from(await response.arrayBuffer()),
+    });
   });
 }

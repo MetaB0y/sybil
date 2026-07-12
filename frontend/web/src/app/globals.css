@@ -833,6 +833,8 @@ textarea {
   /* Standalone links that behave like controls need the same coarse-pointer
    * target as buttons. Inline prose links deliberately do not opt in. */
   a.mobile-action-link {
+    display: inline-flex;
+    align-items: center;
     min-width: 44px;
     min-height: 44px;
   }
