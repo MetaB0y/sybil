@@ -610,9 +610,10 @@ COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod
 
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
-    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib && touch /opt/sybil/arena.env'
+    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib /opt/sybil/crates/sybil-polymarket && touch /opt/sybil/arena.env'
     scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
+    scp crates/sybil-polymarket/curated_markets.json crates/sybil-polymarket/native_markets.json {{SERVER}}:/opt/sybil/crates/sybil-polymarket/
     scp scripts/ops-smoke.sh scripts/store-backup.sh scripts/store-restore-drill.sh scripts/store-manifest.py scripts/synthetic-probe.sh {{SERVER}}:/opt/sybil/scripts/
     scp scripts/lib/smoke-common.sh {{SERVER}}:/opt/sybil/scripts/lib/
 

@@ -235,6 +235,24 @@ grep -Fq '| ssh {{SERVER}} docker load' <<<"$deploy_all_save" \
     || fail "deploy-all does not stream its images to the remote Docker daemon"
 pass "deploy-all transfers every locally built application image"
 
+# The Polymarket mirror bind-mounts its checked-in catalogs from the source
+# tree on the host. Keep deploy-sync responsible for creating that remote path
+# and copying both files so a fresh box cannot start with stale/missing inputs.
+deploy_sync_recipe=$(
+    awk '
+        /^deploy-sync:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+grep -Fq '/opt/sybil/crates/sybil-polymarket' <<<"$deploy_sync_recipe" \
+    || fail "deploy-sync does not create the remote Polymarket catalog directory"
+for catalog in curated_markets.json native_markets.json; do
+    grep -Fq "crates/sybil-polymarket/$catalog" <<<"$deploy_sync_recipe" \
+        || fail "deploy-sync does not transfer $catalog"
+done
+pass "deploy-sync transfers both bind-mounted Polymarket catalogs"
+
 deploy_verify_recipe=$(
     awk '
         /^deploy-verify:/ { in_recipe = 1; next }
