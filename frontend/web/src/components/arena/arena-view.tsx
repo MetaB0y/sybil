@@ -220,9 +220,16 @@ type ArenaFilterSelectProps = Omit<
 
 export function ArenaFilterSelect({
   label,
+  className,
   ...props
 }: ArenaFilterSelectProps) {
-  return <select aria-label={label} {...props} />;
+  return (
+    <select
+      aria-label={label}
+      className={["arena-filter-select", className].filter(Boolean).join(" ")}
+      {...props}
+    />
+  );
 }
 
 function toneColor(tone: Tone): string {
@@ -276,7 +283,7 @@ function PanelHead({
       }}
     >
       <span className="eyebrow">{title}</span>
-      {actions ? <div>{actions}</div> : null}
+      {actions ? <div className="arena-panel-actions">{actions}</div> : null}
     </div>
   );
 }

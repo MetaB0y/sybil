@@ -111,6 +111,53 @@ test.describe("mobile viewport smoke", () => {
       .toBe("");
   });
 
+  test("deployment fixtures stay out of index and global search", async ({
+    page,
+  }) => {
+    await proxyApiForLocalRun(page);
+    await page.goto("/?q=SYB-247&closed=show");
+
+    await expect(page.getByText("no events match these filters.")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(
+      page.locator('a[href^="/m/"]').filter({
+        hasText: /^SYB-247 deterministic crossing v1/,
+      }),
+    ).toHaveCount(0);
+
+    await page
+      .getByRole("button", { name: "Open navigation menu" })
+      .click();
+    const navigation = page.getByRole("dialog", { name: "Navigation menu" });
+    const search = navigation.getByRole("combobox", {
+      name: "search markets",
+    });
+    await expect(search).toBeFocused();
+    const dropdown = navigation.locator(".nav-search-dropdown");
+    await expect(dropdown).toContainText(
+      "no events or markets match “SYB-247”",
+    );
+    await expect(dropdown.getByRole("option")).toHaveCount(0);
+  });
+
+  test("arena filters keep their native controls inside the mobile panel", async ({
+    page,
+  }) => {
+    await proxyApiForLocalRun(page);
+    await page.goto("/arena");
+
+    for (const label of [
+      "Filter fair value drift by bot",
+      "Select fair value drift market",
+      "Filter recent decisions by bot",
+    ]) {
+      const select = page.getByRole("combobox", { name: label });
+      await expect(select).toBeVisible({ timeout: 30_000 });
+      await expectInsideViewport(select, MOBILE_VIEWPORT.width, label);
+    }
+  });
+
   test("leaderboard outage keeps its retry action in the mobile viewport", async ({
     page,
   }) => {
@@ -263,6 +310,21 @@ test.describe("short mobile recovery", () => {
     expect(importBox!.height).toBeGreaterThanOrEqual(43.5);
     await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
   });
+
+  test("arena filters remain usable at 320px", async ({ page }) => {
+    await proxyApiForLocalRun(page);
+    await page.goto("/arena");
+
+    for (const label of [
+      "Filter fair value drift by bot",
+      "Select fair value drift market",
+      "Filter recent decisions by bot",
+    ]) {
+      const select = page.getByRole("combobox", { name: label });
+      await expect(select).toBeVisible({ timeout: 30_000 });
+      await expectInsideViewport(select, SHORT_VIEWPORT.width, label);
+    }
+  });
 });
 
 async function gridColumnCount(grid: Locator): Promise<number> {
@@ -288,6 +350,23 @@ async function expectNoDocumentOverflow(page: Page, path: string) {
       { message: `${path} should not overflow the document horizontally` },
     )
     .toBeLessThanOrEqual(1);
+}
+
+async function expectInsideViewport(
+  locator: Locator,
+  viewportWidth: number,
+  label: string,
+) {
+  const box = await locator.boundingBox();
+  expect(box, `${label} should have a layout box`).not.toBeNull();
+  expect(
+    box!.x,
+    `${label} should start inside the viewport`,
+  ).toBeGreaterThanOrEqual(0);
+  expect(
+    box!.x + box!.width,
+    `${label} should end inside the viewport`,
+  ).toBeLessThanOrEqual(viewportWidth);
 }
 
 async function expectTouchButtons(page: Page, path: string) {

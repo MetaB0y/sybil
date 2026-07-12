@@ -737,6 +737,24 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .arena-panel-actions {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .arena-panel-actions > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .arena-filter-select {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
   .place-order-overlay {
     align-items: flex-end !important;
     padding: 0 !important;

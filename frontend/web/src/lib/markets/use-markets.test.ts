@@ -9,6 +9,8 @@ import {
   isClosed,
   isMirror,
   isNative,
+  isInternalFixtureMarket,
+  publicMarkets,
   toIndexMarket,
   useMarketsIndex,
   type IndexMarket,
@@ -67,6 +69,60 @@ describe("markets/use-markets helpers", () => {
         mk({ market_id: 2, closed: true }),
       ]),
     ).toBe(false);
+  });
+
+  it("keeps deterministic deployment fixtures out of public market discovery", () => {
+    const fixture = mk({
+      market_id: 247,
+      name: "SYB-247 deterministic crossing v1 run 1783836058392115051",
+    });
+    const real = mk({ market_id: 8, name: "Will the devnet launch?" });
+
+    expect(isInternalFixtureMarket(fixture)).toBe(true);
+    expect(isInternalFixtureMarket(real)).toBe(false);
+    expect(publicMarkets([fixture, real])).toEqual([real]);
+
+    const rawBundle = assemble([fixture, real]);
+    expect(rawBundle.total).toBe(2);
+    expect(rawBundle.byId.get(fixture.market_id)).toEqual(fixture);
+
+    const publicBundle = assemble(publicMarkets([fixture, real]));
+    expect(publicBundle.total).toBe(1);
+    expect(publicBundle.byId.has(fixture.market_id)).toBe(false);
+    expect(publicBundle.byId.get(real.market_id)).toEqual(real);
+  });
+
+  it("filters a raw shared cache only at the public discovery observer", () => {
+    const client = new QueryClient();
+    const fixture = mk({
+      market_id: 247,
+      name: "SYB-247 deterministic crossing v1 run 1",
+    });
+    const real = mk({ market_id: 8, name: "Real market" });
+    client.setQueryData(["markets", "all"], [fixture, real]);
+
+    function Probe() {
+      const { bundle } = useMarketsIndex();
+      return createElement(
+        "span",
+        null,
+        [...(bundle?.byId.values() ?? [])]
+          .map((market) => market.name)
+          .join("|"),
+      );
+    }
+
+    const html = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(Probe),
+      ),
+    );
+
+    expect(html).toContain("Real market");
+    expect(html).not.toContain("SYB-247 deterministic crossing");
+    expect(client.getQueryData(["markets", "all"])).toEqual([fixture, real]);
   });
 
   it("assemble keeps closed markets in byId and groups", () => {
@@ -136,7 +192,11 @@ describe("markets/use-markets helpers", () => {
 
     function Probe({ initial }: { initial: IndexMarket[] }) {
       const { bundle } = useMarketsIndex(initial);
-      return createElement("span", null, bundle?.byId.get(9)?.name ?? "missing");
+      return createElement(
+        "span",
+        null,
+        bundle?.byId.get(9)?.name ?? "missing",
+      );
     }
 
     const html = renderToStaticMarkup(

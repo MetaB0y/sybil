@@ -1,5 +1,6 @@
 import MarketsPageClient from "./markets-page-client";
 import {
+  publicMarkets,
   toIndexMarket,
   type IndexMarket,
   type Market,
@@ -25,7 +26,7 @@ async function getInitialMarkets(): Promise<IndexMarket[] | undefined> {
     if (!response.ok) return undefined;
     const body: unknown = await response.json();
     return Array.isArray(body)
-      ? (body as Market[]).map(toIndexMarket)
+      ? publicMarkets(body as Market[]).map(toIndexMarket)
       : undefined;
   } catch {
     return undefined;
