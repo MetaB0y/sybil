@@ -33,6 +33,13 @@ elif cur is not None:
 
 smoke_is_2xx() { [[ "$1" =~ ^2[0-9][0-9]$ ]]; }
 
+# A mature chain is ready for signed actions only when health exposes both a
+# positive committed height and the lowercase 32-byte genesis domain.
+smoke_is_committed_chain_identity() {
+    local height=${1:-} genesis_hash=${2:-}
+    [[ "$height" =~ ^[1-9][0-9]*$ && "$genesis_hash" =~ ^[0-9a-f]{64}$ ]]
+}
+
 # Run the same Docker command locally or through the post-deploy SSH hop.
 # The command is intentionally a single string because the remote form is one
 # SSH command. Callers must only pass repository-owned command text.

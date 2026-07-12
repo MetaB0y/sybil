@@ -1,7 +1,7 @@
 ---
 tags: [runbook, monitoring, operations]
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-12
 ---
 
 # Synthetic monitoring and alert delivery
@@ -21,7 +21,8 @@ without creating accounts, orders, or any other application state.
 
 `synthetic-probe.sh` fails fast with one `FAIL: ...` line unless:
 
-- `GET /v1/health` is 2xx and reports `status=ok`;
+- `GET /v1/health` is 2xx, reports `status=ok`, and exposes a positive
+  committed height plus a lowercase 64-hex genesis hash;
 - `/v1/blocks/latest` advances between samples separated by 1.5 configured
   block intervals;
 - `/v1/markets` is a nonempty JSON array;

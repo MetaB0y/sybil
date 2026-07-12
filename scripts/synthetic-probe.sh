@@ -68,7 +68,7 @@ source "$SCRIPT_DIR/lib/smoke-common.sh"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     cat <<EOF
-dry-run: GET $BASE/v1/health and require status=ok
+dry-run: GET $BASE/v1/health and require status=ok plus a positive height and 64-hex genesis_hash
 dry-run: GET $BASE/v1/blocks/latest twice, ${INTERVAL}s block interval aware, and require height advancement
 dry-run: GET $BASE/v1/markets and require a nonempty JSON array
 dry-run: OPTIONS $BASE/v1/accounts from Origin: $APP_ORIGIN and require POST CORS permission
@@ -141,6 +141,10 @@ get_json /v1/health
 [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || die "/v1/health returned HTTP $HTTP_CODE"
 [[ "$(printf '%s' "$HTTP_BODY" | smoke_jget status)" == "ok" ]] \
     || die "/v1/health did not report status=ok"
+HEALTH_HEIGHT="$(printf '%s' "$HTTP_BODY" | smoke_jget height)"
+GENESIS_HASH="$(printf '%s' "$HTTP_BODY" | smoke_jget genesis_hash)"
+smoke_is_committed_chain_identity "$HEALTH_HEIGHT" "$GENESIS_HASH" \
+    || die "/v1/health did not expose a positive height and lowercase 64-hex genesis_hash"
 
 get_json /v1/blocks/latest
 [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || die "/v1/blocks/latest returned HTTP $HTTP_CODE"

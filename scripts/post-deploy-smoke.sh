@@ -184,10 +184,15 @@ check_liveness() {
     section "1a. API liveness"
 
     local deadline=$((SECONDS + STARTUP_TIMEOUT)) attempts=0
+    local health_height="" health_genesis=""
     while true; do
         attempts=$((attempts + 1))
         http GET /v1/health
-        if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]]; then
+        health_height="$(echo "$HTTP_BODY" | jget height)"
+        health_genesis="$(echo "$HTTP_BODY" | jget genesis_hash)"
+        if is_2xx "$HTTP_CODE" \
+           && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]] \
+           && smoke_is_committed_chain_identity "$health_height" "$health_genesis"; then
             break
         fi
         if (( SECONDS >= deadline )); then
@@ -197,14 +202,16 @@ check_liveness() {
         sleep "$STARTUP_POLL"
     done
 
-    GENESIS_HASH="$(echo "$HTTP_BODY" | jget genesis_hash)"
-    if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]]; then
+    GENESIS_HASH="$health_genesis"
+    if is_2xx "$HTTP_CODE" \
+       && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]] \
+       && smoke_is_committed_chain_identity "$health_height" "$GENESIS_HASH"; then
         if (( attempts > 1 )); then
             info "/v1/health became ready after $attempts attempts"
         fi
-        pass "/v1/health -> ok (height=$(echo "$HTTP_BODY" | jget height))"
+        pass "/v1/health -> ok (height=$health_height, genesis=${GENESIS_HASH:0:16}...)"
     else
-        fail "/v1/health -> $HTTP_CODE: $HTTP_BODY"
+        fail "/v1/health did not expose a committed chain identity -> $HTTP_CODE: $HTTP_BODY"
     fi
 
     http GET /v1/state-root
