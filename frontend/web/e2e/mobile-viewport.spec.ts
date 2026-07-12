@@ -2,8 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
 const APP_BASE = process.env.E2E_BASE_URL ?? "https://app.172-104-31-54.nip.io";
-const API_BASE =
-  process.env.E2E_API_BASE ?? "https://172-104-31-54.nip.io";
+const API_BASE = process.env.E2E_API_BASE ?? "https://172-104-31-54.nip.io";
 
 test.describe("mobile viewport smoke", () => {
   test.use({ viewport: MOBILE_VIEWPORT, isMobile: true, hasTouch: true });
@@ -111,6 +110,84 @@ test.describe("mobile viewport smoke", () => {
       .poll(() => page.evaluate(() => document.body.style.overflow))
       .toBe("");
   });
+
+  test("leaderboard outage keeps its retry action in the mobile viewport", async ({
+    page,
+  }) => {
+    await proxyApiForLocalRun(page);
+    await page.route(`${API_BASE}/v1/leaderboard**`, async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "synthetic leaderboard outage" }),
+      });
+    });
+    await page.goto("/leaderboard");
+
+    const alert = page
+      .getByRole("alert")
+      .filter({ hasText: "leaderboard unavailable" });
+    await expect(alert).toContainText("leaderboard unavailable", {
+      timeout: 30_000,
+    });
+    await expect(page.getByText("no ranked traders yet")).toHaveCount(0);
+
+    const retry = alert.getByRole("button", { name: "retry" });
+    await expect(retry).toBeVisible();
+    const retryBox = await retry.boundingBox();
+    expect(retryBox).not.toBeNull();
+    expect(retryBox!.x).toBeGreaterThanOrEqual(0);
+    expect(retryBox!.x + retryBox!.width).toBeLessThanOrEqual(
+      MOBILE_VIEWPORT.width,
+    );
+    expect(retryBox!.width).toBeGreaterThanOrEqual(43.5);
+    expect(retryBox!.height).toBeGreaterThanOrEqual(43.5);
+  });
+
+  test("open-batch outage does not relabel the committed price as indicative", async ({
+    page,
+  }) => {
+    await proxyApiForLocalRun(page);
+    await page.goto("/");
+    const href = await page
+      .locator('[data-testid="markets-grid"] a[href^="/m/"]')
+      .first()
+      .getAttribute("href");
+    expect(href).toMatch(/^\/m\/\d+/);
+    const marketId = href!.split("/").pop();
+
+    await page.route(
+      `${API_BASE}/v1/markets/${marketId}/open-batch`,
+      async (route) => {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "synthetic open-batch outage" }),
+        });
+      },
+    );
+    await page.goto(href!);
+    await page.getByRole("tab", { name: /Pro/ }).click();
+
+    const hero = page.getByTestId("batch-hero");
+    await expect(
+      hero
+        .getByRole("alert")
+        .filter({ hasText: "open-batch data unavailable" }),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      hero.getByText("last clearing price", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      hero.getByText("indicative price", { exact: true }),
+    ).toHaveCount(0);
+    const retry = hero.getByRole("button", { name: "retry" });
+    await expect(retry).toBeVisible();
+    const retryBox = await retry.boundingBox();
+    expect(retryBox).not.toBeNull();
+    expect(retryBox!.width).toBeGreaterThanOrEqual(43.5);
+    expect(retryBox!.height).toBeGreaterThanOrEqual(43.5);
+  });
 });
 
 test.describe("compact desktop nav boundary", () => {
@@ -129,12 +206,12 @@ test.describe("compact desktop nav boundary", () => {
   });
 });
 
-async function gridColumnCount(
-  grid: Locator,
-): Promise<number> {
+async function gridColumnCount(grid: Locator): Promise<number> {
   return grid.evaluate((node) => {
     const columns = getComputedStyle(node).gridTemplateColumns.trim();
-    return columns === "none" || columns === "" ? 0 : columns.split(/\s+/).length;
+    return columns === "none" || columns === ""
+      ? 0
+      : columns.split(/\s+/).length;
   });
 }
 
@@ -155,18 +232,20 @@ async function expectNoDocumentOverflow(page: Page, path: string) {
 }
 
 async function expectTouchButtons(page: Page, path: string) {
-  const undersized = await page.locator("button:visible").evaluateAll((buttons) =>
-    buttons.flatMap((button) => {
-      if (button.getAttribute("aria-label") === "Open Next.js Dev Tools") {
-        return [];
-      }
-      const rect = button.getBoundingClientRect();
-      if (rect.width >= 43.5 && rect.height >= 43.5) return [];
-      return [
-        `${button.getAttribute("aria-label") ?? button.textContent?.trim() ?? "button"} (${rect.width.toFixed(1)}×${rect.height.toFixed(1)})`,
-      ];
-    }),
-  );
+  const undersized = await page
+    .locator("button:visible")
+    .evaluateAll((buttons) =>
+      buttons.flatMap((button) => {
+        if (button.getAttribute("aria-label") === "Open Next.js Dev Tools") {
+          return [];
+        }
+        const rect = button.getBoundingClientRect();
+        if (rect.width >= 43.5 && rect.height >= 43.5) return [];
+        return [
+          `${button.getAttribute("aria-label") ?? button.textContent?.trim() ?? "button"} (${rect.width.toFixed(1)}×${rect.height.toFixed(1)})`,
+        ];
+      }),
+    );
   expect(undersized, `${path} should expose 44px touch buttons`).toEqual([]);
 }
 

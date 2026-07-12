@@ -20,14 +20,27 @@ const GRID_GAP = 28;
 export function LeaderboardTable({
   rows,
   isLoading,
+  isRetrying,
+  readState,
+  onRetry,
   myAccountId,
 }: {
   rows: LeaderboardRow[];
   isLoading: boolean;
+  isRetrying: boolean;
+  readState: "ready" | "unavailable" | "stale";
+  onRetry: () => void;
   myAccountId: number | null;
 }) {
   return (
     <section style={{ padding: "26px 24px 40px" }}>
+      {readState !== "ready" && (
+        <LeaderboardReadNotice
+          stale={readState === "stale"}
+          retrying={isRetrying}
+          onRetry={onRetry}
+        />
+      )}
       <div
         className="leaderboard-grid-table"
         style={{
@@ -38,7 +51,7 @@ export function LeaderboardTable({
         }}
       >
         <Header />
-        {rows.length === 0 && (
+        {rows.length === 0 && readState !== "unavailable" && (
           <div
             style={{
               padding: "20px 22px",
@@ -51,10 +64,69 @@ export function LeaderboardTable({
           </div>
         )}
         {rows.map((row) => (
-          <Row key={row.accountId} row={row} isMe={row.accountId === myAccountId} />
+          <Row
+            key={row.accountId}
+            row={row}
+            isMe={row.accountId === myAccountId}
+          />
         ))}
       </div>
     </section>
+  );
+}
+
+export function LeaderboardReadNotice({
+  stale,
+  retrying,
+  onRetry,
+}: {
+  stale: boolean;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role={stale ? "status" : "alert"}
+      aria-live={stale ? "polite" : undefined}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--space-3)",
+        padding: "var(--space-3) 22px",
+        marginBottom: "var(--space-3)",
+        border:
+          "1px solid color-mix(in srgb, var(--warn) 45%, var(--border-1))",
+        borderRadius: "var(--radius-sm)",
+        color: "var(--warn)",
+        fontFamily: "var(--font-mono)",
+        fontSize: "var(--fs-12)",
+      }}
+    >
+      <span>
+        {stale
+          ? "leaderboard refresh failed · showing saved rankings"
+          : "leaderboard unavailable · rankings could not be loaded"}
+      </span>
+      <button
+        type="button"
+        disabled={retrying}
+        onClick={onRetry}
+        style={{
+          minWidth: 44,
+          minHeight: 44,
+          padding: "0 var(--space-3)",
+          border: "1px solid var(--border-2)",
+          borderRadius: "var(--radius-sm)",
+          background: "var(--surface-2)",
+          color: "var(--fg-1)",
+          font: "inherit",
+          cursor: retrying ? "wait" : "pointer",
+        }}
+      >
+        {retrying ? "retrying…" : "retry"}
+      </button>
+    </div>
   );
 }
 

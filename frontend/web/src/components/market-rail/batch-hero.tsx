@@ -25,7 +25,11 @@ import {
   parseNanos,
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
-import { useOpenBatchLive } from "@/lib/market-detail/use-open-batch-live";
+import {
+  useOpenBatchLive,
+  type OpenBatchLive,
+  type OpenBatchReadState,
+} from "@/lib/market-detail/use-open-batch-live";
 import { selectConnection, selectRecentBlocks, useStore } from "@/lib/store";
 import { useBatchCountdown } from "./use-batch-countdown";
 
@@ -33,22 +37,19 @@ const HERO_BATCH_COUNT = 24;
 
 export function BatchHero({ outcome }: { outcome: EventOutcome }) {
   const { progress01, secondsLeftPrecise, latestHeight } = useBatchCountdown();
-  const live = useOpenBatchLive(outcome.marketId);
+  const openBatch = useOpenBatchLive(outcome.marketId);
+  const live = openBatch.data;
   const recent = useStore(selectRecentBlocks);
   const connection = useStore(selectConnection);
 
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const placers = live?.uniquePlacers ?? null;
-  // Indicative YES price: only trust the live shadow-solve when something would
-  // actually clear (indicative volume > 0). A thin / one-sided open batch still
-  // reports a degenerate clearing price (often >99¢) that bears no relation to
-  // the market — so when nothing crosses we fall back to the mark, keeping this
-  // number in agreement with the chart and the BuyBox limit default.
-  const liveIndicativeYesNanos =
-    live != null && live.indicativeVolumeNanos > 0n
-      ? live.indicativeYesPriceNanos
-      : null;
-  const indicativeYesNanos = liveIndicativeYesNanos ?? outcome.yesPriceNanos;
+  const price = deriveOpenBatchPrice(
+    live,
+    openBatch.readState,
+    outcome.yesPriceNanos,
+    outcome.shortLabel,
+  );
 
   // Honest connection pill: only claim a "live batch" when the block stream is
   // actually connected. If it's reconnecting/failed the countdown freezes at
@@ -64,6 +65,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
 
   return (
     <div
+      data-testid="batch-hero"
       style={{
         background:
           "linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 2%, transparent))",
@@ -111,7 +113,14 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
           progress01={progress01}
           countdown={formatBatchSeconds(secondsLeftPrecise)}
         />
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            minWidth: 0,
+          }}
+        >
           <div
             style={{
               fontFamily: "var(--font-mono)",
@@ -173,15 +182,27 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
         }}
       />
 
+      <OpenBatchReadNotice
+        state={openBatch.readState}
+        retrying={openBatch.isRetrying}
+        onRetry={openBatch.retry}
+      />
+
       {/* Indicative trio */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <SubStat
           label={
-            <Glossary term="Indicative price">indicative price</Glossary>
+            price.kind === "indicative" ? (
+              <Glossary term="Indicative price">indicative price</Glossary>
+            ) : (
+              "last clearing price"
+            )
           }
-          secondary={`for ${outcome.shortLabel}`}
+          secondary={price.secondary}
           value={
-            indicativeYesNanos == null ? "—" : formatCentsPrecise(indicativeYesNanos)
+            price.valueNanos == null
+              ? "—"
+              : formatCentsPrecise(price.valueNanos)
           }
           valueColor="var(--yes)"
         />
@@ -189,7 +210,9 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
           label={<Glossary term="IEV">indicative volume</Glossary>}
           secondary="would clear at indicative"
           value={
-            live == null ? "—" : formatCompactDollars(live.indicativeVolumeNanos)
+            live == null
+              ? "—"
+              : formatCompactDollars(live.indicativeVolumeNanos)
           }
         />
       </div>
@@ -213,6 +236,105 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
           last {HERO_BATCH_COUNT} batches · matched vol · price move
         </div>
       </div>
+    </div>
+  );
+}
+
+export function deriveOpenBatchPrice(
+  live: OpenBatchLive | null,
+  readState: OpenBatchReadState,
+  committedYesNanos: bigint | null,
+  outcomeLabel: string,
+): {
+  kind: "indicative" | "last-clearing";
+  valueNanos: bigint | null;
+  secondary: string;
+} {
+  // Only a successful shadow-solve with positive crossing volume is an
+  // indicative price. A one-sided/no-cross batch, initial load, or cold outage
+  // uses the committed mark and labels it as such.
+  if (
+    live?.indicativeYesPriceNanos != null &&
+    live.indicativeVolumeNanos > 0n
+  ) {
+    return {
+      kind: "indicative",
+      valueNanos: live.indicativeYesPriceNanos,
+      secondary:
+        readState === "stale"
+          ? "saved open-batch response"
+          : `for ${outcomeLabel}`,
+    };
+  }
+
+  const secondary =
+    readState === "loading"
+      ? "open batch loading"
+      : readState === "unavailable"
+        ? "open batch unavailable"
+        : readState === "stale"
+          ? "no cross in saved response"
+          : "no open-batch cross";
+  return {
+    kind: "last-clearing",
+    valueNanos: committedYesNanos,
+    secondary,
+  };
+}
+
+export function OpenBatchReadNotice({
+  state,
+  retrying,
+  onRetry,
+}: {
+  state: OpenBatchReadState;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  if (state === "loading" || state === "ready") return null;
+  const stale = state === "stale";
+  return (
+    <div
+      role={stale ? "status" : "alert"}
+      aria-live={stale ? "polite" : undefined}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--space-2)",
+        margin: "0 0 14px",
+        padding: "var(--space-2) var(--space-3)",
+        border:
+          "1px solid color-mix(in srgb, var(--warn) 45%, var(--border-1))",
+        borderRadius: "var(--radius-sm)",
+        color: "var(--warn)",
+        fontFamily: "var(--font-mono)",
+        fontSize: "var(--fs-11)",
+      }}
+    >
+      <span>
+        {stale
+          ? "open-batch refresh failed · showing saved response"
+          : "open-batch data unavailable"}
+      </span>
+      <button
+        type="button"
+        disabled={retrying}
+        onClick={onRetry}
+        style={{
+          minWidth: 44,
+          minHeight: 44,
+          padding: "0 var(--space-2)",
+          border: "1px solid var(--border-2)",
+          borderRadius: "var(--radius-sm)",
+          background: "var(--surface-2)",
+          color: "var(--fg-1)",
+          font: "inherit",
+          cursor: retrying ? "wait" : "pointer",
+        }}
+      >
+        {retrying ? "retrying…" : "retry"}
+      </button>
     </div>
   );
 }
@@ -447,7 +569,8 @@ function BatchHistoryBars({
         />
       ))}
       {bars.map((bar) => {
-        const ratio = max === 0n ? 0 : Number((bar.volNanos * 1000n) / max) / 1000;
+        const ratio =
+          max === 0n ? 0 : Number((bar.volNanos * 1000n) / max) / 1000;
         const h = Math.max(4, ratio * 44);
         const isHover = hover?.height === bar.height;
         return (
@@ -485,7 +608,9 @@ function BatchHistoryBars({
               <BatchBarTooltip
                 bar={bar}
                 anchor={hover.rect}
-                settledAgoMs={nowMs > 0 ? Math.max(0, nowMs - bar.timestampMs) : null}
+                settledAgoMs={
+                  nowMs > 0 ? Math.max(0, nowMs - bar.timestampMs) : null
+                }
               />
             )}
           </div>
@@ -536,18 +661,26 @@ function BatchBarTooltip({
           fontVariantNumeric: "tabular-nums",
         }}
       >
-        <span style={{ color: "var(--fg-3)" }}>batch #{formatInt(bar.height)}</span>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <span style={{ color: "var(--fg-3)" }}>
+          batch #{formatInt(bar.height)}
+        </span>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 12 }}
+        >
           <span style={{ color: "var(--fg-3)" }}>settled</span>
           <span style={{ color: "var(--fg-1)" }}>{settledLabel}</span>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 12 }}
+        >
           <span style={{ color: "var(--fg-3)" }}>matched vol</span>
           <span style={{ color: "var(--fg-1)" }}>
             {formatCompactDollars(bar.volNanos)}
           </span>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 12 }}
+        >
           <span style={{ color: "var(--fg-3)" }}>price move</span>
           <span style={{ color: ppColor }}>
             {!cleared
