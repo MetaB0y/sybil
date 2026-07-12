@@ -95,6 +95,31 @@ grep -Fq 'targets: ["sybil-arena:9101"]' deploy/prometheus.yml \
     || fail "VictoriaMetrics does not scrape the arena metrics exporter"
 pass "arena desired-state metrics are enabled and scraped in dev/prod compose"
 
+arena_service_block=$(
+    awk '
+        /^  sybil-arena:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.yml
+)
+grep -Fq 'http://127.0.0.1:9101/metrics' <<<"$arena_service_block" \
+    || fail "sybil-arena has no metrics-readiness healthcheck"
+
+arena_dashboard_block=$(
+    awk '
+        /^  sybil-arena-dashboard:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.yml
+)
+grep -Fq 'http://127.0.0.1:8501/_stcore/health' <<<"$arena_dashboard_block" \
+    || fail "sybil-arena-dashboard has no Streamlit readiness healthcheck"
+grep -Fq 'sybil-arena:' <<<"$arena_dashboard_block" \
+    || fail "sybil-arena-dashboard does not depend on sybil-arena"
+grep -Fq 'condition: service_healthy' <<<"$arena_dashboard_block" \
+    || fail "sybil-arena-dashboard does not wait for healthy arena metrics"
+pass "arena runner and dashboard expose healthchecks with ordered startup"
+
 retention_env=$(
     compose config | python3 -c '
 import re

@@ -134,6 +134,16 @@ groups:
           summary: "sybil-api scrape target is down"
           description: "VictoriaMetrics has not been able to scrape sybil-api for 3m. Check the API container and host pressure before redeploying."
 
+      - alert: ArenaDown
+        expr: up{job="sybil-arena"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          component: arena
+        annotations:
+          summary: "Arena scrape target is down"
+          description: "VictoriaMetrics has not been able to scrape the Arena runner for 3m. Trading and Arena-owned liveness signals may be unavailable."
+
       - alert: ReferencePriceFeedStale
         expr: |
           max(sybil_reference_prices_total) > 0

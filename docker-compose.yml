@@ -166,6 +166,12 @@ services:
       sybil-api:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9101/metrics"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
 
     logging: *default-logging
   sybil-arena-dashboard:
@@ -182,8 +188,15 @@ services:
     volumes:
       - arena-data:/data
     depends_on:
-      - sybil-arena
+      sybil-arena:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8501/_stcore/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
 
     logging: *default-logging
   victoriametrics:

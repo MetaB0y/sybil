@@ -10,6 +10,26 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
+      - series: 'up{job="sybil-arena",instance="sybil-arena:9101"}'
+        values: "0+0x5"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ArenaDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: ArenaDown
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-arena"
+              instance: "sybil-arena:9101"
+              severity: critical
+              component: arena
+            exp_annotations:
+              summary: "Arena scrape target is down"
+              description: "VictoriaMetrics has not been able to scrape the Arena runner for 3m. Trading and Arena-owned liveness signals may be unavailable."
+
+  - interval: 1m
+    input_series:
       - series: 'sybil_reference_eligible_markets_active_total{job="sybil-api"}'
         values: "72+0x20"
       - series: 'sybil_reference_prices_active_total{job="sybil-api"}'
