@@ -17,11 +17,16 @@ import {
   type CreateAccountKeyMode,
   createDemoAccount,
   importExistingAccount,
+  recoverCreatedAccount,
   signInWithDiscoverablePasskey,
   signInWithStoredAccount,
   signInWithStoredPasskey,
 } from "@/lib/account/actions";
-import { readStoredAccount } from "@/lib/account/storage";
+import {
+  readStoredAccount,
+  type AccountAuthScheme,
+} from "@/lib/account/storage";
+import { useAccountStore } from "@/lib/account/store";
 import {
   useConnectModalOpen,
   useSetConnectModalOpen,
@@ -296,6 +301,7 @@ function TabButton({
 }
 
 function CreateTab() {
+  const setOpen = useSetConnectModalOpen();
   const [balanceNanos, setBalanceNanos] = useState<bigint>(
     BALANCE_OPTIONS[2]!.nanos,
   );
@@ -303,14 +309,37 @@ function CreateTab() {
     isWebAuthnAvailable() ? "passkey" : "local_key",
   );
   const [error, setError] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState<{
+    accountId: number;
+    publicKeyHex: string;
+    authScheme: AccountAuthScheme;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit() {
     setError(null);
+    setRecovery(null);
     setBusy(true);
     try {
       await createDemoAccount(balanceNanos, mode);
     } catch (e) {
+      if (e instanceof AccountError && e.kind === "account_created_recovery") {
+        const saved = readStoredAccount();
+        const accountId = e.createdAccountId ?? saved?.accountId;
+        const savedMatches = saved != null && saved.accountId === accountId;
+        const publicKeyHex =
+          e.createdPublicKeyHex ??
+          (savedMatches ? saved.publicKeyHex : undefined);
+        if (accountId !== undefined && publicKeyHex !== undefined) {
+          setRecovery({
+            accountId,
+            publicKeyHex,
+            authScheme:
+              e.createdAuthScheme ??
+              (savedMatches ? saved.authScheme : "raw_p256"),
+          });
+        }
+      }
       const msg =
         e instanceof AccountError && e.kind === "dev_mode_off"
           ? "Demo accounts are disabled on this server. Import an existing account instead."
@@ -320,6 +349,40 @@ function CreateTab() {
               ? e.message
               : "Failed to create account";
       setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRecover() {
+    if (!recovery) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const saved = readStoredAccount();
+      const session = useAccountStore.getState().session;
+      if (
+        saved?.accountId === recovery.accountId &&
+        saved.publicKeyHex === recovery.publicKeyHex &&
+        saved.authScheme === recovery.authScheme &&
+        saved.readApiKey != null &&
+        session?.accountId === saved.accountId &&
+        session.publicKeyHex === saved.publicKeyHex &&
+        session.authScheme === saved.authScheme &&
+        session.readApiKey === saved.readApiKey
+      ) {
+        setOpen(false);
+        return;
+      }
+      await recoverCreatedAccount(
+        recovery.accountId,
+        recovery.publicKeyHex,
+        recovery.authScheme,
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Saved-account reconnect failed",
+      );
     } finally {
       setBusy(false);
     }
@@ -372,19 +435,30 @@ function CreateTab() {
         </div>
       </div>
 
-      {error && <ErrorRow>{error}</ErrorRow>}
+      {error &&
+        (recovery ? (
+          <RecoveryRow>{error}</RecoveryRow>
+        ) : (
+          <ErrorRow>{error}</ErrorRow>
+        ))}
 
       <button
         type="button"
-        onClick={onSubmit}
+        onClick={recovery ? onRecover : onSubmit}
         disabled={busy}
         style={primaryButtonStyle(busy)}
       >
         {busy
-          ? "Creating…"
-          : mode === "passkey"
-            ? "Create with passkey"
-            : "Create local account"}
+          ? recovery
+            ? "Reconnecting…"
+            : "Creating…"
+          : recovery
+            ? `Recover ${
+                recovery.authScheme === "webauthn" ? "passkey" : "local"
+              } account #${recovery.accountId}`
+            : mode === "passkey"
+              ? "Create with passkey"
+              : "Create local account"}
       </button>
     </div>
   );
@@ -551,6 +625,26 @@ function ErrorRow({ children }: { children: React.ReactNode }) {
         border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
         borderRadius: 6,
         color: "var(--no)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function RecoveryRow({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      role="status"
+      style={{
+        padding: "8px 10px",
+        background:
+          "var(--warn-soft, color-mix(in srgb, var(--warn) 12%, transparent))",
+        border: "1px solid color-mix(in srgb, var(--warn) 32%, transparent)",
+        borderRadius: 6,
+        color: "var(--warn)",
         fontFamily: "var(--font-mono)",
         fontSize: 12,
       }}

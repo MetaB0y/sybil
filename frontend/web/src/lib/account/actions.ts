@@ -30,6 +30,7 @@ import {
   clearKeyHandleIfMatches,
   setKeyHandle,
   useAccountStore,
+  type AccountSession,
 } from "./store";
 import {
   clearStoredAccount,
@@ -37,6 +38,7 @@ import {
   readStoredAccount,
   readStoredAccountRevision,
   writeStoredAccount,
+  type AccountAuthScheme,
 } from "./storage";
 
 export class AccountError extends Error {
@@ -48,9 +50,13 @@ export class AccountError extends Error {
       | "invalid_jwk"
       | "account_not_found"
       | "key_register_failed"
+      | "account_created_recovery"
       | "webauthn_unavailable"
       | "session_changed"
       | "unknown",
+    public readonly createdAccountId?: number,
+    public readonly createdPublicKeyHex?: string,
+    public readonly createdAuthScheme?: AccountAuthScheme,
   ) {
     super(message);
     this.name = "AccountError";
@@ -59,11 +65,23 @@ export class AccountError extends Error {
 
 export type CreateAccountKeyMode = "passkey" | "local_key";
 
+type PendingCreatedAccount = {
+  accountId: number;
+  publicKeyHex: string;
+  jwk: JsonWebKey;
+  privateKey: CryptoKey;
+  storageRevisionBeforeCheckpoint: string | null;
+};
+
+const pendingCreatedAccounts = new Map<number, PendingCreatedAccount>();
+
 /**
  * Account creation always registers an initial key in the same request. The
  * passkey path uses a short-lived raw P-256 bootstrap key because WebAuthn's
- * discoverable user handle needs the server-assigned account id; it immediately
- * registers the passkey, revokes the bootstrap key, and mints a read token.
+ * discoverable user handle needs the server-assigned account id. The bootstrap
+ * credential is persisted before any passkey prompt so a cancellation or
+ * network failure cannot strand the newly-created account. The passkey only
+ * replaces it after registration succeeds, then mints its own read token.
  *
  * Throws AccountError("dev_mode_off") if the server rejects step 1, so the
  * modal can show a "bridge deposits coming soon" message.
@@ -83,6 +101,16 @@ export async function createDemoAccount(
   const bootstrapPublicKeyHex = await exportPublicKeyCompressedHex(
     bootstrap.publicKey,
   );
+  const bootstrapJwk = await exportPrivateJwk(bootstrap.privateKey);
+  let storageRevisionBeforeCreate: string | null;
+  try {
+    storageRevisionBeforeCreate = readStoredAccountRevision();
+  } catch {
+    throw new AccountError(
+      "Browser storage is unavailable. Enable site storage before creating an account.",
+      "unknown",
+    );
+  }
   const created = await api.POST("/v1/accounts", {
     body: {
       initial_balance_nanos: Number(initialBalanceNanos) as unknown as string,
@@ -107,9 +135,66 @@ export async function createDemoAccount(
   }
   const accountId = created.data.account_id;
   setKeyHandle(accountId, bootstrap.privateKey);
+  const bootstrapAccount = {
+    accountId,
+    publicKeyHex: bootstrapPublicKeyHex,
+    authScheme: "raw_p256" as const,
+    jwk: bootstrapJwk,
+  };
+  pendingCreatedAccounts.set(accountId, {
+    accountId,
+    publicKeyHex: bootstrapPublicKeyHex,
+    jwk: bootstrapJwk,
+    privateKey: bootstrap.privateKey,
+    storageRevisionBeforeCheckpoint: storageRevisionBeforeCreate,
+  });
+  let installedSession: AccountSession | null = null;
+  let storageRevision: string | null | undefined;
+  let initialCheckpointWritten = false;
 
-  if (mode === "passkey") {
+  try {
+    const revisionBeforeCheckpoint = readStoredAccountRevision();
+    pendingCreatedAccounts.get(accountId)!.storageRevisionBeforeCheckpoint =
+      revisionBeforeCheckpoint;
+    if (revisionBeforeCheckpoint !== storageRevisionBeforeCreate) {
+      throw new AccountError(
+        `Account #${accountId} was created, but the saved identity changed while the request was in flight. Recover it explicitly instead of creating another account.`,
+        "account_created_recovery",
+        accountId,
+        bootstrapPublicKeyHex,
+        "raw_p256",
+      );
+    }
+    writeStoredAccount(bootstrapAccount);
+    initialCheckpointWritten = true;
+    pendingCreatedAccounts.delete(accountId);
+    storageRevision = readStoredAccountRevision();
+
+    if (mode === "local_key") {
+      const bootstrapReadKey = await createApiKey({
+        accountId,
+        publicKeyHex: bootstrapPublicKeyHex,
+        authScheme: "raw_p256",
+        label: "web session",
+      });
+      requireUnchangedStorageRevision(storageRevision);
+      writeStoredAccount({
+        ...bootstrapAccount,
+        readApiKey: bootstrapReadKey.token,
+      });
+      installedSession = {
+        accountId,
+        publicKeyHex: bootstrapPublicKeyHex,
+        authScheme: "raw_p256",
+        readApiKey: bootstrapReadKey.token,
+      };
+      useAccountStore.getState().setSession(installedSession);
+      useAccountStore.getState().setConnectModalOpen(false);
+      return;
+    }
+
     const passkey = await createPasskeyForAccount(accountId);
+    requireUnchangedStorageRevision(storageRevision);
     await registerPasskey({
       accountId,
       publicKeyHex: bootstrapPublicKeyHex,
@@ -117,6 +202,35 @@ export async function createDemoAccount(
       passkey,
       label: "browser passkey",
     });
+    requireUnchangedStorageRevision(storageRevision);
+    const passkeyCheckpoint = {
+      accountId,
+      publicKeyHex: passkey.publicKeyHex,
+      authScheme: "webauthn" as const,
+      credentialIdB64url: passkey.credentialIdB64url,
+    };
+    writeStoredAccount(passkeyCheckpoint);
+    storageRevision = readStoredAccountRevision();
+    const passkeyReadKey = await createApiKey({
+      accountId,
+      publicKeyHex: passkey.publicKeyHex,
+      authScheme: "webauthn",
+      credentialIdB64url: passkey.credentialIdB64url,
+      label: "web session",
+    });
+    requireUnchangedStorageRevision(storageRevision);
+    const passkeyAccount = {
+      ...passkeyCheckpoint,
+      readApiKey: passkeyReadKey.token,
+    };
+    writeStoredAccount(passkeyAccount);
+    storageRevision = readStoredAccountRevision();
+    installedSession = passkeyAccount;
+    useAccountStore.getState().setSession(installedSession);
+
+    // Revoke only after the passkey is independently usable and durable. If
+    // cleanup fails, the passkey session remains recoverable and the modal
+    // offers a reconnect instead of allocating another funded account.
     await revokeSigningKey({
       accountId,
       publicKeyHex: bootstrapPublicKeyHex,
@@ -124,54 +238,159 @@ export async function createDemoAccount(
       targetPubkeyHex: bootstrapPublicKeyHex,
       targetAuthScheme: "raw_p256",
     });
-    clearKeyHandle(accountId);
-    const readKey = await createApiKey({
-      accountId,
-      publicKeyHex: passkey.publicKeyHex,
-      authScheme: "webauthn",
-      credentialIdB64url: passkey.credentialIdB64url,
-      label: "web session",
-    });
-
-    writeStoredAccount({
-      accountId,
-      publicKeyHex: passkey.publicKeyHex,
-      authScheme: "webauthn",
-      credentialIdB64url: passkey.credentialIdB64url,
-      readApiKey: readKey.token,
-    });
-    useAccountStore.getState().setSession({
-      accountId,
-      publicKeyHex: passkey.publicKeyHex,
-      authScheme: "webauthn",
-      credentialIdB64url: passkey.credentialIdB64url,
-      readApiKey: readKey.token,
-    });
+    requireUnchangedStorageRevision(storageRevision);
+    clearKeyHandleIfMatches(accountId, bootstrap.privateKey);
     useAccountStore.getState().setConnectModalOpen(false);
+  } catch (error) {
+    const storageChanged =
+      storageRevision !== undefined &&
+      readStoredAccountRevision() !== storageRevision;
+    if (
+      storageChanged ||
+      (error instanceof AccountError && error.kind === "session_changed")
+    ) {
+      clearKeyHandleIfMatches(accountId, bootstrap.privateKey);
+      const current = useAccountStore.getState().session;
+      if (
+        installedSession &&
+        current?.accountId === installedSession.accountId &&
+        current.publicKeyHex === installedSession.publicKeyHex &&
+        current.authScheme === installedSession.authScheme &&
+        current.credentialIdB64url === installedSession.credentialIdB64url &&
+        current.readApiKey === installedSession.readApiKey
+      ) {
+        useAccountStore.getState().setSession(null);
+      }
+      if (error instanceof AccountError && error.kind === "session_changed") {
+        throw error;
+      }
+      throw new AccountError(
+        "The saved account changed while account setup was in progress. Reopen Connect before continuing.",
+        "session_changed",
+      );
+    }
+    if (!initialCheckpointWritten) {
+      if (
+        error instanceof AccountError &&
+        error.kind === "account_created_recovery"
+      ) {
+        throw error;
+      }
+      const detail =
+        error instanceof Error ? ` ${error.message}` : " Setup did not finish.";
+      throw new AccountError(
+        `Account #${accountId} was created, but its browser checkpoint could not be saved.${detail} Keep this page open, restore browser storage, and retry recovery instead of creating another account.`,
+        "account_created_recovery",
+        accountId,
+        bootstrapPublicKeyHex,
+        "raw_p256",
+      );
+    }
+    let stored: ReturnType<typeof readStoredAccount> = null;
+    try {
+      stored = readStoredAccount();
+    } catch {
+      stored = null;
+    }
+    if (stored?.accountId === accountId) {
+      if (stored.authScheme === "webauthn") {
+        clearKeyHandleIfMatches(accountId, bootstrap.privateKey);
+        const current = useAccountStore.getState().session;
+        if (
+          current?.accountId === accountId &&
+          current.publicKeyHex === bootstrapPublicKeyHex &&
+          current.authScheme !== "webauthn"
+        ) {
+          useAccountStore.getState().setSession(null);
+        }
+      }
+      const credential =
+        stored.authScheme === "webauthn" ? "passkey" : "local browser key";
+      const detail =
+        error instanceof Error ? ` ${error.message}` : " Setup did not finish.";
+      throw new AccountError(
+        `Account #${accountId} was created and saved with its ${credential}.${detail} Reconnect the saved account instead of creating another one.`,
+        "account_created_recovery",
+        accountId,
+        stored.publicKeyHex,
+        stored.authScheme,
+      );
+    }
+    const detail =
+      error instanceof Error ? ` ${error.message}` : " Setup did not finish.";
+    throw new AccountError(
+      `Account #${accountId} was created, but its browser checkpoint could not be saved.${detail} Keep this page open, restore browser storage, and retry recovery instead of creating another account.`,
+      "account_created_recovery",
+      accountId,
+      bootstrapPublicKeyHex,
+      "raw_p256",
+    );
+  }
+}
+
+/** Recover a just-created account without issuing another account-creation
+ * request. Normally this delegates to the durable Saved account path. If the
+ * initial localStorage write failed, the bootstrap credential remains only in
+ * memory long enough for the user to restore storage and retry safely. */
+export async function recoverCreatedAccount(
+  accountId: number,
+  expectedPublicKeyHex: string,
+  expectedAuthScheme: AccountAuthScheme,
+): Promise<void> {
+  const pending = pendingCreatedAccounts.get(accountId);
+  if (pending) {
+    if (
+      pending.publicKeyHex !== expectedPublicKeyHex ||
+      expectedAuthScheme !== "raw_p256" ||
+      readStoredAccountRevision() !== pending.storageRevisionBeforeCheckpoint
+    ) {
+      throw new AccountError(
+        `Recovery state for account #${accountId} changed in another tab. Reopen Connect before continuing.`,
+        "session_changed",
+      );
+    }
+    setKeyHandle(accountId, pending.privateKey);
+    try {
+      writeStoredAccount({
+        accountId,
+        publicKeyHex: pending.publicKeyHex,
+        authScheme: "raw_p256",
+        jwk: pending.jwk,
+      });
+    } catch {
+      throw new AccountError(
+        `Browser storage is still unavailable for account #${accountId}. Enable site storage and try recovery again.`,
+        "account_created_recovery",
+        accountId,
+        pending.publicKeyHex,
+        "raw_p256",
+      );
+    }
+    pendingCreatedAccounts.delete(accountId);
+    await signInWithStoredAccount();
     return;
   }
 
-  const readKey = await createApiKey({
-    accountId,
-    publicKeyHex: bootstrapPublicKeyHex,
-    authScheme: "raw_p256",
-    label: "web session",
-  });
-  const jwk = await exportPrivateJwk(bootstrap.privateKey);
-  writeStoredAccount({
-    accountId,
-    publicKeyHex: bootstrapPublicKeyHex,
-    authScheme: "raw_p256",
-    jwk,
-    readApiKey: readKey.token,
-  });
-  useAccountStore.getState().setSession({
-    accountId,
-    publicKeyHex: bootstrapPublicKeyHex,
-    authScheme: "raw_p256",
-    readApiKey: readKey.token,
-  });
-  useAccountStore.getState().setConnectModalOpen(false);
+  const stored = readStoredAccount();
+  if (
+    stored?.accountId === accountId &&
+    stored.publicKeyHex === expectedPublicKeyHex &&
+    stored.authScheme === expectedAuthScheme
+  ) {
+    await signInWithStoredAccount();
+    return;
+  }
+  if (stored) {
+    throw new AccountError(
+      `The saved identity no longer matches newly-created account #${accountId}. Reopen Connect before continuing.`,
+      "session_changed",
+    );
+  }
+
+  throw new AccountError(
+    `Recovery for account #${accountId} is no longer available in this tab.`,
+    "session_changed",
+  );
 }
 
 /**
