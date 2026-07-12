@@ -134,7 +134,15 @@ impl BlockSequencer {
         }
 
         for order in &submission.orders {
-            if let Err(reason) = validate_order_shape(order) {
+            let shape = if submission.mm_constraint.is_some() {
+                validate_order_shape(order)
+            } else {
+                crate::validation::validate_resting_order_shape(
+                    order,
+                    self.config.min_resting_order_notional_nanos,
+                )
+            };
+            if let Err(reason) = shape {
                 return AdmitOutcome::Rejected(SequencerError::Rejected(Rejection {
                     order_id: 0,
                     account_id: submission.account_id,

@@ -34,6 +34,28 @@ Signals that require explicit review include changes to state-root leaves,
 canonical encodings, signing domains, `BlockWitness`, public inputs, guest
 dependencies, withdrawal/escape claim schemas, or the L1 verifier adapters.
 
+`just check-consensus` enforces the decision mechanically. It fingerprints the
+canonical golden vectors, desired verifier pins, both guest source/commitment
+locks, and the resolved Commonware packages in `Cargo.lock`, then requires
+`deploy/validity-boundary.json` to bind that exact fingerprint to either
+`fresh_genesis` or a repository migration plan. After regenerating the affected
+artifacts, declare the new boundary explicitly:
+
+```bash
+VALIDITY_BOUNDARY_ACTION=fresh_genesis \
+VALIDITY_BOUNDARY_REASON="why this validity boundary moved" \
+just validity-boundary-write
+# Or, once state must be preserved:
+VALIDITY_BOUNDARY_ACTION=migration \
+VALIDITY_BOUNDARY_REASON="why migration is safe" \
+VALIDITY_BOUNDARY_REFERENCE=docs/runbooks/the-reviewed-migration.md \
+just validity-boundary-write
+```
+
+The declaration is a review and deploy guardrail, not proof that a reset or
+migration happened. Deployment evidence remains in `deploy/validity-pins.json`
+and the private deployment log.
+
 ## 1. Freeze and record the target
 
 1. Fetch before selecting a revision; multiple workspaces may have moved
@@ -50,6 +72,10 @@ dependencies, withdrawal/escape claim schemas, or the L1 verifier adapters.
    After an intentional rebuild, run `just validity-pins-write`. This updates
    the desired commitments in `deploy/validity-pins.json` and deliberately
    marks the deployment `pending_redeploy`; it never claims the adapters moved.
+
+   Run `just validity-boundary-write` with the selected action after all
+   validity artifacts are final. A later vector, pin, guest, or Commonware move
+   makes that declaration stale and fails `just check-consensus`.
 
 5. Take a store backup and restore-drill it, even when the state will be
    discarded. The backup is incident evidence and the rollback reference.
@@ -101,9 +127,9 @@ just deploy-monitoring
 just deploy-caddy
 ```
 
-`deploy-api`, `deploy-web`, and `deploy-arena` run the post-deploy gate. The
-current `deploy-all` recipe does not transfer the freshly built `sybil-web`
-image, so do not rely on it alone for a frontend-bearing fresh-genesis release.
+`deploy-api`, `deploy-web`, `deploy-arena`, and `deploy-all` run the post-deploy
+gate. `deploy-all` builds all application images locally, transfers the API,
+arena, and web images to the host, and starts the complete Compose stack.
 
 ## 5. Verify before reopening
 

@@ -183,6 +183,22 @@ pub enum SequencerError {
     /// The requested read API key was not found (SYB-60).
     #[error("api key not found")]
     ApiKeyNotFound,
+    /// Lifetime read API-key record cap reached (active and revoked records).
+    #[error("account API-key limit reached: {count} >= {limit}")]
+    ApiKeyLimit { count: usize, limit: usize },
+    /// A read API-key label exceeds its persisted byte limit.
+    #[error("API-key label is too long: {bytes} bytes > {limit}")]
+    ApiKeyLabelTooLong { bytes: usize, limit: usize },
+    /// A signing-key label exceeds its persisted byte limit.
+    #[error("signing-key label is too long: {bytes} bytes > {limit}")]
+    SigningKeyLabelTooLong { bytes: usize, limit: usize },
+    /// A control-plane mutation would make the recovery account too large for
+    /// its deliberately conservative qMDB admission budget.
+    #[error("serialized account exceeds storage budget: {bytes} bytes > {limit}")]
+    AccountStorageBudgetExceeded { bytes: usize, limit: usize },
+    /// The next signing-key operation would exceed the witness validity cap.
+    #[error("block signing-key operation limit reached: {count} >= {limit}")]
+    KeyOpLimit { count: usize, limit: usize },
     /// Profile field failed length/charset validation (SYB-60).
     #[error("invalid profile: {0}")]
     ProfileInvalid(String),

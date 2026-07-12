@@ -1,0 +1,5 @@
+{
+  "_comment": "fixture comment is not validity input",
+  "schema_version": 4,
+  "canonical_witness": { "length": 42, "hash": "fixture-witness" }
+}

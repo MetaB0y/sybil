@@ -176,6 +176,7 @@ pub enum SequencerMsg {
     ),
     GetBlock(u64, RpcReplyPort<Result<SealedBlock, SequencerError>>),
     GetDaArtifact(u64, RpcReplyPort<Result<DaArtifactLookup, SequencerError>>),
+    GetDaManifest(u64, RpcReplyPort<Result<DaManifestLookup, SequencerError>>),
     CreateMarketWithMetadata(
         String,
         MarketMetadata,

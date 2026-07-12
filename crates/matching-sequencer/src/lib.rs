@@ -26,7 +26,10 @@ pub mod validation;
 #[cfg(test)]
 mod crash_harness;
 
-pub use account::{Account, AccountId, AccountProfile, AccountStore, ApiKeyRecord};
+pub use account::{
+    Account, AccountId, AccountProfile, AccountStore, ApiKeyRecord, MAX_API_KEY_LABEL_BYTES,
+    MAX_API_KEYS_PER_ACCOUNT, MAX_SERIALIZED_ACCOUNT_BYTES, MAX_SIGNING_KEY_LABEL_BYTES,
+};
 pub use account_storage::{
     AccountSnapshotSlot, QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts,
     QmdbStateKeyValueProofParts, QmdbStateLeafExclusionProof, QmdbStateLeafProof,
@@ -63,14 +66,15 @@ pub use market_info::{
 };
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{
-    AnalyticsMemoryStats, BatchResult, BatchSequencer, BlockSequencer, DEFAULT_ORDER_TTL_BLOCKS,
-    LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo, SequencerConfig,
+    AnalyticsMemoryStats, BatchResult, BatchSequencer, BlockSequencer,
+    DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS, DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase,
+    LeaderboardRow, OrderSubmission, PendingOrderInfo, SequencerConfig,
 };
 pub use store::{
     AutoResolutionAction, AutoResolutionRecord, DA_FILE_PROVIDER_REF_ENCODING,
     DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
     DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact, DaArtifactIntegrityError, DaArtifactLookup,
-    DaArtifactManifest, DaProviderRef,
+    DaArtifactManifest, DaManifestLookup, DaProviderRef,
 };
 pub use sybil_verifier::{KeyOpAuth, KeyRecord};
 pub use system_event::SystemEvent;

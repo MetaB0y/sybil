@@ -234,6 +234,9 @@ impl Harness {
             max_open_orders_per_account: 10_000,
             max_pending_bundles: 10_000,
             max_pending_bundles_per_account: 10_000,
+            // The crash harness fuzzes acknowledged-write ordering with tiny
+            // orders; order economics are outside its target invariant.
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
 

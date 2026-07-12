@@ -5,13 +5,15 @@
  *
  *   imageUrl (404) → fallbackIconUrl (404) → deterministic colored tile
  *
- * The resolved image is painted as a CSS background and only advanced to a new
- * URL once that URL has decoded. Switching markets (e.g. picking a sibling
- * outcome) therefore holds the previous thumbnail until the next one is ready
- * instead of flashing blank — a plain `<img>` blanks the moment its `src`
- * changes. Pure CSS (no next/image) — avoids registering remote domain config
- * for the Polymarket S3 bucket. The tile fallback uses the first glyph of the
- * market name on a palette-keyed background.
+ * Known Polymarket artwork is routed through Next's image optimizer (resized to
+ * the thumbnail's pixel box and re-encoded at q=60), so we paint a fraction of
+ * the original bytes; unknown hosts stay raw rather than widening the optimizer
+ * allowlist. Either way the resolved image is painted as a CSS background and
+ * only advanced to a new URL once that URL has decoded. Switching markets (e.g.
+ * picking a sibling outcome) therefore holds the previous thumbnail and
+ * cross-fades the next one in over it, instead of flashing blank — a plain
+ * `<img>` blanks the moment its `src` changes. The tile fallback uses the first
+ * glyph of the market name on a palette-keyed background.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -24,6 +26,14 @@ type Props = {
   size?: number;
 };
 
+const OPTIMIZED_IMAGE_HOST = "polymarket-upload.s3.us-east-2.amazonaws.com";
+
+// Widths we ask the Next optimizer for. next.config sets no `imageSizes`, so the
+// defaults apply and every value here is an allowed tier (an off-list width makes
+// the optimizer 400). We request ~2× the CSS box for retina crispness, snapped up
+// to the nearest tier.
+const OPTIMIZER_WIDTHS = [48, 64, 96, 128, 256, 384];
+
 const PALETTE = [
   "var(--accent-soft)",
   "var(--yes-faint)",
@@ -34,6 +44,21 @@ const PALETTE = [
   "var(--surface-3)",
   "var(--accent-faint)",
 ];
+
+/**
+ * Route Polymarket artwork through the Next image optimizer at a thumbnail-sized
+ * width; leave other hosts untouched. The result is painted as a CSS background,
+ * so we hit the optimizer endpoint directly rather than via `next/image` — that
+ * keeps the cross-fade + decode-gating below while still shipping optimized bytes.
+ */
+function toDisplayUrl(src: string, size: number): string {
+  if (!isOptimizedImageUrl(src)) return src;
+  const target = size * 2;
+  const w =
+    OPTIMIZER_WIDTHS.find((x) => x >= target) ??
+    OPTIMIZER_WIDTHS[OPTIMIZER_WIDTHS.length - 1];
+  return `/_next/image?url=${encodeURIComponent(src)}&w=${w}&q=60`;
+}
 
 /**
  * Resolve to the first URL in `urls` that decodes, or `null` if none do.
@@ -59,8 +84,11 @@ export function MarketThumb({
   size = 40,
 }: Props) {
   const candidates = useMemo(
-    () => [imageUrl, fallbackIconUrl].filter((u): u is string => !!u),
-    [imageUrl, fallbackIconUrl],
+    () =>
+      [imageUrl, fallbackIconUrl]
+        .filter((u): u is string => !!u)
+        .map((u) => toDisplayUrl(u, size)),
+    [imageUrl, fallbackIconUrl, size],
   );
 
   // The URL currently painted. Seeded with the best candidate for first paint,
@@ -142,6 +170,20 @@ export function MarketThumb({
       {initial}
     </div>
   );
+}
+
+export function isOptimizedImageUrl(src: string): boolean {
+  try {
+    const url = new URL(src);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === OPTIMIZED_IMAGE_HOST &&
+      url.port === "" &&
+      url.search === ""
+    );
+  } catch {
+    return false;
+  }
 }
 
 function thumbStyles(size: number): React.CSSProperties {

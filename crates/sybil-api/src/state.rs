@@ -7,7 +7,7 @@ use axum::http::HeaderValue;
 use matching_sequencer::SequencerHandle;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex as AsyncMutex, RwLock};
+use tokio::sync::{Mutex as AsyncMutex, RwLock, Semaphore};
 
 use crate::config::ApiConfig;
 use crate::webauthn::WebAuthnVerifierConfig;
@@ -185,6 +185,40 @@ impl HttpOrderRateLimiter {
     }
 }
 
+#[derive(Debug)]
+pub struct HttpDaRateLimiter {
+    global: TokenBucket,
+    clients: HashMap<String, TokenBucket>,
+    client_refill_per_second: u32,
+    client_burst: u32,
+}
+
+impl HttpDaRateLimiter {
+    fn new(config: &ApiConfig) -> Self {
+        Self {
+            global: TokenBucket::new(config.http_da_global_rps, config.http_da_global_burst),
+            clients: HashMap::new(),
+            client_refill_per_second: config.http_da_client_rps,
+            client_burst: config.http_da_client_burst,
+        }
+    }
+
+    pub fn allow(&mut self, client_key: &str) -> Result<(), u64> {
+        self.global.allow()?;
+        let client_key = if self.clients.contains_key(client_key)
+            || self.clients.len() < MAX_HTTP_RATE_LIMIT_CLIENTS
+        {
+            client_key
+        } else {
+            OVERFLOW_CLIENT_KEY
+        };
+        self.clients
+            .entry(client_key.to_string())
+            .or_insert_with(|| TokenBucket::new(self.client_refill_per_second, self.client_burst))
+            .allow()
+    }
+}
+
 /// Shared application state, available to all route handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -219,6 +253,10 @@ pub struct AppState {
     /// Cheap pre-handler limiter for order endpoints. Sequencer admission has
     /// authoritative account/global limits; this bounds parsing/signature work.
     pub http_order_limiter: Arc<Mutex<HttpOrderRateLimiter>>,
+    /// Public DA reads have their own low-rate bucket and a hard in-flight cap
+    /// so retained-history serving cannot monopolize the sequencer/store.
+    pub http_da_limiter: Arc<Mutex<HttpDaRateLimiter>>,
+    pub http_da_concurrency: Arc<Semaphore>,
     /// WebAuthn verifier policy for passkey account actions.
     pub webauthn: WebAuthnVerifierConfig,
     /// Serializes account creation and the deprecated first-key bootstrap.
@@ -287,6 +325,8 @@ impl AppState {
             event_snapshot_dir,
             arena_db_path: config.arena_db_path.clone(),
             http_order_limiter: Arc::new(Mutex::new(HttpOrderRateLimiter::new(config))),
+            http_da_limiter: Arc::new(Mutex::new(HttpDaRateLimiter::new(config))),
+            http_da_concurrency: Arc::new(Semaphore::new(config.http_da_max_concurrency.max(1))),
             webauthn: WebAuthnVerifierConfig::from_api_config(config),
             account_bootstrap_lock: Arc::new(AsyncMutex::new(())),
             auto_resolutions: crate::auto_resolution::AutoResolutionStore::new(),

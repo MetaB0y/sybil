@@ -766,6 +766,11 @@ impl SequencerHandle {
             .await?
     }
 
+    pub async fn get_da_manifest(&self, height: u64) -> Result<DaManifestLookup, SequencerError> {
+        self.rpc(|reply| SequencerMsg::GetDaManifest(height, reply))
+            .await?
+    }
+
     pub async fn get_recent_blocks(&self, n: usize) -> Result<Vec<SealedBlock>, SequencerError> {
         self.read_query(move |state| {
             let cap = state.sequencer.config.block_history_capacity;
@@ -1184,10 +1189,18 @@ mod tests {
     }
 
     fn make_test_sequencer() -> (BlockSequencer, AccountId) {
-        make_test_sequencer_with_config(SequencerConfig::default())
+        make_test_sequencer_with_config(SequencerConfig {
+            // Actor tests use minimum-unit orders to isolate mailbox/WAL
+            // behavior. The admission floor is covered in sequencer tests.
+            min_resting_order_notional_nanos: 0,
+            ..SequencerConfig::default()
+        })
     }
 
-    fn make_test_sequencer_with_config(config: SequencerConfig) -> (BlockSequencer, AccountId) {
+    fn make_test_sequencer_with_config(mut config: SequencerConfig) -> (BlockSequencer, AccountId) {
+        // Callers customize actor limits, persistence, and timing. Their tiny
+        // order fixtures are not admission-policy tests.
+        config.min_resting_order_notional_nanos = 0;
         let mut accounts = AccountStore::new();
         let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
         let mut markets = MarketSet::new();
@@ -1233,6 +1246,7 @@ mod tests {
     async fn produce_block_rpc_returns_error_when_paused() {
         let config = SequencerConfig {
             block_interval: Duration::from_secs(60),
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
         let (seq, _) = make_test_sequencer_with_config(config);
@@ -1419,6 +1433,7 @@ mod tests {
             global_submission_burst: 1,
             max_submissions_per_account_per_second: 1_000,
             submission_burst_per_account: 1_000,
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
         let mut accounts = AccountStore::new();
@@ -1767,6 +1782,7 @@ mod tests {
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
             block_interval: Duration::from_secs(60),
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
         let (mut baseline, aid) = make_test_sequencer_with_config(config.clone());
@@ -2741,6 +2757,134 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oversized_signing_key_labels_are_rejected_before_wal_and_state_mutation() {
+        let path = temp_store_path("signing-key-label-limit");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            block_interval: Duration::from_secs(600),
+            ..SequencerConfig::default()
+        };
+        let (mut sequencer, _) = make_test_sequencer_with_config(config.clone());
+        sequencer.produce_block(Vec::new(), 1);
+        store.save_block(sequencer.snapshot()).await.unwrap();
+        let restored = store.load_state().await.unwrap().unwrap();
+        let sequencer = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
+        let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+        let account = handle.create_account(0).await.unwrap();
+        let primary =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let oversized = "x".repeat(crate::account::MAX_SIGNING_KEY_LABEL_BYTES + 1);
+
+        let before = handle.get_account(account.id).await.unwrap().unwrap();
+        let error = handle
+            .register_pubkey_with_meta(
+                account.id,
+                PublicKey(*primary.verifying_key()),
+                crate::crypto::RegisteredPubkey {
+                    account_id: account.id,
+                    auth_scheme: AccountAuthScheme::RawP256,
+                    label: Some(oversized.clone()),
+                    scope: crate::crypto::KeyScope::Primary,
+                    created_at_ms: 1,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            SequencerError::SigningKeyLabelTooLong { .. }
+        ));
+        assert!(
+            handle
+                .signing_keys_for_account(account.id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let after = handle.get_account(account.id).await.unwrap().unwrap();
+        assert_eq!(after.last_nonce, before.last_nonce);
+        assert_eq!(after.keys_digest, before.keys_digest);
+        assert_eq!(after.events_digest, before.events_digest);
+        assert_eq!(
+            store
+                .load_state()
+                .await
+                .unwrap()
+                .unwrap()
+                .control_plane_log
+                .len(),
+            1,
+            "only account creation may enter the WAL"
+        );
+
+        handle
+            .register_pubkey_with_meta(
+                account.id,
+                PublicKey(*primary.verifying_key()),
+                crate::crypto::RegisteredPubkey {
+                    account_id: account.id,
+                    auth_scheme: AccountAuthScheme::RawP256,
+                    label: Some("primary".to_string()),
+                    scope: crate::crypto::KeyScope::Primary,
+                    created_at_ms: 2,
+                },
+            )
+            .await
+            .unwrap();
+        handle.produce_block().await.unwrap();
+        let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
+        let candidate =
+            <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
+                &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
+            );
+        let before = handle.get_account(account.id).await.unwrap().unwrap();
+        let signed = crate::crypto::sign_key_registration(
+            account.id,
+            PublicKey(*candidate.verifying_key()),
+            AccountAuthScheme::RawP256,
+            Some(oversized),
+            crate::crypto::KeyScope::Agent,
+            before.keys_digest,
+            before.events_digest,
+            genesis_hash,
+            &primary,
+        );
+        let error = handle.register_key_signed(signed).await.unwrap_err();
+        assert!(matches!(
+            error,
+            SequencerError::SigningKeyLabelTooLong { .. }
+        ));
+        assert_eq!(
+            handle
+                .signing_keys_for_account(account.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let after = handle.get_account(account.id).await.unwrap().unwrap();
+        assert_eq!(after.last_nonce, before.last_nonce);
+        assert_eq!(after.keys_digest, before.keys_digest);
+        assert_eq!(after.events_digest, before.events_digest);
+        assert!(
+            store
+                .load_state()
+                .await
+                .unwrap()
+                .unwrap()
+                .control_plane_log
+                .is_empty(),
+            "rejected signed registration must not append a WAL row"
+        );
+
+        drop(handle);
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn onboarding_bootstrap_then_signed_key_allows_no_later_bootstrap() {
         let (sequencer, _) = make_test_sequencer();
         let handle = SequencerHandle::spawn(sequencer);
@@ -3147,6 +3291,7 @@ mod tests {
         let config = SequencerConfig {
             max_price_history_points_per_market: 1,
             block_interval: Duration::from_secs(60),
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
 
@@ -3297,6 +3442,7 @@ mod tests {
             block_interval: Duration::from_secs(60),
             max_equity_points_per_account: 0,
             max_history_events_per_account: 0,
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
 
@@ -3430,6 +3576,7 @@ mod tests {
         let m0 = markets.add_binary("Test");
         let config = SequencerConfig {
             block_interval: Duration::from_secs(60),
+            min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
         let seq = BlockSequencer::new(

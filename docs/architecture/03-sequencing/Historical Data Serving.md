@@ -75,12 +75,37 @@ currently means unbounded retention for the corresponding family. Pruning must:
 3. preserve rows required by the live head/fence and recovery invariants;
 4. make API gap semantics agree with the committed floor.
 
+`docker-compose.prod.yml` sets the current devnet production posture to seven
+days for every family the job supports. At its 10-second block cadence that is
+60,480 `blocks_full` heights and their paired DA artifact/manifest rows, plus
+60,480 raw-price heights per market. Candle windows are 604,800 seconds for
+the 60-, 300-, and 3,600-second resolutions (10,080, 2,016, and 168 buckets per
+market respectively). Local/base configuration retains the binary defaults;
+it does not inherit these production values.
+
+The overlay schedules pruning every 60 blocks (ten minutes) and keeps the
+existing 10,000-row ceiling per pass. This is deliberately more frequent than
+the local 1,000-block default so per-market raw rows are less likely to outrun
+the bounded worker; it remains possible to lag if sustained ingress exceeds
+that delete throughput.
+
 Account events, fills, and equity are append tables without complete production
 byte/age budgets today. Combined with permissionless churn, this is an open
 availability issue documented in the [resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md).
 
+The seven-day setting is a target floor, not a hard byte quota: per-row sizes
+vary, market count multiplies price/candle stock, and the bounded maintenance
+pass can temporarily lag. It does not prune canonical fenced state, the
+latest-only recovery header/witness, account or live-order state, fills,
+account events, or equity rows, and it does not promise that the redb file
+immediately shrinks after deletion. Thus the setting is only a partial
+mitigation of audit finding 5.
+
 Retention is not DA availability. Deleting the only canonical payload can make
-an accepted validium root unrecoverable even if product history remains.
+an accepted validium root unrecoverable even if product history remains. The
+devnet's seven-day local DA window must not be used as the future escape
+retention SLO; accepted-root reconstruction artifacts need independent
+retention, disclosure, monitoring, and restore drills.
 
 ## When to split a history service
 

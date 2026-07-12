@@ -210,6 +210,49 @@ async fn http_order_rate_limit_returns_429_before_handler_work() {
     );
 }
 
+#[tokio::test]
+async fn public_da_manifest_reads_are_rate_limited_before_store_work() {
+    let (app, _) = test_app_with_config(ApiConfig {
+        dev_mode: true,
+        http_da_global_rps: 1,
+        http_da_global_burst: 1,
+        http_da_client_rps: 1,
+        http_da_client_burst: 1,
+        ..ApiConfig::default()
+    })
+    .await;
+
+    let (status, _) = get(app.clone(), "/v1/da/1/manifest").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, body) = get(app, "/v1/da/1/manifest").await;
+    assert_eq!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "body: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[tokio::test]
+async fn api_key_label_limit_is_rejected_at_http_admission() {
+    let (app, _) = test_app(true).await;
+    let (status, body) = post_json(
+        app,
+        "/v1/accounts/0/api-keys",
+        json!({
+            "label": "x".repeat(matching_sequencer::MAX_API_KEY_LABEL_BYTES + 1),
+            "nonce": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        String::from_utf8_lossy(&body).contains("API-key label exceeds"),
+        "body: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
 fn signed_buy_yes_payload(
     _account_id: u64,
     market_id: u32,
@@ -773,7 +816,7 @@ async fn resolved_market_rejects_new_orders() {
                 "type": "BuyYes",
                 "market_id": market_id,
                 "limit_price_nanos": 600_000_000u64,
-                "quantity": 1
+                "quantity": 2
             }]
         }),
     )

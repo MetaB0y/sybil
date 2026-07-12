@@ -456,23 +456,38 @@ contract SybilBridgeTest {
         vm.warp(block.timestamp + ESCAPE_TIMEOUT + 1);
         vault.activateEscapeMode();
         require(vault.escapeModeActive(), "escape active");
+        require(vault.escapeStateRoot() == stateRoot, "escape root not frozen");
+        require(vault.escapeHeight() == settlement.latestHeight(), "escape height not frozen");
     }
 
-    function testEscapeModeActivatesBeforeFirstRootAfterDeploymentTimeout() public {
-        // No root has ever been accepted, but a user deposited before the
-        // operator produced any root. Escape must still become activatable once
-        // escapeTimeout elapses from deployment, so those deposits are not
-        // trapped by the operator disappearing pre-genesis.
+    function testEscapeModeRejectsZeroRootAfterDeploymentTimeout() public {
         vault.deposit(1_000_000, ACCOUNT_KEY);
         require(settlement.latestRootVerifiedAt() == 0, "no root yet");
 
-        (bool earlyOk,) =
-            address(vault).call(abi.encodeWithSelector(SybilVault.activateEscapeMode.selector));
-        require(!earlyOk, "early escape before first root");
-
         vm.warp(vault.deployedAt() + ESCAPE_TIMEOUT + 1);
-        vault.activateEscapeMode();
-        require(vault.escapeModeActive(), "escape active pre-first-root");
+        (bool ok,) =
+            address(vault).call(abi.encodeWithSelector(SybilVault.activateEscapeMode.selector));
+
+        require(!ok, "zero-root escape activated");
+        require(!vault.escapeModeActive(), "escape active without root");
+        require(vault.escapeStateRoot() == bytes32(0), "zero root frozen");
+        require(vault.escapeHeight() == 0, "zero-root height frozen");
+    }
+
+    function testDepositRejectedAfterEscapeActivation() public {
+        _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        uint64 depositCountBefore = vault.depositCount();
+        uint256 vaultBalanceBefore = token.balanceOf(address(vault));
+        (bool ok,) =
+            address(vault).call(abi.encodeWithSelector(SybilVault.deposit.selector, 1, ACCOUNT_KEY));
+
+        require(!ok, "post-escape deposit accepted");
+        require(vault.depositCount() == depositCountBefore, "rejected deposit appended");
+        require(
+            token.balanceOf(address(vault)) == vaultBalanceBefore, "rejected deposit moved funds"
+        );
     }
 
     function testEscapeClaimPaysWhileVaultPaused() public {
@@ -504,22 +519,38 @@ contract SybilBridgeTest {
         require(!vault.nullifierUsed(inputs.nullifier), "inactive claim burned nullifier");
     }
 
-    function testEscapeClaimRevertsForStaleRoot() public {
-        bytes32 staleRoot = _acceptRootWithDeposit();
+    function testLaterAcceptedRootDoesNotChangeEscapeRoot() public {
+        bytes32 frozenRoot = _acceptRootWithDeposit();
         _activateEscapeMode();
 
-        // Latest-at-claim semantics remain in force if the operator resumes
-        // root submission after escape activation.
         bytes32 latestRoot = keccak256("state-2");
-        settlement.submitStateRoot(_nextRootInputs(staleRoot, 1, latestRoot), "proof");
+        settlement.submitStateRoot(_nextRootInputs(frozenRoot, 1, latestRoot), "proof");
+
+        require(settlement.latestStateRoot() == latestRoot, "settlement did not advance");
+        require(vault.escapeStateRoot() == frozenRoot, "escape root advanced");
+        require(vault.escapeHeight() == 1, "escape height advanced");
 
         SybilTypes.EscapeClaimPublicInputs memory inputs =
-            _escapeInputs(staleRoot, 1, 43, address(0xBEEF), 100_000);
+            _escapeInputs(frozenRoot, 1, 43, address(0xBEEF), 100_000);
+        vault.escapeClaim(inputs, "proof");
+
+        require(vault.nullifierUsed(inputs.nullifier), "frozen-root claim not consumed");
+    }
+
+    function testEscapeClaimRejectsPostActivationRoot() public {
+        bytes32 frozenRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        bytes32 latestRoot = keccak256("state-2");
+        settlement.submitStateRoot(_nextRootInputs(frozenRoot, 1, latestRoot), "proof");
+
+        SybilTypes.EscapeClaimPublicInputs memory inputs =
+            _escapeInputs(latestRoot, 2, 43, address(0xBEEF), 100_000);
         (bool ok,) = address(vault)
             .call(abi.encodeWithSelector(SybilVault.escapeClaim.selector, inputs, bytes("proof")));
 
-        require(!ok, "stale-root escape claim accepted");
-        require(!vault.nullifierUsed(inputs.nullifier), "stale claim burned nullifier");
+        require(!ok, "post-activation-root escape claim accepted");
+        require(!vault.nullifierUsed(inputs.nullifier), "rejected claim burned nullifier");
     }
 
     function testEscapeClaimRevertsForWrongHeightAtLatestRoot() public {
@@ -585,6 +616,42 @@ contract SybilBridgeTest {
         require(token.balanceOf(recipient) == balanceAfterFirstClaim, "double claim paid");
     }
 
+    function testLaterRootCannotResetEscapeNullifier() public {
+        bytes32 frozenRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        uint64 accountId = 45;
+        address recipient = address(0xBEEF);
+        uint256 amount = 100_000;
+        SybilTypes.EscapeClaimPublicInputs memory frozenInputs =
+            _escapeInputs(frozenRoot, 1, accountId, recipient, amount);
+        vault.escapeClaim(frozenInputs, "escape-proof");
+
+        bytes32 laterRoot = keccak256("state-2");
+        settlement.submitStateRoot(_nextRootInputs(frozenRoot, 1, laterRoot), "proof");
+        SybilTypes.EscapeClaimPublicInputs memory laterInputs =
+            _escapeInputs(laterRoot, 2, accountId, recipient, amount);
+
+        (bool laterOk,) = address(vault)
+            .call(
+                abi.encodeWithSelector(
+                    SybilVault.escapeClaim.selector, laterInputs, bytes("second-proof")
+                )
+            );
+        (bool repeatedOk,) = address(vault)
+            .call(
+                abi.encodeWithSelector(
+                    SybilVault.escapeClaim.selector, frozenInputs, bytes("third-proof")
+                )
+            );
+
+        require(!laterOk, "later-root nullifier paid");
+        require(!repeatedOk, "frozen-root nullifier replayed");
+        require(vault.nullifierUsed(frozenInputs.nullifier), "frozen nullifier reset");
+        require(!vault.nullifierUsed(laterInputs.nullifier), "later nullifier consumed");
+        require(token.balanceOf(recipient) == amount, "account paid more than once");
+    }
+
     function testEscapeClaimMockVerifierProofPlumbingPaysExactAmount() public {
         bytes32 stateRoot = _acceptRootWithDeposit();
         _activateEscapeMode();
@@ -610,9 +677,8 @@ contract SybilBridgeTest {
         require(vault.nullifierUsed(inputs.nullifier), "escape nullifier not consumed");
     }
 
-    function testEscapeAndWithdrawalNullifiersDoNotCollideOrBlockEachOther() public {
+    function testQueuedNormalWithdrawalCanFinalizeAfterEscapeActivation() public {
         bytes32 stateRoot = _acceptRootWithDeposit();
-        _activateEscapeMode();
 
         uint64 accountId = 47;
         uint64 withdrawalId = 47;
@@ -644,17 +710,100 @@ contract SybilBridgeTest {
 
         require(withdrawalNullifier != escapeInputs.nullifier, "nullifier domains collided");
         vault.requestWithdrawal(withdrawalInputs, "withdrawal-proof");
+        _activateEscapeMode();
         vault.escapeClaim(escapeInputs, "escape-proof");
         require(vault.nullifierUsed(withdrawalNullifier), "withdrawal nullifier not used");
         require(vault.nullifierUsed(escapeInputs.nullifier), "escape nullifier not used");
 
-        // The only un-spend path applies to an actual queued withdrawal and
-        // must never clear the independently consumed escape nullifier.
-        vault.cancelWithdrawal(withdrawalNullifier, "cross-domain test");
-        require(!vault.nullifierUsed(withdrawalNullifier), "withdrawal nullifier not released");
-        require(vault.nullifierUsed(escapeInputs.nullifier), "escape nullifier released");
-        vault.requestWithdrawal(withdrawalInputs, "withdrawal-proof-2");
-        require(vault.nullifierUsed(withdrawalNullifier), "escape blocked withdrawal requeue");
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY);
+        vault.finalizeWithdrawal(withdrawalNullifier);
+
+        require(vault.nullifierUsed(escapeInputs.nullifier), "finalize reset escape nullifier");
+        require(token.balanceOf(recipient) == amount * 2, "overlap did not pay exact paths");
+    }
+
+    function testQueuedNormalWithdrawalFinalizesWhilePausedAfterEscapeActivation() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        vm.warp(block.timestamp + ESCAPE_TIMEOUT + 1);
+
+        address recipient = address(0xBEEF);
+        uint256 amount = 100_000;
+        bytes32 nullifier = keccak256("paused-escape-queued-withdrawal");
+        SybilTypes.WithdrawalPublicInputs memory inputs = SybilTypes.WithdrawalPublicInputs({
+            stateRoot: stateRoot,
+            height: settlement.latestHeight(),
+            nullifier: nullifier,
+            recipient: recipient,
+            token: address(token),
+            amount: amount,
+            claimKind: vault.CLAIM_KIND_NORMAL()
+        });
+
+        vault.requestWithdrawal(inputs, "withdrawal-proof");
+        vault.activateEscapeMode();
+        vault.pause();
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY);
+        vault.finalizeWithdrawal(nullifier);
+
+        require(token.balanceOf(recipient) == amount, "paused escape finalization did not pay");
+    }
+
+    function testQueuedNormalWithdrawalCannotBeCancelledAfterEscapeActivation() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        vm.warp(block.timestamp + ESCAPE_TIMEOUT + 1);
+
+        address recipient = address(0xBEEF);
+        uint256 amount = 100_000;
+        bytes32 nullifier = keccak256("escape-cancelled-queued-withdrawal");
+        SybilTypes.WithdrawalPublicInputs memory inputs = SybilTypes.WithdrawalPublicInputs({
+            stateRoot: stateRoot,
+            height: settlement.latestHeight(),
+            nullifier: nullifier,
+            recipient: recipient,
+            token: address(token),
+            amount: amount,
+            claimKind: vault.CLAIM_KIND_NORMAL()
+        });
+
+        vault.requestWithdrawal(inputs, "withdrawal-proof");
+        vault.activateEscapeMode();
+        (bool cancelOk,) = address(vault)
+            .call(
+                abi.encodeWithSelector(
+                    SybilVault.cancelWithdrawal.selector, nullifier, "post-escape cancellation"
+                )
+            );
+
+        require(!cancelOk, "post-escape withdrawal cancelled");
+        require(vault.nullifierUsed(nullifier), "post-escape cancellation released nullifier");
+        (,,,,,,,, bool finalized, bool canceled) = vault.withdrawals(nullifier);
+        require(!finalized, "queued withdrawal unexpectedly finalized");
+        require(!canceled, "queued withdrawal marked cancelled");
+    }
+
+    function testRequestWithdrawalRejectedAfterEscapeActivation() public {
+        bytes32 stateRoot = _acceptRootWithDeposit();
+        _activateEscapeMode();
+
+        SybilTypes.WithdrawalPublicInputs memory inputs = SybilTypes.WithdrawalPublicInputs({
+            stateRoot: stateRoot,
+            height: settlement.latestHeight(),
+            nullifier: keccak256("post-escape-withdrawal"),
+            recipient: address(0xBEEF),
+            token: address(token),
+            amount: 100_000,
+            claimKind: vault.CLAIM_KIND_NORMAL()
+        });
+
+        (bool ok,) = address(vault)
+            .call(
+                abi.encodeWithSelector(
+                    SybilVault.requestWithdrawal.selector, inputs, bytes("withdrawal-proof")
+                )
+            );
+
+        require(!ok, "post-escape withdrawal queued");
+        require(!vault.nullifierUsed(inputs.nullifier), "rejected withdrawal burned nullifier");
     }
 
     function testVaultEscapeVerifierChangeRequiresTimelock() public {

@@ -604,3 +604,33 @@ groups:
         annotations:
           summary: "A prover artifact is marked failed"
           description: "At least one prover artifact has proof_status={{ $labels.proof_status }}."
+
+      - alert: SequencerAccountStockGrowingFast
+        expr: delta(sybil_state_accounts_total[15m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "Committed account stock is growing unusually fast"
+          description: "More than 100 accounts were added over 15m (growth: {{ $value }}). Every account recurs in later full-state witnesses; check onboarding traffic and the public account-creation boundary. See docs/runbooks/resource-liveness.md."
+
+      - alert: WitnessPayloadLarge
+        expr: max(sybil_witness_payload_bytes{quantile="0.99"}) > 8 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+          component: da
+        annotations:
+          summary: "Canonical witness payload exceeds the devnet early-warning threshold"
+          description: "Rolling p99 witness payload size has exceeded 8 MiB for 5m (current p99: {{ $value | humanize1024 }}B). At a 10s cadence, retaining 8 MiB every block is roughly 68 GiB/day before database overhead. See docs/runbooks/resource-liveness.md."
+
+      - alert: DaArtifactWriteBacklog
+        expr: sybil_da_artifact_writes_in_flight > 2
+        for: 2m
+        labels:
+          severity: warning
+          component: da
+        annotations:
+          summary: "DA artifact writes are falling behind block production"
+          description: "More than two post-commit DA artifact writes have remained in flight for 2m (current: {{ $value }}). Blocks may continue committing while retained witness availability falls behind. See docs/runbooks/resource-liveness.md."

@@ -16,10 +16,11 @@ COPY sybil_client/ sybil_client/
 COPY bots/ bots/
 COPY sim/ sim/
 COPY live/ live/
+COPY scripts/ scripts/
 COPY feeds/ feeds/
 COPY markets/ markets/
 
 EXPOSE 8501
 
 # Default: run the live trading bots
-ENTRYPOINT ["uv", "run", "python", "-m", "live.runner"]
+ENTRYPOINT ["uv", "run", "--no-sync", "python", "-m", "live.runner"]

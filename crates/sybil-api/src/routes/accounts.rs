@@ -11,9 +11,9 @@ use matching_sequencer::crypto::{
 use matching_sequencer::{
     AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId, AuthenticatedApiKeyCreate,
     AuthenticatedApiKeyRevoke, AuthenticatedKeyRegistration, AuthenticatedKeyRevocation,
-    AuthenticatedProfileUpdate, KeyScope, PublicKey, RegisteredPubkey, SignedApiKeyCreate,
-    SignedApiKeyRevoke, SignedKeyRegistration, SignedKeyRevocation, SignedProfileUpdate,
-    api_key_hash,
+    AuthenticatedProfileUpdate, KeyScope, MAX_API_KEY_LABEL_BYTES, PublicKey, RegisteredPubkey,
+    SignedApiKeyCreate, SignedApiKeyRevoke, SignedKeyRegistration, SignedKeyRevocation,
+    SignedProfileUpdate, api_key_hash,
 };
 use p256::Sec1Point;
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -48,6 +48,10 @@ fn sequencer_auth_scheme(scheme: AuthScheme) -> AccountAuthScheme {
     }
 }
 
+fn validate_signing_key_label(label: Option<&str>) -> Result<(), AppError> {
+    RegisteredPubkey::validate_label(label).map_err(AppError::from)
+}
+
 /// POST /v1/accounts — create an account with its initial signing key.
 ///
 /// Public onboarding must provide `initial_key`; account allocation and
@@ -69,6 +73,11 @@ pub async fn create_account(
     headers: HeaderMap,
     Json(req): Json<CreateAccountRequest>,
 ) -> Result<Json<AccountResponse>, AppError> {
+    validate_signing_key_label(
+        req.initial_key
+            .as_ref()
+            .and_then(|key| key.label.as_deref()),
+    )?;
     let balance_nanos = i64::try_from(req.initial_balance_nanos).map_err(|_| {
         AppError::bad_request(format!(
             "initial_balance_nanos {} exceeds the maximum signed-balance range",
@@ -290,6 +299,7 @@ pub async fn register_key(
     Json(req): Json<RegisterKeyRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     crate::app::require_service_token(&state, &headers)?;
+    validate_signing_key_label(req.label.as_deref())?;
     let _bootstrap_guard = state.account_bootstrap_lock.lock().await;
     let account_id = AccountId(id);
     // First-key bootstrap only: refuse if the account already has a key so this
@@ -353,6 +363,7 @@ pub async fn register_signed_key(
     Path(id): Path<u64>,
     Json(req): Json<SignedRegisterKeyRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    validate_signing_key_label(req.label.as_deref())?;
     let account_id = AccountId(id);
     let new_pubkey = parse_new_key(
         &state,
@@ -1096,6 +1107,13 @@ pub async fn create_api_key(
 ) -> Result<Json<CreateApiKeyResponse>, AppError> {
     let account_id = AccountId(id);
     let label = req.label.clone().filter(|s| !s.is_empty());
+    if let Some(label) = label.as_deref()
+        && label.len() > MAX_API_KEY_LABEL_BYTES
+    {
+        return Err(AppError::bad_request(format!(
+            "API-key label exceeds {MAX_API_KEY_LABEL_BYTES} bytes"
+        )));
+    }
     let canonical = canonical_api_key_create_bytes(account_id, label.as_deref(), req.nonce);
 
     let signer = match req.auth_scheme {

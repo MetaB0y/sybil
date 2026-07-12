@@ -118,13 +118,14 @@ fn make_sequencer() -> (BlockSequencer, MarketSet) {
     }
     let markets = make_markets();
     let oracle = Arc::new(AdminOracle::new());
-    let seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets.clone(),
-        vec![],
-        oracle,
-        matching_sequencer::SequencerConfig::default(),
-    );
+    // These properties target settlement conservation over generated dust as
+    // well as ordinary orders, independently of deployment admission policy.
+    let config = matching_sequencer::SequencerConfig {
+        min_resting_order_notional_nanos: 0,
+        ..matching_sequencer::SequencerConfig::default()
+    };
+    let seq =
+        BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, config);
     (seq, markets)
 }
 

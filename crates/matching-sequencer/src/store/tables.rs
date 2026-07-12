@@ -254,6 +254,9 @@ pub(super) const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new
 /// This is a serving/availability artifact, not a recovery commit fence. Rows
 /// are best-effort and pruned with the existing `blocks_full` retention floor.
 pub(super) const DA_ARTIFACTS: TableDefinition<u64, &[u8]> = TableDefinition::new("da_artifacts");
+/// Publish-time DA metadata cached independently from the large payload row so
+/// public manifest reads never deserialize or hash witness bytes.
+pub(super) const DA_MANIFESTS: TableDefinition<u64, &[u8]> = TableDefinition::new("da_manifests");
 
 // TODO: Tier 3 tables (remaining)
 // const PRICE_HISTORY: TableDefinition<u64, &[u8]> = TableDefinition::new("price_history");

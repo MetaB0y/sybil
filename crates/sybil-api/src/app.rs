@@ -413,7 +413,7 @@ fn unmatched_metric_label(path: &str) -> &'static str {
     }
 }
 
-fn order_rate_limit_client_key(req: &Request<axum::body::Body>) -> String {
+fn http_rate_limit_client_key(req: &Request<axum::body::Body>) -> String {
     req.headers()
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
@@ -444,7 +444,7 @@ async fn order_rate_limit(
     next: Next,
 ) -> Response {
     if req.method() == axum::http::Method::POST && is_order_write_path(req.uri().path()) {
-        let client_key = order_rate_limit_client_key(&req);
+        let client_key = http_rate_limit_client_key(&req);
         let allowed = state
             .http_order_limiter
             .lock()
@@ -456,6 +456,47 @@ async fn order_rate_limit(
         }
     }
     next.run(req).await
+}
+
+fn is_da_read_path(path: &str) -> bool {
+    let mut segments = path.trim_matches('/').split('/');
+    matches!(segments.next(), Some("v1"))
+        && matches!(segments.next(), Some("da"))
+        && segments
+            .next()
+            .is_some_and(|height| height.parse::<u64>().is_ok())
+        && matches!(segments.next(), Some("manifest" | "payload"))
+        && segments.next().is_none()
+}
+
+async fn da_read_limit(
+    State(state): State<AppState>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    if req.method() != axum::http::Method::GET || !is_da_read_path(req.uri().path()) {
+        return next.run(req).await;
+    }
+
+    let client_key = http_rate_limit_client_key(&req);
+    let allowed = state
+        .http_da_limiter
+        .lock()
+        .map(|mut limiter| limiter.allow(&client_key))
+        .unwrap_or(Err(1));
+    if let Err(retry_after_secs) = allowed {
+        metrics::counter!("sybil_http_da_rate_limited_total", "reason" => "rate").increment(1);
+        return AppError::rate_limited(retry_after_secs).into_response();
+    }
+
+    let Ok(permit) = state.http_da_concurrency.clone().try_acquire_owned() else {
+        metrics::counter!("sybil_http_da_rate_limited_total", "reason" => "concurrency")
+            .increment(1);
+        return AppError::rate_limited(1).into_response();
+    };
+    let response = next.run(req).await;
+    drop(permit);
+    response
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1201,6 +1242,7 @@ pub fn create_router(state: AppState) -> Router {
         state.clone(),
         order_rate_limit,
     ))
+    .layer(middleware::from_fn_with_state(state.clone(), da_read_limit))
     .layer(middleware::from_fn(http_metrics))
     .layer(
         TraceLayer::new_for_http()

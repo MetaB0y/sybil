@@ -101,6 +101,7 @@ impl Store {
             ("blocks_full", txn.open_table(BLOCKS_FULL)?.len()?),
             ("block_witnesses", txn.open_table(BLOCK_WITNESSES)?.len()?),
             ("da_artifacts", txn.open_table(DA_ARTIFACTS)?.len()?),
+            ("da_manifests", txn.open_table(DA_MANIFESTS)?.len()?),
             ("pubkey_registry", txn.open_table(PUBKEY_REGISTRY)?.len()?),
             ("clearing_prices", txn.open_table(CLEARING_PRICES)?.len()?),
             ("market_volumes", txn.open_table(MARKET_VOLUMES)?.len()?),

@@ -1,4 +1,8 @@
 pub const DEFAULT_ORDER_TTL_BLOCKS: u64 = 63_072_000;
+/// Default capital floor per resting order: one tenth of a cent. At this floor, live
+/// order-state growth is backed by at least $0.001 of cash notional or position
+/// value instead of zero/dust reservation.
+pub const DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS: u64 = 1_000_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AnalyticsMemoryStats {
@@ -44,6 +48,9 @@ pub struct SequencerConfig {
     /// Maximum resting non-MM orders per account, including non-MM orders
     /// already staged in pending bundles.
     pub max_open_orders_per_account: usize,
+    /// Minimum `ceil(limit_price * quantity / SHARE_SCALE)` for a non-MM order
+    /// that may enter the resting book. Expressed in nanodollars.
+    pub min_resting_order_notional_nanos: u64,
     /// Maximum deferred MM / multi-market submissions per account.
     pub max_pending_bundles_per_account: usize,
     /// In-memory ring buffer size for recent blocks (served by the `/blocks`
@@ -108,6 +115,7 @@ impl Default for SequencerConfig {
             max_global_submissions_per_second: 1_000,
             global_submission_burst: 3_000,
             max_open_orders_per_account: 1_000,
+            min_resting_order_notional_nanos: DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
             max_pending_bundles_per_account: 100,
             block_history_capacity: 100,
             max_price_history_points_per_market:

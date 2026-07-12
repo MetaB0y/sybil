@@ -222,6 +222,17 @@ impl From<matching_sequencer::SequencerError> for AppError {
             matching_sequencer::SequencerError::ApiKeyNotFound => {
                 AppError::not_found("API key not found")
             }
+            matching_sequencer::SequencerError::ApiKeyLimit { .. } => {
+                AppError::conflict(format!("{err}"))
+            }
+            matching_sequencer::SequencerError::ApiKeyLabelTooLong { .. }
+            | matching_sequencer::SequencerError::SigningKeyLabelTooLong { .. }
+            | matching_sequencer::SequencerError::AccountStorageBudgetExceeded { .. } => {
+                AppError::bad_request(format!("{err}"))
+            }
+            matching_sequencer::SequencerError::KeyOpLimit { .. } => {
+                AppError::rate_limited(1).with_details(format!("{err}"))
+            }
             matching_sequencer::SequencerError::ProfileInvalid(msg) => {
                 AppError::bad_request(format!("Invalid profile: {msg}"))
             }

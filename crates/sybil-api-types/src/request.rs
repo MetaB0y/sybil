@@ -168,7 +168,8 @@ pub struct RegisterKeyRequest {
     /// `public_key_hex`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webauthn_registration: Option<WebAuthnRegistration>,
-    /// Optional human label for this key, e.g. "agent:pricer" (SYB-60).
+    /// Optional human label for this key, e.g. "agent:pricer" (SYB-60),
+    /// limited to 128 UTF-8 bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// Scope tag describing what this key is for (SYB-60). Defaults to `primary`.
@@ -204,7 +205,8 @@ pub struct SignedRegisterKeyRequest {
     /// and requires it to match `public_key_hex`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webauthn_registration: Option<WebAuthnRegistration>,
-    /// Optional human label for the new key, e.g. "agent:pricer".
+    /// Optional human label for the new key, e.g. "agent:pricer", limited to
+    /// 128 UTF-8 bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// Scope tag for the new key. Defaults to `primary`.

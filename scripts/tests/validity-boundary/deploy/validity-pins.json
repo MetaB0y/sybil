@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "status": "pending_redeploy",
+  "desired": {
+    "state_transition": {
+      "app_exe_commit": "main-exe",
+      "app_vm_commit": "main-vm"
+    },
+    "escape_claim": {
+      "app_exe_commit": "escape-exe",
+      "app_vm_commit": "escape-vm"
+    }
+  }
+}

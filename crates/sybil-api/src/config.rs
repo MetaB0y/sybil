@@ -93,6 +93,16 @@ pub struct ApiConfig {
     )]
     pub max_open_orders_per_account: usize,
 
+    /// Minimum cash/position notional backing each non-MM resting order.
+    /// Default is one tenth of a cent (1,000,000 nanodollars), matching one
+    /// minimum quantity unit at a $1 limit.
+    #[arg(
+        long,
+        default_value = "1000000",
+        env = "SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS"
+    )]
+    pub min_resting_order_notional_nanos: u64,
+
     /// Maximum deferred MM / multi-market submissions per account.
     #[arg(
         long,
@@ -117,6 +127,26 @@ pub struct ApiConfig {
     /// Pre-handler per-client HTTP burst for order endpoints.
     #[arg(long, default_value = "1000", env = "SYBIL_HTTP_ORDER_CLIENT_BURST")]
     pub http_order_client_burst: u32,
+
+    /// Pre-handler global request rate for retained DA manifest/payload reads.
+    #[arg(long, default_value = "20", env = "SYBIL_HTTP_DA_GLOBAL_RPS")]
+    pub http_da_global_rps: u32,
+
+    /// Global DA read burst allowance.
+    #[arg(long, default_value = "40", env = "SYBIL_HTTP_DA_GLOBAL_BURST")]
+    pub http_da_global_burst: u32,
+
+    /// Per-client retained DA read rate.
+    #[arg(long, default_value = "10", env = "SYBIL_HTTP_DA_CLIENT_RPS")]
+    pub http_da_client_rps: u32,
+
+    /// Per-client retained DA read burst allowance.
+    #[arg(long, default_value = "20", env = "SYBIL_HTTP_DA_CLIENT_BURST")]
+    pub http_da_client_burst: u32,
+
+    /// Maximum retained DA reads executing concurrently.
+    #[arg(long, default_value = "4", env = "SYBIL_HTTP_DA_MAX_CONCURRENCY")]
+    pub http_da_max_concurrency: usize,
 
     /// WebAuthn relying-party id. For local frontend dev this is `localhost`.
     #[arg(long, default_value = "localhost", env = "SYBIL_WEBAUTHN_RP_ID")]
@@ -304,11 +334,17 @@ impl Default for ApiConfig {
             max_global_submissions_per_second: 1_000,
             global_submission_burst: 3_000,
             max_open_orders_per_account: 1_000,
+            min_resting_order_notional_nanos: 1_000_000,
             max_pending_bundles_per_account: 100,
             http_order_global_rps: 500,
             http_order_global_burst: 2_000,
             http_order_client_rps: 250,
             http_order_client_burst: 1_000,
+            http_da_global_rps: 20,
+            http_da_global_burst: 40,
+            http_da_client_rps: 10,
+            http_da_client_burst: 20,
+            http_da_max_concurrency: 4,
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:3000".to_string(),
             webauthn_require_uv: true,

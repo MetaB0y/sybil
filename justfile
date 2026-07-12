@@ -352,10 +352,13 @@ frontend-check:
 check-fast: rust-workspaces-check fmt-check workspace-check lint
 
 # Consensus/protocol gate: shared vectors, guest inputs, deployment coordination,
-# and generated protocol documentation must all agree.
+# an explicit validity deployment boundary, and generated protocol documentation
+# must all agree.
 check-consensus: golden-check
     ./scripts/zk-guest-fingerprint.sh --check
     ./scripts/update-validity-pins.py --check
+    ./scripts/test-validity-boundary.py
+    ./scripts/check-validity-boundary.py --check
     ./scripts/update-protocol-pins.py --check
 
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
@@ -445,6 +448,23 @@ validity-pins-write:
 
 validity-pins-check:
     ./scripts/update-validity-pins.py --check
+
+# Bind the current validity artifacts to a reviewed fresh-genesis or migration
+# decision. Environment variables avoid embedding review text in shell source.
+validity-boundary-write:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${VALIDITY_BOUNDARY_ACTION:?set VALIDITY_BOUNDARY_ACTION}"
+    : "${VALIDITY_BOUNDARY_REASON:?set VALIDITY_BOUNDARY_REASON}"
+    args=(--write --action "$VALIDITY_BOUNDARY_ACTION" --reason "$VALIDITY_BOUNDARY_REASON")
+    if [[ -n "${VALIDITY_BOUNDARY_REFERENCE:-}" ]]; then
+        args+=(--reference "$VALIDITY_BOUNDARY_REFERENCE")
+    fi
+    ./scripts/check-validity-boundary.py "${args[@]}"
+
+validity-boundary-check:
+    ./scripts/test-validity-boundary.py
+    ./scripts/check-validity-boundary.py --check
 
 # Check workspace/design inventories against current repository structure.
 docs-sync:
@@ -623,7 +643,7 @@ deploy-caddy: deploy-sync deploy-prod-env-check
 # Deploy everything
 deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build
-    docker save sybil-api:latest sybil-arena:latest | ssh {{SERVER}} docker load
+    docker save sybil-api:latest sybil-arena:latest sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Post-deploy smoke GATE against the LIVE stack (SYB-248). Fail-closed: exits
@@ -653,7 +673,19 @@ deploy-shell:
 
 # Arena bot status — text dashboard (readable by CLI / LLM)
 arena-status hours="24":
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run python -m live.status --hours {{hours}}'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m live.status --hours {{hours}}'
+
+# Preview resolved-market labels that would be added to the live decisions DB.
+arena-outcomes-dry-run:
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.record_outcomes --db /data/decisions.db --api-base http://sybil-api:3000 --dry-run'
+
+# Persist conflict-checked resolved-market labels used by calibration reports.
+arena-record-outcomes:
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.record_outcomes --db /data/decisions.db --api-base http://sybil-api:3000'
+
+# Print the live bot calibration/rejection report from the shared arena volume.
+arena-calibration:
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} exec -T sybil-arena-dashboard uv run --no-sync python -m scripts.calibration --db /data/decisions.db'
 
 # Live system status (containers, blocks, traders, fills)
 status:

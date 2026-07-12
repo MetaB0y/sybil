@@ -100,13 +100,12 @@ pub async fn test_app_with_config(config: ApiConfig) -> (Router, SequencerHandle
     let accounts = AccountStore::new();
     let markets = MarketSet::new();
     let oracle = Arc::new(AdminOracle::new());
-    let sequencer = BlockSequencer::with_default_solver(
-        accounts,
-        markets,
-        vec![],
-        oracle,
-        SequencerConfig::default(),
-    );
+    let sequencer_config = SequencerConfig {
+        min_resting_order_notional_nanos: config.min_resting_order_notional_nanos,
+        ..SequencerConfig::default()
+    };
+    let sequencer =
+        BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, sequencer_config);
     let handle = SequencerHandle::spawn(sequencer);
     let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()

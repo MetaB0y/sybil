@@ -172,12 +172,21 @@ fn assert_funding_history_once(history: &Value) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_next_block() {
     let root = ProcessTestRoot::new("process-restart");
+    // This WAL/replay drill intentionally uses nano-sized balances and orders;
+    // minimum-notional admission has focused API/sequencer coverage.
+    let test_admission_env = [("SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS", "0")];
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
 
-    let writer = spawn_api(root.data_dir(), root.admin_key_path(), 50).await;
+    let writer = spawn_api_with_env(
+        root.data_dir(),
+        root.admin_key_path(),
+        50,
+        &test_admission_env,
+    )
+    .await;
     wait_for_height_at_least(&client, &writer.base_url, 1).await;
     pause_blocks(&client, &writer.base_url).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -294,7 +303,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     )
     .await;
     assert!(pending_after_cancel.as_array().unwrap().is_empty());
-    let reader = restart_api(writer, &root, 60_000).await;
+    let reader = restart_api_with_env(writer, &root, 60_000, &test_admission_env).await;
     let post_restart_health = wait_for_health(&client, &reader.base_url).await;
     assert_eq!(
         post_restart_health["height"].as_u64(),
@@ -429,7 +438,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     .await;
     assert_eq!(post_restart_pending.as_array().unwrap().len(), 1);
 
-    let committer = restart_api(reader, &root, 50).await;
+    let committer = restart_api_with_env(reader, &root, 50, &test_admission_env).await;
     wait_for_height_at_least(&client, &committer.base_url, pre_write_height + 1).await;
     pause_blocks(&client, &committer.base_url).await;
     let committed_funding_history = get_json(

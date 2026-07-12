@@ -245,6 +245,7 @@ impl SequencerActorState {
         pubkey: PublicKey,
         meta: RegisteredPubkey,
     ) -> Result<(), SequencerError> {
+        RegisteredPubkey::validate_label(meta.label.as_deref())?;
         self.sequencer
             .can_register_first_pubkey(account_id, &pubkey)?;
         self.persist_control_plane(&ControlPlaneCommand::RegisterPubkeyWithMeta {
@@ -295,6 +296,7 @@ impl SequencerActorState {
         &mut self,
         authenticated: AuthenticatedKeyRegistration,
     ) -> Result<(), SequencerError> {
+        RegisteredPubkey::validate_label(authenticated.label.as_deref())?;
         // The signer must already be an active key on the target account. This
         // also implies the account has >= 1 key, so the signed path can never be
         // used to bootstrap the very first key (that stays on the service tier).
@@ -307,7 +309,7 @@ impl SequencerActorState {
         // Reject a duplicate registration before writing the WAL. The digest
         // binding has already rejected stale or replayed key operations.
         self.sequencer
-            .can_register_pubkey(authenticated.account_id, &authenticated.new_pubkey)?;
+            .can_register_authorized_pubkey(authenticated.account_id, &authenticated.new_pubkey)?;
         let meta = RegisteredPubkey {
             account_id: authenticated.account_id,
             auth_scheme: authenticated.new_auth_scheme,
@@ -465,9 +467,15 @@ impl SequencerActorState {
         authenticated: AuthenticatedApiKeyCreate,
     ) -> Result<u64, SequencerError> {
         self.resolve_signer_account(&authenticated.signer, authenticated.account_id)?;
+        let created_at_ms = current_timestamp_ms();
+        self.sequencer.can_create_api_key(
+            authenticated.account_id,
+            authenticated.token_hash,
+            authenticated.label.as_deref(),
+            created_at_ms,
+        )?;
         self.accept_replay_nonce(authenticated.account_id, authenticated.nonce)
             .await?;
-        let created_at_ms = current_timestamp_ms();
         self.persist_control_plane(&ControlPlaneCommand::CreateApiKey {
             account_id: authenticated.account_id,
             token_hash: authenticated.token_hash,

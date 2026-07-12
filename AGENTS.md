@@ -188,7 +188,7 @@ just docs-verify "LP Solver"   # Set last_verified to today (needs notesmd-cli)
 just deploy-api                    # Build + deploy sybil-api + polymarket mirror
 just deploy-arena                  # Build + deploy arena bots/dashboard
 just deploy-web                    # Build + deploy Next.js frontend
-just deploy-all                    # Deploy API/arena/ops; run deploy-web for a changed frontend image
+just deploy-all                    # Build locally and deploy the complete API/arena/web/ops stack
 
 just deploy-logs                   # Tail sybil-api logs
 just deploy-logs sybil-polymarket  # Tail polymarket mirror logs

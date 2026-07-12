@@ -21,6 +21,11 @@ Admission has lightweight backpressure before either path mutates state:
 - The sequencer actor has a global token bucket, bounding coordinated many-account submission floods.
 - Each account has its own token bucket, bounding runaway agents without affecting normal users.
 - Non-MM orders are capped per account across resting orders plus staged non-MM bundles.
+- Every non-MM order that may become durable resting state must have positive
+  price and quantity and meet the configured minimum notional. The default is
+  1,000,000 nanodollars ($0.001), exactly one minimum quantity unit at a $1
+  limit. One-shot MM quotes do not create resting state and retain the existing
+  shape rules.
 - Deferred bundles have both total and per-account caps.
 - A per-submission order-count cap prevents request amplification.
 - [[Actor Mailbox Monitoring]] exposes sequencer mailbox pressure after those admission checks, so coordinated floods that still enqueue faster than the actor drains become visible before latency or memory are the first symptoms.
@@ -44,6 +49,7 @@ graph TB
 - Deferred submissions are persisted before the API returns success
 - MM quotes are one-shot — never carried over to the next batch
 - Admission backpressure is generous by default and only affects abnormal load
+- Durable resting-order growth is backed by positive order notional
 - Orders arrive from [[REST API]] endpoints `POST /v1/orders` and `POST /v1/orders/signed`
 
 ## Where This Lives

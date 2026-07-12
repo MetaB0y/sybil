@@ -38,6 +38,9 @@ authoritative today; scoped delegation is not active.
 ## Bootstrap and key mutation
 
 - Account creation can atomically install its initial key.
+- Initial and additional signing-key labels are optional metadata limited to
+  128 UTF-8 bytes. Admission measures the original bytes without trimming or
+  normalization and rejects oversized labels before account/key/WAL mutation.
 - `POST /v1/accounts/{id}/keys` is service-gated and can bootstrap only an
   account with zero keys.
 - Additional keys use `POST /v1/accounts/{id}/keys/register`; revocation uses
@@ -92,7 +95,11 @@ scheme and hostname. Misconfiguring either locks out passkey actions.
 
 Account reads use a separate read-scoped bearer. Passkey login creates such a
 bearer after an assertion; read keys cannot trade, withdraw, or mutate signing
-keys.
+keys. An account retains at most 64 read-key records over its lifetime,
+including revoked tombstones, and labels are limited to 128 UTF-8 bytes. The
+sequencer also serializes the candidate recovery account before accepting a new
+read key and keeps it under a conservative 256 KiB budget, well below qMDB's
+1 MiB value-codec ceiling.
 
 ## Recovery
 

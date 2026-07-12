@@ -3,7 +3,7 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-06
+last_verified: 2026-07-11
 ---
 
 Sybil runs the same `sybil-api` binary in three very different postures. The
@@ -65,8 +65,14 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT` | `0` | `0` | `0` (redb-served) | no (durable-backed) |
 | `SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT` | `0` | `0` | `0` (redb-served) | no (durable-backed) |
 | `SYBIL_BLOCK_HISTORY_CAPACITY` | `100` | `100` | `100` | no |
-| `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` | `0` (no prune) | `0` | `0` | no |
-| `SYBIL_RAW_PRICE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `0` | no |
+| `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
+| `SYBIL_RAW_PRICE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
+| `SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS` / `MAX_ROWS` | `1000` / `10000` | same as default | `60` / `10000` | no |
+| `SYBIL_PRICE_CANDLE_RETENTION_SECS` | `2592000,15552000,0` | same as default | `604800,604800,604800` | no |
+| `SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS` | `1000000` | `1000000` | `1000000` | no |
+| `SYBIL_HTTP_DA_GLOBAL_RPS` / `BURST` | `20` / `40` | `20` / `40` | `20` / `40` | no |
+| `SYBIL_HTTP_DA_CLIENT_RPS` / `BURST` | `10` / `20` | `10` / `20` | `10` / `20` | no |
+| `SYBIL_HTTP_DA_MAX_CONCURRENCY` | `4` | `4` | `4` | no |
 
 > Constraint note: the `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` compose value is
 > owned by a separate lane (SYB-193 / AR-5). This doc references it but does not
@@ -124,14 +130,46 @@ At boot, before opening the store or binding the socket,
   design limitation, not a config knob.
 - DA/custody artifacts are separate from `block_witnesses`: when a store is
   configured, each committed block schedules a best-effort write to
-  `da_artifacts` containing the canonical witness payload bytes and typed
-  manifest served by `GET /v1/da/{height}/manifest` and
-  `/v1/da/{height}/payload`. These rows are retained with the existing
+  `da_artifacts` containing the canonical witness payload bytes and a paired
+  small `da_manifests` metadata row. The public manifest endpoint reads only
+  the cached metadata; the service-gated payload endpoint reads and integrity-
+  checks the large artifact. Both endpoints have dedicated rate and concurrency
+  limits. These rows are retained together with the existing
   `blocks_full` history policy (`SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` and
   `SYBIL_HISTORY_PRUNE_MAX_ROWS`). With `SYBIL_DATA_DIR` unset, no DA artifacts
   are retained. With block-history pruning disabled, rows remain until the
   store is reset. DA writes happen after block commit and log on failure; they
   do not roll back block production.
+
+The production overlay now gives the streams supported by that retention job
+an explicit seven-day target. The inherited block interval is 10 seconds, so
+seven days is 60,480 full-block/DA heights and 60,480 raw-price heights per
+market. Candle retention is 604,800 seconds at each configured resolution:
+10,080 one-minute buckets, 2,016 five-minute buckets, and 168 hourly buckets
+per market. The base/local profile keeps the binary defaults above, including
+unbounded full-block and raw-price retention, because ephemeral development
+stores should not silently emulate the production posture.
+
+Production schedules the bounded pass every 60 blocks (ten minutes) with a
+10,000-row delete ceiling. The shorter cadence gives raw price rows from many
+markets room within the fixed per-pass budget; it is not a proof of a hard
+bound if ingress eventually exceeds that delete throughput.
+
+This is a row/age policy, not a disk-byte cap. Artifact sizes vary, price and
+candle row counts multiply by the number of markets, bounded pruning may lag
+its target floor, and deleting redb rows does not promise immediate filesystem
+shrinkage. The job does **not** prune the latest-only recovery header/witness,
+canonical fenced state, account events, fills, equity points, or live
+account/order/market state.
+Consequently it reduces one part of the open durable-history DoS exposure but
+does not close finding 5 in `design/dos-audit-2026-07-11.md`.
+
+Seven-day local DA retention is also not an escape guarantee. Once an older DA
+artifact is deleted, this store cannot serve that payload for reconstruction;
+and the local best-effort artifact was never an independent availability
+provider. Before a production escape design relies on an accepted root, its
+required snapshot/payload must be retained and tested independently of this
+devnet product-history budget.
 
 ## Account fill / price history serving policy (today's reality)
 

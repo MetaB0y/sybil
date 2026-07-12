@@ -121,7 +121,7 @@ pub use self::commit::{AnalyticsSnapshot, SequencerSnapshot, Store, StoreError};
 pub use self::da::{
     DA_FILE_PROVIDER_REF_ENCODING, DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
     DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact, DaArtifactIntegrityError, DaArtifactLookup,
-    DaArtifactManifest, DaProviderRef,
+    DaArtifactManifest, DaManifestLookup, DaProviderRef,
 };
 #[cfg(test)]
 pub(crate) use self::fault::StoreFaultPoint;

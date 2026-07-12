@@ -91,6 +91,25 @@ variable does not override that literal Compose value. Full knob matrix and
 history-serving policy:
 `docs/architecture/Deployment Profiles.md`.
 
+## Production History Retention
+
+The production overlay pins the history families already supported by bounded
+store pruning to seven days. At the inherited 10-second block interval this is
+60,480 full blocks plus paired DA artifact/manifest rows, 60,480 raw-price
+heights per market, and 604,800 seconds of each 1-minute, 5-minute, and 1-hour
+candle series. A pass runs every 60 blocks (ten minutes) and deletes at most
+10,000 rows. `just compose-smoke` checks these effective merged-Compose values
+without starting containers.
+
+This is a devnet product-history budget, not a hard disk quota or an escape
+availability promise. Account events, fills, equity rows, canonical recovery
+state, and live account/order/market state are not pruned by this job. Bounded
+maintenance can lag, redb deletion need not immediately shrink the file, and
+DA needed for an accepted-root escape must be retained independently before a
+production escape SLO can be claimed. See
+`docs/architecture/03-sequencing/Historical Data Serving.md` and the open
+finding 5 in `design/dos-audit-2026-07-11.md`.
+
 ## Deploy Commands
 
 ```bash
@@ -101,13 +120,24 @@ just deploy-caddy
 just deploy-all
 ```
 
-`deploy-all` currently transfers the API and arena images but not the freshly
-built `sybil-web` image. Run `just deploy-web` whenever frontend source or its
-baked `NEXT_PUBLIC_*` configuration changed.
+`deploy-all` builds the API, arena, and web images locally, transfers all three
+to the host, and starts the complete Compose stack. Because `NEXT_PUBLIC_*`
+values are baked into `sybil-web`, export any overrides before running either
+`just deploy-web` or `just deploy-all`.
 
 `deploy-arena` and `deploy-all` require `OPENROUTER_API_KEY` in
 `/opt/sybil/arena.env`. The recipes check only for the presence of required variable
 names; they do not print or pass secret values in command arguments.
+
+The arena image also carries its offline quality-report tools. After resolved
+markets exist, preview and persist their conflict-checked outcome labels, then
+print the live calibration report from the shared arena volume:
+
+```bash
+just arena-outcomes-dry-run
+just arena-record-outcomes
+just arena-calibration
+```
 
 Optional Telegram alerting:
 

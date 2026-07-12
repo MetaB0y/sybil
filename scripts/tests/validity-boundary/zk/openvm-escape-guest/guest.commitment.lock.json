@@ -1,0 +1,6 @@
+{
+  "openvm_tag": "v2.0.0",
+  "source_sha256": "escape-source",
+  "app_exe_commit": "escape-exe",
+  "app_vm_commit": "escape-vm"
+}
