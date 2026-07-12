@@ -6,11 +6,17 @@ Rendering is the caller's job.
 
 import json
 import os
+import re
 import sqlite3
 
 import pandas as pd
 
 SYBIL_URL = os.environ.get("SYBIL_URL", "http://172.17.0.1:3000")
+
+_STAGE1_AB_TRADER_RE = re.compile(
+    r"^.+ \[SYB-114:(?P<experiment>[A-Za-z0-9][A-Za-z0-9._-]{0,63}):"
+    r"(?P<variant>control|stage1)\] \(Flat\)$"
+)
 
 
 def extract_strategy(name: str) -> str:
@@ -179,6 +185,112 @@ def get_stats(conn: sqlite3.Connection) -> dict:
         "articles": conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0],
         "snapshots": conn.execute("SELECT COUNT(*) FROM portfolio_snapshots").fetchone()[0],
     }
+
+
+def get_live_experiment_status(conn: sqlite3.Connection) -> list[dict]:
+    """Return persisted experiment metadata plus per-arm durable activity.
+
+    Older decision databases legitimately have no ``live_experiments`` table,
+    so status remains backward-compatible and simply reports no experiments.
+    Only exact durable Stage 1 Flat trader names count toward arm activity;
+    ordinary Kelly/Flat and synthetic accounts cannot inflate readiness.
+    """
+    has_experiments = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='live_experiments'"
+    ).fetchone()
+    if not has_experiments:
+        return []
+
+    experiments = conn.execute(
+        "SELECT experiment_id, mode, started_at_utc, configuration_json "
+        "FROM live_experiments ORDER BY started_at_utc DESC"
+    ).fetchall()
+    if not experiments:
+        return []
+
+    activity: dict[str, dict[str, dict]] = {}
+
+    def collect(table: str, count_key: str) -> None:
+        has_table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not has_table:
+            return
+        rows = conn.execute(
+            f"SELECT trader_name, COUNT(*) AS row_count, "  # noqa: S608 -- fixed table names
+            f"MIN(timestamp) AS first_at, MAX(timestamp) AS last_at FROM {table} "
+            "GROUP BY trader_name"
+        ).fetchall()
+        for row in rows:
+            match = _STAGE1_AB_TRADER_RE.fullmatch(str(row[0]))
+            if match is None:
+                continue
+            experiment_id = match.group("experiment")
+            variant = match.group("variant")
+            arm = activity.setdefault(experiment_id, {}).setdefault(
+                variant,
+                {
+                    "decision_count": 0,
+                    "decision_traders": set(),
+                    "first_decision_at": None,
+                    "last_decision_at": None,
+                    "snapshot_count": 0,
+                    "snapshot_traders": set(),
+                    "first_snapshot_at": None,
+                    "last_snapshot_at": None,
+                },
+            )
+            arm[count_key] += int(row[1])
+            trader_key = count_key.replace("_count", "_traders")
+            arm[trader_key].add(str(row[0]))
+            prefix = count_key.replace("_count", "")
+            first_key = f"first_{prefix}_at"
+            last_key = f"last_{prefix}_at"
+            if row[2] is not None:
+                arm[first_key] = min(filter(None, (arm[first_key], str(row[2]))))
+            if row[3] is not None:
+                arm[last_key] = max(filter(None, (arm[last_key], str(row[3]))))
+
+    collect("decisions", "decision_count")
+    collect("portfolio_snapshots", "snapshot_count")
+
+    result = []
+    for row in experiments:
+        experiment_id = str(row[0])
+        configuration = json.loads(str(row[3]))
+        expected_traders = len(configuration.get("personas", []))
+        arms = {}
+        for variant in ("control", "stage1"):
+            arm = activity.get(experiment_id, {}).get(variant, {})
+            decision_traders = len(arm.get("decision_traders", set()))
+            snapshot_traders = len(arm.get("snapshot_traders", set()))
+            arms[variant] = {
+                "decision_count": arm.get("decision_count", 0),
+                "decision_traders": decision_traders,
+                "first_decision_at": arm.get("first_decision_at"),
+                "last_decision_at": arm.get("last_decision_at"),
+                "snapshot_count": arm.get("snapshot_count", 0),
+                "snapshot_traders": snapshot_traders,
+                "first_snapshot_at": arm.get("first_snapshot_at"),
+                "last_snapshot_at": arm.get("last_snapshot_at"),
+                "ready": (
+                    expected_traders > 0
+                    and decision_traders == expected_traders
+                    and snapshot_traders == expected_traders
+                ),
+            }
+        result.append(
+            {
+                "experiment_id": experiment_id,
+                "mode": str(row[1]),
+                "started_at_utc": str(row[2]),
+                "configuration": configuration,
+                "expected_traders_per_arm": expected_traders,
+                "arms": arms,
+            }
+        )
+    return result
 
 
 def get_mm_mtm(sybil_url: str = SYBIL_URL, account_id: int = 0, initial_balance: float = 1_000_000.0) -> dict | None:
