@@ -9,7 +9,10 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
-import { humanizeOrderError } from "@/lib/account/order-errors";
+import {
+  humanizeCancelError,
+  humanizeOrderError,
+} from "@/lib/account/order-errors";
 import { notionalNanosCeil } from "@/lib/account/quantity";
 import {
   useAccountSession,
@@ -60,6 +63,7 @@ export function DegenRail({
   const [amount, setAmount] = useState<string>("10");
   const [signing, setSigning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Optimistic cancel: hitting Cancel is a local intent, so we reflect it
   // immediately instead of waiting for the order to drop out of the live feeds
@@ -77,9 +81,11 @@ export function DegenRail({
   const latestHeight = useStore(selectLatestHeight);
   // "Available for betting" = balance minus cash reserved by resting buy orders
   // (the engine rejects against this, not raw balance). See useAvailableBalance.
-  const { availableNanos, reservedNanos } = useAvailableBalance(
-    session?.accountId ?? null,
-  );
+  const {
+    availableNanos,
+    reservedNanos,
+    isPending: balancePending,
+  } = useAvailableBalance(session?.accountId ?? null);
   const availableDollars =
     availableNanos == null ? null : Number(availableNanos) / 1e9;
   const reservedDollars = Number(reservedNanos) / 1e9;
@@ -125,6 +131,7 @@ export function DegenRail({
       openConnectModal(true);
       return;
     }
+    if (availableNanos == null) return;
     // selected is narrowed to non-undefined by the early return above, but
     // TypeScript can't see across the function boundary — guard here too.
     if (!selected || !built?.ok || latestHeight == null) return;
@@ -158,6 +165,7 @@ export function DegenRail({
     );
     setSigning(true);
     setSubmitError(null);
+    setCancelError(null);
     try {
       const res = await submitSignedOrder({
         accountId: session.accountId,
@@ -213,6 +221,7 @@ export function DegenRail({
     const orderId = tracking?.orderId ?? null;
     if (!session || !active || orderId === null) return;
     setCancelling(true);
+    setCancelError(null);
     // Flip the card to its cancelled state now; revert only if the backend
     // rejects (e.g. the order already filled/expired in the meantime).
     setOptimisticallyCancelledBetKey(activeBetKey);
@@ -245,6 +254,7 @@ export function DegenRail({
       // block. warn (not error, which trips the dev overlay) is enough.
       console.warn("degen cancel failed:", e);
       setOptimisticallyCancelledBetKey(null);
+      setCancelError(humanizeCancelError(e, "bet"));
     } finally {
       setCancelling(false);
     }
@@ -271,6 +281,8 @@ export function DegenRail({
     connected,
     latestBatchReady: latestHeight != null,
     signing,
+    balanceKnown: availableNanos != null,
+    balancePending,
     orderReady: built?.ok === true,
     insufficient,
   });
@@ -281,11 +293,15 @@ export function DegenRail({
         ? "Waiting for latest batch…"
         : ctaState === "signing"
           ? "Signing…"
-          : ctaState === "raise_bet"
-            ? "Raise your bet"
-            : ctaState === "insufficient"
-              ? "Not enough funds"
-              : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
+          : ctaState === "waiting_balance"
+            ? "Loading balance…"
+            : ctaState === "balance_unavailable"
+              ? "Balance unavailable"
+              : ctaState === "raise_bet"
+                ? "Raise your bet"
+                : ctaState === "insufficient"
+                  ? "Not enough funds"
+                  : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
   const ctaDisabled = ctaState !== "connect" && ctaState !== "ready";
 
   // Explainer slot below the form/progress area:
@@ -317,7 +333,10 @@ export function DegenRail({
           filledQty={tracking?.filledQty ?? 0n}
           targetQty={active.targetQty}
           betUsd={active.betUsd}
-          onBetAgain={() => setActive(null)}
+          onBetAgain={() => {
+            setCancelError(null);
+            setActive(null);
+          }}
           onCancel={onCancelBet}
           canCancel={(tracking?.orderId ?? null) !== null}
           cancelling={cancelling}
@@ -393,6 +412,8 @@ export function DegenRail({
         </>
       )}
 
+      {active && <DegenCancelAlert message={cancelError} />}
+
       {showWaiting && <WaitingAlert />}
       {showExpired && <WhyWaiting variant="expired" />}
     </div>
@@ -403,6 +424,8 @@ export type DegenCtaState =
   | "connect"
   | "waiting_batch"
   | "signing"
+  | "waiting_balance"
+  | "balance_unavailable"
   | "raise_bet"
   | "insufficient"
   | "ready";
@@ -411,21 +434,45 @@ export function degenCtaState({
   connected,
   latestBatchReady,
   signing,
+  balanceKnown,
+  balancePending,
   orderReady,
   insufficient,
 }: {
   connected: boolean;
   latestBatchReady: boolean;
   signing: boolean;
+  balanceKnown: boolean;
+  balancePending: boolean;
   orderReady: boolean;
   insufficient: boolean;
 }): DegenCtaState {
   if (!connected) return "connect";
   if (!latestBatchReady) return "waiting_batch";
   if (signing) return "signing";
+  if (!balanceKnown) {
+    return balancePending ? "waiting_balance" : "balance_unavailable";
+  }
   if (!orderReady) return "raise_bet";
   if (insufficient) return "insufficient";
   return "ready";
+}
+
+export function DegenCancelAlert({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div
+      role="alert"
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        lineHeight: 1.45,
+        color: "var(--no)",
+      }}
+    >
+      {message}
+    </div>
+  );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {

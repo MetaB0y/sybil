@@ -665,8 +665,17 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
     timeout: 20_000,
   });
   await expect(depositGuide).toContainText(/no L1 refund flow today/i);
+  const withdrawals = page.getByRole("region", { name: "Normal withdrawals" });
+  await expect(withdrawals).toContainText("0 active", { timeout: 20_000 });
+  await expect(withdrawals).toContainText("No active withdrawal leaves");
+  await expect(withdrawals).toContainText(
+    /new withdrawal requests are not enabled/i,
+  );
+  await expect(withdrawals).toContainText(
+    /does not by itself release L1 funds/i,
+  );
   await page.getByRole("tab", { name: /open orders/i }).click();
-  const cancelRow = page.locator(`a[href="/m/${cancelMarket.market_id}"]`);
+  const cancelRow = page.locator(`[data-order-id="${cancelOrderId}"]`);
   await expect(cancelRow).toBeVisible({ timeout: 20_000 });
   const cancelResponsePromise = page.waitForResponse(
     (response) =>

@@ -34,7 +34,11 @@ import {
 import { selectLatestBlock, useStore } from "@/lib/store";
 import type { components } from "@/lib/api/schema";
 import { MarketThumb } from "@/components/market-thumb";
-import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
+import {
+  Pager,
+  usePaged,
+  PORTFOLIO_PAGE_SIZE,
+} from "@/components/event-list-pager";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
 import { SidePill } from "./side-pill";
@@ -43,7 +47,7 @@ import { TifCell } from "./tif-cell";
 type Market = components["schemas"]["MarketResponse"];
 
 /** An order with every sortable value derived once. */
-interface OpenRow {
+export interface OpenRow {
   order: AccountOrder;
   market: Market | undefined;
   label: string;
@@ -173,7 +177,11 @@ export function OpenOrdersList({
         market: marketsById.get(o.market_id),
         label: marketsById.get(o.market_id)?.name ?? `#${o.market_id}`,
         action: sideRaw.includes("buy") ? "BUY" : "SELL",
-        outcome: sideRaw.includes("yes") ? "YES" : sideRaw.includes("no") ? "NO" : "",
+        outcome: sideRaw.includes("yes")
+          ? "YES"
+          : sideRaw.includes("no")
+            ? "NO"
+            : "",
         placed,
         filled: placed > 0 ? Math.max(0, placed - o.remaining_quantity) : 0,
         remaining: o.remaining_quantity,
@@ -189,7 +197,9 @@ export function OpenOrdersList({
     });
     if (!sort) {
       // Default: newest-first by created time.
-      return [...decorated].sort((a, b) => (b.createdMs ?? 0) - (a.createdMs ?? 0));
+      return [...decorated].sort(
+        (a, b) => (b.createdMs ?? 0) - (a.createdMs ?? 0),
+      );
     }
     const factor = sort.dir === "asc" ? 1 : -1;
     return [...decorated].sort((a, b) => compareBy(a, b, sort.key) * factor);
@@ -215,7 +225,13 @@ export function OpenOrdersList({
 
   const isEmpty = orders.length === 0;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-3)",
+      }}
+    >
       <PortfolioToolbar
         tabs={tabs}
         search={!isEmpty && <SearchField value={query} onChange={onSearch} />}
@@ -260,7 +276,7 @@ export function OpenOrdersList({
   );
 }
 
-function OrderRow({
+export function OrderRow({
   row,
   nowMs,
   accountId,
@@ -278,9 +294,7 @@ function OrderRow({
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function onCancel(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function onCancel() {
     setError(null);
     setCancelling(true);
     try {
@@ -304,35 +318,50 @@ function OrderRow({
   }
 
   return (
-    <Link
-      href={`/m/${order.market_id}`}
+    <div
+      data-order-id={order.order_id}
       style={{
         ...rowGrid("var(--fg-2)"),
-        textDecoration: "none",
-        color: "inherit",
         borderTop: "1px solid var(--border-1)",
       }}
     >
-      <MarketThumb
-        marketId={order.market_id}
-        name={market?.name ?? `#${order.market_id}`}
-        imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
-        fallbackIconUrl={market?.market_icon_url ?? market?.event_icon_url ?? null}
-        size={28}
-      />
-      <span
-        style={{
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          color: "var(--fg-1)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-        }}
+      <Link
+        href={`/m/${order.market_id}`}
         title={market?.name ?? `#${order.market_id}`}
+        style={{
+          gridColumn: "1 / span 2",
+          display: "grid",
+          gridTemplateColumns: "28px minmax(0, 1fr)",
+          gap: 14,
+          alignItems: "center",
+          minWidth: 0,
+          borderRadius: 3,
+          color: "inherit",
+          textDecoration: "none",
+        }}
       >
-        {market?.name ?? `#${order.market_id}`}
-      </span>
+        <MarketThumb
+          marketId={order.market_id}
+          name={market?.name ?? `#${order.market_id}`}
+          imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
+          fallbackIconUrl={
+            market?.market_icon_url ?? market?.event_icon_url ?? null
+          }
+          size={28}
+        />
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            color: "var(--fg-1)",
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+          }}
+        >
+          {market?.name ?? `#${order.market_id}`}
+        </span>
+      </Link>
       <span
         style={{
           fontFamily: "var(--font-mono)",
@@ -354,7 +383,9 @@ function OrderRow({
           agg={{ count: row.fillCount, avgPriceNanos: row.avgPriceNanos }}
         />
       </RightCell>
-      <RightCell mono>{formatDollars(row.valueNanos, { decimals: 2 })}</RightCell>
+      <RightCell mono>
+        {formatDollars(row.valueNanos, { decimals: 2 })}
+      </RightCell>
       <CreatedCell ms={row.createdMs} block={row.createdBlock} nowMs={nowMs} />
       <RightCell>
         <TifCell expiresAtBlock={order.expires_at_block} />
@@ -395,7 +426,7 @@ function OrderRow({
           Couldn&apos;t cancel order: {error}
         </span>
       )}
-    </Link>
+    </div>
   );
 }
 
@@ -499,8 +530,15 @@ function AvgFillCell({ agg }: { agg: OrderFillAgg }) {
         fontFamily: "var(--font-mono)",
       }}
     >
-      <span style={{ fontSize: 12, color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
-        {agg.avgPriceNanos != null ? formatCentsPrecise(agg.avgPriceNanos) : "—"}
+      <span
+        style={{
+          fontSize: 12,
+          color: count > 0 ? "var(--fg-1)" : "var(--fg-3)",
+        }}
+      >
+        {agg.avgPriceNanos != null
+          ? formatCentsPrecise(agg.avgPriceNanos)
+          : "—"}
       </span>
       <span
         style={{
