@@ -102,6 +102,7 @@ export function ConnectModal() {
         alignItems: "center",
         justifyContent: "center",
         padding: "var(--space-5)",
+        boxSizing: "border-box",
       }}
     >
       <ConnectModalBody
@@ -125,10 +126,14 @@ function ConnectModalBody({
 
   return (
     <div
+      data-testid="connect-modal-card"
       onClick={(e) => e.stopPropagation()}
       style={{
         width: "100%",
         maxWidth: 440,
+        maxHeight: "100%",
+        display: "flex",
+        flexDirection: "column",
         background: "var(--surface-1)",
         border: "1px solid var(--border-1)",
         borderRadius: 12,
@@ -144,6 +149,7 @@ function ConnectModalBody({
           justifyContent: "space-between",
           padding: "14px 18px",
           borderBottom: "1px solid var(--border-1)",
+          flexShrink: 0,
         }}
       >
         <div
@@ -184,6 +190,7 @@ function ConnectModalBody({
           flexWrap: "wrap",
           gap: 4,
           padding: "10px 18px 0",
+          flexShrink: 0,
         }}
       >
         {saved && (
@@ -202,7 +209,16 @@ function ConnectModalBody({
         </TabButton>
       </div>
 
-      <div style={{ padding: "16px 18px 18px" }}>
+      <div
+        data-testid="connect-modal-content"
+        style={{
+          minHeight: 0,
+          padding: "16px 18px 18px",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
         {tab === "saved" && saved ? (
           <SavedAccountTab
             accountId={saved.accountId}

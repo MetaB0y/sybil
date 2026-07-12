@@ -54,7 +54,7 @@ describe("trapTabFocus", () => {
       ),
     ).toBe(true);
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(focusFirst).toHaveBeenCalledWith({ preventScroll: true });
+    expect(focusFirst).toHaveBeenCalledWith();
   });
 
   it("focuses the modal itself when it has no focusable controls", () => {
@@ -73,7 +73,7 @@ describe("trapTabFocus", () => {
       ),
     ).toBe(true);
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(focus).toHaveBeenCalledWith();
   });
 
   it("ignores keys other than Tab", () => {

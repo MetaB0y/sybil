@@ -605,7 +605,7 @@ textarea {
 
   .global-nav-right .batch-pill,
   .global-nav-right .account-chip-balance {
-    display: none;
+    display: none !important;
   }
 
   .global-nav-sheet {

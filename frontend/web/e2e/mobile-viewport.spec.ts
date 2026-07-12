@@ -206,6 +206,65 @@ test.describe("compact desktop nav boundary", () => {
   });
 });
 
+test.describe("short mobile recovery", () => {
+  const SHORT_VIEWPORT = { width: 320, height: 568 };
+  test.use({ viewport: SHORT_VIEWPORT, isMobile: true, hasTouch: true });
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
+
+  test("saved-account import remains reachable inside the locked modal", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("sybil:auth:account_id", "42");
+      localStorage.setItem("sybil:auth:pubkey_hex", "04".padEnd(130, "0"));
+      localStorage.setItem("sybil:auth:auth_scheme", "raw_p256");
+      localStorage.setItem("sybil:auth:private_key_jwk", "{}");
+      localStorage.setItem("sybil:auth:revision", "short-mobile-recovery");
+    });
+    await proxyApiForLocalRun(page);
+    await page.goto("/");
+    await expect(
+      page.getByRole("button", { name: "Open navigation menu" }),
+    ).toBeVisible();
+    await expectNoDocumentOverflow(page, "/ at 320px");
+    await page.getByRole("button", { name: "connect", exact: true }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Connect" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Import existing" }).click();
+
+    const card = page.getByTestId("connect-modal-card");
+    const cardBox = await card.boundingBox();
+    expect(cardBox).not.toBeNull();
+    expect(cardBox!.y).toBeGreaterThanOrEqual(0);
+    expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(
+      SHORT_VIEWPORT.height,
+    );
+
+    const content = page.getByTestId("connect-modal-content");
+    await expect(content).toHaveCSS("overflow-y", "auto");
+    const importButton = dialog.getByRole("button", {
+      name: "Import",
+      exact: true,
+    });
+    await dialog.getByRole("button", { name: "Close" }).focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(importButton).toBeFocused();
+    await expect(importButton).toBeVisible();
+    const importBox = await importButton.boundingBox();
+    expect(importBox).not.toBeNull();
+    expect(importBox!.y).toBeGreaterThanOrEqual(0);
+    expect(importBox!.y + importBox!.height).toBeLessThanOrEqual(
+      SHORT_VIEWPORT.height,
+    );
+    expect(importBox!.width).toBeGreaterThanOrEqual(43.5);
+    expect(importBox!.height).toBeGreaterThanOrEqual(43.5);
+    await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+  });
+});
+
 async function gridColumnCount(grid: Locator): Promise<number> {
   return grid.evaluate((node) => {
     const columns = getComputedStyle(node).gridTemplateColumns.trim();

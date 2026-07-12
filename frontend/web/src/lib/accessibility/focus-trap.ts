@@ -43,6 +43,10 @@ export function trapTabFocus(
   if (!target) return false;
 
   event.preventDefault();
-  target.focus({ preventScroll: true });
+  // Wrapping can cross an internally scrollable modal (for example from a
+  // sticky Close button to the final form action). Let the browser reveal the
+  // new target in its nearest scroll container instead of leaving keyboard
+  // focus on an off-screen control.
+  target.focus();
   return true;
 }
