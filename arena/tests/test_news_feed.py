@@ -1,10 +1,11 @@
 """Tests for the live NewsFeed ingestion pipeline."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
-from live.news_feed import LiveArticle, NewsFeed
+from live.news_feed import LiveArticle, NewsFeed, PairedNewsBatchBarrier
 from sybil_client.types import Market
 
 
@@ -142,6 +143,55 @@ async def test_two_subscribers_both_receive_same_article():
     # Draining one subscriber must NOT consume the other's copy.
     assert await kelly.drain(1) == []  # kelly already drained
     assert len(a_flat) == 1  # flat still had its own copy
+
+
+async def test_paired_batch_barrier_holds_next_batch_until_both_arms_drain():
+    feed = NewsFeed([_market(1, "Market")], api_key=None)
+    upstream = feed.subscribe(name="paired")
+    barrier = PairedNewsBatchBarrier(
+        upstream, ("control", "stage1"), {1: 0.5}, lambda _market_id: None
+    )
+    control = barrier.view("control")
+    stage1 = barrier.view("stage1")
+    first = _article("http://ex/first")
+    second = _article("http://ex/second")
+
+    async with feed._lock:
+        upstream._deliver(1, first)
+    control_first = await control.drain(1)
+    async with feed._lock:
+        upstream._deliver(1, second)
+
+    # The faster arm cannot consume or re-batch pending evidence while its pair
+    # has not consumed the active batch.
+    assert await control.drain(1) == []
+    stage1_first = await stage1.drain(1)
+    assert control_first is stage1_first
+    assert control_first == [first]
+
+    control_second = await control.drain(1)
+    stage1_second = await stage1.drain(1)
+    assert control_second is stage1_second
+    assert control_second == [second]
+
+
+async def test_paired_batch_barrier_concurrent_drains_share_one_snapshot():
+    feed = NewsFeed([_market(1, "Market")], api_key=None)
+    upstream = feed.subscribe(name="paired")
+    barrier = PairedNewsBatchBarrier(
+        upstream, ("control", "stage1"), {1: 0.5}, lambda _market_id: None
+    )
+    article = _article("http://ex/shared")
+    async with feed._lock:
+        upstream._deliver(1, article)
+
+    control_batch, stage1_batch = await asyncio.gather(
+        barrier.view("control").drain(1),
+        barrier.view("stage1").drain(1),
+    )
+
+    assert control_batch is stage1_batch
+    assert control_batch == [article]
 
 
 async def test_unsubscribe_then_resubscribe_is_sane():

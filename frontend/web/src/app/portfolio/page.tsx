@@ -11,10 +11,15 @@
  */
 
 import { useMemo, useState } from "react";
-import { TradesList, tradeOrderCount } from "@/components/portfolio/trades-list";
+import {
+  TradesList,
+  tradeOrderCount,
+} from "@/components/portfolio/trades-list";
+import { DisconnectedAccountPrompt } from "@/components/auth/disconnected-account-prompt";
 import { EquityChart } from "@/components/portfolio/equity-chart";
 import { HistoryFeed } from "@/components/portfolio/history-feed";
 import { IdentityHeader } from "@/components/portfolio/identity-header";
+import { L1DepositGuide } from "@/components/portfolio/l1-deposit-guide";
 import { OpenOrdersList } from "@/components/portfolio/open-orders-list";
 import { PortfolioHero } from "@/components/portfolio/portfolio-hero";
 import {
@@ -22,8 +27,13 @@ import {
   type PortfolioTab,
 } from "@/components/portfolio/portfolio-tabs";
 import { PositionsList } from "@/components/portfolio/positions-list";
+import { RealizedPnlPanel } from "@/components/portfolio/realized-pnl-panel";
 import { RangeTabs } from "@/components/portfolio/range-tabs";
 import { WithdrawalEtas } from "@/components/portfolio/withdrawal-etas";
+import {
+  AuthenticatedReadState,
+  authenticatedReadStatus,
+} from "@/components/portfolio/authenticated-read-state";
 import {
   useAccountHydrated,
   useAccountSession,
@@ -42,7 +52,6 @@ import {
 import { usePnlSplit } from "@/lib/account/use-pnl-split";
 import { usePortfolio } from "@/lib/account/use-portfolio";
 import { parseNanos } from "@/lib/format/nanos";
-import { useEventQuestions } from "@/lib/markets/use-event-raw";
 import { useMarketsList } from "@/lib/markets/use-markets";
 
 const FILLS_PAGE = 200;
@@ -94,9 +103,7 @@ function Connected({
   const markets = useMarketsList();
 
   const fillsData = fills.data ?? [];
-  // Memoized: `?? []` mints a new array each render, and `touchedMarketIds`
-  // below depends on it.
-  const ordersData = useMemo(() => orders.data ?? [], [orders.data]);
+  const ordersData = orders.data ?? [];
   const portfolioData = portfolio.data ?? null;
   const pnlSplit = usePnlSplit(portfolioData);
 
@@ -105,45 +112,6 @@ function Connected({
     [markets.bundle],
   );
   const history = useAccountHistory(accountId);
-
-  // Every market this account touches, across all four tabs.
-  const touchedMarketIds = useMemo(() => {
-    const ids = new Set<number>();
-    for (const p of portfolioData?.positions ?? []) ids.add(p.market_id);
-    for (const o of ordersData) ids.add(o.market_id);
-    for (const e of history.events) if (e.marketId != null) ids.add(e.marketId);
-    return ids;
-  }, [portfolioData, ordersData, history.events]);
-
-  // A grouped (NegRisk) market's `MarketResponse.name` is the terse
-  // "{event_title}: {group_item_title}" — e.g. "Which company has best AI model
-  // end of 2026?: OpenAI". The natural question ("Will OpenAI have the best AI
-  // model at the end of December 2026?") only exists in the raw Polymarket event
-  // snapshot, joined on `polymarket_condition_id`. Fetch just the events this
-  // account touches (shared react-query cache with the cards + ticker) and fall
-  // back to `name` for Sybil-native markets, which have no snapshot.
-  const eventIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const id of touchedMarketIds) {
-      const m = marketsById.get(id);
-      if (m?.event_id && m.polymarket_condition_id) ids.add(m.event_id);
-    }
-    return [...ids];
-  }, [touchedMarketIds, marketsById]);
-
-  const questionByCondition = useEventQuestions(eventIds);
-
-  const titleByMarket = useMemo(() => {
-    const out = new Map<number, string>();
-    for (const id of touchedMarketIds) {
-      const m = marketsById.get(id);
-      const question = m?.polymarket_condition_id
-        ? questionByCondition.get(m.polymarket_condition_id)
-        : undefined;
-      out.set(id, question ?? m?.name ?? `#${id}`);
-    }
-    return out;
-  }, [touchedMarketIds, marketsById, questionByCondition]);
 
   const [range, setRange] = useState<EquityRange>("ALL");
   const [tab, setTab] = useState<PortfolioTab>("positions");
@@ -178,10 +146,63 @@ function Connected({
     [history.events],
   );
 
+  const privateReadStatus = authenticatedReadStatus([
+    portfolio,
+    orders,
+    fills,
+    history,
+    { isPending: curve.isLoading, error: curve.error },
+  ]);
+  const privateReadsRetrying =
+    portfolio.isFetching ||
+    orders.isFetching ||
+    fills.isFetching ||
+    history.isFetching ||
+    curve.isFetching;
+
+  const retryPrivateReads = () => {
+    void Promise.all([
+      portfolio.refetch(),
+      orders.refetch(),
+      fills.refetch(),
+      history.refetch(),
+      curve.refetch(),
+    ]);
+  };
+
+  if (privateReadStatus === "loading") {
+    return (
+      <>
+        <IdentityHeader publicKeyHex={publicKeyHex} />
+        <AuthenticatedReadState
+          status="loading"
+          title="Loading your portfolio"
+          message="Checking your private balances, positions, orders, and account history."
+        />
+      </>
+    );
+  }
+
+  if (privateReadStatus === "error") {
+    return (
+      <>
+        <IdentityHeader publicKeyHex={publicKeyHex} />
+        <AuthenticatedReadState
+          status="error"
+          title="Portfolio unavailable"
+          message="We could not load all of your private account data. Balances and activity are hidden instead of being shown as zero."
+          onRetry={retryPrivateReads}
+          retrying={privateReadsRetrying}
+        />
+      </>
+    );
+  }
+
   const counts: Record<PortfolioTab, number> = {
     positions: portfolioData?.positions.length ?? 0,
     orders: ordersData.length,
     trades: tradesCount,
+    pnl: 0, // badge hidden for P&L (chart tab, not a row count)
     history: history.events.length,
   };
 
@@ -195,16 +216,14 @@ function Connected({
     <>
       <IdentityHeader publicKeyHex={publicKeyHex} />
 
-      <section
-        className="portfolio-hero-grid"
-        style={{
-        }}
-      >
+      <section className="portfolio-hero-grid" style={{}}>
         {/* Left: portfolio hero. */}
         <PortfolioHero
           portfolio={portfolioData}
           pnlSplit={pnlSplit}
           curve={curve}
+          tradeCount={tradesCount}
+          tradeCountCapped={history.hasMore}
           rangeLabel={RANGE_COPY[range]}
         />
 
@@ -216,7 +235,9 @@ function Connected({
         />
       </section>
 
-      <WithdrawalEtas accountId={accountId} events={history.events} />
+      <L1DepositGuide accountId={accountId} />
+
+      <WithdrawalEtas accountId={accountId} />
 
       {tab === "positions" && (
         <PositionsList
@@ -224,7 +245,6 @@ function Connected({
           positions={portfolioData?.positions ?? []}
           fills={fillsData}
           marketsById={marketsById}
-          titleByMarket={titleByMarket}
         />
       )}
       {tab === "orders" && (
@@ -235,7 +255,6 @@ function Connected({
           orders={ordersData}
           fillsByOrder={fillsByOrder}
           marketsById={marketsById}
-          titleByMarket={titleByMarket}
         />
       )}
       {tab === "trades" && (
@@ -243,16 +262,16 @@ function Connected({
           tabs={tabsStrip}
           events={history.events}
           marketsById={marketsById}
-          titleByMarket={titleByMarket}
         />
+      )}
+      {tab === "pnl" && (
+        <RealizedPnlPanel tabs={tabsStrip} events={history.events} />
       )}
       {tab === "history" && (
         <HistoryFeed
           tabs={tabsStrip}
           events={history.events}
           marketsById={marketsById}
-          titleByMarket={titleByMarket}
-          isMock={history.isMock}
         />
       )}
     </>
@@ -262,59 +281,16 @@ function Connected({
 function Disconnected() {
   const openModal = useSetConnectModalOpen();
   return (
-    <div
-      style={{
-        padding: "48px 24px",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-1)",
-        borderRadius: 10,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 16,
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 18,
-          color: "var(--fg-1)",
-        }}
-      >
-        Connect to view your portfolio
-      </div>
-      <p
-        style={{
-          margin: 0,
-          color: "var(--fg-3)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-          maxWidth: 400,
-          lineHeight: 1.5,
-        }}
-      >
-        Create a demo account in your browser — preview &middot; wallet auth
-        coming soon. Your keys are stored only in this browser.
-      </p>
-      <button
-        type="button"
-        onClick={() => openModal(true)}
-        style={{
-          padding: "10px 18px",
-          background: "var(--accent)",
-          border: 0,
-          borderRadius: 8,
-          color: "var(--bg-1)",
-          fontFamily: "var(--font-sans)",
-          fontWeight: 600,
-          fontSize: 14,
-          cursor: "pointer",
-        }}
-      >
-        Connect
-      </button>
-    </div>
+    <DisconnectedAccountPrompt
+      title="Connect to view your portfolio"
+      message={
+        <>
+          Create a demo account with a passkey or a local browser key. Your key
+          material stays on this device.
+        </>
+      }
+      onConnect={() => openModal(true)}
+    />
   );
 }
 

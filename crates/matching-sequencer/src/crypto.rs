@@ -374,10 +374,12 @@ fn to_canonical_bridge_withdrawal(
 pub fn canonical_bridge_withdrawal_bytes(
     request: &crate::bridge::BridgeWithdrawalRequest,
     nonce: u64,
+    genesis_hash: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_bridge_withdrawal_bytes(&to_canonical_bridge_withdrawal(
-        request, nonce,
-    ))
+    sybil_signing::canonical_bridge_withdrawal_bytes(
+        &to_canonical_bridge_withdrawal(request, nonce),
+        genesis_hash,
+    )
 }
 
 /// Canonical bytes for a signed account-profile update (SYB-60).
@@ -566,8 +568,9 @@ pub fn verify_signed_cancel(
 /// Verify a signed bridge withdrawal request's P256 ECDSA signature.
 pub fn verify_signed_bridge_withdrawal(
     signed: &SignedBridgeWithdrawal,
+    genesis_hash: [u8; 32],
 ) -> Result<(), SequencerError> {
-    let msg = canonical_bridge_withdrawal_bytes(&signed.request, signed.nonce);
+    let msg = canonical_bridge_withdrawal_bytes(&signed.request, signed.nonce, genesis_hash);
     signed
         .signer
         .0
@@ -655,9 +658,10 @@ pub fn sign_cancel(
 pub fn sign_bridge_withdrawal(
     request: crate::bridge::BridgeWithdrawalRequest,
     nonce: u64,
+    genesis_hash: [u8; 32],
     key: &SigningKey,
 ) -> SignedBridgeWithdrawal {
-    let msg = canonical_bridge_withdrawal_bytes(&request, nonce);
+    let msg = canonical_bridge_withdrawal_bytes(&request, nonce, genesis_hash);
     let signature: Signature = key.sign(&msg);
     SignedBridgeWithdrawal {
         request,
@@ -964,9 +968,13 @@ mod tests {
             amount_token_units: 42_000_000,
             expiry_height: 123_456,
         };
-        let signed = sign_bridge_withdrawal(request, 1, &key);
+        let signed = sign_bridge_withdrawal(request, 1, GENESIS_HASH, &key);
 
-        assert!(verify_signed_bridge_withdrawal(&signed).is_ok());
+        assert!(verify_signed_bridge_withdrawal(&signed, GENESIS_HASH).is_ok());
+        assert!(matches!(
+            verify_signed_bridge_withdrawal(&signed, [0x99; 32]),
+            Err(SequencerError::InvalidSignature)
+        ));
     }
 
     #[test]
@@ -982,11 +990,11 @@ mod tests {
             amount_token_units: 42_000_000,
             expiry_height: 123_456,
         };
-        let mut signed = sign_bridge_withdrawal(request, 1, &key);
+        let mut signed = sign_bridge_withdrawal(request, 1, GENESIS_HASH, &key);
         signed.request.amount_token_units = 43_000_000;
 
         assert!(matches!(
-            verify_signed_bridge_withdrawal(&signed),
+            verify_signed_bridge_withdrawal(&signed, GENESIS_HASH),
             Err(SequencerError::InvalidSignature)
         ));
     }
@@ -1053,8 +1061,8 @@ mod tests {
             amount_token_units: 42_000_000,
             expiry_height: 123_456,
         };
-        let bytes1 = canonical_bridge_withdrawal_bytes(&request, 1);
-        let bytes2 = canonical_bridge_withdrawal_bytes(&request, 1);
+        let bytes1 = canonical_bridge_withdrawal_bytes(&request, 1, GENESIS_HASH);
+        let bytes2 = canonical_bridge_withdrawal_bytes(&request, 1, GENESIS_HASH);
 
         assert_eq!(bytes1, bytes2);
     }

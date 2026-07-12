@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 from datetime import datetime, timezone
+from typing import Any
 
 from .sqlite_utils import connect_writer
 
@@ -33,11 +34,15 @@ class DecisionDB:
                 ("decisions", "fair_value_age_s", "REAL"),
                 ("decisions", "confidence", "REAL"),
                 ("decisions", "countercase", "TEXT"),
+                # SYB-114 Stage 1: resolution-criteria comprehension guard.
+                ("decisions", "restate", "TEXT"),
                 # SYB-114 Stage 0: explain every no-order sizing decision and
                 # retain market classification for category calibration.
                 ("decisions", "rejection_reason", "TEXT"),
                 ("decisions", "market_category", "TEXT"),
                 ("decisions", "market_tags", "TEXT"),
+                ("decisions", "analysis_batch_id", "TEXT"),
+                ("decisions", "analysis_reference_price", "REAL"),
             ]:
                 try:
                     self.conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
@@ -83,9 +88,12 @@ class DecisionDB:
                     fair_value_age_s REAL,
                     confidence REAL,
                     countercase TEXT,
+                    restate TEXT,
                     rejection_reason TEXT,
                     market_category TEXT,
-                    market_tags TEXT
+                    market_tags TEXT,
+                    analysis_batch_id TEXT,
+                    analysis_reference_price REAL
                 );
 
                 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
@@ -120,6 +128,13 @@ class DecisionDB:
                     cost_source TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS live_experiments (
+                    experiment_id TEXT PRIMARY KEY,
+                    mode TEXT NOT NULL,
+                    started_at_utc TEXT NOT NULL,
+                    configuration_json TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_decisions_trader
                     ON decisions(trader_name);
                 CREATE INDEX IF NOT EXISTS idx_decisions_time
@@ -129,6 +144,81 @@ class DecisionDB:
                 CREATE INDEX IF NOT EXISTS idx_snapshots_time
                     ON portfolio_snapshots(timestamp);
             """)
+
+    def ensure_experiment(
+        self,
+        experiment_id: str,
+        mode: str,
+        configuration: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Create immutable experiment metadata, or diagnose an existing id.
+
+        The caller decides whether a compatible pre-existing record may resume.
+        Stage 1 A/B deliberately rejects all resumes because analyst and Flat
+        strategy state is not reconstructable; retaining this comparison still
+        provides precise drift diagnostics and an audit record.
+        """
+        canonical = json.dumps(configuration, sort_keys=True, separators=(",", ":"))
+        with self._lock:
+            row = self.conn.execute(
+                """SELECT experiment_id, mode, started_at_utc, configuration_json
+                   FROM live_experiments WHERE experiment_id = ?""",
+                (experiment_id,),
+            ).fetchone()
+            if row is None:
+                preexisting = False
+                started_at_utc = datetime.now(timezone.utc).isoformat()
+                self.conn.execute(
+                    """INSERT INTO live_experiments
+                       (experiment_id, mode, started_at_utc, configuration_json)
+                       VALUES (?, ?, ?, ?)""",
+                    (experiment_id, mode, started_at_utc, canonical),
+                )
+                self.conn.commit()
+            else:
+                preexisting = True
+                started_at_utc = str(row["started_at_utc"])
+                persisted_mode = str(row["mode"])
+                persisted_configuration = str(row["configuration_json"])
+                if persisted_mode != mode or persisted_configuration != canonical:
+                    persisted = json.loads(persisted_configuration)
+                    changed = sorted(
+                        key
+                        for key in set(persisted) | set(configuration)
+                        if persisted.get(key) != configuration.get(key)
+                    )
+                    if persisted_mode != mode:
+                        changed.insert(0, "mode")
+                    raise ValueError(
+                        f"experiment {experiment_id!r} restart metadata is incompatible "
+                        f"(changed: {', '.join(changed)}); refusing configuration drift; "
+                        "window invalidated, use a new experiment id"
+                    )
+
+        return {
+            "experiment_id": experiment_id,
+            "mode": mode,
+            "started_at_utc": started_at_utc,
+            "configuration": json.loads(canonical),
+            "preexisting": preexisting,
+        }
+
+    def get_experiment(self, experiment_id: str) -> dict[str, Any] | None:
+        """Return one persisted experiment record for audit/status tooling."""
+        with self._lock:
+            row = self.conn.execute(
+                """SELECT experiment_id, mode, started_at_utc, configuration_json
+                   FROM live_experiments WHERE experiment_id = ?""",
+                (experiment_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "experiment_id": str(row["experiment_id"]),
+            "mode": str(row["mode"]),
+            "started_at_utc": str(row["started_at_utc"]),
+            "configuration": json.loads(str(row["configuration_json"])),
+        }
 
     def log_article(self, article) -> int | None:
         """Insert an article. Returns row id or None if duplicate."""
@@ -175,9 +265,12 @@ class DecisionDB:
         fair_value_age_s: float | None = None,
         confidence: float | None = None,
         countercase: str = "",
+        restate: str = "",
         rejection_reason: str | None = None,
         market_category: str = "",
         market_tags: list[str] | None = None,
+        analysis_batch_id: str = "",
+        analysis_reference_price: float | None = None,
     ) -> int:
         if orders and rejection_reason is not None:
             raise ValueError("submitted decisions cannot have a rejection_reason")
@@ -190,9 +283,10 @@ class DecisionDB:
                     article_urls, analysis, fair_value, market_price, orders,
                     motivation, raw_llm_response, llm_duration_s, balance,
                     yes_pos, no_pos, raw_fair_value, effective_fair_value,
-                    fair_value_age_s, confidence, countercase, rejection_reason,
-                    market_category, market_tags)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    fair_value_age_s, confidence, countercase, restate,
+                    rejection_reason, market_category, market_tags,
+                    analysis_batch_id, analysis_reference_price)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     market_id,
@@ -215,9 +309,12 @@ class DecisionDB:
                     fair_value_age_s,
                     confidence,
                     countercase,
+                    restate,
                     rejection_reason,
                     market_category,
                     json.dumps(market_tags or []),
+                    analysis_batch_id,
+                    analysis_reference_price,
                 ),
             )
             self.conn.commit()

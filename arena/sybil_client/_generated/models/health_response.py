@@ -25,10 +25,12 @@ class HealthResponse:
     """ 
         Attributes:
             status (str):
+            genesis_hash (None | str | Unset): Hash of the height-1 block header. Hex-encoded 32-byte chain instance id.
             height (int | None | Unset):
      """
 
     status: str
+    genesis_hash: None | str | Unset = UNSET
     height: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -38,6 +40,12 @@ class HealthResponse:
 
     def to_dict(self) -> dict[str, Any]:
         status = self.status
+
+        genesis_hash: None | str | Unset
+        if isinstance(self.genesis_hash, Unset):
+            genesis_hash = UNSET
+        else:
+            genesis_hash = self.genesis_hash
 
         height: int | None | Unset
         if isinstance(self.height, Unset):
@@ -51,6 +59,8 @@ class HealthResponse:
         field_dict.update({
             "status": status,
         })
+        if genesis_hash is not UNSET:
+            field_dict["genesis_hash"] = genesis_hash
         if height is not UNSET:
             field_dict["height"] = height
 
@@ -62,6 +72,16 @@ class HealthResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         status = d.pop("status")
+
+        def _parse_genesis_hash(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        genesis_hash = _parse_genesis_hash(d.pop("genesis_hash", UNSET))
+
 
         def _parse_height(data: object) -> int | None | Unset:
             if data is None:
@@ -75,6 +95,7 @@ class HealthResponse:
 
         health_response = cls(
             status=status,
+            genesis_hash=genesis_hash,
             height=height,
         )
 

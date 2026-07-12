@@ -3,7 +3,7 @@ tags: [concept, core]
 layer: core
 crate: matching-engine
 status: current
-last_verified: 2026-07-07
+last_verified: 2026-07-12
 ---
 
 Every market in Sybil is binary: it has exactly two outcomes, YES and NO. At resolution, YES shares pay out a fixed amount (typically $1) and NO shares pay the complement. This simplicity is a deliberate design choice — multi-outcome events like "Who wins the election: A, B, or C?" are modeled as groups of binary markets rather than as a single multi-outcome market.
@@ -23,11 +23,20 @@ flowchart TB
 
 The event is *not* one three-way market — it is three independent binary markets stitched together by a single group constraint. Each is atomic and easy to settle; the group only adds the sum-to-$1 coupling on top.
 
+Display-event membership is not sufficient to create a protocol market group.
+Nested threshold ladders such as “value ≥ 10” and “value ≥ 20” share event
+metadata in the API/frontend, but remain independent binary markets because both
+can resolve YES. Encoding them as a `MarketGroup` would incorrectly impose
+mutual exclusion, sum-to-$1 pricing, group minting, and complete-set
+self-trade-prevention. Any future monotonic ladder constraint must therefore be
+a distinct typed primitive rather than an overloaded `MarketGroup`.
+
 This design trades off expressiveness for simplicity. A binary market is the atomic unit — easy to reason about, easy to settle, easy to verify. The group structure adds back the multi-outcome semantics where needed. From the solver's perspective, groups primarily matter for [[Minting|group minting]] (which is K times cheaper than per-market minting) and for the price sum constraint. The [[Payoff Vectors]] abstraction handles cross-market orders naturally regardless of group membership.
 
 ## Key Properties
 - Each market has outcomes YES (0) and NO (1) — exactly one resolves to $1
 - Market groups = mutually exclusive binary markets
+- Correlated or nested markets may share display-event metadata without joining a market group
 - Sum-to-$1 constraint: `sum(YES_price_m for m in group) <= $1`
 - Groups enable cheaper [[Minting|group minting]] and price consistency
 - All multi-outcome events decompose into binary market groups

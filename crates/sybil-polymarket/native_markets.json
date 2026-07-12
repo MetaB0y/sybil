@@ -78,7 +78,7 @@
       "event_image_url": "https://www.google.com/s2/favicons?domain=artificialanalysis.ai&sz=128"
     },
     {
-      "id": "openrouter_top_model_dec_2026",
+      "id": "openrouter_top_model_dec_2026_v2",
       "enabled": true,
       "title": "Which company leads OpenRouter LLM usage in December 2026?",
       "outcome_set": {
@@ -152,7 +152,7 @@
       "event_image_url": "https://www.google.com/s2/favicons?domain=openrouter.ai&sz=128"
     },
     {
-      "id": "openrouter_top_app_dec_2026",
+      "id": "openrouter_top_app_dec_2026_v2",
       "enabled": true,
       "title": "Which app leads OpenRouter usage in December 2026?",
       "outcome_set": {

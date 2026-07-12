@@ -2,13 +2,10 @@
 
 /**
  * Shared market-name search box for the portfolio tables (positions / open
- * orders / trades / history).
- *
- * Styled as a squared shell to match the global nav search (`.nav-search-shell`)
- * rather than as a pill: same 32px height, same `--radius-md`, same surface and
- * border, and the same quiet focus-brighten instead of the app-wide cyan
- * `:focus-visible` ring. Each list owns the query state and does the actual
- * substring match against its market label; the ✕ clears it.
+ * orders / trades / history). A controlled pill input with a leading magnifier
+ * and a clear (✕) button; the border goes accent while a query is active so a
+ * set filter reads at a glance. Each list owns the query state and does the
+ * actual substring match against its market label.
  */
 
 import { useId } from "react";
@@ -25,14 +22,27 @@ export function SearchField({
   const id = useId();
   const active = value.length > 0;
   return (
-    <div className="portfolio-search-shell">
+    <div
+      style={{
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+        width: 240,
+        maxWidth: "100%",
+      }}
+    >
       <svg
         width="12"
         height="12"
         viewBox="0 0 16 16"
         fill="none"
         aria-hidden
-        style={{ color: "var(--fg-4)", flexShrink: 0 }}
+        style={{
+          position: "absolute",
+          left: 11,
+          color: "var(--fg-4)",
+          pointerEvents: "none",
+        }}
       >
         <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
         <line
@@ -54,16 +64,16 @@ export function SearchField({
         placeholder={placeholder}
         aria-label={placeholder}
         style={{
-          flex: 1,
-          minWidth: 0,
-          padding: "0 var(--space-2)",
-          background: "transparent",
-          border: 0,
-          outline: "none",
+          width: "100%",
+          padding: "6px 28px",
+          background: "var(--bg-2)",
+          border: `1px solid ${active ? "var(--accent)" : "var(--border-1)"}`,
+          borderRadius: 999,
           color: "var(--fg-1)",
           fontFamily: "var(--font-mono)",
           fontSize: 11,
           letterSpacing: "var(--track-wide)",
+          outline: "none",
         }}
       />
       {active && (
@@ -72,10 +82,11 @@ export function SearchField({
           aria-label="Clear search"
           onClick={() => onChange("")}
           style={{
+            position: "absolute",
+            right: 8,
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
-            flexShrink: 0,
             width: 16,
             height: 16,
             padding: 0,

@@ -43,7 +43,9 @@ export function traderLabel(accountId: number): string {
 }
 
 /** Pure mapper: wire response → display rows. Exported for unit tests. */
-export function toLeaderboardRows(data: ApiResponse | undefined): LeaderboardRow[] {
+export function toLeaderboardRows(
+  data: ApiResponse | undefined,
+): LeaderboardRow[] {
   if (!data?.entries) return [];
   return data.entries.map((e: ApiEntry) => ({
     rank: e.rank,
@@ -59,9 +61,14 @@ export function toLeaderboardRows(data: ApiResponse | undefined): LeaderboardRow
 export interface UseLeaderboardResult {
   rows: LeaderboardRow[];
   isLoading: boolean;
+  isRetrying: boolean;
+  readState: "ready" | "unavailable" | "stale";
+  retry: () => void;
 }
 
-export function useLeaderboard(window: LeaderboardWindow): UseLeaderboardResult {
+export function useLeaderboard(
+  window: LeaderboardWindow,
+): UseLeaderboardResult {
   const q = useQuery({
     queryKey: ["leaderboard", window],
     queryFn: async () => {
@@ -76,5 +83,14 @@ export function useLeaderboard(window: LeaderboardWindow): UseLeaderboardResult 
     refetchInterval: 15_000,
   });
 
-  return { rows: toLeaderboardRows(q.data), isLoading: q.isPending };
+  const hasData = q.data !== undefined;
+  return {
+    rows: toLeaderboardRows(q.data),
+    isLoading: q.isPending,
+    isRetrying: q.isFetching,
+    readState: q.error == null ? "ready" : hasData ? "stale" : "unavailable",
+    retry: () => {
+      void q.refetch();
+    },
+  };
 }

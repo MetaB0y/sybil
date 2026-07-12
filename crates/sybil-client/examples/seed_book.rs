@@ -1,8 +1,8 @@
 //! Deterministic crossing-order fixture for deployment and Compose smoke tests.
 //!
-//! `seed_book` creates exactly two zero-balance accounts, registers fixed P256
-//! identities, funds each account with $10, creates one named binary market,
-//! and submits two deterministic signed GTC orders:
+//! `seed_book` atomically creates exactly two zero-balance accounts with fixed
+//! P256 identities, funds each account with $10, creates one named binary
+//! market, and submits two deterministic signed GTC orders:
 //!
 //! - BuyYes: 0.60, quantity 1000
 //! - BuyNo:  0.50, quantity 2000
@@ -439,6 +439,7 @@ async fn run(args: Args) -> Result<SeedSummary, String> {
     ];
     let mut account_summaries = Vec::with_capacity(fixtures.len());
     for (role, key, nonce) in fixtures {
+        let public_key_hex = public_key_hex(key);
         let account = request_json(
             &client,
             &args,
@@ -446,29 +447,15 @@ async fn run(args: Args) -> Result<SeedSummary, String> {
             "create_account",
             Method::POST,
             "/v1/accounts",
-            Some(&json!({"initial_balance_nanos": 0})),
+            Some(&json!({
+                "initial_balance_nanos": 0,
+                "initial_key": {"public_key_hex": public_key_hex}
+            })),
         )
         .await?;
         let account_id = u64_field(&account, "account_id")?;
         if u64_field(&account, "balance_nanos")? != 0 {
             return Err(format!("new account was not zero-balanced: {account}"));
-        }
-
-        let key_path = format!("/v1/accounts/{account_id}/keys");
-        let registered = request_json(
-            &client,
-            &args,
-            &mut steps,
-            "register_key",
-            Method::POST,
-            &key_path,
-            Some(&json!({"public_key_hex": public_key_hex(key)})),
-        )
-        .await?;
-        if registered.get("success").and_then(Value::as_bool) != Some(true) {
-            return Err(format!(
-                "register_key did not return success=true: {registered}"
-            ));
         }
 
         let fund_path = format!("/v1/accounts/{account_id}/fund");
@@ -492,7 +479,7 @@ async fn run(args: Args) -> Result<SeedSummary, String> {
         account_summaries.push(AccountSummary {
             role,
             account_id,
-            public_key_hex: public_key_hex(key),
+            public_key_hex,
             funded_balance_nanos: ACCOUNT_FUNDING_NANOS,
             order_nonce: nonce,
         });

@@ -39,7 +39,7 @@ flowchart LR
 | Activity | `/v1/activity/overview`, `/v1/blocks`, `/v1/blocks/{height}`, `/v1/markets`, `/v1/markets/summary`, `/v1/bots/decisions` | Recent block merge, per-market presentation, unmatched counts |
 | Leaderboard | `/v1/leaderboard` | Window selection and own-row highlight |
 | Arena | `/v1/bots/decisions`, `/v1/bots/equity-series`, `/v1/activity/overview`, `/v1/markets/summary`, `/v1/blocks/latest`, `/v1/blocks/{height}` | Strategy grouping, cost/tokens, FV drift, recent charts |
-| Portfolio | `/v1/accounts/{id}/portfolio`, `/v1/accounts/{id}/equity`, `/v1/accounts/{id}/orders`, `/v1/accounts/{id}/fills`, `/v1/accounts/{id}/events`, `/v1/markets`, `/v1/markets/{id}/prices/history`, `/v1/blocks/{height}` | Marks, realized PnL, history pagination, CSV export, withdrawal ETA |
+| Portfolio | `/v1/accounts/{id}/portfolio`, `/v1/accounts/{id}/equity`, `/v1/accounts/{id}/orders`, `/v1/accounts/{id}/fills`, `/v1/accounts/{id}/events`, `/v1/accounts/{id}/bridge-key`, `/v1/accounts/{id}/withdrawals`, `/v1/markets`, `/v1/markets/{id}/prices/history`, `/v1/blocks/{height}` | Marks, realized PnL, history pagination, CSV export, exact L1 deposit routing key and truthful quarantine recovery guidance, current withdrawal status and ETA |
 | Settings | `/v1/accounts/{id}`, `/v1/accounts/{id}/keys`, `/v1/accounts/{id}/keyop-state`, `/v1/accounts/{id}/api-keys` | Forms and state-bound signing preparation |
 | Dev overview/markets | `/v1/markets/summary`, `/v1/markets/groups`, `/v1/orders/pending`, `/v1/blocks/latest`, `/v1/blocks/{height}` | Diagnostics and aggregate tables |
 | Dev accounts | `/v1/accounts/{id}/portfolio`, `/v1/accounts/{id}/fills`, `/v1/orders/pending`, `/v1/markets/summary` | Multi-account diagnostic aggregation |
@@ -91,6 +91,9 @@ state with clear provenance.
   [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
 - Several diagnostic endpoints exist in OpenAPI but are intentionally unused by
   the product UI. OpenAPI—not this file—is the complete endpoint inventory.
+- Quarantine status is aggregate-only. The portfolio can show an account's
+  exact bridge key and recovery semantics, but it cannot assert that a specific
+  deposit is quarantined without an owner-scoped quarantine read.
 
 ## Staleness guard
 

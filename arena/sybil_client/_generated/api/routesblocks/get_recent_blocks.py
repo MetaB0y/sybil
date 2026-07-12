@@ -17,6 +17,7 @@ from typing import cast
 def _get_kwargs(
     *,
     limit: int | Unset = UNSET,
+    before_height: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     
@@ -26,6 +27,8 @@ def _get_kwargs(
     params: dict[str, Any] = {}
 
     params["limit"] = limit
+
+    params["before_height"] = before_height
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -74,12 +77,14 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     limit: int | Unset = UNSET,
+    before_height: int | Unset = UNSET,
 
 ) -> Response[list[BlockResponse]]:
-    """ GET /v1/blocks?limit=N — last N blocks, newest-first, from in-memory history.
+    """ GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 
     Args:
         limit (int | Unset):
+        before_height (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -92,6 +97,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         limit=limit,
+before_height=before_height,
 
     )
 
@@ -105,12 +111,14 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     limit: int | Unset = UNSET,
+    before_height: int | Unset = UNSET,
 
 ) -> list[BlockResponse] | None:
-    """ GET /v1/blocks?limit=N — last N blocks, newest-first, from in-memory history.
+    """ GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 
     Args:
         limit (int | Unset):
+        before_height (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -124,6 +132,7 @@ def sync(
     return sync_detailed(
         client=client,
 limit=limit,
+before_height=before_height,
 
     ).parsed
 
@@ -131,12 +140,14 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     limit: int | Unset = UNSET,
+    before_height: int | Unset = UNSET,
 
 ) -> Response[list[BlockResponse]]:
-    """ GET /v1/blocks?limit=N — last N blocks, newest-first, from in-memory history.
+    """ GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 
     Args:
         limit (int | Unset):
+        before_height (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -149,6 +160,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         limit=limit,
+before_height=before_height,
 
     )
 
@@ -162,12 +174,14 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     limit: int | Unset = UNSET,
+    before_height: int | Unset = UNSET,
 
 ) -> list[BlockResponse] | None:
-    """ GET /v1/blocks?limit=N — last N blocks, newest-first, from in-memory history.
+    """ GET /v1/blocks?limit=N&before_height=H — blocks newest-first, paged by height.
 
     Args:
         limit (int | Unset):
+        before_height (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -181,5 +195,6 @@ async def asyncio(
     return (await asyncio_detailed(
         client=client,
 limit=limit,
+before_height=before_height,
 
     )).parsed

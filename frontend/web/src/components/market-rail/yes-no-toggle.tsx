@@ -14,7 +14,11 @@ export function YesNoToggle({
   onChange: (s: Side) => void;
 }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+    <div
+      role="group"
+      aria-label="Outcome side"
+      style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}
+    >
       {(
         [
           { id: "YES", label: "Yes", color: "var(--yes)" },
@@ -26,6 +30,7 @@ export function YesNoToggle({
           <button
             key={s.id}
             type="button"
+            aria-pressed={active}
             onClick={() => onChange(s.id)}
             style={{
               minHeight: 48,

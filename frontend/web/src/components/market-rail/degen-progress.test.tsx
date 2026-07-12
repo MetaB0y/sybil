@@ -58,7 +58,7 @@ describe("DegenProgress", () => {
     const html = renderToStaticMarkup(
       <DegenProgress {...common} phase="partial" />,
     );
-    expect(html).toMatch(/Half in/i);
+    expect(html).toMatch(/Partly matched/i);
     expect(html).toContain("$6");
     expect(html).toContain("$10");
     expect(html).toMatch(/rest is back in your balance/i);

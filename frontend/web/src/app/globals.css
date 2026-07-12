@@ -411,6 +411,9 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  max-height: calc(100dvh - var(--nav-height));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-4) var(--space-5) var(--space-5);
   background: var(--surface-1);
   border-bottom: 1px solid var(--border-2);
@@ -442,10 +445,16 @@ textarea {
   transition: border-color var(--dur-fast) var(--ease-standard);
 }
 
-/* Focus affordance: a subtle border brighten on the shell, not the loud cyan
-   focus ring (the input itself suppresses the global :focus-visible ring). */
+/* Pointer focus gets a quiet border change. Keyboard focus remains explicit on
+   the shell even though the nested input's ring is suppressed to avoid a
+   clipped inner outline. */
 .nav-search-shell:focus-within {
   border-color: var(--border-3);
+}
+
+.nav-search-shell:has(input:focus-visible) {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus-ring);
 }
 
 .nav-search-shell input:focus,
@@ -474,10 +483,8 @@ textarea {
   gap: 2px;
 }
 
-/* Portfolio table search — deliberately the same shell as `.nav-search-shell`
-   above: same height, same squared radius, same surface/border, same quiet
-   focus-brighten. The input suppresses the global cyan `:focus-visible` ring
-   (`sybil-tokens.css`), which otherwise fired on every tap. */
+/* Portfolio table search mirrors `.nav-search-shell`, including its distinct
+   pointer and keyboard focus affordances. */
 .portfolio-search-shell {
   position: relative;
   display: inline-flex;
@@ -494,6 +501,11 @@ textarea {
 
 .portfolio-search-shell:focus-within {
   border-color: var(--border-3);
+}
+
+.portfolio-search-shell:has(input:focus-visible) {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus-ring);
 }
 
 .portfolio-search-shell input:focus,
@@ -699,6 +711,29 @@ textarea {
 @media (hover: hover) {
   .dev-data-table tbody tr:hover,
   .arena-data-table tbody tr:hover {
+    background: var(--surface-2);
+  }
+}
+
+.activity-batch-row {
+  appearance: none;
+  background: transparent;
+}
+
+.activity-batch-row[data-expanded="true"],
+.activity-batch-row:active {
+  background: var(--surface-2);
+}
+
+.activity-batch-row:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .activity-batch-row:hover {
     background: var(--surface-2);
   }
 }
@@ -1027,11 +1062,8 @@ textarea {
     gap: var(--space-1);
   }
 
-  /* Phones: collapse the chip's "/ cash" half so the account chip stays
-     compact (just the portfolio total) and never clips off-screen. The batch
-     pill is already hidden by the nav-collapse block above.
-     !important overrides the span's inline `display: inline-flex`. */
-  .account-chip-cash {
+  .global-nav-right .batch-pill,
+  .global-nav-right .account-chip-balance {
     display: none !important;
   }
 
@@ -1163,6 +1195,24 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .arena-panel-actions {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .arena-panel-actions > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .arena-filter-select {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
   .place-order-overlay {
     align-items: flex-end !important;
     padding: 0 !important;
@@ -1237,5 +1287,19 @@ textarea {
 
   .global-nav-brand {
     min-height: 44px;
+  }
+
+  /* Standalone links that behave like controls need the same coarse-pointer
+   * target as buttons. Inline prose links deliberately do not opt in. */
+  a.mobile-action-link {
+    display: inline-flex;
+    align-items: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .clearing-ticker,
+  .clearing-ticker-link {
+    height: 44px !important;
   }
 }

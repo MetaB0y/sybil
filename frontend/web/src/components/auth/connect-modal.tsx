@@ -10,22 +10,29 @@
  * to `document.body` so z-index is independent of nav layout.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   AccountError,
   type CreateAccountKeyMode,
   createDemoAccount,
   importExistingAccount,
+  recoverCreatedAccount,
   signInWithDiscoverablePasskey,
+  signInWithStoredAccount,
   signInWithStoredPasskey,
 } from "@/lib/account/actions";
-import { readStoredAccount } from "@/lib/account/storage";
+import {
+  readStoredAccount,
+  type AccountAuthScheme,
+} from "@/lib/account/storage";
+import { useAccountStore } from "@/lib/account/store";
 import {
   useConnectModalOpen,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
 import { isWebAuthnAvailable } from "@/lib/auth/webauthn";
+import { trapTabFocus } from "@/lib/accessibility/focus-trap";
 
 const BALANCE_OPTIONS: Array<{ label: string; nanos: bigint }> = [
   { label: "$100", nanos: 100_000_000_000n },
@@ -34,19 +41,31 @@ const BALANCE_OPTIONS: Array<{ label: string; nanos: bigint }> = [
   { label: "$5,000", nanos: 5_000_000_000_000n },
 ];
 
-type Tab = "create" | "passkey" | "import";
+type Tab = "saved" | "create" | "passkey" | "import";
 
 export function ConnectModal() {
   const open = useConnectModalOpen();
   const setOpen = useSetConnectModalOpen();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+        ? document.activeElement
+        : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
   }, [open, setOpen]);
 
   // Modal only opens after a client-side interaction, so `document` is
@@ -58,7 +77,17 @@ export function ConnectModal() {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Connect account"
+      aria-labelledby="connect-modal-title"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          return;
+        }
+        trapTabFocus(event.nativeEvent, event.currentTarget);
+      }}
       onClick={(e) => {
         if (e.target === e.currentTarget) setOpen(false);
       }}
@@ -73,23 +102,38 @@ export function ConnectModal() {
         alignItems: "center",
         justifyContent: "center",
         padding: "var(--space-5)",
+        boxSizing: "border-box",
       }}
     >
-      <ConnectModalBody onClose={() => setOpen(false)} />
+      <ConnectModalBody
+        closeButtonRef={closeButtonRef}
+        onClose={() => setOpen(false)}
+      />
     </div>,
     document.body,
   );
 }
 
-function ConnectModalBody({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>("create");
+function ConnectModalBody({
+  closeButtonRef,
+  onClose,
+}: {
+  closeButtonRef: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+}) {
+  const saved = readStoredAccount();
+  const [tab, setTab] = useState<Tab>(() => (saved ? "saved" : "create"));
 
   return (
     <div
+      data-testid="connect-modal-card"
       onClick={(e) => e.stopPropagation()}
       style={{
         width: "100%",
         maxWidth: 440,
+        maxHeight: "100%",
+        display: "flex",
+        flexDirection: "column",
         background: "var(--surface-1)",
         border: "1px solid var(--border-1)",
         borderRadius: 12,
@@ -105,9 +149,11 @@ function ConnectModalBody({ onClose }: { onClose: () => void }) {
           justifyContent: "space-between",
           padding: "14px 18px",
           borderBottom: "1px solid var(--border-1)",
+          flexShrink: 0,
         }}
       >
         <div
+          id="connect-modal-title"
           style={{
             fontFamily: "var(--font-display)",
             fontWeight: 700,
@@ -120,6 +166,7 @@ function ConnectModalBody({ onClose }: { onClose: () => void }) {
           Connect
         </div>
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onClose}
           aria-label="Close"
@@ -140,10 +187,17 @@ function ConnectModalBody({ onClose }: { onClose: () => void }) {
       <div
         style={{
           display: "flex",
+          flexWrap: "wrap",
           gap: 4,
           padding: "10px 18px 0",
+          flexShrink: 0,
         }}
       >
+        {saved && (
+          <TabButton active={tab === "saved"} onClick={() => setTab("saved")}>
+            Saved account
+          </TabButton>
+        )}
         <TabButton active={tab === "create"} onClick={() => setTab("create")}>
           Create demo
         </TabButton>
@@ -155,8 +209,22 @@ function ConnectModalBody({ onClose }: { onClose: () => void }) {
         </TabButton>
       </div>
 
-      <div style={{ padding: "16px 18px 18px" }}>
-        {tab === "create" ? (
+      <div
+        data-testid="connect-modal-content"
+        style={{
+          minHeight: 0,
+          padding: "16px 18px 18px",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        {tab === "saved" && saved ? (
+          <SavedAccountTab
+            accountId={saved.accountId}
+            authScheme={saved.authScheme}
+          />
+        ) : tab === "create" ? (
           <CreateTab />
         ) : tab === "passkey" ? (
           <PasskeyTab />
@@ -164,6 +232,53 @@ function ConnectModalBody({ onClose }: { onClose: () => void }) {
           <ImportTab />
         )}
       </div>
+    </div>
+  );
+}
+
+function SavedAccountTab({
+  accountId,
+  authScheme,
+}: {
+  accountId: number;
+  authScheme: "raw_p256" | "webauthn";
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit() {
+    setError(null);
+    setBusy(true);
+    try {
+      await signInWithStoredAccount();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Saved-account reconnect failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <p style={{ ...bodyText, margin: 0 }}>
+        Reconnect account #{accountId} with its saved{" "}
+        {authScheme === "webauthn" ? "passkey" : "local browser key"}. Sybil
+        will mint a fresh read-only session; your signing credential stays on
+        this device.
+      </p>
+
+      {error && <ErrorRow>{error}</ErrorRow>}
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={busy}
+        style={primaryButtonStyle(busy)}
+      >
+        {busy ? "Reconnecting…" : "Reconnect saved account"}
+      </button>
     </div>
   );
 }
@@ -202,6 +317,7 @@ function TabButton({
 }
 
 function CreateTab() {
+  const setOpen = useSetConnectModalOpen();
   const [balanceNanos, setBalanceNanos] = useState<bigint>(
     BALANCE_OPTIONS[2]!.nanos,
   );
@@ -209,17 +325,40 @@ function CreateTab() {
     isWebAuthnAvailable() ? "passkey" : "local_key",
   );
   const [error, setError] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState<{
+    accountId: number;
+    publicKeyHex: string;
+    authScheme: AccountAuthScheme;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function onSubmit() {
     setError(null);
+    setRecovery(null);
     setBusy(true);
     try {
       await createDemoAccount(balanceNanos, mode);
     } catch (e) {
+      if (e instanceof AccountError && e.kind === "account_created_recovery") {
+        const saved = readStoredAccount();
+        const accountId = e.createdAccountId ?? saved?.accountId;
+        const savedMatches = saved != null && saved.accountId === accountId;
+        const publicKeyHex =
+          e.createdPublicKeyHex ??
+          (savedMatches ? saved.publicKeyHex : undefined);
+        if (accountId !== undefined && publicKeyHex !== undefined) {
+          setRecovery({
+            accountId,
+            publicKeyHex,
+            authScheme:
+              e.createdAuthScheme ??
+              (savedMatches ? saved.authScheme : "raw_p256"),
+          });
+        }
+      }
       const msg =
         e instanceof AccountError && e.kind === "dev_mode_off"
-          ? "Demo accounts are disabled on this server. Bridge deposits coming soon."
+          ? "Demo accounts are disabled on this server. Import an existing account instead."
           : e instanceof AccountError && e.kind === "webauthn_unavailable"
             ? "Passkeys are not available in this browser."
             : e instanceof Error
@@ -231,11 +370,45 @@ function CreateTab() {
     }
   }
 
+  async function onRecover() {
+    if (!recovery) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const saved = readStoredAccount();
+      const session = useAccountStore.getState().session;
+      if (
+        saved?.accountId === recovery.accountId &&
+        saved.publicKeyHex === recovery.publicKeyHex &&
+        saved.authScheme === recovery.authScheme &&
+        saved.readApiKey != null &&
+        session?.accountId === saved.accountId &&
+        session.publicKeyHex === saved.publicKeyHex &&
+        session.authScheme === saved.authScheme &&
+        session.readApiKey === saved.readApiKey
+      ) {
+        setOpen(false);
+        return;
+      }
+      await recoverCreatedAccount(
+        recovery.accountId,
+        recovery.publicKeyHex,
+        recovery.authScheme,
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Saved-account reconnect failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
-        Creates a demo account with the selected starting balance. Passkeys use
-        your device authenticator; local dev keys keep the preview JWK path.
+        Create a demo account with a starting balance. Use a passkey for
+        device-backed signing, or a local key for browser-only testing.
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -254,7 +427,7 @@ function CreateTab() {
             onClick={() => setMode("local_key")}
             style={chipStyle(mode === "local_key")}
           >
-            Local dev key
+            Local browser key
           </button>
         </div>
       </div>
@@ -278,19 +451,30 @@ function CreateTab() {
         </div>
       </div>
 
-      {error && <ErrorRow>{error}</ErrorRow>}
+      {error &&
+        (recovery ? (
+          <RecoveryRow>{error}</RecoveryRow>
+        ) : (
+          <ErrorRow>{error}</ErrorRow>
+        ))}
 
       <button
         type="button"
-        onClick={onSubmit}
+        onClick={recovery ? onRecover : onSubmit}
         disabled={busy}
         style={primaryButtonStyle(busy)}
       >
         {busy
-          ? "Creating…"
-          : mode === "passkey"
-            ? "Create with passkey"
-            : "Create local account"}
+          ? recovery
+            ? "Reconnecting…"
+            : "Creating…"
+          : recovery
+            ? `Recover ${
+                recovery.authScheme === "webauthn" ? "passkey" : "local"
+              } account #${recovery.accountId}`
+            : mode === "passkey"
+              ? "Create with passkey"
+              : "Create local account"}
       </button>
     </div>
   );
@@ -339,7 +523,7 @@ function PasskeyTab() {
   );
 }
 
-function ImportTab() {
+export function ImportTab() {
   const [accountIdRaw, setAccountIdRaw] = useState("");
   const [jwkRaw, setJwkRaw] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -373,13 +557,14 @@ function ImportTab() {
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
         Paste an account id and the JWK from a previous browser session. The
-        public key is derived from the JWK. We don&apos;t verify the key matches
-        what&apos;s registered server-side until you place an order.
+        public key is derived from the JWK and verified against the account
+        during Import. A mismatched key is rejected and is not saved.
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <Label>Account id</Label>
+        <Label htmlFor="connect-import-account-id">Account id</Label>
         <input
+          id="connect-import-account-id"
           type="text"
           value={accountIdRaw}
           onChange={(e) => setAccountIdRaw(e.target.value)}
@@ -389,8 +574,11 @@ function ImportTab() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <Label>Private key (JWK JSON)</Label>
+        <Label htmlFor="connect-import-private-key">
+          Private key (JWK JSON)
+        </Label>
         <textarea
+          id="connect-import-private-key"
           value={jwkRaw}
           onChange={(e) => setJwkRaw(e.target.value)}
           placeholder='{"kty":"EC","crv":"P-256","x":"…","y":"…","d":"…"}'
@@ -419,9 +607,16 @@ function ImportTab() {
 
 // --- styles ---------------------------------------------------------------
 
-function Label({ children }: { children: React.ReactNode }) {
+function Label({
+  children,
+  htmlFor,
+}: {
+  children: React.ReactNode;
+  htmlFor?: string;
+}) {
   return (
     <label
+      htmlFor={htmlFor}
       style={{
         fontFamily: "var(--font-mono)",
         fontSize: 10,
@@ -446,6 +641,26 @@ function ErrorRow({ children }: { children: React.ReactNode }) {
         border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
         borderRadius: 6,
         color: "var(--no)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function RecoveryRow({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      role="status"
+      style={{
+        padding: "8px 10px",
+        background:
+          "var(--warn-soft, color-mix(in srgb, var(--warn) 12%, transparent))",
+        border: "1px solid color-mix(in srgb, var(--warn) 32%, transparent)",
+        borderRadius: 6,
+        color: "var(--warn)",
         fontFamily: "var(--font-mono)",
         fontSize: 12,
       }}

@@ -136,7 +136,6 @@
   --dur-fast:       120ms;   /* @kind other */
   --dur-base:       200ms;   /* @kind other */
   --dur-slow:       320ms;   /* @kind other */
-  --dur-swap:       460ms;   /* market-detail header focus-in swap @kind other */
   --dur-outcome-swap: 1500ms; /* deliberate slow blur when switching outcomes: rail picker + market-detail header @kind other */
 
   /* ── Backdrop ────────────────────────────────────────────────────────── */
@@ -431,13 +430,6 @@ hr {
   to   { transform: translateX(-50%); }
 }
 
-/* Utility: tooltip entrance — fade + slight rise. Paired with a
-   translate(-50%, -100%) anchor so it grows upward from the cursor. */
-@keyframes sybil-tooltip-in {
-  from { opacity: 0; transform: translate(-50%, calc(-100% + 3px)); }
-  to   { opacity: 1; transform: translate(-50%, -100%); }
-}
-
 /* Content swap — used when the market-detail header re-keys to a new outcome so
    the title / stats / thumbnail focus in (blur → sharp, never fully transparent)
    rather than hard-cutting or sliding. */
@@ -464,21 +456,4 @@ hr {
     from { opacity: 1; }
     to   { opacity: 1; }
   }
-}
-
-/* Rotating text (research nudge) — the outgoing word slides up out of the clip
-   box while the incoming word rises into place; the box's overflow:hidden clips
-   both so it reads like a vertical odometer. Percentages are of the word's own
-   height, so 105% clears the line fully. */
-@keyframes sybil-rot-in {
-  from { transform: translateY(105%); }
-  to   { transform: translateY(0); }
-}
-@keyframes sybil-rot-out {
-  from { transform: translateY(0); }
-  to   { transform: translateY(-105%); }
-}
-@media (prefers-reduced-motion: reduce) {
-  @keyframes sybil-rot-in  { from { transform: none; } to { transform: none; } }
-  @keyframes sybil-rot-out { from { transform: none; } to { transform: none; } }
 }

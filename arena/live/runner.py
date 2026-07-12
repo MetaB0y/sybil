@@ -8,20 +8,29 @@ Usage:
 import argparse
 import asyncio
 import logging
+import math
 import os
+import re
 import signal
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from hashlib import sha256
 from pathlib import Path
 
 from sybil_client import SybilClient
 from sybil_client.types import NANOS_PER_DOLLAR, TimeInForce
 
-from .analyst import PersonaAnalyst
+from .analyst import (
+    PersonaAnalyst,
+    llm_generation_parameters,
+    prompt_contract_fingerprint,
+)
 from .db import DecisionDB
 from .fair_value_bus import FairValueBus
 from .market_selection import MarketProfile, select_markets
 from .metrics import ArenaMetrics, start_metrics_server
-from .news_feed import NewsFeed
+from .news_feed import NewsFeed, PairedNewsBatchBarrier
+from .outcomes import DEFAULT_OUTCOME_RECORD_INTERVAL_S, record_outcomes_loop
 from .personas import PERSONAS
 from .strategy import FairValueFreshnessConfig, FlatStrategy, KellyStrategy
 from .synthetic import (
@@ -38,6 +47,15 @@ log = logging.getLogger(__name__)
 # mirror has published any reference prices. Rather than exit, poll for a
 # reference-backed market set on this cadence until one appears.
 MARKET_DISCOVERY_RETRY_SECONDS = 30
+STAGE1_AB_MODE = "syb-114-stage1-ab"
+STAGE1_AB_VARIANTS = (
+    {
+        "id": "control",
+        "prompt_contract": "pre_stage1_control",
+        "sizer": "Flat",
+    },
+    {"id": "stage1", "prompt_contract": "stage1", "sizer": "Flat"},
+)
 
 
 @dataclass
@@ -55,10 +73,11 @@ class LiveConfig:
     fair_value_ttl_s: float = FairValueFreshnessConfig.ttl_s
     fair_value_half_life_s: float = FairValueFreshnessConfig.half_life_s
     fair_value_hard_expiry_s: float = FairValueFreshnessConfig.hard_expiry_s
-    # SYB-64: per-analyst LLM budget (USD). The analyst is a persona's sole LLM
+    # SYB-64: per-analyst LLM pause threshold (USD). The analyst is a persona's sole LLM
     # caller and holds no trading account, so this is a separate pool from the
     # sizers' trading bankroll. Exhausting it pauses the persona's analyst.
-    # None (or <=0 on the CLI) disables the budget (unlimited).
+    # A completed call may cross it before the next call is blocked. None (or
+    # <=0 on the CLI) disables the threshold (unlimited).
     llm_budget_usd: float | None = 5.0
     fast_count: int = 5
     noise_count: int = 5
@@ -67,15 +86,171 @@ class LiveConfig:
     # noise_time_in_force overrides order_time_in_force for the crossing noise
     # traders so a resting book accumulates even while LLM/fast flow stays IOC.
     noise_time_in_force: TimeInForce = "GTC"
-    synthetic_strategy: SyntheticStrategyConfig = field(
-        default_factory=SyntheticStrategyConfig
-    )
+    synthetic_strategy: SyntheticStrategyConfig = field(default_factory=SyntheticStrategyConfig)
     db_path: str = ""
     metrics_host: str = "0.0.0.0"
     metrics_port: int = 0  # <=0 disables the exporter (default: off)
     personas: list[str] = field(default_factory=lambda: list(PERSONAS.keys()))
     market_ids: list[int] | None = None  # Manual market selection (overrides auto)
     mapping_path: str | None = None  # Path to polymarket_mapping.json
+    # Opt-in concurrent Stage 1 A/B. Supplying an id enables the experiment;
+    # the ordinary one-analyst + Kelly/Flat topology remains the default.
+    stage1_ab_experiment_id: str | None = None
+    # Only active in Stage 1 A/B mode; ordinary topology starts no recorder task.
+    outcome_record_interval_s: float = DEFAULT_OUTCOME_RECORD_INTERVAL_S
+
+
+@dataclass
+class LiveTopology:
+    analysts: list[PersonaAnalyst]
+    traders: list[LiveLlmTrader]
+    paired_analyst_groups: list[tuple[PersonaAnalyst, PersonaAnalyst]] = field(
+        default_factory=list
+    )
+
+
+def _validate_stage1_ab_config(config: LiveConfig) -> str | None:
+    """Validate opt-in experiment identity and its frozen market cohort."""
+    if config.stage1_ab_experiment_id is None:
+        return None
+    if not math.isfinite(config.outcome_record_interval_s) or config.outcome_record_interval_s <= 0:
+        raise ValueError("outcome record interval must be a positive finite number")
+
+    experiment_id = config.stage1_ab_experiment_id
+    if not experiment_id or experiment_id != experiment_id.strip():
+        raise ValueError(
+            "--stage1-ab-experiment-id must be a nonempty id without surrounding whitespace"
+        )
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", experiment_id):
+        raise ValueError(
+            "--stage1-ab-experiment-id must use 1-64 letters, numbers, '.', '_' or '-'"
+        )
+    if not config.market_ids:
+        raise ValueError(
+            "--stage1-ab-experiment-id requires an explicit nonempty --market-ids cohort"
+        )
+    if any(market_id < 0 for market_id in config.market_ids):
+        raise ValueError("--market-ids must contain only nonnegative ids in Stage 1 A/B mode")
+    if len(set(config.market_ids)) != len(config.market_ids):
+        raise ValueError("--market-ids must not contain duplicates in Stage 1 A/B mode")
+    if not config.personas:
+        raise ValueError("Stage 1 A/B mode requires at least one persona")
+    unknown = [persona for persona in config.personas if persona not in PERSONAS]
+    if unknown:
+        raise ValueError(f"unknown Stage 1 A/B personas: {', '.join(unknown)}")
+    if len(set(config.personas)) != len(config.personas):
+        raise ValueError("Stage 1 A/B personas must not contain duplicates")
+    if config.llm_budget_usd is not None and config.llm_budget_usd <= 0:
+        raise ValueError(
+            "Stage 1 A/B per-analyst LLM pause threshold must be positive or unlimited"
+        )
+    return experiment_id
+
+
+def _stage1_ab_configuration(
+    config: LiveConfig,
+    genesis_hash: str,
+    startup_reference_prices: dict[int, float],
+) -> dict:
+    """Canonical immutable configuration persisted for restart validation."""
+    analyst_count = 2 * len(config.personas)
+    total_llm_pause_threshold = (
+        None if config.llm_budget_usd is None else config.llm_budget_usd * analyst_count
+    )
+    sizer_count = analyst_count
+    return {
+        "genesis_hash": genesis_hash,
+        "market_ids": sorted(config.market_ids or []),
+        "startup_reference_prices": {
+            str(market_id): startup_reference_prices[market_id]
+            for market_id in sorted(startup_reference_prices)
+        },
+        "model": config.model_name,
+        "llm_generation_parameters": llm_generation_parameters(),
+        "variants": [
+            {
+                **variant,
+                "prompt_contract_sha256": prompt_contract_fingerprint(variant["prompt_contract"]),
+            }
+            for variant in STAGE1_AB_VARIANTS
+        ],
+        "personas": list(config.personas),
+        "persona_text_sha256": {
+            persona_key: sha256(PERSONAS[persona_key]["persona"].encode("utf-8")).hexdigest()
+            for persona_key in config.personas
+        },
+        "persona_display_name_sha256": {
+            persona_key: sha256(PERSONAS[persona_key]["name"].encode("utf-8")).hexdigest()
+            for persona_key in config.personas
+        },
+        "analyst_count": analyst_count,
+        "llm_pause_threshold_usd_per_analyst": config.llm_budget_usd,
+        "llm_pause_threshold_usd_per_persona": (
+            None if config.llm_budget_usd is None else 2 * config.llm_budget_usd
+        ),
+        "configured_llm_pause_threshold_usd_total": total_llm_pause_threshold,
+        "sizer_count": sizer_count,
+        "initial_balance_usd_per_sizer": config.initial_balance,
+        "initial_balance_usd_total": config.initial_balance * sizer_count,
+        "min_llm_interval_s": config.min_llm_interval,
+        "news_poll_interval_s": config.news_poll_interval,
+        "order_time_in_force": config.order_time_in_force,
+        "fair_value_ttl_s": config.fair_value_ttl_s,
+        "fair_value_half_life_s": config.fair_value_half_life_s,
+        "fair_value_hard_expiry_s": config.fair_value_hard_expiry_s,
+        "outcome_record_interval_s": config.outcome_record_interval_s,
+    }
+
+
+async def _require_committed_genesis_hash(client: SybilClient) -> str:
+    """Return the live chain identity, rejecting uncommitted/ambiguous health."""
+    health = await client.health()
+    genesis_hash = str(health.get("genesis_hash") or "").strip().lower()
+    height = health.get("height")
+    if not isinstance(height, int) or height < 1:
+        raise ValueError(
+            "Stage 1 A/B requires a committed chain (health height must be at least 1)"
+        )
+    if not re.fullmatch(r"[0-9a-f]{64}", genesis_hash) or set(genesis_hash) == {"0"}:
+        raise ValueError(
+            "Stage 1 A/B requires a committed nonzero 32-byte genesis_hash from /v1/health"
+        )
+    return genesis_hash
+
+
+def _require_new_experiment(metadata: dict) -> None:
+    """Reject reuse because analyst/FV/Flat basis state cannot be reconstructed."""
+    if metadata.get("preexisting"):
+        raise ValueError(
+            f"experiment {metadata['experiment_id']!r} already exists; window invalidated by "
+            "restart, so use a new --stage1-ab-experiment-id"
+        )
+
+
+def _require_stage1_ab_startup_reference_prices(markets: list) -> dict[int, float]:
+    """Require a positive external reference for every frozen experiment market."""
+    references = {}
+    missing = []
+    for market in markets:
+        reference_nanos = getattr(market, "reference_price_nanos", None)
+        if not _valid_startup_reference_nanos(reference_nanos):
+            missing.append(int(market.id))
+            continue
+        references[int(market.id)] = reference_nanos / NANOS_PER_DOLLAR
+    if missing:
+        raise ValueError(
+            "Stage 1 A/B requires a positive external startup reference for every selected "
+            f"market; missing market ids: {missing}"
+        )
+    return references
+
+
+def _valid_startup_reference_nanos(value: object) -> bool:
+    return type(value) is int and 0 < value <= NANOS_PER_DOLLAR
+
+
+def _pending_startup_reference(value: object) -> bool:
+    return value is None or (type(value) is int and value == 0)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -108,13 +283,89 @@ def _env_market_profile(name: str, default: MarketProfile = "all") -> MarketProf
     raise ValueError(f"{name} must be one of: all, important-news")
 
 
+def _resolve_outcome_record_interval(
+    cli_value: float | None,
+    environ: Mapping[str, str] | None = None,
+    *,
+    experiment_active: bool = True,
+) -> float:
+    """Resolve the positive finite outcome cadence with CLI precedence."""
+    env = os.environ if environ is None else environ
+    if not experiment_active:
+        if cli_value is not None:
+            raise ValueError(
+                "--outcome-record-interval-s requires an active Stage 1 A/B experiment"
+            )
+        return float(DEFAULT_OUTCOME_RECORD_INTERVAL_S)
+    if cli_value is not None:
+        interval_s = cli_value
+    else:
+        raw = env.get("ARENA_OUTCOME_RECORD_INTERVAL_S", "").strip()
+        try:
+            interval_s = float(raw) if raw else float(DEFAULT_OUTCOME_RECORD_INTERVAL_S)
+        except ValueError as exc:
+            raise ValueError("outcome record interval must be a positive finite number") from exc
+    if not math.isfinite(interval_s) or interval_s <= 0:
+        raise ValueError("outcome record interval must be a positive finite number")
+    return interval_s
+
+
+def _env_stage1_market_ids(environ: Mapping[str, str]) -> list[int] | None:
+    """Parse the explicit Stage 1 cohort without accepting ambiguous values."""
+    raw = environ.get("ARENA_MARKET_IDS", "")
+    if not raw.strip():
+        return None
+
+    values = raw.split(",")
+    if any(not re.fullmatch(r"[0-9]+", value.strip()) for value in values):
+        raise ValueError(
+            "ARENA_MARKET_IDS must be a comma-separated list of nonnegative integer ids "
+            "without empty values"
+        )
+    return [int(value.strip()) for value in values]
+
+
+def _resolve_stage1_ab_activation(
+    cli_experiment_id: str | None,
+    cli_market_ids: list[int] | None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[str | None, list[int] | None]:
+    """Resolve CLI-over-env Stage 1 activation and reject env-only half-configs.
+
+    ``--market-ids`` remains a valid ordinary manual selection when no experiment
+    id is configured. ``ARENA_MARKET_IDS`` is deliberately narrower: it is only an
+    environment fallback for the A/B experiment, so setting it alone cannot
+    silently change the default live topology.
+    """
+    env = os.environ if environ is None else environ
+
+    if cli_experiment_id is not None:
+        experiment_id = cli_experiment_id
+    else:
+        raw_experiment_id = env.get("ARENA_STAGE1_AB_EXPERIMENT_ID", "")
+        experiment_id = raw_experiment_id if raw_experiment_id.strip() else None
+
+    if cli_market_ids is not None:
+        market_ids = list(cli_market_ids)
+    else:
+        market_ids = _env_stage1_market_ids(env)
+
+    if experiment_id is None and cli_market_ids is None and market_ids is not None:
+        raise ValueError(
+            "ARENA_MARKET_IDS requires ARENA_STAGE1_AB_EXPERIMENT_ID; set both to opt in"
+        )
+    if experiment_id is not None and market_ids is None:
+        raise ValueError(
+            "Stage 1 A/B activation requires --market-ids or ARENA_MARKET_IDS"
+        )
+    return experiment_id, market_ids
+
+
 def _fallback_unfiltered_markets(markets, max_n: int = 0, require_reference_price: bool = False):
     """Return active mirrored markets without profile scoring or grouping."""
+
     def is_active_mirrored(market) -> bool:
-        tags = {
-            str(tag).strip().lower().replace("-", " ")
-            for tag in getattr(market, "tags", [])
-        }
+        tags = {str(tag).strip().lower().replace("-", " ") for tag in getattr(market, "tags", [])}
         if "polymarket" not in tags:
             return False
         if str(getattr(market, "status", "")).lower() != "active":
@@ -125,11 +376,7 @@ def _fallback_unfiltered_markets(markets, max_n: int = 0, require_reference_pric
                 return False
         return True
 
-    active = [
-        m
-        for m in markets
-        if is_active_mirrored(m)
-    ]
+    active = [m for m in markets if is_active_mirrored(m)]
     active.sort(key=lambda m: (-getattr(m, "volume_nanos", 0), getattr(m, "id", 0)))
     if max_n <= 0:
         return active
@@ -158,32 +405,52 @@ def _select_markets_resilient(
         )
 
 
+async def snapshot_portfolios_once(
+    traders,
+    db: DecisionDB,
+    *,
+    required_trader_names: set[str] | None = None,
+) -> int:
+    """Record one portfolio snapshot per trader, optionally failing closed."""
+    recorded = 0
+    failures = []
+    for trader in traders:
+        try:
+            portfolio = await trader.client.get_portfolio(trader.account_id)
+            positions = {}
+            for (mid, outcome), qty in trader.positions.items():
+                if qty != 0:
+                    positions.setdefault(str(mid), {})[outcome] = qty
+            db.log_snapshot(
+                trader_name=trader.name,
+                balance=portfolio.balance_dollars,
+                portfolio_value=portfolio.portfolio_value_dollars,
+                pnl=portfolio.pnl_dollars,
+                positions=positions,
+                total_fills=len(getattr(trader, "_fill_history", [])),
+                total_orders=getattr(trader, "total_orders_submitted", 0),
+            )
+            recorded += 1
+        except Exception as exc:
+            failures.append((trader.name, exc))
+            log.warning("Snapshot error for %s: %s", trader.name, exc)
+
+    required = required_trader_names or set()
+    required_failures = [(name, exc) for name, exc in failures if name in required]
+    if required_failures:
+        names = ", ".join(name for name, _exc in required_failures)
+        raise RuntimeError(
+            f"experiment portfolio baseline failed for {len(required_failures)} arm(s): {names}; "
+            "window invalidated; use a new experiment id"
+        ) from required_failures[0][1]
+    return recorded
+
+
 async def snapshot_portfolios(traders, db: DecisionDB, interval_s: float = 300):
-    """Periodically log portfolio snapshots for all traders."""
+    """Periodically log portfolio snapshots for all traders after each interval."""
     while True:
         await asyncio.sleep(interval_s)
-        for trader in traders:
-            try:
-                portfolio = await trader.client.get_portfolio(trader.account_id)
-                positions = {}
-                for (mid, outcome), qty in trader.positions.items():
-                    if qty != 0:
-                        positions.setdefault(str(mid), {})[outcome] = qty
-                balance = portfolio.balance_dollars
-                pv = portfolio.portfolio_value_dollars
-                total_fills = len(getattr(trader, "_fill_history", []))
-                total_orders = getattr(trader, "total_orders_submitted", 0)
-                db.log_snapshot(
-                    trader_name=trader.name,
-                    balance=balance,
-                    portfolio_value=pv,
-                    pnl=portfolio.pnl_dollars,
-                    positions=positions,
-                    total_fills=total_fills,
-                    total_orders=total_orders,
-                )
-            except Exception as e:
-                log.warning("Snapshot error for %s: %s", trader.name, e)
+        await snapshot_portfolios_once(traders, db)
 
 
 async def log_articles_loop(feed: NewsFeed, db: DecisionDB, interval_s: float = 30):
@@ -242,20 +509,368 @@ async def _resolve_bot_account(
         except Exception as e:
             log.warning(
                 "Persisted account %d for %s is unusable (%s); creating a new one",
-                existing, bot_name, e,
+                existing,
+                bot_name,
+                e,
             )
 
     account = await client.create_account(initial_balance_nanos)
     db.save_bot_account_id(persona_key, strat_label, account.id)
     log.info(
         "Created account %d for %s ($%.2f)",
-        account.id, bot_name, initial_balance_nanos / NANOS_PER_DOLLAR,
+        account.id,
+        bot_name,
+        initial_balance_nanos / NANOS_PER_DOLLAR,
     )
     return account.id
 
 
+async def _create_stage1_ab_topology(
+    client: SybilClient,
+    db: DecisionDB,
+    config: LiveConfig,
+    experiment_id: str,
+    market_ids: list[int],
+    markets_info: dict,
+    metrics: ArenaMetrics,
+) -> LiveTopology:
+    """Create isolated control/Stage-1 analyst + Flat-sizer arms."""
+    analysts: list[PersonaAnalyst] = []
+    traders: list[LiveLlmTrader] = []
+    paired_analyst_groups: list[tuple[PersonaAnalyst, PersonaAnalyst]] = []
+
+    for persona_key in config.personas:
+        persona = PERSONAS[persona_key]
+        persona_analysts = []
+        for variant in STAGE1_AB_VARIANTS:
+            variant_id = variant["id"]
+            durable_key = f"{STAGE1_AB_MODE}:{experiment_id}:{persona_key}:{variant_id}"
+            display_prefix = f"{persona['name']} [SYB-114:{experiment_id}:{variant_id}]"
+            analyst_name = f"{display_prefix} (Analyst)"
+            trader_name = f"{display_prefix} (Flat)"
+
+            # An arm owns both sides of its analysis/sizing boundary: its own
+            # bus, its own FlatStrategy state, and its own durable account.
+            bus = FairValueBus(persona_key=durable_key)
+            analyst = PersonaAnalyst(
+                client=client,
+                news_feed=None,
+                bus=bus,
+                api_key=config.api_key,
+                persona=persona["persona"],
+                persona_key=durable_key,
+                model_name=config.model_name,
+                market_ids=market_ids,
+                markets_info=markets_info,
+                db=db,
+                min_llm_interval_s=config.min_llm_interval,
+                name=analyst_name,
+                metrics=metrics,
+                llm_budget_usd=config.llm_budget_usd,
+                prompt_contract=variant["prompt_contract"],
+            )
+            account_id = await _resolve_bot_account(
+                client,
+                db,
+                durable_key,
+                "Flat",
+                int(config.initial_balance * NANOS_PER_DOLLAR),
+                trader_name,
+            )
+            trader = LiveLlmTrader(
+                client=client,
+                account_id=account_id,
+                news_feed=None,
+                strategy=FlatStrategy(),
+                market_ids=market_ids,
+                markets_info=markets_info,
+                db=db,
+                name=trader_name,
+                fair_value_bus=bus,
+                fair_value_ttl_s=config.fair_value_ttl_s,
+                fair_value_half_life_s=config.fair_value_half_life_s,
+                fair_value_hard_expiry_s=config.fair_value_hard_expiry_s,
+            )
+            trader.time_in_force = config.order_time_in_force
+            analysts.append(analyst)
+            persona_analysts.append(analyst)
+            traders.append(trader)
+        paired_analyst_groups.append((persona_analysts[0], persona_analysts[1]))
+
+    return LiveTopology(
+        analysts=analysts,
+        traders=traders,
+        paired_analyst_groups=paired_analyst_groups,
+    )
+
+
+async def _create_default_live_topology(
+    client: SybilClient,
+    db: DecisionDB,
+    config: LiveConfig,
+    market_ids: list[int],
+    markets_info: dict,
+    metrics: ArenaMetrics,
+) -> LiveTopology:
+    """Build the ordinary one-analyst + Kelly/Flat graph unchanged."""
+    # Preserve the existing strategy-object lifecycle: one instance per arm is
+    # created for the runner and shared across persona sizers.
+    strategies = [
+        ("Kelly", KellyStrategy()),
+        ("Flat", FlatStrategy()),
+    ]
+    analysts: list[PersonaAnalyst] = []
+    traders: list[LiveLlmTrader] = []
+    for persona_key in config.personas:
+        if persona_key not in PERSONAS:
+            log.warning("Unknown persona: %s, skipping", persona_key)
+            continue
+        persona = PERSONAS[persona_key]
+
+        bus = FairValueBus(persona_key=persona_key)
+        analyst = PersonaAnalyst(
+            client=client,
+            news_feed=None,
+            bus=bus,
+            api_key=config.api_key,
+            persona=persona["persona"],
+            persona_key=persona_key,
+            model_name=config.model_name,
+            market_ids=market_ids,
+            markets_info=markets_info,
+            db=db,
+            min_llm_interval_s=config.min_llm_interval,
+            name=f"{persona['name']} (Analyst)",
+            metrics=metrics,
+            llm_budget_usd=config.llm_budget_usd,
+        )
+        analysts.append(analyst)
+
+        for strat_label, strategy in strategies:
+            bot_name = f"{persona['name']} ({strat_label})"
+            account_id = await _resolve_bot_account(
+                client,
+                db,
+                persona_key,
+                strat_label,
+                int(config.initial_balance * NANOS_PER_DOLLAR),
+                bot_name,
+            )
+            trader = LiveLlmTrader(
+                client=client,
+                account_id=account_id,
+                news_feed=None,
+                strategy=strategy,
+                market_ids=market_ids,
+                markets_info=markets_info,
+                db=db,
+                name=bot_name,
+                fair_value_bus=bus,
+                fair_value_ttl_s=config.fair_value_ttl_s,
+                fair_value_half_life_s=config.fair_value_half_life_s,
+                fair_value_hard_expiry_s=config.fair_value_hard_expiry_s,
+            )
+            trader.time_in_force = config.order_time_in_force
+            traders.append(trader)
+
+    return LiveTopology(analysts=analysts, traders=traders)
+
+
+def _wire_live_inputs(
+    analysts: list[PersonaAnalyst],
+    traders: list[LiveLlmTrader],
+    feed: NewsFeed,
+    paired_analyst_groups: list[tuple[PersonaAnalyst, PersonaAnalyst]] | None = None,
+    startup_reference_prices: dict[int, float] | None = None,
+) -> None:
+    """Attach default or paired analyst feed views and each sizer's price feed."""
+    paired_analysts = set()
+    for control, stage1 in paired_analyst_groups or []:
+        paired_analysts.update((control, stage1))
+        subscription = feed.subscribe(
+            name=f"paired:{control.persona_key.rsplit(':', 1)[0]}"
+        )
+        barrier = PairedNewsBatchBarrier(
+            subscription,
+            (control.name, stage1.name),
+            startup_reference_prices or {},
+            feed.polymarket_prices.get_price,
+        )
+        control.attach_feed_and_bus(feed, control.bus, barrier.view(control.name))
+        stage1.attach_feed_and_bus(feed, stage1.bus, barrier.view(stage1.name))
+    for analyst in analysts:
+        if analyst not in paired_analysts:
+            analyst.attach_feed_and_bus(feed, analyst.bus)
+    for trader in traders:
+        trader.attach_news_feed(feed)
+
+
+async def _start_live_tasks(
+    feed: NewsFeed,
+    analysts: list[PersonaAnalyst],
+    traders: list[LiveLlmTrader],
+    fast_traders: list[FastReferenceTrader],
+    noise_traders: list,
+    db: DecisionDB,
+    stop_event: asyncio.Event,
+    required_baseline_trader_names: set[str] | None = None,
+) -> list[asyncio.Task]:
+    """Persist every account baseline before starting any live worker."""
+    snapshot_traders = [*traders, *fast_traders, *noise_traders]
+    await snapshot_portfolios_once(
+        snapshot_traders,
+        db,
+        required_trader_names=required_baseline_trader_names,
+    )
+
+    tasks = [
+        asyncio.create_task(feed.run(), name="news_feed"),
+        asyncio.create_task(
+            snapshot_portfolios(snapshot_traders, db),
+            name="snapshots",
+        ),
+        asyncio.create_task(log_articles_loop(feed, db), name="article_logger"),
+    ]
+    for analyst in analysts:
+        tasks.append(
+            asyncio.create_task(
+                supervise_bot(analyst, stop_event), name=f"analyst:{analyst.name}"
+            )
+        )
+    for trader in traders:
+        tasks.append(
+            asyncio.create_task(supervise_bot(trader, stop_event), name=f"trader:{trader.name}")
+        )
+    for fast in fast_traders:
+        tasks.append(
+            asyncio.create_task(supervise_bot(fast, stop_event), name=f"fast:{fast.name}")
+        )
+    for noise in noise_traders:
+        tasks.append(
+            asyncio.create_task(supervise_bot(noise, stop_event), name=f"noise:{noise.name}")
+        )
+    return tasks
+
+
+def _start_outcome_recorder_task(
+    config: LiveConfig,
+    db_path: str,
+    stop_event: asyncio.Event,
+    expected_genesis_hash: str | None = None,
+) -> asyncio.Task | None:
+    """Start the authoritative recorder only for an exact Stage 1 cohort."""
+    if config.stage1_ab_experiment_id is None:
+        return None
+    if not config.market_ids:
+        raise ValueError("Stage 1 outcome recorder requires an explicit market cohort")
+    if expected_genesis_hash is None:
+        raise ValueError("Stage 1 outcome recorder requires persisted experiment genesis")
+    return asyncio.create_task(
+        record_outcomes_loop(
+            db_path,
+            config.sybil_url,
+            tuple(config.market_ids),
+            stop_event,
+            expected_genesis_hash=expected_genesis_hash,
+            interval_s=config.outcome_record_interval_s,
+        ),
+        name="outcome_recorder",
+    )
+
+
+async def _discover_markets_until_ready(
+    client: SybilClient,
+    config: LiveConfig,
+    experiment_id: str | None,
+    metrics: ArenaMetrics,
+) -> tuple[list, list]:
+    """Discover the live cohort, waiting for transient reference hydration.
+
+    A manual Stage 1 cohort is frozen by ID, but those markets can appear in
+    the API a few seconds before the Polymarket mirror publishes their external
+    reference prices. Keep the process alive until those *absent* values arrive;
+    missing IDs and malformed/out-of-range values remain hard failures.
+    """
+    while True:
+        all_markets = await client.list_markets()
+        log.info("Total markets on server: %d", len(all_markets))
+
+        if config.market_ids:
+            market_by_id = {m.id: m for m in all_markets}
+            if experiment_id is not None:
+                missing = [mid for mid in config.market_ids if mid not in market_by_id]
+                if missing:
+                    raise ValueError(
+                        "Stage 1 A/B cohort contains market ids absent from the server: "
+                        + ", ".join(str(mid) for mid in missing)
+                    )
+            active = []
+            for mid in config.market_ids:
+                if mid in market_by_id:
+                    active.append(market_by_id[mid])
+                else:
+                    log.warning("Market ID %d not found on server, skipping", mid)
+            log.info("Manual market selection: %d markets", len(active))
+        else:
+            active = _select_markets_resilient(
+                all_markets,
+                config.max_markets,
+                config.market_profile,
+                require_reference_price=config.require_reference_prices,
+            )
+
+        if active:
+            if experiment_id is not None:
+                pending_reference_ids = [
+                    int(m.id)
+                    for m in active
+                    if _pending_startup_reference(
+                        getattr(m, "reference_price_nanos", None)
+                    )
+                ]
+                if pending_reference_ids:
+                    # The cohort is frozen, but it is not selected *for live
+                    # trading* until every reference is ready. Keep the existing
+                    # ArenaNoMarketsSelected alert meaningful if this persists.
+                    metrics.set_market_selection(0, 0)
+                    log.warning(
+                        "Stage 1 A/B startup references not published for market ids %s; "
+                        "retrying in %ss",
+                        pending_reference_ids,
+                        MARKET_DISCOVERY_RETRY_SECONDS,
+                    )
+                    await asyncio.sleep(MARKET_DISCOVERY_RETRY_SECONDS)
+                    continue
+                # Preserve fail-closed validation for negative, non-integer,
+                # or out-of-range values instead of retrying malformed state.
+                _require_stage1_ab_startup_reference_prices(active)
+            reference_count = sum(
+                1
+                for m in active
+                if _valid_startup_reference_nanos(
+                    getattr(m, "reference_price_nanos", None)
+                )
+            )
+            metrics.set_market_selection(len(active), reference_count)
+            return all_markets, active
+
+        metrics.set_market_selection(0, 0)
+        if not config.require_reference_prices:
+            log.error("No suitable markets found!")
+            return all_markets, active
+
+        log.warning(
+            "No reference-backed markets found for profile=%s; retrying in %ss",
+            config.market_profile,
+            MARKET_DISCOVERY_RETRY_SECONDS,
+        )
+        await asyncio.sleep(MARKET_DISCOVERY_RETRY_SECONDS)
+
+
 async def run_live(config: LiveConfig):
     """Main entry point for live trading."""
+    experiment_id = _validate_stage1_ab_config(config)
+
     # Resolve DB path
     db_path = config.db_path or str(Path(__file__).parent / "decisions.db")
     db = DecisionDB(db_path)
@@ -265,54 +880,20 @@ async def run_live(config: LiveConfig):
     metrics = ArenaMetrics()
     metrics_server = start_metrics_server(metrics, config.metrics_port, config.metrics_host)
     if metrics_server is not None:
-        log.info(
-            "Arena metrics listening on %s:%d", config.metrics_host, config.metrics_port
-        )
+        log.info("Arena metrics listening on %s:%d", config.metrics_host, config.metrics_port)
 
     async with SybilClient(config.sybil_url) as client:
         # 1. Discover markets. When reference prices are required, arena may
         # start before the Polymarket mirror has published any; retry instead of
         # exiting so a cold start self-heals once the mirror catches up.
-        active = []
-        while not active:
-            all_markets = await client.list_markets()
-            log.info("Total markets on server: %d", len(all_markets))
-
-            if config.market_ids:
-                # Manual market selection by ID
-                market_by_id = {m.id: m for m in all_markets}
-                active = []
-                for mid in config.market_ids:
-                    if mid in market_by_id:
-                        active.append(market_by_id[mid])
-                    else:
-                        log.warning("Market ID %d not found on server, skipping", mid)
-                log.info("Manual market selection: %d markets", len(active))
-            else:
-                active = _select_markets_resilient(
-                    all_markets,
-                    config.max_markets,
-                    config.market_profile,
-                    require_reference_price=config.require_reference_prices,
-                )
-
-            metrics.set_market_selection(
-                len(active),
-                sum(1 for m in active if (getattr(m, "reference_price_nanos", 0) or 0) > 0),
-            )
-            if active:
-                break
-
-            if not config.require_reference_prices:
-                log.error("No suitable markets found!")
-                return
-
-            log.warning(
-                "No reference-backed markets found for profile=%s; retrying in %ss",
-                config.market_profile,
-                MARKET_DISCOVERY_RETRY_SECONDS,
-            )
-            await asyncio.sleep(MARKET_DISCOVERY_RETRY_SECONDS)
+        all_markets, active = await _discover_markets_until_ready(
+            client,
+            config,
+            experiment_id,
+            metrics,
+        )
+        if not active:
+            return
 
         log.info(
             "Selected %d markets for trading with profile=%s:",
@@ -331,9 +912,7 @@ async def run_live(config: LiveConfig):
         markets_info = {m.id: m for m in active}
         market_ids = [m.id for m in active]
         synthetic_markets = [
-            m
-            for m in all_markets
-            if str(getattr(m, "status", "")).lower() == "active"
+            m for m in all_markets if str(getattr(m, "status", "")).lower() == "active"
         ]
         if config.market_ids:
             allowed = set(config.market_ids)
@@ -341,68 +920,77 @@ async def run_live(config: LiveConfig):
         synthetic_markets_info = {m.id: m for m in synthetic_markets}
         synthetic_market_ids = [m.id for m in synthetic_markets]
 
-        # 2. Create accounts — each persona gets two bots (Kelly + Flat)
-        strategies = [
-            ("Kelly", KellyStrategy()),
-            ("Flat", FlatStrategy()),
-        ]
-
-        # SYB-210: split analysis from sizing. Each persona gets ONE analyst
-        # (the sole LLM caller) publishing onto a per-persona FairValueBus, and
-        # TWO sizers (Kelly + Flat) subscribing to that same bus. Both sizing
-        # arms therefore consume identical fair-value updates, and the analysis
-        # LLM is called N times per batch instead of 2N.
-        analysts = []
-        traders = []
-        for persona_key in config.personas:
-            if persona_key not in PERSONAS:
-                log.warning("Unknown persona: %s, skipping", persona_key)
-                continue
-            persona = PERSONAS[persona_key]
-
-            bus = FairValueBus(persona_key=persona_key)
-            analyst = PersonaAnalyst(
-                client=client,
-                news_feed=None,  # attached below after feed creation
-                bus=bus,
-                api_key=config.api_key,
-                persona=persona["persona"],
-                persona_key=persona_key,
-                model_name=config.model_name,
-                market_ids=market_ids,
-                markets_info=markets_info,
-                db=db,
-                min_llm_interval_s=config.min_llm_interval,
-                name=f"{persona['name']} (Analyst)",
-                metrics=metrics,
-                llm_budget_usd=config.llm_budget_usd,
+        # 2. Create analyst/sizer accounts. The experiment is a fully opt-in
+        # alternate topology; without an id, preserve the ordinary live graph
+        # and names exactly (one analyst feeding Kelly + Flat per persona).
+        startup_reference_prices = {}
+        experiment_genesis_hash = None
+        if experiment_id is not None:
+            startup_reference_prices = _require_stage1_ab_startup_reference_prices(active)
+            genesis_hash = await _require_committed_genesis_hash(client)
+            experiment_config = _stage1_ab_configuration(
+                config,
+                genesis_hash,
+                startup_reference_prices,
             )
-            analysts.append(analyst)
-
-            for strat_label, strategy in strategies:
-                bot_name = f"{persona['name']} ({strat_label})"
-                account_id = await _resolve_bot_account(
-                    client, db, persona_key, strat_label,
-                    int(config.initial_balance * NANOS_PER_DOLLAR),
-                    bot_name,
+            metadata = db.ensure_experiment(
+                experiment_id,
+                STAGE1_AB_MODE,
+                experiment_config,
+            )
+            _require_new_experiment(metadata)
+            experiment_genesis_hash = str(metadata["configuration"]["genesis_hash"])
+            log.info(
+                "SYB-114 Stage 1 A/B enabled: id=%s start=%s cohort=%s "
+                "genesis=%s model=%s variants=control,stage1 analysts=%d",
+                experiment_id,
+                metadata["started_at_utc"],
+                experiment_config["market_ids"],
+                genesis_hash,
+                config.model_name,
+                experiment_config["analyst_count"],
+            )
+            if config.llm_budget_usd is None:
+                log.info(
+                    "SYB-114 A/B LLM pause threshold: unlimited per analyst; two independent "
+                    "analysts per persona (2x ordinary configured threshold)"
                 )
-
-                trader = LiveLlmTrader(
-                    client=client,
-                    account_id=account_id,
-                    news_feed=None,  # set below after feed creation
-                    strategy=strategy,
-                    market_ids=market_ids,
-                    markets_info=markets_info,
-                    db=db,
-                    name=bot_name,
-                    fair_value_bus=bus,
-                    fair_value_ttl_s=config.fair_value_ttl_s,
-                    fair_value_half_life_s=config.fair_value_half_life_s,
-                    fair_value_hard_expiry_s=config.fair_value_hard_expiry_s,
+            else:
+                log.info(
+                    "SYB-114 A/B LLM pause threshold: $%.2f per analyst, $%.2f per persona "
+                    "(exactly 2x ordinary configured threshold), $%.2f configured total; "
+                    "actual spend may cross each threshold by one completed call",
+                    config.llm_budget_usd,
+                    experiment_config["llm_pause_threshold_usd_per_persona"],
+                    experiment_config["configured_llm_pause_threshold_usd_total"],
                 )
-                trader.time_in_force = config.order_time_in_force
-                traders.append(trader)
+            topology = await _create_stage1_ab_topology(
+                client,
+                db,
+                config,
+                experiment_id,
+                market_ids,
+                markets_info,
+                metrics,
+            )
+            analysts = topology.analysts
+            traders = topology.traders
+        else:
+            # SYB-210: split analysis from sizing. Each persona gets ONE analyst
+            # (the sole LLM caller) publishing onto a per-persona FairValueBus,
+            # and TWO sizers (Kelly + Flat) subscribing to that same bus.
+            topology = await _create_default_live_topology(
+                client,
+                db,
+                config,
+                market_ids,
+                markets_info,
+                metrics,
+            )
+            analysts = topology.analysts
+            traders = topology.traders
+
+        metrics.set_active_traders(trader.name for trader in traders)
 
         # 3. Create synthetic fast/noise traders. Fast traders only act on
         # reference-backed mirror markets; noise traders only act on native
@@ -467,18 +1055,26 @@ async def run_live(config: LiveConfig):
         )
 
         # 4. Create news feed (with LLM gate using cheap model)
-        feed = NewsFeed(active, api_key=config.api_key, poll_interval_s=config.news_poll_interval,
-                        mapping_path=config.mapping_path, metrics=metrics)
+        feed = NewsFeed(
+            active,
+            api_key=config.api_key,
+            poll_interval_s=config.news_poll_interval,
+            mapping_path=config.mapping_path,
+            metrics=metrics,
+        )
 
         # Wire feed into analysts (news subscription) and sizers (price cache
         # only). Each analyst registers its own subscriber view of the feed so
         # every persona sees every article (SYB-192); the two sizers of a
         # persona no longer subscribe to news — they consume the analyst's
         # FairValueBus instead (SYB-210).
-        for analyst in analysts:
-            analyst.attach_feed_and_bus(feed, analyst.bus)
-        for trader in traders:
-            trader.attach_news_feed(feed)
+        _wire_live_inputs(
+            analysts,
+            traders,
+            feed,
+            topology.paired_analyst_groups,
+            startup_reference_prices,
+        )
 
         # 5. Run everything
         log.info(
@@ -491,22 +1087,26 @@ async def run_live(config: LiveConfig):
         )
 
         stop_event = asyncio.Event()
-        tasks = [
-            asyncio.create_task(feed.run(), name="news_feed"),
-            asyncio.create_task(
-                snapshot_portfolios([*traders, *fast_traders, *noise_traders], db),
-                name="snapshots",
+        tasks = await _start_live_tasks(
+            feed,
+            analysts,
+            traders,
+            fast_traders,
+            noise_traders,
+            db,
+            stop_event,
+            required_baseline_trader_names=(
+                {trader.name for trader in traders} if experiment_id is not None else None
             ),
-            asyncio.create_task(log_articles_loop(feed, db), name="article_logger"),
-        ]
-        for a in analysts:
-            tasks.append(asyncio.create_task(supervise_bot(a, stop_event), name=f"analyst:{a.name}"))
-        for t in traders:
-            tasks.append(asyncio.create_task(supervise_bot(t, stop_event), name=f"trader:{t.name}"))
-        for f in fast_traders:
-            tasks.append(asyncio.create_task(supervise_bot(f, stop_event), name=f"fast:{f.name}"))
-        for n in noise_traders:
-            tasks.append(asyncio.create_task(supervise_bot(n, stop_event), name=f"noise:{n.name}"))
+        )
+        outcome_recorder_task = _start_outcome_recorder_task(
+            config,
+            db_path,
+            stop_event,
+            experiment_genesis_hash,
+        )
+        if outcome_recorder_task is not None:
+            tasks.append(outcome_recorder_task)
 
         # Graceful shutdown
         def _signal_handler():
@@ -641,7 +1241,7 @@ def main():
         "--synthetic-randomization-range",
         type=float,
         default=None,
-        help="Synthetic price jitter range; capped internally below 2%.",
+        help="Synthetic price jitter range; capped internally below 2%%.",
     )
     parser.add_argument(
         "--synthetic-market-ids",
@@ -691,9 +1291,8 @@ def main():
         type=float,
         default=5.0,
         help=(
-            "Per-analyst LLM budget in USD (SYB-64). When an analyst's spend "
-            "reaches this, it pauses (no more LLM calls / fair values). "
-            "<=0 disables the budget (unlimited)."
+            "Per-analyst LLM pause threshold in USD (SYB-64). A completed call may "
+            "cross it; later calls pause. <=0 disables the threshold (unlimited)."
         ),
     )
     parser.add_argument("--db-path", default="", help="SQLite DB path")
@@ -708,21 +1307,50 @@ def main():
         default="0.0.0.0",
         help="Bind host for the arena metrics exporter.",
     )
-    parser.add_argument("--personas", nargs="+", default=list(PERSONAS.keys()),
-                        help="Persona keys to use")
-    parser.add_argument("--market-ids", nargs="+", type=int, default=None,
-                        help="Manually specify market IDs to trade (overrides --max-markets)")
-    parser.add_argument("--mapping-path", default=None,
-                        help="Path to polymarket_mapping.json for reference prices")
+    parser.add_argument(
+        "--personas", nargs="+", default=list(PERSONAS.keys()), help="Persona keys to use"
+    )
+    parser.add_argument(
+        "--market-ids",
+        nargs="+",
+        type=int,
+        default=None,
+        help=(
+            "Manually specify market IDs to trade (overrides --max-markets). In Stage 1 A/B "
+            "mode, falls back to comma-separated ARENA_MARKET_IDS."
+        ),
+    )
+    parser.add_argument(
+        "--stage1-ab-experiment-id",
+        default=None,
+        help=(
+            "Opt into the concurrent SYB-114 Stage 1 control-vs-Stage1 experiment. "
+            "Falls back to ARENA_STAGE1_AB_EXPERIMENT_ID and requires an explicit "
+            "nonempty --market-ids or ARENA_MARKET_IDS cohort."
+        ),
+    )
+    parser.add_argument(
+        "--outcome-record-interval-s",
+        type=float,
+        default=None,
+        help=(
+            "Seconds between authoritative outcome checks during Stage 1 A/B. "
+            "Defaults to ARENA_OUTCOME_RECORD_INTERVAL_S or 900; must be positive. "
+            "Rejected unless a Stage 1 experiment is active."
+        ),
+    )
+    parser.add_argument(
+        "--mapping-path", default=None, help="Path to polymarket_mapping.json for reference prices"
+    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
     try:
-        max_markets = args.max_markets if args.max_markets is not None else _env_int(
-            "ARENA_MAX_MARKETS", 0
+        max_markets = (
+            args.max_markets if args.max_markets is not None else _env_int("ARENA_MAX_MARKETS", 0)
         )
         market_profile = args.market_profile or _env_market_profile("ARENA_MARKET_PROFILE")
-        fast_count = args.fast_count if args.fast_count is not None else _env_int(
-            "ARENA_FAST_COUNT", 5
+        fast_count = (
+            args.fast_count if args.fast_count is not None else _env_int("ARENA_FAST_COUNT", 5)
         )
         synthetic_max_inventory = (
             args.synthetic_max_inventory
@@ -750,8 +1378,8 @@ def main():
             else _env_float("ARENA_SYNTHETIC_RANDOMIZATION_RANGE", 0.02)
         )
         # Zero-fills fix: well-funded, aggressive two-sided crossing noise.
-        noise_count = args.noise_count if args.noise_count is not None else _env_int(
-            "ARENA_NOISE_COUNT", 5
+        noise_count = (
+            args.noise_count if args.noise_count is not None else _env_int("ARENA_NOISE_COUNT", 5)
         )
         # Well-funded by default so crossing noise sustains a steady fill stream;
         # each crossing pair pays a small (~2*crossing_edge) mint premium.
@@ -788,6 +1416,14 @@ def main():
             ttl_s=fair_value_ttl_s,
             half_life_s=fair_value_half_life_s,
             hard_expiry_s=fair_value_hard_expiry_s,
+        )
+        stage1_ab_experiment_id, market_ids = _resolve_stage1_ab_activation(
+            args.stage1_ab_experiment_id,
+            args.market_ids,
+        )
+        outcome_record_interval_s = _resolve_outcome_record_interval(
+            args.outcome_record_interval_s,
+            experiment_active=stage1_ab_experiment_id is not None,
         )
     except ValueError as e:
         parser.error(str(e))
@@ -843,9 +1479,16 @@ def main():
         metrics_host=args.metrics_host,
         metrics_port=args.metrics_port,
         personas=args.personas,
-        market_ids=args.market_ids,
+        market_ids=market_ids,
         mapping_path=args.mapping_path,
+        stage1_ab_experiment_id=stage1_ab_experiment_id,
+        outcome_record_interval_s=outcome_record_interval_s,
     )
+
+    try:
+        _validate_stage1_ab_config(config)
+    except ValueError as e:
+        parser.error(str(e))
 
     asyncio.run(run_live(config))
 

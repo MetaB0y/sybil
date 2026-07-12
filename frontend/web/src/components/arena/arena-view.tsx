@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type SelectHTMLAttributes,
+} from "react";
 import { BlockBarChart } from "@/components/dev/block-bar-chart";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -23,6 +29,7 @@ import {
   useArenaDecisionHistory,
   useArenaEquitySeries,
   useArenaFeed,
+  type ArenaFeed,
   type ArenaBotSummary,
   type ArenaDecision,
   type ArenaEquityPoint,
@@ -56,6 +63,162 @@ const EMPTY_DECISIONS: ArenaDecision[] = [];
 const EMPTY_TOKEN_USAGE: ArenaTokenUsage[] = [];
 
 type Tone = "yes" | "no" | "warn" | "accent" | "dim";
+
+export type ArenaFeedUiState = {
+  kind: "loading" | "transport_error" | "server_error" | "ready";
+  showDashboard: boolean;
+  meta: string;
+  badge: string;
+  tone: Tone;
+  title?: string;
+  message?: string;
+};
+
+export function arenaFeedUiState({
+  data,
+  isPending,
+  isError,
+}: {
+  data: ArenaFeed | undefined;
+  isPending: boolean;
+  isError: boolean;
+}): ArenaFeedUiState {
+  if (data?.db_available === false) {
+    return {
+      kind: "server_error",
+      showDashboard: false,
+      meta: "arena database unavailable",
+      badge: "DB unavailable",
+      tone: "warn",
+      title: "Arena database unavailable",
+      message:
+        data.error ||
+        "The API is reachable, but it cannot read the Arena decision database.",
+    };
+  }
+  if (isError) {
+    const hasSnapshot = data?.db_available === true;
+    return {
+      kind: "transport_error",
+      showDashboard: hasSnapshot,
+      meta: hasSnapshot ? "arena refresh failed" : "arena feed unavailable",
+      badge: hasSnapshot ? "Update failed" : "Feed unavailable",
+      tone: "warn",
+      title: hasSnapshot ? "Arena refresh failed" : "Arena feed unavailable",
+      message: hasSnapshot
+        ? "The latest successful snapshot remains visible, but Sybil could not refresh the Arena feed."
+        : "Sybil could not load the Arena feed. No decision or portfolio totals are being shown as zero.",
+    };
+  }
+  if (isPending || data == null) {
+    return {
+      kind: "loading",
+      showDashboard: false,
+      meta: "loading arena feed",
+      badge: "Loading",
+      tone: "dim",
+      title: "Loading Arena",
+      message: "Fetching bot decisions, portfolios, and usage totals…",
+    };
+  }
+  return {
+    kind: "ready",
+    showDashboard: true,
+    meta: "live arena bot feed · decisions, portfolios, reasoning, platform activity",
+    badge: "SQLite mounted",
+    tone: "yes",
+  };
+}
+
+export type ArenaPanelDataState = {
+  kind: "idle" | "loading" | "transport_error" | "server_error" | "ready";
+  showData: boolean;
+  title?: string;
+  message?: string;
+};
+
+export function arenaPanelDataState({
+  data,
+  enabled,
+  isPending,
+  isError,
+  label,
+}: {
+  data: { db_available: boolean; error?: string | null } | undefined;
+  enabled: boolean;
+  isPending: boolean;
+  isError: boolean;
+  label: string;
+}): ArenaPanelDataState {
+  if (!enabled) {
+    return {
+      kind: "idle",
+      showData: false,
+      title: label,
+      message: "Select a bot to load this history.",
+    };
+  }
+  if (data?.db_available === false) {
+    return {
+      kind: "server_error",
+      showData: false,
+      title: `${label} unavailable`,
+      message:
+        data.error ||
+        "The API is reachable, but the Arena database cannot serve this history.",
+    };
+  }
+  if (isError) {
+    const hasSnapshot = data?.db_available === true;
+    return {
+      kind: "transport_error",
+      showData: hasSnapshot,
+      title: `${label} ${hasSnapshot ? "refresh failed" : "unavailable"}`,
+      message: hasSnapshot
+        ? "The latest successful history remains visible, but its refresh failed."
+        : "This Arena history could not be loaded. Empty history is not being inferred.",
+    };
+  }
+  if (isPending || data == null) {
+    return {
+      kind: "loading",
+      showData: false,
+      title: `Loading ${label.toLowerCase()}`,
+      message: "Waiting for the Arena database response…",
+    };
+  }
+  return { kind: "ready", showData: true };
+}
+
+export function combineArenaPanelDataStates(
+  ...states: ArenaPanelDataState[]
+): ArenaPanelDataState {
+  return (
+    states.find((state) => !state.showData) ??
+    states.find((state) => state.kind !== "ready") ?? { kind: "ready", showData: true }
+  );
+}
+
+type ArenaFilterSelectProps = Omit<
+  SelectHTMLAttributes<HTMLSelectElement>,
+  "aria-label"
+> & {
+  label: string;
+};
+
+export function ArenaFilterSelect({
+  label,
+  className,
+  ...props
+}: ArenaFilterSelectProps) {
+  return (
+    <select
+      aria-label={label}
+      className={["arena-filter-select", className].filter(Boolean).join(" ")}
+      {...props}
+    />
+  );
+}
 
 function toneColor(tone: Tone): string {
   if (tone === "yes") return "var(--yes)";
@@ -108,7 +271,7 @@ function PanelHead({
       }}
     >
       <span className="eyebrow">{title}</span>
-      {actions ? <div>{actions}</div> : null}
+      {actions ? <div className="arena-panel-actions">{actions}</div> : null}
     </div>
   );
 }
@@ -121,6 +284,124 @@ function PanelBody({
   style?: CSSProperties;
 }) {
   return <div style={{ padding: 16, ...style }}>{children}</div>;
+}
+
+export function ArenaFeedGate({
+  state,
+  retrying,
+  onRetry,
+  children,
+}: {
+  state: ArenaFeedUiState;
+  retrying: boolean;
+  onRetry: () => void;
+  children?: ReactNode;
+}) {
+  const loading = state.kind === "loading";
+  return (
+    <>
+      {state.kind !== "ready" ? (
+        <Panel style={{ marginTop: 18 }}>
+          <PanelBody>
+            <div
+              role={loading ? "status" : "alert"}
+              aria-live={loading ? "polite" : "assertive"}
+              aria-busy={loading || retrying}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <strong
+                style={{ color: loading ? "var(--fg-2)" : "var(--warn)" }}
+              >
+                {state.title}
+              </strong>
+              <p style={{ ...muted, margin: 0 }}>{state.message}</p>
+              {!loading ? (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  disabled={retrying}
+                  style={{
+                    minHeight: 44,
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    border: "1px solid var(--border-2)",
+                    background: "var(--surface-2)",
+                    color: "var(--fg-1)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    cursor: retrying ? "wait" : "pointer",
+                  }}
+                >
+                  {retrying ? "Retrying…" : "Retry Arena feed"}
+                </button>
+              ) : null}
+            </div>
+          </PanelBody>
+        </Panel>
+      ) : null}
+      {state.showDashboard ? children : null}
+    </>
+  );
+}
+
+export function ArenaPanelDataNotice({
+  state,
+  retrying,
+  onRetry,
+}: {
+  state: ArenaPanelDataState;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  if (state.kind === "ready") return null;
+  const loading = state.kind === "loading";
+  const failed =
+    state.kind === "transport_error" || state.kind === "server_error";
+  return (
+    <div
+      role={failed ? "alert" : "status"}
+      aria-live={failed ? "assertive" : "polite"}
+      aria-busy={loading || retrying}
+      style={{
+        padding: 10,
+        marginBottom: state.showData ? 10 : 0,
+        border: "1px solid var(--border-2)",
+        borderRadius: 8,
+        background: "var(--surface-2)",
+      }}
+    >
+      <strong style={{ color: failed ? "var(--warn)" : "var(--fg-2)" }}>
+        {state.title}
+      </strong>
+      <p style={{ ...muted, margin: "6px 0 0" }}>{state.message}</p>
+      {failed ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={retrying}
+          style={{
+            minHeight: 44,
+            marginTop: 10,
+            padding: "8px 12px",
+            borderRadius: 6,
+            border: "1px solid var(--border-2)",
+            background: "var(--surface-1)",
+            color: "var(--fg-1)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            cursor: retrying ? "wait" : "pointer",
+          }}
+        >
+          {retrying ? "Retrying…" : "Retry history"}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function Pill({
@@ -316,7 +597,11 @@ export function ArenaView() {
   const { blocks, latestBlock, isBackfilling } = useDevRecentBlocks(36);
 
   const data = feed.data;
-  const dbAvailable = data?.db_available === true;
+  const feedState = arenaFeedUiState({
+    data,
+    isPending: feed.isPending,
+    isError: feed.isError,
+  });
   const stats = data?.stats;
   const summaries = data?.summaries ?? EMPTY_SUMMARIES;
   const decisions = data?.decisions ?? EMPTY_DECISIONS;
@@ -351,12 +636,62 @@ export function ArenaView() {
     marketId: hasDriftMarket ? numericMarketId : undefined,
     limit: 500,
   });
+  const equityState = arenaPanelDataState({
+    data: equity.data,
+    enabled: activeTrader !== "",
+    isPending: equity.isPending,
+    isError: equity.isError,
+    label: "Equity history",
+  });
+  const traderHistoryState = arenaPanelDataState({
+    data: traderHistory.data,
+    enabled: activeTrader !== "",
+    isPending: traderHistory.isPending,
+    isError: traderHistory.isError,
+    label: "Bot decision history",
+  });
+  const driftState = hasDriftMarket
+    ? arenaPanelDataState({
+        data: driftFeed.data,
+        enabled: true,
+        isPending: driftFeed.isPending,
+        isError: driftFeed.isError,
+        label: "Fair-value history",
+      })
+    : ({ kind: "ready", showData: true } satisfies ArenaPanelDataState);
+  const fvState = combineArenaPanelDataStates(
+    traderHistoryState,
+    driftState,
+  );
   const totals = useMemo(() => summarizeBots(summaries), [summaries]);
   const strategies = useMemo(() => strategyRows(summaries), [summaries]);
   const tokenCost = estimateTokenCost(tokenUsage);
   const latestDecision = stats?.latest_decision_timestamp
     ? shortTime(stats.latest_decision_timestamp)
     : "none yet";
+  const feedHeader = (
+    <PageHeader
+      title="Bot Arena"
+      meta={feedState.meta}
+      action={<Pill tone={feedState.tone}>{feedState.badge}</Pill>}
+    />
+  );
+  const feedNotice = (
+    <ArenaFeedGate
+      state={feedState}
+      retrying={feed.isFetching}
+      onRetry={() => void feed.refetch()}
+    />
+  );
+
+  if (!feedState.showDashboard) {
+    return (
+      <main className="arena-main" style={{}}>
+        {feedHeader}
+        {feedNotice}
+      </main>
+    );
+  }
 
   return (
     <main
@@ -364,27 +699,8 @@ export function ArenaView() {
       style={{
       }}
     >
-      <PageHeader
-        title="Bot Arena"
-        meta={
-          dbAvailable
-            ? "live arena bot feed · decisions, portfolios, reasoning, platform activity"
-            : "arena database unavailable"
-        }
-        action={
-          <Pill tone={dbAvailable ? "yes" : "warn"}>
-            {dbAvailable ? "SQLite mounted" : "DB unavailable"}
-          </Pill>
-        }
-      />
-
-      {!dbAvailable && data?.error ? (
-        <Panel style={{ marginTop: 18 }}>
-          <PanelBody>
-            <span style={{ color: "var(--warn)" }}>{data.error}</span>
-          </PanelBody>
-        </Panel>
-      ) : null}
+      {feedHeader}
+      {feedNotice}
 
       <StatGrid
         style={{
@@ -443,7 +759,9 @@ export function ArenaView() {
         <EquityCurvePanel
           trader={activeTrader}
           points={equity.data?.points ?? []}
-          isLoading={equity.isPending}
+          state={equityState}
+          retrying={equity.isFetching}
+          onRetry={() => void equity.refetch()}
           downsampled={equity.data?.downsampled === true}
           stride={equity.data?.stride ?? 1}
           sourceRows={equity.data?.source_rows ?? 0}
@@ -456,7 +774,12 @@ export function ArenaView() {
           selectedMarketId={effectiveMarketId}
           onSelectMarketId={setSelectedMarketId}
           decisions={driftFeed.data?.decisions ?? EMPTY_DECISIONS}
-          isLoading={traderHistory.isPending || driftFeed.isPending}
+          state={fvState}
+          retrying={traderHistory.isFetching || driftFeed.isFetching}
+          onRetry={() => {
+            void traderHistory.refetch();
+            if (hasDriftMarket) void driftFeed.refetch();
+          }}
         />
       </div>
 
@@ -611,14 +934,18 @@ function LlmUsagePanel({ rows }: { rows: ArenaTokenUsage[] }) {
 function EquityCurvePanel({
   trader,
   points,
-  isLoading,
+  state,
+  retrying,
+  onRetry,
   downsampled,
   stride,
   sourceRows,
 }: {
   trader: string;
   points: ArenaEquityPoint[];
-  isLoading: boolean;
+  state: ArenaPanelDataState;
+  retrying: boolean;
+  onRetry: () => void;
   downsampled: boolean;
   stride: number;
   sourceRows: number;
@@ -631,48 +958,62 @@ function EquityCurvePanel({
         title="Equity Curve"
         actions={
           <span style={muted}>
-            {trader
+            {state.showData && trader
               ? downsampled
                 ? `${trader} · ${fmtInt(sourceRows)} rows · stride ${stride}`
                 : trader
-              : "select a bot"}
+              : state.kind === "idle"
+                ? "select a bot"
+                : state.kind === "loading"
+                  ? "loading"
+                  : "unavailable"}
           </span>
         }
       />
       <PanelBody>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-            gap: 10,
-            marginBottom: 10,
-          }}
-        >
-          <MiniStat
-            label="Latest Equity"
-            value={latest ? money(latest.value) : "-"}
-            tone="accent"
-          />
-          <MiniStat
-            label="Range PnL"
-            value={
-              chartPoints.length >= 2
-                ? money(
-                    chartPoints[chartPoints.length - 1]!.value -
-                      chartPoints[0]!.value,
-                    true,
-                  )
-                : "-"
-            }
-            tone={
-              chartPoints.length >= 2 &&
-              chartPoints[chartPoints.length - 1]!.value >= chartPoints[0]!.value
-                ? "yes"
-                : "no"
-            }
-          />
-        </div>
-        <EquityLineChart points={chartPoints} isLoading={isLoading} />
+        <ArenaPanelDataNotice
+          state={state}
+          retrying={retrying}
+          onRetry={onRetry}
+        />
+        {state.showData ? (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                gap: 10,
+                marginBottom: 10,
+              }}
+            >
+              <MiniStat
+                label="Latest Equity"
+                value={latest ? money(latest.value) : "-"}
+                tone="accent"
+              />
+              <MiniStat
+                label="Range PnL"
+                value={
+                  chartPoints.length >= 2
+                    ? money(
+                        chartPoints[chartPoints.length - 1]!.value -
+                          chartPoints[0]!.value,
+                        true,
+                      )
+                    : "-"
+                }
+                tone={
+                  chartPoints.length >= 2 &&
+                  chartPoints[chartPoints.length - 1]!.value >=
+                    chartPoints[0]!.value
+                    ? "yes"
+                    : "no"
+                }
+              />
+            </div>
+            <EquityLineChart points={chartPoints} isLoading={false} />
+          </>
+        ) : null}
       </PanelBody>
     </Panel>
   );
@@ -686,7 +1027,9 @@ function FvDriftPanel({
   selectedMarketId,
   onSelectMarketId,
   decisions,
-  isLoading,
+  state,
+  retrying,
+  onRetry,
 }: {
   trader: string;
   traderNames: string[];
@@ -695,7 +1038,9 @@ function FvDriftPanel({
   selectedMarketId: string;
   onSelectMarketId: (marketId: string) => void;
   decisions: ArenaDecision[];
-  isLoading: boolean;
+  state: ArenaPanelDataState;
+  retrying: boolean;
+  onRetry: () => void;
 }) {
   const points = useMemo(() => driftPointsFromDecisions(decisions), [decisions]);
   const latest = points[points.length - 1];
@@ -708,7 +1053,8 @@ function FvDriftPanel({
         title="FV Drift Monitor"
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <select
+            <ArenaFilterSelect
+              label="Filter fair value drift by bot"
               value={trader}
               onChange={(event) => onSelectTrader(event.target.value)}
               className="arena-select"
@@ -722,8 +1068,9 @@ function FvDriftPanel({
                   {name}
                 </option>
               ))}
-            </select>
-            <select
+            </ArenaFilterSelect>
+            <ArenaFilterSelect
+              label="Select fair value drift market"
               value={selectedMarketId}
               onChange={(event) => onSelectMarketId(event.target.value)}
               className="arena-select"
@@ -737,43 +1084,52 @@ function FvDriftPanel({
                   {option.marketName}
                 </option>
               ))}
-            </select>
+            </ArenaFilterSelect>
           </div>
         }
       />
       <PanelBody>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))",
-            gap: 10,
-            marginBottom: 10,
-          }}
-        >
-          <MiniStat
-            label="Fair Value"
-            value={latest ? pct(latest.fairValue) : "-"}
-            tone="yes"
-          />
-          <MiniStat
-            label="Market"
-            value={latest ? pct(latest.marketPrice) : "-"}
-            tone="accent"
-          />
-          <MiniStat
-            label="Drift"
-            value={latest ? pct(latest.edge) : "-"}
-            tone={latest && latest.edge >= 0.1 ? "warn" : "accent"}
-          />
-        </div>
-        <div style={{ ...muted, marginBottom: 8 }}>
-          {selectedMarket
-            ? selectedMarket.marketName
-            : trader
-              ? "No market history for selected bot"
-              : "Select a bot"}
-        </div>
-        <DriftLineChart points={points} isLoading={isLoading} />
+        <ArenaPanelDataNotice
+          state={state}
+          retrying={retrying}
+          onRetry={onRetry}
+        />
+        {state.showData ? (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))",
+                gap: 10,
+                marginBottom: 10,
+              }}
+            >
+              <MiniStat
+                label="Fair Value"
+                value={latest ? pct(latest.fairValue) : "-"}
+                tone="yes"
+              />
+              <MiniStat
+                label="Market"
+                value={latest ? pct(latest.marketPrice) : "-"}
+                tone="accent"
+              />
+              <MiniStat
+                label="Drift"
+                value={latest ? pct(latest.edge) : "-"}
+                tone={latest && latest.edge >= 0.1 ? "warn" : "accent"}
+              />
+            </div>
+            <div style={{ ...muted, marginBottom: 8 }}>
+              {selectedMarket
+                ? selectedMarket.marketName
+                : trader
+                  ? "No market history for selected bot"
+                  : "Select a bot"}
+            </div>
+            <DriftLineChart points={points} isLoading={false} />
+          </>
+        ) : null}
       </PanelBody>
     </Panel>
   );
@@ -1388,7 +1744,8 @@ function DecisionsPanel({
       <PanelHead
         title="Recent Decisions"
         actions={
-          <select
+          <ArenaFilterSelect
+            label="Filter recent decisions by bot"
             value={selectedTrader}
             onChange={(event) => onSelectTrader(event.target.value)}
             className="arena-select"
@@ -1399,7 +1756,7 @@ function DecisionsPanel({
                 {name}
               </option>
             ))}
-          </select>
+          </ArenaFilterSelect>
         }
       />
       <PanelBody>
@@ -1526,6 +1883,7 @@ function DecisionCard({ decision }: { decision: ArenaDecision }) {
           {articles.map((article, index) => (
             <a
               key={index}
+              className="mobile-action-link"
               href={articleUrl(article)}
               target="_blank"
               rel="noreferrer"

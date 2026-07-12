@@ -45,20 +45,20 @@ class QmdbStateRangeProofResponse:
     def to_dict(self) -> dict[str, Any]:
         digests_hex = self.digests_hex
 
-        inactive_peaks = self.inactive_peaks
 
+
+        inactive_peaks = self.inactive_peaks
 
         leaves = self.leaves
 
         ops_root_hex = self.ops_root_hex
-
-
 
         partial_chunk_digest_hex: None | str | Unset
         if isinstance(self.partial_chunk_digest_hex, Unset):
             partial_chunk_digest_hex = UNSET
         else:
             partial_chunk_digest_hex = self.partial_chunk_digest_hex
+
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -70,6 +70,7 @@ class QmdbStateRangeProofResponse:
         })
         if partial_chunk_digest_hex is not UNSET:
             field_dict["partial_chunk_digest_hex"] = partial_chunk_digest_hex
+
         return field_dict
 
 
@@ -78,6 +79,7 @@ class QmdbStateRangeProofResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         digests_hex = cast(list[str], d.pop("digests_hex"))
+
 
         inactive_peaks = d.pop("inactive_peaks")
 

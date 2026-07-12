@@ -18,6 +18,14 @@ export type EventPriceHistory = {
   byMarket: Map<number, PricePoint[]>;
   /** True while any sibling's first fetch is still in flight. */
   isPending: boolean;
+  /** Selected lanes whose latest request failed, cached or otherwise. */
+  failureCount: number;
+  /** Failed lanes with no saved data to render. */
+  unavailableCount: number;
+  /** True while a failed lane is being retried. */
+  isRetrying: boolean;
+  /** Retry only the lanes whose latest request failed. */
+  retryFailed: () => Promise<void>;
 };
 
 export function useEventPriceHistory(marketIds: number[]): EventPriceHistory {
@@ -44,8 +52,17 @@ export function useEventPriceHistory(marketIds: number[]): EventPriceHistory {
     byMarket.set(id, results[i]?.data ?? []);
   });
 
+  const failed = results.filter((result) => result.error != null);
+
   return {
     byMarket,
     isPending: results.some((r) => r.isPending),
+    failureCount: failed.length,
+    unavailableCount: failed.filter((result) => result.data === undefined)
+      .length,
+    isRetrying: failed.some((result) => result.isFetching),
+    retryFailed: async () => {
+      await Promise.all(failed.map((result) => result.refetch()));
+    },
   };
 }

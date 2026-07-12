@@ -26,7 +26,7 @@
 //!     -> {"signer_pubkey_hex":..,"signature_hex":..}
 //!   cargo run -p sybil-client --example smoke_sign -- withdrawal \
 //!       --priv HEX --account N --chain-id N --vault HEX20 --recipient HEX20 \
-//!       --token HEX20 --amount N --expiry N --nonce N
+//!       --token HEX20 --amount N --expiry N --nonce N --genesis-hash HEX32
 //!     -> {"signer_pubkey_hex":..,"signature_hex":..}
 
 use std::collections::HashMap;
@@ -196,6 +196,7 @@ fn cmd_cancel(flags: &HashMap<String, String>) {
 
 fn cmd_withdrawal(flags: &HashMap<String, String>) {
     let key = key_from_hex(req(flags, "priv"));
+    let genesis_hash = parse_hash32(req(flags, "genesis-hash"), "genesis-hash");
     let request = BridgeWithdrawalRequest {
         account_id: req_u64(flags, "account"),
         chain_id: req_u64(flags, "chain-id"),
@@ -206,7 +207,10 @@ fn cmd_withdrawal(flags: &HashMap<String, String>) {
         expiry_height: req_u64(flags, "expiry"),
         nonce: req_u64(flags, "nonce"),
     };
-    emit_signed(&key, &canonical_bridge_withdrawal_bytes(&request));
+    emit_signed(
+        &key,
+        &canonical_bridge_withdrawal_bytes(&request, genesis_hash),
+    );
 }
 
 fn main() {

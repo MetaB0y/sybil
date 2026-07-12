@@ -8,21 +8,18 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  completeSetReason,
-  findCompleteSetBlockers,
-} from "@/lib/account/complete-set";
 import { cancelSignedOrder, submitSignedOrder } from "@/lib/account/orders";
-import { humanizeOrderError } from "@/lib/account/order-errors";
+import {
+  humanizeCancelError,
+  humanizeOrderError,
+} from "@/lib/account/order-errors";
 import { notionalNanosCeil } from "@/lib/account/quantity";
 import {
   useAccountSession,
   useSetConnectModalOpen,
 } from "@/lib/account/use-account";
 import type { AccountEvent } from "@/lib/account/use-account-events";
-import { useAccountOrders } from "@/lib/account/use-account-orders";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
-import { useGroupMarkets } from "@/lib/markets/use-market-groups";
 import {
   ONE_DOLLAR_NANOS,
   buildDegenOrder,
@@ -66,6 +63,7 @@ export function DegenRail({
   const [amount, setAmount] = useState<string>("10");
   const [signing, setSigning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Optimistic cancel: hitting Cancel is a local intent, so we reflect it
   // immediately instead of waiting for the order to drop out of the live feeds
@@ -83,9 +81,11 @@ export function DegenRail({
   const latestHeight = useStore(selectLatestHeight);
   // "Available for betting" = balance minus cash reserved by resting buy orders
   // (the engine rejects against this, not raw balance). See useAvailableBalance.
-  const { availableNanos, reservedNanos } = useAvailableBalance(
-    session?.accountId ?? null,
-  );
+  const {
+    availableNanos,
+    reservedNanos,
+    isPending: balancePending,
+  } = useAvailableBalance(session?.accountId ?? null);
   const availableDollars =
     availableNanos == null ? null : Number(availableNanos) / 1e9;
   const reservedDollars = Number(reservedNanos) / 1e9;
@@ -93,11 +93,6 @@ export function DegenRail({
   const selected =
     group.outcomes.find((o) => o.marketId === group.currentMarketId) ??
     group.outcomes[0];
-
-  // Complete-set preflight inputs. Group membership is NegRisk-only, so it must
-  // come from /v1/markets/groups — an event's siblings are a superset.
-  const { data: openOrders } = useAccountOrders(session?.accountId ?? null);
-  const groupMarkets = useGroupMarkets(selected?.marketId ?? null);
 
   const { data: pricePoints } = usePriceHistory(selected?.marketId ?? -1);
   const tracking = useDegenBetTracker(active);
@@ -119,12 +114,13 @@ export function DegenRail({
 
   const amountNum = parseFloat(amount) || 0;
   const built = useMemo(() => {
+    if (latestHeight == null) return null;
     const betUsdNanos = BigInt(Math.round(amountNum * 1e9));
     return buildDegenOrder({
       side,
       betUsdNanos,
       markNanos,
-      latestHeight: BigInt(latestHeight ?? 0),
+      latestHeight: BigInt(latestHeight),
     });
   }, [amountNum, side, markNanos, latestHeight]);
 
@@ -135,9 +131,10 @@ export function DegenRail({
       openConnectModal(true);
       return;
     }
+    if (availableNanos == null) return;
     // selected is narrowed to non-undefined by the early return above, but
     // TypeScript can't see across the function boundary — guard here too.
-    if (!selected || !built.ok || latestHeight == null) return;
+    if (!selected || !built?.ok || latestHeight == null) return;
     // Freeze the open batch's block-clock anchor so the progress card shows ONE
     // countdown to the next batch clear (the live current-batch timeline).
     // Carried in DegenActive so it survives a Degen↔Pro toggle.
@@ -168,6 +165,7 @@ export function DegenRail({
     );
     setSigning(true);
     setSubmitError(null);
+    setCancelError(null);
     try {
       const res = await submitSignedOrder({
         accountId: session.accountId,
@@ -223,6 +221,7 @@ export function DegenRail({
     const orderId = tracking?.orderId ?? null;
     if (!session || !active || orderId === null) return;
     setCancelling(true);
+    setCancelError(null);
     // Flip the card to its cancelled state now; revert only if the backend
     // rejects (e.g. the order already filled/expired in the meantime).
     setOptimisticallyCancelledBetKey(activeBetKey);
@@ -255,6 +254,7 @@ export function DegenRail({
       // block. warn (not error, which trips the dev overlay) is enough.
       console.warn("degen cancel failed:", e);
       setOptimisticallyCancelledBetKey(null);
+      setCancelError(humanizeCancelError(e, "bet"));
     } finally {
       setCancelling(false);
     }
@@ -269,50 +269,40 @@ export function DegenRail({
     (pricePoints != null && pricePoints.length > 0);
   // Cash the engine would reserve for this bet. Block the CTA when it exceeds
   // what's available so we never trip a server-side InsufficientBalance rejection.
-  const requiredNanos = built.ok
+  const requiredNanos = built?.ok
     ? notionalNanosCeil(built.order.limitPriceNanos, built.order.maxFill)
     : 0n;
   const insufficient =
     connected &&
-    built.ok &&
+    built?.ok === true &&
     availableNanos != null &&
     requiredNanos > availableNanos;
-
-  // NegRisk self-trade prevention: in a market group, a resting buy can make
-  // this bet complete a full outcome set, which the engine rejects outright
-  // (CompleteSetFormation). Catch it before the bettor signs, and say which
-  // order is in the way — the raw rejection explains nothing.
-  const blockers = connected
-    ? findCompleteSetBlockers({
-        groupMarkets,
-        restingOrders: openOrders ?? [],
-        marketId: selected.marketId,
-        side: side === "YES" ? "BuyYes" : "BuyNo",
-      })
-    : null;
-  const completeSet = blockers != null && blockers.length > 0;
-  const completeSetReasonText = completeSet
-    ? completeSetReason(
-        blockers,
-        side === "YES" ? "BuyYes" : "BuyNo",
-        selected.marketId,
-        (m) => group.outcomes.find((o) => o.marketId === m)?.shortLabel ?? null,
-      )
-    : null;
-
-  const ctaLabel = !connected
-    ? "Connect to bet"
-    : signing
-      ? "Signing…"
-      : !built.ok
-        ? "Raise your bet"
-        : insufficient
-          ? "Not enough funds"
-          : completeSet
-            ? `Cancel your open order to bet ${side}`
-            : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
-  const ctaDisabled =
-    connected && (signing || !built.ok || insufficient || completeSet);
+  const ctaState = degenCtaState({
+    connected,
+    latestBatchReady: latestHeight != null,
+    signing,
+    balanceKnown: availableNanos != null,
+    balancePending,
+    orderReady: built?.ok === true,
+    insufficient,
+  });
+  const ctaLabel =
+    ctaState === "connect"
+      ? "Connect to bet"
+      : ctaState === "waiting_batch"
+        ? "Waiting for latest batch…"
+        : ctaState === "signing"
+          ? "Signing…"
+          : ctaState === "waiting_balance"
+            ? "Loading balance…"
+            : ctaState === "balance_unavailable"
+              ? "Balance unavailable"
+              : ctaState === "raise_bet"
+                ? "Raise your bet"
+                : ctaState === "insufficient"
+                  ? "Not enough funds"
+                  : `Bet $${amountNum} on ${side}${group.isMultiOutcome ? ` · ${selected.shortLabel}` : ""}`;
+  const ctaDisabled = ctaState !== "connect" && ctaState !== "ready";
 
   // Explainer slot below the form/progress area:
   //  - while a bet is in flight ("tracking"): a compact WaitingAlert with the
@@ -343,8 +333,10 @@ export function DegenRail({
           filledQty={tracking?.filledQty ?? 0n}
           targetQty={active.targetQty}
           betUsd={active.betUsd}
-          avgPriceNanos={tracking?.avgPriceNanos ?? null}
-          onBetAgain={() => setActive(null)}
+          onBetAgain={() => {
+            setCancelError(null);
+            setActive(null);
+          }}
           onCancel={onCancelBet}
           canCancel={(tracking?.orderId ?? null) !== null}
           cancelling={cancelling}
@@ -371,7 +363,7 @@ export function DegenRail({
             <DegenAmount
               amount={amount}
               setAmount={setAmount}
-              maxFill={built.ok ? built.order.maxFill : null}
+              maxFill={built?.ok ? built.order.maxFill : null}
               availableDollars={availableDollars}
               reservedDollars={reservedDollars}
               seeding={!hasPrice}
@@ -402,20 +394,6 @@ export function DegenRail({
             {ctaLabel}
           </button>
 
-          {completeSetReasonText && !submitError && (
-            <div
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                lineHeight: "16px",
-                color: "var(--fg-3)",
-                textAlign: "center",
-              }}
-            >
-              {completeSetReasonText}
-            </div>
-          )}
-
           {submitError && (
             <div
               role="alert"
@@ -434,8 +412,65 @@ export function DegenRail({
         </>
       )}
 
+      {active && <DegenCancelAlert message={cancelError} />}
+
       {showWaiting && <WaitingAlert />}
       {showExpired && <WhyWaiting variant="expired" />}
+    </div>
+  );
+}
+
+export type DegenCtaState =
+  | "connect"
+  | "waiting_batch"
+  | "signing"
+  | "waiting_balance"
+  | "balance_unavailable"
+  | "raise_bet"
+  | "insufficient"
+  | "ready";
+
+export function degenCtaState({
+  connected,
+  latestBatchReady,
+  signing,
+  balanceKnown,
+  balancePending,
+  orderReady,
+  insufficient,
+}: {
+  connected: boolean;
+  latestBatchReady: boolean;
+  signing: boolean;
+  balanceKnown: boolean;
+  balancePending: boolean;
+  orderReady: boolean;
+  insufficient: boolean;
+}): DegenCtaState {
+  if (!connected) return "connect";
+  if (!latestBatchReady) return "waiting_batch";
+  if (signing) return "signing";
+  if (!balanceKnown) {
+    return balancePending ? "waiting_balance" : "balance_unavailable";
+  }
+  if (!orderReady) return "raise_bet";
+  if (insufficient) return "insufficient";
+  return "ready";
+}
+
+export function DegenCancelAlert({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div
+      role="alert"
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        lineHeight: 1.45,
+        color: "var(--no)",
+      }}
+    >
+      {message}
     </div>
   );
 }

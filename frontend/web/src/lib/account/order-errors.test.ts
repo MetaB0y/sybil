@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { humanizeOrderError } from "./order-errors";
+import { humanizeCancelError, humanizeOrderError } from "./order-errors";
 
 describe("humanizeOrderError", () => {
   it("maps an insufficient-balance rejection to friendly copy", () => {
     const raw = new Error(
       "submit_signed failed (HTTP 400): order 18293722 rejected: InsufficientBalance { required: 1009762112570, available: 1000000000000 }",
     );
-    expect(humanizeOrderError(raw, "bet")).toBe("Not enough balance for this bet.");
+    expect(humanizeOrderError(raw, "bet")).toBe(
+      "Not enough balance for this bet.",
+    );
     expect(humanizeOrderError(raw, "order")).toBe(
       "Not enough balance for this order.",
     );
@@ -16,24 +18,30 @@ describe("humanizeOrderError", () => {
     const raw = new Error(
       "submit_signed failed (HTTP 400): order 1 rejected: InsufficientPosition { market: 5, outcome: 0, required: 10, available: 2 }",
     );
-    expect(humanizeOrderError(raw)).toBe("You don't have enough shares to sell.");
+    expect(humanizeOrderError(raw)).toBe(
+      "You don't have enough shares to sell.",
+    );
   });
 
   it("maps an expired order", () => {
     const raw = new Error(
       "order 7 rejected: Expired { current_block: 100, expires_at_block: 99 }",
     );
-    expect(humanizeOrderError(raw, "bet")).toMatch(/didn't make it into a batch/i);
+    expect(humanizeOrderError(raw, "bet")).toMatch(
+      /didn't make it into a batch/i,
+    );
   });
 
   it("maps transport / signer errors", () => {
     expect(humanizeOrderError(new Error("invalid P256 signature"))).toMatch(
       /verify your bet/i,
     );
-    expect(humanizeOrderError(new Error("rate limited; retry after 3s"))).toMatch(
-      /too many orders/i,
+    expect(
+      humanizeOrderError(new Error("rate limited; retry after 3s")),
+    ).toMatch(/too many orders/i);
+    expect(humanizeOrderError(new Error("mempool full"))).toMatch(
+      /network is busy/i,
     );
-    expect(humanizeOrderError(new Error("mempool full"))).toMatch(/network is busy/i);
   });
 
   it("maps a 409 replay-nonce rejection to a retry nudge", () => {
@@ -57,9 +65,42 @@ describe("humanizeOrderError", () => {
   });
 
   it("falls back to a generic line and never echoes the raw string", () => {
-    const raw = new Error("submit_signed failed (HTTP 500): kaboom internal panic");
+    const raw = new Error(
+      "submit_signed failed (HTTP 500): kaboom internal panic",
+    );
     const out = humanizeOrderError(raw, "bet");
     expect(out).toBe("Couldn't place your bet. Try again.");
     expect(out).not.toMatch(/HTTP|panic|kaboom/);
+  });
+});
+
+describe("humanizeCancelError", () => {
+  it("explains a dismissed passkey without claiming the bet stopped", () => {
+    expect(
+      humanizeCancelError(new Error("Passkey signing was cancelled")),
+    ).toBe("Passkey approval was cancelled. Your bet may still be active.");
+  });
+
+  it("does not misclassify a server WebAuthn rejection as user cancellation", () => {
+    expect(
+      humanizeCancelError(
+        new Error("Invalid WebAuthn assertion: OriginMismatch"),
+      ),
+    ).toBe("Couldn't verify the cancellation. Reconnect and try again.");
+  });
+
+  it("distinguishes a terminal race and a replay conflict", () => {
+    expect(humanizeCancelError(new Error("pending order not found"))).toContain(
+      "already filled, expired, or was cancelled",
+    );
+    expect(
+      humanizeCancelError(new Error("HTTP 409 stale replay nonce")),
+    ).toContain("conflicted with a newer update");
+  });
+
+  it("keeps the fallback honest about a possibly active order", () => {
+    expect(humanizeCancelError(new Error("network down"), "order")).toBe(
+      "Couldn't cancel this order. It may still be active — try again.",
+    );
   });
 });

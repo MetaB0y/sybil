@@ -68,13 +68,13 @@ source "$SCRIPT_DIR/lib/smoke-common.sh"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     cat <<EOF
-dry-run: GET $BASE/v1/health and require status=ok
+dry-run: GET $BASE/v1/health and require status=ok plus a positive height and 64-hex genesis_hash
 dry-run: GET $BASE/v1/blocks/latest twice, ${INTERVAL}s block interval aware, and require height advancement
 dry-run: GET $BASE/v1/markets and require a nonempty JSON array
 dry-run: OPTIONS $BASE/v1/accounts from Origin: $APP_ORIGIN and require POST CORS permission
 dry-run: require /proofs/latest height within $PROOF_LAG_MAX blocks of /v1/blocks/latest (mode: $PROOF_LAG_MODE; source: ${PROVER_BASE:-docker exec into compose service sybil-prover})
 dry-run: inspect compose project '$COMPOSE_PROJECT' containers ($([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local-docker)) when Docker is available
-dry-run: write sybil_synthetic_probe_failure=0 or 1 and sybil_synthetic_proof_lag_blocks to ${VM_URL:-compose victoriametrics service}
+dry-run: write sybil_synthetic_probe_failure=0 or 1 plus sybil_synthetic_proof_lag_blocks and sybil_synthetic_proof_lag_limit_blocks to ${VM_URL:-compose victoriametrics service}
 EOF
     exit 0
 fi
@@ -91,7 +91,7 @@ prom_label_escape() {
 }
 
 push_metric_line() {
-    local line=$1 vm_container
+    local line=$1 vm_container line_q
 
     if [[ -n "$VM_URL" ]]; then
         curl -fsS --max-time 10 --data-binary "$line" \
@@ -99,14 +99,15 @@ push_metric_line() {
         return
     fi
 
-    command -v docker >/dev/null 2>&1 || return 1
-    vm_container="$(docker ps -q \
-        --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-        --filter 'label=com.docker.compose.service=victoriametrics' | head -1)"
+    smoke_docker_available "$DOCKER_SSH" || return 1
+    vm_container="$(smoke_docker_run "$DOCKER_SSH" \
+        "docker ps -q --filter label=com.docker.compose.project=$COMPOSE_PROJECT --filter label=com.docker.compose.service=victoriametrics" \
+        | head -1)"
     [[ -n "$vm_container" ]] || return 1
-    docker exec "$vm_container" wget -qO- \
-        --header='Content-Type: text/plain' --post-data="$line" \
-        'http://127.0.0.1:8428/api/v1/import/prometheus' >/dev/null 2>&1
+    printf -v line_q '%q' "$line"
+    smoke_docker_run "$DOCKER_SSH" \
+        "docker exec $vm_container wget -qO- --header='Content-Type: text/plain' --post-data=$line_q http://127.0.0.1:8428/api/v1/import/prometheus" \
+        >/dev/null
 }
 
 push_result_metric() {
@@ -119,6 +120,12 @@ push_proof_lag_metric() {
     local lag=$1 instance
     instance="$(prom_label_escape "$BASE")"
     push_metric_line "sybil_synthetic_proof_lag_blocks{job=\"sybil-synthetic\",instance=\"$instance\"} $lag"
+}
+
+push_proof_lag_limit_metric() {
+    local limit=$1 instance
+    instance="$(prom_label_escape "$BASE")"
+    push_metric_line "sybil_synthetic_proof_lag_limit_blocks{job=\"sybil-synthetic\",instance=\"$instance\"} $limit"
 }
 
 die() {
@@ -141,6 +148,10 @@ get_json /v1/health
 [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || die "/v1/health returned HTTP $HTTP_CODE"
 [[ "$(printf '%s' "$HTTP_BODY" | smoke_jget status)" == "ok" ]] \
     || die "/v1/health did not report status=ok"
+HEALTH_HEIGHT="$(printf '%s' "$HTTP_BODY" | smoke_jget height)"
+GENESIS_HASH="$(printf '%s' "$HTTP_BODY" | smoke_jget genesis_hash)"
+smoke_is_committed_chain_identity "$HEALTH_HEIGHT" "$GENESIS_HASH" \
+    || die "/v1/health did not expose a positive height and lowercase 64-hex genesis_hash"
 
 get_json /v1/blocks/latest
 [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || die "/v1/blocks/latest returned HTTP $HTTP_CODE"
@@ -230,13 +241,33 @@ else
         CHAIN_HEIGHT="$(printf '%s' "$HTTP_BODY" | smoke_jget height)"
         [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ && "$CHAIN_HEIGHT" =~ ^[0-9]+$ ]] \
             || die "/v1/blocks/latest sample for the proof-lag check was invalid (HTTP $HTTP_CODE)"
-        PROOF_LAG=$((CHAIN_HEIGHT - PROOF_HEIGHT))
-        (( PROOF_LAG < 0 )) && PROOF_LAG=0
-        push_proof_lag_metric "$PROOF_LAG" || true
-        if (( PROOF_LAG > PROOF_LAG_MAX )); then
-            proof_lag_violation "proof height $PROOF_HEIGHT trails chain height $CHAIN_HEIGHT by $PROOF_LAG blocks (max $PROOF_LAG_MAX); the prover pipeline looks wedged"
+        CANONICAL_ROOT=""
+        CANONICAL_READY=1
+        if (( PROOF_HEIGHT <= CHAIN_HEIGHT )); then
+            get_json "/v1/blocks/$PROOF_HEIGHT"
+            CANONICAL_ROOT="$(printf '%s' "$HTTP_BODY" | smoke_jget state_root)"
+            if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ || -z "$CANONICAL_ROOT" ]]; then
+                CANONICAL_READY=0
+                proof_lag_violation "canonical block $PROOF_HEIGHT was unavailable for proof identity binding (HTTP $HTTP_CODE)"
+            fi
         else
-            PROOF_LAG_SUMMARY="proof lag $PROOF_LAG<=$PROOF_LAG_MAX blocks"
+            CANONICAL_READY=0
+            proof_lag_violation "proof height $PROOF_HEIGHT is ahead of current chain height $CHAIN_HEIGHT"
+        fi
+        if [[ "$CANONICAL_READY" == "1" ]]; then
+            PROOF_RESULT="$(printf '%s' "$PROOF_BODY" | smoke_proof_lag_result "$CHAIN_HEIGHT" "$PROOF_LAG_MAX" "$CANONICAL_ROOT" || true)"
+            read -r PROOF_STATE PROOF_HEIGHT PROOF_LAG <<< "$PROOF_RESULT"
+            if [[ "$PROOF_STATE" == "ERR" ]]; then
+                proof_lag_violation "prover /proofs/latest is invalid (${PROOF_HEIGHT:-unknown}; body: ${PROOF_BODY:0:200}); the proof pipeline may have never started"
+            else
+                push_proof_lag_metric "$PROOF_LAG" || true
+                push_proof_lag_limit_metric "$PROOF_LAG_MAX" || true
+                if [[ "$PROOF_STATE" == "STALE" ]]; then
+                    proof_lag_violation "proof height $PROOF_HEIGHT trails chain height $CHAIN_HEIGHT by $PROOF_LAG blocks (max $PROOF_LAG_MAX); the prover pipeline looks wedged"
+                else
+                    PROOF_LAG_SUMMARY="proof lag $PROOF_LAG<=$PROOF_LAG_MAX blocks"
+                fi
+            fi
         fi
     fi
 fi

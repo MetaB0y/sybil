@@ -61,6 +61,40 @@ const VIEW_TABS: { id: View; label: string }[] = [
   { id: "closed", label: "Closed orders" },
 ];
 
+const sectionStyle: React.CSSProperties = {
+  padding: "var(--space-5)",
+  background: "var(--surface-1)",
+  border: "1px solid var(--border-1)",
+  borderRadius: "var(--radius-lg)",
+  boxShadow: "var(--shadow-inset-top)",
+  display: "flex",
+  flexDirection: "column",
+  gap: "var(--space-3)",
+};
+
+const readNoticeStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "var(--space-3)",
+  color: "var(--warn)",
+  fontFamily: "var(--font-mono)",
+  fontSize: "var(--fs-12)",
+};
+
+function readRetryStyle(disabled: boolean): React.CSSProperties {
+  return {
+    minHeight: 32,
+    padding: "0 var(--space-3)",
+    border: "1px solid var(--border-2)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--surface-2)",
+    color: "var(--fg-1)",
+    font: "inherit",
+    cursor: disabled ? "wait" : "pointer",
+  };
+}
+
 /** History event types that terminally close an order. */
 const CLOSED_TYPES = new Set(["filled", "cancelled", "expired", "rejected"]);
 
@@ -131,11 +165,15 @@ function cmpBig(a: bigint, b: bigint): number {
 export function EventHoldings({ marketId }: { marketId: number }) {
   const session = useAccountSession();
   const accountId = session?.accountId ?? null;
-  const { group } = useEventGroup(marketId);
+  const eventGroup = useEventGroup(marketId);
+  const { group } = eventGroup;
   const portfolio = usePortfolio(accountId);
-  const fillsData = useAccountFills(accountId).data;
-  const ordersData = useAccountOrders(accountId).data;
-  const historyData = useAccountHistory(accountId).events;
+  const fills = useAccountFills(accountId);
+  const orders = useAccountOrders(accountId);
+  const history = useAccountHistory(accountId);
+  const fillsData = fills.data;
+  const ordersData = orders.data;
+  const historyData = history.events;
 
   const [sort, setSort] = useState<Sort | null>(null);
   const [view, setView] = useState<View>("holdings");
@@ -258,21 +296,87 @@ export function EventHoldings({ marketId }: { marketId: number }) {
   // orders, or closed orders. Each view shows its own empty state. Default view
   // stays "holdings" — no effect-driven auto-select (avoids set-state-in-effect).
   const hasAny = holdings.length > 0 || eventOrders.length > 0 || hasClosed;
-  if (accountId === null || !hasAny) return null;
+  const reads = [
+    {
+      error: eventGroup.error,
+      hasData: group !== null,
+      isPending: eventGroup.isPending,
+      isFetching: eventGroup.isFetching,
+      refetch: eventGroup.refetch,
+    },
+    {
+      error: portfolio.error,
+      hasData: portfolio.data !== undefined,
+      isPending: portfolio.isPending,
+      isFetching: portfolio.isFetching,
+      refetch: portfolio.refetch,
+    },
+    {
+      error: fills.error,
+      hasData: fills.data !== undefined,
+      isPending: fills.isPending,
+      isFetching: fills.isFetching,
+      refetch: fills.refetch,
+    },
+    {
+      error: orders.error,
+      hasData: orders.data !== undefined,
+      isPending: orders.isPending,
+      isFetching: orders.isFetching,
+      refetch: orders.refetch,
+    },
+    {
+      error: history.error,
+      hasData: history.hasData,
+      isPending: history.isPending,
+      isFetching: history.isFetching,
+      refetch: history.refetch,
+    },
+  ];
+  const failedReads = reads.filter((read) => read.error != null);
+  const gate = deriveEventHoldingsGate({
+    connected: accountId !== null,
+    hasAny,
+    pendingWithoutData: reads.some(
+      (read) => read.isPending && !read.hasData,
+    ),
+    failureCount: failedReads.length,
+    missingFailureCount: failedReads.filter((read) => !read.hasData).length,
+  });
+  const retrying = failedReads.some((read) => read.isFetching);
+  const retryFailed = () => {
+    void Promise.all(failedReads.map((read) => read.refetch()));
+  };
+
+  if (accountId === null) return null;
+  if (gate === "hidden") return null;
+  if (gate === "loading" || gate === "unavailable" || !hasAny) {
+    return (
+      <section style={sectionStyle}>
+        <EventHoldingsReadNotice
+          state={
+            gate === "loading"
+              ? "loading"
+              : gate === "unavailable"
+                ? "unavailable"
+                : "stale"
+          }
+          retrying={retrying}
+          onRetry={retryFailed}
+        />
+      </section>
+    );
+  }
 
   return (
-    <section
-      style={{
-        padding: "var(--space-5)",
-        background: "var(--surface-1)",
-        border: "1px solid var(--border-1)",
-        borderRadius: "var(--radius-lg)",
-        boxShadow: "var(--shadow-inset-top)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-3)",
-      }}
-    >
+    <section style={sectionStyle}>
+      {gate === "stale" && (
+        <EventHoldingsReadNotice
+          state="stale"
+          retrying={retrying}
+          onRetry={retryFailed}
+        />
+      )}
       <div
         style={{
           display: "flex",
@@ -352,6 +456,74 @@ export function EventHoldings({ marketId }: { marketId: number }) {
         />
       )}
     </section>
+  );
+}
+
+export type EventHoldingsGate =
+  | "hidden"
+  | "loading"
+  | "unavailable"
+  | "stale"
+  | "ready";
+
+export function deriveEventHoldingsGate({
+  connected,
+  hasAny,
+  pendingWithoutData,
+  failureCount,
+  missingFailureCount,
+}: {
+  connected: boolean;
+  hasAny: boolean;
+  pendingWithoutData: boolean;
+  failureCount: number;
+  missingFailureCount: number;
+}): EventHoldingsGate {
+  if (!connected) return "hidden";
+  if (missingFailureCount > 0) return "unavailable";
+  if (pendingWithoutData) return "loading";
+  if (failureCount > 0) return "stale";
+  return hasAny ? "ready" : "hidden";
+}
+
+export function EventHoldingsReadNotice({
+  state,
+  retrying,
+  onRetry,
+}: {
+  state: "loading" | "unavailable" | "stale";
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  if (state === "loading") {
+    return (
+      <div role="status" aria-live="polite" style={readNoticeStyle}>
+        loading your positions & orders…
+      </div>
+    );
+  }
+
+  const stale = state === "stale";
+  return (
+    <div
+      role={stale ? "status" : "alert"}
+      aria-live={stale ? "polite" : undefined}
+      style={readNoticeStyle}
+    >
+      <span>
+        {stale
+          ? "positions & orders refresh failed · showing saved data"
+          : "positions & orders unavailable · no account data is shown as empty"}
+      </span>
+      <button
+        type="button"
+        disabled={retrying}
+        onClick={onRetry}
+        style={readRetryStyle(retrying)}
+      >
+        {retrying ? "retrying…" : "retry"}
+      </button>
+    </div>
   );
 }
 

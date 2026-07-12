@@ -22,7 +22,7 @@ T = TypeVar("T", bound="StateRootResponse")
 class StateRootResponse:
     """ 
         Attributes:
-            state_root (str):
+            state_root (str): Current state root. Hex-encoded 32-byte qMDB root.
      """
 
     state_root: str

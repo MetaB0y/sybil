@@ -45,6 +45,13 @@ CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 `SYBIL_CORS_ORIGINS` may be set to a comma-separated browser-origin allowlist;
 empty/unset keeps CORS same-origin only.
 
+The admin resolution key is not supplied through `.env`. The production
+overlay pins `SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key`; `sybil-api`
+creates it on the first boot of the persistent `sybil-data` volume and reuses
+it on subsequent boots. A normal container restart therefore does not rotate
+the admin feed. `just deploy-reset-state CONFIRM` deletes `sybil-data`, so it
+also intentionally discards that key and creates a new chain/admin identity.
+
 `SYBIL_WEBAUTHN_RP_ID` is the web-app hostname only; `SYBIL_WEBAUTHN_ORIGIN` is
 the exact browser origin including `https://`. Both must match the app hostname
 baked into the web image via `NEXT_PUBLIC_WEBAUTHN_RP_ID`; changing them
@@ -82,8 +89,8 @@ its environment and exits with a clear error if it is missing.
 default `local`). `docker-compose.prod.yml` sets it to `prod`, which arms a
 startup preflight: the server refuses to boot if a dev-only knob is wired in
 (`SYBIL_DEV_MODE=true`, unset `SYBIL_SERVICE_TOKEN`, unset `SYBIL_DATA_DIR`, or
-`SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0`). Every profile logs a `deployment
-profile preflight` block naming knobs that diverge from the prod baseline.
+unset `SYBIL_ADMIN_FEED_KEY_PATH`). Every profile logs a `deployment profile
+preflight` block naming knobs that diverge from the prod baseline.
 
 Override deliberately (never steady state) with `SYBIL_ALLOW_DEV_KNOBS=1`.
 The checked-in production overlay sets the profile to `prod`; changing a shell
@@ -112,6 +119,27 @@ finding 5 in `design/dos-audit-2026-07-11.md`.
 
 ## Deploy Commands
 
+### Release gate matrix
+
+The release checks are cost-tiered so browser/container journeys do not inflate
+the normal pull-request path:
+
+| Gate | Workflow / command | Trigger and budget | Promotion effect |
+| --- | --- | --- | --- |
+| L0 property + L1 matching/fills + L2 config contract | `CI` (`check`, `smoke`, `compose-profile-smoke`) | Pull request once Actions billing is restored; no live host | Required merge checks once branch protection is enabled |
+| Web unit/type/lint/build | `Frontend CI` (`build`) | Frontend pull request once Actions billing is restored | Required merge check once branch protection is enabled |
+| L3 deterministic Compose money path | `Compose Integration` / `just itest-compose` | Manual pre-deploy now; nightly after billing; 45-minute hard timeout | Must be green before an operator deploys |
+| L4 passkey browser journey | `Frontend CI` (`e2e`) / `pnpm e2e` | Manual pre-deploy now; future mainline/nightly, never pull requests; 20-minute hard timeout | Must be green before an operator deploys |
+| L5 live-stack smoke | `just deploy-verify` | Automatic final dependency of `deploy-api`, `deploy-web`, `deploy-arena`, and `deploy-all` | Non-zero exits fail the deploy; promotion is not reported successful |
+
+GitHub Actions is intentionally manual-dispatch-only while SYB-251's billing
+limit remains in effect. Do not interpret that temporary trigger policy as a
+green merge gate. After billing is restored, restore the checked-in PR/mainline
+and nightly triggers, run each lane successfully to establish actual duration,
+then configure the named fast checks as required in branch protection. The L4
+job is explicitly guarded from pull-request events so restoring frontend PR
+triggers cannot accidentally put the browser journey on the fast path.
+
 ```bash
 just deploy-api
 just deploy-arena
@@ -128,6 +156,25 @@ values are baked into `sybil-web`, export any overrides before running either
 `deploy-arena` and `deploy-all` require `OPENROUTER_API_KEY` in
 `/opt/sybil/arena.env`. The recipes check only for the presence of required variable
 names; they do not print or pass secret values in command arguments.
+
+### Local build fast path
+
+Build deployable images on the native Linux/amd64 development machine, never on
+the 2 GB Linode. The deploy recipes then stream the locally built images through
+`docker save | ssh docker load`; the server only loads and starts them.
+
+Measured on the development machine on 2026-07-10, a full-stack build with warm
+cargo-chef/BuildKit caches took about one minute. A workspace-membership change
+that invalidated the cold Rust dependency recipe took about nine minutes. The
+former 80+ minute path was an Apple-Silicon-to-amd64 emulated build and is not a
+supported deploy path. The cargo-chef recipe is manifest-driven, so adding Cargo
+examples, benches, or binaries does not require maintaining dummy source files.
+
+For routine work, batch several changes before deploying and use the narrowest
+recipe that covers them (`deploy-web`, `deploy-arena`, or `deploy-api`). Use
+`deploy-all` only when the complete stack changed. Preserve BuildKit's local
+cache between deploys; a cold recipe rebuild is expected after dependency or
+workspace-manifest changes.
 
 The arena image also carries its offline quality-report tools. After resolved
 markets exist, preview and persist their conflict-checked outcome labels, then

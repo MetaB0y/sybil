@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
-import type { HistoryEvent } from "@/lib/account/use-account-history";
 import {
   formatWithdrawalCountdown,
   pendingWithdrawals,
@@ -11,48 +10,34 @@ import {
   type BridgeWithdrawal,
 } from "@/lib/account/withdrawals";
 import { formatDollars, parseNanos } from "@/lib/format/nanos";
+import { selectLatestBlock, useStore } from "@/lib/store";
+import { AuthenticatedReadState } from "./authenticated-read-state";
 
-export function WithdrawalEtas({
-  accountId,
-  events,
-}: {
-  accountId: number;
-  events: HistoryEvent[];
-}) {
+export function WithdrawalEtas({ accountId }: { accountId: number }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const queryClient = useQueryClient();
+  const latest = useStore(selectLatestBlock);
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  const blockHeights = useMemo(
-    () =>
-      [...new Set(events.filter((e) => e.type === "withdrawal").map((e) => e.blockHeight))]
-        .filter((height) => Number.isFinite(height))
-        .sort((a, b) => b - a),
-    [events],
-  );
+  useEffect(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["account", accountId, "withdrawals"],
+    });
+  }, [accountId, latest?.height, queryClient]);
 
   const q = useQuery({
-    enabled: blockHeights.length > 0,
-    queryKey: ["account", accountId, "withdrawal-leaves", blockHeights],
+    queryKey: ["account", accountId, "withdrawals"],
     queryFn: async (): Promise<BridgeWithdrawal[]> => {
-      const blocks = await Promise.all(
-        blockHeights.map(async (height) => {
-          const { data, error } = await api.GET("/v1/blocks/{height}", {
-            params: { path: { height } },
-          });
-          if (error || !data) throw new Error("fetch withdrawal block failed");
-          return data;
-        }),
-      );
-      return blocks.flatMap((block) =>
-        (block.bridge?.withdrawal_leaves ?? []).filter(
-          (leaf) => leaf.account_id === accountId,
-        ),
-      );
+      const { data, error } = await api.GET("/v1/accounts/{id}/withdrawals", {
+        params: { path: { id: accountId } },
+      });
+      if (error || !data) throw new Error("fetch active withdrawals failed");
+      return data;
     },
-    staleTime: 30_000,
+    staleTime: 0,
     refetchOnWindowFocus: false,
   });
 
@@ -64,10 +49,41 @@ export function WithdrawalEtas({
     [q.data, nowMs],
   );
 
-  if (blockHeights.length === 0 || rows.length === 0) return null;
+  if (q.isPending) {
+    return (
+      <AuthenticatedReadState
+        status="loading"
+        title="Loading withdrawal status"
+        message="Checking the current bridge status for this account."
+      />
+    );
+  }
 
+  if (q.error) {
+    return (
+      <AuthenticatedReadState
+        status="error"
+        title="Withdrawal status unavailable"
+        message="We could not verify your active withdrawals. They are hidden instead of being shown as an empty list."
+        onRetry={() => void q.refetch()}
+        retrying={q.isFetching}
+      />
+    );
+  }
+
+  return <WithdrawalStatusPanel rows={rows} nowMs={nowMs} />;
+}
+
+export function WithdrawalStatusPanel({
+  rows,
+  nowMs,
+}: {
+  rows: readonly BridgeWithdrawal[];
+  nowMs: number;
+}) {
   return (
     <section
+      aria-labelledby="normal-withdrawals-title"
       style={{
         background: "var(--surface-1)",
         border: "1px solid var(--border-1)",
@@ -87,19 +103,49 @@ export function WithdrawalEtas({
           gap: 12,
         }}
       >
-        <span className="eyebrow">Pending withdrawals</span>
-        <span className="text-annotation">
-          {q.isPending ? "checking bridge status" : `${rows.length} pending`}
+        <span id="normal-withdrawals-title" className="eyebrow">
+          Normal withdrawals
         </span>
+        <span className="text-annotation">{rows.length} active</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        {rows.map((withdrawal) => (
-          <WithdrawalRow
-            key={withdrawal.withdrawal_id}
-            withdrawal={withdrawal}
-            nowMs={nowMs}
-          />
-        ))}
+      {rows.length === 0 ? (
+        <div
+          style={{
+            padding: "12px 16px",
+            color: "var(--fg-3)",
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+          }}
+        >
+          No active withdrawal leaves.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {rows.map((withdrawal) => (
+            <WithdrawalRow
+              key={withdrawal.withdrawal_id}
+              withdrawal={withdrawal}
+              nowMs={nowMs}
+            />
+          ))}
+        </div>
+      )}
+      <div
+        style={{
+          padding: "10px 16px",
+          borderTop: "1px solid var(--border-1)",
+          background: "var(--bg-2)",
+          color: "var(--fg-4)",
+          fontFamily: "var(--font-sans)",
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}
+      >
+        Status only on this private devnet. New withdrawal requests are not
+        enabled in the web app: the signed API is service-gated and currently
+        creates a Sybil withdrawal leaf and debits available cash, but does not
+        by itself release L1 funds. The proof-backed vault claim path is still
+        incomplete.
       </div>
     </section>
   );
@@ -184,7 +230,11 @@ function WithdrawalRow({
   );
 }
 
-function StatePill({ state }: { state: ReturnType<typeof withdrawalCancelState> }) {
+function StatePill({
+  state,
+}: {
+  state: ReturnType<typeof withdrawalCancelState>;
+}) {
   const color =
     state === "cancel-window-open"
       ? "var(--warn)"

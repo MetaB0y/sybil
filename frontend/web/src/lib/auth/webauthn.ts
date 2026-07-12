@@ -22,6 +22,15 @@ export interface DiscoveredPasskey {
   credentialIdB64url: string;
 }
 
+export interface CreatePasskeyOptions {
+  /**
+   * Onboarding defaults to the local platform authenticator. Backup creation
+   * uses `any` so the browser may choose a second device, security key, or
+   * different passkey provider.
+   */
+  authenticatorAttachment?: AuthenticatorAttachment | "any";
+}
+
 export function isWebAuthnAvailable(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -33,6 +42,7 @@ export function isWebAuthnAvailable(): boolean {
 
 export async function createPasskeyForAccount(
   accountId: number,
+  options: CreatePasskeyOptions = {},
 ): Promise<CreatedPasskey> {
   if (!isWebAuthnAvailable()) {
     throw new Error("WebAuthn is not available in this browser");
@@ -42,6 +52,7 @@ export async function createPasskeyForAccount(
   const rp: PublicKeyCredentialRpEntity = { name: "Sybil" };
   const configuredRpId = rpId();
   if (configuredRpId) rp.id = configuredRpId;
+  const attachment = options.authenticatorAttachment ?? "platform";
   const credential = (await navigator.credentials.create({
     publicKey: {
       challenge: challenge as unknown as BufferSource,
@@ -53,7 +64,9 @@ export async function createPasskeyForAccount(
       },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }],
       authenticatorSelection: {
-        authenticatorAttachment: "platform",
+        ...(attachment === "any"
+          ? {}
+          : { authenticatorAttachment: attachment }),
         residentKey: "preferred",
         userVerification: "required",
       },

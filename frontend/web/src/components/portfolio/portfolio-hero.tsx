@@ -15,6 +15,8 @@ interface Props {
   portfolio: Portfolio | null;
   pnlSplit: PnlSplit | null;
   curve: EquityCurve | null;
+  tradeCount: number;
+  tradeCountCapped: boolean;
   rangeLabel: string;
 }
 
@@ -22,6 +24,8 @@ export function PortfolioHero({
   portfolio,
   pnlSplit,
   curve,
+  tradeCount,
+  tradeCountCapped,
   rangeLabel,
 }: Props) {
   const totalValue = portfolio
@@ -78,6 +82,7 @@ export function PortfolioHero({
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <Eyebrow>Portfolio value</Eyebrow>
         <div
           className="tabular"
           style={{
@@ -141,7 +146,7 @@ export function PortfolioHero({
           }
           sub={
             reservedNanos > 0n
-              ? `${formatDollars(reservedNanos, { decimals: 2 })} reserved`
+              ? `available · ${formatDollars(reservedNanos, { decimals: 2 })} reserved`
               : "available"
           }
         />
@@ -155,6 +160,7 @@ export function PortfolioHero({
                   sign: true,
                 })
           }
+          sub="open positions"
           tone={
             pnlSplit == null
               ? "neutral"
@@ -173,6 +179,7 @@ export function PortfolioHero({
                   sign: true,
                 })
           }
+          sub={`${tradeCount}${tradeCountCapped ? "+" : ""} trades`}
           tone={
             pnlSplit == null
               ? "neutral"
@@ -194,9 +201,7 @@ function Stat({
 }: {
   label: string;
   primary: React.ReactNode;
-  /** Optional caption under the number. Realized P&L has none — a trade count
-   *  told the reader nothing the P&L figure didn't already say. */
-  sub?: string;
+  sub: string;
   tone?: "yes" | "no" | "neutral";
 }) {
   const color =
@@ -228,19 +233,17 @@ function Stat({
       >
         {primary}
       </span>
-      {sub && (
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            color: "var(--fg-3)",
-            letterSpacing: "var(--track-wide)",
-            textTransform: "uppercase",
-          }}
-        >
-          {sub}
-        </span>
-      )}
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          color: "var(--fg-3)",
+          letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
+        }}
+      >
+        {sub}
+      </span>
     </div>
   );
 }

@@ -134,6 +134,16 @@ groups:
           summary: "sybil-api scrape target is down"
           description: "VictoriaMetrics has not been able to scrape sybil-api for 3m. Check the API container and host pressure before redeploying."
 
+      - alert: ArenaDown
+        expr: up{job="sybil-arena"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          component: arena
+        annotations:
+          summary: "Arena scrape target is down"
+          description: "VictoriaMetrics has not been able to scrape the Arena runner for 3m. Trading and Arena-owned liveness signals may be unavailable."
+
       - alert: ReferencePriceFeedStale
         expr: |
           max(sybil_reference_prices_total) > 0
@@ -148,14 +158,20 @@ groups:
           description: "The API has not received a reference-price update for more than 3m. The mirror, Polymarket feed, or API reference-price endpoint may be broken."
 
       - alert: ReferencePriceCoverageLow
-        expr: max(sybil_reference_prices_total) < 100
+        expr: |
+          (
+            max(sybil_reference_prices_active_total)
+            / clamp_min(max(sybil_reference_eligible_markets_active_total), 1)
+          ) < 0.6
+          and
+          max(sybil_reference_eligible_markets_active_total) >= 20
         for: 10m
         labels:
           severity: warning
           component: polymarket
         annotations:
-          summary: "Few markets have Polymarket reference prices"
-          description: "Fewer than 100 markets have live reference prices. Polymarket coverage may have dropped or the mirror may not be tracking enough tokens."
+          summary: "Polymarket reference-price coverage is low"
+          description: "Fewer than 60% of active reference-eligible mirror markets have live reference prices (current ratio: {{ $value | humanizePercentage }}). Polymarket coverage may have dropped or the mirror may not be tracking enough tokens."
 
       - alert: SybilPriceDivergenceHigh
         expr: |
@@ -276,14 +292,17 @@ groups:
           description: "No synthetic result reached VictoriaMetrics for 15m. Check the sybil-synthetic-probe timer, Docker access, and VictoriaMetrics ingestion."
 
       - alert: SyntheticProofLagHigh
-        expr: last_over_time(sybil_synthetic_proof_lag_blocks{job="sybil-synthetic"}[15m]) > 30
+        expr: |
+          last_over_time(sybil_synthetic_proof_lag_blocks{job="sybil-synthetic"}[15m])
+          > on(job, instance)
+          last_over_time(sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic"}[15m])
         for: 10m
         labels:
           severity: warning
           component: prover
         annotations:
           summary: "Proof pipeline is lagging the chain head"
-          description: "The synthetic probe measured /proofs/latest more than 30 blocks behind /v1/blocks/latest for {{ $labels.instance }} (current lag: {{ $value }} blocks). The prover or mock-prover pipeline is likely wedged; see the proof-lag section of the synthetic-monitoring runbook."
+          description: "The synthetic probe measured /proofs/latest beyond its configured lag limit for {{ $labels.instance }} (current lag: {{ $value }} blocks). The prover or mock-prover pipeline is likely wedged; see the proof-lag section of the synthetic-monitoring runbook."
 
       - alert: ActorMailboxQueueHigh
         expr: max_over_time(sybil_actor_queue_depth[2m]) > 1000
@@ -462,18 +481,32 @@ groups:
         expr: |
           sybil_bot_latest_decision_age_seconds{trader!=""} > 3600
           and on (trader)
-          sybil_bot_decisions_total{trader!=""} > 20
-          and on (trader)
-          increase(sybil_bot_decisions_total{trader!=""}[6h]) > 0
-          and on (trader)
-          increase(sybil_bot_decisions_total{trader!=""}[1h]) == 0
+          sybil_arena_trader_active{trader!=""} == 1
         for: 5m
         labels:
           severity: warning
           component: arena
         annotations:
           summary: "One arena trader is stale"
-          description: "{{ $labels.trader }} has not recorded a decision for more than 1h after being active during the last 6h. Historical disabled traders are intentionally ignored."
+          description: "{{ $labels.trader }} is configured in the current arena runner but has not recorded a decision for more than 1h. Historical retired traders are excluded by desired state."
+
+      - alert: BotTraderMissing
+        expr: |
+          (
+            sybil_arena_trader_active{trader!=""} == 1
+            unless on (trader)
+            sybil_bot_latest_decision_age_seconds{trader!=""}
+          )
+          and on () sybil_bot_db_available == 1
+          and on () sybil_bot_decisions_total{trader=""} > 0
+          and on () sybil_bot_latest_decision_age_seconds{trader=""} < 600
+        for: 15m
+        labels:
+          severity: warning
+          component: arena
+        annotations:
+          summary: "Configured arena trader is missing decisions"
+          description: "{{ $labels.trader }} has no recorded decision while the decision database is available and other arena decisions are recent. Its loop may be unhealthy."
 
       - alert: ArenaNoMarketsSelected
         expr: max(sybil_arena_selected_markets) == 0

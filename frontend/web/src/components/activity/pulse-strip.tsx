@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * 24h pulse strip — four real `last_24h` figures from
+ * 24h pulse strip — five real `last_24h` figures from
  * `GET /v1/activity/overview` (see use-activity-overview.ts), one per cell.
  * Values show "—" until the first response lands.
  */
@@ -37,6 +37,11 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
       value: fmtCount(last24h.ordersMatched),
       accent: "var(--yes)",
     },
+    {
+      label: "Unmatched orders",
+      value: fmtCount(last24h.ordersUnmatched),
+      accent: "var(--fg-2)",
+    },
   ];
   return (
     <section className="activity-pulse-section" style={{ padding: "20px 24px 4px" }}>
@@ -68,12 +73,14 @@ export function PulseStrip({ last24h }: { last24h: Last24hStats }) {
       <div
         className="activity-pulse-grid"
       >
-        {items.map((it) => (
+        {items.map((it, i) => (
           <div
             key={it.label}
             className="activity-pulse-cell"
             style={{
               padding: "14px 18px",
+              borderRight:
+                i < items.length - 1 ? "1px solid var(--border-1)" : 0,
               display: "flex",
               flexDirection: "column",
               gap: 8,

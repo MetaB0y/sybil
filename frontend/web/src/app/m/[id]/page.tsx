@@ -8,13 +8,12 @@ import {
   RANGE_MS,
   type ChartRange,
 } from "@/components/chart-range-bar";
-import { EventActivity } from "@/components/event-activity";
 import { EventHoldings } from "@/components/event-holdings";
 import { MarketRail } from "@/components/market-rail";
+import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
-import { PriceChart } from "@/components/price-chart";
-import { useSoonTooltip } from "@/components/soon-tooltip";
+import { PriceChart, PriceHistoryNotice } from "@/components/price-chart";
 import {
   formatAge,
   formatCompactDollars,
@@ -24,8 +23,8 @@ import {
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import { useMarket } from "@/lib/markets/use-market";
 import { SelectOutcomeProvider } from "@/lib/market-detail/active-outcome";
+import { detectStackable } from "@/lib/market-detail/build-chart-series";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
-import { useEventTraders } from "@/lib/markets/use-event-traders";
 import { useMarketStats } from "@/lib/market-detail/use-market-stats";
 import { useEventPriceHistory } from "@/lib/markets/use-event-price-history";
 import { useEventRaw } from "@/lib/markets/use-event-raw";
@@ -43,11 +42,6 @@ const chartSelectionByEvent = new Map<string, number[]>();
 
 /** Max simultaneous chart lines — matches the legend's `maxSelected`. */
 const MAX_CHART_LINES = 8;
-
-/** Per-stat value-slot widths (px) for the header stat row — each just wide
- *  enough for that stat's realistic max, so the columns hold position across an
- *  outcome switch without padding short values ($0, 1d) with dead space. */
-const STAT_W = { vol: 38, h24: 38, traders: 24, liq: 34, age: 28 } as const;
 
 /** Wrap gap (px) between legend chip rows — mirrors OutcomeLegend's `gap`. */
 const LEGEND_ROW_GAP = 10;
@@ -85,6 +79,12 @@ export default function MarketDetailPage({
   const marketQ = useMarket(marketId);
   const market = marketQ.data;
 
+  // Place-order modal (SYB-54) — launched from the header CTA, renders the
+  // shared BuyBox for the currently-selected outcome.
+  const [orderOpen, setOrderOpen] = useState(false);
+  const openOrder = useCallback(() => setOrderOpen(true), []);
+  const closeOrder = useCallback(() => setOrderOpen(false), []);
+
   return (
     <SelectOutcomeProvider value={selectOutcome}>
       <main
@@ -98,13 +98,18 @@ export default function MarketDetailPage({
         {market && (
           <>
             {/* Header band — fixed; the chart/rail split scrolls below it. Closed
-                state shows in a status pill + the rail's read-only notice, not a
-                separate banner row (which shifted the page). Ordering lives in
-                the rail, so the header carries no CTA. */}
+                state shows in the status pill + the rail's read-only notice, not
+                a separate banner row (which shifted the page). */}
             <div
               className="market-detail-header-pad"
             >
-              <Header marketId={marketId} market={market} />
+              <Header
+                marketId={marketId}
+                market={market}
+                {...(market.closed === true
+                  ? {}
+                  : { onPlaceOrder: openOrder })}
+              />
             </div>
 
             <div
@@ -117,11 +122,16 @@ export default function MarketDetailPage({
                 <ChartSection marketId={marketId} />
                 <EventHoldings marketId={marketId} />
                 <DescriptionBlock market={market} />
-                <EventActivity marketId={marketId} />
               </div>
 
               <MarketRail marketId={marketId} />
             </div>
+
+            <PlaceOrderModal
+              marketId={marketId}
+              open={orderOpen}
+              onClose={closeOrder}
+            />
           </>
         )}
       </main>
@@ -138,6 +148,7 @@ export default function MarketDetailPage({
 function Header({
   marketId,
   market,
+  onPlaceOrder,
 }: {
   marketId: number;
   market: {
@@ -154,9 +165,10 @@ function Header({
     market_icon_url?: string | null;
     event_image_url?: string | null;
     event_icon_url?: string | null;
-    event_id?: string | null;
     polymarket_condition_id?: string | null;
   };
+  /** Opens the place-order modal. Omitted (no button) when the market is closed. */
+  onPlaceOrder?: () => void;
 }) {
   const { stats } = useMarketStats(marketId);
   const { primary } = pickDisplayCategory(market.categories, market.category);
@@ -165,40 +177,17 @@ function Header({
   // (see `isMirror`); its absence means the market was created natively on Sybil.
   const origin = market.polymarket_condition_id != null ? "mirror" : "native";
 
-  // Title: the mirror's on-block `name` is the compact "{event}: {outcome}"
-  // form (block-hashed, so it can't be the full sentence). The real per-market
-  // question lives in the off-block Polymarket snapshot, keyed by condition id —
-  // prefer it, falling back to `name` for native/binary markets with no /raw.
-  const raw = useEventRaw(market.event_id ?? undefined, !!market.event_id).data;
-  const rawQuestion = market.polymarket_condition_id
-    ? raw?.get(market.polymarket_condition_id)?.question?.trim()
-    : undefined;
-  const title = rawQuestion || market.name;
-
-  const imageUrl = market.market_image_url ?? market.event_image_url ?? null;
-  const fallbackIconUrl = market.market_icon_url ?? market.event_icon_url ?? null;
-
-  // The title, meta and thumb all re-key on `marketId`, so switching an outcome
-  // remounts all three in the same commit — their blur-in starts immediately on
-  // the switch (no waiting for the image to decode) and in sync with each other
-  // and the rail picker. The new image simply paints in mid-blur as it decodes;
-  // the animation never waits on it (waiting was the lag).
-
   return (
     <header
       className="market-detail-header"
-      // Slow the above-chart outcome blur to match the rail picker: the title,
-      // meta and thumb all animate on `var(--dur-swap)`, so overriding it here to
-      // the shared --dur-outcome-swap slows exactly those three (scoped to this
-      // header — card thumbnails elsewhere keep the fast 460ms --dur-swap).
-      style={{ ["--dur-swap" as string]: "var(--dur-outcome-swap)" } as React.CSSProperties}
     >
       <MarketThumb
-        key={marketId}
         marketId={market.market_id}
         name={market.name}
-        imageUrl={imageUrl}
-        fallbackIconUrl={fallbackIconUrl}
+        imageUrl={market.market_image_url ?? market.event_image_url ?? null}
+        fallbackIconUrl={
+          market.market_icon_url ?? market.event_icon_url ?? null
+        }
         size={56}
       />
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", minWidth: 0 }}>
@@ -216,7 +205,11 @@ function Header({
             color: "var(--fg-3)",
           }}
         >
-          <Link href="/" style={{ color: "var(--fg-4)", textDecoration: "none" }}>
+          <Link
+            className="mobile-action-link"
+            href="/"
+            style={{ color: "var(--fg-4)", textDecoration: "none" }}
+          >
             markets
           </Link>
           <span style={{ color: "var(--fg-4)" }}>/</span>
@@ -247,33 +240,46 @@ function Header({
           <span>{origin}</span>
         </div>
 
-        {/* Title + status pill. The pill only appears once a market is closed;
-            an active market needs no "ACTIVE" badge. Ordering lives in the rail,
-            so there's no header CTA. */}
-        <div className="market-detail-title-row">
-          {/* Re-keyed per outcome so the new question blurs in immediately on the
-              switch, in sync with the thumb + meta (all keyed on marketId). */}
+        {/* Title + status pill */}
+        <div
+          className="market-detail-title-row"
+          style={{
+          }}
+        >
           <h1
-            key={marketId}
             className="market-detail-title"
-            style={{
-              animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
-            }}
           >
-            {title}
+            {market.name}
           </h1>
-          {market.closed === true && (
-            <StatusPill status={market.status} closed />
+          <StatusPill status={market.status} closed={market.closed === true} />
+          {onPlaceOrder && (
+            <button
+              type="button"
+              onClick={onPlaceOrder}
+              style={{
+                marginLeft: "auto",
+                flexShrink: 0,
+                minHeight: 40,
+                padding: "8px 16px",
+                borderRadius: "var(--radius-md)",
+                border: 0,
+                background: "var(--accent)",
+                color: "var(--fg-on-accent)",
+                fontFamily: "var(--font-sans)",
+                fontSize: "var(--fs-13)",
+                fontWeight: 600,
+                letterSpacing: "0.01em",
+                cursor: "pointer",
+              }}
+            >
+              Place order
+            </button>
           )}
         </div>
 
         {/* 5-stat meta row, all scoped to this market. Volume, 24h volume,
-            traders and liquidity are backend values; age is timestamp-derived.
-            Fixed value-slot widths keep the columns from sliding as digit counts
-            change; the row eases in on the outcome switch (re-keyed by marketId)
-            in sync with the title + thumb. */}
+            traders and liquidity are backend values; age is timestamp-derived. */}
         <div
-          key={marketId}
           className="text-mono"
           style={{
             display: "flex",
@@ -281,30 +287,29 @@ function Header({
             gap: "var(--space-4)",
             fontSize: "var(--fs-12)",
             color: "var(--fg-3)",
-            animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
           }}
         >
-          <MetaStat label="vol" valueWidth={STAT_W.vol}>
+          <MetaStat label="vol">
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {market.volume_nanos ? formatCompactDollars(market.volume_nanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="24h" valueWidth={STAT_W.h24}>
+          <MetaStat label="24h">
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatCompactDollars(stats.volume24hNanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="traders" valueWidth={STAT_W.traders}>
+          <MetaStat label="traders">
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatInt(stats.traders) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="liq" valueWidth={STAT_W.liq}>
+          <MetaStat label="liq">
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats ? formatCompactDollars(stats.liquidityNanos) : "—"}
             </span>
           </MetaStat>
-          <MetaStat label="age" valueWidth={STAT_W.age}>
+          <MetaStat label="age">
             <span className="tabular" style={{ color: "var(--fg-2)" }}>
               {stats?.marketAgeMs == null ? "—" : formatAge(stats.marketAgeMs)}
             </span>
@@ -318,21 +323,14 @@ function Header({
 function MetaStat({
   label,
   children,
-  valueWidth,
 }: {
   label: string;
   children: React.ReactNode;
-  /** Fixed min-width (px) for the value slot so the row's columns hold their
-   *  position instead of sliding left/right as digit counts change ($1 vs
-   *  $1000). Omitted where the values don't change in place (event footer). */
-  valueWidth?: number;
 }) {
   return (
     <span style={{ display: "inline-flex", gap: 6 }}>
       <span style={{ color: "var(--fg-4)" }}>{label}</span>
-      <span style={{ display: "inline-block", minWidth: valueWidth }}>
-        {children}
-      </span>
+      {children}
     </span>
   );
 }
@@ -467,7 +465,7 @@ function ChartSection({ marketId }: { marketId: number }) {
   const highlightId = group?.isMultiOutcome ? marketId : undefined;
 
   // Fetch history only for the outcomes actually shown (legend caps at 8).
-  const { byMarket } = useEventPriceHistory(effectiveSelected);
+  const history = useEventPriceHistory(effectiveSelected);
 
   const drawn = useMemo(
     () =>
@@ -477,10 +475,22 @@ function ChartSection({ marketId }: { marketId: number }) {
     [outcomes, effectiveSelected],
   );
 
-  // Binary → area; any multi-outcome event → overlaid independent lines.
-  // NegRisk events are drawn exactly like any other group — no stacked-band
-  // special case, so the event's `negRisk` flag no longer gates the chart.
-  const mode = group?.isMultiOutcome ? "lines" : "area";
+  // Binary → area. Multi → stacked only for true NegRisk (mutually-exclusive)
+  // events, else overlaid independent lines. Use the real `negRisk` flag from
+  // the Polymarket event JSON (event-wide, so any market's value works); fall
+  // back to the price-sum heuristic only when the event has no /raw snapshot.
+  const rawMarkets = useEventRaw(
+    group?.eventId ?? undefined,
+    !!group?.eventId,
+  ).data;
+  const negRisk = rawMarkets
+    ? [...rawMarkets.values()][0]?.negRisk
+    : undefined;
+  const mode = !group?.isMultiOutcome
+    ? "area"
+    : (negRisk ?? detectStackable(outcomes))
+      ? "stacked"
+      : "lines";
 
   // Latest committed block is our "now" reference — ticks each batch, so the
   // sliding range window stays current without a Date.now() call in render.
@@ -494,21 +504,6 @@ function ChartSection({ marketId }: { marketId: number }) {
   // live blocks), so a new line just pops in when its history resolves instead
   // of blanking and rebuilding the whole chart.
   const loading = groupPending;
-
-  // Event-total footer: volume + 24h volume summed across the group's outcomes,
-  // and the event's union trader count (per-market counts aren't additive).
-  // Only meaningful for a real multi-outcome event.
-  const eventTraders = useEventTraders(
-    group?.isMultiOutcome ? (group.eventId ?? undefined) : undefined,
-  ).data;
-  const eventVolumeNanos = useMemo(
-    () => outcomes.reduce((sum, o) => sum + o.volumeNanos, 0n),
-    [outcomes],
-  );
-  const eventVolume24hNanos = useMemo(
-    () => outcomes.reduce((sum, o) => sum + o.volume24hNanos, 0n),
-    [outcomes],
-  );
 
   return (
     <section
@@ -556,7 +551,7 @@ function ChartSection({ marketId }: { marketId: number }) {
             />
           </div>
         ) : (
-          <div className="eyebrow">yes probability</div>
+          <div className="eyebrow">{"// yes probability"}</div>
         )}
         <div style={{ flexShrink: 0 }}>
           <ChartRangeBar value={range} onChange={setRange} />
@@ -576,44 +571,24 @@ function ChartSection({ marketId }: { marketId: number }) {
           loading…
         </div>
       ) : (
-        <PriceChart
-          drawn={drawn}
-          byMarket={byMarket}
-          mode={mode}
-          sinceMs={sinceMs}
-          nowMs={nowMs}
-        />
-      )}
-
-      {!loading && group?.isMultiOutcome && (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "var(--space-4)",
-            paddingTop: "var(--space-3)",
-            borderTop: "1px solid var(--border-1)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--fs-12)",
-            color: "var(--fg-3)",
-          }}
-        >
-          <MetaStat label="event vol">
-            <span className="tabular" style={{ color: "var(--fg-2)" }}>
-              {formatCompactDollars(eventVolumeNanos)}
-            </span>
-          </MetaStat>
-          <MetaStat label="24h vol">
-            <span className="tabular" style={{ color: "var(--fg-2)" }}>
-              {formatCompactDollars(eventVolume24hNanos)}
-            </span>
-          </MetaStat>
-          <MetaStat label="traders">
-            <span className="tabular" style={{ color: "var(--fg-2)" }}>
-              {eventTraders != null ? formatInt(eventTraders) : "—"}
-            </span>
-          </MetaStat>
-        </div>
+        <>
+          <PriceHistoryNotice
+            failureCount={history.failureCount}
+            unavailableCount={history.unavailableCount}
+            retrying={history.isRetrying}
+            onRetry={() => void history.retryFailed()}
+          />
+          <PriceChart
+            drawn={drawn}
+            byMarket={history.byMarket}
+            mode={mode}
+            sinceMs={sinceMs}
+            nowMs={nowMs}
+            highlightId={highlightId}
+            historyPending={history.isPending}
+            historyUnavailable={history.unavailableCount > 0}
+          />
+        </>
       )}
     </section>
   );
@@ -670,7 +645,7 @@ function DescriptionBlock({
       {description && (
         <div>
           <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-            description
+            {"// description"}
           </div>
           <p
             style={{
@@ -688,7 +663,7 @@ function DescriptionBlock({
       {resolutionCriteria && (
         <div>
           <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-            resolution
+            {"// resolution"}
           </div>
           <p
             style={{
@@ -705,10 +680,11 @@ function DescriptionBlock({
       )}
       <div>
         <div className="eyebrow" style={{ marginBottom: "var(--space-2)" }}>
-          {sourceLabel}
+          {"// " + sourceLabel}
         </div>
         {sourceUrl ? (
           <a
+            className="mobile-action-link"
             href={sourceUrl}
             target="_blank"
             rel="noreferrer noopener"
@@ -740,56 +716,7 @@ function DescriptionBlock({
           </span>
         )}
       </div>
-
-      <ProposeResolution />
     </section>
-  );
-}
-
-/**
- * Inactive "Propose resolution" affordance. Resolution proposals aren't wired
- * to the backend yet, so hovering the button floats the shared "soon" tooltip
- * (same animation as the Comments tab) rather than a static label. It reserves
- * the spot next to the resolution criteria the way the Discussion card reserves
- * the comments slot. `aria-disabled` (not the real `disabled` attribute) keeps
- * the button hoverable so the tooltip can fire.
- */
-function ProposeResolution() {
-  const { hovered, handlers, tooltip } = useSoonTooltip();
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: "var(--space-3)",
-        paddingTop: "var(--space-3)",
-        borderTop: "1px solid var(--border-1)",
-      }}
-    >
-      <button
-        type="button"
-        aria-disabled
-        tabIndex={-1}
-        {...handlers}
-        style={{
-          flexShrink: 0,
-          padding: "10px 16px",
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--border-2)",
-          background: "var(--surface-2)",
-          color: hovered ? "var(--fg-2)" : "var(--fg-3)",
-          fontFamily: "var(--font-sans)",
-          fontSize: "var(--fs-13)",
-          fontWeight: 600,
-          cursor: "default",
-          transition: "color var(--dur-fast) var(--ease-standard)",
-        }}
-      >
-        Propose resolution
-      </button>
-      {tooltip}
-    </div>
   );
 }
 

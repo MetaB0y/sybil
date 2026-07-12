@@ -27,10 +27,17 @@ flowchart LR
         API --> STORE["persistent sybil-data"]
         API --> PROVER
         METRICS["VictoriaMetrics + vmalert"] --> API
+        METRICS --> BOTS
         METRICS --> PROVER
         GRAFANA --> METRICS
     end
 ```
+
+The Arena exporter publishes runner-owned desired state (configured traders),
+market selection, news-feed health, and LLM usage. `sybil-api` separately reads
+the shared decisions database for observed per-trader activity. vmalert joins
+those two sources by trader name so retired historical traders do not page while
+a configured trader that stalls or never starts still does.
 
 The checked-in Compose files and `justfile` are executable truth. Never copy a
 port, credential, or environment-variable list from an old incident report or

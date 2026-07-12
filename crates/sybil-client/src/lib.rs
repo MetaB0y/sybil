@@ -14,5 +14,5 @@
 mod client;
 mod error;
 
-pub use client::SybilClient;
+pub use client::{AttestationVerification, SybilClient};
 pub use error::Error;

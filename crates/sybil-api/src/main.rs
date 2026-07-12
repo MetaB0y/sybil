@@ -507,6 +507,7 @@ async fn bootstrap_oracle_feeds(
 fn load_or_generate_admin_pubkey(key_path: &str) -> Result<Vec<u8>, String> {
     use p256::ecdsa::SigningKey;
     use p256::elliptic_curve::rand_core::UnwrapErr;
+    use std::io::Write;
 
     if key_path.is_empty() {
         let key = <SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
@@ -521,6 +522,7 @@ fn load_or_generate_admin_pubkey(key_path: &str) -> Result<Vec<u8>, String> {
 
     let path = std::path::Path::new(key_path);
     if path.exists() {
+        harden_admin_key_permissions(path)?;
         let hex_str =
             std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
         let bytes =
@@ -540,12 +542,47 @@ fn load_or_generate_admin_pubkey(key_path: &str) -> Result<Vec<u8>, String> {
             &mut UnwrapErr(getrandom::SysRng),
         );
         let scalar_bytes = key.to_bytes();
-        std::fs::write(path, hex::encode(scalar_bytes))
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options
+            .open(path)
+            .map_err(|e| format!("create {}: {e}", path.display()))?;
+        file.write_all(hex::encode(scalar_bytes).as_bytes())
+            .and_then(|()| file.sync_all())
             .map_err(|e| format!("write {}: {e}", path.display()))?;
+        harden_admin_key_permissions(path)?;
         let pubkey = matching_sequencer::PublicKey(*key.verifying_key());
         tracing::info!(path = %path.display(), "generated new admin feed key");
         Ok(pubkey.compressed_bytes())
     }
+}
+
+fn harden_admin_key_permissions(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let metadata = std::fs::symlink_metadata(path)
+            .map_err(|e| format!("inspect {}: {e}", path.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!(
+                "admin feed key path {} must be a regular file",
+                path.display()
+            ));
+        }
+        let mode = metadata.mode() & 0o777;
+        if mode != 0o600 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("chmod 0600 {}: {e}", path.display()))?;
+            tracing::warn!(path = %path.display(), previous_mode = format_args!("{mode:04o}"), "hardened admin feed key permissions");
+        }
+    }
+    Ok(())
 }
 
 /// Resolves on SIGTERM (Docker `docker stop`) or Ctrl-C.

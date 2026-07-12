@@ -27,12 +27,28 @@ class AccountResponse:
     """ 
         Attributes:
             account_id (int):
-            balance_nanos (int): Available account balance. Integer nanodollars; 1_000_000_000 = $1.
+            available_balance_nanos (int): Spendable account balance after live-order reservations. Integer
+                nanodollars; 1_000_000_000 = $1.
+            balance_nanos (int): Total (gross) account balance; see `available_balance_nanos` for spendable
+                funds. Integer nanodollars; 1_000_000_000 = $1.
+            events_digest_hex (str): Current event-chain digest used to make every key operation one-shot.
+            keys_digest_hex (str): Current validity key-set digest used to state-bind key operations.
+            reserved_balance_nanos (int): Balance reserved by live resting orders. Integer nanodollars;
+                1_000_000_000 = $1.
+            avatar_seed (None | str | Unset): Optional deterministic identicon seed (SYB-60).
+            display_name (None | str | Unset): Optional opt-in display name (SYB-60). Not yet used for leaderboard
+                labels — that flip is a deliberate follow-up.
             positions (list[PositionResponse] | Unset):
      """
 
     account_id: int
+    available_balance_nanos: int
     balance_nanos: int
+    events_digest_hex: str
+    keys_digest_hex: str
+    reserved_balance_nanos: int
+    avatar_seed: None | str | Unset = UNSET
+    display_name: None | str | Unset = UNSET
     positions: list[PositionResponse] | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -44,7 +60,27 @@ class AccountResponse:
         from ..models.position_response import PositionResponse
         account_id = self.account_id
 
+        available_balance_nanos = self.available_balance_nanos
+
         balance_nanos = self.balance_nanos
+
+        events_digest_hex = self.events_digest_hex
+
+        keys_digest_hex = self.keys_digest_hex
+
+        reserved_balance_nanos = self.reserved_balance_nanos
+
+        avatar_seed: None | str | Unset
+        if isinstance(self.avatar_seed, Unset):
+            avatar_seed = UNSET
+        else:
+            avatar_seed = self.avatar_seed
+
+        display_name: None | str | Unset
+        if isinstance(self.display_name, Unset):
+            display_name = UNSET
+        else:
+            display_name = self.display_name
 
         positions: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.positions, Unset):
@@ -60,8 +96,16 @@ class AccountResponse:
         field_dict.update(self.additional_properties)
         field_dict.update({
             "account_id": account_id,
+            "available_balance_nanos": available_balance_nanos,
             "balance_nanos": balance_nanos,
+            "events_digest_hex": events_digest_hex,
+            "keys_digest_hex": keys_digest_hex,
+            "reserved_balance_nanos": reserved_balance_nanos,
         })
+        if avatar_seed is not UNSET:
+            field_dict["avatar_seed"] = avatar_seed
+        if display_name is not UNSET:
+            field_dict["display_name"] = display_name
         if positions is not UNSET:
             field_dict["positions"] = positions
 
@@ -75,7 +119,35 @@ class AccountResponse:
         d = dict(src_dict)
         account_id = d.pop("account_id")
 
+        available_balance_nanos = d.pop("available_balance_nanos")
+
         balance_nanos = d.pop("balance_nanos")
+
+        events_digest_hex = d.pop("events_digest_hex")
+
+        keys_digest_hex = d.pop("keys_digest_hex")
+
+        reserved_balance_nanos = d.pop("reserved_balance_nanos")
+
+        def _parse_avatar_seed(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        avatar_seed = _parse_avatar_seed(d.pop("avatar_seed", UNSET))
+
+
+        def _parse_display_name(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        display_name = _parse_display_name(d.pop("display_name", UNSET))
+
 
         _positions = d.pop("positions", UNSET)
         positions: list[PositionResponse] | Unset = UNSET
@@ -91,7 +163,13 @@ class AccountResponse:
 
         account_response = cls(
             account_id=account_id,
+            available_balance_nanos=available_balance_nanos,
             balance_nanos=balance_nanos,
+            events_digest_hex=events_digest_hex,
+            keys_digest_hex=keys_digest_hex,
+            reserved_balance_nanos=reserved_balance_nanos,
+            avatar_seed=avatar_seed,
+            display_name=display_name,
             positions=positions,
         )
 

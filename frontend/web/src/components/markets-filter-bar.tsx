@@ -11,10 +11,12 @@ type ChipDef = {
   key: SortKey;
   label: string;
   disabled?: boolean;
+  title?: string;
 };
 
 const SORTS: ChipDef[] = [
   { key: "volume", label: "Volume" },
+  { key: "new", label: "New" },
   { key: "traders", label: "Traders" },
 ];
 
@@ -54,91 +56,93 @@ export function MarketsFilterBar({
           flexShrink: 0,
         }}
       >
-        {SORTS.map((s) => (
-          <Chip
-            key={s.key}
-            active={sort === s.key}
-            disabled={s.disabled ?? false}
-            onClick={() => {
-              if (!s.disabled) onSortChange(s.key);
-            }}
-          >
-            {s.label}
-          </Chip>
-        ))}
-
-        <Divider />
-
-        <Chip
-          active={hideClosed}
+        <div
+          role="group"
+          aria-label="market sorting"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-2)",
+          }}
+        >
+          {SORTS.map((s) => {
+            const active = sort === s.key;
+            return (
+              <button
+                key={s.key}
+                type="button"
+                aria-pressed={active}
+                disabled={s.disabled}
+                title={s.title}
+                onClick={() => !s.disabled && onSortChange(s.key)}
+                style={{
+                  height: 26,
+                  padding: "0 var(--space-3)",
+                  background: active ? "var(--surface-2)" : "transparent",
+                  color: active
+                    ? "var(--fg-1)"
+                    : s.disabled
+                      ? "var(--fg-4)"
+                      : "var(--fg-3)",
+                  border: `1px solid ${
+                    active ? "var(--border-3)" : "var(--border-2)"
+                  }`,
+                  borderRadius: "var(--radius-sm)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "11px",
+                  letterSpacing: "var(--track-wide)",
+                  textTransform: "uppercase",
+                  cursor: s.disabled
+                    ? "not-allowed"
+                    : active
+                      ? "default"
+                      : "pointer",
+                  transition: "all var(--dur-fast) var(--ease-standard)",
+                }}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+        <span
+          aria-hidden
+          style={{
+            width: 1,
+            height: 16,
+            background: "var(--border-2)",
+            margin: "0 var(--space-1)",
+          }}
+        />
+        <button
+          type="button"
           aria-pressed={hideClosed}
+          onClick={() => onHideClosedChange(!hideClosed)}
           title={
             hideClosed
               ? "Closed markets hidden — click to show them greyed out"
               : "Closed markets shown — click to hide"
           }
-          onClick={() => onHideClosedChange(!hideClosed)}
+          style={{
+            height: 26,
+            padding: "0 var(--space-3)",
+            background: hideClosed ? "var(--surface-2)" : "transparent",
+            color: hideClosed ? "var(--fg-1)" : "var(--fg-3)",
+            border: `1px solid ${
+              hideClosed ? "var(--border-3)" : "var(--border-2)"
+            }`,
+            borderRadius: "var(--radius-sm)",
+            fontFamily: "var(--font-mono)",
+            fontSize: "11px",
+            letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            transition: "all var(--dur-fast) var(--ease-standard)",
+          }}
         >
           Hide closed
-        </Chip>
+        </button>
       </div>
     </div>
-  );
-}
-
-/** Shared pill styling for the sort chips and the on/off toggles. */
-function Chip({
-  active,
-  disabled,
-  title,
-  onClick,
-  children,
-  ...rest
-}: {
-  active: boolean;
-  disabled?: boolean | undefined;
-  title?: string | undefined;
-  onClick: () => void;
-  children: React.ReactNode;
-  "aria-pressed"?: boolean | undefined;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      title={title}
-      onClick={onClick}
-      style={{
-        height: 26,
-        padding: "0 var(--space-3)",
-        background: active ? "var(--surface-2)" : "transparent",
-        color: active ? "var(--fg-1)" : disabled ? "var(--fg-4)" : "var(--fg-3)",
-        border: `1px solid ${active ? "var(--border-3)" : "var(--border-2)"}`,
-        borderRadius: "var(--radius-sm)",
-        fontFamily: "var(--font-mono)",
-        fontSize: "11px",
-        letterSpacing: "var(--track-wide)",
-        textTransform: "uppercase",
-        cursor: disabled ? "not-allowed" : "pointer",
-        transition: "all var(--dur-fast) var(--ease-standard)",
-      }}
-      {...rest}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Divider() {
-  return (
-    <span
-      aria-hidden
-      style={{
-        width: 1,
-        height: 16,
-        background: "var(--border-2)",
-        margin: "0 var(--space-1)",
-      }}
-    />
   );
 }

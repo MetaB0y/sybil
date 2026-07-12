@@ -37,7 +37,9 @@ authoritative today; scoped delegation is not active.
 
 ## Bootstrap and key mutation
 
-- Account creation can atomically install its initial key.
+- Public account creation installs its initial key through one sequencer actor
+  command and one control-plane WAL row. Legacy bare service-tier creation and
+  the deprecated service-tier first-key bootstrap remain separate commands.
 - Initial and additional signing-key labels are optional metadata limited to
   128 UTF-8 bytes. Admission measures the original bytes without trimming or
   normalization and rejects oversized labels before account/key/WAL mutation.
@@ -75,9 +77,10 @@ Unsigned `POST /v1/orders` is a service route: in production it requires the
 service token; dev mode skips that service bearer for local workflows. It is not
 a public production trading path.
 
-Signed bridge withdrawal creation is also service-gated scaffolding. The final
-L1 release remains proof/root/nullifier controlled; an API signature alone does
-not move vault funds.
+Signed bridge withdrawal creation is also genesis-bound and nonce-protected,
+but remains service-gated scaffolding. The final L1 release remains
+proof/root/nullifier controlled; an API signature alone does not move vault
+funds.
 
 ## WebAuthn details
 

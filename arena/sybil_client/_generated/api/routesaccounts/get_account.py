@@ -41,6 +41,14 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 401:
+        response_401 = cast(Any, None)
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = cast(Any, None)
+        return response_403
+
     if response.status_code == 404:
         response_404 = cast(Any, None)
         return response_404
@@ -63,7 +71,7 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 def sync_detailed(
     id: int,
     *,
-    client: AuthenticatedClient | Client,
+    client: AuthenticatedClient,
 
 ) -> Response[AccountResponse | Any]:
     """ GET /v1/accounts/{id}
@@ -94,7 +102,7 @@ def sync_detailed(
 def sync(
     id: int,
     *,
-    client: AuthenticatedClient | Client,
+    client: AuthenticatedClient,
 
 ) -> AccountResponse | Any | None:
     """ GET /v1/accounts/{id}
@@ -120,7 +128,7 @@ client=client,
 async def asyncio_detailed(
     id: int,
     *,
-    client: AuthenticatedClient | Client,
+    client: AuthenticatedClient,
 
 ) -> Response[AccountResponse | Any]:
     """ GET /v1/accounts/{id}
@@ -151,7 +159,7 @@ async def asyncio_detailed(
 async def asyncio(
     id: int,
     *,
-    client: AuthenticatedClient | Client,
+    client: AuthenticatedClient,
 
 ) -> AccountResponse | Any | None:
     """ GET /v1/accounts/{id}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -11,10 +10,10 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
-import { useMarketsList, type Market } from "@/lib/markets/use-markets";
+import { useMarketsIndex, type IndexMarket } from "@/lib/markets/use-markets";
 import { buildIndexCards } from "@/lib/markets/build-index-cards";
 import {
-  searchResultCards,
+  selectIndexCards,
   type CardItem,
 } from "@/lib/markets/select-index-cards";
 import { selectPricesByMarketId, useStore } from "@/lib/store";
@@ -24,6 +23,8 @@ import { MarketThumb } from "./market-thumb";
 
 /** Rows rendered in the dropdown before the "see all" footer. */
 const MAX_RESULTS = 8;
+/** Trader counts don't matter for the volume-sorted preview. */
+const EMPTY_TRADERS: Map<string, number> = new Map();
 
 /**
  * Global search. Typing opens a dropdown preview of matching events/markets —
@@ -31,11 +32,8 @@ const MAX_RESULTS = 8;
  * commits the query to the markets grid (`/?q=`); arrow-keys + Enter (or a
  * click) jump straight to a specific market. `/` focuses the box from anywhere.
  *
- * Unlike the grid (one card per event), the preview drills into the match: an
- * event whose title matches shows as the event; an event matched only through an
- * outcome shows that specific market (e.g. "OpenAI" inside a "best AI model"
- * event). Open-only, volume-sorted. `see all` still hands the raw query to the
- * grid, which keeps its event grouping.
+ * The preview filters with the same defaults a fresh `/?q=` landing uses
+ * (volume sort, no category, open-only) so what you see is what the grid shows.
  */
 export function NavSearch() {
   const searchParams = useSearchParams();
@@ -60,15 +58,31 @@ export function NavSearch() {
     setQ(urlQ);
   }
 
-  const { bundle } = useMarketsList();
+  const { bundle, isFetching, error, refetch } = useMarketsIndex();
+  const dataState = deriveNavSearchDataState({
+    hasBundle: bundle !== null,
+    hasError: error != null,
+  });
   const prices = useStore(selectPricesByMarketId);
   const items = useMemo(
     () => (bundle ? buildIndexCards(bundle) : []),
-    [bundle]
+    [bundle],
   );
 
-  const results = useMemo(() => searchResultCards(items, q), [items, q]);
+  const results = useMemo(() => {
+    if (!q.trim()) return [] as CardItem[];
+    return selectIndexCards(items, {
+      query: q,
+      sort: "volume",
+      category: null,
+      showClosed: false,
+      eventTraders: EMPTY_TRADERS,
+    });
+  }, [items, q]);
   const top = results.slice(0, MAX_RESULTS);
+  const showDropdown = open && q.trim().length > 0;
+  const hasSearchData = dataState === "ready" || dataState === "stale";
+  const hasOptions = showDropdown && hasSearchData && top.length > 0;
 
   const close = useCallback(() => {
     setOpen(false);
@@ -89,7 +103,7 @@ export function NavSearch() {
       close();
       inputRef.current?.blur();
     },
-    [router, searchParams, close]
+    [router, searchParams, close],
   );
 
   const goToItem = useCallback(
@@ -102,24 +116,8 @@ export function NavSearch() {
       close();
       inputRef.current?.blur();
     },
-    [router, close]
+    [router, close],
   );
-
-  // Clear the query. If the grid is currently filtered by it (`?q=`), reset to
-  // all markets — that URL param is the only way back to the full grid — while
-  // preserving the active sort. Off a `?q=` view we just empty the box.
-  const clearSearch = useCallback(() => {
-    setQ("");
-    close();
-    if (urlQ) {
-      const params = new URLSearchParams();
-      const sort = searchParams.get("sort");
-      if (sort) params.set("sort", sort);
-      const qs = params.toString();
-      router.push(qs ? `/?${qs}` : "/", { scroll: false });
-    }
-    inputRef.current?.focus();
-  }, [close, urlQ, searchParams, router]);
 
   const onChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     setQ(e.target.value);
@@ -148,11 +146,11 @@ export function NavSearch() {
         }
       }
     },
-    [top, highlight, q, open, goToItem, goToGrid, close]
+    [top, highlight, q, open, goToItem, goToGrid, close],
   );
 
-  // `/` focuses search from anywhere (a common shortcut). Ignore when the user
-  // is already typing somewhere (input/textarea/contentEditable).
+  // `/` focuses search from anywhere — the leading glyph promises it. Ignore
+  // when the user is already typing somewhere (input/textarea/contentEditable).
   useEffect(() => {
     const onSlash = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -176,11 +174,12 @@ export function NavSearch() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [open, close]);
 
-  const showDropdown = open && q.trim().length > 0;
-
   return (
     <div ref={shellRef} style={{ position: "relative" }}>
       <div className="nav-search-shell" style={searchShellStyle}>
+        <span aria-hidden className="text-mono" style={searchSlashStyle}>
+          /
+        </span>
         <input
           ref={inputRef}
           value={q}
@@ -192,77 +191,64 @@ export function NavSearch() {
           placeholder="search events, markets"
           aria-label="search markets"
           role="combobox"
-          aria-expanded={showDropdown}
-          aria-controls="nav-search-results"
+          aria-expanded={hasOptions}
+          aria-controls={hasOptions ? "nav-search-options" : undefined}
           aria-autocomplete="list"
           style={searchInputStyle}
         />
-        {q && (
-          <button
-            type="button"
-            aria-label="Clear search"
-            // Keep focus (don't blur the input) through the click.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={clearSearch}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = "var(--fg-1)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "var(--fg-4)";
-            }}
-            style={clearButtonStyle}
-          >
-            <X size={14} aria-hidden />
-          </button>
-        )}
       </div>
 
       {showDropdown && (
-        <div
-          id="nav-search-results"
-          role="listbox"
-          className="nav-search-dropdown"
-          style={dropdownStyle}
-          // Drop the hover highlight when the pointer leaves the dropdown so a
-          // row doesn't stay "selected" (and Enter falls back to the grid).
-          onMouseLeave={() => setHighlight(-1)}
-        >
-          {top.length === 0 ? (
-            <div style={emptyStyle}>no events or markets match “{q.trim()}”</div>
+        <div className="nav-search-dropdown" style={dropdownStyle}>
+          {dataState === "loading" || dataState === "unavailable" ? (
+            <NavSearchDataNotice
+              state={dataState}
+              retrying={isFetching}
+              onRetry={() => void refetch()}
+            />
           ) : (
             <>
-              {top.map((item, i) => (
-                <ResultRow
-                  key={resultKey(item)}
-                  item={item}
-                  prices={prices}
-                  active={i === highlight}
-                  onPick={() => goToItem(item)}
-                  onHover={() => setHighlight(i)}
+              {dataState === "stale" && (
+                <NavSearchDataNotice
+                  state="stale"
+                  retrying={isFetching}
+                  onRetry={() => void refetch()}
                 />
-              ))}
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => goToGrid(q)}
-                // Hovering the footer clears any row highlight so only one row
-                // reads as active, and gives the button its own hover feedback.
-                onMouseEnter={(e) => {
-                  setHighlight(-1);
-                  e.currentTarget.style.background = "var(--surface-2)";
-                  e.currentTarget.style.color = "var(--fg-1)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.color = "var(--fg-3)";
-                }}
-                style={footerStyle}
-              >
-                <span>
-                  see all {results.length} result{results.length === 1 ? "" : "s"}
-                </span>
-                <span aria-hidden>↵</span>
-              </button>
+              )}
+              {top.length === 0 ? (
+                <div style={emptyStyle}>
+                  {dataState === "stale"
+                    ? `no matches in saved market data for “${q.trim()}”`
+                    : `no events or markets match “${q.trim()}”`}
+                </div>
+              ) : (
+                <>
+                  <div id="nav-search-options" role="listbox">
+                    {top.map((item, i) => (
+                      <ResultRow
+                        key={resultKey(item)}
+                        item={item}
+                        prices={prices}
+                        active={i === highlight}
+                        onPick={() => goToItem(item)}
+                        onHover={() => setHighlight(i)}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => goToGrid(q)}
+                    style={footerStyle}
+                  >
+                    <span>
+                      see all {results.length} result
+                      {results.length === 1 ? "" : "s"}
+                    </span>
+                    <span aria-hidden>↵</span>
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -272,7 +258,66 @@ export function NavSearch() {
 }
 
 export function NavSearchSkeleton() {
-  return <div className="nav-search-shell" style={searchShellStyle} aria-hidden />;
+  return (
+    <div className="nav-search-shell" style={searchShellStyle} aria-hidden />
+  );
+}
+
+export type NavSearchDataState = "loading" | "unavailable" | "stale" | "ready";
+
+export function deriveNavSearchDataState({
+  hasBundle,
+  hasError,
+}: {
+  hasBundle: boolean;
+  hasError: boolean;
+}): NavSearchDataState {
+  if (hasBundle) return hasError ? "stale" : "ready";
+  if (hasError) return "unavailable";
+  return "loading";
+}
+
+export function NavSearchDataNotice({
+  state,
+  retrying,
+  onRetry,
+}: {
+  state: Exclude<NavSearchDataState, "ready">;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  if (state === "loading") {
+    return (
+      <div role="status" aria-live="polite" style={emptyStyle}>
+        loading market search…
+      </div>
+    );
+  }
+
+  const stale = state === "stale";
+
+  return (
+    <div
+      role={stale ? "status" : "alert"}
+      aria-live={stale ? "polite" : undefined}
+      style={dataNoticeStyle}
+    >
+      <span>
+        {stale
+          ? "market search update failed · showing saved results"
+          : "market search unavailable"}
+      </span>
+      <button
+        type="button"
+        disabled={retrying}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRetry}
+        style={retryStyle}
+      >
+        {retrying ? (stale ? "refreshing…" : "retrying…") : "retry"}
+      </button>
+    </div>
+  );
 }
 
 function ResultRow({
@@ -288,15 +333,7 @@ function ResultRow({
   onPick: () => void;
   onHover: () => void;
 }) {
-  const isBinary = item.kind === "binary";
-  // For an outcome surfaced as its own market, show the short outcome label
-  // ("OpenAI") — not the mirror's full "Event: Outcome" name — and put the
-  // parent event underneath so identically-named outcomes across events stay
-  // distinguishable. Standalone binaries (event title ≈ market name) get the
-  // plain name and no subtitle.
-  const name = isBinary ? outcomeShortLabel(item.market) : item.name;
-  const eventTitle = isBinary ? item.market.event_title?.trim() : null;
-  const context = eventTitle && eventTitle !== name ? eventTitle : null;
+  const name = item.kind === "binary" ? item.market.name : item.name;
   const thumb = thumbProps(item);
   const vol =
     item.volumeNanos > 0n ? formatCompactDollars(item.volumeNanos) : "—";
@@ -321,7 +358,10 @@ function ResultRow({
       onMouseDown={(e) => e.preventDefault()}
       onMouseEnter={onHover}
       onClick={onPick}
-      style={{ ...rowStyle, background: active ? "var(--surface-2)" : "transparent" }}
+      style={{
+        ...rowStyle,
+        background: active ? "var(--surface-2)" : "transparent",
+      }}
     >
       <MarketThumb
         marketId={thumb.id}
@@ -331,22 +371,19 @@ function ResultRow({
         size={28}
       />
       <span style={rowNameStyle}>
-        <span style={rowTitleLineStyle}>
-          {item.primaryCategory && (
-            <span
-              aria-hidden
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: getCategoryColor(item.primaryCategory),
-                flexShrink: 0,
-              }}
-            />
-          )}
-          <span style={rowTitleStyle}>{name}</span>
-        </span>
-        {context && <span style={rowContextStyle}>{context}</span>}
+        {item.primaryCategory && (
+          <span
+            aria-hidden
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: getCategoryColor(item.primaryCategory),
+              flexShrink: 0,
+            }}
+          />
+        )}
+        <span style={rowTitleStyle}>{name}</span>
       </span>
       <span className="text-mono tabular" style={rowMetaStyle}>
         <span style={{ color: "var(--fg-2)" }}>{detail}</span>
@@ -357,7 +394,7 @@ function ResultRow({
 }
 
 /** Leader = open outcome with the most volume (matches MultiCard's ranking). */
-function pickLeaderId(markets: Market[]): number {
+function pickLeaderId(markets: IndexMarket[]): number {
   let best = markets[0]!;
   for (const m of markets) {
     const bClosed = best.closed === true ? 1 : 0;
@@ -393,30 +430,19 @@ function thumbProps(item: CardItem): {
   };
 }
 
-/**
- * Short outcome label for a market row. Prefers Polymarket's `group_item_title`
- * ("OpenAI"); else strips a leading "Event title: " prefix off the mirror name
- * ("…best AI model?: OpenAI" → "OpenAI"); else the name as-is (standalone
- * binaries, whose name is already the whole question).
- */
-function outcomeShortLabel(m: Market): string {
-  const git = m.group_item_title?.trim();
-  if (git) return git;
-  const et = m.event_title?.trim();
-  if (et && m.name.startsWith(et)) {
-    const rest = m.name.slice(et.length).replace(/^[\s:]+/, "").trim();
-    if (rest) return rest;
-  }
-  return m.name;
-}
-
 function resultKey(item: CardItem): string {
   return item.kind === "binary"
     ? `m${item.market.market_id}`
     : `e${item.eventId}`;
 }
 
-const searchShellStyle: React.CSSProperties = {
+const searchShellStyle: React.CSSProperties = {};
+
+const searchSlashStyle: React.CSSProperties = {
+  color: "var(--fg-4)",
+  fontSize: "var(--fs-12)",
+  letterSpacing: "var(--track-wide)",
+  marginRight: "var(--space-2)",
 };
 
 const searchInputStyle: React.CSSProperties = {
@@ -428,28 +454,9 @@ const searchInputStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "var(--fs-12)",
   padding: 0,
-  minWidth: 0,
 };
 
-const clearButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  flexShrink: 0,
-  width: 18,
-  height: 18,
-  marginLeft: 4,
-  padding: 0,
-  border: 0,
-  borderRadius: "var(--radius-sm)",
-  background: "transparent",
-  color: "var(--fg-4)",
-  cursor: "pointer",
-  transition: "color var(--dur-fast) var(--ease-standard)",
-};
-
-const dropdownStyle: React.CSSProperties = {
-};
+const dropdownStyle: React.CSSProperties = {};
 
 const rowStyle: React.CSSProperties = {
   display: "grid",
@@ -468,27 +475,8 @@ const rowStyle: React.CSSProperties = {
 
 const rowNameStyle: React.CSSProperties = {
   display: "flex",
-  flexDirection: "column",
-  justifyContent: "center",
-  gap: 1,
-  minWidth: 0,
-};
-
-const rowTitleLineStyle: React.CSSProperties = {
-  display: "flex",
   alignItems: "center",
   gap: "var(--space-2)",
-  minWidth: 0,
-};
-
-const rowContextStyle: React.CSSProperties = {
-  fontFamily: "var(--font-sans)",
-  fontSize: "11px",
-  lineHeight: 1.3,
-  color: "var(--fg-4)",
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
   minWidth: 0,
 };
 
@@ -497,8 +485,6 @@ const rowTitleStyle: React.CSSProperties = {
   fontSize: "var(--fs-13)",
   lineHeight: 1.3,
   color: "var(--fg-1)",
-  // Show the full event name up to two lines instead of a hard one-line
-  // ellipsis — a nav that hides what you searched for is useless.
   display: "-webkit-box",
   WebkitLineClamp: 2,
   WebkitBoxOrient: "vertical",
@@ -521,6 +507,26 @@ const emptyStyle: React.CSSProperties = {
   color: "var(--fg-3)",
 };
 
+const dataNoticeStyle: React.CSSProperties = {
+  ...emptyStyle,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "var(--space-3)",
+  color: "var(--warn)",
+};
+
+const retryStyle: React.CSSProperties = {
+  minHeight: 32,
+  padding: "0 var(--space-3)",
+  border: "1px solid var(--border-2)",
+  borderRadius: "var(--radius-sm)",
+  background: "var(--surface-2)",
+  color: "var(--fg-1)",
+  font: "inherit",
+  cursor: "pointer",
+};
+
 const footerStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -539,6 +545,4 @@ const footerStyle: React.CSSProperties = {
   letterSpacing: "var(--track-wide)",
   textTransform: "uppercase",
   color: "var(--fg-3)",
-  transition:
-    "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
 };

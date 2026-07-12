@@ -245,7 +245,14 @@ jobs:
         working-directory: zk/openvm-tools
         run: cargo clippy --tests --all-features
 
-      # Guest crate checked with the normal host compiler (the same check as
+      # Generate the config-derived, gitignored include that cargo-openvm
+      # normally writes before compiling a guest. This keeps the fast host lane
+      # reproducible from a clean checkout without installing the heavy guest
+      # toolchain; the rebuild workflow still owns real guest compilation.
+      - name: Generate OpenVM host-check init files
+        run: ./scripts/generate-openvm-init.py zk/openvm-guest zk/openvm-escape-guest
+
+      # Guest crates checked with the normal host compiler (the same checks as
       # `just openvm-guest-check`). This validates the guest source compiles;
       # it does NOT rebuild the zkVM artifact / commitment, which requires the
       # pinned `cargo-openvm` CLI + risc0 target toolchain and stays a local /

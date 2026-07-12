@@ -1,5 +1,26 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const baseURL =
+  process.env.E2E_BASE_URL ?? "https://app.172-104-31-54.nip.io";
+const localHosts = (process.env.E2E_LOCAL_HOSTS ?? "")
+  .split(",")
+  .map((host) => host.trim())
+  .filter(Boolean);
+
+if (localHosts.length > 0 && !localHosts.includes(new URL(baseURL).hostname)) {
+  throw new Error(
+    `E2E_LOCAL_HOSTS must include the E2E_BASE_URL hostname (${new URL(baseURL).hostname})`,
+  );
+}
+
+const localHostLaunchArgs = localHosts.length > 0
+  ? [
+      `--host-resolver-rules=${localHosts
+        .map((host) => `MAP ${host} 127.0.0.1`)
+        .join(",")}`,
+    ]
+  : [];
+
 /**
  * Playwright config for the Sybil web e2e journey (SYB-243).
  *
@@ -9,6 +30,12 @@ import { defineConfig, devices } from "@playwright/test";
  * domain, `E2E_API_BASE`.
  *
  *   E2E_BASE_URL=https://app.172-104-31-54.nip.io pnpm e2e
+ *
+ * A local HTTPS proxy can still exercise the validity-pinned devnet RP without
+ * changing machine DNS or weakening verifier checks. Build the web/API with
+ * that RP, point E2E_BASE_URL at the proxy, and set E2E_LOCAL_HOSTS to the
+ * comma-separated proxy hostnames. Only Chromium maps them to 127.0.0.1, and
+ * only this opt-in run accepts the ephemeral local CA.
  *
  * The spec drives the passkey (WebAuthn) account-create + signed-order flow via
  * a Chromium virtual authenticator (CDP), so we only run the Chromium project.
@@ -27,7 +54,8 @@ export default defineConfig({
     ? [["github"], ["list"], ["html", { open: "never" }]]
     : [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "https://app.172-104-31-54.nip.io",
+    baseURL,
+    ignoreHTTPSErrors: localHosts.length > 0,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
@@ -35,7 +63,12 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(localHostLaunchArgs.length > 0
+          ? { launchOptions: { args: localHostLaunchArgs } }
+          : {}),
+      },
     },
   ],
 });

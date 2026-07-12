@@ -43,23 +43,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/v1/accounts/{id}/keyop-state": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** GET /v1/accounts/{id}/keyop-state */
-    get: operations["get_keyop_state"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/v1/accounts/{id}/api-keys": {
     parameters: {
       query?: never;
@@ -183,6 +166,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/accounts/{id}/keyop-state": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/accounts/{id}/keyop-state — public signing state for key operations.
+     * @description These digests are already committed validity state and reveal no key or
+     *     portfolio data. A client must fetch them immediately before signing a
+     *     registration or revocation; admission rejects stale values with 409.
+     */
+    get: operations["get_keyop_state"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/accounts/{id}/keys": {
     parameters: {
       query?: never;
@@ -222,8 +227,9 @@ export interface paths {
      * POST /v1/accounts/{id}/keys/register — register an additional signing key,
      *     authorized by a signature from an existing account key (SYB-229).
      * @description Canonical bytes cover the full new key record and the account's current
-     *     key/event digests, domain-separated by `genesis_hash`. Both signer schemes are
-     *     verified at ingress and again by the shared verifier used in the main guest.
+     *     key/event digests, domain-separated by `genesis_hash`. The raw-P256 path is
+     *     re-verified by the sequencer; the WebAuthn path is verified at the edge and
+     *     again by the shared verifier before the authenticated intent is forwarded.
      */
     post: operations["register_signed_key"];
     delete?: never;
@@ -322,6 +328,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/accounts/{id}/withdrawals": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/accounts/{id}/withdrawals
+     * @description Returns the account's currently active withdrawal leaves. Terminal leaves
+     *     are visible with their terminal status until the next committed block
+     *     retires them, then disappear from this collection. Historical creation
+     *     blocks remain immutable and must not be used as a current-status view.
+     */
+    get: operations["list_account_withdrawals"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/activity/overview": {
     parameters: {
       query?: never;
@@ -394,6 +423,27 @@ export interface paths {
      *     resolver will never finalize it.
      */
     post: operations["reject_auto_resolution"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/attestation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/attestation
+     * @description Development-only shape stub. The route is mounted only when `dev_mode` is
+     *     enabled; none of these empty fields are cryptographic evidence.
+     */
+    get: operations["attestation"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1279,7 +1329,9 @@ export interface components {
        *     labels — that flip is a deliberate follow-up.
        */
       display_name?: string | null;
+      /** @description Current event-chain digest used to make every key operation one-shot. */
       events_digest_hex: string;
+      /** @description Current validity key-set digest used to state-bind key operations. */
       keys_digest_hex: string;
       positions?: components["schemas"]["PositionResponse"][];
       /**
@@ -1324,6 +1376,39 @@ export interface components {
        * @description Revocation time in Unix milliseconds, if revoked.
        */
       revoked_at_ms?: number | null;
+    };
+    /**
+     * @description Development-only JSON projection of an enclave attestation.
+     *
+     *     These fields correspond to values carried by an AWS Nitro attestation
+     *     document, but this DTO is not itself the canonical CBOR/COSE document. A
+     *     response with `is_stub = true` has no cryptographic trust value.
+     */
+    AttestationResponse: {
+      /**
+       * @description Lowercase hex encoding of Nitro's optional DER-encoded `public_key`
+       *     field. Empty in the development stub.
+       */
+      enclave_pubkey: string;
+      /** @description Always true for the currently implemented development-only response. */
+      is_stub: boolean;
+      /**
+       * @description PCR index to lowercase hex-encoded measurement bytes. A real Nitro
+       *     document uses SHA-384 PCR values; the development stub returns no PCRs.
+       */
+      pcr_values: {
+        [key: string]: string;
+      };
+      /**
+       * @description Lowercase hex encoding of protocol data carried in Nitro's optional
+       *     `user_data` field. Empty in the development stub.
+       */
+      report_data: string;
+      /**
+       * @description Base64url encoding of the COSE_Sign1 signature bytes. Empty in the
+       *     development stub; this field alone is insufficient to verify Nitro PKI.
+       */
+      signature: string;
     };
     /** @enum {string} */
     AuthScheme: "raw_p256" | "webauthn";
@@ -1609,7 +1694,7 @@ export interface components {
     };
     BridgeDepositEventResponse: {
       /** Format: int64 */
-      account_id: number;
+      account_id?: number | null;
       /**
        * Format: int64
        * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
@@ -1621,15 +1706,17 @@ export interface components {
     };
     BridgeDepositResponse: {
       /** Format: int64 */
-      account_id: number;
+      account_id?: number | null;
       /**
        * Format: int64
        * @description Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
        */
-      balance_nanos: string;
+      balance_nanos?: string | null;
       /** Format: int64 */
       deposit_id: number;
       deposit_root_hex: string;
+      /** @description `credited` or `quarantined`. */
+      disposition: string;
     };
     BridgeStatusResponse: {
       cancelled_withdrawal_count?: number;
@@ -1641,8 +1728,14 @@ export interface components {
       next_withdrawal_id: number;
       /** Format: int64 */
       observed_l1_height: number;
+      quarantine_ledger_size?: number;
       queued_withdrawal_count?: number;
       refunded_withdrawal_count?: number;
+      /**
+       * Format: int64
+       * @description Sum of parked value. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      total_quarantined_nanos?: string;
       withdrawal_count: number;
     };
     BridgeWithdrawalL1EventResponse: {
@@ -2053,6 +2146,13 @@ export interface components {
       /** Format: int64 */
       timestamp_ms: number;
       type: string;
+    };
+    /** @description Public, non-secret state needed to construct a one-shot key operation. */
+    KeyOpStateResponse: {
+      /** Format: int64 */
+      account_id: number;
+      events_digest_hex: string;
+      keys_digest_hex: string;
     };
     /**
      * @description Scope tag for a registered signing key (SYB-60).
@@ -2915,7 +3015,10 @@ export interface components {
        *     documented here so passkey clients can round-trip the registration payload.
        */
       credential_id_b64url?: string | null;
-      /** @description Optional human label for this key, e.g. "agent:pricer" (SYB-60). */
+      /**
+       * @description Optional human label for this key, e.g. "agent:pricer" (SYB-60),
+       *     limited to 128 UTF-8 bytes.
+       */
       label?: string | null;
       /**
        * @description Hex-encoded compressed P256 public key (33 bytes).
@@ -3046,7 +3149,9 @@ export interface components {
     /** @description Signed request to revoke a registered signing key (SYB-60). */
     RevokeKeyRequest: {
       auth_scheme?: components["schemas"]["AuthScheme"];
+      /** @description Hex account event-chain digest the authorization is state-bound to. */
       bound_events_digest_hex: string;
+      /** @description Hex account key-set digest the authorization is state-bound to. */
       bound_keys_digest_hex: string;
       signature_hex?: string | null;
       /**
@@ -3210,12 +3315,17 @@ export interface components {
        *     `webauthn`, `webauthn_registration` must prove possession of the new key.
        */
       auth_scheme?: components["schemas"]["AuthScheme"];
+      /** @description Hex account event-chain digest the authorization is state-bound to. */
+      bound_events_digest_hex: string;
+      /** @description Hex account key-set digest the authorization is state-bound to. */
+      bound_keys_digest_hex: string;
       /** @description Base64url credential id for a WebAuthn new key. */
       credential_id_b64url?: string | null;
-      /** @description Optional human label for the new key, e.g. "agent:pricer". */
+      /**
+       * @description Optional human label for the new key, e.g. "agent:pricer", limited to
+       *     128 UTF-8 bytes.
+       */
       label?: string | null;
-      bound_events_digest_hex: string;
-      bound_keys_digest_hex: string;
       /**
        * @description Hex-encoded compressed P256 public key (33 bytes) of the NEW key.
        * @example 02a1b2c3...
@@ -3258,12 +3368,6 @@ export interface components {
       state_root: string;
       state_slot: string;
       verified: boolean;
-    };
-    KeyOpStateResponse: {
-      /** Format: int64 */
-      account_id: number;
-      events_digest_hex: string;
-      keys_digest_hex: string;
     };
     StateRootResponse: {
       /** @description Current state root. Hex-encoded 32-byte qMDB root. */
@@ -3310,9 +3414,9 @@ export interface components {
     SubmitL1DepositRequest: {
       /**
        * Format: int64
-       * @description Sybil account receiving the credit.
+       * @description Sybil account receiving the credit. Must be absent when `quarantine` is true.
        */
-      account_id: number;
+      account_id?: number | null;
       /**
        * Format: int64
        * @description Token base units accepted by the vault, e.g. USDC's 6-decimal units.
@@ -3330,6 +3434,8 @@ export interface components {
       deposit_id: number;
       /** @description Hex-encoded post-deposit L1 deposit tree root (32 bytes). */
       deposit_root_hex: string;
+      /** @description Dispose an unresolvable raw key into the committed system quarantine ledger. */
+      quarantine?: boolean;
       /** @description Hex-encoded L1 sender address (20 bytes). */
       sender_hex: string;
       /** @description Optional Sybil bridge account key. If omitted, the API derives it for the account. */
@@ -3534,6 +3640,53 @@ export interface components {
           market_id: number;
           /** @enum {string} */
           type: "market_group_extended";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /** Format: int32 */
+          auth_scheme: number;
+          /** Format: int32 */
+          capability_mask: number;
+          public_key_hex: string;
+          /** @enum {string} */
+          type: "key_registered";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /** Format: int32 */
+          auth_scheme: number;
+          /** Format: int32 */
+          capability_mask: number;
+          public_key_hex: string;
+          /** @enum {string} */
+          type: "key_revoked";
+        }
+      | {
+          /**
+           * Format: int64
+           * @description Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
+           */
+          amount_nanos: string;
+          /** Format: int64 */
+          deposit_id: number;
+          deposit_root_hex: string;
+          sybil_account_key_hex: string;
+          /** @enum {string} */
+          type: "deposit_quarantined";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /**
+           * Format: int64
+           * @description Amount moved into the account. Integer nanodollars; 1_000_000_000 = $1.
+           */
+          amount_nanos: string;
+          sybil_account_key_hex: string;
+          /** @enum {string} */
+          type: "quarantine_claimed";
         };
     /** @enum {string} */
     TimeInForce: "GTC" | "IOC" | "GTD";
@@ -3661,32 +3814,6 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-    };
-  };
-  get_keyop_state: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Account ID */
-        id: number;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Current key-operation signing state */
-      200: {
-        headers: { [name: string]: unknown };
-        content: {
-          "application/json": components["schemas"]["KeyOpStateResponse"];
-        };
-      };
-      /** @description Account not found */
-      404: {
-        headers: { [name: string]: unknown };
         content?: never;
       };
     };
@@ -4054,6 +4181,36 @@ export interface operations {
       };
     };
   };
+  get_keyop_state: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current key-operation signing state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["KeyOpStateResponse"];
+        };
+      };
+      /** @description Account not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   list_account_keys: {
     parameters: {
       query?: never;
@@ -4234,7 +4391,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Cannot revoke the last key, or stale state binding */
+      /** @description Cannot revoke the last key, or stale key state */
       409: {
         headers: {
           [name: string]: unknown;
@@ -4423,6 +4580,43 @@ export interface operations {
       };
     };
   };
+  list_account_withdrawals: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Account ID */
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Active withdrawals for this account */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeWithdrawalResponse"][];
+        };
+      };
+      /** @description Missing/invalid bearer token */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Token belongs to a different account */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   get_activity_overview: {
     parameters: {
       query?: never;
@@ -4579,6 +4773,26 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  attestation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Development-only unverified attestation shape */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AttestationResponse"];
+        };
       };
     };
   };

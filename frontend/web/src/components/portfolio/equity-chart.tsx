@@ -7,14 +7,6 @@
  * REDESIGN (drop-in replacement — same props, same tokens, same data hook):
  *   - A *fitted* Y-axis — scaled to the data's own range with ~8% headroom and
  *     rounded "nice" gridlines/labels — not anchored to $0. (Unchanged.)
- *   - A monotone-cubic stroke rather than a raw polyline, so the equity series
- *     reads as a curve instead of a run of sharp corners. Monotone (Fritsch–
- *     Carlson) specifically: the spline passes through every sample and cannot
- *     overshoot between them, so it never invents a peak the data doesn't have.
- *   - Range swaps crossfade. `useEquityCurve` holds the previous range's series
- *     while the new one loads (`placeholderData`); we blur it, then re-key on
- *     the range that actually landed so the incoming curve focuses in — the
- *     same `sybil-fade-swap` motion the market-page activity chart uses.
  *   - A gradient AREA FILL under the line, tinted by the range's net P&L:
  *     mint (`--yes`) when up, coral (`--no`) when down, neutral cyan when flat.
  *     The fill gives the volatile "canyon" marks visible mass so they read as
@@ -52,7 +44,7 @@ const MIN_H = 200;
 const FLAT_EPS = 0.001;
 
 export function EquityChart({ curve, headerRight }: Props) {
-  const { points, drawnRange: range, isLoading, isEmpty, isSwapping } = curve;
+  const { points, range, isLoading, isEmpty } = curve;
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 560, h: 320 });
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -100,9 +92,9 @@ export function EquityChart({ curve, headerRight }: Props) {
   const xFor = (t: number) => PAD_L + ((t - tMin) / tSpan) * innerW;
   const yFor = (v: number) => PAD_T + (1 - (v - yMin) / ySpan) * innerH;
 
-  const lineD = monotoneCubicPath(
-    points.map((p) => ({ x: xFor(p.t), y: yFor(p.value) })),
-  );
+  const lineD = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(p.t).toFixed(2)} ${yFor(p.value).toFixed(2)}`)
+    .join(" ");
   // Close the area down to the plot floor for the gradient fill.
   const areaD =
     points.length >= 2
@@ -168,27 +160,7 @@ export function EquityChart({ curve, headerRight }: Props) {
         {isEmpty ? (
           <Centered>{isLoading ? "loading…" : "no equity history yet"}</Centered>
         ) : (
-          <div
-            // Outer layer carries the blur/dim while the newly-picked range is
-            // in flight; the inner layer re-keys on the range that landed, so
-            // the incoming curve focuses in rather than hard-cutting.
-            style={{
-              position: "absolute",
-              inset: 0,
-              filter: isSwapping ? "blur(5px)" : undefined,
-              opacity: isSwapping ? 0.5 : 1,
-              transition:
-                "filter var(--dur-swap) var(--ease-standard), opacity var(--dur-swap) var(--ease-standard)",
-            }}
-          >
-            <div
-              key={range}
-              style={{
-                position: "absolute",
-                inset: 0,
-                animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
-              }}
-            >
+          <>
             <svg
               viewBox={`0 0 ${W} ${H}`}
               width="100%"
@@ -306,8 +278,7 @@ export function EquityChart({ curve, headerRight }: Props) {
             </svg>
 
             {hovered && <HoverReadout point={hovered} x={xFor(hovered.t)} W={W} boxW={box.w} intraday={intraday} />}
-            </div>
-          </div>
+          </>
         )}
       </div>
     </div>
@@ -395,60 +366,6 @@ function Centered({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-/**
- * Monotone cubic (Fritsch–Carlson) interpolation through `pts`, emitted as an
- * SVG path of cubic Béziers. Softens the polyline's corners while guaranteeing
- * the curve stays inside each segment's own value range — a plain Catmull-Rom
- * would bulge past a local max and show equity the account never had.
- *
- * Operates in screen space; `xFor`/`yFor` are affine, so monotonicity there is
- * monotonicity in the data.
- */
-function monotoneCubicPath(pts: { x: number; y: number }[]): string {
-  const n = pts.length;
-  if (n === 0) return "";
-  const head = `M ${pts[0]!.x.toFixed(2)} ${pts[0]!.y.toFixed(2)}`;
-  if (n === 1) return head;
-  if (n === 2) return `${head} L ${pts[1]!.x.toFixed(2)} ${pts[1]!.y.toFixed(2)}`;
-
-  // Secant slopes between consecutive samples.
-  const dx: number[] = [];
-  const slope: number[] = [];
-  for (let i = 0; i < n - 1; i++) {
-    const h = pts[i + 1]!.x - pts[i]!.x;
-    dx.push(h);
-    slope.push(h === 0 ? 0 : (pts[i + 1]!.y - pts[i]!.y) / h);
-  }
-
-  // Tangents: zero at every local extremum (that's what kills overshoot),
-  // weighted harmonic mean of the neighbouring secants elsewhere.
-  const m: number[] = new Array(n);
-  m[0] = slope[0]!;
-  m[n - 1] = slope[n - 2]!;
-  for (let i = 1; i < n - 1; i++) {
-    const s0 = slope[i - 1]!;
-    const s1 = slope[i]!;
-    if (s0 * s1 <= 0) {
-      m[i] = 0;
-    } else {
-      const w1 = 2 * dx[i]! + dx[i - 1]!;
-      const w2 = dx[i]! + 2 * dx[i - 1]!;
-      m[i] = (w1 + w2) / (w1 / s0 + w2 / s1);
-    }
-  }
-
-  let d = head;
-  for (let i = 0; i < n - 1; i++) {
-    const t = dx[i]! / 3;
-    const c1x = pts[i]!.x + t;
-    const c1y = pts[i]!.y + m[i]! * t;
-    const c2x = pts[i + 1]!.x - t;
-    const c2y = pts[i + 1]!.y - m[i + 1]! * t;
-    d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)} ${c2x.toFixed(2)} ${c2y.toFixed(2)} ${pts[i + 1]!.x.toFixed(2)} ${pts[i + 1]!.y.toFixed(2)}`;
-  }
-  return d;
 }
 
 /** Round a [lo, hi] range out to "nice" bounds and produce evenly spaced ticks

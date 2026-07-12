@@ -3,15 +3,15 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-12
 ---
 
 The REST API is the external interface to the exchange. Built with Axum (a Rust async web framework), it exposes endpoints for account management, market operations, order submission, and block retrieval. An OpenAPI schema is auto-generated for client code generation. The API communicates with the sequencer via message passing through a `SequencerHandle` — no shared mutable state.
 
-The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, first-party [[WebSocket Block Stream|WebSocket stream]] with `?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). Operator/service writes, the state-proof and DA-payload custody surfaces, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts only simulation pause/resume plus diagnostic all-pending/orderbook listings.
+The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, first-party [[WebSocket Block Stream|WebSocket stream]] with `?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
 
 Per-account reads (`/accounts/{id}`, portfolio, fills, equity, events, orders,
-signing-key metadata, read-key metadata, bridge key, and private summary) require
+signing-key metadata, read-key metadata, bridge key, active withdrawals, and private summary) require
 either an active read-scoped bearer owned by `{id}` or the service token. A
 wrong-account read bearer is `403`; missing, invalid, or revoked read credentials
 are `401`. Public market, activity, aggregate-statistics, and leaderboard reads
@@ -23,9 +23,12 @@ before signing key registration/revocation; it contains no key list, balance,
 position, or profile data. Admission rejects a stale state binding with 409.
 
 Public account onboarding uses `POST /v1/accounts` with both
-`initial_balance_nanos` and `initial_key`. Omitting `initial_key` retains the
-deprecated bare-account form for service/dev tooling only; the old unsigned
-`POST /accounts/{id}/keys` bootstrap is likewise service-only.
+`initial_balance_nanos` and `initial_key`. The API sends both through one
+sequencer actor command and one control-plane WAL row, so restart cannot expose
+an acknowledged onboarding account without its initial key. Omitting
+`initial_key` retains the deprecated bare-account form for service/dev tooling
+only; the old unsigned `POST /accounts/{id}/keys` bootstrap is likewise
+service-only.
 
 > [!warning] Public onboarding is not production-safe yet
 > The route currently permits unlimited free accounts and caller-selected demo
@@ -43,6 +46,11 @@ expiry clock. Crossing `expiry_height` emits a refund event, restores the
 account balance exactly once, and retires the leaf in the same committed block.
 `refunded` is exposed as a withdrawal status while the terminal event is
 pending; replays after pruning are accepted as no-ops.
+
+`GET /v1/accounts/{id}/withdrawals` is the owner-scoped current-status view.
+It returns active leaves, including a terminal status during the short interval
+before the next block retires that leaf. Historical block responses preserve
+the immutable creation-time leaf and are not a current withdrawal-status API.
 
 Order quantity fields (`quantity`, `max_fill`, `fill_qty`,
 `remaining_quantity`, `original_quantity`, and position `quantity`) are protocol
@@ -119,6 +127,7 @@ hard in-flight concurrency cap before dispatching store work.
 - Order submissions support GTC, IOC, and GTD time-in-force
 - Stateless API layer — all state in sequencer
 - CORS is permissive only in dev mode; production uses `SYBIL_CORS_ORIGINS` and defaults to same-origin only
+- `GET /v1/attestation` is an unverified shape stub mounted only in dev mode; production returns 404 until real Nitro verification exists
 
 ## Where This Lives
 > `crates/sybil-api/src/app.rs` — router creation, OpenAPI schema
@@ -132,5 +141,6 @@ hard in-flight concurrency cap before dispatching store work.
 - [[Block Data Boundaries]] — API composition vs. canonical protocol data
 - [[P256 Authentication]] — signed order submission
 - [[Actor Mailbox Monitoring]] — sequencer queue-depth metric and alerts
+- [[Attestation]] — dev-only enclave-attestation shape and the real-verification boundary
 - [[Block Lifecycle]] — what happens after an order enters the system
 - [[State Root Schema]] — canonical typed-state key/value commitment

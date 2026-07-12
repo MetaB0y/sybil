@@ -222,6 +222,10 @@ fn exact_owner_routes() -> &'static [RouteMount] {
         },
         RouteMount {
             method: "GET",
+            path: "/v1/accounts/{id}/withdrawals",
+        },
+        RouteMount {
+            method: "GET",
             path: "/v1/accounts/{id}/private-summary",
         },
     ]
@@ -327,6 +331,10 @@ fn exact_service_routes() -> &'static [RouteMount] {
 fn exact_dev_routes() -> &'static [RouteMount] {
     &[
         RouteMount {
+            method: "GET",
+            path: "/v1/attestation",
+        },
+        RouteMount {
             method: "POST",
             path: "/v1/simulation/pause",
         },
@@ -359,13 +367,14 @@ fn temp_event_dir() -> String {
 }
 
 async fn prod_app() -> axum::Router {
-    let (app, _) = test_app_with_config(ApiConfig {
+    let (app, handle) = test_app_with_config(ApiConfig {
         dev_mode: false,
         service_token: TOKEN.to_string(),
         event_snapshot_dir: temp_event_dir(),
         ..ApiConfig::default()
     })
     .await;
+    handle.produce_block().await.unwrap();
     app
 }
 
@@ -737,7 +746,7 @@ async fn account_reads_enforce_owner_or_service_matrix() {
     let (owner_id, owner_token) = create_owner_with_read_key(app.clone(), 21).await;
     let (_, wrong_owner_token) = create_owner_with_read_key(app.clone(), 22).await;
 
-    for suffix in ["", "/portfolio", "/orders"] {
+    for suffix in ["", "/portfolio", "/orders", "/withdrawals"] {
         let uri = format!("/v1/accounts/{owner_id}{suffix}");
 
         let (status, _) = request_json(app.clone(), Method::GET, &uri, None, json!({})).await;
@@ -873,7 +882,18 @@ async fn service_routes_succeed_with_token_in_prod() {
         amount_token_units: 1_000,
         expiry_height: 10,
     };
-    let msg = canonical_bridge_withdrawal_bytes(&signed_withdrawal, 1);
+    let (status, body) =
+        request_json(app.clone(), Method::GET, "/v1/health", None, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let genesis_hash: [u8; 32] = hex::decode(
+        parse_json(&body)["genesis_hash"]
+            .as_str()
+            .expect("prod test app has a genesis hash"),
+    )
+    .unwrap()
+    .try_into()
+    .unwrap();
+    let msg = canonical_bridge_withdrawal_bytes(&signed_withdrawal, 1, genesis_hash);
     let signature: Signature = withdrawal_key.sign(&msg);
     let (status, body) = request_json(
         app.clone(),
@@ -1036,6 +1056,7 @@ async fn service_routes_succeed_with_token_in_prod() {
 async fn dev_routes_are_not_mounted_in_prod() {
     let app = prod_app().await;
     for (method, uri) in [
+        (Method::GET, "/v1/attestation"),
         (Method::POST, "/v1/simulation/pause"),
         (Method::POST, "/v1/simulation/resume"),
         (Method::GET, "/v1/orders/pending"),

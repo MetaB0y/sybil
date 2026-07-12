@@ -84,9 +84,16 @@ build:
 openvm-install:
     cargo +1.91 install --locked --git https://github.com/openvm-org/openvm.git --tag v2.0.0 cargo-openvm
 
-# Check the OpenVM guest crate with the normal host compiler
+# Host-check the OpenVM guest from a clean checkout. The generated init include
+# is only for host compilation; the real guest target remains openvm-guest-build.
 openvm-guest-check:
-    cargo check --manifest-path zk/openvm-guest/Cargo.toml
+    ./scripts/generate-openvm-init.py zk/openvm-guest
+    cargo check --locked --all-targets --manifest-path zk/openvm-guest/Cargo.toml
+
+# Host-check the independent escape guest from a clean checkout.
+openvm-escape-guest-check:
+    ./scripts/generate-openvm-init.py zk/openvm-escape-guest
+    cargo check --locked --all-targets --manifest-path zk/openvm-escape-guest/Cargo.toml
 
 # Build and transpile the Sybil OpenVM guest
 openvm-guest-build:
@@ -361,8 +368,14 @@ check-consensus: golden-check
     ./scripts/check-validity-boundary.py --check
     ./scripts/update-protocol-pins.py --check
 
+# Backup/restore manifest compatibility and shell-entrypoint syntax.
+store-tools-check:
+    python3 scripts/test-store-manifest.py
+    python3 -m py_compile scripts/store-manifest.py scripts/test-store-manifest.py
+    bash -n scripts/store-backup.sh scripts/store-restore-drill.sh
+
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
-check-all: check-fast test standalone-check check-consensus docs-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
+check-all: check-fast test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check monitoring-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any
@@ -523,6 +536,27 @@ smoke:
 compose-smoke:
     ./scripts/compose-profile-smoke.sh
 
+# Validate the monitoring scrape config, alert syntax, and focused rule semantics.
+# Use a local promtool when installed; otherwise run the pinned tool image locally.
+monitoring-check: compose-smoke
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash scripts/test-smoke-common.sh
+    bash scripts/test-post-deploy-smoke.sh
+    if command -v promtool >/dev/null 2>&1; then
+        promtool check config deploy/prometheus.yml
+        promtool check rules deploy/vmalert/rules.yml
+        promtool test rules deploy/vmalert/tests/arena-liveness_test.yml
+    elif command -v docker >/dev/null 2>&1; then
+        image="prom/prometheus:v2.52.0"
+        docker run --rm --entrypoint promtool -v "$PWD/deploy:/work:ro" "$image" check config /work/prometheus.yml
+        docker run --rm --entrypoint promtool -v "$PWD/deploy/vmalert:/work:ro" "$image" check rules /work/rules.yml
+        docker run --rm --entrypoint promtool -v "$PWD/deploy/vmalert:/work:ro" "$image" test rules /work/tests/arena-liveness_test.yml
+    else
+        echo "monitoring-check requires promtool or Docker" >&2
+        exit 2
+    fi
+
 # Isolated Docker money-path E2E (SYB-243). Builds sybil-api, runs the shared
 # deterministic signed seeder, asserts exact fills/prices/balances, then down -v.
 itest-compose:
@@ -566,23 +600,23 @@ SERVER := "root@172.104.31.54"
 COMPOSE_PROD := "docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 COMPOSE_TELEGRAM := "docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.telegram.yml"
 
-# Post-deploy verification gate (SYB-248). `deploy-verify` runs the fail-closed
-# smoke gate against the LIVE stack as the FINAL step of every deploy recipe.
+# Post-deploy verification gates (SYB-248) run against the LIVE stack as the
+# final step of application deploy recipes. API/all-stack promotions run the
+# full deterministic market/fill seed. Scoped web/Arena promotions run every
+# other assertion but do not create another persistent fixture market.
 #
-# TODO(SYB-248): flip SMOKE_REQUIRE_SIGNER to "1" once the `smoke_sign` signing
-# helper ships in the deploy image AND the live /v1/orders/signed path is
-# confirmed green. Requiring the signer today would red-fail every deploy while
-# the signer is not guaranteed present in the image, so the signed-order check
-# stays advisory (SKIP, not FAIL) for now. Every other core flow is already a
-# hard, fail-closed assertion regardless of this knob.
-SMOKE_REQUIRE_SIGNER := "0"
+# The deploy is orchestrated from this source checkout, where post-deploy smoke
+# builds (or reuses) the canonical `smoke_sign` helper locally. Signed order and
+# cancel are core private-devnet flows, so every deploy requires the signer and
+# fails closed if it is unavailable or either lifecycle check regresses.
 
 # Sync compose configs + deploy/ directory to server
 deploy-sync:
-    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib && touch /opt/sybil/arena.env'
+    ssh {{SERVER}} 'mkdir -p /opt/sybil/scripts/lib /opt/sybil/crates/sybil-polymarket && touch /opt/sybil/arena.env'
     scp docker-compose.yml docker-compose.prod.yml docker-compose.telegram.yml {{SERVER}}:/opt/sybil/
     scp -r deploy {{SERVER}}:/opt/sybil/
-    scp scripts/ops-smoke.sh scripts/store-backup.sh scripts/store-restore-drill.sh scripts/synthetic-probe.sh {{SERVER}}:/opt/sybil/scripts/
+    scp crates/sybil-polymarket/curated_markets.json crates/sybil-polymarket/native_markets.json {{SERVER}}:/opt/sybil/crates/sybil-polymarket/
+    scp scripts/ops-smoke.sh scripts/store-backup.sh scripts/store-restore-drill.sh scripts/store-manifest.py scripts/synthetic-probe.sh {{SERVER}}:/opt/sybil/scripts/
     scp scripts/lib/smoke-common.sh {{SERVER}}:/opt/sybil/scripts/lib/
 
 deploy-prod-env-check:
@@ -612,7 +646,7 @@ deploy-reset-state confirm: deploy-prod-env-check
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.
-deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify
+deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && deploy-verify-scoped
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-arena
     docker save sybil-arena:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
@@ -631,7 +665,7 @@ deploy-telegram-alerts: deploy-sync deploy-prod-env-check
 #   NEXT_PUBLIC_API_BASE=https://api.sybil.exchange \
 #   NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange \
 #   NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange just deploy-web
-deploy-web: deploy-sync deploy-prod-env-check && deploy-verify
+deploy-web: deploy-sync deploy-prod-env-check && deploy-verify-web
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
     docker save sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-web caddy'
@@ -651,10 +685,22 @@ deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && dep
 # deterministic fills-after-seed, service-token matrix), which fails the deploy.
 # The service token is read from /opt/sybil/.env on the server; per-container
 # health is probed over SSH (SYBIL_SMOKE_DOCKER_SSH={{SERVER}}). Runs
-# automatically as the final step of deploy-api / deploy-web / deploy-arena /
-# deploy-all; can also be invoked directly.
+# automatically as the final step of deploy-api / deploy-all; can also be
+# invoked directly.
 deploy-verify:
-    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} SYBIL_SMOKE_REQUIRE_SIGNER={{SMOKE_REQUIRE_SIGNER}} scripts/post-deploy-smoke.sh --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+
+# Scoped verifier for Arena image promotions. The API/matcher did not change,
+# so avoid another durable SYB-247 market while still requiring live external
+# mirror/reference readiness because Arena consumes it.
+deploy-verify-scoped:
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+
+# Web-only promotion keeps the signed lifecycle/full-stack health assertions,
+# but does not couple an otherwise valid frontend image to a transient external
+# Polymarket outage. It skips no local application readiness check.
+deploy-verify-web:
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --skip-mirror-readiness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Restart-resilience gate (SYB-267): restarts the live sybil-api container and
 # fails on OOM-kill / boot-loop / unhealthy-after-timeout. OPT-IN — ~20s API

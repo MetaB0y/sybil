@@ -189,6 +189,13 @@ impl Actor for SequencerActor {
             SequencerMsg::CreateAccount(initial_balance, reply) => {
                 let _ = reply.send(state.handle_create_account(initial_balance).await);
             }
+            SequencerMsg::CreateAccountWithInitialKey(initial_balance, pubkey, meta, reply) => {
+                let _ = reply.send(
+                    state
+                        .handle_create_account_with_initial_key(initial_balance, pubkey, meta)
+                        .await,
+                );
+            }
             SequencerMsg::FundAccount(account_id, amount, reply) => {
                 let _ = reply.send(state.handle_fund_account(account_id, amount).await);
             }

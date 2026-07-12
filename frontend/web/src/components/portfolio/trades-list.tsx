@@ -37,18 +37,14 @@ import { MarketThumb } from "@/components/market-thumb";
 import { Pager, usePaged, PORTFOLIO_PAGE_SIZE } from "@/components/event-list-pager";
 import { Glossary } from "@/components/glossary";
 import { fillRowCount, fillsToCsv, downloadCsv } from "@/lib/account/fills-csv";
-import {
-  formatShareUnits,
-  notionalNanos,
-  priceNanosFromNotional,
-} from "@/lib/account/quantity";
+import { notionalNanos, priceNanosFromNotional } from "@/lib/account/quantity";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
 import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import type { components } from "@/lib/api/schema";
 import { FilterDropdown } from "./filter-dropdown";
 import { PortfolioToolbar } from "./portfolio-toolbar";
 import { SearchField } from "./search-field";
-import { SidePill, valueChipStyle } from "./side-pill";
+import { SidePill } from "./side-pill";
 
 type Market = components["schemas"]["MarketResponse"];
 
@@ -201,8 +197,6 @@ interface Props {
   tabs: React.ReactNode;
   events: HistoryEvent[];
   marketsById: Map<number, Market>;
-  /** market_id → natural question title (see `portfolio/page.tsx`). */
-  titleByMarket: Map<number, string>;
 }
 
 /**
@@ -229,6 +223,7 @@ function ExportCsvButton({
       onClick={onExport}
       disabled={count === 0}
       aria-label="Export fills as CSV"
+      title={count === 0 ? "No fills to export" : `Export ${count} fills as CSV`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -251,7 +246,7 @@ function ExportCsvButton({
   );
 }
 
-export function TradesList({ tabs, events, marketsById, titleByMarket }: Props) {
+export function TradesList({ tabs, events, marketsById }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [query, setQuery] = useState("");
   const [marketId, setMarketId] = useState<number | "all">("all");
@@ -335,10 +330,7 @@ export function TradesList({ tabs, events, marketsById, titleByMarket }: Props) 
         id: key,
         marketId: agg.marketId,
         market: marketsById.get(agg.marketId),
-        label:
-          titleByMarket.get(agg.marketId) ??
-          marketsById.get(agg.marketId)?.name ??
-          `#${agg.marketId}`,
+        label: marketsById.get(agg.marketId)?.name ?? `#${agg.marketId}`,
         filledAtMs: agg.lastAtMs,
         qty: totalQty,
         priceNanos,
@@ -359,7 +351,7 @@ export function TradesList({ tabs, events, marketsById, titleByMarket }: Props) 
     }
     const factor = sort.dir === "asc" ? 1 : -1;
     return decorated.sort((a, b) => compareBy(a, b, sort.key) * factor);
-  }, [events, marketsById, titleByMarket, sort]);
+  }, [events, marketsById, sort]);
 
   // Markets present in the trades, for the market filter dropdown.
   const marketOptions = useMemo(() => {
@@ -502,6 +494,7 @@ function TradeRow({ row }: { row: TradeRowData }) {
               whiteSpace: "nowrap",
               minWidth: 0,
             }}
+            title={label}
           >
             {label}
           </span>
@@ -541,7 +534,7 @@ function TradeRow({ row }: { row: TradeRowData }) {
           {isBuy ? "BUY" : isSell ? "SELL" : "—"}
         </span>
         {row.outcome ? <SidePill outcome={row.outcome} /> : <Muted>—</Muted>}
-        <RightCell mono>{row.qty == null ? "—" : formatShareUnits(row.qty)}</RightCell>
+        <RightCell mono>{row.qty ?? "—"}</RightCell>
         <RightCell mono>
           <PriceCell
             settledNanos={row.priceNanos}
@@ -621,7 +614,7 @@ function FillSubRow({
       <span />
       <span />
       <span />
-      <RightCell mono>{qty == null ? "—" : formatShareUnits(qty)}</RightCell>
+      <RightCell mono>{qty ?? "—"}</RightCell>
       <RightCell mono>
         <PriceCell settledNanos={price} requestedNanos={requestedPriceNanos} />
       </RightCell>
@@ -651,12 +644,8 @@ function FillSubRow({
 function fmtFillTime(ms: number): string {
   const d = new Date(ms);
   const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return `${time} ${date}`;
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return `${date} ${time}`;
 }
 
 /**
@@ -685,10 +674,10 @@ function PriceCell({
 }
 
 /**
- * Welfare cell — how much better than your limit the order filled, as a small
- * tinted chip that matches the side pill (green surplus / red shortfall / muted
- * exact-fill), with the value in bold as the one intended difference from the
- * side chip. The signed $ answers "how much better".
+ * Welfare cell — highlights how much better than your limit the order filled.
+ * A positive surplus reads as a green pill, a negative one as a red pill; an
+ * exact-limit fill or unknown welfare stays muted and flat. The signed $ amount
+ * answers "how much better".
  */
 function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
   if (welfareNanos == null) {
@@ -698,10 +687,10 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
   const negative = welfareNanos < 0n;
   const tone = positive ? "var(--yes)" : negative ? "var(--no)" : "var(--fg-3)";
   const bg = positive
-    ? "color-mix(in srgb, var(--yes) 14%, transparent)"
+    ? "color-mix(in srgb, var(--yes) 16%, transparent)"
     : negative
       ? "color-mix(in srgb, var(--no) 14%, transparent)"
-      : "var(--fill-subtle)";
+      : "transparent";
   return (
     <span
       title={
@@ -711,8 +700,31 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
             ? "Filled at a worse edge than your limit"
             : "Filled exactly at your limit"
       }
-      style={valueChipStyle({ color: tone, bg, bold: true })}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        gap: 3,
+        padding: positive || negative ? "1px 6px" : 0,
+        borderRadius: 3,
+        background: bg,
+        color: tone,
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        fontWeight: positive || negative ? 600 : 400,
+        whiteSpace: "nowrap",
+      }}
     >
+      {positive && (
+        <span aria-hidden style={{ fontSize: 8, lineHeight: 1 }}>
+          ▲
+        </span>
+      )}
+      {negative && (
+        <span aria-hidden style={{ fontSize: 8, lineHeight: 1 }}>
+          ▼
+        </span>
+      )}
       {formatDollars(welfareNanos, { decimals: 2, sign: true })}
     </span>
   );
@@ -738,28 +750,31 @@ function PnlCell({ pnlNanos }: { pnlNanos: bigint | null }) {
   );
 }
 
-/** Fill time on one line — wall clock, then a faded short date. Same shape as
- *  the market-detail closed-orders stamp. Full timestamp on hover. */
+/** Fill time — short date over wall-clock, like the history feed's stamps. */
 function FilledTime({ ms }: { ms: number }) {
   const d = new Date(ms);
   const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return (
     <span
-      title={d.toLocaleString()}
       style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "flex-end",
+        gap: 1,
         fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        color: "var(--fg-2)",
-        whiteSpace: "nowrap",
       }}
     >
-      {time}
-      <span style={{ color: "var(--fg-4)" }}>{` ${date}`}</span>
+      <span style={{ fontSize: 11, color: "var(--fg-2)" }}>{date}</span>
+      <span
+        style={{
+          fontSize: 9.5,
+          color: "var(--fg-4)",
+          letterSpacing: "var(--track-wide)",
+        }}
+      >
+        {time}
+      </span>
     </span>
   );
 }
@@ -778,6 +793,7 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(col.key)}
+      title={`Sort by ${col.label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -820,9 +836,8 @@ function SortHeader({
 function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
-    // Qty is 62px because it now renders shares ("150.25"), not raw units.
     gridTemplateColumns:
-      "28px minmax(0, 1.3fr) 56px 48px 62px 74px 94px 82px 70px 96px",
+      "28px minmax(0, 1.3fr) 56px 48px 46px 74px 94px 82px 70px 96px",
     gap: 14,
     alignItems: "center",
     padding: "10px 14px",

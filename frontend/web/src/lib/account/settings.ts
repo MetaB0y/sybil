@@ -236,7 +236,8 @@ async function attachSignerAuth<T extends Record<string, unknown>>(
 export interface RevokeSigningKeyArgs extends SettingsSignerArgs {
   /** Hex-encoded compressed P256 pubkey of the key to revoke. */
   targetPubkeyHex: string;
-  targetAuthScheme?: AccountAuthScheme;
+  /** Auth scheme committed in the target key record. */
+  targetAuthScheme: AccountAuthScheme;
 }
 
 /**
@@ -252,7 +253,7 @@ export async function revokeSigningKey(
   const canonical = canonicalKeyRevocationBytes(
     BigInt(args.accountId),
     fromHex(args.targetPubkeyHex),
-    args.targetAuthScheme ?? "raw_p256",
+    args.targetAuthScheme,
     genesisHash,
     fromHex(binding.keysDigestHex),
     fromHex(binding.eventsDigestHex),

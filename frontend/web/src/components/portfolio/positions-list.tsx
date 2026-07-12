@@ -33,9 +33,6 @@ interface Props {
   positions: Position[];
   fills: AccountFill[];
   marketsById: Map<number, Market>;
-  /** market_id → natural question title (see `portfolio/page.tsx`). Falls back
-   *  to `market.name`, which for grouped markets is "{event}: {outcome}". */
-  titleByMarket: Map<number, string>;
 }
 
 /** A position with every sortable value derived once. */
@@ -106,13 +103,7 @@ function compareBy(a: PositionRowData, b: PositionRowData, key: SortKey): number
   }
 }
 
-export function PositionsList({
-  tabs,
-  positions,
-  fills,
-  marketsById,
-  titleByMarket,
-}: Props) {
+export function PositionsList({ tabs, positions, fills, marketsById }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [query, setQuery] = useState("");
 
@@ -131,7 +122,7 @@ export function PositionsList({
       return {
         position: p,
         market,
-        label: titleByMarket.get(p.market_id) ?? market?.name ?? `#${p.market_id}`,
+        label: market?.name ?? `#${p.market_id}`,
         outcome: p.outcome,
         shares: unitsToShares(p.quantity),
         avgNanos,
@@ -145,7 +136,7 @@ export function PositionsList({
     if (!sort) return decorated;
     const factor = sort.dir === "asc" ? 1 : -1;
     return [...decorated].sort((a, b) => compareBy(a, b, sort.key) * factor);
-  }, [positions, fills, marketsById, titleByMarket, sort]);
+  }, [positions, fills, marketsById, sort]);
 
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -211,8 +202,7 @@ export function PositionsList({
 }
 
 function PositionRow({ row }: { row: PositionRowData }) {
-  const { position, market, label, markNanos, avgNanos, valueNanos, pnlNanos, pnlPct } =
-    row;
+  const { position, market, markNanos, avgNanos, valueNanos, pnlNanos, pnlPct } = row;
 
   return (
     <Link
@@ -227,7 +217,7 @@ function PositionRow({ row }: { row: PositionRowData }) {
     >
       <MarketThumb
         marketId={position.market_id}
-        name={label}
+        name={market?.name ?? `#${position.market_id}`}
         imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
         fallbackIconUrl={market?.market_icon_url ?? market?.event_icon_url ?? null}
         size={28}
@@ -241,8 +231,9 @@ function PositionRow({ row }: { row: PositionRowData }) {
           fontFamily: "var(--font-sans)",
           fontSize: 13,
         }}
+        title={market?.name ?? `#${position.market_id}`}
       >
-        {label}
+        {market?.name ?? `#${position.market_id}`}
       </span>
       <SidePill outcome={position.outcome} />
       <RightCell mono>{formatShareUnits(position.quantity)}</RightCell>
@@ -253,17 +244,13 @@ function PositionRow({ row }: { row: PositionRowData }) {
       </span>
       <RightCell mono>{formatDollars(valueNanos, { decimals: 2 })}</RightCell>
       <RightCell>
-        {/* Amount and percent on ONE line: the percent is a restatement of the
-            amount, not a second fact, so it reads as a suffix rather than a
-            stacked value. Keeps every row a single text line tall. */}
         <span
           style={{
             display: "inline-flex",
-            alignItems: "baseline",
-            justifyContent: "flex-end",
-            gap: 5,
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 1,
             fontFamily: "var(--font-mono)",
-            whiteSpace: "nowrap",
             color:
               pnlNanos == null
                 ? "var(--fg-3)"
@@ -277,11 +264,11 @@ function PositionRow({ row }: { row: PositionRowData }) {
               ? "—"
               : formatDollars(pnlNanos, { decimals: 2, sign: true })}
           </span>
-          {pnlPct != null && (
-            <span style={{ fontSize: 10, opacity: 0.75 }}>
-              {`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`}
-            </span>
-          )}
+          <span style={{ fontSize: 10 }}>
+            {pnlPct == null
+              ? ""
+              : `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`}
+          </span>
         </span>
       </RightCell>
       <RightCell mono>{formatResolves(market)}</RightCell>
@@ -307,6 +294,7 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(col)}
+      title={`Sort by ${label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -333,9 +321,8 @@ function SortHeader({
 function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
-    // P&L is 116px because its amount and percent now share one line.
     gridTemplateColumns:
-      "32px minmax(0, 1.4fr) 50px 70px 60px 60px 88px 80px 116px 110px",
+      "32px minmax(0, 1.4fr) 50px 70px 60px 60px 96px 80px 90px 110px",
     gap: 10,
     alignItems: "center",
     padding: "10px 14px",

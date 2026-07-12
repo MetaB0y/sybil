@@ -23,15 +23,8 @@ import {
   type OrderSide,
   type SubmitTimeInForce,
 } from "@/lib/account/orders";
-import {
-  completeSetReason,
-  findCompleteSetBlockers,
-} from "@/lib/account/complete-set";
 import { humanizeOrderError } from "@/lib/account/order-errors";
-import {
-  useAccountOrders,
-  type AccountOrder,
-} from "@/lib/account/use-account-orders";
+import type { AccountOrder } from "@/lib/account/use-account-orders";
 import {
   formatShareUnits,
   notionalNanosCeil,
@@ -44,17 +37,8 @@ import {
 } from "@/lib/account/use-account";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
 import { usePortfolio } from "@/lib/account/use-portfolio";
-import {
-  formatAge,
-  formatBatchSeconds,
-  formatDollars,
-} from "@/lib/format/nanos";
-import { BLOCK_INTERVAL_MS } from "@/lib/constants";
-import {
-  useEventGroup,
-  type EventOutcome,
-} from "@/lib/market-detail/use-event-group";
-import { useGroupMarkets } from "@/lib/markets/use-market-groups";
+import { formatBatchSeconds, formatDollars } from "@/lib/format/nanos";
+import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import { useBatchCountdown } from "./use-batch-countdown";
 
 type Direction = "buy" | "sell";
@@ -74,26 +58,6 @@ function orderSideFor(dir: Direction, side: OutcomeSide): OrderSide {
   return side === "YES" ? "SellYes" : "SellNo";
 }
 
-/** Share-units of THIS outcome+market locked by the account's resting SELL
- *  orders (a sell reserves position, not cash — the mirror of the buy-side
- *  `reservedNanos`). Side strings arrive as "SellYes"/"SellNo"; match loosely
- *  the way `event-open-orders` does. */
-function sumSellShareReservations(
-  orders: AccountOrder[] | undefined,
-  marketId: number,
-  side: OutcomeSide,
-): bigint {
-  const want = side.toLowerCase();
-  let units = 0n;
-  for (const o of orders ?? []) {
-    if (o.market_id !== marketId) continue;
-    const s = o.side.toLowerCase();
-    if (!s.includes("sell") || !s.includes(want)) continue;
-    units += BigInt(o.remaining_quantity);
-  }
-  return units;
-}
-
 export function BuyBox({
   outcome,
   requireConfirmation = false,
@@ -108,14 +72,9 @@ export function BuyBox({
   const { secondsLeftPrecise, latestHeight } = useBatchCountdown();
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const portfolio = usePortfolio(session?.accountId ?? null);
-  const { availableNanos, reservedNanos } = useAvailableBalance(
+  const { availableNanos, isPending: balancePending } = useAvailableBalance(
     session?.accountId ?? null,
   );
-  // Complete-set preflight inputs. Group membership is NegRisk-only, so it must
-  // come from /v1/markets/groups — an event's siblings are a superset.
-  const { data: openOrders } = useAccountOrders(session?.accountId ?? null);
-  const groupMarkets = useGroupMarkets(outcome.marketId);
-  const { group } = useEventGroup(outcome.marketId);
 
   // A never-traded market has no price yet (absent from /v1/markets/prices).
   // We still need a numeric seed for the limit slider, but we must NOT present
@@ -130,18 +89,8 @@ export function BuyBox({
   const [amount, setAmount] = useState("25");
   const [shares, setShares] = useState("100");
   const [tif, setTif] = useState<Tif>("GTC");
-  // GTD picker: how many batches ahead the order stays eligible. `gtdBatches`
-  // is the clamped numeric source of truth the submit path reads; `gtdText` is
-  // the editable text buffer so the user can type freely (or clear the field)
-  // without the value snapping mid-edit. `setGtd` keeps the two in sync + clamps.
-  const [gtdBatches, setGtdBatches] = useState(10);
-  const [gtdText, setGtdText] = useState("10");
-  const GTD_MAX = 60;
-  const setGtd = (n: number) => {
-    const c = Math.max(1, Math.min(GTD_MAX, Math.round(n)));
-    setGtdBatches(c);
-    setGtdText(String(c));
-  };
+  // GTD block-height picker: how many batches ahead the order stays eligible.
+  const [gtdBatches, setGtdBatches] = useState(5);
 
   const indicativeCents = outcomeSide === "YES" ? yesCents : noCents;
   const [limit, setLimit] = useState<number>(indicativeCents);
@@ -197,21 +146,20 @@ export function BuyBox({
     Number(notionalNanosCeil(limitPriceNanosPreview, qtyUnits)) / 1e9;
   const payoutIfWin = qtyShares; // qty × $1
 
+  // Live clearing ESTIMATE from the side's indicative price. A batch auction
+  // gives no firm quote, so this is only "what the next batch would fill near
+  // if it clears at today's indicative" — surfaced as an estimate, never a quote.
+  const estClearingCents = Math.max(
+    1,
+    Math.min(99, Math.round(indicativeCents)),
+  );
+  const estFillDollars = qtyShares * (estClearingCents / 100);
+
   // Cash available to BUY = balance − cash reserved by resting buy orders.
   // (Sells are gated by held shares below, not cash.) Matches the engine so a
   // buy MAX / headroom never proposes more than will be accepted.
   const availableDollars =
     availableNanos == null ? null : Number(availableNanos) / 1e9;
-
-  // "Order in" locked-in-orders figures (mirrors the Lite rail's "$X in
-  // orders"): cash reserved by resting BUY orders (account-wide, engine-
-  // authoritative), and shares of THIS outcome reserved by resting SELL orders.
-  const cashLockedNanos = reservedNanos ?? 0n;
-  const sellLockedUnits = sumSellShareReservations(
-    openOrders,
-    outcome.marketId,
-    outcomeSide,
-  );
 
   // Shares of THIS outcome+side the user currently holds — what they can sell.
   // Positions carry the outcome as "YES"/"NO" (accounts route), matching
@@ -229,8 +177,14 @@ export function BuyBox({
   const quickChips: { label: string; disabled?: boolean; apply: () => void }[] =
     unit === "usd"
       ? [
-          { label: "+10", apply: () => setAmount(String((parseFloat(amount) || 0) + 10)) },
-          { label: "+50", apply: () => setAmount(String((parseFloat(amount) || 0) + 50)) },
+          {
+            label: "+10",
+            apply: () => setAmount(String((parseFloat(amount) || 0) + 10)),
+          },
+          {
+            label: "+50",
+            apply: () => setAmount(String((parseFloat(amount) || 0) + 50)),
+          },
           dir === "sell"
             ? {
                 label: "MAX",
@@ -247,8 +201,14 @@ export function BuyBox({
               },
         ]
       : [
-          { label: "+10", apply: () => setShares(String((parseFloat(shares) || 0) + 10)) },
-          { label: "+100", apply: () => setShares(String((parseFloat(shares) || 0) + 100)) },
+          {
+            label: "+10",
+            apply: () => setShares(String((parseFloat(shares) || 0) + 10)),
+          },
+          {
+            label: "+100",
+            apply: () => setShares(String((parseFloat(shares) || 0) + 100)),
+          },
           dir === "sell"
             ? {
                 label: "MAX",
@@ -261,7 +221,9 @@ export function BuyBox({
                 apply: () => {
                   if (availableDollars != null)
                     setShares(
-                      formatShareUnits(sharesToUnits(availableDollars / limitDec)),
+                      formatShareUnits(
+                        sharesToUnits(availableDollars / limitDec),
+                      ),
                     );
                 },
               },
@@ -290,41 +252,32 @@ export function BuyBox({
   // which would otherwise reject every sell).
   const positionsLoaded = portfolio.data != null;
   const insufficientSell =
-    connected && dir === "sell" && positionsLoaded && qtyUnits > BigInt(heldUnits);
-
-  // NegRisk self-trade prevention: in a market group, a resting buy can make
-  // this order complete a full outcome set, which the engine rejects outright
-  // (CompleteSetFormation). Catch it before signing and name the order in the
-  // way. Sells never complete a set, so the helper no-ops for them.
-  const orderSide = orderSideFor(dir, outcomeSide);
-  const blockers = connected
-    ? findCompleteSetBlockers({
-        groupMarkets,
-        restingOrders: openOrders ?? [],
-        marketId: outcome.marketId,
-        side: orderSide,
-      })
-    : null;
-  const completeSet = blockers != null && blockers.length > 0;
-  const completeSetReasonText = completeSet
-    ? completeSetReason(
-        blockers,
-        orderSide,
-        outcome.marketId,
-        (m) => group?.outcomes.find((o) => o.marketId === m)?.shortLabel ?? null,
-        "order",
-      )
-    : null;
-
-  const ctaOff =
-    submitting || insufficientBuy || insufficientSell || completeSet;
+    connected &&
+    dir === "sell" &&
+    positionsLoaded &&
+    qtyUnits > BigInt(heldUnits);
+  const ctaState = tradeCtaState({
+    connected,
+    submitting,
+    direction: dir,
+    balanceKnown: availableNanos != null,
+    balancePending,
+    positionsKnown: positionsLoaded,
+    positionsPending: portfolio.isPending,
+    insufficientBuy,
+    insufficientSell,
+  });
+  const ctaOff = ctaState !== "connect" && ctaState !== "ready";
 
   const ctaLabel = (() => {
-    if (!connected) return "Connect to trade";
-    if (submitting) return "Signing…";
-    if (insufficientBuy) return "Not enough funds";
-    if (insufficientSell) return "Not enough shares";
-    if (completeSet) return "Cancel your open order first";
+    if (ctaState === "connect") return "Connect to trade";
+    if (ctaState === "signing") return "Signing…";
+    if (ctaState === "waiting_balance") return "Loading balance…";
+    if (ctaState === "balance_unavailable") return "Balance unavailable";
+    if (ctaState === "waiting_positions") return "Loading positions…";
+    if (ctaState === "positions_unavailable") return "Positions unavailable";
+    if (ctaState === "insufficient_buy") return "Not enough funds";
+    if (ctaState === "insufficient_sell") return "Not enough shares";
     const sideWord = requireConfirmation
       ? confirming
         ? dir === "buy"
@@ -347,6 +300,11 @@ export function BuyBox({
       return;
     }
     if (!session) return;
+    // Never start a passkey ceremony against unknown private account state.
+    // Query errors recover on the next block/poll; until then the disabled CTA
+    // above truthfully reports that balance/positions are unavailable.
+    if (dir === "buy" && availableNanos == null) return;
+    if (dir === "sell" && !positionsLoaded) return;
     setSubmitError(null);
     setAccepted(null);
 
@@ -462,6 +420,8 @@ export function BuyBox({
 
       {/* Buy/Sell toggle */}
       <div
+        role="group"
+        aria-label="Order direction"
         style={{
           display: "flex",
           background: "var(--bg-2)",
@@ -477,6 +437,7 @@ export function BuyBox({
             <button
               key={s}
               type="button"
+              aria-pressed={active}
               onClick={() => setDir(s)}
               disabled={disabledInputs}
               style={{
@@ -521,6 +482,7 @@ export function BuyBox({
               whiteSpace: "nowrap",
               minWidth: 0,
             }}
+            title={outcome.label}
           >
             {outcome.shortLabel}
           </span>
@@ -537,6 +499,8 @@ export function BuyBox({
           </span>
         </div>
         <div
+          role="group"
+          aria-label="Outcome side"
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
@@ -551,6 +515,7 @@ export function BuyBox({
               <button
                 key={s}
                 type="button"
+                aria-pressed={active}
                 onClick={() => setOutcomeSide(s)}
                 disabled={disabledInputs}
                 style={{
@@ -608,38 +573,27 @@ export function BuyBox({
               color: "var(--fg-4)",
             }}
           >
-            {dir === "sell" ? (
-              <>
-                {`balance ${formatShareUnits(heldUnits)} sh`}
-                {sellLockedUnits > 0n && (
-                  <span style={{ opacity: 0.7 }}>
-                    {` · ${formatShareUnits(sellLockedUnits)} sh in orders`}
-                  </span>
-                )}
-              </>
-            ) : availableDollars == null ? (
-              ""
-            ) : (
-              <>
-                {unit === "usd"
+            {dir === "sell"
+              ? `balance ${formatShareUnits(heldUnits)} sh`
+              : availableDollars == null
+                ? ""
+                : unit === "usd"
                   ? `available ${formatDollars(BigInt(Math.floor(availableDollars * 1e9)), { decimals: 2 })}`
                   : `max ${(availableDollars / limitDec).toFixed(0)} sh`}
-                {cashLockedNanos > 0n && (
-                  <span style={{ opacity: 0.7 }}>
-                    {` · ${formatDollars(cashLockedNanos, { decimals: 2 })} in orders`}
-                  </span>
-                )}
-              </>
-            )}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+        <div
+          role="group"
+          aria-label="Order amount unit"
+          style={{ display: "flex", gap: 4, marginBottom: 6 }}
+        >
           {(["usd", "shares"] as Unit[]).map((u) => {
             const active = unit === u;
             return (
               <button
                 key={u}
                 type="button"
+                aria-pressed={active}
                 onClick={() => setUnit(u)}
                 disabled={disabledInputs}
                 style={{
@@ -682,6 +636,13 @@ export function BuyBox({
             {unit === "usd" ? "$" : "#"}
           </span>
           <input
+            type="text"
+            inputMode="decimal"
+            aria-label={
+              unit === "usd"
+                ? "Order amount in dollars"
+                : "Order quantity in shares"
+            }
             value={unit === "usd" ? amount : shares}
             disabled={disabledInputs}
             onChange={(e) =>
@@ -753,8 +714,7 @@ export function BuyBox({
               border: 0,
               minHeight: 40,
               padding: "0 var(--space-1)",
-              cursor:
-                disabledInputs || !hasPrice ? "not-allowed" : "pointer",
+              cursor: disabledInputs || !hasPrice ? "not-allowed" : "pointer",
               color: !hasPrice
                 ? "var(--fg-4)"
                 : limit === indicativeCents
@@ -766,7 +726,9 @@ export function BuyBox({
               textUnderlineOffset: 2,
             }}
           >
-            {hasPrice ? `set indicative ${indicativeCents}¢` : "no indicative yet"}
+            {hasPrice
+              ? `set indicative ${indicativeCents}¢`
+              : "no indicative yet"}
           </button>
         </div>
         <div
@@ -781,6 +743,9 @@ export function BuyBox({
           }}
         >
           <input
+            type="text"
+            inputMode="decimal"
+            aria-label="Limit price in cents"
             value={limitText}
             disabled={disabledInputs}
             onChange={(e) => {
@@ -814,6 +779,7 @@ export function BuyBox({
         </div>
         <input
           type="range"
+          aria-label="Limit price slider in cents"
           min={1}
           max={99}
           value={limit}
@@ -835,7 +801,9 @@ export function BuyBox({
           }}
         >
           <span>1¢</span>
-          <span>{hasPrice ? `indicative ${indicativeCents}¢` : "seed the book"}</span>
+          <span>
+            {hasPrice ? `indicative ${indicativeCents}¢` : "seed the book"}
+          </span>
           <span>99¢</span>
         </div>
       </div>
@@ -860,13 +828,18 @@ export function BuyBox({
             {TIF_HELP[tif]}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
+        <div
+          role="group"
+          aria-label="Time in force"
+          style={{ display: "flex", gap: 4, marginTop: 5 }}
+        >
           {TIF_OPTS.map((t) => {
             const active = tif === t;
             return (
               <button
                 key={t}
                 type="button"
+                aria-pressed={active}
                 onClick={() => setTif(t)}
                 disabled={disabledInputs}
                 style={{
@@ -916,61 +889,29 @@ export function BuyBox({
               <StepButton
                 label="−"
                 disabled={disabledInputs || gtdBatches <= 1}
-                onClick={() => setGtd(gtdBatches - 1)}
+                onClick={() => setGtdBatches((n) => Math.max(1, n - 1))}
               />
               <span
                 className="tabular"
                 style={{
-                  display: "inline-flex",
-                  alignItems: "baseline",
-                  justifyContent: "center",
-                  gap: 3,
                   minWidth: 60,
+                  textAlign: "center",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
+                  color: "var(--fg-1)",
                 }}
               >
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  aria-label="batches until expiry"
-                  value={gtdText}
-                  disabled={disabledInputs}
-                  onChange={(e) => {
-                    const t = e.target.value.replace(/[^0-9]/g, "").slice(0, 3);
-                    setGtdText(t);
-                    const n = parseInt(t, 10);
-                    if (Number.isFinite(n) && n >= 1) {
-                      setGtdBatches(Math.min(GTD_MAX, n));
-                    }
-                  }}
-                  onBlur={() => setGtd(parseInt(gtdText, 10) || gtdBatches)}
-                  style={{
-                    width: 32,
-                    textAlign: "right",
-                    background: "transparent",
-                    border: 0,
-                    color: "var(--fg-1)",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                    padding: 0,
-                    outline: "none",
-                    // Kill the global :focus-visible cyan ring on this inline field
-                    // (inline box-shadow beats the stylesheet rule).
-                    boxShadow: "none",
-                  }}
-                />
-                <span style={{ fontSize: 10, color: "var(--fg-3)" }}>
-                  {gtdBatches === 1 ? "batch" : "batches"}
-                </span>
+                {gtdBatches} {gtdBatches === 1 ? "batch" : "batches"}
               </span>
               <StepButton
                 label="+"
-                disabled={disabledInputs || gtdBatches >= GTD_MAX}
-                onClick={() => setGtd(gtdBatches + 1)}
+                disabled={disabledInputs || gtdBatches >= 60}
+                onClick={() => setGtdBatches((n) => Math.min(60, n + 1))}
               />
             </div>
           </div>
         )}
-        {tif === "GTD" && (
+        {tif !== "GTC" && latestHeight != null && (
           <div
             style={{
               marginTop: 5,
@@ -980,12 +921,10 @@ export function BuyBox({
               textAlign: "right",
             }}
           >
-            {`cancels in ~${formatAge(Math.max(1, gtdBatches) * BLOCK_INTERVAL_MS)}`}
-            {latestHeight != null && (
-              <span style={{ opacity: 0.7 }}>
-                {` · block #${(latestHeight + Math.max(1, gtdBatches)).toLocaleString()}`}
-              </span>
-            )}
+            expires block #
+            {(
+              latestHeight + (tif === "IOC" ? 1 : Math.max(1, gtdBatches))
+            ).toLocaleString()}
           </div>
         )}
       </div>
@@ -1004,11 +943,24 @@ export function BuyBox({
           fontSize: 11,
         }}
       >
-        {/* Never-traded market: no price to fill against, so note that the order
-            seeds the book at the chosen limit. (Traded markets previously showed
-            a live "est. fill" estimate here; removed — the max-cost / min-receive
-            rows below already bound the outcome without implying a firm quote.) */}
-        {!hasPrice && (
+        {/* Live clearing estimate — labelled an estimate; a batch auction gives
+            no firm quote until the next batch clears. For a never-traded market
+            there is no price to estimate against, so instead of a fabricated
+            ~50% fill we say the order would seed the book at the chosen limit. */}
+        {hasPrice ? (
+          <ReceiptRow
+            label={
+              dir === "buy"
+                ? "est. fill · next batch"
+                : "est. proceeds · next batch"
+            }
+            value={
+              <span style={{ color: "var(--fg-2)" }}>
+                ~${estFillDollars.toFixed(2)} at ~{estClearingCents}%
+              </span>
+            }
+          />
+        ) : (
           <div style={{ color: "var(--fg-3)", lineHeight: 1.35 }}>
             no price yet — your order would seed the book at{" "}
             <span style={{ color: "var(--fg-1)" }}>{limitCentsPreview}¢</span>
@@ -1018,8 +970,14 @@ export function BuyBox({
           <>
             {/* Buy: pay AT MOST limit×qty (uniform clearing may be cheaper),
                 receive qty shares, each worth $1 if the outcome resolves in. */}
-            <ReceiptRow label="max cost" value={`≤ $${grossAtLimit.toFixed(2)}`} />
-            <ReceiptRow label="shares (if filled)" value={formatShareUnits(qtyUnits)} />
+            <ReceiptRow
+              label="max cost"
+              value={`≤ $${grossAtLimit.toFixed(2)}`}
+            />
+            <ReceiptRow
+              label="shares (if filled)"
+              value={formatShareUnits(qtyUnits)}
+            />
             <ReceiptRow
               label="payout if it wins"
               value={`$${payoutIfWin.toFixed(2)}`}
@@ -1033,7 +991,10 @@ export function BuyBox({
               label="min receive"
               value={`≥ $${grossAtLimit.toFixed(2)}`}
             />
-            <ReceiptRow label="shares to sell" value={formatShareUnits(qtyUnits)} />
+            <ReceiptRow
+              label="shares to sell"
+              value={formatShareUnits(qtyUnits)}
+            />
           </>
         )}
         <div
@@ -1064,7 +1025,8 @@ export function BuyBox({
             gap: 5,
             padding: "9px 10px",
             borderRadius: 4,
-            border: "1px solid color-mix(in srgb, var(--accent) 38%, transparent)",
+            border:
+              "1px solid color-mix(in srgb, var(--accent) 38%, transparent)",
             background: "color-mix(in srgb, var(--accent) 10%, transparent)",
             color: "var(--fg-2)",
             fontFamily: "var(--font-mono)",
@@ -1110,28 +1072,13 @@ export function BuyBox({
         {ctaLabel}
       </button>
 
-      {completeSetReasonText && !submitError && (
-        <div
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            lineHeight: "16px",
-            color: "var(--fg-3)",
-            textAlign: "center",
-          }}
-        >
-          {completeSetReasonText}
-        </div>
-      )}
-
       {submitError && (
         <div
           role="alert"
           style={{
             padding: "6px 10px",
             background: "color-mix(in srgb, var(--no) 12%, transparent)",
-            border:
-              "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--no) 32%, transparent)",
             borderRadius: 4,
             color: "var(--no)",
             fontFamily: "var(--font-mono)",
@@ -1152,15 +1099,16 @@ export function BuyBox({
             minHeight: 40,
             padding: "8px 10px",
             background: "color-mix(in srgb, var(--yes) 12%, transparent)",
-            border:
-              "1px solid color-mix(in srgb, var(--yes) 32%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--yes) 32%, transparent)",
             borderRadius: 4,
             color: "var(--yes)",
             fontFamily: "var(--font-mono)",
             fontSize: 11,
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div
+            style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
+          >
             <span>order accepted</span>
             <span>
               {accepted.orderId != null ? `#${accepted.orderId}` : "queued"}
@@ -1169,7 +1117,9 @@ export function BuyBox({
           <div style={{ color: "var(--fg-2)" }}>{accepted.summary}</div>
           <div style={{ color: "var(--fg-3)" }}>
             clears in block{" "}
-            {accepted.block == null ? "—" : `#${accepted.block.toLocaleString()}`}
+            {accepted.block == null
+              ? "—"
+              : `#${accepted.block.toLocaleString()}`}
           </div>
         </div>
       )}
@@ -1186,6 +1136,52 @@ export function BuyBox({
       </span>
     </div>
   );
+}
+
+export type TradeCtaState =
+  | "connect"
+  | "signing"
+  | "waiting_balance"
+  | "balance_unavailable"
+  | "waiting_positions"
+  | "positions_unavailable"
+  | "insufficient_buy"
+  | "insufficient_sell"
+  | "ready";
+
+/** Pure state machine for the authenticated Pro trade action. */
+export function tradeCtaState({
+  connected,
+  submitting,
+  direction,
+  balanceKnown,
+  balancePending,
+  positionsKnown,
+  positionsPending,
+  insufficientBuy,
+  insufficientSell,
+}: {
+  connected: boolean;
+  submitting: boolean;
+  direction: Direction;
+  balanceKnown: boolean;
+  balancePending: boolean;
+  positionsKnown: boolean;
+  positionsPending: boolean;
+  insufficientBuy: boolean;
+  insufficientSell: boolean;
+}): TradeCtaState {
+  if (!connected) return "connect";
+  if (submitting) return "signing";
+  if (direction === "buy" && !balanceKnown) {
+    return balancePending ? "waiting_balance" : "balance_unavailable";
+  }
+  if (direction === "sell" && !positionsKnown) {
+    return positionsPending ? "waiting_positions" : "positions_unavailable";
+  }
+  if (insufficientBuy) return "insufficient_buy";
+  if (insufficientSell) return "insufficient_sell";
+  return "ready";
 }
 
 /** Newest (highest order_id) open order for a market — best-effort id recovery

@@ -7,20 +7,20 @@ import {
   formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
-import { isMirror, isNative, type Market } from "@/lib/markets/use-markets";
-import { avgLiquidityNanos } from "@/lib/markets/liquidity";
+import {
+  isMirror,
+  isNative,
+  type IndexMarket,
+} from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
 import { formatTraders } from "@/lib/mock";
-import {
-  getCategoryColor,
-  pickDisplayCategory,
-} from "@/lib/categorize";
+import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import type { MarketPrice } from "@/lib/store";
 import { MarketThumb } from "./market-thumb";
 import { Sparkline } from "./sparkline";
 
 type Props = {
-  market: Market;
+  market: IndexMarket;
   price: MarketPrice | undefined;
 };
 
@@ -39,19 +39,18 @@ export function BinaryCard({ market, price }: Props) {
   const [ref, inView] = useInViewport<HTMLAnchorElement>();
   const { points, delta24Cents, noDelta24Cents } = useCardHistory(
     market.market_id,
-    inView
+    inView,
   );
 
   // Prices are odds → render as % (number is unchanged; see formatPercentPrecise).
   const yesCents = price ? formatPercentPrecise(price.yes) : "—";
   const noCents = price ? formatPercentPrecise(price.no) : "—";
-  const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
-  const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
 
   return (
     <Link
       ref={ref}
       href={`/m/${market.market_id}`}
+      prefetch={false}
       draggable={false}
       onClick={(e) => {
         if (window.getSelection()?.toString()) e.preventDefault();
@@ -88,7 +87,6 @@ export function BinaryCard({ market, price }: Props) {
         delta24Cents={delta24Cents}
         points={points}
         tone={oddsColor(!!price)}
-        vol={vol}
       />
       <SideList
         market={market}
@@ -101,7 +99,7 @@ export function BinaryCard({ market, price }: Props) {
   );
 }
 
-function EyebrowRow({ market }: { market: Market }) {
+function EyebrowRow({ market }: { market: IndexMarket }) {
   const { primary } = pickDisplayCategory(market.categories, market.category);
   return (
     <div
@@ -142,7 +140,7 @@ function EyebrowRow({ market }: { market: Market }) {
             {primary}
           </>
         ) : (
-          <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
+          <span style={{ color: "var(--fg-3)" }}>uncategorized</span>
         )}
       </span>
       <span
@@ -150,6 +148,7 @@ function EyebrowRow({ market }: { market: Market }) {
         style={{
           fontSize: "10px",
           letterSpacing: "var(--track-wide)",
+          textTransform: "uppercase",
           color: "var(--fg-3)",
         }}
       >
@@ -164,7 +163,7 @@ function EyebrowRow({ market }: { market: Market }) {
   );
 }
 
-function TitleRow({ market }: { market: Market }) {
+function TitleRow({ market }: { market: IndexMarket }) {
   return (
     <div
       style={{
@@ -181,7 +180,7 @@ function TitleRow({ market }: { market: Market }) {
         fallbackIconUrl={market.market_icon_url ?? null}
         size={64}
       />
-      <h3
+      <h2
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
@@ -199,7 +198,7 @@ function TitleRow({ market }: { market: Market }) {
         }}
       >
         {market.name}
-      </h3>
+      </h2>
     </div>
   );
 }
@@ -209,13 +208,11 @@ function FeaturedPriceRow({
   delta24Cents,
   points,
   tone,
-  vol,
 }: {
   cents: string;
   delta24Cents: number | null;
   points: import("@/lib/markets/use-card-history").PricePoint[];
   tone: string;
-  vol: string;
 }) {
   return (
     <div
@@ -230,18 +227,12 @@ function FeaturedPriceRow({
         border: "1px solid var(--border-1)",
       }}
     >
-      {/* Label + sparkline styling mirrors MultiCard's FeaturedOutcome so a
-          solo Yes/No hero and a multi leading-outcome hero read identically. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <span
           style={{
             fontFamily: "var(--font-sans)",
-            fontSize: "var(--fs-16)",
-            fontWeight: 600,
-            color: "var(--fg-1)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            fontSize: "var(--fs-13)",
+            color: "var(--fg-2)",
           }}
         >
           Yes
@@ -276,29 +267,7 @@ function FeaturedPriceRow({
           </span>
         </div>
       </div>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "flex-end",
-          gap: 4,
-        }}
-      >
-        <Sparkline points={points} />
-        <span
-          className="tabular"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "10px",
-            textTransform: "uppercase",
-            letterSpacing: "var(--track-wide)",
-            color: "var(--fg-3)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {"vol " + vol}
-        </span>
-      </div>
+      <Sparkline points={points} tone="yes" />
     </div>
   );
 }
@@ -309,7 +278,7 @@ function SideList({
   hasPrice,
   noDelta,
 }: {
-  market: Market;
+  market: IndexMarket;
   noCents: string;
   hasPrice: boolean;
   noDelta: number | null;
@@ -410,11 +379,11 @@ function SideRow({
   );
 }
 
-function FooterRow({ market }: { market: Market }) {
+function FooterRow({ market }: { market: IndexMarket }) {
   const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   const liqNanos = market.liquidity_avg10_nanos
-    ? avgLiquidityNanos(BigInt(market.liquidity_avg10_nanos))
+    ? BigInt(market.liquidity_avg10_nanos)
     : 0n;
   const liq = liqNanos > 0n ? formatCompactDollars(liqNanos) : "—";
   const traderCount = market.trader_count ?? 0;
@@ -461,9 +430,8 @@ function FooterChip({
 }
 
 /**
- * Odds (YES/NO %) are always neutral — never tinted green/red. Only the 24h
- * delta token carries directional color (see `deltaValueColor`). Dim to fg-4
- * when there's no price yet.
+ * Odds are neutral values. Directional green/red belongs only to the separate
+ * 24h-delta token so a probability is not mistaken for a gain or loss.
  */
 function oddsColor(hasPrice: boolean): string {
   return hasPrice ? "var(--fg-1)" : "var(--fg-4)";
@@ -479,4 +447,3 @@ function deltaValueColor(delta: number | null): string {
   if (Math.round(delta) === 0) return "var(--fg-3)";
   return delta > 0 ? "var(--yes)" : "var(--no)";
 }
-

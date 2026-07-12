@@ -1,13 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect } from "react";
 
 export default function GlobalError({
   error,
-  reset,
+  unstable_retry,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  unstable_retry: () => void;
 }) {
   useEffect(() => {
     console.error(error);
@@ -48,24 +49,73 @@ export default function GlobalError({
       >
         Something went wrong
       </h1>
-      <p style={{ color: "var(--fg-3)", margin: 0 }}>
-        {error.message || "Unexpected error."}
-      </p>
-      <button
-        onClick={() => reset()}
+      <p
         style={{
-          marginTop: "var(--space-4)",
-          padding: "var(--space-2) var(--space-4)",
-          background: "var(--accent)",
-          color: "var(--fg-on-accent)",
-          border: 0,
-          borderRadius: "var(--radius-md)",
-          fontFamily: "var(--font-sans)",
-          cursor: "pointer",
+          color: "var(--fg-3)",
+          margin: 0,
+          maxWidth: 460,
+          textAlign: "center",
+          lineHeight: 1.5,
         }}
       >
-        Try again
-      </button>
+        We couldn&apos;t load this screen. Retry the request, or return to the
+        market list while the service recovers.
+      </p>
+      {error.digest && (
+        <span
+          style={{
+            color: "var(--fg-4)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+          }}
+        >
+          reference {error.digest}
+        </span>
+      )}
+      <div
+        style={{
+          marginTop: "var(--space-4)",
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--space-3)",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => unstable_retry()}
+          style={{
+            minHeight: 40,
+            padding: "0 var(--space-4)",
+            background: "var(--accent)",
+            color: "var(--fg-on-accent)",
+            border: 0,
+            borderRadius: "var(--radius-md)",
+            fontFamily: "var(--font-sans)",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Try again
+        </button>
+        <Link
+          href="/"
+          style={{
+            minHeight: 40,
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "0 var(--space-4)",
+            border: "1px solid var(--border-2)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--fg-2)",
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+            fontWeight: 600,
+            textDecoration: "none",
+          }}
+        >
+          Back to markets
+        </Link>
+      </div>
     </div>
   );
 }

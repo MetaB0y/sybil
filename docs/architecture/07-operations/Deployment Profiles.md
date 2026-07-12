@@ -52,7 +52,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | --- | --- | --- | --- | --- |
 | `SYBIL_DATA_DIR` | unset (in-memory) | unset (in-memory) | `/data` (redb) | **yes — blocks** |
 | `SYBIL_MARKET_REF_DATA_PATH` | unset (volatile) | unset (volatile) | `/data/market_ref_data.json` | no (degraded) |
-| `SYBIL_ADMIN_FEED_KEY_PATH` | unset (ephemeral) | unset (ephemeral) | **should be set** | no (gap, see below) |
+| `SYBIL_ADMIN_FEED_KEY_PATH` | unset (ephemeral) | unset (ephemeral) | `/data/admin-feed.key` | **yes — blocks** |
 | `SYBIL_EVENT_SNAPSHOT_DIR` | unset | `/data/event_snapshots` | `/data/event_snapshots` | no |
 | `SYBIL_ARENA_DB_PATH` | unset | `/arena-data/decisions.db` | `/arena-data/decisions.db` | no |
 
@@ -102,8 +102,8 @@ At boot, before opening the store or binding the socket,
    This runs on **every** profile, so a `local` or `devnet` box still surfaces
    its deltas.
 2. **Fail-closes a `prod` start** when any dev-only knob is set:
-   `SYBIL_DEV_MODE=true`, `SYBIL_SERVICE_TOKEN` unset, or `SYBIL_DATA_DIR`
-   unset. The process exits non-zero with a
+   `SYBIL_DEV_MODE=true`, `SYBIL_SERVICE_TOKEN` unset, `SYBIL_DATA_DIR`
+   unset, or `SYBIL_ADMIN_FEED_KEY_PATH` unset. The process exits non-zero with a
    message naming the offending knobs. This mirrors the existing fail-closed
    service-token posture in `service_auth`
    (`crates/sybil-api/src/app.rs`), promoted from request-time to startup.
@@ -208,10 +208,18 @@ The preflight still logs `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0` as an
 informational deviation from the intended hot-cache default, but it no longer
 blocks a `prod` boot. `SYBIL_DATA_DIR` unset remains prod-blocking.
 
-### Secondary gaps flagged for follow-up
+## Admin resolution key durability
 
-- `SYBIL_ADMIN_FEED_KEY_PATH` is unset in prod, so the admin resolution key is
-  regenerated ephemerally on every restart. Set it to a persistent path so
-  attestation-based resolution survives restarts. Logged as an informational
-  deviation, not a blocker.
-- Prod runs the mock prover (see Prover section above).
+The production overlay pins `SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key`.
+On the first boot of a new `sybil-data` volume, the API generates the P256
+scalar and writes it there with mode `0600`; later process and container starts
+load the same key and repair broader Unix permissions to `0600`. The admin feed
+therefore keeps the same public identity across ordinary
+restarts and host reboots. Removing `sybil-data` is an intentional key rotation
+as well as a chain-state reset, so operators must not use the reset recipe as a
+routine restart mechanism. A process-level API test covers first-boot creation,
+the registered public key, and restart reuse; `just compose-smoke` covers the
+effective path and volume mount.
+
+The separate remaining deployment-profile gap is that prod runs the mock
+prover (see Prover section above).

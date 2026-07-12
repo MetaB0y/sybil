@@ -127,23 +127,27 @@ pub async fn create_account(
         ));
     }
 
-    let account = state.sequencer.create_account(balance_nanos).await?;
-    if let Some((key, pubkey)) = initial_key {
-        state
-            .sequencer
-            .register_pubkey_with_meta(
-                account.id,
-                pubkey,
-                RegisteredPubkey {
-                    account_id: account.id,
-                    auth_scheme: sequencer_auth_scheme(key.auth_scheme),
-                    label: key.label.clone(),
-                    scope: sequencer_key_scope(key.scope),
-                    created_at_ms: now_ms(),
-                },
-            )
-            .await?;
-    }
+    let account = match initial_key {
+        Some((key, pubkey)) => {
+            state
+                .sequencer
+                .create_account_with_initial_key(
+                    balance_nanos,
+                    pubkey,
+                    RegisteredPubkey {
+                        // The sequencer overwrites this placeholder with the
+                        // atomically allocated account id.
+                        account_id: AccountId(0),
+                        auth_scheme: sequencer_auth_scheme(key.auth_scheme),
+                        label: key.label.clone(),
+                        scope: sequencer_key_scope(key.scope),
+                        created_at_ms: now_ms(),
+                    },
+                )
+                .await?
+        }
+        None => state.sequencer.create_account(balance_nanos).await?,
+    };
     Ok(Json(account_to_response(&account, 0)))
 }
 

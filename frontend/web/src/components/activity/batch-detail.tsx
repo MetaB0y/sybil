@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * Expanded panel for a batch row. Top: a meta strip (tx hash / block / sequencer
- * / clearing duration / algorithm; placeholders are visibly labelled). Body: a
- * 2-col grid — a market-row table on the left, and on the right the batch
- * identity (number + proof tx) above the order stats (donut + composition KV).
+ * Expanded panel for a batch row. Top: truthful committed-block metadata.
+ * Body: 2-col grid with a market-row table on the left and a donut +
+ * composition KV on the right.
  *
  * Data comes from `useBatchDetail(height)`. The per-market rows are real —
  * volume, welfare and placed/matched come from `BlockResponse.by_market`.
@@ -12,7 +11,6 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { MockValue } from "@/components/mock-value";
 import { getCategoryColor } from "@/lib/categorize";
 import {
   formatCents,
@@ -20,16 +18,11 @@ import {
   formatCompactDollarsCents,
   formatInt,
 } from "@/lib/format/nanos";
-import { mockTxHash } from "@/lib/activity/mocks";
 import { useBatchDetail } from "@/lib/activity/use-batch-detail";
 import type { BatchMarketRow, BatchRow } from "@/lib/activity/types";
 import { DonutOutcome } from "./donut-outcome";
 
-// Sized so the market table's natural height meets-or-exceeds the sidebar's
-// (~392px): 8 rows fill it, so the "show more" footer sits right under the last
-// row instead of being pushed down by margin-top:auto with a visible gap above
-// it. Any residual slack lands below the shorter column, where it's unobtrusive.
-const ROWS_INITIAL = 8;
+const ROWS_INITIAL = 6;
 const ROWS_STEP = 10;
 
 const GRID = "2fr 70px 60px 110px 100px 130px";
@@ -39,7 +32,7 @@ type SortKey = "clear" | "delta" | "volume" | "welfare" | "orders";
 type SortDir = "asc" | "desc";
 
 export function BatchDetail({ row }: { row: BatchRow }) {
-  const { rows, isPending } = useBatchDetail(row.height);
+  const { block, rows, isPending } = useBatchDetail(row.height);
   const [shown, setShown] = useState(ROWS_INITIAL);
   // Default order: biggest matched volume first, then most matched, then most
   // placed (see sortMarketRows tiebreakers).
@@ -72,20 +65,46 @@ export function BatchDetail({ row }: { row: BatchRow }) {
         padding: "18px 24px 24px 70px",
       }}
     >
-      {/* Grid items stretch, so the left card claims the full row height and
-          the two columns always end on the same line — no row-count tuning.
-          The className carries the mobile reflow to a single column. */}
+      {/* Meta strip */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 32,
+          paddingBottom: 16,
+          borderBottom: "1px solid var(--border-1)",
+          marginBottom: 18,
+        }}
+      >
+        <MetaPair label="Batch" value={`#${formatInt(row.height)}`} mono />
+        <MetaPair
+          label="State root"
+          value={block ? shortDigest(block.state_root) : "—"}
+          title={block?.state_root}
+          mono
+        />
+        <MetaPair
+          label="Events root"
+          value={block ? shortDigest(block.events_root) : "—"}
+          title={block?.events_root}
+          mono
+        />
+        <MetaPair
+          label="Markets priced"
+          value={formatInt(row.marketsTouched)}
+          mono
+        />
+        <MetaPair label="Clearing rule" value="uniform · pro-rata" />
+      </div>
+
       <div
         className="activity-batch-detail-grid"
         style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}
       >
         {/* Left: market rows */}
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div>
           <div
             style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
               background: "var(--surface-1)",
               border: "1px solid var(--border-1)",
               borderRadius: 6,
@@ -133,14 +152,9 @@ export function BatchDetail({ row }: { row: BatchRow }) {
                 style={{
                   display: "block",
                   width: "100%",
-                  // Pinned to the bottom of the stretched card so it reads as a
-                  // footer of the panel, not as a link trailing the last row.
-                  // No top border: the last market row already draws the one
-                  // divider, and a second one here would bracket the gap the
-                  // stretch leaves between them.
-                  marginTop: "auto",
                   background: "transparent",
                   border: 0,
+                  borderTop: "1px solid var(--border-1)",
                   padding: "10px 14px",
                   cursor: "pointer",
                   color: "var(--accent)",
@@ -159,11 +173,8 @@ export function BatchDetail({ row }: { row: BatchRow }) {
           </div>
         </div>
 
-        {/* Right: batch identity, then the order stats it belongs to */}
+        {/* Right: donut + composition KV */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <SidebarPanel>
-            <BatchIdentity height={row.height} />
-          </SidebarPanel>
           <SidebarPanel title="Order outcome">
             <DonutOutcome
               matched={row.ordersMatched}
@@ -249,6 +260,7 @@ function SortTh({
     <button
       type="button"
       onClick={() => onSort(col)}
+      title={`Sort by ${label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -347,6 +359,7 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
         <Link
           href={`/m/${row.marketId}`}
           className="market-link"
+          title={row.title}
           style={{
             fontFamily: "var(--font-sans)",
             fontSize: 12,
@@ -360,10 +373,8 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
         </Link>
       </div>
 
-      {/* Clear price (real). 12px, matching the other money columns: at 13px
-          and in --fg-1 it sat at the same size and colour as the Inter market
-          title beside it, which made the shared mono face read as sans. */}
-      <span style={cellNumber("var(--fg-1)", 12)}>
+      {/* Clear price (real) */}
+      <span style={cellNumber("var(--fg-1)", 13)}>
         {formatCents(row.clearPriceNanos)}
       </span>
 
@@ -412,8 +423,7 @@ function SidebarPanel({
   title,
   children,
 }: {
-  /** Omitted by the identity panel, whose rows are self-labelling. */
-  title?: string;
+  title: string;
   children: React.ReactNode;
 }) {
   return (
@@ -425,11 +435,9 @@ function SidebarPanel({
         padding: "12px 14px",
       }}
     >
-      {title != null && (
-        <div className="eyebrow" style={{ color: "var(--fg-3)", paddingBottom: 10 }}>
-          {title}
-        </div>
-      )}
+      <div className="eyebrow" style={{ color: "var(--fg-3)", paddingBottom: 10 }}>
+        {title}
+      </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {children}
       </div>
@@ -477,80 +485,43 @@ function KvRow({
   );
 }
 
-// ── Batch identity ────────────────────────────────────────────────────────
+// ── Meta strip helper ─────────────────────────────────────────────────────
 
-/**
- * Which batch this panel is about, and the commitment that proves it — the
- * two facts worth keeping from the old meta strip. Everything else it carried
- * (sequencer, clearing duration, algo) was either a constant or a mock nobody
- * could act on.
- *
- * The proof tx is still a deterministic function of the height: blocks do seal
- * a real `events_root` / `state_root`, but nothing anchors them to a chain, so
- * there is no transaction to link to yet. Hence the mock pill.
- */
-function BatchIdentity({ height }: { height: number }) {
+function MetaPair({
+  label,
+  value,
+  mono,
+  title,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  title?: string | undefined;
+}) {
   return (
-    <>
-      <IdentityRow label="Batch">
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 15,
-            color: "var(--fg-1)",
-            fontVariantNumeric: "tabular-nums",
-            letterSpacing: "-0.005em",
-          }}
-        >
-          #{formatInt(height)}
-        </span>
-      </IdentityRow>
-      <IdentityRow label="Proof tx">
-        <MockValue
-          hint="tx hash — mock; blocks seal a real events_root, but nothing anchors it to a chain yet, so there's no transaction to link"
-          variant="pill"
-        >
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              color: "var(--accent)",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {mockTxHash(height)}
-          </span>
-        </MockValue>
-      </IdentityRow>
-    </>
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <span className="eyebrow" style={{ color: "var(--fg-3)" }}>
+        {label}
+      </span>
+      <span
+        title={title}
+        style={{
+          fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)",
+          fontSize: 12,
+          color: "var(--fg-1)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </span>
+    </div>
   );
 }
 
-function IdentityRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "baseline",
-        justifyContent: "space-between",
-        gap: 10,
-      }}
-    >
-      <span
-        className="eyebrow"
-        style={{ color: "var(--fg-3)", whiteSpace: "nowrap", flexShrink: 0 }}
-      >
-        {label}
-      </span>
-      {children}
-    </div>
-  );
+function shortDigest(value: string): string {
+  const hex = value.startsWith("0x") ? value.slice(2) : value;
+  if (hex.length <= 22) return value;
+  return `0x${hex.slice(0, 12)}···${hex.slice(-8)}`;
 }
 
 function cellNumber(color: string, fontSize: number): React.CSSProperties {

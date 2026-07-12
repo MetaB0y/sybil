@@ -29,6 +29,10 @@ pub enum Error {
     #[error("block stream protocol error: {0}")]
     Protocol(String),
 
+    /// The attestation response cannot be assigned the requested trust level.
+    #[error("attestation verification error: {0}")]
+    Attestation(String),
+
     /// The server-side broadcast buffer overflowed. Reconnect with
     /// `last_sent_height + 1` when present, or cold-resync if the client never
     /// received a block on this connection.

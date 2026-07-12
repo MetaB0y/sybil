@@ -69,6 +69,7 @@ export function DegenAmount({
         <input
           type="text"
           inputMode="decimal"
+          aria-label="Bet amount in dollars"
           value={amount}
           onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
           placeholder="0"

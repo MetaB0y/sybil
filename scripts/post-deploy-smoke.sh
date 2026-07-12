@@ -7,6 +7,8 @@
 # trading flows are HARD assertions, never silent SKIPs:
 #
 #   * CORS preflight from the real app origin (the browser-breakage class).
+#   * Deployed web shell + one Next.js static asset (the broken-web-promotion
+#     class that API-only checks cannot see).
 #   * Passkey onboarding: unauthenticated account create + first-key bootstrap
 #     (the HTTP-401 regression that shipped would FAIL here, not skip).
 #   * Fills-after-seed: a deterministic crossing seed MUST increase matched
@@ -23,6 +25,9 @@
 #                                           [--app-origin ORIGIN]
 #                                           [--block-interval SECONDS]
 #                                           [--require-signer]
+#                                           [--skip-fill-seed]
+#                                           [--skip-mirror-readiness]
+#                                           [--require-proof-freshness]
 #
 # Configuration (flags override env; env overrides defaults):
 #   base_url / SYBIL_SMOKE_BASE          API root host
@@ -32,10 +37,43 @@
 #   --app-origin / SYBIL_SMOKE_APP_ORIGIN   browser origin for the CORS check
 #                                        (default https://app.172-104-31-54.nip.io)
 #   --block-interval / SYBIL_SMOKE_INTERVAL block time seconds (default 10)
+#   SYBIL_SMOKE_STARTUP_TIMEOUT
+#                                        seconds to wait for /v1/health after a
+#                                        container replacement (default 60)
+#   SYBIL_SMOKE_STARTUP_POLL
+#                                        seconds between health probes (default 2)
+#   SYBIL_SMOKE_MIRROR_TIMEOUT
+#                                        seconds to wait for a referenced mirror
+#                                        market after replacement (default 180)
+#   SYBIL_SMOKE_MIRROR_POLL
+#                                        seconds between market probes (default 5)
+#   SYBIL_SMOKE_MIRROR_MAX_AGE
+#                                        maximum reference-feed age in seconds
+#                                        (default 180)
+#   SYBIL_SMOKE_PROOF_TIMEOUT
+#                                        seconds to wait for proof catch-up
+#                                        after replacement (default 120)
+#   SYBIL_SMOKE_PROOF_POLL
+#                                        seconds between proof probes (default 5)
+#   SYBIL_SMOKE_PROOF_LAG_MAX
+#                                        maximum proof lag in blocks (default 30)
 #   --require-signer / SYBIL_SMOKE_REQUIRE_SIGNER=1
 #                                        FAIL (not SKIP) if the signed-order
-#                                        signer is unavailable. Set this in the
-#                                        deploy image where the signer ships.
+#                                        signer is unavailable. Deploy recipes
+#                                        always set this because they run from
+#                                        a source checkout with Cargo available.
+#   --skip-fill-seed / SYBIL_SMOKE_SKIP_FILL_SEED=1
+#                                        Skip only the persistent deterministic
+#                                        market/fill fixture. Scoped web/Arena
+#                                        promotions use this because the matcher
+#                                        image did not change; API/all-stack
+#                                        promotions always run the full gate.
+#   --skip-mirror-readiness / SYBIL_SMOKE_SKIP_MIRROR_READINESS=1
+#                                        Skip the external mirror gate only for
+#                                        a web-only image promotion.
+#   --require-proof-freshness / SYBIL_SMOKE_REQUIRE_PROOF_FRESHNESS=1
+#                                        Fail when the Compose prover status is
+#                                        unavailable, malformed, or too stale.
 #
 #   SYBIL_SMOKE_DOCKER_SSH   run the container-health probe over this ssh target
 #                            (e.g. root@172.104.31.54) instead of local docker.
@@ -52,7 +90,18 @@ BASE="${SYBIL_SMOKE_BASE:-https://172-104-31-54.nip.io}"
 APP_ORIGIN="${SYBIL_SMOKE_APP_ORIGIN:-https://app.172-104-31-54.nip.io}"
 SERVICE_TOKEN="${SYBIL_SERVICE_TOKEN:-}"
 INTERVAL="${SYBIL_SMOKE_INTERVAL:-10}"
+STARTUP_TIMEOUT="${SYBIL_SMOKE_STARTUP_TIMEOUT:-60}"
+STARTUP_POLL="${SYBIL_SMOKE_STARTUP_POLL:-2}"
+MIRROR_TIMEOUT="${SYBIL_SMOKE_MIRROR_TIMEOUT:-180}"
+MIRROR_POLL="${SYBIL_SMOKE_MIRROR_POLL:-5}"
+MIRROR_MAX_AGE="${SYBIL_SMOKE_MIRROR_MAX_AGE:-180}"
+PROOF_TIMEOUT="${SYBIL_SMOKE_PROOF_TIMEOUT:-120}"
+PROOF_POLL="${SYBIL_SMOKE_PROOF_POLL:-5}"
+PROOF_LAG_MAX="${SYBIL_SMOKE_PROOF_LAG_MAX:-30}"
 REQUIRE_SIGNER="${SYBIL_SMOKE_REQUIRE_SIGNER:-0}"
+REQUIRE_PROOF_FRESHNESS="${SYBIL_SMOKE_REQUIRE_PROOF_FRESHNESS:-0}"
+SKIP_FILL_SEED="${SYBIL_SMOKE_SKIP_FILL_SEED:-0}"
+SKIP_MIRROR_READINESS="${SYBIL_SMOKE_SKIP_MIRROR_READINESS:-0}"
 DOCKER_SSH="${SYBIL_SMOKE_DOCKER_SSH:-}"
 COMPOSE_PROJECT="${SYBIL_COMPOSE_PROJECT:-sybil}"
 BASE_SET_BY_ARG=0
@@ -69,6 +118,9 @@ while [[ $# -gt 0 ]]; do
         --app-origin) APP_ORIGIN="${2:-}"; shift 2 ;;
         --block-interval) INTERVAL="${2:-10}"; shift 2 ;;
         --require-signer) REQUIRE_SIGNER=1; shift ;;
+        --skip-fill-seed) SKIP_FILL_SEED=1; shift ;;
+        --skip-mirror-readiness) SKIP_MIRROR_READINESS=1; shift ;;
+        --require-proof-freshness) REQUIRE_PROOF_FRESHNESS=1; shift ;;
         --*) echo "unknown flag: $1" >&2; usage 2 ;;
         *)
             if [[ "$BASE_SET_BY_ARG" -eq 0 ]]; then BASE="$1"; BASE_SET_BY_ARG=1; shift
@@ -80,9 +132,52 @@ done
 BASE="${BASE%/}"           # strip trailing slash
 APP_ORIGIN="${APP_ORIGIN%/}"
 
-for tool in curl python3; do
+for tool in curl python3 timeout; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required" >&2; exit 2; }
 done
+
+for timeout in "$STARTUP_TIMEOUT" "$MIRROR_TIMEOUT" "$PROOF_TIMEOUT"; do
+    if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
+        echo "error: smoke timeouts must be non-negative integers" >&2
+        exit 2
+    fi
+done
+for flag in "$SKIP_FILL_SEED" "$SKIP_MIRROR_READINESS" "$REQUIRE_PROOF_FRESHNESS"; do
+    if [[ "$flag" != "0" && "$flag" != "1" ]]; then
+        echo "error: smoke skip flags must be 0 or 1" >&2
+        exit 2
+    fi
+done
+if ! [[ "$MIRROR_POLL" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: mirror poll must be a positive integer" >&2
+    exit 2
+fi
+if ! [[ "$MIRROR_MAX_AGE" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: mirror max age must be a positive integer" >&2
+    exit 2
+fi
+if ! [[ "$PROOF_POLL" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: proof poll must be a positive integer" >&2
+    exit 2
+fi
+if ! [[ "$PROOF_LAG_MAX" =~ ^[0-9]+$ ]]; then
+    echo "error: proof lag max must be a non-negative integer" >&2
+    exit 2
+fi
+python3 - "$INTERVAL" "$STARTUP_POLL" <<'PY' || exit 2
+import math
+import sys
+
+for name, raw in zip(("block interval", "startup poll"), sys.argv[1:]):
+    try:
+        value = float(raw)
+    except ValueError:
+        print(f"error: {name} must be a positive number", file=sys.stderr)
+        raise SystemExit(1)
+    if not math.isfinite(value) or value <= 0:
+        print(f"error: {name} must be a positive number", file=sys.stderr)
+        raise SystemExit(1)
+PY
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -113,8 +208,8 @@ jget() {
 # ── HTTP helper: sets HTTP_CODE and HTTP_BODY ───────────────────────────────
 # usage: http METHOD PATH [BODY] [AUTH]   AUTH in none(default)|token|bad
 http() {
-    local method="$1" path="$2" body="${3:-}" auth="${4:-none}"
-    local args=(-sS -m 30 -o "$TMP/body" -w '%{http_code}' -X "$method"
+    local method="$1" path="$2" body="${3:-}" auth="${4:-none}" max_time="${5:-30}"
+    local args=(-sS -m "$max_time" -o "$TMP/body" -w '%{http_code}' -X "$method"
         "$BASE$path" -H 'Accept: application/json')
     case "$auth" in
         token) [[ -n "$SERVICE_TOKEN" ]] && args+=(-H "Authorization: Bearer $SERVICE_TOKEN") ;;
@@ -125,10 +220,28 @@ http() {
         args+=(-H 'Content-Type: application/json' --data "$body")
     fi
     HTTP_CODE="$(curl "${args[@]}" 2>/dev/null || echo 000)"
-    HTTP_BODY="$(cat "$TMP/body" 2>/dev/null || true)"
+    HTTP_BODY="$(read_http_body "$TMP/body" 2>/dev/null || true)"
 }
 
 is_2xx() { smoke_is_2xx "$1"; }
+
+# Bash variables cannot contain NUL bytes. Most smoke responses are JSON, but
+# an authorized DA payload is binary; decoding that file through command
+# substitution used to emit a noisy "ignored null byte" warning. Preserve text
+# bodies verbatim for assertions and represent binary bodies with a safe size
+# marker (the gating matrix only needs their HTTP status).
+read_http_body() {
+    python3 -c '
+from pathlib import Path
+import sys
+
+body = Path(sys.argv[1]).read_bytes()
+if b"\0" in body:
+    print(f"<binary body: {len(body)} bytes>")
+else:
+    print(body.decode("utf-8", errors="replace"), end="")
+' "$1"
+}
 
 # ── 1. Service health ───────────────────────────────────────────────────────
 HEAD_HEIGHT=0
@@ -136,12 +249,35 @@ GENESIS_HASH=""
 check_liveness() {
     section "1a. API liveness"
 
-    http GET /v1/health
-    GENESIS_HASH="$(echo "$HTTP_BODY" | jget genesis_hash)"
-    if is_2xx "$HTTP_CODE" && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]]; then
-        pass "/v1/health -> ok (height=$(echo "$HTTP_BODY" | jget height))"
+    local deadline=$((SECONDS + STARTUP_TIMEOUT)) attempts=0
+    local health_height="" health_genesis=""
+    while true; do
+        attempts=$((attempts + 1))
+        http GET /v1/health
+        health_height="$(echo "$HTTP_BODY" | jget height)"
+        health_genesis="$(echo "$HTTP_BODY" | jget genesis_hash)"
+        if is_2xx "$HTTP_CODE" \
+           && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]] \
+           && smoke_is_committed_chain_identity "$health_height" "$health_genesis"; then
+            break
+        fi
+        if (( SECONDS >= deadline )); then
+            break
+        fi
+        info "/v1/health not ready ($HTTP_CODE); retrying in ${STARTUP_POLL}s..."
+        sleep "$STARTUP_POLL"
+    done
+
+    GENESIS_HASH="$health_genesis"
+    if is_2xx "$HTTP_CODE" \
+       && [[ "$(echo "$HTTP_BODY" | jget status)" == "ok" ]] \
+       && smoke_is_committed_chain_identity "$health_height" "$GENESIS_HASH"; then
+        if (( attempts > 1 )); then
+            info "/v1/health became ready after $attempts attempts"
+        fi
+        pass "/v1/health -> ok (height=$health_height, genesis=${GENESIS_HASH:0:16}...)"
     else
-        fail "/v1/health -> $HTTP_CODE: $HTTP_BODY"
+        fail "/v1/health did not expose a committed chain identity -> $HTTP_CODE: $HTTP_BODY"
     fi
 
     http GET /v1/state-root
@@ -182,9 +318,183 @@ check_services() {
     smoke_check_compose_services "$DOCKER_SSH" "$COMPOSE_PROJECT" pass fail skip
 }
 
-# ── 2. CORS preflight from the app origin ───────────────────────────────────
+check_proof_freshness() {
+    section "1c. Proof-pipeline freshness"
+    if ! smoke_docker_available "$DOCKER_SSH"; then
+        if [[ "$REQUIRE_PROOF_FRESHNESS" == "1" ]]; then
+            fail "proof freshness requires Docker access to Compose project '$COMPOSE_PROJECT'"
+        else
+            skip "proof freshness unavailable without Docker access"
+        fi
+        return
+    fi
+
+    local deadline=$((SECONDS + PROOF_TIMEOUT)) attempts=0
+    local chain_height="" proof_body="" canonical_root="" result="ERR no-response"
+    local proof_state="ERR" proof_height="" proof_lag=""
+    local chain_code="000" canonical_code="000"
+    local remaining request_timeout sleep_for candidate_height
+    while true; do
+        if (( attempts > 0 && SECONDS >= deadline )); then
+            break
+        fi
+        attempts=$((attempts + 1))
+        remaining=$((deadline - SECONDS))
+        request_timeout=10
+        if (( remaining > 0 && remaining < request_timeout )); then
+            request_timeout=$remaining
+        elif (( remaining <= 0 )); then
+            request_timeout=1
+        fi
+
+        proof_body="$(smoke_compose_service_curl "$DOCKER_SSH" "$COMPOSE_PROJECT" \
+            sybil-prover http://127.0.0.1:3002/proofs/latest "$request_timeout" \
+            2>/dev/null || true)"
+        result="ERR no-response"
+        candidate_height="$(printf '%s' "$proof_body" | jget block_height)"
+
+        remaining=$((deadline - SECONDS))
+        if [[ -n "$proof_body" && "$candidate_height" =~ ^[0-9]+$ && "$remaining" -gt 0 ]]; then
+            request_timeout=10
+            (( remaining < request_timeout )) && request_timeout=$remaining
+            http GET /v1/blocks/latest "" none "$request_timeout"
+            chain_code=$HTTP_CODE
+            chain_height="$(printf '%s' "$HTTP_BODY" | jget height)"
+            if ! is_2xx "$chain_code" || [[ ! "$chain_height" =~ ^[0-9]+$ ]]; then
+                result="ERR invalid-chain-head"
+            elif (( candidate_height > chain_height )); then
+                result="ERR future-block-height"
+            else
+                remaining=$((deadline - SECONDS))
+                if (( remaining > 0 )); then
+                    request_timeout=10
+                    (( remaining < request_timeout )) && request_timeout=$remaining
+                    http GET "/v1/blocks/$candidate_height" "" none "$request_timeout"
+                    canonical_code=$HTTP_CODE
+                    canonical_root="$(printf '%s' "$HTTP_BODY" | jget state_root)"
+                    if is_2xx "$canonical_code" && [[ -n "$canonical_root" ]]; then
+                        result="$(printf '%s' "$proof_body" | smoke_proof_lag_result \
+                            "$chain_height" "$PROOF_LAG_MAX" "$canonical_root" || true)"
+                    else
+                        result="ERR canonical-block-unavailable"
+                    fi
+                else
+                    result="ERR deadline-exhausted"
+                fi
+            fi
+        elif [[ -n "$proof_body" && ! "$candidate_height" =~ ^[0-9]+$ ]]; then
+            result="ERR invalid-block-height"
+        elif (( remaining <= 0 )); then
+            result="ERR deadline-exhausted"
+        fi
+        read -r proof_state proof_height proof_lag <<< "$result"
+        if [[ "$proof_state" == "OK" ]]; then
+            if (( attempts > 1 )); then
+                info "proof pipeline became ready after $attempts attempts"
+            fi
+            pass "proof height $proof_height trails chain height $chain_height by $proof_lag blocks (max $PROOF_LAG_MAX)"
+            return
+        fi
+
+        remaining=$((deadline - SECONDS))
+        if (( remaining <= 0 )); then
+            break
+        fi
+        sleep_for=$PROOF_POLL
+        (( sleep_for > remaining )) && sleep_for=$remaining
+        info "proof pipeline not ready (${result:-ERR unknown}); retrying in ${sleep_for}s..."
+        sleep "$sleep_for"
+    done
+
+    local reason
+    if [[ "$proof_state" == "STALE" ]]; then
+        reason="proof height $proof_height trails chain height $chain_height by $proof_lag blocks (max $PROOF_LAG_MAX)"
+    elif [[ "$proof_height" == "invalid-chain-head" ]]; then
+        reason="/v1/blocks/latest did not expose a numeric height"
+    elif [[ "$proof_height" == "future-block-height" ]]; then
+        reason="proof height ${candidate_height:-unknown} is ahead of current chain height ${chain_height:-unknown}"
+    elif [[ "$proof_height" == "canonical-block-unavailable" ]]; then
+        reason="canonical block $candidate_height was unavailable for proof identity binding"
+    elif [[ "$proof_height" == "deadline-exhausted" ]]; then
+        reason="proof identity checks exhausted their deadline"
+    elif [[ -z "$proof_body" ]]; then
+        reason="prover /proofs/latest was unavailable or empty"
+    else
+        reason="prover /proofs/latest was invalid (${proof_height:-unknown}; body: ${proof_body:0:200})"
+    fi
+    if [[ "$REQUIRE_PROOF_FRESHNESS" == "1" ]]; then
+        fail "$reason after ${PROOF_TIMEOUT}s"
+    else
+        skip "$reason (proof freshness not required)"
+    fi
+}
+
+# ── 2a. Deployed web shell + static asset ──────────────────────────────────────
+check_web_app() {
+    section "2a. Deployed web app ($APP_ORIGIN)"
+
+    local code asset_url asset_meta asset_code asset_type asset_size
+    if ! code="$(curl -sS -L -m 30 -o "$TMP/app.html" -w '%{http_code}' "$APP_ORIGIN/")"; then
+        fail "GET $APP_ORIGIN/ failed (deployed web app unreachable)"
+        return
+    fi
+    if ! is_2xx "$code"; then
+        fail "GET $APP_ORIGIN/ -> $code (deployed web app unavailable)"
+        return
+    fi
+    if grep -Fq '<title>Sybil</title>' "$TMP/app.html"; then
+        pass "GET $APP_ORIGIN/ -> $code with Sybil app shell"
+    else
+        fail "GET $APP_ORIGIN/ -> $code but the Sybil app shell is missing"
+        return
+    fi
+
+    # A 200 HTML shell is not sufficient for this interactive app: a stale or
+    # misrouted /_next/static path leaves users with an unhydrated page. Resolve
+    # the first emitted JavaScript asset exactly as a browser would and require
+    # a non-empty JavaScript response.
+    asset_url="$(python3 - "$APP_ORIGIN" "$TMP/app.html" <<'PY'
+import html
+import re
+import sys
+from pathlib import Path
+from urllib.parse import urljoin
+
+origin, path = sys.argv[1:]
+document = Path(path).read_text(encoding="utf-8", errors="replace")
+assets = re.findall(r'(?:src|href)="([^"]+)"', document)
+asset = next(
+    (html.unescape(value) for value in assets
+     if "/_next/static/" in value and ".js" in value),
+    "",
+)
+if asset:
+    print(urljoin(f"{origin}/", asset))
+PY
+)"
+    if [[ -z "$asset_url" ]]; then
+        fail "GET $APP_ORIGIN/ returned no Next.js JavaScript asset"
+        return
+    fi
+    if ! asset_meta="$(curl -sS -L -m 30 -o /dev/null \
+        -w '%{http_code}|%{content_type}|%{size_download}' "$asset_url")"; then
+        fail "GET $asset_url failed (Next.js static asset unreachable)"
+        return
+    fi
+    IFS='|' read -r asset_code asset_type asset_size <<< "$asset_meta"
+    if is_2xx "$asset_code" \
+       && [[ "$asset_type" == *javascript* ]] \
+       && [[ "$asset_size" =~ ^[0-9]+$ ]] \
+       && (( asset_size > 0 )); then
+        pass "Next.js asset -> $asset_code ($asset_type, ${asset_size}B)"
+    else
+        fail "Next.js asset -> ${asset_code:-?} (${asset_type:-no content-type}, ${asset_size:-0}B)"
+    fi
+}
+
+# ── 2b. CORS preflight from the app origin ──────────────────────────────────
 check_cors() {
-    section "2. CORS preflight (browser origin: $APP_ORIGIN)"
+    section "2b. CORS preflight (browser origin: $APP_ORIGIN)"
     local path="/v1/accounts"
     local hdr code allow
     curl -sS -m 20 -D "$TMP/cors_hdr" -o /dev/null -X OPTIONS "$BASE$path" \
@@ -280,30 +590,81 @@ check_onboarding() {
 ORDER_MARKET=""
 check_markets() {
     section "4. Markets"
-    http GET /v1/markets
-    if ! is_2xx "$HTTP_CODE"; then
-        fail "/v1/markets -> $HTTP_CODE: $HTTP_BODY"; return
+    local deadline=$((SECONDS + MIRROR_TIMEOUT)) attempts=0
+    local counts="" ok="ERR" native=0 mirror=0 referenced=0 pick="" ref_age=""
+    local market_code="000" market_body="" remaining request_timeout sleep_for
+    while true; do
+        if (( attempts > 0 && SECONDS >= deadline )); then
+            break
+        fi
+        attempts=$((attempts + 1))
+        remaining=$((deadline - SECONDS))
+        request_timeout=30
+        if (( remaining > 0 && remaining < request_timeout )); then
+            request_timeout=$remaining
+        elif (( remaining <= 0 )); then
+            request_timeout=1
+        fi
+        http GET /v1/markets "" none "$request_timeout"
+        market_code=$HTTP_CODE
+        market_body=$HTTP_BODY
+        ok="ERR"; native=0; mirror=0; referenced=0; pick=""; ref_age=""
+        if is_2xx "$HTTP_CODE"; then
+            counts="$(printf '%s' "$HTTP_BODY" | smoke_market_inventory 2>/dev/null || true)"
+            read -r ok native mirror referenced pick <<< "$counts"
+        fi
+
+        if [[ "$SKIP_MIRROR_READINESS" == "1" && "$ok" == "OK" ]]; then
+            break
+        fi
+        if smoke_market_inventory_is_ready "$ok" "$native" "$mirror" "$referenced"; then
+            remaining=$((deadline - SECONDS))
+            request_timeout=30
+            if (( remaining > 0 && remaining < request_timeout )); then
+                request_timeout=$remaining
+            elif (( remaining <= 0 )); then
+                request_timeout=1
+            fi
+            http GET /metrics "" none "$request_timeout"
+            if is_2xx "$HTTP_CODE"; then
+                ref_age="$(printf '%s' "$HTTP_BODY" | smoke_prometheus_scalar sybil_reference_prices_age_seconds 2>/dev/null || true)"
+            fi
+            if smoke_reference_age_is_fresh "$ref_age" "$MIRROR_MAX_AGE"; then
+                break
+            fi
+        fi
+
+        remaining=$((deadline - SECONDS))
+        if (( remaining <= 0 )); then
+            break
+        fi
+        sleep_for=$MIRROR_POLL
+        (( sleep_for > remaining )) && sleep_for=$remaining
+        info "market registry not ready (active native=$native, active mirror=$mirror, positive refs=$referenced, ref age=${ref_age:-unknown}s); retrying in ${sleep_for}s..."
+        sleep "$sleep_for"
+    done
+
+    if [[ "$ok" != "OK" ]]; then
+        fail "/v1/markets did not return an array -> $market_code: $market_body"
+        return
     fi
-    local counts; counts="$(echo "$HTTP_BODY" | python3 -c '
-import sys, json
-try:
-    a = json.load(sys.stdin)
-    assert isinstance(a, list)
-except Exception:
-    print("ERR 0 0"); sys.exit(0)
-native = [m for m in a if m.get("polymarket_condition_id") is None and (m.get("resolution_criteria") or "") != ""]
-mirror = [m for m in a if m.get("polymarket_condition_id") is not None]
-cand = [m for m in a if m.get("polymarket_condition_id") is None] or a
-pick = cand[0].get("market_id") if cand else None
-print("OK", len(native), len(mirror), pick if pick is not None else "")
-')"
-    read -r ok native mirror pick <<< "$counts"
-    if [[ "$ok" != "OK" ]]; then fail "/v1/markets did not return an array"; return; fi
     ORDER_MARKET="$pick"
-    if [[ "$native" -ge 1 ]]; then pass "native markets: $native (>=1)"
-    else fail "native markets: $native (need >=1)"; fi
-    if [[ "$mirror" -ge 1 ]]; then pass "mirror markets: $mirror (>=1)"
-    else warn "mirror markets: $mirror (no Polymarket mirror present)"; fi
+    if [[ "$native" -ge 1 ]]; then pass "active native markets: $native (>=1)"
+    else fail "active native markets: $native (need >=1)"; fi
+    if [[ "$SKIP_MIRROR_READINESS" == "1" ]]; then
+        skip "external mirror readiness is out of scope for a web-only promotion"
+    elif [[ "$mirror" -lt 1 ]]; then
+        fail "active mirror markets: $mirror (need >=1 after ${MIRROR_TIMEOUT}s)"
+    elif [[ "$referenced" -lt 1 ]]; then
+        fail "active mirror markets with positive references: $referenced (need >=1 after ${MIRROR_TIMEOUT}s)"
+    elif ! smoke_reference_age_is_fresh "$ref_age" "$MIRROR_MAX_AGE"; then
+        fail "reference feed age ${ref_age:-unknown}s exceeds ${MIRROR_MAX_AGE}s after ${MIRROR_TIMEOUT}s"
+    else
+        if (( attempts > 1 )); then
+            info "mirror reference became ready after $attempts attempts"
+        fi
+        pass "active mirror markets: $mirror; positive references: $referenced; feed age: ${ref_age}s"
+    fi
     [[ -n "$ORDER_MARKET" ]] && info "trading against market_id=$ORDER_MARKET"
 }
 
@@ -471,7 +832,7 @@ check_signed_order() {
     setup_signing
     if [[ -z "$SIGN_BIN" ]]; then
         if [[ "$REQUIRE_SIGNER" == "1" ]]; then
-            fail "signer unavailable but --require-signer set (ship smoke_sign in the deploy image)"
+            fail "signer unavailable but --require-signer set (build smoke_sign in the deploy checkout)"
         else
             skip "signer (smoke_sign) unavailable; set SYBIL_SMOKE_REQUIRE_SIGNER=1 in the deploy gate to make this a hard check"
         fi
@@ -528,7 +889,7 @@ check_signed_cancel_lifecycle() {
     setup_signing
     if [[ -z "$SIGN_BIN" ]]; then
         if [[ "$REQUIRE_SIGNER" == "1" ]]; then
-            fail "signer unavailable but --require-signer set (ship smoke_sign in the deploy image)"
+            fail "signer unavailable but --require-signer set (build smoke_sign in the deploy checkout)"
         else
             skip "signer (smoke_sign) unavailable; cancel-lifecycle check skipped"
         fi
@@ -660,18 +1021,32 @@ check_bots() {
 }
 
 # ── Run ─────────────────────────────────────────────────────────────────────
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
 echo "Sybil post-deploy smoke GATE"
 echo "  API base   : $BASE"
 echo "  app origin : $APP_ORIGIN"
 echo "  block time : ${INTERVAL}s   service-token: $([[ -n "$SERVICE_TOKEN" ]] && echo present || echo absent)"
 echo "  docker     : $([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local)"
+echo "  fill seed  : $([[ "$SKIP_FILL_SEED" == "1" ]] && echo scoped-skip || echo required)"
+echo "  mirror gate: $([[ "$SKIP_MIRROR_READINESS" == "1" ]] && echo web-only-skip || echo required)"
+echo "  proof gate : $([[ "$REQUIRE_PROOF_FRESHNESS" == "1" ]] && echo "required (lag <= $PROOF_LAG_MAX)" || echo optional)"
 
 check_liveness
 check_services
+check_proof_freshness
+check_web_app
 check_cors
 check_onboarding
 check_markets
-check_orders_and_fills
+if [[ "$SKIP_FILL_SEED" == "1" ]]; then
+    section "5. Order placement + fills-after-seed gate"
+    skip "deterministic market seed is out of scope for a non-API promotion"
+else
+    check_orders_and_fills
+fi
 check_gating
 check_signed_order
 check_signed_cancel_lifecycle

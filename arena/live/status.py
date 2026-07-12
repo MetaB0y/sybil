@@ -25,10 +25,53 @@ def run(db_path: str | None = None, hours: int = 24):
         return
 
     conn = connect_reader(db_path)
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    now_dt = datetime.now(timezone.utc)
+    cutoff = (now_dt - timedelta(hours=hours)).isoformat()
+    now = now_dt.strftime("%Y-%m-%d %H:%M")
 
     print(f"=== Sybil Arena Status ({now} UTC, last {hours}h) ===\n")
+
+    experiments = queries.get_live_experiment_status(conn)
+    if experiments:
+        print("--- Experiment Records ---")
+        for experiment in experiments:
+            started = datetime.fromisoformat(experiment["started_at_utc"])
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            eligible = started + timedelta(hours=24)
+            elapsed_hours = max(0.0, (now_dt - started).total_seconds() / 3600)
+            window_age = (
+                f"{elapsed_hours:.1f}/24h"
+                if now_dt < eligible
+                else ">=24h (continuity still requires report validation)"
+            )
+            config = experiment["configuration"]
+            cohort = ",".join(str(mid) for mid in config.get("market_ids", [])) or "none"
+            print(
+                f"  {experiment['experiment_id']}  age={window_age}"
+                f"  start={started.astimezone(timezone.utc).isoformat()}"
+                f"  eligible={eligible.astimezone(timezone.utc).isoformat()}"
+            )
+            print(
+                f"    mode={experiment['mode']}  model={config.get('model', 'unknown')}"
+                f"  cohort={cohort}"
+            )
+            if experiment["identity_error"] is not None:
+                print(f"    IDENTITY INVALID: {experiment['identity_error']}")
+            expected = experiment["expected_traders_per_arm"]
+            for variant in ("control", "stage1"):
+                arm = experiment["arms"][variant]
+                readiness = "observed" if arm["ready"] else "INCOMPLETE"
+                last = arm["last_decision_at"] or "none"
+                print(
+                    f"    {variant:7s} {readiness:10s}"
+                    f" decisions={arm['decision_count']}"
+                    f" traders={arm['decision_traders']}/{expected}"
+                    f" snapshots={arm['snapshot_count']}"
+                    f" snapshot-traders={arm['snapshot_traders']}/{expected}"
+                    f" last={last}"
+                )
+        print()
 
     # --- Strategy Comparison ---
     strat = queries.get_strategy_comparison(conn)

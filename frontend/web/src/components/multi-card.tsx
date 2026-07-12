@@ -8,15 +8,15 @@ import {
   formatPercentDelta,
   formatCompactDollars,
 } from "@/lib/format/nanos";
-import { isMirror, isNative, type Market } from "@/lib/markets/use-markets";
-import { avgLiquidityNanos } from "@/lib/markets/liquidity";
+import {
+  isMirror,
+  isNative,
+  type IndexMarket,
+} from "@/lib/markets/use-markets";
 import { useCardHistory } from "@/lib/markets/use-card-history";
 import { formatTraders } from "@/lib/mock";
 import { useEventTraders } from "@/lib/markets/use-event-traders";
-import {
-  getCategoryColor,
-  pickDisplayCategory,
-} from "@/lib/categorize";
+import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
 import type { MarketPrice } from "@/lib/store";
 import { MarketThumb } from "./market-thumb";
 import { Sparkline } from "./sparkline";
@@ -27,7 +27,7 @@ const CARD_HEIGHT = 384;
 
 type Props = {
   groupName: string;
-  markets: Market[];
+  markets: IndexMarket[];
   prices: Record<number, MarketPrice>;
 };
 
@@ -67,7 +67,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
 
   const { points, delta24Cents } = useCardHistory(
     leader?.market_id ?? -1,
-    inView && !!leader
+    inView && !!leader,
   );
 
   const totalVolumeNanos = sumVolumeNanos(markets);
@@ -82,7 +82,10 @@ export function MultiCard({ groupName, markets, prices }: Props) {
 
   // Outcome short-labels (e.g. "↑ 200,000") live only in the raw Polymarket
   // event JSON; join by polymarket_condition_id. Lazy + cached per event.
-  const rawMarkets = useEventRaw(markets[0]?.event_id ?? undefined, inView).data;
+  const rawMarkets = useEventRaw(
+    markets[0]?.event_id ?? undefined,
+    inView,
+  ).data;
   const getLabel = useMemo(() => makeLabelResolver(rawMarkets), [rawMarkets]);
 
   return (
@@ -132,7 +135,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
       />
       <FooterRow
         totalVol={totalVol}
-        totalLiqNanos={avgLiquidityNanos(sumLiquidityNanos(markets))}
+        totalLiqNanos={sumLiquidityNanos(markets)}
         traderCount={eventTradersQ.data ?? 0}
       />
     </article>
@@ -145,7 +148,7 @@ function EyebrowRow({
   hiddenCount,
   allClosed,
 }: {
-  markets: Market[];
+  markets: IndexMarket[];
   count: number;
   hiddenCount: number;
   allClosed: boolean;
@@ -192,7 +195,7 @@ function EyebrowRow({
             {primary}
           </>
         ) : (
-          <span style={{ color: "var(--fg-4)" }}>uncategorized</span>
+          <span style={{ color: "var(--fg-3)" }}>uncategorized</span>
         )}
       </span>
       <span
@@ -249,6 +252,7 @@ function TitleRow({
   return (
     <Link
       href={href}
+      prefetch={false}
       draggable={false}
       onClick={(e) => {
         if (window.getSelection()?.toString()) e.preventDefault();
@@ -269,7 +273,7 @@ function TitleRow({
         fallbackIconUrl={fallbackIconUrl}
         size={64}
       />
-      <h3
+      <h2
         style={{
           fontFamily: "var(--font-sans)",
           fontWeight: 600,
@@ -287,7 +291,7 @@ function TitleRow({
         }}
       >
         {groupName}
-      </h3>
+      </h2>
     </Link>
   );
 }
@@ -299,11 +303,11 @@ function FeaturedOutcome({
   delta24Cents,
   getLabel,
 }: {
-  leader: Market | undefined;
+  leader: IndexMarket | undefined;
   price: MarketPrice | undefined;
   points: import("@/lib/markets/use-card-history").PricePoint[];
   delta24Cents: number | null;
-  getLabel: (m: Market) => string;
+  getLabel: (m: IndexMarket) => string;
 }) {
   if (!leader) {
     return (
@@ -330,6 +334,7 @@ function FeaturedOutcome({
   return (
     <Link
       href={`/m/${leader.market_id}`}
+      prefetch={false}
       draggable={false}
       onClick={(e) => {
         if (window.getSelection()?.toString()) e.preventDefault();
@@ -347,13 +352,19 @@ function FeaturedOutcome({
         color: "var(--fg-1)",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+          minWidth: 0,
+        }}
+      >
         <span
           style={{
             fontFamily: "var(--font-sans)",
-            fontSize: "var(--fs-16)",
-            fontWeight: 600,
-            color: "var(--fg-1)",
+            fontSize: "var(--fs-13)",
+            color: "var(--fg-2)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -427,10 +438,10 @@ function SecondaryList({
   getLabel,
   cardClosed,
 }: {
-  markets: Market[];
+  markets: IndexMarket[];
   prices: Record<number, MarketPrice>;
   inView: boolean;
-  getLabel: (m: Market) => string;
+  getLabel: (m: IndexMarket) => string;
   cardClosed: boolean;
 }) {
   return (
@@ -466,11 +477,11 @@ function SecondaryRow({
   getLabel,
   cardClosed,
 }: {
-  market: Market;
+  market: IndexMarket;
   price: MarketPrice | undefined;
   first?: boolean;
   inView: boolean;
-  getLabel: (m: Market) => string;
+  getLabel: (m: IndexMarket) => string;
   cardClosed: boolean;
 }) {
   const label = getLabel(market);
@@ -487,7 +498,9 @@ function SecondaryRow({
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   return (
     <Link
+      className="mobile-action-link"
       href={`/m/${market.market_id}`}
+      prefetch={false}
       draggable={false}
       onClick={(e) => {
         if (window.getSelection()?.toString()) e.preventDefault();
@@ -605,9 +618,8 @@ function FooterRow({
 }
 
 /**
- * Odds (outcome %) are always neutral — never tinted green/red. Only the 24h
- * delta token carries directional color (see `deltaValueColor`). Dim to fg-4
- * when there's no price yet.
+ * Odds are neutral values. Directional green/red belongs only to the separate
+ * 24h-delta token so a probability is not mistaken for a gain or loss.
  */
 function oddsColor(hasPrice: boolean): string {
   return hasPrice ? "var(--fg-1)" : "var(--fg-4)";
@@ -652,8 +664,8 @@ function FooterChip({
  * outcome). Sources 2–3 are a pre-deploy/edge fallback for the in-view snapshot.
  */
 function makeLabelResolver(
-  raw: Map<string, RawEventMarket> | undefined
-): (m: Market) => string {
+  raw: Map<string, RawEventMarket> | undefined,
+): (m: IndexMarket) => string {
   const byQuestion = new Map<string, string>();
   if (raw) {
     for (const rm of raw.values()) {
@@ -662,7 +674,7 @@ function makeLabelResolver(
       }
     }
   }
-  return (m: Market) => {
+  return (m: IndexMarket) => {
     const gt =
       m.group_item_title ??
       (m.polymarket_condition_id
@@ -679,7 +691,7 @@ function trimOutcomeLabel(name: string): string {
   return name.slice(idx + 1).trim();
 }
 
-function sumVolumeNanos(markets: Market[]): bigint | null {
+function sumVolumeNanos(markets: IndexMarket[]): bigint | null {
   let total = 0n;
   let any = false;
   for (const m of markets) {
@@ -696,7 +708,7 @@ function sumVolumeNanos(markets: Market[]): bigint | null {
  * Additive scalar — the backend already excludes multi-market orders, so
  * summing per-market scores does not double-count.
  */
-function sumLiquidityNanos(markets: Market[]): bigint {
+function sumLiquidityNanos(markets: IndexMarket[]): bigint {
   let total = 0n;
   for (const m of markets) {
     if (m.liquidity_avg10_nanos != null) {

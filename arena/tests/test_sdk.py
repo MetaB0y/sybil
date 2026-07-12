@@ -66,6 +66,8 @@ def _portfolio_payload() -> dict:
     return {
         "account_id": 42,
         "balance_nanos": 100 * NANOS_PER_DOLLAR,
+        "available_balance_nanos": 100 * NANOS_PER_DOLLAR,
+        "reserved_balance_nanos": 0,
         "total_deposited_nanos": 100 * NANOS_PER_DOLLAR,
         "positions": [
             {

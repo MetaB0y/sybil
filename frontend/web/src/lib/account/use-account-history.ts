@@ -94,7 +94,11 @@ export const CATEGORY_OF: Record<
 
 export interface AccountHistory {
   events: HistoryEvent[];
-  isMock: boolean;
+  hasData: boolean;
+  isPending: boolean;
+  isFetching: boolean;
+  error: Error | null;
+  refetch: () => Promise<unknown>;
   // `hasMore` is true only when the cursor walk hit the `MAX_PAGES` safety cap
   // (i.e. older events exist beyond what we loaded); `loadMore` raises the cap.
   hasMore: boolean;
@@ -113,8 +117,16 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
 
   const q = useQuery({
     enabled: accountId !== null,
-    queryKey: ["account", accountId, "history", { page: HISTORY_PAGE, maxPages }],
-    queryFn: async (): Promise<{ events: HistoryEvent[]; truncated: boolean }> => {
+    queryKey: [
+      "account",
+      accountId,
+      "history",
+      { page: HISTORY_PAGE, maxPages },
+    ],
+    queryFn: async (): Promise<{
+      events: HistoryEvent[];
+      truncated: boolean;
+    }> => {
       if (accountId === null) throw new Error("no account");
       // Walk the `before` cursor from the newest event to the oldest, paging in
       // 500s, so counts/lists reflect the account's whole history — not a window.
@@ -149,7 +161,11 @@ export function useAccountHistory(accountId: number | null): AccountHistory {
   const events = q.data?.events ?? [];
   return {
     events,
-    isMock: false,
+    hasData: q.data !== undefined,
+    isPending: q.isPending,
+    isFetching: q.isFetching,
+    error: q.error,
+    refetch: q.refetch,
     hasMore: q.data?.truncated ?? false,
     loadMore: () => setMaxPages((p) => p + MAX_PAGES),
   };
@@ -169,7 +185,9 @@ export interface OrderFillAgg {
  * events live in the durable, full history log loaded by `useAccountHistory`.
  * Used by Open Orders' "Avg fill" column and the hero trade count.
  */
-export function fillAggByOrder(events: HistoryEvent[]): Map<number, OrderFillAgg> {
+export function fillAggByOrder(
+  events: HistoryEvent[],
+): Map<number, OrderFillAgg> {
   const acc = new Map<number, { count: number; qty: bigint; cost: bigint }>();
   for (const e of events) {
     if (e.type !== "filled" && e.type !== "partial_fill") continue;
@@ -210,9 +228,11 @@ function mapEvent(r: HistoryEventResponse): HistoryEvent {
   if (r.amount_nanos != null) e.amountNanos = parseNanos(r.amount_nanos);
   if (r.realized_pnl_nanos != null)
     e.realizedPnlNanos = parseNanos(r.realized_pnl_nanos);
-  if (r.payout_outcome != null) e.payoutOutcome = r.payout_outcome as "YES" | "NO";
+  if (r.payout_outcome != null)
+    e.payoutOutcome = r.payout_outcome as "YES" | "NO";
   if (r.reason != null) e.reason = r.reason;
   if (r.required_nanos != null) e.requiredNanos = parseNanos(r.required_nanos);
-  if (r.available_nanos != null) e.availableNanos = parseNanos(r.available_nanos);
+  if (r.available_nanos != null)
+    e.availableNanos = parseNanos(r.available_nanos);
   return e;
 }

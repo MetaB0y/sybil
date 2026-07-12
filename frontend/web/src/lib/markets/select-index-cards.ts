@@ -7,8 +7,7 @@
  * `showClosed`, and always sink below open cards regardless of the active sort.
  */
 
-import { binaryCardOf } from "./build-index-cards";
-import type { Market } from "./use-markets";
+import type { IndexMarket } from "./use-markets";
 import type { SortKey } from "./sort";
 
 export type CardItem =
@@ -16,7 +15,7 @@ export type CardItem =
       kind: "multi";
       name: string;
       eventId: string;
-      markets: Market[];
+      markets: IndexMarket[];
       volumeNanos: bigint;
       sortKey: string;
       createdMs: number;
@@ -25,7 +24,7 @@ export type CardItem =
     }
   | {
       kind: "binary";
-      market: Market;
+      market: IndexMarket;
       volumeNanos: bigint;
       sortKey: string;
       createdMs: number;
@@ -61,6 +60,9 @@ function compareBySort(
   sort: SortKey,
   eventTraders: Map<string, number>,
 ): number {
+  if (sort === "new") {
+    return b.createdMs - a.createdMs;
+  }
   if (sort === "traders") {
     const ta = traderCountOf(a, eventTraders);
     const tb = traderCountOf(b, eventTraders);
@@ -95,43 +97,4 @@ export function selectIndexCards(
     return compareBySort(a, b, opts.sort, opts.eventTraders);
   });
   return out;
-}
-
-/**
- * Nav-search results (drill-down). Where the grid shows one card per event,
- * search resolves each match to the most specific thing:
- *   - an event whose *title* matches the query is returned as the event;
- *   - an event that matches only through its outcomes is replaced by those
- *     matching outcomes, each as its own market card;
- *   - a standalone market matches on its own name/event title.
- * So typing "OpenAI" jumps to the specific OpenAI market instead of the parent
- * "best AI model" event. Closed cards drop; the rest are volume-sorted (bigger
- * events break ties first), matching the dropdown's volume-preview intent.
- */
-export function searchResultCards(
-  items: CardItem[],
-  query: string,
-): CardItem[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  const out: CardItem[] = [];
-  for (const it of items) {
-    if (it.kind === "binary") {
-      if (it.sortKey.includes(q)) out.push(it);
-    } else if (it.name.toLowerCase().includes(q)) {
-      out.push(it);
-    } else {
-      for (const m of it.markets) {
-        if (m.name.toLowerCase().includes(q)) out.push(binaryCardOf(m));
-      }
-    }
-  }
-  return out
-    .filter((c) => !c.closed)
-    .sort((a, b) => {
-      if (a.volumeNanos !== b.volumeNanos) {
-        return a.volumeNanos < b.volumeNanos ? 1 : -1;
-      }
-      return sizeOf(b) - sizeOf(a);
-    });
 }

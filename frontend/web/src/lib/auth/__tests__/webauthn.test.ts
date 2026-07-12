@@ -3,6 +3,7 @@ import {
   accountIdFromUserHandle,
   base64UrlDecode,
   base64UrlEncode,
+  createPasskeyForAccount,
   discoverPasskeyAccount,
 } from "../webauthn";
 
@@ -43,6 +44,45 @@ describe("accountIdFromUserHandle", () => {
     expect(() => accountIdFromUserHandle(unsafe)).toThrow(
       "too large for this browser",
     );
+  });
+});
+
+describe("createPasskeyForAccount", () => {
+  function installWebAuthn(create: ReturnType<typeof vi.fn>) {
+    vi.stubGlobal("window", { PublicKeyCredential: class {} });
+    vi.stubGlobal("navigator", { credentials: { create } });
+  }
+
+  it("prefers the platform authenticator for onboarding", async () => {
+    const create = vi.fn().mockResolvedValue(null);
+    installWebAuthn(create);
+
+    await expect(createPasskeyForAccount(109)).rejects.toThrow(
+      "Passkey creation was cancelled",
+    );
+    expect(
+      create.mock.calls[0]?.[0].publicKey.authenticatorSelection,
+    ).toMatchObject({
+      authenticatorAttachment: "platform",
+      residentKey: "preferred",
+      userVerification: "required",
+    });
+  });
+
+  it("allows a different authenticator or provider for a backup", async () => {
+    const create = vi.fn().mockResolvedValue(null);
+    installWebAuthn(create);
+
+    await expect(
+      createPasskeyForAccount(109, { authenticatorAttachment: "any" }),
+    ).rejects.toThrow("Passkey creation was cancelled");
+    const selection =
+      create.mock.calls[0]?.[0].publicKey.authenticatorSelection;
+    expect(selection).not.toHaveProperty("authenticatorAttachment");
+    expect(selection).toMatchObject({
+      residentKey: "preferred",
+      userVerification: "required",
+    });
   });
 });
 

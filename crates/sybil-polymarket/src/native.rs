@@ -73,17 +73,25 @@ pub enum NativeOutcomeSet {
     /// Categorical/multi-outcome template. Each enabled outcome becomes one
     /// binary market, and all enabled outcomes are placed in one MarketGroup.
     Categorical { outcomes: Vec<NativeOutcome> },
-    /// Nested threshold ladder. Each enabled rung becomes one binary child
-    /// market ("value {direction} {threshold} {unit}"), and all enabled rungs
-    /// are placed in one MarketGroup. Unlike `Categorical`, the rungs are NOT
-    /// mutually exclusive, so their initial prices are intentionally not summed.
+    /// Nested threshold ladder. Each enabled rung becomes one independent
+    /// binary child market ("value {direction} {threshold} {unit}"). Rungs
+    /// share display-event metadata but never enter a core `MarketGroup`,
+    /// because several nested thresholds can resolve YES simultaneously.
     Threshold {
-        /// `"above"` (bigger-is-the-question) or `"below"` (e.g. price ladders).
-        direction: String,
+        /// Bigger-is-the-question or smaller-is-the-question semantics.
+        direction: NativeThresholdDirection,
         /// Display unit, e.g. `"tokens"`, `"hours"`, `"USD/MTok"`.
         unit: String,
         outcomes: Vec<NativeThresholdRung>,
     },
+}
+
+/// Comparison direction for one nested threshold ladder.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeThresholdDirection {
+    Above,
+    Below,
 }
 
 /// One categorical outcome.
@@ -103,8 +111,8 @@ pub struct NativeOutcome {
     pub image_url: Option<String>,
 }
 
-/// One rung of a threshold ladder. Each enabled rung expands to a binary child
-/// market grouped under the parent template.
+/// One rung of a threshold ladder. Each enabled rung expands to an independent
+/// binary child market displayed under the parent event.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NativeThresholdRung {
     /// Stable rung id within the parent template.
@@ -186,6 +194,16 @@ pub struct NativeMarketSpec {
     event_icon_url: Option<String>,
     /// Per-child market image (categorical outcome / threshold rung logo).
     market_image_url: Option<String>,
+    /// Structured threshold semantics. Display titles are not trusted as the
+    /// resolution predicate.
+    threshold_question: Option<NativeThresholdQuestion>,
+}
+
+#[derive(Debug, Clone)]
+struct NativeThresholdQuestion {
+    direction: NativeThresholdDirection,
+    unit: String,
+    threshold: f64,
 }
 
 impl NativeMarketCatalog {
@@ -352,11 +370,6 @@ impl NativeMarketTemplate {
                         "{context} threshold template must use per-rung quote_range values"
                     )));
                 }
-                if direction != "above" && direction != "below" {
-                    return Err(Error::NativeCatalog(format!(
-                        "{context} threshold direction must be \"above\" or \"below\""
-                    )));
-                }
                 validate_nonempty("outcome_set.unit", unit, context)?;
                 if outcomes.len() < 2 {
                     return Err(Error::NativeCatalog(format!(
@@ -365,6 +378,7 @@ impl NativeMarketTemplate {
                 }
                 let mut rung_ids = HashSet::new();
                 let mut enabled_count = 0usize;
+                let mut previous: Option<&NativeThresholdRung> = None;
                 for (i, rung) in outcomes.iter().enumerate() {
                     let rung_context = format!("{context} rung #{i} ({:?})", rung.id);
                     validate_id(&rung.id, &rung_context)?;
@@ -388,6 +402,27 @@ impl NativeMarketTemplate {
                     if rung.enabled {
                         enabled_count += 1;
                     }
+                    if let Some(previous) = previous {
+                        let ordered = match direction {
+                            NativeThresholdDirection::Above => rung.threshold > previous.threshold,
+                            NativeThresholdDirection::Below => rung.threshold < previous.threshold,
+                        };
+                        if !ordered {
+                            return Err(Error::NativeCatalog(format!(
+                                "{rung_context} thresholds must be strictly ordered from the easiest predicate to the hardest"
+                            )));
+                        }
+                        if rung.quote_range.min > previous.quote_range.min + f64::EPSILON
+                            || rung.quote_range.initial
+                                > previous.quote_range.initial + f64::EPSILON
+                            || rung.quote_range.max > previous.quote_range.max + f64::EPSILON
+                        {
+                            return Err(Error::NativeCatalog(format!(
+                                "{rung_context} nested threshold quote ranges must be non-increasing"
+                            )));
+                        }
+                    }
+                    previous = Some(rung);
                 }
                 if self.enabled && enabled_count < 2 {
                     return Err(Error::NativeCatalog(format!(
@@ -429,6 +464,7 @@ impl NativeMarketTemplate {
                     event_image_url: self.event_image_url.clone(),
                     event_icon_url: self.event_icon_url.clone(),
                     market_image_url: self.event_image_url.clone(),
+                    threshold_question: None,
                 }]
             }
             NativeOutcomeSet::Categorical { outcomes } => {
@@ -458,13 +494,16 @@ impl NativeMarketTemplate {
                         event_image_url: self.event_image_url.clone(),
                         event_icon_url: self.event_icon_url.clone(),
                         market_image_url: outcome.image_url.clone(),
+                        threshold_question: None,
                     })
                     .collect()
             }
-            NativeOutcomeSet::Threshold { outcomes, .. } => {
+            NativeOutcomeSet::Threshold {
+                direction,
+                unit,
+                outcomes,
+            } => {
                 let enabled: Vec<_> = outcomes.iter().filter(|rung| rung.enabled).collect();
-                let group_size = enabled.len();
-                let group_key = Some(native_group_key(&self.id));
                 enabled
                     .into_iter()
                     .map(|rung| NativeMarketSpec {
@@ -473,8 +512,8 @@ impl NativeMarketTemplate {
                         name: format!("{}: {}", self.title, rung.title),
                         outcome_title: Some(rung.title.clone()),
                         quote_range: rung.quote_range,
-                        group_key: group_key.clone(),
-                        group_size,
+                        group_key: None,
+                        group_size: 0,
                         end_time_ms,
                         description: Some(format!(
                             "Native threshold market. Units: {}.",
@@ -488,6 +527,11 @@ impl NativeMarketTemplate {
                         event_image_url: self.event_image_url.clone(),
                         event_icon_url: self.event_icon_url.clone(),
                         market_image_url: rung.image_url.clone(),
+                        threshold_question: Some(NativeThresholdQuestion {
+                            direction: *direction,
+                            unit: unit.clone(),
+                            threshold: rung.threshold,
+                        }),
                     })
                     .collect()
             }
@@ -541,6 +585,16 @@ impl NativeMarketSpec {
     /// phrased as "did this outcome win?" so a single scalar payout in [0,1]
     /// (YES probability) is always well defined.
     pub fn resolution_question(&self) -> String {
+        if let Some(question) = &self.threshold_question {
+            let comparison = match question.direction {
+                NativeThresholdDirection::Above => "greater than or equal to",
+                NativeThresholdDirection::Below => "less than or equal to",
+            };
+            return format!(
+                "For the event \"{}\": resolve YES if and only if the observed value is {comparison} {} {}, otherwise NO.",
+                self.event_title, question.threshold, question.unit
+            );
+        }
         match &self.outcome_title {
             Some(outcome) => format!(
                 "For the event \"{}\": resolve YES if the outcome \"{}\" is the winning \
@@ -664,6 +718,26 @@ mod tests {
             // Polymarket condition id (the mirror/native discriminator).
             assert_eq!(spec.metadata_request().polymarket_condition_id, None);
         }
+        for template in &catalog.markets {
+            if matches!(template.outcome_set, NativeOutcomeSet::Threshold { .. }) {
+                assert!(
+                    specs
+                        .iter()
+                        .filter(|spec| spec.template_id == template.id)
+                        .all(|spec| spec.group_key.is_none() && spec.group_size == 0),
+                    "threshold template {} must not create a mutually-exclusive core group",
+                    template.id
+                );
+            }
+        }
+
+        // These ids were already deployed with different categorical children.
+        // Reusing them would append the replacement children to the persisted
+        // old MarketGroup instead of creating a clean catalog generation.
+        assert!(catalog.markets.iter().all(|template| {
+            template.id != "openrouter_top_model_dec_2026"
+                && template.id != "openrouter_top_app_dec_2026"
+        }));
 
         // No placeholder text may survive in shipped entries.
         for market in &catalog.markets {
@@ -780,13 +854,13 @@ mod tests {
         let specs = catalog.enabled_market_specs();
         // Only the two enabled rungs expand; the disabled rung is skipped.
         assert_eq!(specs.len(), 2);
-        assert!(
-            specs
-                .iter()
-                .all(|spec| spec.group_key.as_deref() == Some("native:native_ladder"))
-        );
-        assert!(specs.iter().all(|spec| spec.group_size == 2));
+        assert!(specs.iter().all(|spec| spec.group_key.is_none()));
+        assert!(specs.iter().all(|spec| spec.group_size == 0));
         assert_eq!(specs[0].market_key, "native_ladder:ge_2m");
+        assert_eq!(
+            specs[0].resolution_question(),
+            "For the event \"How large will X be?\": resolve YES if and only if the observed value is greater than or equal to 2000000 tokens, otherwise NO."
+        );
         let metadata = specs[0].metadata_request();
         assert_eq!(metadata.group_item_title.as_deref(), Some("\u{2265} 2M"));
         // Template image flows to every child's event image.
@@ -821,7 +895,37 @@ mod tests {
         );
         let bad = ok.replace("\"below\"", "\"sideways\"");
         let err = NativeMarketCatalog::parse_json(&bad).unwrap_err();
-        assert!(err.to_string().contains("direction must be"), "{err}");
+        assert!(err.to_string().contains("unknown variant"), "{err}");
+    }
+
+    #[test]
+    fn threshold_ladders_require_ordered_thresholds_and_monotone_quotes() {
+        let json = r#"{
+            "markets": [{
+                "id": "native_ladder", "enabled": true, "title": "How large?",
+                "outcome_set": { "type": "threshold", "direction": "above", "unit": "x",
+                    "outcomes": [
+                        { "id": "ge_2", "title": "≥ 2", "enabled": true, "threshold": 2, "quote_range": { "min": 0.4, "max": 0.8, "initial": 0.6 } },
+                        { "id": "ge_5", "title": "≥ 5", "enabled": true, "threshold": 5, "quote_range": { "min": 0.2, "max": 0.6, "initial": 0.3 } }
+                    ] },
+                "units": "x", "end_time": "2026-12-31T23:59:00Z",
+                "resolution_criteria": "Compare the observed value.",
+                "source_url": "https://example.com/x", "category": "AI",
+                "resolution_source": { "type": "manual", "instructions": "Read x." }
+            }]
+        }"#;
+        NativeMarketCatalog::parse_json(json).unwrap();
+
+        let duplicate = json.replace("\"threshold\": 5", "\"threshold\": 2");
+        let err = NativeMarketCatalog::parse_json(&duplicate).unwrap_err();
+        assert!(err.to_string().contains("strictly ordered"), "{err}");
+
+        let non_monotone = json.replace(
+            "\"min\": 0.2, \"max\": 0.6, \"initial\": 0.3",
+            "\"min\": 0.5, \"max\": 0.9, \"initial\": 0.7",
+        );
+        let err = NativeMarketCatalog::parse_json(&non_monotone).unwrap_err();
+        assert!(err.to_string().contains("non-increasing"), "{err}");
     }
 
     #[test]

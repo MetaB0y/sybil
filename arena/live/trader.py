@@ -55,6 +55,8 @@ class PriceSnapshot:
 @dataclass
 class TradeRecord:
     market_id: int
+    analysis_batch_id: str
+    analysis_reference_price: float | None
     articles: list[LiveArticle]
     analysis: str
     fair_value: float
@@ -62,6 +64,7 @@ class TradeRecord:
     effective_fair_value: float | None
     fair_value_age_s: float | None
     confidence: float | None
+    restate: str
     countercase: str
     rejection_reason: str | None
     orders: list[OrderSpec]
@@ -82,6 +85,7 @@ class FairValueDecisionContext:
     age_s: float | None
     freshness_factor: float
     confidence: float | None
+    restate: str
     countercase: str
 
 
@@ -182,6 +186,7 @@ class LiveLlmTrader(BaseAgent):
         self.fair_values: dict[int, float] = {}
         self.fair_value_timestamps: dict[int, datetime] = {}
         self.fair_value_confidences: dict[int, float | None] = {}
+        self.fair_value_restates: dict[int, str] = {}
         self.fair_value_countercases: dict[int, str] = {}
         self._latest_rebalance_context: dict[int, FairValueDecisionContext] = {}
         self._latest_rejection_reasons: dict[int, str | None] = {}
@@ -216,8 +221,11 @@ class LiveLlmTrader(BaseAgent):
         effective_fair_value: float | None = None,
         fair_value_age_s: float | None = None,
         confidence: float | None = None,
+        restate: str = "",
         countercase: str = "",
         rejection_reason: str | None = None,
+        analysis_batch_id: str = "",
+        analysis_reference_price: float | None = None,
     ) -> None:
         if orders and rejection_reason is not None:
             raise ValueError("submitted decisions cannot have a rejection_reason")
@@ -227,6 +235,8 @@ class LiveLlmTrader(BaseAgent):
         no_pos = self.get_position(market_id, "NO")
         record = TradeRecord(
             market_id=market_id,
+            analysis_batch_id=analysis_batch_id,
+            analysis_reference_price=analysis_reference_price,
             articles=articles or [],
             analysis=analysis,
             fair_value=fair_value,
@@ -234,6 +244,7 @@ class LiveLlmTrader(BaseAgent):
             effective_fair_value=effective_fair_value,
             fair_value_age_s=fair_value_age_s,
             confidence=confidence,
+            restate=restate,
             countercase=countercase,
             rejection_reason=rejection_reason,
             orders=orders,
@@ -281,10 +292,13 @@ class LiveLlmTrader(BaseAgent):
                 effective_fair_value=effective_fair_value,
                 fair_value_age_s=fair_value_age_s,
                 confidence=confidence,
+                restate=restate,
                 countercase=countercase,
                 rejection_reason=rejection_reason,
                 market_category=market_category,
                 market_tags=[str(tag) for tag in market_tags],
+                analysis_batch_id=analysis_batch_id,
+                analysis_reference_price=analysis_reference_price,
             )
 
     # -- Price helpers --
@@ -316,12 +330,14 @@ class LiveLlmTrader(BaseAgent):
         self.fair_values[update.market_id] = update.fair_value
         self.fair_value_timestamps[update.market_id] = update.ts or observed_at
         self.fair_value_confidences[update.market_id] = update.confidence
+        self.fair_value_restates[update.market_id] = update.restate
         self.fair_value_countercases[update.market_id] = update.countercase
 
     def _forget_fair_value(self, market_id: int) -> None:
         self.fair_values.pop(market_id, None)
         self.fair_value_timestamps.pop(market_id, None)
         self.fair_value_confidences.pop(market_id, None)
+        self.fair_value_restates.pop(market_id, None)
         self.fair_value_countercases.pop(market_id, None)
         self._latest_updates.pop(market_id, None)
 
@@ -356,6 +372,7 @@ class LiveLlmTrader(BaseAgent):
             age_s=fresh_fv.age_s if fresh_fv else None,
             freshness_factor=fresh_fv.freshness_factor if fresh_fv else 0.0,
             confidence=self.fair_value_confidences.get(market_id),
+            restate=self.fair_value_restates.get(market_id, ""),
             countercase=self.fair_value_countercases.get(market_id, ""),
         )
 
@@ -542,6 +559,7 @@ class LiveLlmTrader(BaseAgent):
                     "effective_fair_value": effective_fv,
                     "fair_value_age_s": context.age_s if context else None,
                     "confidence": context.confidence if context else None,
+                    "restate": context.restate if context else "",
                     "countercase": context.countercase if context else "",
                     "orders": market_orders,
                     "motivation": motivation,
@@ -551,6 +569,10 @@ class LiveLlmTrader(BaseAgent):
                     "block_height": block.height,
                     "timestamp": now,
                     "rejection_reason": self._latest_rejection_reasons[market_id],
+                    "analysis_batch_id": update.analysis_batch_id if update else "",
+                    "analysis_reference_price": (
+                        update.analysis_reference_price if update else None
+                    ),
                 }
                 self._record_trade(
                     market_id=entry["market_id"],
@@ -569,8 +591,11 @@ class LiveLlmTrader(BaseAgent):
                     effective_fair_value=entry["effective_fair_value"],
                     fair_value_age_s=entry["fair_value_age_s"],
                     confidence=entry["confidence"],
+                    restate=entry["restate"],
                     countercase=entry["countercase"],
                     rejection_reason=entry["rejection_reason"],
+                    analysis_batch_id=entry["analysis_batch_id"],
+                    analysis_reference_price=entry["analysis_reference_price"],
                 )
             all_orders.extend(rebalance_orders)
             self._last_rebalance = self._monotonic()

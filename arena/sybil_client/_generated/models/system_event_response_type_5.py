@@ -9,7 +9,6 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..models.system_event_response_type_5_type import SystemEventResponseType5Type
-from typing import cast
 
 
 
@@ -22,29 +21,18 @@ T = TypeVar("T", bound="SystemEventResponseType5")
 
 @_attrs_define
 class SystemEventResponseType5:
-    """ On-chain cancellation event (D1). `side` is the categorical
-    `OrderDirection` ("BuyYes"/"SellYes"/"BuyNo"/"SellNo") and
-    `remaining_quantity` is the unfilled portion of `max_fill` at
-    cancel time. Integer share-units; 1000 units = 1 share.
-    Forward-additive: old clients ignore unknown
-    variants via serde's `#[serde(tag = "type")]` shape.
-
+    """ 
         Attributes:
             account_id (int):
-            market_ids (list[int]):
-            order_id (int):
-            remaining_quantity (int): Cancelled order's unfilled quantity. Integer share-units;
-                1000 units = 1 share.
-            side (str):
+            amount_nanos (int): Finalized withdrawal amount. Integer nanodollars; 1_000_000_000 = $1.
             type_ (SystemEventResponseType5Type):
+            withdrawal_id (int):
      """
 
     account_id: int
-    market_ids: list[int]
-    order_id: int
-    remaining_quantity: int
-    side: str
+    amount_nanos: int
     type_: SystemEventResponseType5Type
+    withdrawal_id: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -54,28 +42,20 @@ class SystemEventResponseType5:
     def to_dict(self) -> dict[str, Any]:
         account_id = self.account_id
 
-        market_ids = self.market_ids
-
-
-
-        order_id = self.order_id
-
-        remaining_quantity = self.remaining_quantity
-
-        side = self.side
+        amount_nanos = self.amount_nanos
 
         type_ = self.type_.value
+
+        withdrawal_id = self.withdrawal_id
 
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
             "account_id": account_id,
-            "market_ids": market_ids,
-            "order_id": order_id,
-            "remaining_quantity": remaining_quantity,
-            "side": side,
+            "amount_nanos": amount_nanos,
             "type": type_,
+            "withdrawal_id": withdrawal_id,
         })
 
         return field_dict
@@ -87,27 +67,20 @@ class SystemEventResponseType5:
         d = dict(src_dict)
         account_id = d.pop("account_id")
 
-        market_ids = cast(list[int], d.pop("market_ids"))
-
-
-        order_id = d.pop("order_id")
-
-        remaining_quantity = d.pop("remaining_quantity")
-
-        side = d.pop("side")
+        amount_nanos = d.pop("amount_nanos")
 
         type_ = SystemEventResponseType5Type(d.pop("type"))
 
 
 
 
+        withdrawal_id = d.pop("withdrawal_id")
+
         system_event_response_type_5 = cls(
             account_id=account_id,
-            market_ids=market_ids,
-            order_id=order_id,
-            remaining_quantity=remaining_quantity,
-            side=side,
+            amount_nanos=amount_nanos,
             type_=type_,
+            withdrawal_id=withdrawal_id,
         )
 
 

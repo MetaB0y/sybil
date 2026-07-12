@@ -27,12 +27,7 @@ import {
 } from "@/lib/account/quantity";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
-import {
-  formatAge,
-  formatCentsPrecise,
-  formatDollarsRounded,
-  parseNanos,
-} from "@/lib/format/nanos";
+import { formatAge, formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
@@ -80,7 +75,7 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "outcome", label: "Outcome", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
-  { key: "placed", label: "Filled/Placed", align: "right" },
+  { key: "placed", label: "Placed/Filled", align: "right" },
   { key: "limit", label: "Limit", align: "right" },
   { key: "avgfill", label: "Avg fill", align: "right" },
   { key: "value", label: "Value", align: "right" },
@@ -212,10 +207,16 @@ export function EventOpenOrders({
   // Cancellation refresh: the resting-orders feed (useAccountOrders) self-
   // refetches per block, but invalidate immediately so the row drops as soon as
   // the cancel is acknowledged rather than on the next batch.
-  function onCancelled() {
-    qc.invalidateQueries({ queryKey: ["account", accountId, "orders"] });
-    qc.invalidateQueries({ queryKey: ["account", accountId, "portfolio"] });
-    qc.invalidateQueries({ queryKey: ["orders", "pending"] });
+  function onCancelled(orderId: number) {
+    qc.setQueryData<AccountOrder[]>(
+      ["account", accountId, "orders"],
+      (current) => current?.filter((order) => order.order_id !== orderId),
+    );
+    void Promise.allSettled([
+      qc.invalidateQueries({ queryKey: ["account", accountId, "orders"] }),
+      qc.invalidateQueries({ queryKey: ["account", accountId, "portfolio"] }),
+      qc.invalidateQueries({ queryKey: ["orders", "pending"] }),
+    ]);
   }
 
   if (orders.length === 0) {
@@ -264,7 +265,7 @@ function OrderRow({
   nowMs: number | null;
   accountId: number;
   publicKeyHex: string;
-  onCancelled: () => void;
+  onCancelled: (orderId: number) => void;
 }) {
   const {
     order,
@@ -298,7 +299,8 @@ function OrderRow({
           limitPriceNanos: String(order.limit_price_nanos),
         },
       });
-      onCancelled();
+      onCancelled(order.order_id);
+      setCancelling(false);
     } catch (e) {
       setCancelError(e instanceof Error ? e.message : String(e));
       setCancelling(false);
@@ -308,6 +310,7 @@ function OrderRow({
   return (
     <Row>
       <span
+        title={label}
         style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -330,14 +333,17 @@ function OrderRow({
       >
         {action}
       </span>
-      <SidePill outcome={outcome} />
+      <span>
+        <SidePill outcome={outcome} />
+      </span>
       <Right mono>
         {placed === 0 ? (
-          <>{formatShareUnits(order.remaining_quantity, 1)}</>
+          <>{formatShareUnits(order.remaining_quantity)}</>
         ) : (
-          // Rounded to 1dp in view.
-          <span>
-            {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
+          <span
+            title={`${formatShareUnits(filled)} filled of ${formatShareUnits(placed)} placed`}
+          >
+            {`${formatShareUnits(placed)} / ${formatShareUnits(filled)}`}
           </span>
         )}
       </Right>
@@ -345,7 +351,7 @@ function OrderRow({
       <Right mono>
         <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />
       </Right>
-      <Right mono>{formatDollarsRounded(valueNanos, { decimals: 1 })}</Right>
+      <Right mono>{formatDollars(valueNanos, { decimals: 2 })}</Right>
       <Right mono>
         <CreatedCell placedAtMs={placedAtMs} nowMs={nowMs} />
       </Right>
@@ -357,7 +363,7 @@ function OrderRow({
           type="button"
           onClick={onCancel}
           disabled={cancelling}
-          title={cancelError || undefined}
+          title="Cancel order"
           style={{
             padding: "3px 8px",
             background: "transparent",
@@ -375,6 +381,20 @@ function OrderRow({
           {cancelling ? "…" : "Cancel"}
         </button>
       </Right>
+      {cancelError && (
+        <span
+          role="alert"
+          style={{
+            gridColumn: "1 / -1",
+            color: "var(--no)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            lineHeight: 1.4,
+          }}
+        >
+          Couldn&apos;t cancel order: {cancelError}
+        </span>
+      )}
     </Row>
   );
 }
@@ -393,19 +413,30 @@ function CreatedCell({ placedAtMs, nowMs }: { placedAtMs: number; nowMs: number 
   );
 }
 
-/** Avg fill price (WAC, side-adjusted) with the fill count inline as a faded
- *  "·N" suffix — one line, so the row stays a single row. */
+/** Avg fill price (WAC, side-adjusted) with fill count beneath. */
 function AvgFillCell({ priceNanos, count }: { priceNanos: bigint | null; count: number }) {
   return (
     <span
-      style={{ fontFamily: "var(--font-mono)", fontSize: 12, whiteSpace: "nowrap" }}
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "flex-end",
+        gap: 1,
+        fontFamily: "var(--font-mono)",
+      }}
     >
-      <span style={{ color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
+      <span style={{ fontSize: 12, color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
         {priceNanos != null ? formatCentsPrecise(priceNanos) : "—"}
       </span>
-      {count > 0 && (
-        <span style={{ color: "var(--fg-4)", fontSize: 10 }}>{` ·${count}`}</span>
-      )}
+      <span
+        style={{
+          fontSize: 9.5,
+          color: "var(--fg-4)",
+          letterSpacing: "var(--track-wide)",
+        }}
+      >
+        {count === 1 ? "1 fill" : `${count} fills`}
+      </span>
     </span>
   );
 }
@@ -439,6 +470,7 @@ function HeaderCell({
         letterSpacing: "var(--track-wide)",
         color: active ? "var(--fg-2)" : "var(--fg-4)",
       }}
+      title={`Sort by ${col.label}`}
     >
       <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>

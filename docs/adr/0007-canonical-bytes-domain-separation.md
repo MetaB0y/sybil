@@ -38,8 +38,9 @@ Canonical signing bytes are **domain-separated and genesis-bound**:
   state-bound `pre_keys_digest`+`pre_events_digest` for key-ops, per the
   ratification packet D2).
 
-Order/cancel/key-register/key-revoke canonical bytes all now lead with
-`genesis_hash` (SYB-224/229/231, landed).
+Order/cancel/bridge-withdrawal/key-register/key-revoke canonical bytes all now
+lead with `genesis_hash` (SYB-224/229/231 and the SYB-56 bridge follow-up,
+landed).
 
 ## Alternatives considered
 

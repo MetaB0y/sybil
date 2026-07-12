@@ -19,7 +19,8 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
+from hashlib import sha256
+from typing import TYPE_CHECKING, Callable, Literal
 
 import openai
 
@@ -27,7 +28,7 @@ from sybil_client import Block
 
 from .costs import cost_of_call
 from .fair_value_bus import FairValueBus, FairValueUpdate
-from .news_feed import LiveArticle, NewsFeed, NewsSubscription
+from .news_feed import LiveArticle, NewsFeed, NewsSubscription, PairedNewsBatchView
 from .pricing import market_price
 from .strategy import RESOLVED_HIGH, RESOLVED_LOW
 
@@ -42,7 +43,20 @@ log = logging.getLogger(__name__)
 
 DEFAULT_PARSE_CONFIDENCE = 0.5
 DEFAULT_COUNTERCASE = "No countercase supplied; treat this estimate cautiously."
+DEFAULT_RESTATE = ""
 DEDUP_SIMILARITY_THRESHOLD = 0.82
+LLM_TEMPERATURE = 0.3
+LLM_MAX_TOKENS = 2048
+LLM_REASONING_MAX_TOKENS = 1024
+
+
+def llm_generation_parameters() -> dict:
+    """Return the actual immutable generation treatment used for every call."""
+    return {
+        "temperature": LLM_TEMPERATURE,
+        "max_tokens": LLM_MAX_TOKENS,
+        "reasoning": {"max_tokens": LLM_REASONING_MAX_TOKENS},
+    }
 
 
 # System prompt: unchanged probability-analysis framing from the pre-split
@@ -66,15 +80,91 @@ Key principles:
 - Only revise significantly for DIRECT evidence — tangential news warrants at most 1-2 cent
   adjustment
 - Official actions > direct quotes > analysis > speculation > rumors
+- Prefer original primary sources or wire reporting; discount aggregator and SEO-driven summaries
 - Most events have genuine uncertainty — avoid extreme probabilities unless evidence is
   extraordinary
 
 Always respond in English regardless of article language."""
 
+# Concurrent SYB-114 Stage 1 experiments need the actual pre-Stage-1 prompt as
+# their control. Keep this as an explicit contract instead of editing the
+# current prompt at runtime: the two variants must remain auditable, and the
+# ordinary live path must continue to use ``SYSTEM_PROMPT`` verbatim.
+PRE_STAGE1_SYSTEM_PROMPT = """\
+You are analyzing news articles for a prediction market. Your job is to estimate the probability
+of the event occurring, given the evidence.
+
+You will be given:
+- A market question
+- Current market price (from Polymarket)
+- Your previous fair value estimate (if any)
+- One or more news articles
+
+Respond with your probability estimate and brief reasoning. Be concise.
+
+Key principles:
+- Base your estimate on the article evidence + prior fair value, not just the market price
+- If the article contains no NEW information, keep your estimate near your prior fair value
+- Only revise significantly for DIRECT evidence — tangential news warrants at most 1-2 cent
+  adjustment
+- Official actions > direct quotes > analysis > speculation > rumors
+- Most events have genuine uncertainty — avoid extreme probabilities unless evidence is
+  extraordinary
+
+Always respond in English regardless of article language."""
+
+PromptContract = Literal["stage1", "pre_stage1_control"]
+
+PRE_STAGE1_RESPONSE_CONTRACT = """FAIR_VALUE: [Your probability estimate, 0.01-0.99]
+COUNTERCASE: [1 sentence — strongest reason this estimate could be wrong]
+CONFIDENCE: [0.0-1.0 confidence in this fair value; lower for indirect, stale, duplicated, or conflicting evidence]
+MOTIVATION: [1 sentence — why this fair value]
+ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
+
+STAGE1_RESPONSE_CONTRACT = """RESTATE: [1 sentence — paraphrase exactly what must happen for this market to resolve YES]
+FAIR_VALUE: [Your probability estimate, 0.01-0.99]
+COUNTERCASE: [1 sentence — strongest reason this estimate could be wrong]
+CONFIDENCE: [0.0-1.0 confidence in this fair value; lower for indirect, stale, duplicated, or conflicting evidence]
+MOTIVATION: [1 sentence — why this fair value]
+ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
+
+PROMPT_TEMPLATE = """{system_prompt}
+
+{persona}
+
+Market: "{market_name}"{context}
+
+Current state:
+{price_line}{last_fv_line}
+
+Recent estimates:
+{recent_fair_values}
+
+{article_section}
+
+Analyze and respond in this EXACT format:
+
+{response_contract}"""
+
+
+def prompt_contract_fingerprint(prompt_contract: PromptContract) -> str:
+    """SHA-256 the complete static scaffold + selected system/output contract."""
+    if prompt_contract == "pre_stage1_control":
+        system_prompt = PRE_STAGE1_SYSTEM_PROMPT
+        response_contract = PRE_STAGE1_RESPONSE_CONTRACT
+    elif prompt_contract == "stage1":
+        system_prompt = SYSTEM_PROMPT
+        response_contract = STAGE1_RESPONSE_CONTRACT
+    else:
+        raise ValueError(f"unknown analyst prompt contract: {prompt_contract}")
+    material = "\0".join((PROMPT_TEMPLATE, system_prompt, response_contract))
+    return sha256(material.encode("utf-8")).hexdigest()
+
 
 @dataclass(frozen=True)
 class ParsedFairValue:
     fair_value: float
+    restate: str
     motivation: str
     analysis: str
     countercase: str
@@ -154,8 +244,10 @@ def cluster_near_duplicate_articles(
             if article.url and any(article.url == existing.url for existing in cluster_articles):
                 matched = (cluster_articles, cluster_tokens)
                 break
-            if any(_jaccard(tokens, existing_tokens) >= similarity_threshold
-                   for existing_tokens in cluster_tokens):
+            if any(
+                _jaccard(tokens, existing_tokens) >= similarity_threshold
+                for existing_tokens in cluster_tokens
+            ):
                 matched = (cluster_articles, cluster_tokens)
                 break
         if matched is None:
@@ -175,7 +267,7 @@ class PersonaAnalyst:
 
     Not a ``BaseAgent`` — it has no account and submits no orders. It streams
     blocks purely for cadence and a ``block_height`` stamp; the per-call LLM
-    budget (AR-6) is enforced here now that this is the only LLM caller.
+    spend pause threshold (AR-6) is enforced here now that this is the only LLM caller.
     """
 
     def __init__(
@@ -194,6 +286,7 @@ class PersonaAnalyst:
         name: str | None = None,
         metrics: "ArenaMetrics | None" = None,
         llm_budget_usd: float | None = None,
+        prompt_contract: PromptContract = "stage1",
         now_fn: Callable[[], datetime] | None = None,
         monotonic_fn: Callable[[], float] | None = None,
     ):
@@ -210,22 +303,25 @@ class PersonaAnalyst:
         self.min_llm_interval_s = min_llm_interval_s
         self.name = name or "PersonaAnalyst"
         self.metrics = metrics
+        if prompt_contract not in ("stage1", "pre_stage1_control"):
+            raise ValueError(f"unknown analyst prompt contract: {prompt_contract}")
+        self.prompt_contract = prompt_contract
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._monotonic = monotonic_fn or time.monotonic
 
-        # SYB-64: per-agent LLM budget. The analyst is the persona's sole LLM
-        # caller (SYB-210), so this budget is a separate pool from the sizers'
+        # SYB-64: per-agent LLM pause threshold. The analyst is the persona's sole LLM
+        # caller (SYB-210), so this threshold is separate from the sizers'
         # trading bankroll — the analyst holds no trading account. When it hits
-        # $0 the analyst PAUSES: it stops issuing LLM calls, so it publishes no
+        # $0 the analyst PAUSES before its next call. The completed call that
+        # crosses the threshold is still billed, so this is not a hard ceiling.
+        # Once paused it stops issuing LLM calls, so it publishes no
         # new fair values and the persona's two sizers idle on stale FV (they
         # place no new news-driven orders). Other personas' analysts are
-        # unaffected. ``None`` disables the budget (unlimited).
+        # unaffected. ``None`` disables the threshold (unlimited).
         self.llm_budget_usd = llm_budget_usd
-        # Reconstruct cumulative spend from persisted rows so the budget and the
+        # Reconstruct cumulative spend from persisted rows so the threshold and the
         # pause decision survive an arena restart (SYB-64 acceptance).
-        self.llm_spent_usd = (
-            self.db.get_total_llm_cost(self.name) if self.db is not None else 0.0
-        )
+        self.llm_spent_usd = self.db.get_total_llm_cost(self.name) if self.db is not None else 0.0
         self._paused = False
         if self.llm_budget_usd is not None:
             self._paused = self.llm_spent_usd >= self.llm_budget_usd
@@ -252,14 +348,19 @@ class PersonaAnalyst:
         # Recent (ts, fair_value, motivation) per market, for prompt context.
         self.fv_log: dict[int, list[tuple[datetime, float, str]]] = {}
 
-    def attach_feed_and_bus(self, feed: NewsFeed, bus: FairValueBus) -> None:
+    def attach_feed_and_bus(
+        self,
+        feed: NewsFeed,
+        bus: FairValueBus,
+        news_subscription: NewsSubscription | PairedNewsBatchView | None = None,
+    ) -> None:
         """Wire in the shared feed + persona bus after construction.
 
         Used by the runner, which builds analysts before the feed/bus exist.
         """
         self.news_feed = feed
         self.bus = bus
-        self.news_sub = feed.subscribe(name=self.name)
+        self.news_sub = news_subscription or feed.subscribe(name=self.name)
 
     def stop(self) -> None:
         self._running = False
@@ -277,7 +378,7 @@ class PersonaAnalyst:
         return self._llm_client
 
     def _budget_remaining(self) -> float | None:
-        """Remaining USD LLM budget, or None when no budget is configured."""
+        """USD remaining to the pause threshold, or None when disabled."""
         if self.llm_budget_usd is None:
             return None
         return self.llm_budget_usd - self.llm_spent_usd
@@ -287,7 +388,7 @@ class PersonaAnalyst:
         return remaining is not None and remaining <= 0
 
     def _enter_paused(self) -> None:
-        """Pause the analyst on budget exhaustion (SYB-64).
+        """Pause the analyst once its configured spend threshold is reached (SYB-64).
 
         Idempotent: the owner is notified once (error-level log — the arena has
         no separate notification channel, so we do not invent one) when the
@@ -299,9 +400,12 @@ class PersonaAnalyst:
         if not self._paused:
             self._paused = True
             log.error(
-                "[%s] LLM budget exhausted ($%.4f spent of $%.4f); PAUSING — no "
-                "further LLM calls or fair-value updates until budget is raised",
-                self.name, self.llm_spent_usd, self.llm_budget_usd,
+                "[%s] LLM pause threshold reached ($%.4f spent vs $%.4f threshold); "
+                "PAUSING — no "
+                "further LLM calls or fair-value updates until the threshold is raised",
+                self.name,
+                self.llm_spent_usd,
+                self.llm_budget_usd,
             )
         if self.metrics is not None:
             self.metrics.set_llm_paused(self.name, True)
@@ -312,12 +416,15 @@ class PersonaAnalyst:
         resp = await llm.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=2048,
+            temperature=LLM_TEMPERATURE,
+            max_tokens=LLM_MAX_TOKENS,
             # SYB-64: ``usage.include`` makes OpenRouter return the actual billed
             # USD cost in ``resp.usage.cost`` (0% error vs. billing). We fall
             # back to a price table only when the field is absent.
-            extra_body={"reasoning": {"max_tokens": 1024}, "usage": {"include": True}},
+            extra_body={
+                "reasoning": {"max_tokens": LLM_REASONING_MAX_TOKENS},
+                "usage": {"include": True},
+            },
         )
         text = resp.choices[0].message.content or ""
         duration = time.monotonic() - t0
@@ -327,13 +434,18 @@ class PersonaAnalyst:
             usd_cost, cost_source = cost_of_call(
                 resp.usage, self.model_name, prompt_tokens, completion_tokens
             )
-            # SYB-64: deduct from the agent's LLM budget and surface remaining.
+            # SYB-64: accumulate spend against the pause threshold and surface remaining.
             self.llm_spent_usd += usd_cost
             remaining = self._budget_remaining()
             log.info(
                 "[%s] tokens: prompt=%d completion=%d cost=$%.5f (%s) spent=$%.4f (%.1fs)",
-                self.name, prompt_tokens, completion_tokens, usd_cost,
-                cost_source, self.llm_spent_usd, duration,
+                self.name,
+                prompt_tokens,
+                completion_tokens,
+                usd_cost,
+                cost_source,
+                self.llm_spent_usd,
+                duration,
             )
             if self.metrics is not None:
                 self.metrics.record_llm_cost(self.name, usd_cost, remaining)
@@ -345,8 +457,13 @@ class PersonaAnalyst:
                 # SYB-64: usd_cost + source are persisted so spend is auditable
                 # and reconstructable across restarts.
                 self.db.log_token_usage(
-                    self.name, prompt_tokens, completion_tokens,
-                    self.model_name, duration, usd_cost, cost_source,
+                    self.name,
+                    prompt_tokens,
+                    completion_tokens,
+                    self.model_name,
+                    duration,
+                    usd_cost,
+                    cost_source,
                 )
         return text, duration
 
@@ -363,14 +480,26 @@ class PersonaAnalyst:
         return "\n".join(lines).rstrip()
 
     def _build_prompt(
-        self, articles: list[LiveArticle], market: "Market", block: Block
+        self,
+        articles: list[LiveArticle],
+        market: "Market",
+        block: Block,
+        reference_price: float | None = None,
     ) -> str:
         market_id = market.id
-        yes_price = market_price(self.news_feed, self.markets_info, market_id, block)
+        yes_price = (
+            reference_price
+            if reference_price is not None
+            else market_price(self.news_feed, self.markets_info, market_id, block)
+        )
         if yes_price <= 0:
             return ""
 
-        poly_price = self.news_feed.polymarket_prices.get_price(market_id)
+        poly_price = (
+            reference_price
+            if reference_price is not None
+            else self.news_feed.polymarket_prices.get_price(market_id)
+        )
         if poly_price and poly_price > 0:
             price_line = f"- Polymarket consensus: YES=${poly_price:.4f} | NO=${1 - poly_price:.4f}"
         else:
@@ -397,27 +526,24 @@ class PersonaAnalyst:
                 parts.append(f'[{idx}] From {art.source}: "{art.title}"\n{text}\n')
             article_section = "\n".join(parts)
 
-        return f"""{SYSTEM_PROMPT}
+        if self.prompt_contract == "pre_stage1_control":
+            system_prompt = PRE_STAGE1_SYSTEM_PROMPT
+            response_contract = PRE_STAGE1_RESPONSE_CONTRACT
+        else:
+            system_prompt = SYSTEM_PROMPT
+            response_contract = STAGE1_RESPONSE_CONTRACT
 
-{self.persona}
-
-Market: "{market.name}"{context}
-
-Current state:
-{price_line}{last_fv_line}
-
-Recent estimates:
-{self._format_recent_fair_values(market_id)}
-
-{article_section}
-
-Analyze and respond in this EXACT format:
-
-FAIR_VALUE: [Your probability estimate, 0.01-0.99]
-COUNTERCASE: [1 sentence — strongest reason this estimate could be wrong]
-CONFIDENCE: [0.0-1.0 confidence in this fair value; lower for indirect, stale, duplicated, or conflicting evidence]
-MOTIVATION: [1 sentence — why this fair value]
-ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
+        return PROMPT_TEMPLATE.format(
+            system_prompt=system_prompt,
+            persona=self.persona,
+            market_name=market.name,
+            context=context,
+            price_line=price_line,
+            last_fv_line=last_fv_line,
+            recent_fair_values=self._format_recent_fair_values(market_id),
+            article_section=article_section,
+            response_contract=response_contract,
+        )
 
     # -- LLM output parsing --
 
@@ -435,6 +561,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             "FAIR_VALUE",
             "MOTIVATION",
             "ORDERS",
+            "RESTATE",
         )
         keyword_pattern = "|".join(labels)
         match = re.search(
@@ -474,6 +601,17 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             return DEFAULT_COUNTERCASE
         return countercase
 
+    def _parse_restate(self, text: str) -> str:
+        restate = self._extract_section(text, "RESTATE")
+        if not restate:
+            # RESTATE did not exist in the pre-Stage-1 output contract, so its
+            # absence is expected control behavior rather than a parse failure.
+            if self.prompt_contract == "pre_stage1_control":
+                return DEFAULT_RESTATE
+            self._record_parse_fallback("restate_missing")
+            return DEFAULT_RESTATE
+        return restate
+
     def _parse_fair_value(self, text: str) -> ParsedFairValue | None:
         fv_match = re.search(r"FAIR_VALUE:\s*([\d.]+)", text, re.IGNORECASE)
         if not fv_match:
@@ -496,6 +634,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
         return ParsedFairValue(
             fair_value=fair_value,
+            restate=self._parse_restate(text),
             motivation=motivation,
             analysis=analysis,
             countercase=countercase,
@@ -505,7 +644,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
     # -- Main loop --
 
     async def on_block(self, block: Block) -> None:
-        """Drain news, run the analysis LLM (budget-gated), publish updates."""
+        """Drain news, run the analysis LLM (threshold-gated), publish updates."""
         now = self._now()
 
         if not self._observed_first_block:
@@ -514,7 +653,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             self._observed_first_block = True
             return
 
-        # SYB-64: if the LLM budget is exhausted, PAUSE — skip the whole block so
+        # SYB-64: after the spend threshold is reached, PAUSE — skip the whole block so
         # no LLM call is issued and no fair value is published. This is checked
         # before any draining/prompting, so a paused analyst does zero LLM work.
         if self._budget_exhausted():
@@ -523,15 +662,21 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
 
         # AR-6: the min interval is enforced per LLM *call*, not per block. A
         # single block can surface articles for many markets; stop draining once
-        # the budget is spent and leave remaining articles pending for a later
-        # block. Now that the analyst is the only LLM caller, this budget governs
+        # the interval blocks another call and leave remaining articles pending for a later
+        # block. Now that the analyst is the only LLM caller, this threshold governs
         # total analysis-LLM cost.
         for market_id in list(self.market_ids or []):
             elapsed_llm = self._monotonic() - self._last_llm_call
             if self._last_llm_call != 0 and elapsed_llm < self.min_llm_interval_s:
                 break
 
-            articles = await self.news_sub.drain(market_id) if self.news_sub else []
+            batch_reference_price = None
+            if isinstance(self.news_sub, PairedNewsBatchView):
+                batch = await self.news_sub.drain_batch(market_id)
+                articles = batch.articles if batch is not None else []
+                batch_reference_price = batch.reference_price if batch is not None else None
+            else:
+                articles = await self.news_sub.drain(market_id) if self.news_sub else []
             if not articles:
                 continue
             clusters = cluster_near_duplicate_articles(articles)
@@ -550,23 +695,42 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             if not market:
                 continue
 
-            ref_price = market_price(self.news_feed, self.markets_info, market_id, block)
+            ref_price = (
+                batch_reference_price
+                if batch_reference_price is not None
+                else market_price(self.news_feed, self.markets_info, market_id, block)
+            )
             if ref_price <= 0:
                 continue
 
             # Skip resolved markets — don't waste LLM calls.
             if ref_price >= RESOLVED_HIGH or ref_price <= RESOLVED_LOW:
                 if market_id in self.fair_values:
-                    log.info("[%s] %s resolved (price=%.2f), clearing FV",
-                             self.name, market.name[:30], ref_price)
+                    log.info(
+                        "[%s] %s resolved (price=%.2f), clearing FV",
+                        self.name,
+                        market.name[:30],
+                        ref_price,
+                    )
                     del self.fair_values[market_id]
                 continue
 
             titles = "; ".join(f'"{a.title[:40]}"' for a in articles)
-            log.info("[%s] %d article(s) for %s (price=%.2f): %s",
-                     self.name, len(articles), market.name[:30], ref_price, titles)
+            log.info(
+                "[%s] %d article(s) for %s (price=%.2f): %s",
+                self.name,
+                len(articles),
+                market.name[:30],
+                ref_price,
+                titles,
+            )
 
-            prompt = self._build_prompt(articles, market, block)
+            prompt = self._build_prompt(
+                articles,
+                market,
+                block,
+                reference_price=batch_reference_price,
+            )
             if not prompt:
                 continue
 
@@ -595,25 +759,36 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
             if len(records) > 200:
                 self.fv_log[market_id] = records[-200:]
 
-            log.info("[%s] %s: FV %.2f->%.2f (market=%.2f, edge=%.2f, conf=%.2f) | %s",
-                     self.name, market.name[:30],
-                     old_fv or 0, fair_value, ref_price,
-                     fair_value - ref_price, parsed.confidence, motivation)
+            log.info(
+                "[%s] %s: FV %.2f->%.2f (market=%.2f, edge=%.2f, conf=%.2f) | %s",
+                self.name,
+                market.name[:30],
+                old_fv or 0,
+                fair_value,
+                ref_price,
+                fair_value - ref_price,
+                parsed.confidence,
+                motivation,
+            )
 
             # Broadcast to both sizing arms of this persona. Both receive the
             # SAME update object, guaranteeing identical A/B inputs (SYB-210).
-            await self.bus.publish(FairValueUpdate(
-                market_id=market_id,
-                persona_key=self.persona_key,
-                fair_value=fair_value,
-                motivation=motivation,
-                analysis=analysis,
-                countercase=parsed.countercase,
-                confidence=parsed.confidence,
-                articles=articles,
-                block_height=block.height,
-                ts=now,
-            ))
+            await self.bus.publish(
+                FairValueUpdate(
+                    market_id=market_id,
+                    persona_key=self.persona_key,
+                    fair_value=fair_value,
+                    restate=parsed.restate,
+                    motivation=motivation,
+                    analysis=analysis,
+                    countercase=parsed.countercase,
+                    confidence=parsed.confidence,
+                    articles=articles,
+                    block_height=block.height,
+                    ts=now,
+                    analysis_reference_price=batch_reference_price,
+                )
+            )
 
     async def run(self) -> None:
         """Stream blocks for cadence; drive on_block. Fail-open per block (SYB-185)."""
@@ -628,5 +803,7 @@ ANALYSIS: [2-3 sentences max — key evidence from the article(s)]"""
                 log.exception(
                     "Analyst on_block failed; continuing: name=%s block_height=%s "
                     "on_block_error_count=%d",
-                    self.name, block.height, self.on_block_error_count,
+                    self.name,
+                    block.height,
+                    self.on_block_error_count,
                 )

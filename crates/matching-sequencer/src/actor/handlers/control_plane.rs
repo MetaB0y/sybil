@@ -65,6 +65,40 @@ impl SequencerActorState {
             .expect("created account should exist"))
     }
 
+    pub(super) async fn handle_create_account_with_initial_key(
+        &mut self,
+        initial_balance: i64,
+        pubkey: PublicKey,
+        meta: RegisteredPubkey,
+    ) -> Result<Account, SequencerError> {
+        let timestamp_ms = current_timestamp_ms();
+        let prepared = self.sequencer.prepare_account_with_initial_key(
+            initial_balance,
+            timestamp_ms,
+            pubkey.clone(),
+            meta.clone(),
+        )?;
+        self.persist_control_plane(&ControlPlaneCommand::CreateAccountWithInitialKey {
+            initial_balance,
+            timestamp_ms,
+            compressed_pubkey: pubkey.compressed_bytes(),
+            auth_scheme: meta.auth_scheme,
+            label: meta.label,
+            scope: meta.scope,
+            created_at_ms: meta.created_at_ms,
+        })
+        .await?;
+        let account_id = self
+            .sequencer
+            .apply_prepared_account_with_initial_key(prepared);
+        Ok(self
+            .sequencer
+            .accounts
+            .get(account_id)
+            .cloned()
+            .expect("created account should exist"))
+    }
+
     pub(super) async fn handle_fund_account(
         &mut self,
         account_id: AccountId,

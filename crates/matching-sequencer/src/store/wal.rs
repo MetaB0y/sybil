@@ -112,6 +112,22 @@ pub enum ControlPlaneCommand {
         api_key_id: u64,
         revoked_at_ms: u64,
     },
+    /// Public onboarding: allocate the account and install its first signing
+    /// key as one durable command. Kept at the enum tail so legacy MessagePack
+    /// variant indexes remain replay-compatible.
+    CreateAccountWithInitialKey {
+        initial_balance: i64,
+        timestamp_ms: u64,
+        compressed_pubkey: Vec<u8>,
+        #[serde(default)]
+        auth_scheme: crate::crypto::AccountAuthScheme,
+        #[serde(default)]
+        label: Option<String>,
+        #[serde(default)]
+        scope: crate::crypto::KeyScope,
+        #[serde(default)]
+        created_at_ms: u64,
+    },
 }
 
 impl Store {

@@ -23,7 +23,8 @@ esac
 [[ $# -le 1 ]] || { echo "unexpected arguments: ${*:2}" >&2; exit 2; }
 
 for file in docker-compose.yml docker-compose.itest.yml \
-    crates/sybil-client/examples/seed_book.rs crates/sybil-custody/src/main.rs \
+    crates/sybil-client/examples/seed_book.rs crates/sybil-client/examples/smoke_sign.rs \
+    crates/sybil-custody/src/main.rs contracts/script/UnsafeAnvilBridgeSetup.s.sol \
     contracts/script/UnsafeAnvilEscapeSetup.s.sol scripts/assert-seed-book.py; do
     [[ -f "$file" ]] || { echo "missing required harness file: $file" >&2; exit 1; }
 done
@@ -31,7 +32,7 @@ done
 if [[ "$DRY_RUN" -eq 1 ]]; then
     python3 scripts/assert-seed-book.py --self-test
     printf 'dry-run: docker compose -p <isolated-project> -f docker-compose.yml -f docker-compose.itest.yml up -d --build sybil-api\n'
-    printf 'dry-run: wait health -> seed -> snapshot/reconstruct -> unsafe Anvil fixture claim/payout -> down -v\n'
+    printf 'dry-run: wait health -> seed -> snapshot/reconstruct -> unsafe Anvil escape payout -> unsafe Anvil normal deposit/index/withdraw/finalize -> down -v\n'
     exit 0
 fi
 
@@ -142,10 +143,10 @@ import json, sys
 s = json.load(open(sys.argv[1], encoding="utf-8"))
 assert s["schema"] == "sybil.seed_book.v1"
 assert s["fixture_version"] == "SYB-247-v1:0"
-assert len(s["http_steps"]) == 10
+assert len(s["http_steps"]) == 8
 assert all(step["status"] == 200 for step in s["http_steps"])
 ' "$WORK/summary.json"
-pass "create account -> register key -> fund -> signed orders: ten exact HTTP 200 responses"
+pass "atomic account + key -> fund -> signed orders: eight exact HTTP 200 responses"
 
 http_json POST /v1/simulation/resume "$WORK/resume.json" 200
 [[ "$(jget "$WORK/resume.json" status)" == "resumed" ]]
@@ -278,5 +279,183 @@ assert user_after > user_before, (user_before, user_after)
 assert user_after - user_before == vault_before - vault_after
 PY
 pass "escape activation -> fixture adapter proof -> custody calldata submission paid exact claim"
+
+step "Run the UNSAFE local-Anvil normal bridge round trip"
+echo "  local-only: accept-all adapters validate plumbing, not withdrawal proof soundness"
+(cd contracts && forge script script/UnsafeAnvilBridgeSetup.s.sol:UnsafeAnvilBridgeSetup \
+    --rpc-url "$ANVIL_RPC" --broadcast) >"$WORK/bridge-setup.log"
+
+BRIDGE_BROADCAST="contracts/broadcast/UnsafeAnvilBridgeSetup.s.sol/31337/run-latest.json"
+[[ -f "$BRIDGE_BROADCAST" ]] || { echo "bridge setup broadcast artifact missing" >&2; exit 1; }
+read -r BRIDGE_TOKEN BRIDGE_SETTLEMENT BRIDGE_VAULT < <(python3 - "$BRIDGE_BROADCAST" <<'PY'
+import json, sys
+txs = json.load(open(sys.argv[1], encoding="utf-8"))["transactions"]
+created = {tx.get("contractName"): tx.get("contractAddress") for tx in txs if tx.get("contractAddress")}
+print(created["MockUSDC"], created["SybilSettlement"], created["SybilVault"])
+PY
+)
+
+cargo build -p sybil-client --example smoke_sign
+cargo build -p sybil-l1-indexer
+target/debug/examples/smoke_sign keygen >"$WORK/bridge-key.json"
+BRIDGE_PRIVATE_KEY="$(jget "$WORK/bridge-key.json" private_key_hex)"
+BRIDGE_PUBLIC_KEY="$(jget "$WORK/bridge-key.json" public_key_hex)"
+BRIDGE_ACCOUNT_BODY="$(python3 - "$BRIDGE_PUBLIC_KEY" <<'PY'
+import json, sys
+print(json.dumps({
+    "initial_balance_nanos": 0,
+    "initial_key": {"public_key_hex": sys.argv[1], "auth_scheme": "raw_p256"},
+}))
+PY
+)"
+http_json POST /v1/accounts "$WORK/bridge-account.json" 200 "$BRIDGE_ACCOUNT_BODY"
+BRIDGE_ACCOUNT="$(jget "$WORK/bridge-account.json" account_id)"
+http_json GET "/v1/accounts/$BRIDGE_ACCOUNT/bridge-key" "$WORK/bridge-account-key.json" 200
+BRIDGE_ACCOUNT_KEY="$(jget "$WORK/bridge-account-key.json" sybil_account_key_hex)"
+
+BRIDGE_DEPOSIT_UNITS=5000000
+cast send "$BRIDGE_VAULT" "deposit(uint256,bytes32)" \
+    "$BRIDGE_DEPOSIT_UNITS" "0x$BRIDGE_ACCOUNT_KEY" \
+    --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
+
+BRIDGE_CURSOR="$WORK/bridge-indexer-cursor.json"
+run_bridge_indexer() {
+    target/debug/sybil-l1-indexer \
+        --rpc-url "$ANVIL_RPC" \
+        --sybil-api-url "$BASE" \
+        --vault-address "$BRIDGE_VAULT" \
+        --chain-id 31337 \
+        --start-block 0 \
+        --confirmations 0 \
+        --min-confirmations 0 \
+        --cursor-path "$BRIDGE_CURSOR" \
+        --once
+}
+run_bridge_indexer 2>&1 | tee "$WORK/bridge-indexer-deposit.log"
+http_json GET "/v1/accounts/$BRIDGE_ACCOUNT" "$WORK/bridge-funded-account.json" 200
+http_json GET /v1/bridge/status "$WORK/bridge-status.json" 200
+python3 - "$WORK/bridge-funded-account.json" "$WORK/bridge-status.json" <<'PY'
+import json, sys
+account = json.load(open(sys.argv[1], encoding="utf-8"))
+status = json.load(open(sys.argv[2], encoding="utf-8"))
+assert account["balance_nanos"] == 5_000_000_000, account
+assert status["deposit_cursor"] == 1, status
+PY
+pass "real MockUSDC deposit -> confirmed indexer -> exact Sybil credit"
+
+BRIDGE_WITHDRAW_UNITS=2000000
+BRIDGE_L1_HEIGHT="$(cast block-number --rpc-url "$ANVIL_RPC")"
+BRIDGE_EXPIRY_HEIGHT="$((BRIDGE_L1_HEIGHT + 1000))"
+http_json GET /v1/health "$WORK/bridge-health.json" 200
+BRIDGE_GENESIS_HASH="$(jget "$WORK/bridge-health.json" genesis_hash)"
+[[ "$BRIDGE_GENESIS_HASH" =~ ^[0-9a-f]{64}$ ]]
+target/debug/examples/smoke_sign withdrawal \
+    --priv "$BRIDGE_PRIVATE_KEY" \
+    --account "$BRIDGE_ACCOUNT" \
+    --chain-id 31337 \
+    --vault "$BRIDGE_VAULT" \
+    --recipient "$ANVIL_ADMIN" \
+    --token "$BRIDGE_TOKEN" \
+    --amount "$BRIDGE_WITHDRAW_UNITS" \
+    --expiry "$BRIDGE_EXPIRY_HEIGHT" \
+    --nonce 1 \
+    --genesis-hash "$BRIDGE_GENESIS_HASH" >"$WORK/bridge-withdraw-signature.json"
+BRIDGE_WITHDRAW_BODY="$(python3 - \
+    "$WORK/bridge-withdraw-signature.json" "$BRIDGE_ACCOUNT" "$BRIDGE_VAULT" \
+    "$ANVIL_ADMIN" "$BRIDGE_TOKEN" "$BRIDGE_WITHDRAW_UNITS" "$BRIDGE_EXPIRY_HEIGHT" <<'PY'
+import json, sys
+signature = json.load(open(sys.argv[1], encoding="utf-8"))
+print(json.dumps({
+    "withdrawal": {
+        "account_id": int(sys.argv[2]),
+        "chain_id": 31337,
+        "vault_address_hex": sys.argv[3],
+        "recipient_hex": sys.argv[4],
+        "token_address_hex": sys.argv[5],
+        "amount_token_units": int(sys.argv[6]),
+        "expiry_height": int(sys.argv[7]),
+        "nonce": 1,
+    },
+    "signer_pubkey_hex": signature["signer_pubkey_hex"],
+    "auth_scheme": "raw_p256",
+    "signature_hex": signature["signature_hex"],
+}))
+PY
+)"
+http_json POST /v1/bridge/withdrawals/signed \
+    "$WORK/bridge-withdrawal.json" 200 "$BRIDGE_WITHDRAW_BODY"
+BRIDGE_WITHDRAW_HEIGHT="$(jget "$WORK/bridge-withdrawal.json" created_at_height)"
+BRIDGE_NULLIFIER="$(jget "$WORK/bridge-withdrawal.json" nullifier_hex)"
+
+http_json POST /v1/simulation/resume "$WORK/bridge-resume.json" 200
+bridge_committed=0
+for _ in $(seq 1 30); do
+    if http_json GET /v1/blocks/latest "$WORK/bridge-latest.json" 200 2>/dev/null \
+       && [[ "$(jget "$WORK/bridge-latest.json" height)" -ge "$BRIDGE_WITHDRAW_HEIGHT" ]] \
+       && http_json GET "/v1/da/$BRIDGE_WITHDRAW_HEIGHT/manifest" \
+            "$WORK/bridge-manifest.json" 200 2>/dev/null; then
+        bridge_committed=1
+        break
+    fi
+    sleep 1
+done
+[[ "$bridge_committed" -eq 1 ]] || { echo "withdrawal block/manifest did not commit" >&2; exit 1; }
+http_json POST /v1/simulation/pause "$WORK/bridge-pause.json" 200
+http_json GET "/v1/blocks/$BRIDGE_WITHDRAW_HEIGHT" "$WORK/bridge-block.json" 200
+http_json GET "/v1/accounts/$BRIDGE_ACCOUNT" "$WORK/bridge-debited-account.json" 200
+[[ "$(jget "$WORK/bridge-debited-account.json" balance_nanos)" == "3000000000" ]]
+
+ZERO_HASH="0x$(printf '%064d' 0)"
+BRIDGE_STATE_ROOT="0x$(jget "$WORK/bridge-manifest.json" state_root)"
+BRIDGE_BLOCK_HASH="0x$(jget "$WORK/bridge-manifest.json" block_hash)"
+BRIDGE_EVENTS_ROOT="0x$(jget "$WORK/bridge-block.json" events_root)"
+BRIDGE_WITNESS_ROOT="0x$(jget "$WORK/bridge-manifest.json" witness_root)"
+BRIDGE_DA_COMMITMENT="0x$(jget "$WORK/bridge-manifest.json" da_commitment)"
+BRIDGE_DEPOSIT_ROOT="0x$(jget "$WORK/bridge-block.json" bridge.deposit_root_hex)"
+BRIDGE_DEPOSIT_COUNT="$(jget "$WORK/bridge-block.json" bridge.deposit_count)"
+# This fixture settlement is fresh, so the committed API withdrawal root is
+# installed as its first accepted root. The accept-all adapter deliberately
+# does not prove the API chain's parent transition; this is plumbing-only.
+cast send "$BRIDGE_SETTLEMENT" \
+    "submitStateRoot((uint64,uint64,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,uint64),bytes)" \
+    "(0,$BRIDGE_WITHDRAW_HEIGHT,$ZERO_HASH,$BRIDGE_STATE_ROOT,$BRIDGE_BLOCK_HASH,$BRIDGE_EVENTS_ROOT,$BRIDGE_WITNESS_ROOT,$BRIDGE_DA_COMMITMENT,$BRIDGE_DEPOSIT_ROOT,$BRIDGE_DEPOSIT_COUNT)" \
+    0x01 --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
+
+BRIDGE_NORMAL_KIND="$(cast call "$BRIDGE_VAULT" "CLAIM_KIND_NORMAL()(bytes32)" --rpc-url "$ANVIL_RPC")"
+BRIDGE_USER_BEFORE="$(cast call "$BRIDGE_TOKEN" "balanceOf(address)(uint256)" "$ANVIL_ADMIN" --rpc-url "$ANVIL_RPC")"
+BRIDGE_VAULT_BEFORE="$(cast call "$BRIDGE_TOKEN" "balanceOf(address)(uint256)" "$BRIDGE_VAULT" --rpc-url "$ANVIL_RPC")"
+cast send "$BRIDGE_VAULT" \
+    "requestWithdrawal((bytes32,uint64,bytes32,address,address,uint256,bytes32),bytes)" \
+    "($BRIDGE_STATE_ROOT,$BRIDGE_WITHDRAW_HEIGHT,0x$BRIDGE_NULLIFIER,$ANVIL_ADMIN,$BRIDGE_TOKEN,$BRIDGE_WITHDRAW_UNITS,$BRIDGE_NORMAL_KIND)" \
+    0x02 --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
+cast send "$BRIDGE_VAULT" "finalizeWithdrawal(bytes32)" "0x$BRIDGE_NULLIFIER" \
+    --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
+BRIDGE_USER_AFTER="$(cast call "$BRIDGE_TOKEN" "balanceOf(address)(uint256)" "$ANVIL_ADMIN" --rpc-url "$ANVIL_RPC")"
+BRIDGE_VAULT_AFTER="$(cast call "$BRIDGE_TOKEN" "balanceOf(address)(uint256)" "$BRIDGE_VAULT" --rpc-url "$ANVIL_RPC")"
+BRIDGE_USER_BEFORE="$(cast to-dec "${BRIDGE_USER_BEFORE%% *}")"
+BRIDGE_USER_AFTER="$(cast to-dec "${BRIDGE_USER_AFTER%% *}")"
+BRIDGE_VAULT_BEFORE="$(cast to-dec "${BRIDGE_VAULT_BEFORE%% *}")"
+BRIDGE_VAULT_AFTER="$(cast to-dec "${BRIDGE_VAULT_AFTER%% *}")"
+python3 - "$BRIDGE_USER_BEFORE" "$BRIDGE_USER_AFTER" \
+    "$BRIDGE_VAULT_BEFORE" "$BRIDGE_VAULT_AFTER" "$BRIDGE_WITHDRAW_UNITS" <<'PY'
+import sys
+user_before, user_after, vault_before, vault_after, amount = map(int, sys.argv[1:])
+assert user_after - user_before == amount, (user_before, user_after, amount)
+assert vault_before - vault_after == amount, (vault_before, vault_after, amount)
+PY
+
+run_bridge_indexer 2>&1 | tee "$WORK/bridge-indexer-withdrawal.log"
+http_json GET "/v1/accounts/$BRIDGE_ACCOUNT/withdrawals" \
+    "$WORK/bridge-withdrawals-final.json" 200
+python3 - "$WORK/bridge-withdrawals-final.json" "$BRIDGE_NULLIFIER" <<'PY'
+import json, sys
+rows = json.load(open(sys.argv[1], encoding="utf-8"))
+assert len(rows) == 1, rows
+assert rows[0]["nullifier_hex"] == sys.argv[2], rows[0]
+assert rows[0]["l1_status"] == "finalized", rows[0]
+assert rows[0]["l1_requested_at_unix"] is not None, rows[0]
+assert rows[0]["l1_finalized_at_unix"] is not None, rows[0]
+PY
+pass "signed Sybil debit -> unsafe accepted root -> vault queue/finalize -> indexed finalized status"
 
 step "Compose integration passed"

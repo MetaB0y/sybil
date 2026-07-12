@@ -59,8 +59,7 @@ export function FilterDropdown({
           padding: "5px 11px",
           background: open ? "var(--surface-2)" : "var(--bg-2)",
           border: `1px solid ${isActive ? "var(--accent)" : "var(--border-1)"}`,
-          // Rectangular (radius-sm) to match the markets filter buttons, not a pill.
-          borderRadius: "var(--radius-sm)",
+          borderRadius: 999,
           color: isActive ? "var(--fg-1)" : "var(--fg-2)",
           fontFamily: "var(--font-mono)",
           fontSize: 11,

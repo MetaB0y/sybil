@@ -134,7 +134,7 @@ export function DegenProgress(props: DegenProgressProps) {
     props.phase === "filled"
       ? `Successfully bet ${money(actualUsd)} on ${props.side}!`
       : props.phase === "partial"
-        ? `◐ Half in! Bet ${money(actualUsd)} of ${money(props.betUsd)} on ${props.side} — the rest is back in your balance.`
+        ? `◐ Partly matched: bet ${money(actualUsd)} of ${money(props.betUsd)} on ${props.side} — the rest is back in your balance.`
         : cancelled
           ? `Bet cancelled.`
           : `No match within ~2 min — your funds are back in your balance. Try again.`;

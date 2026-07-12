@@ -61,6 +61,12 @@ pub enum SequencerMsg {
     ),
     ProduceBlock(RpcReplyPort<Result<SealedBlock, SequencerError>>),
     CreateAccount(i64, RpcReplyPort<Result<Account, SequencerError>>),
+    CreateAccountWithInitialKey(
+        i64,
+        PublicKey,
+        RegisteredPubkey,
+        RpcReplyPort<Result<Account, SequencerError>>,
+    ),
     FundAccount(
         AccountId,
         i64,

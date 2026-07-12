@@ -11,6 +11,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 BACKUP_DIR=""
 PORT="${SYBIL_RESTORE_DRILL_PORT:-3310}"
 TIMEOUT=120
@@ -48,7 +50,7 @@ dry-run: validate $BACKUP_DIR/manifest.json and SHA256SUMS
 dry-run: create unique Compose project with docker-compose.yml + docker-compose.itest.yml
 dry-run: populate only that project's fresh itest-data volume from $BACKUP_DIR/store
 dry-run: $BUILD_DESCRIPTION sybil-api with a 24h block interval on 127.0.0.1:$PORT
-dry-run: require health and exact manifest matches for latest height/state_root and sampled account
+dry-run: require health and exact manifest matches for latest height, committed/replayed state roots, and sampled account
 dry-run: docker compose down -v --remove-orphans (production sybil-data is never referenced)
 EOF
     exit 0
@@ -64,6 +66,8 @@ BACKUP_DIR="$(cd "$BACKUP_DIR" 2>/dev/null && pwd)" \
 for tool in docker curl python3 sha256sum; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required" >&2; exit 2; }
 done
+[[ -f "$SCRIPT_DIR/store-manifest.py" ]] \
+    || { echo "error: $SCRIPT_DIR/store-manifest.py is required" >&2; exit 2; }
 if docker compose version >/dev/null 2>&1; then
     COMPOSE_BIN=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -73,16 +77,7 @@ else
     exit 2
 fi
 
-python3 - "$BACKUP_DIR/manifest.json" <<'PY'
-import json, sys
-m = json.load(open(sys.argv[1], encoding="utf-8"))
-assert m.get("schema") == "sybil.store-backup.v1"
-e = m["expected"]
-assert isinstance(e["height"], int) and e["height"] >= 0
-assert isinstance(e["state_root"], str) and len(e["state_root"]) == 64
-assert isinstance(e["account_id"], int) and e["account_id"] >= 0
-assert e["account"]["account_id"] == e["account_id"]
-PY
+python3 "$SCRIPT_DIR/store-manifest.py" validate "$BACKUP_DIR/manifest.json"
 (
     cd "$BACKUP_DIR/store"
     sha256sum -c "$BACKUP_DIR/SHA256SUMS"
@@ -139,25 +134,10 @@ curl -fsS --max-time 10 "$BASE/v1/state-root" > "$WORK/state-root.json"
 ACCOUNT_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected"]["account_id"])' "$BACKUP_DIR/manifest.json")"
 curl -fsS --max-time 10 "$BASE/v1/accounts/$ACCOUNT_ID" > "$WORK/account.json"
 
-python3 - "$BACKUP_DIR/manifest.json" "$WORK/latest.json" \
-    "$WORK/state-root.json" "$WORK/account.json" <<'PY'
-import json, sys
-manifest, latest, state_root, account = [
-    json.load(open(path, encoding="utf-8")) for path in sys.argv[1:5]
-]
-expected = manifest["expected"]
-failures = []
-if latest.get("height") != expected["height"]:
-    failures.append(f"height expected {expected['height']}, got {latest.get('height')}")
-if latest.get("state_root") != expected["state_root"]:
-    failures.append("latest block state_root mismatch")
-if state_root.get("state_root") != expected["state_root"]:
-    failures.append("/v1/state-root mismatch")
-if account != expected["account"]:
-    failures.append(f"account {expected['account_id']} state mismatch")
-if failures:
-    raise SystemExit("; ".join(failures))
-print(f"OK: restored height={expected['height']} state_root={expected['state_root']} account={expected['account_id']}")
-PY
+python3 "$SCRIPT_DIR/store-manifest.py" compare \
+    --manifest "$BACKUP_DIR/manifest.json" \
+    --latest "$WORK/latest.json" \
+    --state-root "$WORK/state-root.json" \
+    --account "$WORK/account.json"
 
 echo "RESULT: restored OK — exact manifest state served from an isolated fresh volume"

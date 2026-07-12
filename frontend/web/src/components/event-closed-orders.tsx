@@ -16,8 +16,7 @@
  *     event lacks one.
  *   - price = the terminal event's price, else the last fill price seen; the
  *     order's limit (requested) price from its `placed` event is shown
- *     struck-through before it when the two differ. A cancelled/expired order
- *     that never traded falls back to that limit price, rendered faded.
+ *     struck-through before it when the two differ.
  *   - welfare = Σ (limit − fill) × qty over the order's fills, signed by side
  *     (buyer below limit / seller above = positive surplus). Mirrors the engine's
  *     `welfare_contribution`. Null when the limit price has aged out of the feed.
@@ -35,22 +34,14 @@
  */
 
 import { useMemo, useState } from "react";
-import {
-  formatShareUnits,
-  notionalNanos,
-  priceNanosFromNotional,
-} from "@/lib/account/quantity";
+import { notionalNanos } from "@/lib/account/quantity";
 import type { HistoryEvent } from "@/lib/account/use-account-history";
-import {
-  formatCentsPrecise,
-  formatDollars,
-  formatDollarsRounded,
-} from "@/lib/format/nanos";
+import { formatCentsPrecise, formatDollars } from "@/lib/format/nanos";
 import { Pager, usePaged } from "@/components/event-list-pager";
-import { SidePill, valueChipStyle } from "@/components/portfolio/side-pill";
+import { SidePill } from "@/components/portfolio/side-pill";
 import { Glossary } from "@/components/glossary";
 
-type Status = "FILLED" | "PARTIAL" | "CANCELLED" | "EXPIRED" | "REJECTED";
+type Status = "FILLED" | "CANCELLED" | "EXPIRED" | "REJECTED";
 
 /** The terminal history event types that close an order. */
 const TERMINAL = new Set<HistoryEvent["type"]>([
@@ -79,11 +70,6 @@ interface ClosedOrder {
   side?: "BUY" | "SELL";
   outcome?: "YES" | "NO";
   qty: number | null;
-  /** For a PARTIAL order (filled, then the rest expired/cancelled): the unfilled
-   *  remainder and how it closed. `qty` above holds the FILLED shares; this is
-   *  the part that never traded, surfaced in the status tooltip. Null otherwise. */
-  remainderQty: number | null;
-  remainderKind: "expired" | "cancelled" | null;
   /** Settled (fill) price shown in the Price cell. */
   priceNanos: bigint | null;
   /** Limit price from the order's `placed` event; null once it ages out of the
@@ -91,10 +77,6 @@ interface ClosedOrder {
   requestedPriceNanos: bigint | null;
   /** qty × price (notional $), or null when either is unknown. */
   valueNanos: bigint | null;
-  /** True when the order never traded (cancelled/expired with no fill) and the
-   * Price/Value cells fall back to the order's limit price — rendered faded so
-   * it reads as "would have" rather than "did". */
-  unfilled: boolean;
   /** Realized PnL (nanos) summed over fill events — SELL orders only, else null. */
   realizedPnlNanos: bigint | null;
   /** Consumer surplus (nanos) = Σ (limit − fill) × qty over fills, signed by side
@@ -303,45 +285,8 @@ export function EventClosedOrders({
     for (const [orderId, slot] of byOrder) {
       const t = slot.terminal;
       if (t == null) continue; // only partial fills so far — still resting
-      const rawStatus =
-        STATUS_OF[t.type as "filled" | "cancelled" | "expired" | "rejected"];
-
-      // A partially-filled order whose remainder then expired/cancelled: fills
-      // DID happen, but the terminal event only closed out the unfilled part.
-      // Reporting it as plain EXPIRED (and multiplying the expired remainder by
-      // the fill price) hides the trade and shows a meaningless value. Detect it
-      // and report PARTIAL with the FILLED economics instead.
-      const terminalUnfilled = t.type === "expired" || t.type === "cancelled";
-      const partial = slot.filledQty > 0n && terminalUnfilled;
-
-      let status: Status;
-      let qty: number | null;
-      let priceNanos: bigint | null;
-      let unfilled: boolean;
-      let remainderQty: number | null = null;
-      let remainderKind: "expired" | "cancelled" | null = null;
-
-      if (partial) {
-        status = "PARTIAL";
-        qty = Number(slot.filledQty); // the shares that actually filled
-        priceNanos = priceNanosFromNotional(slot.filledNotional, slot.filledQty); // WAC
-        unfilled = false;
-        remainderQty = t.qty ?? null; // the part that never traded
-        remainderKind = t.type === "expired" ? "expired" : "cancelled";
-      } else {
-        status = rawStatus;
-        qty = t.qty ?? null;
-        const settledNanos = t.priceNanos ?? slot.lastFillPrice;
-        // A cancelled/expired order that never filled has no settled price, but it
-        // still carries the limit price from its `placed` event. Surface that (and
-        // the notional it *would* have been) rather than a blank row, flagged
-        // `unfilled` so the Price/Value cells render faded — the trade didn't happen.
-        unfilled =
-          settledNanos == null &&
-          (rawStatus === "CANCELLED" || rawStatus === "EXPIRED") &&
-          slot.requestedPrice != null;
-        priceNanos = settledNanos ?? (unfilled ? slot.requestedPrice : null);
-      }
+      const qty = t.qty ?? null;
+      const priceNanos = t.priceNanos ?? slot.lastFillPrice;
       // Welfare = Σ (limit − fill) × qty, signed by side: a buyer gains when it
       // fills below the limit, a seller when above. Needs a known limit, side,
       // and at least one fill; else null ("—").
@@ -354,21 +299,12 @@ export function EventClosedOrders({
         orderId,
         marketId: slot.marketId,
         label: labelByMarket.get(slot.marketId) ?? `#${slot.marketId}`,
-        status,
+        status: STATUS_OF[t.type as "filled" | "cancelled" | "expired" | "rejected"],
         closedAtMs: t.timestampMs,
         qty,
-        remainderQty,
-        remainderKind,
         priceNanos,
         requestedPriceNanos: slot.requestedPrice,
-        // For a partial, the exact Σ(price×qty) over fills is the true value of
-        // what traded; elsewhere derive it from the single settled price × qty.
-        valueNanos: partial
-          ? slot.filledNotional
-          : qty != null && priceNanos != null
-            ? notionalNanos(priceNanos, qty)
-            : null,
-        unfilled,
+        valueNanos: qty != null && priceNanos != null ? notionalNanos(priceNanos, qty) : null,
         // PnL is realized on the closing trade — show it for sells only.
         realizedPnlNanos: slot.side === "SELL" ? slot.realizedPnl : null,
         welfareNanos,
@@ -419,6 +355,7 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
   return (
     <Row>
       <span
+        title={order.label}
         style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -441,27 +378,12 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
       >
         {isBuy ? "BUY" : isSell ? "SELL" : "—"}
       </span>
-      {order.outcome ? <SidePill outcome={order.outcome} /> : <Muted>—</Muted>}
+      <span>{order.outcome ? <SidePill outcome={order.outcome} /> : <Muted>—</Muted>}</span>
       <Right>
         <StatusBadge status={order.status} />
       </Right>
+      <Right mono>{order.qty ?? "—"}</Right>
       <Right mono>
-        {order.qty == null ? (
-          "—"
-        ) : order.status === "PARTIAL" && order.remainderQty != null ? (
-          // filled / ordered — the faded total makes the unfilled (expired /
-          // cancelled) part visible without a separate phantom row.
-          <span>
-            {formatShareUnits(order.qty, 1)}
-            <span style={{ color: "var(--fg-4)" }}>
-              {` / ${formatShareUnits(order.qty + order.remainderQty, 1)}`}
-            </span>
-          </span>
-        ) : (
-          <span>{formatShareUnits(order.qty, 1)}</span>
-        )}
-      </Right>
-      <Right mono dim={order.unfilled}>
         <PriceCell
           settledNanos={order.priceNanos}
           requestedNanos={order.requestedPriceNanos}
@@ -470,8 +392,8 @@ function ClosedRow({ order }: { order: ClosedOrder }) {
       <Right>
         <WelfareCell welfareNanos={order.welfareNanos} />
       </Right>
-      <Right mono dim={order.unfilled}>
-        {order.valueNanos != null ? formatDollarsRounded(order.valueNanos, { decimals: 1 }) : "—"}
+      <Right mono>
+        {order.valueNanos != null ? formatDollars(order.valueNanos, { decimals: 2 }) : "—"}
       </Right>
       <Right>
         <PnlCell pnlNanos={order.realizedPnlNanos} />
@@ -524,13 +446,12 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
   const positive = welfareNanos > 0n;
   const negative = welfareNanos < 0n;
   const tone = positive ? "var(--yes)" : negative ? "var(--no)" : "var(--fg-3)";
-  const bg = positive
-    ? "color-mix(in srgb, var(--yes) 14%, transparent)"
-    : negative
-      ? "color-mix(in srgb, var(--no) 14%, transparent)"
-      : "var(--fill-subtle)";
-  // A small tinted chip matching the side pill; the value is bold as the one
-  // intended difference from the side chip.
+  const bg =
+    positive
+      ? "color-mix(in srgb, var(--yes) 16%, transparent)"
+      : negative
+        ? "color-mix(in srgb, var(--no) 14%, transparent)"
+        : "transparent";
   return (
     <span
       title={
@@ -540,8 +461,31 @@ function WelfareCell({ welfareNanos }: { welfareNanos: bigint | null }) {
             ? "Filled at a worse edge than your limit"
             : "Filled exactly at your limit"
       }
-      style={valueChipStyle({ color: tone, bg, bold: true })}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        gap: 3,
+        padding: positive || negative ? "1px 6px" : 0,
+        borderRadius: 3,
+        background: bg,
+        color: tone,
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        fontWeight: positive || negative ? 600 : 400,
+        whiteSpace: "nowrap",
+      }}
     >
+      {positive && (
+        <span aria-hidden style={{ fontSize: 8, lineHeight: 1 }}>
+          ▲
+        </span>
+      )}
+      {negative && (
+        <span aria-hidden style={{ fontSize: 8, lineHeight: 1 }}>
+          ▼
+        </span>
+      )}
       {formatDollars(welfareNanos, { decimals: 2, sign: true })}
     </span>
   );
@@ -564,55 +508,63 @@ function PnlCell({ pnlNanos }: { pnlNanos: bigint | null }) {
     >
       {pnlNanos == null
         ? "—"
-        : formatDollarsRounded(pnlNanos, { decimals: 1, sign: true })}
+        : formatDollars(pnlNanos, { decimals: 2, sign: true })}
     </span>
   );
 }
 
-/**
- * Terminal-status chip. FILLED reads in the position tone, PARTIAL in the amber
- * "incomplete" tone (filled, but the rest didn't), REJECTED in the loss tone;
- * the rest are muted.
- */
-function StatusBadge({
-  status,
-}: {
-  status: Status;
-}) {
+/** Terminal-status chip. FILLED reads in the position tone; the rest are muted. */
+function StatusBadge({ status }: { status: Status }) {
   const tone =
     status === "FILLED"
       ? { fg: "var(--yes)", bg: "color-mix(in srgb, var(--yes) 14%, transparent)" }
-      : status === "PARTIAL"
-        ? { fg: "var(--warn)", bg: "color-mix(in srgb, var(--warn) 16%, transparent)" }
-        : status === "REJECTED"
-          ? { fg: "var(--no)", bg: "color-mix(in srgb, var(--no) 14%, transparent)" }
-          : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
-  // Same chip as the side pill / welfare (regular weight); only the tone differs.
-  return <span style={valueChipStyle({ color: tone.fg, bg: tone.bg })}>{status}</span>;
-}
-
-/** Close time — wall-clock first, then the short date faded after it, on one
- *  line. 24-hour so it stays compact enough to sit beside the date. */
-function ClosedTime({ ms }: { ms: number }) {
-  const d = new Date(ms);
-  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const time = d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+      : status === "REJECTED"
+        ? { fg: "var(--no)", bg: "color-mix(in srgb, var(--no) 14%, transparent)" }
+        : { fg: "var(--fg-3)", bg: "var(--fill-subtle)" };
   return (
     <span
-      title={d.toLocaleString()}
       style={{
+        padding: "1px 7px",
+        background: tone.bg,
+        color: tone.fg,
+        borderRadius: 3,
         fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        color: "var(--fg-2)",
+        fontSize: 9.5,
+        fontWeight: 600,
+        letterSpacing: "var(--track-wide)",
         whiteSpace: "nowrap",
       }}
     >
-      {time}
-      <span style={{ color: "var(--fg-4)" }}>{` ${date}`}</span>
+      {status}
+    </span>
+  );
+}
+
+/** Close time — short date over wall-clock, like the history feed's stamps. */
+function ClosedTime({ ms }: { ms: number }) {
+  const d = new Date(ms);
+  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        alignItems: "flex-end",
+        gap: 1,
+        fontFamily: "var(--font-mono)",
+      }}
+    >
+      <span style={{ fontSize: 11, color: "var(--fg-2)" }}>{date}</span>
+      <span
+        style={{
+          fontSize: 9.5,
+          color: "var(--fg-4)",
+          letterSpacing: "var(--track-wide)",
+        }}
+      >
+        {time}
+      </span>
     </span>
   );
 }
@@ -646,6 +598,7 @@ function HeaderCell({
         letterSpacing: "var(--track-wide)",
         color: active ? "var(--fg-2)" : "var(--fg-4)",
       }}
+      title={`Sort by ${col.label}`}
     >
       <span>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
@@ -683,13 +636,9 @@ function Row({
     <div
       style={{
         display: "grid",
-        // Ten columns in one row: keep the data columns compact, but give them a
-        // roomy gap so they breathe instead of bunching (the outcome 1fr absorbs
-        // the slack on wide screens). qty needs a touch more width for values
-        // like "234.375".
         gridTemplateColumns:
-          "minmax(0, 1fr) 52px 46px 82px 62px 74px 78px 54px 52px 80px",
-        gap: 18,
+          "minmax(0, 1fr) 52px 46px 66px 38px 76px 86px 60px 56px 58px",
+        gap: 13,
         alignItems: "center",
         padding: "9px 0",
         borderTop: header ? undefined : "1px solid var(--border-1)",
@@ -708,13 +657,9 @@ function Row({
 function Right({
   children,
   mono,
-  dim,
 }: {
   children: React.ReactNode;
   mono?: boolean;
-  /** Fade the value to fg-4 — used for the limit price/value of orders that
-   *  never traded, so they read as "would have" rather than settled. */
-  dim?: boolean;
 }) {
   return (
     <span
@@ -723,7 +668,7 @@ function Right({
         whiteSpace: "nowrap",
         fontFamily: mono ? "var(--font-mono)" : "inherit",
         fontSize: mono ? 12 : undefined,
-        color: dim ? "var(--fg-4)" : mono ? "var(--fg-1)" : undefined,
+        color: mono ? "var(--fg-1)" : undefined,
       }}
     >
       {children}

@@ -12,9 +12,10 @@
  * an overlay that closes on backdrop click, Esc-to-close, and CSS-token styling.
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useEventGroup } from "@/lib/market-detail/use-event-group";
+import { trapTabFocus } from "@/lib/accessibility/focus-trap";
 import { BuyBox } from "./buy-box";
 
 export function PlaceOrderModal({
@@ -26,17 +27,24 @@ export function PlaceOrderModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     if (!open) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+        ? document.activeElement
+        : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
+    const focusFrame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKey);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
   }, [open, onClose]);
 
@@ -48,6 +56,16 @@ export function PlaceOrderModal({
       role="dialog"
       aria-modal="true"
       aria-label="Place order"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+          return;
+        }
+        trapTabFocus(event.nativeEvent, event.currentTarget);
+      }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -64,16 +82,22 @@ export function PlaceOrderModal({
         padding: "var(--space-5)",
       }}
     >
-      <ModalBody marketId={marketId} onClose={onClose} />
+      <ModalBody
+        closeButtonRef={closeButtonRef}
+        marketId={marketId}
+        onClose={onClose}
+      />
     </div>,
     document.body,
   );
 }
 
 function ModalBody({
+  closeButtonRef,
   marketId,
   onClose,
 }: {
+  closeButtonRef: RefObject<HTMLButtonElement | null>;
   marketId: number;
   onClose: () => void;
 }) {
@@ -143,6 +167,7 @@ function ModalBody({
           )}
         </div>
         <button
+          ref={closeButtonRef}
           className="place-order-close"
           type="button"
           onClick={onClose}

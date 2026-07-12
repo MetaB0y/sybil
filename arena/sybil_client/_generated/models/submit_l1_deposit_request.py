@@ -24,7 +24,6 @@ T = TypeVar("T", bound="SubmitL1DepositRequest")
 class SubmitL1DepositRequest:
     """ 
         Attributes:
-            account_id (int): Sybil account receiving the credit.
             amount_token_units (int): Token base units accepted by the vault, e.g. USDC's 6-decimal units.
             chain_id (int): Source chain id.
             deposit_id (int): Sequential L1 vault deposit id.
@@ -32,11 +31,12 @@ class SubmitL1DepositRequest:
             sender_hex (str): Hex-encoded L1 sender address (20 bytes).
             token_address_hex (str): Hex-encoded token contract address (20 bytes).
             vault_address_hex (str): Hex-encoded vault contract address (20 bytes).
+            account_id (int | None | Unset): Sybil account receiving the credit. Must be absent when `quarantine` is true.
+            quarantine (bool | Unset): Dispose an unresolvable raw key into the committed system quarantine ledger.
             sybil_account_key_hex (None | str | Unset): Optional Sybil bridge account key. If omitted, the API derives it
                 for the account.
      """
 
-    account_id: int
     amount_token_units: int
     chain_id: int
     deposit_id: int
@@ -44,6 +44,8 @@ class SubmitL1DepositRequest:
     sender_hex: str
     token_address_hex: str
     vault_address_hex: str
+    account_id: int | None | Unset = UNSET
+    quarantine: bool | Unset = UNSET
     sybil_account_key_hex: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -52,8 +54,6 @@ class SubmitL1DepositRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
-        account_id = self.account_id
-
         amount_token_units = self.amount_token_units
 
         chain_id = self.chain_id
@@ -68,6 +68,14 @@ class SubmitL1DepositRequest:
 
         vault_address_hex = self.vault_address_hex
 
+        account_id: int | None | Unset
+        if isinstance(self.account_id, Unset):
+            account_id = UNSET
+        else:
+            account_id = self.account_id
+
+        quarantine = self.quarantine
+
         sybil_account_key_hex: None | str | Unset
         if isinstance(self.sybil_account_key_hex, Unset):
             sybil_account_key_hex = UNSET
@@ -78,7 +86,6 @@ class SubmitL1DepositRequest:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "account_id": account_id,
             "amount_token_units": amount_token_units,
             "chain_id": chain_id,
             "deposit_id": deposit_id,
@@ -87,6 +94,10 @@ class SubmitL1DepositRequest:
             "token_address_hex": token_address_hex,
             "vault_address_hex": vault_address_hex,
         })
+        if account_id is not UNSET:
+            field_dict["account_id"] = account_id
+        if quarantine is not UNSET:
+            field_dict["quarantine"] = quarantine
         if sybil_account_key_hex is not UNSET:
             field_dict["sybil_account_key_hex"] = sybil_account_key_hex
 
@@ -97,8 +108,6 @@ class SubmitL1DepositRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        account_id = d.pop("account_id")
-
         amount_token_units = d.pop("amount_token_units")
 
         chain_id = d.pop("chain_id")
@@ -113,6 +122,18 @@ class SubmitL1DepositRequest:
 
         vault_address_hex = d.pop("vault_address_hex")
 
+        def _parse_account_id(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        account_id = _parse_account_id(d.pop("account_id", UNSET))
+
+
+        quarantine = d.pop("quarantine", UNSET)
+
         def _parse_sybil_account_key_hex(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -124,7 +145,6 @@ class SubmitL1DepositRequest:
 
 
         submit_l1_deposit_request = cls(
-            account_id=account_id,
             amount_token_units=amount_token_units,
             chain_id=chain_id,
             deposit_id=deposit_id,
@@ -132,6 +152,8 @@ class SubmitL1DepositRequest:
             sender_hex=sender_hex,
             token_address_hex=token_address_hex,
             vault_address_hex=vault_address_hex,
+            account_id=account_id,
+            quarantine=quarantine,
             sybil_account_key_hex=sybil_account_key_hex,
         )
 

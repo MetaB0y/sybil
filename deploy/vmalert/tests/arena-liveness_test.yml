@@ -1,0 +1,154 @@
+# Prometheus-compatible tests for dynamic reference coverage and arena trader
+# desired-state liveness. Run:
+#   promtool test rules deploy/vmalert/tests/arena-liveness_test.yml
+
+rule_files:
+  - ../rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="sybil-arena",instance="sybil-arena:9101"}'
+        values: "0+0x5"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ArenaDown
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: ArenaDown
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-arena"
+              instance: "sybil-arena:9101"
+              severity: critical
+              component: arena
+            exp_annotations:
+              summary: "Arena scrape target is down"
+              description: "VictoriaMetrics has not been able to scrape the Arena runner for 3m. Trading and Arena-owned liveness signals may be unavailable."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_reference_eligible_markets_active_total{job="sybil-api"}'
+        values: "72+0x20"
+      - series: 'sybil_reference_prices_active_total{job="sybil-api"}'
+        values: "72+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReferencePriceCoverageLow
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_reference_eligible_markets_active_total{job="sybil-api"}'
+        values: "72+0x20"
+      - series: 'sybil_reference_prices_active_total{job="sybil-api"}'
+        values: "30+0x20"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ReferencePriceCoverageLow
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: ReferencePriceCoverageLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: polymarket
+            exp_annotations:
+              summary: "Polymarket reference-price coverage is low"
+              description: "Fewer than 60% of active reference-eligible mirror markets have live reference prices (current ratio: 41.67%). Polymarket coverage may have dropped or the mirror may not be tracking enough tokens."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_bot_latest_decision_age_seconds{job="sybil-api",trader="retired"}'
+        values: "7200+60x10"
+      - series: 'sybil_bot_decisions_total{job="sybil-api",trader="retired"}'
+        values: "100+0x10"
+      - series: 'sybil_bot_latest_decision_age_seconds{job="sybil-api",trader="current"}'
+        values: "7200+60x10"
+      - series: 'sybil_arena_trader_active{job="sybil-arena",trader="current"}'
+        values: "1+0x10"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: BotTraderStale
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-api"
+              trader: "current"
+              severity: warning
+              component: arena
+            exp_annotations:
+              summary: "One arena trader is stale"
+              description: "current is configured in the current arena runner but has not recorded a decision for more than 1h. Historical retired traders are excluded by desired state."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_arena_trader_active{job="sybil-arena",trader="never-started"}'
+        values: "1+0x20"
+      - series: 'sybil_bot_db_available{job="sybil-api"}'
+        values: "1+0x20"
+      - series: 'sybil_bot_decisions_total{job="sybil-api"}'
+        values: "10+0x20"
+      - series: 'sybil_bot_latest_decision_age_seconds{job="sybil-api"}'
+        values: "60+0x20"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: BotTraderMissing
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: BotTraderMissing
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-arena"
+              trader: "never-started"
+              severity: warning
+              component: arena
+            exp_annotations:
+              summary: "Configured arena trader is missing decisions"
+              description: "never-started has no recorded decision while the decision database is available and other arena decisions are recent. Its loop may be unhealthy."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_arena_trader_active{job="sybil-arena",trader="quiet"}'
+        values: "1+0x20"
+      - series: 'sybil_bot_db_available{job="sybil-api"}'
+        values: "1+0x20"
+      - series: 'sybil_bot_decisions_total{job="sybil-api"}'
+        values: "10+0x20"
+      - series: 'sybil_bot_latest_decision_age_seconds{job="sybil-api"}'
+        values: "900+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BotTraderMissing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_arena_trader_active{job="sybil-arena",trader="fresh"}'
+        values: "1+0x20"
+      - series: 'sybil_bot_db_available{job="sybil-api"}'
+        values: "1+0x20"
+      - series: 'sybil_bot_decisions_total{job="sybil-api"}'
+        values: "0+0x20"
+      - series: 'sybil_bot_latest_decision_age_seconds{job="sybil-api"}'
+        values: "0+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BotTraderMissing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_arena_trader_active{job="sybil-arena",trader="db-down"}'
+        values: "1+0x20"
+      - series: 'sybil_bot_db_available{job="sybil-api"}'
+        values: "0+0x20"
+      - series: 'sybil_bot_decisions_total{job="sybil-api"}'
+        values: "10+0x20"
+      - series: 'sybil_bot_latest_decision_age_seconds{job="sybil-api"}'
+        values: "60+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BotTraderMissing
+        exp_alerts: []

@@ -107,6 +107,8 @@ fn is_set(value: &str) -> bool {
 ///   promoted to startup).
 /// - `SYBIL_DATA_DIR` unset — in-memory only; the whole store (state, equity,
 ///   history, price points) is lost on restart and never persisted.
+/// - `SYBIL_ADMIN_FEED_KEY_PATH` unset — the admin resolution feed identity is
+///   regenerated on every restart, so the configured signer is not durable.
 ///
 /// Informational-only deviations (logged, never block): a durable store backs
 /// these when `SYBIL_DATA_DIR` is set, so the reduced RAM cache does not lose
@@ -119,9 +121,8 @@ fn is_set(value: &str) -> bool {
 ///   — prod-intended value is already `0` (served store-first from redb), so a
 ///   nonzero RAM fallback is the only thing that could differ.
 /// - `SYBIL_BLOCK_HISTORY_CAPACITY` — recent-block ring size.
-/// - `SYBIL_MARKET_REF_DATA_PATH` / `SYBIL_ADMIN_FEED_KEY_PATH` — unset means
-///   volatile mirror metadata / an ephemeral admin key. Degraded but not data
-///   loss for trading; flagged for operator attention.
+/// - `SYBIL_MARKET_REF_DATA_PATH` — unset means volatile mirror metadata.
+///   Degraded but not data loss for trading; flagged for operator attention.
 pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
     let mut out = Vec::new();
 
@@ -204,7 +205,7 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
             knob: "SYBIL_ADMIN_FEED_KEY_PATH",
             value: "<unset> (ephemeral admin key)".to_string(),
             prod_intended: "<set>",
-            dev_only: false,
+            dev_only: true,
         });
     }
 
@@ -385,6 +386,23 @@ mod tests {
                 .iter()
                 .any(|d| d.knob == "SYBIL_DATA_DIR")
         );
+        assert!(run_preflight(&config).is_err());
+    }
+
+    #[test]
+    fn missing_admin_feed_key_path_blocks_prod_start() {
+        let config = ApiConfig {
+            admin_feed_key_path: String::new(),
+            ..prod_ready_config()
+        };
+        let report = build_report(&config).unwrap();
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|d| d.knob == "SYBIL_ADMIN_FEED_KEY_PATH")
+        );
+        assert!(report.blocks_prod_start(false));
         assert!(run_preflight(&config).is_err());
     }
 

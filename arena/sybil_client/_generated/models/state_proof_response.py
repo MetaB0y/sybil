@@ -31,7 +31,7 @@ class StateProofResponse:
             leaf_key_hex (str):
             proof_format (str):
             proof_kind (str):
-            state_root (str):
+            state_root (str): State root this proof is anchored to. Hex-encoded 32-byte qMDB root.
             state_slot (str):
             verified (bool):
             exclusion_proof (None | QmdbStateExclusionProofResponse | Unset):

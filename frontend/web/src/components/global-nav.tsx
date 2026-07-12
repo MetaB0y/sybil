@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
-import { Suspense, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AccountChip } from "./auth/account-chip";
 import { BatchPill } from "./batch-pill";
 import { DevZoneNav } from "./dev/dev-zone-nav";
@@ -23,30 +23,94 @@ const TABS: readonly NavTab[] = [
     match: (p) => p.startsWith("/leaderboard"),
   },
   { href: "/portfolio", label: "Portfolio", match: (p) => p.startsWith("/portfolio") },
-  // Settings is reached from the account dropdown (account-chip), not a top-level
-  // tab — it's an account-scoped page, so it lives with the other account actions.
+  { href: "/settings", label: "Settings", match: (p) => p.startsWith("/settings") },
 ];
 
 export function GlobalNav() {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [lastPathname, setLastPathname] = useState(pathname);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const restoreMenuButtonFocusRef = useRef(true);
+
+  const closeMenu = useCallback((restoreFocus = true) => {
+    restoreMenuButtonFocusRef.current = restoreFocus;
+    setMenuOpen(false);
+  }, []);
+
+  const openMenu = useCallback(() => {
+    restoreMenuButtonFocusRef.current = true;
+    setMenuOpen(true);
+  }, []);
 
   if (pathname !== lastPathname) {
     setLastPathname(pathname);
     if (shouldCloseNavSheetOnPathChange(menuOpen)) setMenuOpen(false);
   }
 
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const sheet = sheetRef.current;
+    const menuButton = menuButtonRef.current;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusable = getFocusableElements(sheet);
+    (focusable[0] ?? sheet)?.focus({ preventScroll: true });
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu();
+        return;
+      }
+      if (event.key !== "Tab" || !sheet) return;
+
+      const items = getFocusableElements(sheet);
+      if (items.length === 0) {
+        event.preventDefault();
+        sheet.focus({ preventScroll: true });
+        return;
+      }
+
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !sheet.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (active === last || !sheet.contains(active))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+      if (restoreMenuButtonFocusRef.current && menuButton?.isConnected) {
+        menuButton.focus({ preventScroll: true });
+      }
+    };
+  }, [menuOpen, closeMenu]);
+
   return (
     <header className="global-nav">
-      {/* Wordmark */}
+      {/* Wordmark + status pill */}
       <Link
         className="global-nav-brand"
         href="/"
         style={{
           display: "inline-flex",
           alignItems: "baseline",
-          flexShrink: 0,
+          gap: "var(--space-2)",
           textDecoration: "none",
           color: "var(--fg-1)",
         }}
@@ -62,6 +126,24 @@ export function GlobalNav() {
         >
           Sybil
         </span>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            height: 18,
+            padding: "0 var(--space-2)",
+            background: "var(--warn-soft)",
+            color: "var(--warn)",
+            border: "1px solid color-mix(in srgb, var(--warn) 24%, transparent)",
+            borderRadius: "var(--radius-pill)",
+            fontFamily: "var(--font-mono)",
+            fontSize: "10px",
+            letterSpacing: "var(--track-wide)",
+            textTransform: "uppercase",
+          }}
+        >
+          devnet
+        </span>
       </Link>
 
       {/* Route tabs */}
@@ -72,25 +154,24 @@ export function GlobalNav() {
         <DevZoneNav />
       </nav>
 
-      {/* Global search — grows to fill the middle of the bar */}
-      <div className="global-nav-search-desktop">
-        <Suspense fallback={<NavSearchSkeleton />}>
-          <NavSearch />
-        </Suspense>
-      </div>
-
-      {/* Right side — theme + batch pill + (placeholder) account chip */}
+      {/* Right side — search + batch status + account controls. */}
       <div className="global-nav-right">
+        <div className="global-nav-search-desktop">
+          <Suspense fallback={<NavSearchSkeleton />}>
+            <NavSearch />
+          </Suspense>
+        </div>
         <ThemeToggle />
         <BatchPill />
         <AccountChip />
         <button
+          ref={menuButtonRef}
           type="button"
           className="global-nav-menu-button"
           aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
           aria-expanded={menuOpen}
           aria-controls="global-nav-sheet"
-          onClick={() => setMenuOpen((open) => !open)}
+          onClick={() => (menuOpen ? closeMenu() : openMenu())}
         >
           {menuOpen ? <X size={18} aria-hidden /> : <Menu size={18} aria-hidden />}
         </button>
@@ -100,9 +181,17 @@ export function GlobalNav() {
           <div
             className="global-nav-sheet-backdrop"
             aria-hidden
-            onClick={() => setMenuOpen(false)}
+            onClick={() => closeMenu()}
           />
-          <div id="global-nav-sheet" className="global-nav-sheet">
+          <div
+            ref={sheetRef}
+            id="global-nav-sheet"
+            className="global-nav-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
+            tabIndex={-1}
+          >
             <div className="global-nav-sheet-search">
               <Suspense fallback={<NavSearchSkeleton />}>
                 <NavSearch />
@@ -110,7 +199,12 @@ export function GlobalNav() {
             </div>
             <nav className="global-nav-sheet-tabs" aria-label="Primary mobile">
               {TABS.map((tab) => (
-                <NavTabLink key={tab.href} tab={tab} pathname={pathname} />
+                <NavTabLink
+                  key={tab.href}
+                  tab={tab}
+                  pathname={pathname}
+                  onNavigate={() => closeMenu(false)}
+                />
               ))}
               <DevZoneNav />
             </nav>
@@ -124,14 +218,37 @@ export function GlobalNav() {
 function NavTabLink({
   tab,
   pathname,
+  onNavigate,
 }: {
   tab: NavTab;
   pathname: string;
+  onNavigate?: () => void;
 }) {
   const active = tab.match(pathname);
   return (
-    <Link className="global-nav-tab" data-active={active} href={tab.href}>
+    <Link
+      className="global-nav-tab"
+      data-active={active}
+      href={tab.href}
+      {...(onNavigate ? { onClick: onNavigate } : {})}
+    >
       {tab.label}
     </Link>
   );
+}
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return [];
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter((element) => element.getAttribute("aria-hidden") !== "true");
 }

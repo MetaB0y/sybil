@@ -49,6 +49,26 @@ Do not put provider keys in source, command examples committed with real
 values, or process arguments on a deployed host. The deployment path reads the
 key from `/opt/sybil/arena.env`.
 
+The concurrent SYB-114 Stage 1 experiment can also be activated through that
+file by setting both `ARENA_STAGE1_AB_EXPERIMENT_ID` and comma-separated
+`ARENA_MARKET_IDS`. Both are opt-in: unset/empty values keep the normal topology,
+and a partial environment configuration is rejected. CLI flags of the same
+meaning take precedence; see the canonical
+[`LLM Trader`](../docs/architecture/06-agents/LLM%20Trader.md) note for the run
+and measurement contract.
+
+An active Stage 1 experiment automatically queries authoritative Sybil
+resolution endpoints for its exact frozen cohort immediately and every 15
+minutes, recording immutable labels in `market_outcomes`. Override the positive
+cadence with `ARENA_OUTCOME_RECORD_INTERVAL_S` or
+`--outcome-record-interval-s`; the CLI flag is rejected without an active
+experiment, while a dormant env value is ignored. Ordinary live runs start no recorder. The manual
+`python -m scripts.record_outcomes` command still derives markets from decisions
+unless an exact `--market-ids` cohort is supplied. Automatic writes verify the
+persisted experiment genesis before fetching and again immediately before the
+transaction. A chain mismatch or a 404 for an exact-cohort market disarms the
+recorder without writing; decisions-derived manual mode retains legacy 404-as-missing behavior.
+
 ## Layout
 
 | Path | Responsibility |

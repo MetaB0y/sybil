@@ -1,7 +1,7 @@
 ---
 tags: [runbook, monitoring, operations]
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-12
 ---
 
 # Synthetic monitoring and alert delivery
@@ -21,7 +21,8 @@ without creating accounts, orders, or any other application state.
 
 `synthetic-probe.sh` fails fast with one `FAIL: ...` line unless:
 
-- `GET /v1/health` is 2xx and reports `status=ok`;
+- `GET /v1/health` is 2xx, reports `status=ok`, and exposes a positive
+  committed height plus a lowercase 64-hex genesis hash;
 - `/v1/blocks/latest` advances between samples separated by 1.5 configured
   block intervals;
 - `/v1/markets` is a nonempty JSON array;
@@ -56,6 +57,7 @@ whenever the lag was computable:
 ```text
 sybil_synthetic_probe_failure{job="sybil-synthetic",instance="<base-url>"} 0|1
 sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="<base-url>"} <blocks>
+sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="<base-url>"} <blocks>
 ```
 
 On the host it discovers the compose `victoriametrics` container and posts to
@@ -70,9 +72,11 @@ port. `SYBIL_SYNTHETIC_VM_URL` can instead name a directly reachable VM URL.
 - `SyntheticProbeMissing` fires when no result arrives for 15 minutes, covering
   a disabled timer or broken ingestion path;
 - `SyntheticProofLagHigh` fires when the probe's measured proof lag stays
-  above 30 blocks for 10 minutes. In the default `fail` mode this is largely
-  redundant with `SyntheticProbeFailed` (the probe already fails on high lag);
-  it is the pager for `warn` mode and gives a graded lag series either way.
+  above the emitted `SYBIL_SMOKE_PROOF_LAG_MAX` limit for 10 minutes. In the
+  default `fail` mode this is largely redundant with `SyntheticProbeFailed`
+  (the probe already fails on high lag); it is the pager for `warn` mode and
+  gives a graded lag series either way. The alert and probe therefore keep the
+  same ceiling when operators tune it for real-prover cadence.
 
 The existing Telegram overlay loads the same rules and configures vmalert's
 notifier as `http://telegram-alerts:8080`. The bridge accepts vmalert's

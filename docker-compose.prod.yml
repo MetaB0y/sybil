@@ -34,6 +34,10 @@ services:
       # Off-block Polymarket mirror metadata (event id/title, images, end
       # dates, category). JSON-on-disk so it survives sybil-api restarts.
       SYBIL_MARKET_REF_DATA_PATH: "/data/market_ref_data.json"
+      # The API creates this P256 scalar on first boot and reloads the same
+      # key on later boots. Keep it in sybil-data so the admin resolution feed
+      # identity survives container replacement and host reboots.
+      SYBIL_ADMIN_FEED_KEY_PATH: "/data/admin-feed.key"
       # Serve per-account equity series + history feed entirely from redb
       # (full series persisted under SYBIL_DATA_DIR). 0 = keep nothing in RAM,
       # so host memory no longer grows with the (ever-increasing) account count.
@@ -85,6 +89,7 @@ services:
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
       - "--mapping-path=/polymarket-data/polymarket_mapping.json"
+      - "--metrics-port=9101"
 
     logging: *default-logging
   grafana:

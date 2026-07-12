@@ -8,6 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
+from typing import cast
 
 
 
@@ -22,16 +24,18 @@ T = TypeVar("T", bound="BridgeDepositResponse")
 class BridgeDepositResponse:
     """ 
         Attributes:
-            account_id (int):
-            balance_nanos (int): Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
             deposit_id (int):
             deposit_root_hex (str):
+            disposition (str): `credited` or `quarantined`.
+            account_id (int | None | Unset):
+            balance_nanos (int | None | Unset): Account balance after the deposit. Integer nanodollars; 1_000_000_000 = $1.
      """
 
-    account_id: int
-    balance_nanos: int
     deposit_id: int
     deposit_root_hex: str
+    disposition: str
+    account_id: int | None | Unset = UNSET
+    balance_nanos: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -39,23 +43,36 @@ class BridgeDepositResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        account_id = self.account_id
-
-        balance_nanos = self.balance_nanos
-
         deposit_id = self.deposit_id
 
         deposit_root_hex = self.deposit_root_hex
+
+        disposition = self.disposition
+
+        account_id: int | None | Unset
+        if isinstance(self.account_id, Unset):
+            account_id = UNSET
+        else:
+            account_id = self.account_id
+
+        balance_nanos: int | None | Unset
+        if isinstance(self.balance_nanos, Unset):
+            balance_nanos = UNSET
+        else:
+            balance_nanos = self.balance_nanos
 
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "account_id": account_id,
-            "balance_nanos": balance_nanos,
             "deposit_id": deposit_id,
             "deposit_root_hex": deposit_root_hex,
+            "disposition": disposition,
         })
+        if account_id is not UNSET:
+            field_dict["account_id"] = account_id
+        if balance_nanos is not UNSET:
+            field_dict["balance_nanos"] = balance_nanos
 
         return field_dict
 
@@ -64,19 +81,38 @@ class BridgeDepositResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        account_id = d.pop("account_id")
-
-        balance_nanos = d.pop("balance_nanos")
-
         deposit_id = d.pop("deposit_id")
 
         deposit_root_hex = d.pop("deposit_root_hex")
 
+        disposition = d.pop("disposition")
+
+        def _parse_account_id(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        account_id = _parse_account_id(d.pop("account_id", UNSET))
+
+
+        def _parse_balance_nanos(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        balance_nanos = _parse_balance_nanos(d.pop("balance_nanos", UNSET))
+
+
         bridge_deposit_response = cls(
-            account_id=account_id,
-            balance_nanos=balance_nanos,
             deposit_id=deposit_id,
             deposit_root_hex=deposit_root_hex,
+            disposition=disposition,
+            account_id=account_id,
+            balance_nanos=balance_nanos,
         )
 
 

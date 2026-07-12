@@ -8,6 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from typing import cast
 
 
 
@@ -23,9 +24,11 @@ class OrderAcceptedResponse:
     """ 
         Attributes:
             accepted (bool):
+            order_ids (list[int]): Sequencer-assigned IDs for the admitted orders, in request order.
      """
 
     accepted: bool
+    order_ids: list[int]
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -35,11 +38,16 @@ class OrderAcceptedResponse:
     def to_dict(self) -> dict[str, Any]:
         accepted = self.accepted
 
+        order_ids = self.order_ids
+
+
+
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
             "accepted": accepted,
+            "order_ids": order_ids,
         })
 
         return field_dict
@@ -51,8 +59,12 @@ class OrderAcceptedResponse:
         d = dict(src_dict)
         accepted = d.pop("accepted")
 
+        order_ids = cast(list[int], d.pop("order_ids"))
+
+
         order_accepted_response = cls(
             accepted=accepted,
+            order_ids=order_ids,
         )
 
 

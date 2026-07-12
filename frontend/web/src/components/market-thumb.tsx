@@ -1,22 +1,18 @@
 "use client";
 
 /**
- * Market thumbnail with a two-step fallback chain:
+ * Market thumbnail with two-step fallback chain:
  *
  *   imageUrl (404) → fallbackIconUrl (404) → deterministic colored tile
  *
- * Known Polymarket artwork is routed through Next's image optimizer (resized to
- * the thumbnail's pixel box and re-encoded at q=60), so we paint a fraction of
- * the original bytes; unknown hosts stay raw rather than widening the optimizer
- * allowlist. Either way the resolved image is painted as a CSS background and
- * only advanced to a new URL once that URL has decoded. Switching markets (e.g.
- * picking a sibling outcome) therefore holds the previous thumbnail and
- * cross-fades the next one in over it, instead of flashing blank — a plain
- * `<img>` blanks the moment its `src` changes. The tile fallback uses the first
- * glyph of the market name on a palette-keyed background.
+ * Known Polymarket artwork is resized and re-encoded by `next/image`; unknown
+ * hosts stay browser-loaded and lazy rather than widening the server-side
+ * image-proxy allowlist. Fallback tile uses the first glyph of the market name
+ * on a palette-keyed background.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import { useState } from "react";
 
 type Props = {
   marketId: number;
@@ -26,13 +22,9 @@ type Props = {
   size?: number;
 };
 
-const OPTIMIZED_IMAGE_HOST = "polymarket-upload.s3.us-east-2.amazonaws.com";
+type Stage = "image" | "icon" | "tile";
 
-// Widths we ask the Next optimizer for. next.config sets no `imageSizes`, so the
-// defaults apply and every value here is an allowed tier (an off-list width makes
-// the optimizer 400). We request ~2× the CSS box for retina crispness, snapped up
-// to the nearest tier.
-const OPTIMIZER_WIDTHS = [48, 64, 96, 128, 256, 384];
+const OPTIMIZED_IMAGE_HOST = "polymarket-upload.s3.us-east-2.amazonaws.com";
 
 const PALETTE = [
   "var(--accent-soft)",
@@ -45,37 +37,6 @@ const PALETTE = [
   "var(--accent-faint)",
 ];
 
-/**
- * Route Polymarket artwork through the Next image optimizer at a thumbnail-sized
- * width; leave other hosts untouched. The result is painted as a CSS background,
- * so we hit the optimizer endpoint directly rather than via `next/image` — that
- * keeps the cross-fade + decode-gating below while still shipping optimized bytes.
- */
-function toDisplayUrl(src: string, size: number): string {
-  if (!isOptimizedImageUrl(src)) return src;
-  const target = size * 2;
-  const w =
-    OPTIMIZER_WIDTHS.find((x) => x >= target) ??
-    OPTIMIZER_WIDTHS[OPTIMIZER_WIDTHS.length - 1];
-  return `/_next/image?url=${encodeURIComponent(src)}&w=${w}&q=60`;
-}
-
-/**
- * Resolve to the first URL in `urls` that decodes, or `null` if none do.
- * Sequential (recursive, no await-in-loop) so the fallback order is honoured:
- * try the market image, then the icon, then give up to the tile.
- */
-function firstLoadable(urls: string[]): Promise<string | null> {
-  if (urls.length === 0) return Promise.resolve(null);
-  const [head, ...rest] = urls;
-  return new Promise<boolean>((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
-    img.src = head!;
-  }).then((ok) => (ok ? head! : firstLoadable(rest)));
-}
-
 export function MarketThumb({
   marketId,
   name,
@@ -83,67 +44,57 @@ export function MarketThumb({
   fallbackIconUrl,
   size = 40,
 }: Props) {
-  const candidates = useMemo(
-    () =>
-      [imageUrl, fallbackIconUrl]
-        .filter((u): u is string => !!u)
-        .map((u) => toDisplayUrl(u, size)),
-    [imageUrl, fallbackIconUrl, size],
-  );
+  const initialStage: Stage = imageUrl
+    ? "image"
+    : fallbackIconUrl
+      ? "icon"
+      : "tile";
+  const [stage, setStage] = useState<Stage>(initialStage);
 
-  // The URL currently painted. Seeded with the best candidate for first paint,
-  // then only advanced once a candidate has decoded — so it holds across a
-  // market switch instead of flashing blank. `null` → deterministic tile.
-  const [painted, setPainted] = useState<string | null>(candidates[0] ?? null);
-
-  // The previously painted URL, kept one render behind so the new image can
-  // cross-fade in over the old one instead of hard-cutting. Render-safe
-  // "previous value" pattern (adjust state during render), not a ref.
-  const [prev, setPrev] = useState<string | null>(null);
-  const [seen, setSeen] = useState<string | null>(painted);
-  if (seen !== painted) {
-    setPrev(seen);
-    setSeen(painted);
+  // Reset stage when input URLs change (parent reuses this component for a
+  // different market). React's documented "reset state when prop changes"
+  // pattern: track prev props in state and reset during render rather than
+  // in an effect.
+  const [prevImage, setPrevImage] = useState(imageUrl);
+  const [prevIcon, setPrevIcon] = useState(fallbackIconUrl);
+  if (prevImage !== imageUrl || prevIcon !== fallbackIconUrl) {
+    setPrevImage(imageUrl);
+    setPrevIcon(fallbackIconUrl);
+    setStage(initialStage);
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    firstLoadable(candidates).then((url) => {
-      if (!cancelled) setPainted(url);
-    });
-    return () => {
-      cancelled = true;
+  if (stage !== "tile") {
+    const src = stage === "image" ? imageUrl! : fallbackIconUrl!;
+    const onError = () => {
+      if (stage === "image" && fallbackIconUrl) setStage("icon");
+      else setStage("tile");
     };
-  }, [candidates]);
-
-  if (painted) {
     return (
-      <div
-        aria-hidden
-        style={{
-          ...thumbStyles(size),
-          position: "relative",
-          background: "var(--surface-2)",
-        }}
-      >
-        {prev && prev !== painted && (
-          <span
-            style={{
-              position: "absolute",
-              inset: 0,
-              background: `url("${prev}") center / cover no-repeat`,
-            }}
+      <div style={thumbStyles(size)} aria-hidden>
+        {isOptimizedImageUrl(src) ? (
+          <Image
+            src={src}
+            alt=""
+            width={size}
+            height={size}
+            sizes={`${size}px`}
+            quality={60}
+            style={imageStyles}
+            onError={onError}
+          />
+        ) : (
+          /* eslint-disable-next-line @next/next/no-img-element -- unknown hosts must not widen the server image proxy */
+          <img
+            src={src}
+            alt=""
+            width={size}
+            height={size}
+            loading="lazy"
+            decoding="async"
+            style={imageStyles}
+            onError={onError}
           />
         )}
-        <span
-          key={painted}
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: `url("${painted}") center / cover no-repeat`,
-            animation: "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
-          }}
-        />
       </div>
     );
   }
@@ -171,6 +122,13 @@ export function MarketThumb({
     </div>
   );
 }
+
+const imageStyles: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  display: "block",
+};
 
 export function isOptimizedImageUrl(src: string): boolean {
   try {

@@ -14,18 +14,20 @@ that already has one.
 
 1. Create the account with a passkey from a synced passkey provider where
    appropriate.
-2. While signed in with that key, create a second passkey on another device or
-   provider.
-3. Fetch the current key-operation binding from
-   `GET /v1/accounts/{id}/keyop-state`.
-4. Register the new WebAuthn key with a state-bound signature from the existing
-   key via `POST /v1/accounts/{id}/keys/register`.
-5. Sign a harmless action from the backup device and confirm it succeeds before
-   relying on the backup.
+2. While signed in with that key, open **Settings → Signing keys / agent keys**
+   and choose **Add backup passkey**. Use the browser or authenticator picker to
+   create the additional credential on the intended device or provider.
+3. Sybil fetches the current key-operation binding and has the existing passkey
+   authorize the state-bound registration. The server never receives either
+   passkey's private key and cannot reset one.
+4. Disconnect, choose **Sign in with passkey**, and select the backup. Confirm
+   that it reconnects to the same account and sign a harmless action before
+   relying on it.
 
-The settings UI lists signing keys, but the add-backup-passkey ceremony may
-still require a trusted client using the endpoints above. Do not ask an
-operator to bypass the signed registration path.
+Disconnecting or clearing local browser data does not delete a synced or
+authenticator-held passkey. It also does not reset server state: discoverable
+sign-in recovers the account id from the selected passkey. Do not ask an
+operator to bypass the signed registration path or reset the account.
 
 ## Lost device
 

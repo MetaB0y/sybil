@@ -730,8 +730,50 @@ async fn bridge_deposit_and_withdrawal_surface_in_block_response() {
     assert_eq!(withdrawal["withdrawal_id"], json!(1));
     assert_eq!(withdrawal["amount_nanos"], json!(4_000_000u64));
     assert!(withdrawal["withdrawal_leaf_digest_hex"].as_str().is_some());
+    let nullifier_hex = withdrawal["nullifier_hex"].as_str().unwrap().to_string();
+
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/withdrawals"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let active = parse_json(&body);
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["l1_status"], json!("not_requested"));
+
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/bridge/withdrawals/l1-events",
+        json!({
+            "nullifier_hex": nullifier_hex,
+            "status": "finalized",
+            "event_at_unix": 1_700_000_000u64,
+            "l1_block_height": 1u64,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/withdrawals"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let active = parse_json(&body);
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["l1_status"], json!("finalized"));
 
     handle.produce_block().await.unwrap();
+
+    let (status, body) = get(
+        app.clone(),
+        &format!("/v1/accounts/{account_id}/withdrawals"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
 
     let (status, body) = get(app, "/v1/blocks/latest").await;
     assert_eq!(status, StatusCode::OK);
@@ -2035,12 +2077,37 @@ async fn fills_paginated_correctly() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn health_endpoint() {
-    let (app, _) = test_app(true).await;
-    let (status, body) = get(app, "/v1/health").await;
+async fn health_endpoint_is_an_atomic_chain_snapshot_and_fails_closed() {
+    let (app, handle) = test_app(true).await;
+
+    let (status, body) = get(app.clone(), "/v1/health").await;
+    assert_eq!(status, StatusCode::OK);
+    let resp = parse_json(&body);
+    assert_eq!(resp["status"].as_str(), Some("ok"));
+    assert!(resp["height"].is_null());
+    assert!(resp["genesis_hash"].is_null());
+
+    let produced = handle.produce_block().await.unwrap();
+    let (status, body) = get(app.clone(), "/v1/health").await;
     assert_eq!(status, StatusCode::OK);
     let resp = parse_json(&body);
     assert_eq!(resp["status"].as_str().unwrap(), "ok");
+    assert_eq!(resp["height"].as_u64(), Some(1));
+    let expected_genesis = hex::encode(matching_sequencer::block::hash_header(
+        &produced.canonical.header,
+    ));
+    assert_eq!(
+        resp["genesis_hash"].as_str(),
+        Some(expected_genesis.as_str())
+    );
+
+    assert!(handle.stop_and_wait(Duration::from_secs(5)).await);
+    let (status, body) = get(app, "/v1/health").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let resp = parse_json(&body);
+    assert_eq!(resp["status"].as_str(), Some("unhealthy"));
+    assert!(resp["height"].is_null());
+    assert!(resp["genesis_hash"].is_null());
 }
 
 #[tokio::test]

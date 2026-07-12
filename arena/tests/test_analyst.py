@@ -14,10 +14,11 @@ from unittest.mock import AsyncMock, MagicMock
 from live.analyst import (
     DEFAULT_COUNTERCASE,
     DEFAULT_PARSE_CONFIDENCE,
+    DEFAULT_RESTATE,
     PersonaAnalyst,
     cluster_near_duplicate_articles,
 )
-from live.fair_value_bus import FairValueBus, FairValueUpdate
+from live.fair_value_bus import FairValueBus, FairValueUpdate, analysis_batch_id
 from live.metrics import ArenaMetrics
 from live.news_feed import LiveArticle
 from live.trader import LiveLlmTrader
@@ -113,6 +114,7 @@ def _make_sizer(bus, name, market_ids=(7,)):
 def test_parse_fair_value_tolerates_trailing_dot():
     analyst = _make_analyst(FairValueBus(), [7])
     parsed = analyst._parse_fair_value(
+        "RESTATE: YES resolves if the named event happens by the deadline.\n"
         "FAIR_VALUE: 0.85.\n"
         "COUNTERCASE: The source could be overstating the event.\n"
         "CONFIDENCE: 0.70\n"
@@ -121,6 +123,7 @@ def test_parse_fair_value_tolerates_trailing_dot():
     )
     assert parsed is not None
     assert parsed.fair_value == 0.85
+    assert parsed.restate == "YES resolves if the named event happens by the deadline."
     assert parsed.motivation == "Strong new evidence."
     assert parsed.analysis == "The article directly updates the market."
     assert parsed.countercase == "The source could be overstating the event."
@@ -145,11 +148,17 @@ def test_parse_fair_value_fallbacks_are_conservative_and_counted():
 
     assert parsed is not None
     assert parsed.confidence == DEFAULT_PARSE_CONFIDENCE
+    assert parsed.restate == DEFAULT_RESTATE
     assert parsed.countercase == DEFAULT_COUNTERCASE
     assert analyst.parse_fallback_counts == {
+        "restate_missing": 1,
         "countercase_missing": 1,
         "confidence_garbled": 1,
     }
+    assert metrics.registry.get_sample_value(
+        "sybil_arena_analyst_parse_fallbacks_total",
+        {"trader": "Test (Analyst)", "field": "restate_missing"},
+    ) == 1
     assert metrics.registry.get_sample_value(
         "sybil_arena_analyst_parse_fallbacks_total",
         {"trader": "Test (Analyst)", "field": "countercase_missing"},
@@ -184,6 +193,21 @@ def test_cluster_near_duplicate_articles_keeps_one_representative_per_cluster():
     assert any(cluster.representative is duplicate for cluster in clusters)
 
 
+def test_analysis_batch_id_is_stable_for_sorted_article_urls():
+    first = _article()
+    second = LiveArticle(
+        url="http://x/b",
+        title="Second",
+        source="src",
+        published=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        full_text="Body",
+    )
+
+    assert analysis_batch_id(7, [first, second]) == analysis_batch_id(7, [second, first])
+    assert analysis_batch_id(7, [first]) != analysis_batch_id(8, [first])
+    assert analysis_batch_id(7, [first], 0.55) != analysis_batch_id(7, [first], 0.56)
+
+
 def test_prompt_includes_full_resolution_criteria():
     analyst = _make_analyst(FairValueBus(), [7])
     market = analyst.markets_info[7]
@@ -194,6 +218,9 @@ def test_prompt_includes_full_resolution_criteria():
 
     assert f"Resolution: {market.resolution_criteria}" in prompt
     assert f"Resolution: {market.resolution_criteria[:200]}" in prompt
+    assert "RESTATE: [1 sentence" in prompt
+    assert prompt.index("RESTATE:") < prompt.index("FAIR_VALUE:")
+    assert "discount aggregator and SEO-driven summaries" in prompt
 
 
 # -- AR-6: per-call LLM budget enforced on the analyst -------------------- #
@@ -257,7 +284,11 @@ async def test_both_sizers_receive_same_update_object_and_values():
     analyst = _make_analyst(bus, [7], min_llm_interval_s=1000.0)
     analyst._observed_first_block = True
     analyst._call_llm = AsyncMock(
-        return_value=("FAIR_VALUE: 0.73\nMOTIVATION: m\nANALYSIS: a", 0.1)
+        return_value=(
+            "RESTATE: The event occurs by the specified deadline.\n"
+            "FAIR_VALUE: 0.73\nMOTIVATION: m\nANALYSIS: a",
+            0.1,
+        )
     )
 
     kelly = _make_sizer(bus, "Test (Kelly)")
@@ -272,6 +303,8 @@ async def test_both_sizers_receive_same_update_object_and_values():
     assert kelly_update is flat_update
     assert kelly_update.fair_value == 0.73
     assert flat_update.fair_value == 0.73
+    assert kelly_update.restate == "The event occurs by the specified deadline."
+    assert flat_update.restate == kelly_update.restate
 
 
 # -- The sizer runs LLM-free ---------------------------------------------- #
@@ -316,18 +349,28 @@ async def test_sizer_logs_decision_per_trader_for_reader_compat(tmp_path):
 
         await bus.publish(FairValueUpdate(
             market_id=7, persona_key="test", fair_value=0.66,
-            motivation="m", analysis="a", articles=[], block_height=2,
+            motivation="m", analysis="a",
+            restate="YES resolves if the event occurs by the deadline.",
+            analysis_reference_price=0.55,
+            articles=[], block_height=2,
             ts=datetime(2026, 1, 1, tzinfo=timezone.utc),
         ))
         await kelly.on_block(_block())
         await flat.on_block(_block())
 
         rows = db.conn.execute(
-            "SELECT trader_name, analysis, fair_value FROM decisions "
+            "SELECT trader_name, analysis, fair_value, restate, analysis_batch_id, "
+            "analysis_reference_price FROM decisions "
             "WHERE analysis = 'a' ORDER BY trader_name"
         ).fetchall()
         names = sorted(r["trader_name"] for r in rows)
         assert names == ["Test (Flat)", "Test (Kelly)"]
         assert all(r["fair_value"] == 0.66 for r in rows)
+        assert all(
+            r["restate"] == "YES resolves if the event occurs by the deadline." for r in rows
+        )
+        assert len({r["analysis_batch_id"] for r in rows}) == 1
+        assert rows[0]["analysis_batch_id"]
+        assert all(r["analysis_reference_price"] == 0.55 for r in rows)
     finally:
         db.close()

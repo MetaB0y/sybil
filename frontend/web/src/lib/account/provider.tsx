@@ -8,7 +8,7 @@
  */
 
 import { useEffect, type ReactNode } from "react";
-import { disconnect, rehydrateFromStorage } from "./actions";
+import { invalidateReadSession, rehydrateFromStorage } from "./actions";
 import { READ_AUTH_INVALID_EVENT } from "@/lib/api/client";
 import { STORAGE_KEYS } from "./storage";
 import { useAccountStore } from "./store";
@@ -33,6 +33,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       STORAGE_KEYS.JWK,
       STORAGE_KEYS.CREDENTIAL_ID,
       STORAGE_KEYS.READ_API_KEY,
+      STORAGE_KEYS.REVISION,
     ]);
     function onStorage(e: StorageEvent) {
       if (e.key !== null && !interesting.has(e.key)) return;
@@ -44,7 +45,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function onReadAuthInvalid() {
-      disconnect();
+      invalidateReadSession();
     }
     window.addEventListener(READ_AUTH_INVALID_EVENT, onReadAuthInvalid);
     return () =>

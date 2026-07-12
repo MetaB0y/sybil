@@ -19,6 +19,11 @@ services:
       SYBIL_DEV_MODE: "true"
       SYBIL_BLOCK_INTERVAL_MS: "10000"
       SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
+      # The local Compose frontend is published on localhost:3005. Keep the
+      # browser ceremony and server verification on the same RP/origin by
+      # default, while allowing production/alternate local hosts to override.
+      SYBIL_WEBAUTHN_RP_ID: "${SYBIL_WEBAUTHN_RP_ID:-localhost}"
+      SYBIL_WEBAUTHN_ORIGIN: "${SYBIL_WEBAUTHN_ORIGIN:-http://localhost:3005}"
       SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET: "2000"
       SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT: "5000"
       SYBIL_EVENT_SNAPSHOT_DIR: "/data/event_snapshots"
@@ -152,6 +157,7 @@ services:
       - "--sybil-url=http://sybil-api:3000"
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
+      - "--metrics-port=9101"
     environment:
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -160,6 +166,12 @@ services:
       sybil-api:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9101/metrics"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
 
     logging: *default-logging
   sybil-arena-dashboard:
@@ -176,8 +188,15 @@ services:
     volumes:
       - arena-data:/data
     depends_on:
-      - sybil-arena
+      sybil-arena:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8501/_stcore/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
 
     logging: *default-logging
   victoriametrics:

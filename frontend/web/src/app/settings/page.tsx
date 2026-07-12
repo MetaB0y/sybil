@@ -7,6 +7,7 @@
  */
 
 import { SettingsView } from "@/components/settings/settings-view";
+import { DisconnectedAccountPrompt } from "@/components/auth/disconnected-account-prompt";
 import {
   useAccountHydrated,
   useAccountSession,
@@ -36,6 +37,10 @@ export default function SettingsPage() {
       <SettingsView
         accountId={session.accountId}
         publicKeyHex={session.publicKeyHex}
+        authScheme={session.authScheme}
+        {...(session.credentialIdB64url
+          ? { credentialIdB64url: session.credentialIdB64url }
+          : {})}
       />
     </Shell>
   );
@@ -44,60 +49,16 @@ export default function SettingsPage() {
 function Disconnected() {
   const openModal = useSetConnectModalOpen();
   return (
-    <div
-      style={{
-        padding: "48px 24px",
-        background: "var(--surface-1)",
-        border: "1px dashed var(--border-1)",
-        borderRadius: 10,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 16,
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 18,
-          color: "var(--fg-1)",
-        }}
-      >
-        Connect to manage your account
-      </div>
-      <p
-        style={{
-          margin: 0,
-          color: "var(--fg-3)",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-          maxWidth: 400,
-          lineHeight: 1.5,
-        }}
-      >
-        Profile, signing keys, and API keys live behind your account. Connect a
-        demo account in your browser to manage them.
-      </p>
-      <button
-        type="button"
-        onClick={() => openModal(true)}
-        style={{
-          minHeight: 40,
-          padding: "10px 18px",
-          background: "var(--accent)",
-          border: 0,
-          borderRadius: 8,
-          color: "var(--bg-1)",
-          fontFamily: "var(--font-sans)",
-          fontWeight: 600,
-          fontSize: 14,
-          cursor: "pointer",
-        }}
-      >
-        Connect
-      </button>
-    </div>
+    <DisconnectedAccountPrompt
+      title="Connect to manage your account"
+      message={
+        <>
+          Profile, signing keys, and API keys live behind your account. Connect
+          a demo account in your browser to manage them.
+        </>
+      }
+      onConnect={() => openModal(true)}
+    />
   );
 }
 

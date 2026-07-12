@@ -23,6 +23,9 @@ pub enum Error {
     #[error("Mapping error: {0}")]
     Mapping(String),
 
+    #[error("Attestation verification error: {0}")]
+    Attestation(String),
+
     #[error("Native market catalog error: {0}")]
     NativeCatalog(String),
 
@@ -44,6 +47,7 @@ impl From<sybil_client::Error> for Error {
             sybil_client::Error::WebSocket(message) | sybil_client::Error::Protocol(message) => {
                 Self::WebSocket(message)
             }
+            sybil_client::Error::Attestation(message) => Self::Attestation(message),
             sybil_client::Error::BlockStreamLagged {
                 skipped,
                 last_sent_height,

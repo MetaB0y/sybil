@@ -4,18 +4,18 @@
  * Run:  pnpm smoke
  * Override server: SYBIL_API_BASE=https://other.example.com pnpm smoke
  *
- * Excluded from the default `pnpm test` glob (vitest.config.ts only picks up
- * src/**). Run this only when you've changed the canonical-bytes encoding
- * or the auth flow and want to confirm the deployed server still accepts
- * what we produce.
+ * The live suite is skipped during the default `pnpm test`; only `pnpm smoke`
+ * enables it. Run the live suite only when you've changed canonical-byte
+ * encoding or the auth flow and want to confirm a server accepts what we
+ * produce.
  *
  * Each run:
- *   1. POST /v1/accounts (dev-mode) → fresh demo account
- *   2. Generate ephemeral P-256 keypair (never persisted)
- *   3. POST /v1/accounts/{id}/keys
+ *   1. Generate an ephemeral P-256 keypair (never persisted)
+ *   2. Atomically POST /v1/accounts with that initial key
+ *   3. Mint a signed read bearer for owner-scoped account reads
  *   4. GET  /v1/markets/summary → pick first active binary market
  *   5. Build canonical bytes + sign + POST /v1/orders/signed
- *   6. Wait one batch (2.5 s), GET portfolio / orders / fills
+ *   6. Wait one batch (2.5 s), authenticate GET portfolio / orders / fills
  *   7. If a pending order remains, cancel-signed it
  *
  * Step 6 has three acceptable outcomes:
@@ -32,6 +32,7 @@ import {
   signBytes,
 } from "../src/lib/auth/p256";
 import {
+  canonicalApiKeyCreateBytes,
   canonicalOrderBytes,
   canonicalCancelBytes,
   fromHex,
@@ -49,9 +50,12 @@ interface RestResult<T = unknown> {
 async function rest<T = unknown>(
   path: string,
   init?: RequestInit,
+  bearerToken?: string,
 ): Promise<RestResult<T>> {
   const url = `${BASE}${path}`;
-  const res = await fetch(url, init);
+  const headers = new Headers(init?.headers);
+  if (bearerToken) headers.set("Authorization", `Bearer ${bearerToken}`);
+  const res = await fetch(url, { ...init, headers });
   const text = await res.text();
   let body: unknown;
   try {
@@ -72,6 +76,10 @@ interface MarketSummary {
 interface AccountResponse {
   account_id: number;
   balance_nanos: number;
+}
+
+interface CreateApiKeyResponse {
+  token: string;
 }
 
 interface PortfolioResponse {
@@ -105,6 +113,38 @@ interface HealthResp {
   genesis_hash?: string | null;
 }
 
+function initialAccountBody(publicKeyHex: string) {
+  return {
+    initial_balance_nanos: Number(INITIAL_BALANCE_NANOS),
+    initial_key: {
+      public_key_hex: publicKeyHex,
+      auth_scheme: "raw_p256",
+    },
+  };
+}
+
+function ownerReadHeaders(token: string): HeadersInit {
+  return { Authorization: `Bearer ${token}` };
+}
+
+describe("signed-flow smoke request contracts", () => {
+  it("uses atomic public onboarding with an initial signing key", () => {
+    expect(initialAccountBody("02abcd")).toEqual({
+      initial_balance_nanos: Number(INITIAL_BALANCE_NANOS),
+      initial_key: {
+        public_key_hex: "02abcd",
+        auth_scheme: "raw_p256",
+      },
+    });
+  });
+
+  it("authenticates owner-scoped reads with the minted bearer", () => {
+    expect(ownerReadHeaders("sybk_test")).toEqual({
+      Authorization: "Bearer sybk_test",
+    });
+  });
+});
+
 // Gate the smoke off `pnpm test` runs — only `pnpm smoke` sets SYBIL_SMOKE=1.
 const RUN = process.env.SYBIL_SMOKE === "1";
 
@@ -115,13 +155,16 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       const log = (msg: string) => console.log(`[smoke] ${msg}`);
       log(`server: ${BASE}`);
 
-      // 1. Create demo account
+      // 1. Generate an ephemeral keypair before atomic onboarding.
+      const kp = await generateKeyPair();
+      const pubHex = await exportPublicKeyCompressedHex(kp.publicKey);
+      log(`pubkey = ${pubHex}`);
+
+      // 2. Create the account and initial key in one public request.
       const created = await rest<AccountResponse>("/v1/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          initial_balance_nanos: Number(INITIAL_BALANCE_NANOS),
-        }),
+        body: JSON.stringify(initialAccountBody(pubHex)),
       });
       expect(
         created.ok,
@@ -130,28 +173,47 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       const accountId = created.body.account_id;
       log(`account_id = ${accountId}, balance = ${created.body.balance_nanos}`);
 
-      // 2. Generate ephemeral keypair
-      const kp = await generateKeyPair();
-      const pubHex = await exportPublicKeyCompressedHex(kp.publicKey);
-      log(`pubkey = ${pubHex}`);
-
-      // 3. Register pubkey
-      const reg = await rest(`/v1/accounts/${accountId}/keys`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ public_key_hex: pubHex }),
-      });
-      expect(
-        reg.ok,
-        `POST /v1/accounts/{id}/keys returned ${reg.status}: ${JSON.stringify(reg.body)}`,
-      ).toBe(true);
-      log("pubkey registered");
-
       const health = await rest<HealthResp>("/v1/health");
       expect(health.ok).toBe(true);
       const genesisHashHex = health.body.genesis_hash;
       if (!genesisHashHex) throw new Error("/v1/health did not return genesis_hash");
       const genesisHash = fromHex(genesisHashHex);
+
+      let nonce = BigInt(Date.now());
+      const nextNonce = () => ++nonce;
+
+      // 3. Mint a read-only bearer for the owner-scoped verification reads.
+      const readKeyNonce = nextNonce();
+      const readKeyLabel = "signed-flow smoke";
+      const readKeyCanonical = canonicalApiKeyCreateBytes(
+        BigInt(accountId),
+        readKeyLabel,
+        readKeyNonce,
+      );
+      const readKeySignature = await signBytes(
+        kp.privateKey,
+        readKeyCanonical,
+      );
+      const readKey = await rest<CreateApiKeyResponse>(
+        `/v1/accounts/${accountId}/api-keys`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            label: readKeyLabel,
+            signer_pubkey_hex: pubHex,
+            auth_scheme: "raw_p256",
+            nonce: Number(readKeyNonce),
+            signature_hex: readKeySignature,
+          }),
+        },
+      );
+      expect(
+        readKey.ok,
+        `POST /v1/accounts/{id}/api-keys returned ${readKey.status}: ${JSON.stringify(readKey.body)}`,
+      ).toBe(true);
+      expect(readKey.body.token).toMatch(/^sybk_[0-9a-f]{64}$/);
+      log("owner read bearer minted");
 
       // 4. Pick a market — prefer Active binary
       const summary = await rest<MarketSummary[]>("/v1/markets/summary");
@@ -165,10 +227,10 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       if (!market) throw new Error("no markets returned from server");
       log(`market = ${market.market_id} (${market.name ?? "unnamed"})`);
 
-      // 5. Sign + submit a BuyYes @ $0.50 × 1
+      // 5. Sign + submit a BuyYes @ $0.50 × 1 share (1,000 units)
       const priceNanos = 500_000_000n;
-      const qty = 1n;
-      const orderNonce = BigInt(Date.now());
+      const qty = 1_000n;
+      const orderNonce = nextNonce();
       const canonical = canonicalOrderBytes({
         marketIds: [market.market_id],
         payoffs: [1, 0],
@@ -205,9 +267,18 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       // 6. Wait one batch + query state
       await new Promise((r) => setTimeout(r, 2500));
       const [portfolio, openOrders, fills] = await Promise.all([
-        rest<PortfolioResponse>(`/v1/accounts/${accountId}/portfolio`),
-        rest<PendingOrder[]>(`/v1/accounts/${accountId}/orders`),
-        rest<unknown[]>(`/v1/accounts/${accountId}/fills?limit=10`),
+        rest<PortfolioResponse>(
+          `/v1/accounts/${accountId}/portfolio`,
+          { headers: ownerReadHeaders(readKey.body.token) },
+        ),
+        rest<PendingOrder[]>(
+          `/v1/accounts/${accountId}/orders`,
+          { headers: ownerReadHeaders(readKey.body.token) },
+        ),
+        rest<unknown[]>(
+          `/v1/accounts/${accountId}/fills?limit=10`,
+          { headers: ownerReadHeaders(readKey.body.token) },
+        ),
       ]);
       expect(portfolio.ok).toBe(true);
       expect(openOrders.ok).toBe(true);
@@ -231,7 +302,7 @@ describe.skipIf(!RUN)("signed-flow smoke (live)", () => {
       // 7. If still pending, cancel
       if (hasPending) {
         const orderId = openOrders.body[0]!.order_id;
-        const cancelNonce = BigInt(Date.now());
+        const cancelNonce = nextNonce();
         const cancelCanonical = canonicalCancelBytes(
           BigInt(accountId),
           BigInt(orderId),

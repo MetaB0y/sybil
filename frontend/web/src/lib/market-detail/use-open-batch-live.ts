@@ -13,9 +13,10 @@
  *    the market has no resting orders to solve; volume is `0n` when nothing
  *    crosses.
  *
- * Polling pauses while the tab is hidden. Returns `null` until the first
- * response lands. Expect placers 0 / price null on most markets — the
- * resting book is near-empty (same reason `liq` reads 0).
+ * Polling pauses while the tab is hidden. Query state remains explicit so the
+ * rail never turns an unavailable live read into a real-looking empty batch.
+ * Expect placers 0 / price null on most markets — the resting book is near-empty
+ * (same reason `liq` reads 0).
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -56,12 +57,35 @@ async function fetchOpenBatchLive(marketId: number): Promise<OpenBatchLive> {
   };
 }
 
-/** Live open-batch snapshot for one market; `null` until the first fetch. */
-export function useOpenBatchLive(marketId: number): OpenBatchLive | null {
+export type OpenBatchReadState = "loading" | "ready" | "unavailable" | "stale";
+
+export type UseOpenBatchLiveResult = {
+  data: OpenBatchLive | null;
+  readState: OpenBatchReadState;
+  isRetrying: boolean;
+  retry: () => void;
+};
+
+/** Live open-batch snapshot plus truthful transport/cache state. */
+export function useOpenBatchLive(marketId: number): UseOpenBatchLiveResult {
   const q = useQuery({
     queryKey: ["open-batch", marketId],
     queryFn: () => fetchOpenBatchLive(marketId),
     refetchInterval: OPEN_BATCH_POLL_MS,
   });
-  return q.data ?? null;
+  const hasData = q.data !== undefined;
+  return {
+    data: q.data ?? null,
+    readState: q.isPending
+      ? "loading"
+      : q.error == null
+        ? "ready"
+        : hasData
+          ? "stale"
+          : "unavailable",
+    isRetrying: q.isFetching,
+    retry: () => {
+      void q.refetch();
+    },
+  };
 }

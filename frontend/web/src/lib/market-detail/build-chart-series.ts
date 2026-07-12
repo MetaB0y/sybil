@@ -39,6 +39,27 @@ const MAX_POINTS = 360;
  *  enough to actually see. */
 const FLAT_FALLBACK_SPAN_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Heuristic NegRisk detector. A mutually-exclusive (NegRisk) event's outcome
+ * YES prices partition probability — they sum to ~100¢. Independent binaries
+ * that merely share an `event_id` do not. The frontend has no NegRisk flag
+ * (the mirror knows it but `MarketResponse` doesn't expose it), so we infer:
+ * every outcome priced AND the sum within tolerance of 1 ⇒ stackable.
+ *
+ * Conservative on purpose — anything ambiguous (partial pricing, off-sum)
+ * falls through to `false`, and the chart defaults such groups to overlaid
+ * lines, which never falsely implies a partition.
+ *
+ * TODO(backend): replace with a real `neg_risk` field on `MarketResponse`
+ * (off-block, mirror-populated like `event_id`).
+ */
+export function detectStackable(outcomes: { yesCents: number | null }[]): boolean {
+  if (outcomes.length < 2) return false;
+  if (outcomes.some((o) => o.yesCents == null)) return false;
+  const sum = outcomes.reduce((a, o) => a + (o.yesCents ?? 0) / 100, 0);
+  return Math.abs(sum - 1) <= 0.12;
+}
+
 function probFromNanos(nanos: string | number | bigint): number {
   const n =
     typeof nanos === "bigint"

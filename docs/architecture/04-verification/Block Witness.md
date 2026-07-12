@@ -319,7 +319,7 @@ compute_state_root_with_sidecar(post_state, state_sidecar)
 
 ## Versioning And Compatibility
 
-The version byte is the first byte of `canonical_witness_bytes`. v5 is `0x05`.
+The version byte is the first byte of `canonical_witness_bytes`. v9 is `0x09`.
 Unknown versions must fail closed. This repo does not maintain dual witness
 decoders for devnet schema changes; ADR-0011 rejects compatibility wrappers
 before launch because they double validity-critical encoder surface.
