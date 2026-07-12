@@ -688,19 +688,19 @@ deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && dep
 # automatically as the final step of deploy-api / deploy-all; can also be
 # invoked directly.
 deploy-verify:
-    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Scoped verifier for Arena image promotions. The API/matcher did not change,
 # so avoid another durable SYB-247 market while still requiring live external
 # mirror/reference readiness because Arena consumes it.
 deploy-verify-scoped:
-    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --skip-fill-seed --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Web-only promotion keeps the signed lifecycle/full-stack health assertions,
 # but does not couple an otherwise valid frontend image to a transient external
 # Polymarket outage. It skips no local application readiness check.
 deploy-verify-web:
-    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --skip-fill-seed --skip-mirror-readiness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --skip-mirror-readiness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Restart-resilience gate (SYB-267): restarts the live sybil-api container and
 # fails on OOM-kill / boot-loop / unhealthy-after-timeout. OPT-IN — ~20s API

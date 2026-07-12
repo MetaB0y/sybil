@@ -14,6 +14,17 @@ assert_eq() {
     [[ "$actual" == "$expected" ]] || fail "$label: expected '$expected', got '$actual'"
 }
 
+assert_proof_result() {
+    local body=$1 chain=$2 limit=$3 canonical_root=$4 expected_output=$5 expected_status=$6
+    local output status
+    set +e
+    output=$(printf '%s' "$body" | smoke_proof_lag_result "$chain" "$limit" "$canonical_root")
+    status=$?
+    set -e
+    assert_eq "$output" "$expected_output" "proof lag output"
+    assert_eq "$status" "$expected_status" "proof lag status"
+}
+
 inventory=$(printf '%s' '[
   {"market_id": 7, "status": "active", "polymarket_condition_id": null, "resolution_criteria": "native"},
   {"market_id": 8, "status": "active", "polymarket_condition_id": "0xabc", "reference_price_nanos": "500000000"},
@@ -70,5 +81,20 @@ fi
 if printf '%s' 'not json' | smoke_market_inventory >/dev/null 2>&1; then
     fail "malformed market inventory was accepted"
 fi
+
+root_a="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+root_b="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+proof_ready='{"block_height":98,"state_root":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"prepared","proof_status":"mock_verified"}'
+proof_stale='{"block_height":90,"state_root":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"prepared","proof_status":"mock_verified"}'
+proof_future='{"block_height":105,"state_root":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"prepared","proof_status":"mock_verified"}'
+assert_proof_result "$proof_ready" 100 5 "$root_a" "OK 98 2" 0
+assert_proof_result "$proof_stale" 100 5 "$root_a" "STALE 90 10" 1
+assert_proof_result "$proof_future" 100 5 "$root_a" "ERR future-block-height" 1
+assert_proof_result "$proof_ready" 100 5 "$root_b" "ERR state-root-mismatch" 1
+assert_proof_result '{"block_height":98,"state_root":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"failed","proof_status":"mock_verified"}' 100 5 "$root_a" "ERR invalid-worker-status" 1
+assert_proof_result '{"block_height":98,"state_root":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"prepared","proof_status":"not_started"}' 100 5 "$root_a" "ERR invalid-proof-status" 1
+assert_proof_result '{"block_height":"98"}' 100 5 "$root_a" "ERR invalid-block-height" 1
+assert_proof_result '{"error":"empty"}' 100 5 "$root_a" "ERR invalid-block-height" 1
+assert_proof_result 'not json' 100 5 "$root_a" "ERR malformed-json" 1
 
 echo "smoke-common tests: ok"

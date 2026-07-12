@@ -241,14 +241,33 @@ else
         CHAIN_HEIGHT="$(printf '%s' "$HTTP_BODY" | smoke_jget height)"
         [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ && "$CHAIN_HEIGHT" =~ ^[0-9]+$ ]] \
             || die "/v1/blocks/latest sample for the proof-lag check was invalid (HTTP $HTTP_CODE)"
-        PROOF_LAG=$((CHAIN_HEIGHT - PROOF_HEIGHT))
-        (( PROOF_LAG < 0 )) && PROOF_LAG=0
-        push_proof_lag_metric "$PROOF_LAG" || true
-        push_proof_lag_limit_metric "$PROOF_LAG_MAX" || true
-        if (( PROOF_LAG > PROOF_LAG_MAX )); then
-            proof_lag_violation "proof height $PROOF_HEIGHT trails chain height $CHAIN_HEIGHT by $PROOF_LAG blocks (max $PROOF_LAG_MAX); the prover pipeline looks wedged"
+        CANONICAL_ROOT=""
+        CANONICAL_READY=1
+        if (( PROOF_HEIGHT <= CHAIN_HEIGHT )); then
+            get_json "/v1/blocks/$PROOF_HEIGHT"
+            CANONICAL_ROOT="$(printf '%s' "$HTTP_BODY" | smoke_jget state_root)"
+            if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ || -z "$CANONICAL_ROOT" ]]; then
+                CANONICAL_READY=0
+                proof_lag_violation "canonical block $PROOF_HEIGHT was unavailable for proof identity binding (HTTP $HTTP_CODE)"
+            fi
         else
-            PROOF_LAG_SUMMARY="proof lag $PROOF_LAG<=$PROOF_LAG_MAX blocks"
+            CANONICAL_READY=0
+            proof_lag_violation "proof height $PROOF_HEIGHT is ahead of current chain height $CHAIN_HEIGHT"
+        fi
+        if [[ "$CANONICAL_READY" == "1" ]]; then
+            PROOF_RESULT="$(printf '%s' "$PROOF_BODY" | smoke_proof_lag_result "$CHAIN_HEIGHT" "$PROOF_LAG_MAX" "$CANONICAL_ROOT" || true)"
+            read -r PROOF_STATE PROOF_HEIGHT PROOF_LAG <<< "$PROOF_RESULT"
+            if [[ "$PROOF_STATE" == "ERR" ]]; then
+                proof_lag_violation "prover /proofs/latest is invalid (${PROOF_HEIGHT:-unknown}; body: ${PROOF_BODY:0:200}); the proof pipeline may have never started"
+            else
+                push_proof_lag_metric "$PROOF_LAG" || true
+                push_proof_lag_limit_metric "$PROOF_LAG_MAX" || true
+                if [[ "$PROOF_STATE" == "STALE" ]]; then
+                    proof_lag_violation "proof height $PROOF_HEIGHT trails chain height $CHAIN_HEIGHT by $PROOF_LAG blocks (max $PROOF_LAG_MAX); the prover pipeline looks wedged"
+                else
+                    PROOF_LAG_SUMMARY="proof lag $PROOF_LAG<=$PROOF_LAG_MAX blocks"
+                fi
+            fi
         fi
     fi
 fi

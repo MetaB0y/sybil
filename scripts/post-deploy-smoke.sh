@@ -27,6 +27,7 @@
 #                                           [--require-signer]
 #                                           [--skip-fill-seed]
 #                                           [--skip-mirror-readiness]
+#                                           [--require-proof-freshness]
 #
 # Configuration (flags override env; env overrides defaults):
 #   base_url / SYBIL_SMOKE_BASE          API root host
@@ -49,6 +50,13 @@
 #   SYBIL_SMOKE_MIRROR_MAX_AGE
 #                                        maximum reference-feed age in seconds
 #                                        (default 180)
+#   SYBIL_SMOKE_PROOF_TIMEOUT
+#                                        seconds to wait for proof catch-up
+#                                        after replacement (default 120)
+#   SYBIL_SMOKE_PROOF_POLL
+#                                        seconds between proof probes (default 5)
+#   SYBIL_SMOKE_PROOF_LAG_MAX
+#                                        maximum proof lag in blocks (default 30)
 #   --require-signer / SYBIL_SMOKE_REQUIRE_SIGNER=1
 #                                        FAIL (not SKIP) if the signed-order
 #                                        signer is unavailable. Deploy recipes
@@ -63,6 +71,9 @@
 #   --skip-mirror-readiness / SYBIL_SMOKE_SKIP_MIRROR_READINESS=1
 #                                        Skip the external mirror gate only for
 #                                        a web-only image promotion.
+#   --require-proof-freshness / SYBIL_SMOKE_REQUIRE_PROOF_FRESHNESS=1
+#                                        Fail when the Compose prover status is
+#                                        unavailable, malformed, or too stale.
 #
 #   SYBIL_SMOKE_DOCKER_SSH   run the container-health probe over this ssh target
 #                            (e.g. root@172.104.31.54) instead of local docker.
@@ -84,7 +95,11 @@ STARTUP_POLL="${SYBIL_SMOKE_STARTUP_POLL:-2}"
 MIRROR_TIMEOUT="${SYBIL_SMOKE_MIRROR_TIMEOUT:-180}"
 MIRROR_POLL="${SYBIL_SMOKE_MIRROR_POLL:-5}"
 MIRROR_MAX_AGE="${SYBIL_SMOKE_MIRROR_MAX_AGE:-180}"
+PROOF_TIMEOUT="${SYBIL_SMOKE_PROOF_TIMEOUT:-120}"
+PROOF_POLL="${SYBIL_SMOKE_PROOF_POLL:-5}"
+PROOF_LAG_MAX="${SYBIL_SMOKE_PROOF_LAG_MAX:-30}"
 REQUIRE_SIGNER="${SYBIL_SMOKE_REQUIRE_SIGNER:-0}"
+REQUIRE_PROOF_FRESHNESS="${SYBIL_SMOKE_REQUIRE_PROOF_FRESHNESS:-0}"
 SKIP_FILL_SEED="${SYBIL_SMOKE_SKIP_FILL_SEED:-0}"
 SKIP_MIRROR_READINESS="${SYBIL_SMOKE_SKIP_MIRROR_READINESS:-0}"
 DOCKER_SSH="${SYBIL_SMOKE_DOCKER_SSH:-}"
@@ -105,6 +120,7 @@ while [[ $# -gt 0 ]]; do
         --require-signer) REQUIRE_SIGNER=1; shift ;;
         --skip-fill-seed) SKIP_FILL_SEED=1; shift ;;
         --skip-mirror-readiness) SKIP_MIRROR_READINESS=1; shift ;;
+        --require-proof-freshness) REQUIRE_PROOF_FRESHNESS=1; shift ;;
         --*) echo "unknown flag: $1" >&2; usage 2 ;;
         *)
             if [[ "$BASE_SET_BY_ARG" -eq 0 ]]; then BASE="$1"; BASE_SET_BY_ARG=1; shift
@@ -116,17 +132,17 @@ done
 BASE="${BASE%/}"           # strip trailing slash
 APP_ORIGIN="${APP_ORIGIN%/}"
 
-for tool in curl python3; do
+for tool in curl python3 timeout; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required" >&2; exit 2; }
 done
 
-for timeout in "$STARTUP_TIMEOUT" "$MIRROR_TIMEOUT"; do
+for timeout in "$STARTUP_TIMEOUT" "$MIRROR_TIMEOUT" "$PROOF_TIMEOUT"; do
     if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
         echo "error: smoke timeouts must be non-negative integers" >&2
         exit 2
     fi
 done
-for flag in "$SKIP_FILL_SEED" "$SKIP_MIRROR_READINESS"; do
+for flag in "$SKIP_FILL_SEED" "$SKIP_MIRROR_READINESS" "$REQUIRE_PROOF_FRESHNESS"; do
     if [[ "$flag" != "0" && "$flag" != "1" ]]; then
         echo "error: smoke skip flags must be 0 or 1" >&2
         exit 2
@@ -138,6 +154,14 @@ if ! [[ "$MIRROR_POLL" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if ! [[ "$MIRROR_MAX_AGE" =~ ^[1-9][0-9]*$ ]]; then
     echo "error: mirror max age must be a positive integer" >&2
+    exit 2
+fi
+if ! [[ "$PROOF_POLL" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: proof poll must be a positive integer" >&2
+    exit 2
+fi
+if ! [[ "$PROOF_LAG_MAX" =~ ^[0-9]+$ ]]; then
+    echo "error: proof lag max must be a non-negative integer" >&2
     exit 2
 fi
 python3 - "$INTERVAL" "$STARTUP_POLL" <<'PY' || exit 2
@@ -292,6 +316,117 @@ docker_run() {
 check_services() {
     section "1b. Container health (compose project '$COMPOSE_PROJECT')"
     smoke_check_compose_services "$DOCKER_SSH" "$COMPOSE_PROJECT" pass fail skip
+}
+
+check_proof_freshness() {
+    section "1c. Proof-pipeline freshness"
+    if ! smoke_docker_available "$DOCKER_SSH"; then
+        if [[ "$REQUIRE_PROOF_FRESHNESS" == "1" ]]; then
+            fail "proof freshness requires Docker access to Compose project '$COMPOSE_PROJECT'"
+        else
+            skip "proof freshness unavailable without Docker access"
+        fi
+        return
+    fi
+
+    local deadline=$((SECONDS + PROOF_TIMEOUT)) attempts=0
+    local chain_height="" proof_body="" canonical_root="" result="ERR no-response"
+    local proof_state="ERR" proof_height="" proof_lag=""
+    local chain_code="000" canonical_code="000"
+    local remaining request_timeout sleep_for candidate_height
+    while true; do
+        if (( attempts > 0 && SECONDS >= deadline )); then
+            break
+        fi
+        attempts=$((attempts + 1))
+        remaining=$((deadline - SECONDS))
+        request_timeout=10
+        if (( remaining > 0 && remaining < request_timeout )); then
+            request_timeout=$remaining
+        elif (( remaining <= 0 )); then
+            request_timeout=1
+        fi
+
+        proof_body="$(smoke_compose_service_curl "$DOCKER_SSH" "$COMPOSE_PROJECT" \
+            sybil-prover http://127.0.0.1:3002/proofs/latest "$request_timeout" \
+            2>/dev/null || true)"
+        result="ERR no-response"
+        candidate_height="$(printf '%s' "$proof_body" | jget block_height)"
+
+        remaining=$((deadline - SECONDS))
+        if [[ -n "$proof_body" && "$candidate_height" =~ ^[0-9]+$ && "$remaining" -gt 0 ]]; then
+            request_timeout=10
+            (( remaining < request_timeout )) && request_timeout=$remaining
+            http GET /v1/blocks/latest "" none "$request_timeout"
+            chain_code=$HTTP_CODE
+            chain_height="$(printf '%s' "$HTTP_BODY" | jget height)"
+            if ! is_2xx "$chain_code" || [[ ! "$chain_height" =~ ^[0-9]+$ ]]; then
+                result="ERR invalid-chain-head"
+            elif (( candidate_height > chain_height )); then
+                result="ERR future-block-height"
+            else
+                remaining=$((deadline - SECONDS))
+                if (( remaining > 0 )); then
+                    request_timeout=10
+                    (( remaining < request_timeout )) && request_timeout=$remaining
+                    http GET "/v1/blocks/$candidate_height" "" none "$request_timeout"
+                    canonical_code=$HTTP_CODE
+                    canonical_root="$(printf '%s' "$HTTP_BODY" | jget state_root)"
+                    if is_2xx "$canonical_code" && [[ -n "$canonical_root" ]]; then
+                        result="$(printf '%s' "$proof_body" | smoke_proof_lag_result \
+                            "$chain_height" "$PROOF_LAG_MAX" "$canonical_root" || true)"
+                    else
+                        result="ERR canonical-block-unavailable"
+                    fi
+                else
+                    result="ERR deadline-exhausted"
+                fi
+            fi
+        elif [[ -n "$proof_body" && ! "$candidate_height" =~ ^[0-9]+$ ]]; then
+            result="ERR invalid-block-height"
+        elif (( remaining <= 0 )); then
+            result="ERR deadline-exhausted"
+        fi
+        read -r proof_state proof_height proof_lag <<< "$result"
+        if [[ "$proof_state" == "OK" ]]; then
+            if (( attempts > 1 )); then
+                info "proof pipeline became ready after $attempts attempts"
+            fi
+            pass "proof height $proof_height trails chain height $chain_height by $proof_lag blocks (max $PROOF_LAG_MAX)"
+            return
+        fi
+
+        remaining=$((deadline - SECONDS))
+        if (( remaining <= 0 )); then
+            break
+        fi
+        sleep_for=$PROOF_POLL
+        (( sleep_for > remaining )) && sleep_for=$remaining
+        info "proof pipeline not ready (${result:-ERR unknown}); retrying in ${sleep_for}s..."
+        sleep "$sleep_for"
+    done
+
+    local reason
+    if [[ "$proof_state" == "STALE" ]]; then
+        reason="proof height $proof_height trails chain height $chain_height by $proof_lag blocks (max $PROOF_LAG_MAX)"
+    elif [[ "$proof_height" == "invalid-chain-head" ]]; then
+        reason="/v1/blocks/latest did not expose a numeric height"
+    elif [[ "$proof_height" == "future-block-height" ]]; then
+        reason="proof height ${candidate_height:-unknown} is ahead of current chain height ${chain_height:-unknown}"
+    elif [[ "$proof_height" == "canonical-block-unavailable" ]]; then
+        reason="canonical block $candidate_height was unavailable for proof identity binding"
+    elif [[ "$proof_height" == "deadline-exhausted" ]]; then
+        reason="proof identity checks exhausted their deadline"
+    elif [[ -z "$proof_body" ]]; then
+        reason="prover /proofs/latest was unavailable or empty"
+    else
+        reason="prover /proofs/latest was invalid (${proof_height:-unknown}; body: ${proof_body:0:200})"
+    fi
+    if [[ "$REQUIRE_PROOF_FRESHNESS" == "1" ]]; then
+        fail "$reason after ${PROOF_TIMEOUT}s"
+    else
+        skip "$reason (proof freshness not required)"
+    fi
 }
 
 # ── 2a. Deployed web shell + static asset ──────────────────────────────────────
@@ -897,9 +1032,11 @@ echo "  block time : ${INTERVAL}s   service-token: $([[ -n "$SERVICE_TOKEN" ]] &
 echo "  docker     : $([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local)"
 echo "  fill seed  : $([[ "$SKIP_FILL_SEED" == "1" ]] && echo scoped-skip || echo required)"
 echo "  mirror gate: $([[ "$SKIP_MIRROR_READINESS" == "1" ]] && echo web-only-skip || echo required)"
+echo "  proof gate : $([[ "$REQUIRE_PROOF_FRESHNESS" == "1" ]] && echo "required (lag <= $PROOF_LAG_MAX)" || echo optional)"
 
 check_liveness
 check_services
+check_proof_freshness
 check_web_app
 check_cors
 check_onboarding

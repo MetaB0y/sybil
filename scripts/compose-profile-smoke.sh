@@ -287,6 +287,8 @@ deploy_verify_recipe=$(
 )
 grep -Fq 'post-deploy-smoke.sh --require-signer' <<<"$deploy_verify_recipe" \
     || fail "deploy-verify does not require the signed order/cancel smoke helper"
+grep -Fq -- '--require-proof-freshness' <<<"$deploy_verify_recipe" \
+    || fail "deploy-verify does not require proof-pipeline freshness"
 if grep -Fq -- '--skip-fill-seed' <<<"$deploy_verify_recipe"; then
     fail "deploy-verify must retain the full deterministic fill seed"
 fi
@@ -301,9 +303,9 @@ deploy_verify_scoped_recipe=$(
         in_recipe { print }
     ' justfile
 )
-grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed' \
+grep -Fq 'post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed' \
     <<<"$deploy_verify_scoped_recipe" \
-    || fail "deploy-verify-scoped does not skip only the persistent fill fixture"
+    || fail "deploy-verify-scoped lost proof freshness or its scoped fill skip"
 if grep -Fq -- '--skip-mirror-readiness' <<<"$deploy_verify_scoped_recipe"; then
     fail "Arena deploy verification must require external mirror readiness"
 fi
@@ -317,9 +319,9 @@ deploy_verify_web_recipe=$(
         in_recipe { print }
     ' justfile
 )
-grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed --skip-mirror-readiness' \
+grep -Fq 'post-deploy-smoke.sh --require-signer --require-proof-freshness --skip-fill-seed --skip-mirror-readiness' \
     <<<"$deploy_verify_web_recipe" \
-    || fail "deploy-verify-web does not isolate only fill-seed and external-mirror checks"
+    || fail "deploy-verify-web lost proof freshness or its two isolated skips"
 grep -Fq -- '--service-token' <<<"$deploy_verify_web_recipe" \
     || fail "deploy-verify-web lost the valid service-token gating checks"
 grep -Eq '^deploy-web:.*&& deploy-verify-web$' justfile \
