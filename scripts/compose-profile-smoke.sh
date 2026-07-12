@@ -304,17 +304,33 @@ deploy_verify_scoped_recipe=$(
 grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed' \
     <<<"$deploy_verify_scoped_recipe" \
     || fail "deploy-verify-scoped does not skip only the persistent fill fixture"
+if grep -Fq -- '--skip-mirror-readiness' <<<"$deploy_verify_scoped_recipe"; then
+    fail "Arena deploy verification must require external mirror readiness"
+fi
 grep -Fq -- '--service-token' <<<"$deploy_verify_scoped_recipe" \
     || fail "deploy-verify-scoped lost the valid service-token gating checks"
-grep -Eq '^deploy-web:.*&& deploy-verify-scoped$' justfile \
-    || fail "deploy-web does not use the scoped post-deploy verifier"
+
+deploy_verify_web_recipe=$(
+    awk '
+        /^deploy-verify-web:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed --skip-mirror-readiness' \
+    <<<"$deploy_verify_web_recipe" \
+    || fail "deploy-verify-web does not isolate only fill-seed and external-mirror checks"
+grep -Fq -- '--service-token' <<<"$deploy_verify_web_recipe" \
+    || fail "deploy-verify-web lost the valid service-token gating checks"
+grep -Eq '^deploy-web:.*&& deploy-verify-web$' justfile \
+    || fail "deploy-web does not use the web-only post-deploy verifier"
 grep -Eq '^deploy-arena:.*&& deploy-verify-scoped$' justfile \
     || fail "deploy-arena does not use the scoped post-deploy verifier"
 grep -Eq '^deploy-api:.*&& deploy-verify$' justfile \
     || fail "deploy-api no longer uses the full deterministic-fill verifier"
 grep -Eq '^deploy-all:.*&& deploy-verify$' justfile \
     || fail "deploy-all no longer uses the full deterministic-fill verifier"
-pass "scoped web/arena deploys avoid persistent fill fixtures; API/all remain full"
+pass "web/Arena deploys avoid persistent fill fixtures; only web skips external mirror readiness"
 
 grep -Eq '^COPY[[:space:]]+scripts/[[:space:]]+scripts/$' arena/Dockerfile \
     || fail "arena image does not include offline calibration scripts"

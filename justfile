@@ -541,6 +541,8 @@ compose-smoke:
 monitoring-check: compose-smoke
     #!/usr/bin/env bash
     set -euo pipefail
+    bash scripts/test-smoke-common.sh
+    bash scripts/test-post-deploy-smoke.sh
     if command -v promtool >/dev/null 2>&1; then
         promtool check config deploy/prometheus.yml
         promtool check rules deploy/vmalert/rules.yml
@@ -663,7 +665,7 @@ deploy-telegram-alerts: deploy-sync deploy-prod-env-check
 #   NEXT_PUBLIC_API_BASE=https://api.sybil.exchange \
 #   NEXT_PUBLIC_WS_BASE=wss://api.sybil.exchange \
 #   NEXT_PUBLIC_WEBAUTHN_RP_ID=sybil.exchange just deploy-web
-deploy-web: deploy-sync deploy-prod-env-check && deploy-verify-scoped
+deploy-web: deploy-sync deploy-prod-env-check && deploy-verify-web
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-web
     docker save sybil-web:latest | ssh {{SERVER}} docker load
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-web caddy'
@@ -688,11 +690,17 @@ deploy-all: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && dep
 deploy-verify:
     SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
-# Scoped verifier for web/Arena image promotions. The API/matcher did not
-# change, so retain every other fail-closed assertion while avoiding another
-# durable SYB-247 market solely to re-prove the unchanged matcher.
+# Scoped verifier for Arena image promotions. The API/matcher did not change,
+# so avoid another durable SYB-247 market while still requiring live external
+# mirror/reference readiness because Arena consumes it.
 deploy-verify-scoped:
     SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --skip-fill-seed --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
+
+# Web-only promotion keeps the signed lifecycle/full-stack health assertions,
+# but does not couple an otherwise valid frontend image to a transient external
+# Polymarket outage. It skips no local application readiness check.
+deploy-verify-web:
+    SYBIL_SMOKE_DOCKER_SSH={{SERVER}} scripts/post-deploy-smoke.sh --require-signer --skip-fill-seed --skip-mirror-readiness --service-token "$(ssh {{SERVER}} 'grep -oP "^SYBIL_SERVICE_TOKEN=\K.*" /opt/sybil/.env')"
 
 # Restart-resilience gate (SYB-267): restarts the live sybil-api container and
 # fails on OOM-kill / boot-loop / unhealthy-after-timeout. OPT-IN — ~20s API

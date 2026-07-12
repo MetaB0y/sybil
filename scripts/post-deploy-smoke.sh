@@ -26,6 +26,7 @@
 #                                           [--block-interval SECONDS]
 #                                           [--require-signer]
 #                                           [--skip-fill-seed]
+#                                           [--skip-mirror-readiness]
 #
 # Configuration (flags override env; env overrides defaults):
 #   base_url / SYBIL_SMOKE_BASE          API root host
@@ -40,6 +41,14 @@
 #                                        container replacement (default 60)
 #   SYBIL_SMOKE_STARTUP_POLL
 #                                        seconds between health probes (default 2)
+#   SYBIL_SMOKE_MIRROR_TIMEOUT
+#                                        seconds to wait for a referenced mirror
+#                                        market after replacement (default 180)
+#   SYBIL_SMOKE_MIRROR_POLL
+#                                        seconds between market probes (default 5)
+#   SYBIL_SMOKE_MIRROR_MAX_AGE
+#                                        maximum reference-feed age in seconds
+#                                        (default 180)
 #   --require-signer / SYBIL_SMOKE_REQUIRE_SIGNER=1
 #                                        FAIL (not SKIP) if the signed-order
 #                                        signer is unavailable. Deploy recipes
@@ -51,6 +60,9 @@
 #                                        promotions use this because the matcher
 #                                        image did not change; API/all-stack
 #                                        promotions always run the full gate.
+#   --skip-mirror-readiness / SYBIL_SMOKE_SKIP_MIRROR_READINESS=1
+#                                        Skip the external mirror gate only for
+#                                        a web-only image promotion.
 #
 #   SYBIL_SMOKE_DOCKER_SSH   run the container-health probe over this ssh target
 #                            (e.g. root@172.104.31.54) instead of local docker.
@@ -69,8 +81,12 @@ SERVICE_TOKEN="${SYBIL_SERVICE_TOKEN:-}"
 INTERVAL="${SYBIL_SMOKE_INTERVAL:-10}"
 STARTUP_TIMEOUT="${SYBIL_SMOKE_STARTUP_TIMEOUT:-60}"
 STARTUP_POLL="${SYBIL_SMOKE_STARTUP_POLL:-2}"
+MIRROR_TIMEOUT="${SYBIL_SMOKE_MIRROR_TIMEOUT:-180}"
+MIRROR_POLL="${SYBIL_SMOKE_MIRROR_POLL:-5}"
+MIRROR_MAX_AGE="${SYBIL_SMOKE_MIRROR_MAX_AGE:-180}"
 REQUIRE_SIGNER="${SYBIL_SMOKE_REQUIRE_SIGNER:-0}"
 SKIP_FILL_SEED="${SYBIL_SMOKE_SKIP_FILL_SEED:-0}"
+SKIP_MIRROR_READINESS="${SYBIL_SMOKE_SKIP_MIRROR_READINESS:-0}"
 DOCKER_SSH="${SYBIL_SMOKE_DOCKER_SSH:-}"
 COMPOSE_PROJECT="${SYBIL_COMPOSE_PROJECT:-sybil}"
 BASE_SET_BY_ARG=0
@@ -88,6 +104,7 @@ while [[ $# -gt 0 ]]; do
         --block-interval) INTERVAL="${2:-10}"; shift 2 ;;
         --require-signer) REQUIRE_SIGNER=1; shift ;;
         --skip-fill-seed) SKIP_FILL_SEED=1; shift ;;
+        --skip-mirror-readiness) SKIP_MIRROR_READINESS=1; shift ;;
         --*) echo "unknown flag: $1" >&2; usage 2 ;;
         *)
             if [[ "$BASE_SET_BY_ARG" -eq 0 ]]; then BASE="$1"; BASE_SET_BY_ARG=1; shift
@@ -103,12 +120,24 @@ for tool in curl python3; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required" >&2; exit 2; }
 done
 
-if ! [[ "$STARTUP_TIMEOUT" =~ ^[0-9]+$ ]]; then
-    echo "error: SYBIL_SMOKE_STARTUP_TIMEOUT must be a non-negative integer" >&2
+for timeout in "$STARTUP_TIMEOUT" "$MIRROR_TIMEOUT"; do
+    if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
+        echo "error: smoke timeouts must be non-negative integers" >&2
+        exit 2
+    fi
+done
+for flag in "$SKIP_FILL_SEED" "$SKIP_MIRROR_READINESS"; do
+    if [[ "$flag" != "0" && "$flag" != "1" ]]; then
+        echo "error: smoke skip flags must be 0 or 1" >&2
+        exit 2
+    fi
+done
+if ! [[ "$MIRROR_POLL" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: mirror poll must be a positive integer" >&2
     exit 2
 fi
-if [[ "$SKIP_FILL_SEED" != "0" && "$SKIP_FILL_SEED" != "1" ]]; then
-    echo "error: SYBIL_SMOKE_SKIP_FILL_SEED must be 0 or 1" >&2
+if ! [[ "$MIRROR_MAX_AGE" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: mirror max age must be a positive integer" >&2
     exit 2
 fi
 python3 - "$INTERVAL" "$STARTUP_POLL" <<'PY' || exit 2
@@ -155,8 +184,8 @@ jget() {
 # ── HTTP helper: sets HTTP_CODE and HTTP_BODY ───────────────────────────────
 # usage: http METHOD PATH [BODY] [AUTH]   AUTH in none(default)|token|bad
 http() {
-    local method="$1" path="$2" body="${3:-}" auth="${4:-none}"
-    local args=(-sS -m 30 -o "$TMP/body" -w '%{http_code}' -X "$method"
+    local method="$1" path="$2" body="${3:-}" auth="${4:-none}" max_time="${5:-30}"
+    local args=(-sS -m "$max_time" -o "$TMP/body" -w '%{http_code}' -X "$method"
         "$BASE$path" -H 'Accept: application/json')
     case "$auth" in
         token) [[ -n "$SERVICE_TOKEN" ]] && args+=(-H "Authorization: Bearer $SERVICE_TOKEN") ;;
@@ -426,30 +455,81 @@ check_onboarding() {
 ORDER_MARKET=""
 check_markets() {
     section "4. Markets"
-    http GET /v1/markets
-    if ! is_2xx "$HTTP_CODE"; then
-        fail "/v1/markets -> $HTTP_CODE: $HTTP_BODY"; return
+    local deadline=$((SECONDS + MIRROR_TIMEOUT)) attempts=0
+    local counts="" ok="ERR" native=0 mirror=0 referenced=0 pick="" ref_age=""
+    local market_code="000" market_body="" remaining request_timeout sleep_for
+    while true; do
+        if (( attempts > 0 && SECONDS >= deadline )); then
+            break
+        fi
+        attempts=$((attempts + 1))
+        remaining=$((deadline - SECONDS))
+        request_timeout=30
+        if (( remaining > 0 && remaining < request_timeout )); then
+            request_timeout=$remaining
+        elif (( remaining <= 0 )); then
+            request_timeout=1
+        fi
+        http GET /v1/markets "" none "$request_timeout"
+        market_code=$HTTP_CODE
+        market_body=$HTTP_BODY
+        ok="ERR"; native=0; mirror=0; referenced=0; pick=""; ref_age=""
+        if is_2xx "$HTTP_CODE"; then
+            counts="$(printf '%s' "$HTTP_BODY" | smoke_market_inventory 2>/dev/null || true)"
+            read -r ok native mirror referenced pick <<< "$counts"
+        fi
+
+        if [[ "$SKIP_MIRROR_READINESS" == "1" && "$ok" == "OK" ]]; then
+            break
+        fi
+        if smoke_market_inventory_is_ready "$ok" "$native" "$mirror" "$referenced"; then
+            remaining=$((deadline - SECONDS))
+            request_timeout=30
+            if (( remaining > 0 && remaining < request_timeout )); then
+                request_timeout=$remaining
+            elif (( remaining <= 0 )); then
+                request_timeout=1
+            fi
+            http GET /metrics "" none "$request_timeout"
+            if is_2xx "$HTTP_CODE"; then
+                ref_age="$(printf '%s' "$HTTP_BODY" | smoke_prometheus_scalar sybil_reference_prices_age_seconds 2>/dev/null || true)"
+            fi
+            if smoke_reference_age_is_fresh "$ref_age" "$MIRROR_MAX_AGE"; then
+                break
+            fi
+        fi
+
+        remaining=$((deadline - SECONDS))
+        if (( remaining <= 0 )); then
+            break
+        fi
+        sleep_for=$MIRROR_POLL
+        (( sleep_for > remaining )) && sleep_for=$remaining
+        info "market registry not ready (active native=$native, active mirror=$mirror, positive refs=$referenced, ref age=${ref_age:-unknown}s); retrying in ${sleep_for}s..."
+        sleep "$sleep_for"
+    done
+
+    if [[ "$ok" != "OK" ]]; then
+        fail "/v1/markets did not return an array -> $market_code: $market_body"
+        return
     fi
-    local counts; counts="$(echo "$HTTP_BODY" | python3 -c '
-import sys, json
-try:
-    a = json.load(sys.stdin)
-    assert isinstance(a, list)
-except Exception:
-    print("ERR 0 0"); sys.exit(0)
-native = [m for m in a if m.get("polymarket_condition_id") is None and (m.get("resolution_criteria") or "") != ""]
-mirror = [m for m in a if m.get("polymarket_condition_id") is not None]
-cand = [m for m in a if m.get("polymarket_condition_id") is None] or a
-pick = cand[0].get("market_id") if cand else None
-print("OK", len(native), len(mirror), pick if pick is not None else "")
-')"
-    read -r ok native mirror pick <<< "$counts"
-    if [[ "$ok" != "OK" ]]; then fail "/v1/markets did not return an array"; return; fi
     ORDER_MARKET="$pick"
-    if [[ "$native" -ge 1 ]]; then pass "native markets: $native (>=1)"
-    else fail "native markets: $native (need >=1)"; fi
-    if [[ "$mirror" -ge 1 ]]; then pass "mirror markets: $mirror (>=1)"
-    else warn "mirror markets: $mirror (no Polymarket mirror present)"; fi
+    if [[ "$native" -ge 1 ]]; then pass "active native markets: $native (>=1)"
+    else fail "active native markets: $native (need >=1)"; fi
+    if [[ "$SKIP_MIRROR_READINESS" == "1" ]]; then
+        skip "external mirror readiness is out of scope for a web-only promotion"
+    elif [[ "$mirror" -lt 1 ]]; then
+        fail "active mirror markets: $mirror (need >=1 after ${MIRROR_TIMEOUT}s)"
+    elif [[ "$referenced" -lt 1 ]]; then
+        fail "active mirror markets with positive references: $referenced (need >=1 after ${MIRROR_TIMEOUT}s)"
+    elif ! smoke_reference_age_is_fresh "$ref_age" "$MIRROR_MAX_AGE"; then
+        fail "reference feed age ${ref_age:-unknown}s exceeds ${MIRROR_MAX_AGE}s after ${MIRROR_TIMEOUT}s"
+    else
+        if (( attempts > 1 )); then
+            info "mirror reference became ready after $attempts attempts"
+        fi
+        pass "active mirror markets: $mirror; positive references: $referenced; feed age: ${ref_age}s"
+    fi
     [[ -n "$ORDER_MARKET" ]] && info "trading against market_id=$ORDER_MARKET"
 }
 
@@ -806,12 +886,17 @@ check_bots() {
 }
 
 # ── Run ─────────────────────────────────────────────────────────────────────
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
 echo "Sybil post-deploy smoke GATE"
 echo "  API base   : $BASE"
 echo "  app origin : $APP_ORIGIN"
 echo "  block time : ${INTERVAL}s   service-token: $([[ -n "$SERVICE_TOKEN" ]] && echo present || echo absent)"
 echo "  docker     : $([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local)"
 echo "  fill seed  : $([[ "$SKIP_FILL_SEED" == "1" ]] && echo scoped-skip || echo required)"
+echo "  mirror gate: $([[ "$SKIP_MIRROR_READINESS" == "1" ]] && echo web-only-skip || echo required)"
 
 check_liveness
 check_services

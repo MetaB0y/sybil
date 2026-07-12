@@ -40,6 +40,107 @@ smoke_is_committed_chain_identity() {
     [[ "$height" =~ ^[1-9][0-9]*$ && "$genesis_hash" =~ ^[0-9a-f]{64}$ ]]
 }
 
+# Summarize the public market registry for launch readiness. Prints:
+#   OK <native> <mirrored> <mirrored-with-reference> <trade-market-id>
+# and returns non-zero for malformed/non-array JSON.
+smoke_market_inventory() {
+    python3 -c '
+import json
+import sys
+
+try:
+    markets = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+if not isinstance(markets, list):
+    raise SystemExit(1)
+
+if not all(isinstance(market, dict) for market in markets):
+    raise SystemExit(1)
+
+def active(market):
+    return str(market.get("status") or "").lower() == "active"
+
+def valid_reference(market):
+    try:
+        value = int(market.get("reference_price_nanos"))
+    except (TypeError, ValueError):
+        return False
+    return 0 < value <= 1_000_000_000
+
+native = [
+    market
+    for market in markets
+    if active(market)
+    and market.get("polymarket_condition_id") is None
+    and (market.get("resolution_criteria") or "") != ""
+]
+mirrored = [
+    market
+    for market in markets
+    if active(market)
+    and str(market.get("polymarket_condition_id") or "").strip() != ""
+]
+referenced = [market for market in mirrored if valid_reference(market)]
+trade_candidates = [
+    market
+    for market in markets
+    if active(market) and market.get("polymarket_condition_id") is None
+] or markets
+market_id = trade_candidates[0].get("market_id") if trade_candidates else None
+print(
+    "OK",
+    len(native),
+    len(mirrored),
+    len(referenced),
+    market_id if market_id is not None else "",
+)
+'
+}
+
+smoke_market_inventory_is_ready() {
+    local status=${1:-} native=${2:-} mirrored=${3:-} referenced=${4:-}
+    [[ "$status" == "OK" \
+        && "$native" =~ ^[0-9]+$ && "$native" -ge 1 \
+        && "$mirrored" =~ ^[0-9]+$ && "$mirrored" -ge 1 \
+        && "$referenced" =~ ^[0-9]+$ && "$referenced" -ge 1 ]]
+}
+
+# Read one unlabeled Prometheus scalar from exposition text on stdin.
+smoke_prometheus_scalar() {
+    local metric=$1
+    python3 -c '
+import re
+import sys
+
+metric = sys.argv[1]
+pattern = re.compile(r"^" + re.escape(metric) + r"[ \t]+([^ \t]+)[ \t]*$")
+for raw in sys.stdin:
+    match = pattern.match(raw.rstrip("\n"))
+    if match:
+        print(match.group(1))
+        raise SystemExit(0)
+raise SystemExit(1)
+' "$metric"
+}
+
+smoke_reference_age_is_fresh() {
+    local age=${1:-} max_age=${2:-}
+    python3 - "$age" "$max_age" <<'PY'
+import math
+import sys
+
+try:
+    age = float(sys.argv[1])
+    maximum = float(sys.argv[2])
+except ValueError:
+    raise SystemExit(1)
+if not math.isfinite(age) or not math.isfinite(maximum):
+    raise SystemExit(1)
+raise SystemExit(0 if 0 <= age <= maximum else 1)
+PY
+}
+
 # Run the same Docker command locally or through the post-deploy SSH hop.
 # The command is intentionally a single string because the remote form is one
 # SSH command. Callers must only pass repository-owned command text.
