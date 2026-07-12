@@ -13,7 +13,13 @@
  * (add one with scope "agent").
  */
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/page-header";
@@ -29,6 +35,7 @@ import {
 import { addBackupPasskey } from "@/lib/account/backup-passkey";
 import type { AccountAuthScheme } from "@/lib/account/storage";
 import { isWebAuthnAvailable } from "@/lib/auth/webauthn";
+import { trapTabFocus } from "@/lib/accessibility/focus-trap";
 import {
   settingsQueryKeys,
   useAccountProfile,
@@ -294,6 +301,7 @@ function SigningKeysSection({
     jwk: JsonWebKey;
     pubkey: string;
   } | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
 
   const invalidate = () =>
     qc.invalidateQueries({
@@ -420,6 +428,7 @@ function SigningKeysSection({
             />
           </Field>
           <button
+            ref={addButtonRef}
             type="button"
             onClick={() => add.mutate()}
             disabled={add.isPending}
@@ -446,6 +455,7 @@ function SigningKeysSection({
           intro="This is the new agent key's private JWK. It signs trades on your account and is shown only once — store it somewhere safe now."
           secretLabel="Private key (JWK)"
           secret={JSON.stringify(newJwk.jwk)}
+          restoreFocusRef={addButtonRef}
           extra={
             <InfoLine
               label="Public key"
@@ -665,6 +675,7 @@ function ReadApiKeysSection({
     token: string;
     id: number;
   } | null>(null);
+  const createButtonRef = useRef<HTMLButtonElement>(null);
 
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: settingsQueryKeys.apiKeys(accountId) });
@@ -764,6 +775,7 @@ function ReadApiKeysSection({
             />
           </Field>
           <button
+            ref={createButtonRef}
             type="button"
             onClick={() => create.mutate()}
             disabled={create.isPending}
@@ -781,6 +793,7 @@ function ReadApiKeysSection({
           intro="This is a READ-ONLY bearer token. It can read your account but cannot trade. It is shown only once — copy it now; the server keeps only a hash."
           secretLabel="Bearer token"
           secret={newToken.token}
+          restoreFocusRef={createButtonRef}
           extra={<InfoLine label="Key id" value={`#${newToken.id}`} />}
         />
       )}
@@ -858,6 +871,7 @@ function ShowOnceModal({
   secretLabel,
   secret,
   extra,
+  restoreFocusRef,
   onClose,
 }: {
   title: string;
@@ -865,17 +879,68 @@ function ShowOnceModal({
   secretLabel: string;
   secret: string;
   extra?: React.ReactNode;
+  restoreFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<
+    "idle" | "copying" | "copied" | "failed"
+  >("idle");
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const secretRef = useRef<HTMLTextAreaElement>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
+  const mountedRef = useRef(false);
+  const copyRequestRef = useRef(0);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+    mountedRef.current = true;
+    const previouslyFocused =
+      restoreFocusRef?.current ??
+      (document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+        ? document.activeElement
+        : null);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
+    return () => {
+      mountedRef.current = false;
+      copyRequestRef.current += 1;
+      window.cancelAnimationFrame(focusFrame);
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, [restoreFocusRef]);
+
+  async function onCopy() {
+    if (copyState === "copying") return;
+    if (copyResetTimerRef.current !== null) {
+      window.clearTimeout(copyResetTimerRef.current);
+      copyResetTimerRef.current = null;
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    const request = copyRequestRef.current + 1;
+    copyRequestRef.current = request;
+    setCopyState("copying");
+    const clipboard =
+      typeof navigator === "undefined" ? undefined : navigator.clipboard;
+    const copied = await writeShowOnceSecret(secret, clipboard);
+    if (!mountedRef.current || copyRequestRef.current !== request) return;
+    if (copied) {
+      setCopyState("copied");
+      copyResetTimerRef.current = window.setTimeout(() => {
+        setCopyState("idle");
+        copyResetTimerRef.current = null;
+      }, 1500);
+      return;
+    }
+    setCopyState("failed");
+    secretRef.current?.focus();
+    secretRef.current?.select();
+  }
 
   if (typeof document === "undefined") return null;
 
@@ -884,6 +949,16 @@ function ShowOnceModal({
       role="dialog"
       aria-modal="true"
       aria-label={title}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+          return;
+        }
+        trapTabFocus(event.nativeEvent, event.currentTarget);
+      }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -898,6 +973,7 @@ function ShowOnceModal({
         alignItems: "center",
         justifyContent: "center",
         padding: "var(--space-5)",
+        boxSizing: "border-box",
       }}
     >
       <div
@@ -905,6 +981,9 @@ function ShowOnceModal({
         style={{
           width: "100%",
           maxWidth: 480,
+          maxHeight: "100%",
+          display: "flex",
+          flexDirection: "column",
           background: "var(--surface-1)",
           border: "1px solid var(--border-1)",
           borderRadius: 12,
@@ -935,6 +1014,7 @@ function ShowOnceModal({
             {title}
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close"
@@ -957,12 +1037,15 @@ function ShowOnceModal({
             display: "flex",
             flexDirection: "column",
             gap: 12,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
           }}
         >
           <p style={{ ...bodyText, margin: 0 }}>{intro}</p>
           {extra}
           <Field label={secretLabel}>
             <textarea
+              ref={secretRef}
               readOnly
               value={secret}
               rows={3}
@@ -976,17 +1059,27 @@ function ShowOnceModal({
               }}
             />
           </Field>
+          {copyState === "failed" && (
+            <div role="alert" style={copyFailureStyle}>
+              Copy failed. The credential above is selected—copy it manually
+              before closing this one-time view.
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <button
               type="button"
-              onClick={() => {
-                void navigator.clipboard?.writeText(secret);
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              }}
-              style={primaryButtonStyle(false)}
+              onClick={() => void onCopy()}
+              aria-disabled={copyState === "copying"}
+              aria-busy={copyState === "copying"}
+              style={primaryButtonStyle(copyState === "copying")}
             >
-              {copied ? "Copied ✓" : "Copy"}
+              {copyState === "copied"
+                ? "Copied ✓"
+                : copyState === "copying"
+                  ? "Copying…"
+                  : copyState === "failed"
+                    ? "Try copy again"
+                    : "Copy"}
             </button>
             <button
               type="button"
@@ -1001,6 +1094,19 @@ function ShowOnceModal({
     </div>,
     document.body,
   );
+}
+
+export async function writeShowOnceSecret(
+  secret: string,
+  clipboard: Pick<Clipboard, "writeText"> | undefined,
+): Promise<boolean> {
+  if (!clipboard) return false;
+  try {
+    await clipboard.writeText(secret);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // --- Identicon (deterministic inline SVG) ---------------------------------
@@ -1200,15 +1306,29 @@ function ErrorRow({ children }: { children: React.ReactNode }) {
 
 // --- helpers --------------------------------------------------------------
 
-function messageOf(e: unknown): string {
+export function settingsActionMessage(e: unknown): string {
   if (e instanceof SettingsActionError) {
     if (e.status === 409) {
-      return "Cannot revoke the last key on this account — add another key first.";
+      const detail = e.message.toLowerCase();
+      if (detail.includes("last remaining signing key")) {
+        return "Cannot revoke the last key on this account — add another key first.";
+      }
+      if (detail.includes("stale key-operation state binding")) {
+        return "The account key state changed before this action landed. Review the current key list and try again.";
+      }
+      if (
+        detail.includes("replay nonce") &&
+        (detail.includes("stale") || detail.includes("duplicate"))
+      ) {
+        return "The account changed before this action landed. Review the latest state and try again.";
+      }
     }
     return e.message;
   }
   return e instanceof Error ? e.message : "Action failed";
 }
+
+const messageOf = settingsActionMessage;
 
 function truncateMiddle(s: string, head = 8, tail = 6): string {
   if (s.length <= head + tail + 1) return s;
@@ -1252,6 +1372,17 @@ const inputStyle: React.CSSProperties = {
   outline: "none",
   width: "100%",
   boxSizing: "border-box",
+};
+
+const copyFailureStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  background: "color-mix(in srgb, var(--warn) 10%, transparent)",
+  border: "1px solid color-mix(in srgb, var(--warn) 35%, transparent)",
+  borderRadius: 6,
+  color: "var(--warn)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  lineHeight: 1.45,
 };
 
 function primaryButtonStyle(busy: boolean): React.CSSProperties {

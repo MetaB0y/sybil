@@ -4,9 +4,12 @@ import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import {
   Field,
   SettingsView,
+  settingsActionMessage,
   signingPublicKeysEqual,
   signingKeyRevocationPolicy,
+  writeShowOnceSecret,
 } from "./settings-view";
+import { SettingsActionError } from "@/lib/account/settings";
 import { settingsQueryKeys } from "@/lib/account/use-settings-data";
 
 describe("Field", () => {
@@ -20,6 +23,71 @@ describe("Field", () => {
     expect(html).toMatch(
       /^<label[^>]*>[\s\S]*Display name[\s\S]*<input[^>]*\/>[\s\S]*<\/label>$/,
     );
+  });
+});
+
+describe("writeShowOnceSecret", () => {
+  it("reports success only after the clipboard write resolves", async () => {
+    let written = "";
+    const copied = await writeShowOnceSecret("sybk_once", {
+      writeText: async (value) => {
+        written = value;
+      },
+    });
+
+    expect(copied).toBe(true);
+    expect(written).toBe("sybk_once");
+  });
+
+  it("falls back to manual selection when clipboard access is missing or rejects", async () => {
+    await expect(writeShowOnceSecret("secret", undefined)).resolves.toBe(false);
+    await expect(
+      writeShowOnceSecret("secret", {
+        writeText: async () => {
+          throw new DOMException("clipboard denied", "NotAllowedError");
+        },
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
+describe("settingsActionMessage", () => {
+  it("only labels the actual last-key conflict as last-key protection", () => {
+    expect(
+      settingsActionMessage(
+        new SettingsActionError(
+          "revoke_key failed (HTTP 409): Cannot revoke the account's last remaining signing key",
+          409,
+        ),
+      ),
+    ).toContain("Cannot revoke the last key");
+  });
+
+  it("gives retry guidance for stale bindings and replay nonces", () => {
+    expect(
+      settingsActionMessage(
+        new SettingsActionError(
+          "register_agent_key failed (HTTP 409): stale key-operation state binding for account 7",
+          409,
+        ),
+      ),
+    ).toContain("key state changed");
+    expect(
+      settingsActionMessage(
+        new SettingsActionError(
+          "set_profile failed (HTTP 409): stale replay nonce for account 7: nonce 41 must be greater than 42",
+          409,
+        ),
+      ),
+    ).toContain("account changed");
+  });
+
+  it("preserves unknown conflicts instead of inventing last-key copy", () => {
+    const error = new SettingsActionError(
+      "create_api_key failed (HTTP 409): another conflict",
+      409,
+    );
+    expect(settingsActionMessage(error)).toBe(error.message);
   });
 });
 

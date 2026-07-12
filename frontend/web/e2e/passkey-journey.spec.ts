@@ -303,6 +303,61 @@ test("passkey account create + signed order (live rp_id/origin validation)", asy
   await expect(page.getByRole("status")).toContainText("Backup passkey added");
   await expect(page.getByText(/backup passkey · webauthn/i)).toBeVisible();
 
+  // Show-once credentials must never claim a clipboard write succeeded when
+  // the browser denies it. Exercise the real signed API-key creation, then
+  // verify the modal selects the secret for manual copying and restores focus.
+  const apiKeyLabel = page.getByPlaceholder("e.g. grafana");
+  const createApiKey = page.getByRole("button", { name: "Create API key" });
+  await apiKeyLabel.fill("e2e show-once");
+  await createApiKey.click();
+  const showOnce = page.getByRole("dialog", {
+    name: "Read API key created",
+  });
+  await expect(showOnce).toBeVisible({ timeout: 30_000 });
+  await expect(showOnce.getByRole("button", { name: "Close" })).toBeFocused();
+  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new DOMException("clipboard denied", "NotAllowedError");
+        },
+      },
+    });
+  });
+  await showOnce.getByRole("button", { name: "Copy", exact: true }).click();
+  await expect(showOnce.getByRole("alert")).toContainText("Copy failed");
+  await expect(
+    showOnce.getByRole("button", { name: "Try copy again" }),
+  ).toBeVisible();
+  const secretField = showOnce.getByRole("textbox", { name: "Bearer token" });
+  await expect(secretField).toBeFocused();
+  expect(
+    await secretField.evaluate(
+      (field) =>
+        field instanceof HTMLTextAreaElement &&
+        field.selectionStart === 0 &&
+        field.selectionEnd === field.value.length,
+    ),
+    "failed clipboard writes should select the entire one-time secret",
+  ).toBe(true);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async () => undefined },
+    });
+  });
+  const retryCopy = showOnce.getByRole("button", { name: "Try copy again" });
+  await retryCopy.click();
+  const copied = showOnce.getByRole("button", { name: "Copied ✓" });
+  await expect(copied).toBeVisible();
+  await expect(copied).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(showOnce).toBeHidden();
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+  await expect(createApiKey).toBeFocused();
+
   const backupCredentials = await authenticator.client.send(
     "WebAuthn.getCredentials",
     { authenticatorId: backupAuthenticatorId },
