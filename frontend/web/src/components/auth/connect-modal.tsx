@@ -557,8 +557,8 @@ export function ImportTab() {
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <p style={{ ...bodyText, margin: 0 }}>
         Paste an account id and the JWK from a previous browser session. The
-        public key is derived from the JWK. We don&apos;t verify the key matches
-        what&apos;s registered server-side until you place an order.
+        public key is derived from the JWK and verified against the account
+        during Import. A mismatched key is rejected and is not saved.
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
