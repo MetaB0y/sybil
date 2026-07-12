@@ -56,44 +56,55 @@ export function MarketsFilterBar({
           flexShrink: 0,
         }}
       >
-        {SORTS.map((s) => {
-          const active = sort === s.key;
-          return (
-            <button
-              key={s.key}
-              type="button"
-              disabled={s.disabled}
-              title={s.title}
-              onClick={() => !s.disabled && onSortChange(s.key)}
-              style={{
-                height: 26,
-                padding: "0 var(--space-3)",
-                background: active ? "var(--surface-2)" : "transparent",
-                color: active
-                  ? "var(--fg-1)"
-                  : s.disabled
-                    ? "var(--fg-4)"
-                    : "var(--fg-3)",
-                border: `1px solid ${
-                  active ? "var(--border-3)" : "var(--border-2)"
-                }`,
-                borderRadius: "var(--radius-sm)",
-                fontFamily: "var(--font-mono)",
-                fontSize: "11px",
-                letterSpacing: "var(--track-wide)",
-                textTransform: "uppercase",
-                cursor: s.disabled
-                  ? "not-allowed"
-                  : active
-                    ? "default"
-                    : "pointer",
-                transition: "all var(--dur-fast) var(--ease-standard)",
-              }}
-            >
-              {s.label}
-            </button>
-          );
-        })}
+        <div
+          role="group"
+          aria-label="market sorting"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-2)",
+          }}
+        >
+          {SORTS.map((s) => {
+            const active = sort === s.key;
+            return (
+              <button
+                key={s.key}
+                type="button"
+                aria-pressed={active}
+                disabled={s.disabled}
+                title={s.title}
+                onClick={() => !s.disabled && onSortChange(s.key)}
+                style={{
+                  height: 26,
+                  padding: "0 var(--space-3)",
+                  background: active ? "var(--surface-2)" : "transparent",
+                  color: active
+                    ? "var(--fg-1)"
+                    : s.disabled
+                      ? "var(--fg-4)"
+                      : "var(--fg-3)",
+                  border: `1px solid ${
+                    active ? "var(--border-3)" : "var(--border-2)"
+                  }`,
+                  borderRadius: "var(--radius-sm)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "11px",
+                  letterSpacing: "var(--track-wide)",
+                  textTransform: "uppercase",
+                  cursor: s.disabled
+                    ? "not-allowed"
+                    : active
+                      ? "default"
+                      : "pointer",
+                  transition: "all var(--dur-fast) var(--ease-standard)",
+                }}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
         <span
           aria-hidden
           style={{

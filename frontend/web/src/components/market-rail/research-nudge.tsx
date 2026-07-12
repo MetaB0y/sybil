@@ -76,6 +76,7 @@ export function ResearchNudge() {
       >
         <a
           ref={linkRef}
+          className="mobile-action-link"
           href={platform.url}
           target="_blank"
           rel="noreferrer noopener"
@@ -96,7 +97,6 @@ export function ResearchNudge() {
           <span aria-hidden="true">↗</span>
         </a>
       </span>
-
     </div>
   );
 }

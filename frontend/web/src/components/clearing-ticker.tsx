@@ -110,6 +110,7 @@ export function ClearingTicker({ marketsById }: Props) {
 
   return (
     <div
+      className="clearing-ticker"
       style={{
         position: "sticky",
         top: "var(--nav-height)",
@@ -230,6 +231,7 @@ function TickerCell({
   const { id, name, volNanos, ppChange, ts } = event;
   return (
     <Link
+      className="clearing-ticker-link"
       href={`/m/${id}`}
       aria-hidden={ariaHidden}
       tabIndex={ariaHidden ? -1 : undefined}

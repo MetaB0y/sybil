@@ -680,6 +680,7 @@ function DescriptionBlock({
         </div>
         {sourceUrl ? (
           <a
+            className="mobile-action-link"
             href={sourceUrl}
             target="_blank"
             rel="noreferrer noopener"

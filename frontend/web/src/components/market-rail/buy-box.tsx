@@ -420,6 +420,8 @@ export function BuyBox({
 
       {/* Buy/Sell toggle */}
       <div
+        role="group"
+        aria-label="Order direction"
         style={{
           display: "flex",
           background: "var(--bg-2)",
@@ -435,6 +437,7 @@ export function BuyBox({
             <button
               key={s}
               type="button"
+              aria-pressed={active}
               onClick={() => setDir(s)}
               disabled={disabledInputs}
               style={{
@@ -496,6 +499,8 @@ export function BuyBox({
           </span>
         </div>
         <div
+          role="group"
+          aria-label="Outcome side"
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
@@ -510,6 +515,7 @@ export function BuyBox({
               <button
                 key={s}
                 type="button"
+                aria-pressed={active}
                 onClick={() => setOutcomeSide(s)}
                 disabled={disabledInputs}
                 style={{
@@ -576,13 +582,18 @@ export function BuyBox({
                   : `max ${(availableDollars / limitDec).toFixed(0)} sh`}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+        <div
+          role="group"
+          aria-label="Order amount unit"
+          style={{ display: "flex", gap: 4, marginBottom: 6 }}
+        >
           {(["usd", "shares"] as Unit[]).map((u) => {
             const active = unit === u;
             return (
               <button
                 key={u}
                 type="button"
+                aria-pressed={active}
                 onClick={() => setUnit(u)}
                 disabled={disabledInputs}
                 style={{
@@ -817,13 +828,18 @@ export function BuyBox({
             {TIF_HELP[tif]}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
+        <div
+          role="group"
+          aria-label="Time in force"
+          style={{ display: "flex", gap: 4, marginTop: 5 }}
+        >
           {TIF_OPTS.map((t) => {
             const active = tif === t;
             return (
               <button
                 key={t}
                 type="button"
+                aria-pressed={active}
                 onClick={() => setTif(t)}
                 disabled={disabledInputs}
                 style={{

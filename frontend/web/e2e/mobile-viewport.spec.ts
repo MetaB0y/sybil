@@ -30,7 +30,7 @@ test.describe("mobile viewport smoke", () => {
       })
       .toBe(1);
     await expectNoDocumentOverflow(page, "/");
-    await expectTouchButtons(page, "/");
+    await expectTouchTargets(page, "/");
 
     const firstMarket = marketsGrid.locator('a[href^="/m/"]').first();
     await expect(firstMarket).toBeVisible();
@@ -70,7 +70,7 @@ test.describe("mobile viewport smoke", () => {
     );
     expect(Math.abs(bottomGap)).toBeLessThanOrEqual(1);
     await expectNoDocumentOverflow(page, href!);
-    await expectTouchButtons(page, `${href!} order sheet`);
+    await expectTouchTargets(page, `${href!} order sheet`);
 
     await closeOrder.click();
     await expect(dialog).toBeHidden();
@@ -80,7 +80,7 @@ test.describe("mobile viewport smoke", () => {
       await page.goto(path);
       await expect(page.locator("main")).toBeVisible();
       await expectNoDocumentOverflow(page, path);
-      await expectTouchButtons(page, path);
+      await expectTouchTargets(page, path);
     }
   });
 
@@ -369,22 +369,28 @@ async function expectInsideViewport(
   ).toBeLessThanOrEqual(viewportWidth);
 }
 
-async function expectTouchButtons(page: Page, path: string) {
+async function expectTouchTargets(page: Page, path: string) {
   const undersized = await page
-    .locator("button:visible")
-    .evaluateAll((buttons) =>
-      buttons.flatMap((button) => {
-        if (button.getAttribute("aria-label") === "Open Next.js Dev Tools") {
+    .locator("button:visible, a[href]:visible")
+    .evaluateAll((targets) =>
+      targets.flatMap((target) => {
+        if (target.getAttribute("aria-label") === "Open Next.js Dev Tools") {
           return [];
         }
-        const rect = button.getBoundingClientRect();
+        if (
+          target instanceof HTMLAnchorElement &&
+          getComputedStyle(target).display === "inline"
+        ) {
+          return [];
+        }
+        const rect = target.getBoundingClientRect();
         if (rect.width >= 43.5 && rect.height >= 43.5) return [];
         return [
-          `${button.getAttribute("aria-label") ?? button.textContent?.trim() ?? "button"} (${rect.width.toFixed(1)}×${rect.height.toFixed(1)})`,
+          `${target.getAttribute("aria-label") ?? target.textContent?.trim() ?? target.tagName.toLowerCase()} (${rect.width.toFixed(1)}×${rect.height.toFixed(1)})`,
         ];
       }),
     );
-  expect(undersized, `${path} should expose 44px touch buttons`).toEqual([]);
+  expect(undersized, `${path} should expose 44px touch targets`).toEqual([]);
 }
 
 /** The deployed API only allows the deployed app origin. For a local visual

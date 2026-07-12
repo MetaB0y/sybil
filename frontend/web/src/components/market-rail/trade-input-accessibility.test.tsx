@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
 import { BuyBox } from "./buy-box";
 import { DegenAmount } from "./degen-amount";
+import { YesNoToggle } from "./yes-no-toggle";
 
 const OUTCOME: EventOutcome = {
   marketId: 7,
@@ -31,6 +32,36 @@ describe("trade input accessibility", () => {
     expect(html).toContain('aria-label="Limit price in cents"');
     expect(html).toContain('aria-label="Limit price slider in cents"');
     expect(html.match(/inputMode="decimal"/g)).toHaveLength(2);
+  });
+
+  it("exposes the active order choices to assistive technology", () => {
+    const pro = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <BuyBox outcome={OUTCOME} />
+      </QueryClientProvider>,
+    );
+    const degen = renderToStaticMarkup(
+      <YesNoToggle value="NO" onChange={() => undefined} />,
+    );
+
+    for (const label of [
+      "Order direction",
+      "Outcome side",
+      "Order amount unit",
+      "Time in force",
+    ]) {
+      expect(pro).toContain(`role="group" aria-label="${label}"`);
+    }
+    expect(pro).toMatch(
+      /role="group" aria-label="Order direction"[^>]*>.*aria-pressed="true"[^>]*>buy<\/button>/,
+    );
+    expect(pro).toMatch(
+      /role="group" aria-label="Outcome side"[^>]*>.*aria-pressed="true"[^>]*><span>YES<\/span>/,
+    );
+    expect(pro).toMatch(/aria-pressed="true"[^>]*>\$ amount<\/button>/);
+    expect(pro).toMatch(/aria-pressed="true"[^>]*>GTC<\/button>/);
+    expect(degen).toContain('role="group" aria-label="Outcome side"');
+    expect(degen).toMatch(/aria-pressed="true"[^>]*>No<\/button>/);
   });
 
   it("programmatically names the Degen bet amount", () => {

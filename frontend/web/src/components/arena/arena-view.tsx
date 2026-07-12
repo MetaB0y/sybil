@@ -1906,6 +1906,7 @@ function DecisionCard({ decision }: { decision: ArenaDecision }) {
           {articles.map((article, index) => (
             <a
               key={index}
+              className="mobile-action-link"
               href={articleUrl(article)}
               target="_blank"
               rel="noreferrer"

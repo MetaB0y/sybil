@@ -44,6 +44,7 @@ describe("markets page accessibility", () => {
 
     expect(batchPillLabelColor(true)).toBe("var(--accent)");
     expect(batchPillLabelColor(false)).toBe("var(--warn)");
+    expect(ticker).toContain('class="clearing-ticker"');
     expect(ticker).toMatch(/color:var\(--fg-2\)[^>]*>awaiting fills…<\/span>/);
   });
 
@@ -91,5 +92,6 @@ describe("markets page accessibility", () => {
     expect(prefetchProps).toEqual(
       Array.from({ length: 5 }, () => 'data-prefetch="false"'),
     );
+    expect(multi.match(/class="mobile-action-link"/g)).toHaveLength(2);
   });
 });

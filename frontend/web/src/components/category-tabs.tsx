@@ -48,7 +48,7 @@ export function CategoryTabs() {
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
-    [pathname, router, searchParams]
+    [pathname, router, searchParams],
   );
 
   return (
@@ -70,6 +70,7 @@ export function CategoryTabs() {
           <button
             key={cat}
             type="button"
+            aria-pressed={isActive}
             onClick={() => select(cat)}
             style={{
               position: "relative",

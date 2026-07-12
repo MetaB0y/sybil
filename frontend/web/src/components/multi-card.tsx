@@ -498,6 +498,7 @@ function SecondaryRow({
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   return (
     <Link
+      className="mobile-action-link"
       href={`/m/${market.market_id}`}
       prefetch={false}
       draggable={false}

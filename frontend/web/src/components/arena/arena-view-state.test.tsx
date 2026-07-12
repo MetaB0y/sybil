@@ -114,6 +114,31 @@ describe("ArenaView query-state integration", () => {
     expect(html).toContain("Est. LLM Cost");
   });
 
+  it("marks article pills as coarse-pointer action links", () => {
+    Object.assign(
+      mocks.feed,
+      query({
+        ...readyFeed,
+        decisions: [
+          {
+            id: 17,
+            trader_name: "Alice (Flat)",
+            market_id: 7,
+            market_name: "Accessible market",
+            article_urls: ["https://example.com/evidence"],
+            orders: [],
+          },
+        ],
+      }),
+    );
+
+    const html = renderToStaticMarkup(<ArenaView />);
+
+    expect(html).toContain(
+      'class="mobile-action-link" href="https://example.com/evidence"',
+    );
+  });
+
   it("does not render totals when the API reports its database unavailable", () => {
     Object.assign(
       mocks.feed,
