@@ -74,7 +74,7 @@ dry-run: GET $BASE/v1/markets and require a nonempty JSON array
 dry-run: OPTIONS $BASE/v1/accounts from Origin: $APP_ORIGIN and require POST CORS permission
 dry-run: require /proofs/latest height within $PROOF_LAG_MAX blocks of /v1/blocks/latest (mode: $PROOF_LAG_MODE; source: ${PROVER_BASE:-docker exec into compose service sybil-prover})
 dry-run: inspect compose project '$COMPOSE_PROJECT' containers ($([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local-docker)) when Docker is available
-dry-run: write sybil_synthetic_probe_failure=0 or 1 and sybil_synthetic_proof_lag_blocks to ${VM_URL:-compose victoriametrics service}
+dry-run: write sybil_synthetic_probe_failure=0 or 1 plus sybil_synthetic_proof_lag_blocks and sybil_synthetic_proof_lag_limit_blocks to ${VM_URL:-compose victoriametrics service}
 EOF
     exit 0
 fi
@@ -120,6 +120,12 @@ push_proof_lag_metric() {
     local lag=$1 instance
     instance="$(prom_label_escape "$BASE")"
     push_metric_line "sybil_synthetic_proof_lag_blocks{job=\"sybil-synthetic\",instance=\"$instance\"} $lag"
+}
+
+push_proof_lag_limit_metric() {
+    local limit=$1 instance
+    instance="$(prom_label_escape "$BASE")"
+    push_metric_line "sybil_synthetic_proof_lag_limit_blocks{job=\"sybil-synthetic\",instance=\"$instance\"} $limit"
 }
 
 die() {
@@ -238,6 +244,7 @@ else
         PROOF_LAG=$((CHAIN_HEIGHT - PROOF_HEIGHT))
         (( PROOF_LAG < 0 )) && PROOF_LAG=0
         push_proof_lag_metric "$PROOF_LAG" || true
+        push_proof_lag_limit_metric "$PROOF_LAG_MAX" || true
         if (( PROOF_LAG > PROOF_LAG_MAX )); then
             proof_lag_violation "proof height $PROOF_HEIGHT trails chain height $CHAIN_HEIGHT by $PROOF_LAG blocks (max $PROOF_LAG_MAX); the prover pipeline looks wedged"
         else

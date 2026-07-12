@@ -57,6 +57,7 @@ whenever the lag was computable:
 ```text
 sybil_synthetic_probe_failure{job="sybil-synthetic",instance="<base-url>"} 0|1
 sybil_synthetic_proof_lag_blocks{job="sybil-synthetic",instance="<base-url>"} <blocks>
+sybil_synthetic_proof_lag_limit_blocks{job="sybil-synthetic",instance="<base-url>"} <blocks>
 ```
 
 On the host it discovers the compose `victoriametrics` container and posts to
@@ -71,9 +72,11 @@ port. `SYBIL_SYNTHETIC_VM_URL` can instead name a directly reachable VM URL.
 - `SyntheticProbeMissing` fires when no result arrives for 15 minutes, covering
   a disabled timer or broken ingestion path;
 - `SyntheticProofLagHigh` fires when the probe's measured proof lag stays
-  above 30 blocks for 10 minutes. In the default `fail` mode this is largely
-  redundant with `SyntheticProbeFailed` (the probe already fails on high lag);
-  it is the pager for `warn` mode and gives a graded lag series either way.
+  above the emitted `SYBIL_SMOKE_PROOF_LAG_MAX` limit for 10 minutes. In the
+  default `fail` mode this is largely redundant with `SyntheticProbeFailed`
+  (the probe already fails on high lag); it is the pager for `warn` mode and
+  gives a graded lag series either way. The alert and probe therefore keep the
+  same ceiling when operators tune it for real-prover cadence.
 
 The existing Telegram overlay loads the same rules and configures vmalert's
 notifier as `http://telegram-alerts:8080`. The bridge accepts vmalert's
