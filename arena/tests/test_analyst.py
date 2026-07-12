@@ -18,7 +18,7 @@ from live.analyst import (
     PersonaAnalyst,
     cluster_near_duplicate_articles,
 )
-from live.fair_value_bus import FairValueBus, FairValueUpdate
+from live.fair_value_bus import FairValueBus, FairValueUpdate, analysis_batch_id
 from live.metrics import ArenaMetrics
 from live.news_feed import LiveArticle
 from live.trader import LiveLlmTrader
@@ -193,6 +193,20 @@ def test_cluster_near_duplicate_articles_keeps_one_representative_per_cluster():
     assert any(cluster.representative is duplicate for cluster in clusters)
 
 
+def test_analysis_batch_id_is_stable_for_sorted_article_urls():
+    first = _article()
+    second = LiveArticle(
+        url="http://x/b",
+        title="Second",
+        source="src",
+        published=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        full_text="Body",
+    )
+
+    assert analysis_batch_id(7, [first, second]) == analysis_batch_id(7, [second, first])
+    assert analysis_batch_id(7, [first]) != analysis_batch_id(8, [first])
+
+
 def test_prompt_includes_full_resolution_criteria():
     analyst = _make_analyst(FairValueBus(), [7])
     market = analyst.markets_info[7]
@@ -343,7 +357,7 @@ async def test_sizer_logs_decision_per_trader_for_reader_compat(tmp_path):
         await flat.on_block(_block())
 
         rows = db.conn.execute(
-            "SELECT trader_name, analysis, fair_value, restate FROM decisions "
+            "SELECT trader_name, analysis, fair_value, restate, analysis_batch_id FROM decisions "
             "WHERE analysis = 'a' ORDER BY trader_name"
         ).fetchall()
         names = sorted(r["trader_name"] for r in rows)
@@ -352,5 +366,7 @@ async def test_sizer_logs_decision_per_trader_for_reader_compat(tmp_path):
         assert all(
             r["restate"] == "YES resolves if the event occurs by the deadline." for r in rows
         )
+        assert len({r["analysis_batch_id"] for r in rows}) == 1
+        assert rows[0]["analysis_batch_id"]
     finally:
         db.close()

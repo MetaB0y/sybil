@@ -321,6 +321,61 @@ class NewsSubscription:
         return articles
 
 
+class PairedNewsBatchView:
+    """One arm's exactly-once view of a two-party analysis batch barrier."""
+
+    def __init__(self, barrier: "PairedNewsBatchBarrier", arm_name: str):
+        self._barrier = barrier
+        self.name = arm_name
+
+    async def drain(self, market_id: int) -> list[LiveArticle]:
+        return await self._barrier.drain(self.name, market_id)
+
+
+class PairedNewsBatchBarrier:
+    """Hold one shared per-market batch until both experiment arms consume it.
+
+    The barrier owns exactly one ordinary feed subscription. The first arm to
+    drain a market snapshots that subscription's current pending list; both arm
+    views receive that same list object exactly once. Further upstream articles
+    remain queued until both arms have consumed the active batch.
+    """
+
+    def __init__(self, subscription: NewsSubscription, arm_names: tuple[str, str]):
+        if len(set(arm_names)) != 2:
+            raise ValueError("paired news barrier requires two distinct arm names")
+        self.subscription = subscription
+        self.arm_names = frozenset(arm_names)
+        self._active: dict[int, tuple[list[LiveArticle], set[str]]] = {}
+        self._lock = asyncio.Lock()
+
+    def view(self, arm_name: str) -> PairedNewsBatchView:
+        if arm_name not in self.arm_names:
+            raise ValueError(f"unknown paired news arm: {arm_name}")
+        return PairedNewsBatchView(self, arm_name)
+
+    async def drain(self, arm_name: str, market_id: int) -> list[LiveArticle]:
+        if arm_name not in self.arm_names:
+            raise ValueError(f"unknown paired news arm: {arm_name}")
+
+        async with self._lock:
+            active = self._active.get(market_id)
+            if active is None:
+                articles = await self.subscription.drain(market_id)
+                if not articles:
+                    return []
+                active = (articles, set())
+                self._active[market_id] = active
+
+            articles, consumed = active
+            if arm_name in consumed:
+                return []
+            consumed.add(arm_name)
+            if consumed == self.arm_names:
+                del self._active[market_id]
+            return articles
+
+
 # --------------------------------------------------------------------------- #
 # NewsFeed
 # --------------------------------------------------------------------------- #

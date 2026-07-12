@@ -117,6 +117,15 @@ def test_compare_uses_exact_shared_scoreable_cohort_and_whole_account_pnl(tmp_pa
         "after": 3.0,
         "delta": 1.0,
     }
+    assert result["portfolio_identity_matching"]["flat"] == {
+        "matched_trader_names": ["Alice (Flat)"],
+        "excluded_before_trader_names": [],
+        "excluded_after_trader_names": [],
+        "by_trader": {
+            "Alice (Flat)": {"before": 2.0, "after": 3.0, "delta": 1.0}
+        },
+        "matched_mean_pnl": {"before": 2.0, "after": 3.0, "delta": 1.0},
+    }
     assert result["portfolio_pnl_scope"] == "all_trader_positions"
     assert "not filtered to the shared market cohort" in result["portfolio_pnl_note"]
     assert result["measurement_protocol"] == {
@@ -142,6 +151,7 @@ def test_compare_uses_exact_shared_scoreable_cohort_and_whole_account_pnl(tmp_pa
     )
     assert "Shared available market IDs: 1,2" in table
     assert "Shared scoreable market IDs: 1" in table
+    assert "Matched Flat trader identities: Alice (Flat)" in table
     assert "Portfolio PnL is whole-account scope" in table
     assert "overall Brier" in table
 
@@ -193,12 +203,26 @@ def test_compare_rejects_invalid_or_empty_windows(tmp_path, overrides, message):
 
 
 def test_compare_requires_protocol_window_unless_minimum_is_explicitly_lowered(tmp_path):
-    _before, _after, args = _valid_pair(tmp_path)
+    before, after, args = _valid_pair(tmp_path)
     args["before_until"] = "2026-01-01T06:00:00Z"
     args["after_until"] = "2026-02-01T06:00:00Z"
 
     with pytest.raises(ValueError, match="below the configured 24h minimum"):
         compare_decisions_dbs(**args)
+
+    for db_path, timestamp, pnl in (
+        (before, "2026-01-01T03:00:00Z", 1.0),
+        (after, "2026-02-01T03:00:00Z", 6.0),
+    ):
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """INSERT INTO portfolio_snapshots
+               (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+               VALUES ('Alice (Flat)', ?, 0, 0, ?, '{}')""",
+            (timestamp, pnl),
+        )
+        conn.commit()
+        conn.close()
 
     result = compare_decisions_dbs(**args, min_window_hours=5)
     assert result["measurement_protocol"] == {
@@ -264,8 +288,12 @@ def test_compare_requires_explicit_outcomes_unless_exploratory_override_is_recor
     before = tmp_path / "before.db"
     after = tmp_path / "after.db"
     decision = ("Alice", 1, "M1", "2026-01-01T00:00:00Z", 0.8, 0.99, "[]")
-    _comparison_db(before, outcomes=[(1, 1.0)], decisions=[decision])
-    _comparison_db(after, outcomes=[], decisions=[decision])
+    snapshots = [
+        ("Alice (Flat)", "2025-12-31T23:00:00Z", 0.0),
+        ("Alice (Flat)", "2026-01-01T12:00:00Z", 1.0),
+    ]
+    _comparison_db(before, outcomes=[(1, 1.0)], decisions=[decision], snapshots=snapshots)
+    _comparison_db(after, outcomes=[], decisions=[decision], snapshots=snapshots)
     args = {
         "before_db": str(before),
         "before_since": "2026-01-01T00:00:00Z",
@@ -288,6 +316,54 @@ def test_compare_requires_explicit_outcomes_unless_exploratory_override_is_recor
     assert result["measurement_protocol"]["inferred_outcomes_override_used"] is True
     table = format_delta_table(result)
     assert "allow inferred=true, override used=true" in table
+
+
+def test_compare_excludes_changed_accounts_from_matched_pnl_mean(tmp_path):
+    _before, after, args = _valid_pair(tmp_path)
+    conn = sqlite3.connect(after)
+    conn.executemany(
+        """INSERT INTO portfolio_snapshots
+           (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+           VALUES ('Changed Cohort (Flat)', ?, 0, 0, ?, '{}')""",
+        [
+            ("2026-01-31T23:00:00Z", 0.0),
+            ("2026-02-01T12:00:00Z", 100.0),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = compare_decisions_dbs(**args)
+
+    matching = result["portfolio_identity_matching"]["flat"]
+    assert matching["matched_trader_names"] == ["Alice (Flat)"]
+    assert matching["excluded_after_trader_names"] == ["Changed Cohort (Flat)"]
+    assert result["deltas"]["portfolio_pnl"]["flat"]["mean_pnl"] == {
+        "before": 2.0,
+        "after": 3.0,
+        "delta": 1.0,
+    }
+
+
+def test_compare_rejects_changed_cohort_with_no_matching_flat_identity(tmp_path):
+    before, after, args = _valid_pair(tmp_path)
+    conn = sqlite3.connect(before)
+    conn.execute(
+        "UPDATE portfolio_snapshots SET trader_name = 'Old Cohort (Flat)' "
+        "WHERE trader_name = 'Alice (Flat)'"
+    )
+    conn.commit()
+    conn.close()
+    conn = sqlite3.connect(after)
+    conn.execute(
+        "UPDATE portfolio_snapshots SET trader_name = 'New Cohort (Flat)' "
+        "WHERE trader_name = 'Alice (Flat)'"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ValueError, match="no matched durable trader identities.*cohort"):
+        compare_decisions_dbs(**args)
 
 
 def test_compare_rejects_resolved_markets_without_scoreable_rows(tmp_path):

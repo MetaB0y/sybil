@@ -32,7 +32,8 @@ def _fixture_db(path):
             countercase TEXT,
             rejection_reason TEXT,
             market_category TEXT,
-            market_tags TEXT
+            market_tags TEXT,
+            analysis_batch_id TEXT
         );
         INSERT INTO decisions
             (trader_name, market_id, market_name, timestamp, fair_value,
@@ -83,6 +84,8 @@ def test_calibration_harness_computes_brier_reliability_and_noise_baseline(tmp_p
         "source": "explicit",
         "count": 2,
         "used_decision_rows": 3,
+        "raw_scoreable_decision_rows": 3,
+        "duplicate_batch_decision_rows_excluded": 0,
     }
     assert alice["n"] == 2
     assert alice["brier"] == 0.1325
@@ -162,9 +165,129 @@ def test_calibration_pnl_uses_window_deltas_for_all_live_arms(tmp_path):
             "max_pnl": 3.0,
         },
     }
+    assert result["portfolio_pnl_by_trader"] == {
+        "flat": {"Alice (Flat)": 4.0},
+        "kelly": {"Alice (Kelly)": 3.0},
+        "native_noise": {"Noise-0": 3.0},
+    }
     report = format_report(result)
     assert "Flat-arm PnL: n=1 mode=window_delta mean=4.00" in report
     assert "Kelly-arm PnL: n=1 mode=window_delta mean=3.00" in report
+    assert "Flat-arm PnL by durable trader identity" in report
+    assert "Alice (Flat): 4.00" in report
+
+
+def test_window_pnl_includes_movement_after_in_window_startup_baseline(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        """INSERT INTO portfolio_snapshots
+           (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+           VALUES ('Fresh Experiment (Flat)', ?, 0, 0, ?, '{}')""",
+        [
+            ("2026-01-01T00:01:00Z", 0.0),
+            ("2026-01-01T00:02:00Z", 6.5),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = analyze_decisions_db(
+        str(db_path),
+        since="2026-01-01T00:01:00Z",
+        until="2026-01-01T00:03:00Z",
+    )
+
+    assert result["portfolio_pnl_by_trader"]["flat"] == {
+        "Fresh Experiment (Flat)": 6.5
+    }
+
+
+def test_calibration_keeps_stage1_ab_flat_variants_separate(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        """INSERT INTO portfolio_snapshots
+           (trader_name, timestamp, balance, portfolio_value, pnl, positions)
+           VALUES (?, '2026-01-01T00:03:00Z', 0, 0, ?, '{}')""",
+        [
+            ("News Trader [SYB-114:exp:control] (Flat)", 3.0),
+            ("News Trader [SYB-114:exp:stage1] (Flat)", 7.0),
+        ],
+    )
+    conn.executemany(
+        """INSERT INTO decisions
+           (trader_name, market_id, market_name, timestamp, fair_value,
+            market_price, orders, raw_fair_value, effective_fair_value,
+            fair_value_age_s, confidence, countercase, rejection_reason,
+            market_category, market_tags, analysis_batch_id)
+           VALUES (?, 1, 'M1', '2026-01-01T00:03:00Z', ?, 0.50,
+                   '[{"side":"BUY_YES"}]', ?, ?, 0, 0.7, 'c', NULL,
+                   'Politics', '[]', ?)""",
+        [
+            (
+                "News Trader [SYB-114:exp:control] (Flat)",
+                0.60,
+                0.60,
+                0.60,
+                "batch-shared",
+            ),
+            (
+                "News Trader [SYB-114:exp:control] (Flat)",
+                0.61,
+                0.61,
+                0.61,
+                "batch-shared",
+            ),
+            (
+                "News Trader [SYB-114:exp:stage1] (Flat)",
+                0.70,
+                0.70,
+                0.70,
+                "batch-shared",
+            ),
+            (
+                "News Trader [SYB-114:exp:stage1] (Flat)",
+                0.75,
+                0.75,
+                0.75,
+                "batch-stage1-only",
+            ),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = analyze_decisions_db(str(db_path))
+
+    assert result["portfolio_pnl_by_trader"]["flat"] == {
+        "News Trader [SYB-114:exp:control] (Flat)": 3.0,
+        "News Trader [SYB-114:exp:stage1] (Flat)": 7.0,
+    }
+    assert [
+        persona["persona"] for persona in result["personas"] if "SYB-114" in persona["persona"]
+    ] == [
+        "News Trader [SYB-114:exp:control]",
+        "News Trader [SYB-114:exp:stage1]",
+    ]
+    report = format_report(result)
+    assert "News Trader [SYB-114:exp:control]" in report
+    assert "News Trader [SYB-114:exp:stage1]" in report
+    assert "News Trader [SYB-114:exp:control] (Flat): 3.00" in report
+    assert "News Trader [SYB-114:exp:stage1] (Flat): 7.00" in report
+    assert result["analysis_batches"]["duplicate_decision_rows_excluded"] == 1
+    assert result["analysis_batches"]["control_stage1_matching"] == [
+        {
+            "experiment_id": "exp",
+            "persona": "News Trader",
+            "matched_count": 1,
+            "unmatched_control_count": 0,
+            "unmatched_stage1_count": 1,
+        }
+    ]
+    assert "matched=1 unmatched-control=0 unmatched-stage1=1" in report
 
 
 def test_calibration_window_reason_counterfactuals_categories_and_surprises(tmp_path):

@@ -186,6 +186,7 @@ def test_decision_db_migrates_old_decisions_table_with_stage_metadata(tmp_path):
         columns = {row[1] for row in db.conn.execute("PRAGMA table_info(decisions)")}
         assert "rejection_reason" in columns
         assert "restate" in columns
+        assert "analysis_batch_id" in columns
     finally:
         db.close()
 

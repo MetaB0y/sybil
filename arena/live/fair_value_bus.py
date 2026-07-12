@@ -22,6 +22,7 @@ import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
+from hashlib import sha256
 
 from .news_feed import LiveArticle
 
@@ -31,6 +32,13 @@ log = logging.getLogger(__name__)
 # A stalled sizer must not grow memory without limit, so its oldest queued
 # updates are dropped once this many pile up for a single market.
 MAX_SUBSCRIBER_QUEUE = 500
+
+
+def analysis_batch_id(market_id: int, articles: list[LiveArticle]) -> str:
+    """Domain-separated id for one market and its sorted article URL batch."""
+    urls = sorted(article.url for article in articles)
+    material = "\0".join(("sybil/analysis-batch/v1", str(market_id), *urls))
+    return sha256(material.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -48,6 +56,11 @@ class FairValueUpdate:
     articles: list[LiveArticle] = field(default_factory=list)
     block_height: int = 0
     ts: datetime | None = None
+    analysis_batch_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.analysis_batch_id:
+            self.analysis_batch_id = analysis_batch_id(self.market_id, self.articles)
 
 
 class FairValueSubscription:

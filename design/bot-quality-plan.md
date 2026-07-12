@@ -9,6 +9,14 @@ ticket: SYB-114
 
 > **Status note (2026-07-11):** research input, not the current arena backlog.
 > Resurvey the live bot pipeline and calibration data before executing a stage.
+>
+> **Stage 1 harness update (2026-07-12):** the runner now has an opt-in concurrent
+> `--stage1-ab-experiment-id` mode. It freezes an explicit `--market-ids` cohort and runs isolated
+> pre-Stage-1 control/current-Stage-1 Flat arms on the same feed. The ordinary live topology is
+> unchanged. Metadata is also bound to the committed chain `genesis_hash`, so a fresh genesis needs
+> a new experiment id. A paired batch barrier holds each article batch until both arms consume it,
+> and experiment ids are single-run because in-memory analyst/Flat state cannot resume safely.
+> This documents available measurement machinery, not a completed window.
 
 Implementation is gated on the first calibration window (Valery runs `scripts/calibration.py`
 after ~a day of post-genesis trading; genesis was 2026-07-10, so data lands 2026-07-11).
@@ -28,8 +36,9 @@ All paths under `/home/anonymous/sybil/arena/`.
   `FairValueBus`. No ensembling, no self-consistency, no second opinion, no retry-on-parse-fail
   (fallback defaults: confidence 0.5).
 - Model: **OpenRouter `deepseek/deepseek-v4-flash`** (default in `live/runner.py::LiveConfig`),
-  budget **$5/analyst default** (`llm_budget_usd`), hard pause at $0 (SYB-64); actual billed
-  cost via `usage.include` (`live/costs.py`). Min 60s between LLM calls (`min_llm_interval_s`).
+  spend pause threshold **$5/analyst default** (`llm_budget_usd`); actual billed cost arrives via
+  `usage.include` (`live/costs.py`) after a call, so spend may cross the threshold by that final
+  call before later calls pause. Min 60s between LLM calls (`min_llm_interval_s`).
 - `live/news_feed.py` — Google News RSS per market (query built from market name), URL dedup,
   batch **LLM relevance gate** (`google/gemma-4-31b-it`, 1 call/market/poll), full text via
   trafilatura, 300s poll. Also fetches **Polymarket CLOB mid prices** (the cross-platform
@@ -48,7 +57,8 @@ All paths under `/home/anonymous/sybil/arena/`.
 **What gets logged per decision** (`live/db.py::decisions` table): trader_name, market_id,
 fair_value, raw/effective FV, fair_value_age_s, confidence, countercase, market_price, orders
 (JSON), motivation, analysis, raw_llm_response, balance, positions, article_urls. Token spend
-per call in `token_usage`. Portfolio snapshots every 300s.
+per call in `token_usage`. Portfolio snapshots are written once before workers start and every
+300s thereafter.
 
 **Calibration measurement today** (`scripts/calibration.py`): per-persona Brier vs
 market-price-as-forecast baseline, reliability curve, rejection calibration
@@ -99,7 +109,7 @@ trades **Manifold Markets** since 2026-02, built by "marbinner". Headline stats
 
 ## 3. Transfer analysis
 
-Setting constraints: 10s blocks, EG/Fisher batch clearing, IOC orders, $5–10 hard-capped
+Setting constraints: 10s blocks, EG/Fisher batch clearing, IOC orders, $5–10 spend-threshold
 OpenRouter keys, deepseek-v4-flash analysts, continuous operation, Kelly sizing loop OUT of
 scope (known FV-drift concern).
 
@@ -139,13 +149,16 @@ per-reason rejection stats.
 **Stage 1 — prompt scaffolding (T3 + T8-lite):** `S`, +2-4% tokens
 - Add `RESTATE:` field (resolution-criteria paraphrase) to the analyst format; log it.
 - Add per-article source line + one prompt sentence discounting aggregator/SEO sources.
-Measure: Brier delta on shared market set; parse-fallback rate must not rise.
+Measure concurrently with `live.runner --stage1-ab-experiment-id <id> --market-ids <ids...>`.
+The runner persists the UTC start and immutable experiment configuration in `live_experiments`;
+pass that start plus the same cohort to `scripts/calibration.py`. Brier delta on the shared market
+set and parse-fallback rate are the primary checks.
 
 **Stage 2 — price-move re-estimation trigger (T1):** `M`, +20-50% analyst calls (budget-gated)
 - In `analyst.py::on_block`, alongside news drain: if `polymarket_prices.get_price(mid)` moved
   >θ (start θ=0.10) from the price at last FV publish and FV age > ttl, run the LLM with a
   "price moved, no new articles — re-derive" prompt variant. Respect `min_llm_interval_s`
-  and the SYB-64 budget (it already hard-caps worst case).
+  and the SYB-64 pause threshold (which blocks subsequent calls after crossing).
 Measure: stale-FV losses (decisions where fair_value_age_s > ttl at order time) and PnL delta.
 
 **Stage 3 — oracle second-opinion (T2):** `M`, +5-20% spend depending on gating
@@ -173,19 +186,23 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
   `calibration.py --market-ids` so forecast scoring cannot drift to a different cohort. This
   filter does not reconstruct per-market PnL: portfolio PnL remains the whole trader account,
   so the runner-level cohort pin is still required for the PnL comparison.
-- **A/B harness already exists**: the FairValueBus fan-out (SYB-192/210) guarantees identical
-  news inputs. For each experiment, run the *same persona* twice — control analyst vs variant
-  analyst (technique on) — each with its own bus + Flat sizer, same feed. Flat arm is the
-  primary PnL readout (Kelly out of scope and higher-variance).
+- **A/B harness already exists**: each persona's control/variant analysts consume the same
+  per-market article list through a paired batch barrier, then publish onto separate buses for
+  separate Flat sizers/accounts. The next feed batch stays blocked until both arms consume the
+  active one. Flat is the primary PnL readout (Kelly is out of scope and higher-variance).
 - **Metrics per window** (calibration.py): per-analyst Brier vs market-price baseline (the
   delta column), reliability curve, rejection accuracy (per reason, Stage 0), Flat-arm PnL vs
   NativeNoiseTrader baseline, LLM $/decision from `token_usage`. When `--since` is supplied,
   portfolio PnL is reported as the per-trader delta from the last pre-window snapshot to the
   last snapshot inside the half-open window; without it, the report keeps cumulative PnL.
-- **Windows**: ≥1 day per side, or concurrent A/B (preferred — same news, same prices). Compare
-  on decisions matched by (market_id, article batch) where possible.
+  Cross-window deltas match the exact intersection of durable trader names per arm and fail if
+  Flat has no matched accounts; added/removed identities are reported rather than averaged in.
+- **Windows**: ≥1 day per side, or concurrent A/B (preferred — same news, same prices). Persisted
+  `analysis_batch_id` values de-duplicate repeated sizer rows and expose unmatched arm batches.
+  Experiment ids cannot resume; any restart requires a new window/id.
 - **Guardrail**: any stage that raises analyst spend must show cost per decision; abort a stage
-  if projected spend exceeds 2× baseline (keys hard-capped $5–10).
+  if projected spend exceeds 2× baseline. Configured thresholds are $5–10, not hard ceilings;
+  each analyst may overshoot by one completed call.
 
 ## 6. OpenRouter spend impact summary
 
@@ -193,14 +210,14 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
 |-------|-------------|------------------------------|
 | 0 | none | $0 |
 | 1 | none (+~40 output tok/call) | +2-4% |
-| 2 | price-triggered re-estimates | +20-50% (θ- and budget-capped) |
+| 2 | price-triggered re-estimates | +20-50% (θ- and threshold-gated) |
 | 3 | edge-triggered oracle (cheap model) | +5-20% |
 | 4 | none (+~100 prompt tok) | +1-2% |
 | A/B harness | duplicate analyst per experiment | ×2 during experiment windows only |
 
-Baseline reference: deepseek-v4-flash analyst calls are ~$0.001-class; the $5 default budget
-(`runner.py --llm-budget-usd`) already hard-pauses overruns, so worst case is analysts pausing
-earlier, not overage.
+Baseline reference: deepseek-v4-flash analyst calls are ~$0.001-class; the $5 default pause
+threshold (`runner.py --llm-budget-usd`) blocks later calls after it is reached. One completed call
+can cross the threshold before its billed cost is known.
 
 ## 7. What surprised me
 

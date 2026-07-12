@@ -55,6 +55,7 @@ class PriceSnapshot:
 @dataclass
 class TradeRecord:
     market_id: int
+    analysis_batch_id: str
     articles: list[LiveArticle]
     analysis: str
     fair_value: float
@@ -222,6 +223,7 @@ class LiveLlmTrader(BaseAgent):
         restate: str = "",
         countercase: str = "",
         rejection_reason: str | None = None,
+        analysis_batch_id: str = "",
     ) -> None:
         if orders and rejection_reason is not None:
             raise ValueError("submitted decisions cannot have a rejection_reason")
@@ -231,6 +233,7 @@ class LiveLlmTrader(BaseAgent):
         no_pos = self.get_position(market_id, "NO")
         record = TradeRecord(
             market_id=market_id,
+            analysis_batch_id=analysis_batch_id,
             articles=articles or [],
             analysis=analysis,
             fair_value=fair_value,
@@ -291,6 +294,7 @@ class LiveLlmTrader(BaseAgent):
                 rejection_reason=rejection_reason,
                 market_category=market_category,
                 market_tags=[str(tag) for tag in market_tags],
+                analysis_batch_id=analysis_batch_id,
             )
 
     # -- Price helpers --
@@ -561,6 +565,7 @@ class LiveLlmTrader(BaseAgent):
                     "block_height": block.height,
                     "timestamp": now,
                     "rejection_reason": self._latest_rejection_reasons[market_id],
+                    "analysis_batch_id": update.analysis_batch_id if update else "",
                 }
                 self._record_trade(
                     market_id=entry["market_id"],
@@ -582,6 +587,7 @@ class LiveLlmTrader(BaseAgent):
                     restate=entry["restate"],
                     countercase=entry["countercase"],
                     rejection_reason=entry["rejection_reason"],
+                    analysis_batch_id=entry["analysis_batch_id"],
                 )
             all_orders.extend(rebalance_orders)
             self._last_rebalance = self._monotonic()

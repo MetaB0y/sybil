@@ -11,7 +11,8 @@ Usage:
 The windows are half-open: ``since`` is inclusive and ``until`` is exclusive.
 Forecast metrics use only market IDs that have decisions in both windows and a
 shared explicit resolved outcome. Inferred outcomes require an explicit
-exploratory override. Portfolio PnL remains a whole-account measurement.
+exploratory override. Portfolio PnL remains a whole-account measurement and
+compares only exact durable trader identities present in both windows.
 """
 
 from __future__ import annotations
@@ -83,7 +84,45 @@ def _metric(before: int | float | None, after: int | float | None) -> dict[str, 
     }
 
 
-def _comparison_deltas(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+def _matched_portfolio_identities(
+    before: dict[str, Any], after: dict[str, Any]
+) -> dict[str, Any]:
+    """Match whole-account PnL only on exact durable names within each arm."""
+    result = {}
+    for arm in ("flat", "kelly", "native_noise"):
+        before_by_name = before.get("portfolio_pnl_by_trader", {}).get(arm, {})
+        after_by_name = after.get("portfolio_pnl_by_trader", {}).get(arm, {})
+        before_names = set(before_by_name)
+        after_names = set(after_by_name)
+        matched = sorted(before_names & after_names)
+        by_trader = {
+            name: _metric(before_by_name[name], after_by_name[name]) for name in matched
+        }
+        before_values = [before_by_name[name] for name in matched]
+        after_values = [after_by_name[name] for name in matched]
+        result[arm] = {
+            "matched_trader_names": matched,
+            "excluded_before_trader_names": sorted(before_names - after_names),
+            "excluded_after_trader_names": sorted(after_names - before_names),
+            "by_trader": by_trader,
+            "matched_mean_pnl": _metric(
+                sum(before_values) / len(before_values) if before_values else None,
+                sum(after_values) / len(after_values) if after_values else None,
+            ),
+        }
+    if not result["flat"]["matched_trader_names"]:
+        raise ValueError(
+            "Flat-arm PnL comparison has no matched durable trader identities; "
+            "the cohort/account set changed, so use like-for-like experiment windows"
+        )
+    return result
+
+
+def _comparison_deltas(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    portfolio_identities: dict[str, Any],
+) -> dict[str, Any]:
     before_personas = {row["persona"]: row for row in before["personas"]}
     after_personas = {row["persona"]: row for row in after["personas"]}
     personas = {
@@ -105,10 +144,8 @@ def _comparison_deltas(before: dict[str, Any], after: dict[str, Any]) -> dict[st
     }
     portfolio_pnl = {
         arm: {
-            "mean_pnl": _metric(
-                before["portfolio_pnl"][arm].get("mean_pnl"),
-                after["portfolio_pnl"][arm].get("mean_pnl"),
-            )
+            "mean_pnl": portfolio_identities[arm]["matched_mean_pnl"],
+            "by_trader": portfolio_identities[arm]["by_trader"],
         }
         for arm in ("flat", "kelly", "native_noise")
     }
@@ -249,6 +286,7 @@ def compare_decisions_dbs(
         market_ids=shared_scoreable,
         **analysis_args,
     )
+    portfolio_identities = _matched_portfolio_identities(before, after)
 
     return {
         "measurement_protocol": {
@@ -275,11 +313,12 @@ def compare_decisions_dbs(
         },
         "before": before,
         "after": after,
-        "deltas": _comparison_deltas(before, after),
+        "portfolio_identity_matching": portfolio_identities,
+        "deltas": _comparison_deltas(before, after, portfolio_identities),
         "portfolio_pnl_scope": "all_trader_positions",
         "portfolio_pnl_note": (
-            "Portfolio PnL is whole-account scope and is not filtered to the shared market "
-            "cohort; the runner must pin the same cohort for a causal PnL comparison."
+            "Portfolio PnL is whole-account scope, matched on exact durable trader names, and "
+            "is not filtered to the shared market cohort; excluded identities are reported."
         ),
     }
 
@@ -305,7 +344,14 @@ def format_delta_table(result: dict[str, Any]) -> str:
         (f"{persona} Brier", metrics["brier"])
         for persona, metrics in result["deltas"]["personas"].items()
     )
+    for arm in ("flat", "kelly", "native_noise"):
+        rows.extend(
+            (f"{arm} {name} PnL", metric)
+            for name, metric in result["deltas"]["portfolio_pnl"][arm]["by_trader"].items()
+        )
     cohort = result["cohort"]
+    identity_matching = result["portfolio_identity_matching"]
+    metric_width = max(28, *(len(label) for label, _metric_row in rows))
     lines = [
         "Arena calibration delta (after - before)",
         (
@@ -326,13 +372,19 @@ def format_delta_table(result: dict[str, Any]) -> str:
         + ",".join(str(value) for value in cohort["shared_available_market_ids"]),
         "Shared scoreable market IDs: "
         + ",".join(str(value) for value in cohort["shared_scoreable_market_ids"]),
+        "Matched Flat trader identities: "
+        + ",".join(identity_matching["flat"]["matched_trader_names"]),
+        "Excluded before Flat identities: "
+        + ",".join(identity_matching["flat"]["excluded_before_trader_names"]),
+        "Excluded after Flat identities: "
+        + ",".join(identity_matching["flat"]["excluded_after_trader_names"]),
         result["portfolio_pnl_note"],
         "",
-        f"{'metric':28s} {'before':>12s} {'after':>12s} {'delta':>12s}",
-        "-" * 67,
+        f"{'metric':{metric_width}s} {'before':>12s} {'after':>12s} {'delta':>12s}",
+        "-" * (metric_width + 39),
     ]
     lines.extend(
-        f"{label[:28]:28s} {_fmt(metric['before']):>12s} "
+        f"{label:{metric_width}s} {_fmt(metric['before']):>12s} "
         f"{_fmt(metric['after']):>12s} {_fmt(metric['delta']):>12s}"
         for label, metric in rows
     )

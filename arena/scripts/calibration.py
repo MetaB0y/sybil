@@ -187,6 +187,7 @@ def _select_decisions(
         "rejection_reason",
         "market_category",
         "market_tags",
+        "analysis_batch_id",
     ]
     selected = [
         "id",
@@ -374,6 +375,7 @@ def _surprises(rows: list[dict[str, Any]], top_n: int) -> list[dict[str, Any]]:
     return [
         {
             "decision_id": row["id"],
+            "analysis_batch_id": row["analysis_batch_id"],
             "persona": row["persona"],
             "trader_name": row["trader_name"],
             "market_id": row["market_id"],
@@ -387,14 +389,62 @@ def _surprises(rows: list[dict[str, Any]], top_n: int) -> list[dict[str, Any]]:
     ]
 
 
-def _portfolio_pnl_summary(
+def _deduplicate_analysis_batches(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Keep the first forecast per durable trader, market, and analysis batch."""
+    unique = []
+    seen = set()
+    for row in rows:
+        key = (row["trader_name"], row["market_id"], row["analysis_batch_id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique, len(rows) - len(unique)
+
+
+_AB_PERSONA_RE = re.compile(
+    r"^(?P<persona>.+) \[SYB-114:(?P<experiment>[^:\]]+):"
+    r"(?P<variant>control|stage1)\]$"
+)
+
+
+def _analysis_batch_matching(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Report control/Stage-1 batch overlap for each durable experiment persona."""
+    groups: dict[tuple[str, str], dict[str, set[str]]] = {}
+    for row in rows:
+        match = _AB_PERSONA_RE.fullmatch(row["persona"])
+        if match is None:
+            continue
+        key = (match.group("experiment"), match.group("persona"))
+        variants = groups.setdefault(key, {"control": set(), "stage1": set()})
+        variants[match.group("variant")].add(row["analysis_batch_id"])
+
+    result = []
+    for (experiment_id, persona), variants in sorted(groups.items()):
+        control = variants["control"]
+        stage1 = variants["stage1"]
+        result.append(
+            {
+                "experiment_id": experiment_id,
+                "persona": persona,
+                "matched_count": len(control & stage1),
+                "unmatched_control_count": len(control - stage1),
+                "unmatched_stage1_count": len(stage1 - control),
+            }
+        )
+    return result
+
+
+def _portfolio_pnl_by_trader(
     conn: sqlite3.Connection,
     trader_kind: str,
     since: datetime | None,
     until: datetime | None,
-) -> dict[str, Any]:
+) -> dict[str, float]:
     if not _has_table(conn, "portfolio_snapshots"):
-        return {"n": 0}
+        return {}
 
     def matches(trader_name: str) -> bool:
         if trader_kind == "flat":
@@ -415,8 +465,8 @@ def _portfolio_pnl_summary(
             continue
         snapshots.setdefault(trader_name, []).append((timestamp, pnl))
 
-    pnls = []
-    for trader_snapshots in snapshots.values():
+    pnls: dict[str, float] = {}
+    for trader_name, trader_snapshots in snapshots.items():
         trader_snapshots.sort(key=lambda item: item[0])
         eligible = [
             (timestamp, pnl)
@@ -426,7 +476,7 @@ def _portfolio_pnl_summary(
         if not eligible:
             continue
         if since is None:
-            pnls.append(eligible[-1][1])
+            pnls[trader_name] = eligible[-1][1]
             continue
 
         in_window = [item for item in eligible if item[0] >= since]
@@ -434,7 +484,19 @@ def _portfolio_pnl_summary(
             continue
         before_window = [item for item in eligible if item[0] < since]
         starting_pnl = before_window[-1][1] if before_window else in_window[0][1]
-        pnls.append(in_window[-1][1] - starting_pnl)
+        pnls[trader_name] = in_window[-1][1] - starting_pnl
+
+    return dict(sorted(pnls.items()))
+
+
+def _portfolio_pnl_summary(
+    conn: sqlite3.Connection,
+    trader_kind: str,
+    since: datetime | None,
+    until: datetime | None,
+) -> dict[str, Any]:
+    by_trader = _portfolio_pnl_by_trader(conn, trader_kind, since, until)
+    pnls = list(by_trader.values())
 
     if not pnls:
         return {"n": 0}
@@ -474,7 +536,7 @@ def analyze_decisions_db(
     conn = _connect(db_path)
     try:
         outcomes, outcome_source = load_outcomes(conn, resolved_threshold)
-        rows: list[dict[str, Any]] = []
+        scoreable_rows: list[dict[str, Any]] = []
         for row in _select_decisions(conn, since_dt, until_dt):
             market_id = int(row["market_id"])
             if cohort is not None and market_id not in cohort:
@@ -484,7 +546,16 @@ def analyze_decisions_db(
             market_forecast = _clamp_probability(row["market_price"])
             if outcome is None or forecast is None or market_forecast is None:
                 continue
-            rows.append(
+            analysis_id = (
+                str(row["analysis_batch_id"] or "").strip()
+                if "analysis_batch_id" in row.keys()
+                else ""
+            )
+            # Old databases had no batch identity. Treat each legacy row as a
+            # unique batch rather than inventing false de-duplication.
+            if not analysis_id:
+                analysis_id = f"legacy-row:{int(row['id'])}"
+            scoreable_rows.append(
                 {
                     "id": int(row["id"]),
                     "persona": _persona_name(str(row["trader_name"])),
@@ -492,6 +563,7 @@ def analyze_decisions_db(
                     "market_id": market_id,
                     "market_name": str(row["market_name"] or ""),
                     "timestamp": str(row["timestamp"] or ""),
+                    "analysis_batch_id": analysis_id,
                     "forecast": forecast,
                     "raw_forecast": _raw_forecast(row),
                     "market_price": market_forecast,
@@ -518,6 +590,8 @@ def analyze_decisions_db(
                 }
             )
 
+        rows, duplicate_decision_rows_excluded = _deduplicate_analysis_batches(scoreable_rows)
+
         personas = []
         for persona in sorted({row["persona"] for row in rows}):
             subset = [row for row in rows if row["persona"] == persona]
@@ -532,6 +606,9 @@ def analyze_decisions_db(
                 {
                     "persona": persona,
                     "n": len(subset),
+                    "analysis_batch_count": len(
+                        {row["analysis_batch_id"] for row in subset}
+                    ),
                     "brier": _brier(forecast_pairs),
                     "raw_brier": _brier(raw_pairs),
                     "market_price_brier": _brier(market_pairs),
@@ -553,6 +630,10 @@ def analyze_decisions_db(
             kind: _portfolio_pnl_summary(conn, kind, since_dt, until_dt)
             for kind in ("flat", "kelly", "native_noise")
         }
+        portfolio_pnl_by_trader = {
+            kind: _portfolio_pnl_by_trader(conn, kind, since_dt, until_dt)
+            for kind in ("flat", "kelly", "native_noise")
+        }
         return {
             "db_path": str(Path(db_path)),
             "bins": bins,
@@ -570,6 +651,8 @@ def analyze_decisions_db(
                 "source": outcome_source,
                 "count": len(outcomes),
                 "used_decision_rows": len(rows),
+                "raw_scoreable_decision_rows": len(scoreable_rows),
+                "duplicate_batch_decision_rows_excluded": duplicate_decision_rows_excluded,
             },
             "personas": personas,
             "baselines": {
@@ -580,7 +663,17 @@ def analyze_decisions_db(
                 "native_noise_trader_pnl": portfolio_pnl["native_noise"],
             },
             "portfolio_pnl": portfolio_pnl,
+            "portfolio_pnl_by_trader": portfolio_pnl_by_trader,
             "portfolio_pnl_scope": "all_trader_positions",
+            "analysis_batches": {
+                "identity": "sha256(market_id + sorted article URLs)",
+                "scoring_semantics": (
+                    "first forecast per durable trader_name + market_id + analysis_batch_id"
+                ),
+                "unique_scored_rows": len(rows),
+                "duplicate_decision_rows_excluded": duplicate_decision_rows_excluded,
+                "control_stage1_matching": _analysis_batch_matching(rows),
+            },
             "overall": {
                 "n": len(rows),
                 "brier": _brier(all_forecast_pairs),
@@ -613,14 +706,18 @@ def format_report(result: dict[str, Any]) -> str:
                 "",
             ]
         )
+    persona_width = max(
+        28,
+        *(len(str(persona["persona"])) for persona in result["personas"]),
+    )
     lines.extend(
         [
             "Calibration by persona",
             (
-                "persona                         n    brier  market   delta  "
+                f"{'persona':{persona_width}s}     n    brier  market   delta  "
                 "reject  acted_b  reject_b  conf"
             ),
-            "-" * 89,
+            "-" * (persona_width + 61),
         ]
     )
     for persona in result["personas"]:
@@ -629,7 +726,7 @@ def format_report(result: dict[str, Any]) -> str:
         delta = None if brier is None or market is None else brier - market
         rejection = persona["rejection_calibration"]
         lines.append(
-            f"{persona['persona'][:28]:28s} "
+            f"{persona['persona']:{persona_width}s} "
             f"{persona['n']:5d} "
             f"{_fmt(brier):>8s} "
             f"{_fmt(market):>7s} "
@@ -669,6 +766,30 @@ def format_report(result: dict[str, Any]) -> str:
             ),
         ]
     )
+    flat_by_trader = result.get("portfolio_pnl_by_trader", {}).get("flat", {})
+    if flat_by_trader:
+        lines.extend(
+            ["", "Flat-arm PnL by durable trader identity"]
+            + [f"  {name}: {_fmt(pnl, 2)}" for name, pnl in flat_by_trader.items()]
+        )
+    batch_summary = result.get("analysis_batches", {})
+    lines.extend(
+        [
+            "",
+            (
+                "Analysis batches: unique scored rows="
+                f"{batch_summary.get('unique_scored_rows', 0)}, duplicate decision rows excluded="
+                f"{batch_summary.get('duplicate_decision_rows_excluded', 0)}"
+            ),
+        ]
+    )
+    for matching in batch_summary.get("control_stage1_matching", []):
+        lines.append(
+            f"  {matching['persona']} [SYB-114:{matching['experiment_id']}]: "
+            f"matched={matching['matched_count']} "
+            f"unmatched-control={matching['unmatched_control_count']} "
+            f"unmatched-stage1={matching['unmatched_stage1_count']}"
+        )
     reason_rows = []
     for persona in result["personas"]:
         for reason, stats in persona["rejection_calibration"]["by_reason"].items():
