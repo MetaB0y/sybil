@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { BatchesTable } from "./batches-table";
@@ -44,5 +44,50 @@ describe("BatchesTable", () => {
 
     expect(html).toContain("select any row to expand");
     expect(html).not.toContain("click any row");
+  });
+
+  it("distinguishes loading, failed backfill, and a real empty chain", () => {
+    const loading = renderToStaticMarkup(
+      <BatchesTable rows={[]} isBackfilling />,
+    );
+    const failed = renderToStaticMarkup(
+      <BatchesTable
+        rows={[]}
+        isBackfilling={false}
+        backfillError
+        onRetry={vi.fn()}
+      />,
+    );
+    const empty = renderToStaticMarkup(
+      <BatchesTable rows={[]} isBackfilling={false} />,
+    );
+
+    expect(loading).toContain('role="status"');
+    expect(loading).toContain("loading recent batches…");
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("not shown as an empty chain");
+    expect(failed).not.toContain("no batches yet");
+    expect(empty).toContain(
+      "no batches yet — waiting for the first committed batch",
+    );
+    const liveToggle = empty.match(/<button[^>]*aria-pressed="true"[^>]*>/)?.[0];
+    expect(liveToggle).toContain("disabled");
+  });
+
+  it("keeps live rows visible when historical backfill refresh fails", () => {
+    const html = renderToStaticMarkup(
+      <BatchesTable
+        rows={[row]}
+        isBackfilling={false}
+        backfillError
+        retrying
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('role="status"');
+    expect(html).toContain("showing live and saved rows");
+    expect(html).toContain('id="activity-batch-42-trigger"');
+    expect(html).toContain("disabled");
   });
 });

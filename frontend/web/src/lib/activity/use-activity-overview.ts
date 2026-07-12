@@ -15,17 +15,50 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { components } from "../api/schema";
 import { formatCompactDollars, parseNanos } from "../format/nanos";
+import { BLOCK_INTERVAL_MS } from "../constants";
 import { selectLatestBlock, useStore } from "../store";
 import type { ActivityOverview, AllTimeStats, Last24hStats } from "./types";
 
 export type UseActivityOverviewResult = ActivityOverview & {
   isLoading: boolean;
+  state: ActivityReadState;
+  isRetrying: boolean;
+  retryFailed: () => Promise<void>;
+};
+
+export type ActivityReadState =
+  | "loading"
+  | "unavailable"
+  | "stale"
+  | "ready";
+
+type ReadSource = {
+  hasData: boolean;
+  isPending: boolean;
+  isFetching: boolean;
+  error: unknown;
+  refetch: () => Promise<unknown>;
 };
 
 type OverviewBucket = components["schemas"]["OverviewBucketResponse"];
 
 export function useActivityOverview(): UseActivityOverviewResult {
   const latestBlock = useStore(selectLatestBlock);
+
+  // The realtime provider normally owns latest-block hydration. Activity also
+  // needs an independently retryable read so a failed global hydration cannot
+  // turn the chain height into an authoritative zero.
+  const latestBlockQ = useQuery({
+    queryKey: ["activity-latest-block"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/v1/blocks/latest");
+      if (error || !data) throw new Error("/v1/blocks/latest failed");
+      return data;
+    },
+    enabled: latestBlock == null,
+    staleTime: 10_000,
+    refetchInterval: latestBlock == null ? BLOCK_INTERVAL_MS : false,
+  });
 
   const summaryQ = useQuery({
     queryKey: ["markets-summary"],
@@ -50,22 +83,73 @@ export function useActivityOverview(): UseActivityOverviewResult {
 
   const liveMarkets = summaryQ.data
     ? summaryQ.data.filter((m) => m.status === "active").length
-    : 0;
+    : null;
+  const block = latestBlock ?? latestBlockQ.data ?? null;
 
   // Real figures from /v1/activity/overview. `null` / "—" until the first
   // response lands, so the page never flashes a stale mock as if real.
   const ov = overviewQ.data;
   const allTime: AllTimeStats = {
     ...bucketStats(ov?.all_time),
-    totalBatches: latestBlock?.height ?? 0,
+    totalBatches: block?.height ?? null,
     liveMarkets,
   };
   const last24h: Last24hStats = bucketStats(ov?.last_24h);
 
+  const sources: ReadSource[] = [
+    querySource(summaryQ),
+    querySource(overviewQ),
+    latestBlock == null
+      ? querySource(latestBlockQ)
+      : {
+          hasData: true,
+          isPending: false,
+          isFetching: false,
+          error: null,
+          refetch: latestBlockQ.refetch,
+        },
+  ];
+  const state = deriveActivityReadState(sources);
+  const failed = sources.filter((source) => source.error != null);
+
   return {
     allTime,
     last24h,
-    isLoading: summaryQ.isPending || overviewQ.isPending,
+    isLoading: state === "loading",
+    state,
+    isRetrying: failed.some((source) => source.isFetching),
+    retryFailed: async () => {
+      await Promise.all(failed.map((source) => source.refetch()));
+    },
+  };
+}
+
+export function deriveActivityReadState(
+  sources: Array<Pick<ReadSource, "hasData" | "isPending" | "error">>,
+): ActivityReadState {
+  if (sources.some((source) => source.error != null && !source.hasData)) {
+    return "unavailable";
+  }
+  if (sources.some((source) => source.isPending && !source.hasData)) {
+    return "loading";
+  }
+  if (sources.some((source) => source.error != null)) return "stale";
+  return "ready";
+}
+
+function querySource(query: {
+  data: unknown;
+  isPending: boolean;
+  isFetching: boolean;
+  error: unknown;
+  refetch: () => Promise<unknown>;
+}): ReadSource {
+  return {
+    hasData: query.data !== undefined,
+    isPending: query.isPending,
+    isFetching: query.isFetching,
+    error: query.error,
+    refetch: query.refetch,
   };
 }
 

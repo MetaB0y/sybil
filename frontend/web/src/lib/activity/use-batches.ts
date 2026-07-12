@@ -20,7 +20,7 @@
 
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { deriveBatchRow } from "./derive-batch";
 import type { BatchRow } from "./types";
 import { selectRecentBlocks, useStore } from "../store";
@@ -31,26 +31,36 @@ export type UseBatchesResult = {
   /** True only while the initial REST backfill is in flight and the table is
    *  still empty. */
   isBackfilling: boolean;
+  isFetching: boolean;
+  error: Error | null;
+  retry: () => void;
 };
 
 export function useBatches(limit = 60): UseBatchesResult {
   const recentBlocks = useStore(selectRecentBlocks);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
-  // One-shot backfill per mount. The server clamps `limit` to its ring depth,
-  // so over-asking is safe and future-proofs the table if the ring grows.
-  const backfilled = useRef(false);
+  // One initial backfill plus explicit retries. The server clamps `limit` to
+  // its ring depth, so over-asking is safe and future-proofs the table.
   useEffect(() => {
-    if (backfilled.current) return;
-    backfilled.current = true;
     let cancelled = false;
     (async () => {
       try {
-        const { data, error } = await api.GET("/v1/blocks", {
-          params: { query: { limit } },
-        });
-        if (cancelled || error || !data || data.length === 0) return;
+        const data = await fetchBatchBackfill(limit);
+        if (cancelled) return;
+        setError(null);
+        if (data.length === 0) return;
         useStore.getState().applyBlocks(data);
+      } catch (cause) {
+        if (!cancelled) {
+          setError(
+            cause instanceof Error
+              ? cause
+              : new Error("/v1/blocks backfill failed"),
+          );
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -58,7 +68,12 @@ export function useBatches(limit = 60): UseBatchesResult {
     return () => {
       cancelled = true;
     };
-  }, [limit]);
+  }, [limit, attempt]);
+
+  const retry = useCallback(() => {
+    setLoading(true);
+    setAttempt((value) => value + 1);
+  }, []);
 
   const rows = useMemo(
     () => recentBlocks.slice(0, limit).map(deriveBatchRow),
@@ -68,5 +83,16 @@ export function useBatches(limit = 60): UseBatchesResult {
   return {
     rows,
     isBackfilling: loading && recentBlocks.length === 0,
+    isFetching: loading,
+    error,
+    retry,
   };
+}
+
+export async function fetchBatchBackfill(limit: number) {
+  const { data, error } = await api.GET("/v1/blocks", {
+    params: { query: { limit } },
+  });
+  if (error || !data) throw new Error("/v1/blocks backfill failed");
+  return data;
 }

@@ -12,6 +12,7 @@ import { PulseStrip } from "@/components/activity/pulse-strip";
 import { BatchesTable } from "@/components/activity/batches-table";
 import { BatchDetail } from "@/components/activity/batch-detail";
 import { ActivityBatchChip } from "@/components/activity/batch-chip";
+import { ActivityOverviewReadNotice } from "@/components/activity/overview-read-notice";
 import { PageHeader } from "@/components/page-header";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 import { useArenaFeed } from "@/lib/arena/use-arena-feed";
@@ -19,7 +20,7 @@ import { useArenaFeed } from "@/lib/arena/use-arena-feed";
 export default function ActivityPage() {
   const overview = useActivityOverview();
   const bots = useArenaFeed({ limit: 1 });
-  const { rows, isBackfilling } = useBatches(60);
+  const batches = useBatches(60);
   const botCount =
     bots.data?.db_available === true ? (bots.data.stats?.traders ?? null) : null;
 
@@ -49,11 +50,19 @@ export default function ActivityPage() {
         />
       </div>
 
+      <ActivityOverviewReadNotice
+        state={overview.state}
+        retrying={overview.isRetrying}
+        onRetry={() => void overview.retryFailed()}
+      />
       <HeroAllTime allTime={overview.allTime} botCount={botCount} />
       <PulseStrip last24h={overview.last24h} />
       <BatchesTable
-        rows={rows}
-        isBackfilling={isBackfilling}
+        rows={batches.rows}
+        isBackfilling={batches.isBackfilling}
+        backfillError={batches.error != null}
+        retrying={batches.isFetching}
+        onRetry={batches.retry}
         renderDetail={(r) => <BatchDetail row={r} />}
       />
     </main>

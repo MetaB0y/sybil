@@ -25,10 +25,16 @@ const GRID_GAP = 28;
 export function BatchesTable({
   rows,
   isBackfilling,
+  backfillError = false,
+  retrying = false,
+  onRetry = () => {},
   renderDetail,
 }: {
   rows: BatchRowData[];
   isBackfilling: boolean;
+  backfillError?: boolean;
+  retrying?: boolean;
+  onRetry?: () => void;
   /** Slot for the expanded-row content; called with the row that's open. */
   renderDetail?: (row: BatchRowData) => ReactNode;
 }) {
@@ -44,12 +50,15 @@ export function BatchesTable({
   const [live, setLive] = useState(true);
   const [frozenRows, setFrozenRows] = useState<BatchRowData[]>([]);
   const displayRows = live ? rows : frozenRows;
+  const backfillUnavailable = backfillError && rows.length === 0;
+  const backfillStale = backfillError && rows.length > 0;
   const newWhileFrozen =
     !live && rows[0] && frozenRows[0]
       ? Math.max(0, rows[0].height - frozenRows[0].height)
       : 0;
   const toggleLive = () => {
     if (live) {
+      if (rows.length === 0) return;
       setFrozenRows(rows); // freezing → snapshot what's on screen now
       setLive(false);
     } else {
@@ -92,10 +101,19 @@ export function BatchesTable({
           <LiveToggle
             live={live}
             newWhileFrozen={newWhileFrozen}
+            disabled={live && rows.length === 0}
             onToggle={toggleLive}
           />
         </span>
       </div>
+
+      {backfillStale && (
+        <BatchBackfillNotice
+          stale
+          retrying={retrying}
+          onRetry={onRetry}
+        />
+      )}
 
       <div
         className="activity-grid-table"
@@ -107,16 +125,23 @@ export function BatchesTable({
         }}
       >
         <Header />
-        {displayRows.length === 0 && (
+        {isBackfilling && displayRows.length === 0 && (
+          <div role="status" aria-live="polite" style={emptyStyle}>
+            loading recent batches…
+          </div>
+        )}
+        {backfillUnavailable && !isBackfilling && (
+          <BatchBackfillNotice
+            stale={false}
+            retrying={retrying}
+            onRetry={onRetry}
+          />
+        )}
+        {!isBackfilling && !backfillUnavailable && displayRows.length === 0 && (
           <div
-            style={{
-              padding: "20px 22px",
-              color: "var(--fg-3)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-            }}
+            style={emptyStyle}
           >
-            no batches yet — waiting for hydration
+            no batches yet — waiting for the first committed batch
           </div>
         )}
         {displayRows.map((r) => (
@@ -144,6 +169,69 @@ export function BatchesTable({
   );
 }
 
+export function BatchBackfillNotice({
+  stale,
+  retrying,
+  onRetry,
+}: {
+  stale: boolean;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role={stale ? "status" : "alert"}
+      aria-live={stale ? "polite" : undefined}
+      style={backfillNoticeStyle}
+    >
+      <span>
+        {stale
+          ? "batch history refresh failed · showing live and saved rows"
+          : "recent batches unavailable · the failed request is not shown as an empty chain"}
+      </span>
+      <button
+        type="button"
+        disabled={retrying}
+        onClick={onRetry}
+        style={retryButtonStyle(retrying)}
+      >
+        {retrying ? "retrying…" : "retry"}
+      </button>
+    </div>
+  );
+}
+
+const emptyStyle: React.CSSProperties = {
+  padding: "20px 22px",
+  color: "var(--fg-3)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+};
+
+const backfillNoticeStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "var(--space-3)",
+  padding: "var(--space-3) 22px",
+  color: "var(--warn)",
+  fontFamily: "var(--font-mono)",
+  fontSize: "var(--fs-12)",
+};
+
+function retryButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    minHeight: 32,
+    padding: "0 var(--space-3)",
+    border: "1px solid var(--border-2)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--surface-2)",
+    color: "var(--fg-1)",
+    font: "inherit",
+    cursor: disabled ? "wait" : "pointer",
+  };
+}
+
 /**
  * Live ⇄ Frozen toggle. Live = table tails new batches; Frozen = rows are held
  * so the user can inspect a batch in peace (relative times still tick). While
@@ -153,19 +241,24 @@ export function BatchesTable({
 function LiveToggle({
   live,
   newWhileFrozen,
+  disabled,
   onToggle,
 }: {
   live: boolean;
   newWhileFrozen: number;
+  disabled: boolean;
   onToggle: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onToggle}
+      disabled={disabled}
       aria-pressed={live}
       title={
-        live
+        disabled
+          ? "Waiting for the first committed batch"
+          : live
           ? "Pause the live tail to inspect a batch — rows stop updating"
           : "Resume live updates"
       }
@@ -175,12 +268,17 @@ function LiveToggle({
         gap: 6,
         padding: "4px 10px",
         borderRadius: 999,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
         border: `1px solid ${live ? "var(--border-2)" : "var(--accent)"}`,
         background: live
           ? "var(--surface-1)"
           : "color-mix(in srgb, var(--accent) 12%, transparent)",
-        color: live ? "var(--fg-2)" : "var(--accent)",
+        color: disabled
+          ? "var(--fg-4)"
+          : live
+            ? "var(--fg-2)"
+            : "var(--accent)",
+        opacity: disabled ? 0.7 : 1,
         fontFamily: "var(--font-mono)",
         fontSize: 10,
         textTransform: "uppercase",

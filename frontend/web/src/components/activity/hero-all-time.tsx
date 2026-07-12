@@ -74,8 +74,14 @@ export function HeroAllTime({
                 letterSpacing: "0.04em",
               }}
             >
-              {formatInt(allTime.totalBatches)} batches ·{" "}
-              {formatInt(allTime.liveMarkets)} live markets
+              {allTime.totalBatches == null
+                ? "—"
+                : formatInt(allTime.totalBatches)}{" "}
+              batches ·{" "}
+              {allTime.liveMarkets == null
+                ? "—"
+                : formatInt(allTime.liveMarkets)}{" "}
+              live markets
             </span>
           </div>
         </div>

@@ -58,8 +58,8 @@ export type Last24hStats = {
  * hero-only fields.
  */
 export type AllTimeStats = Last24hStats & {
-  totalBatches: number; // real — from latestBlock.height
-  liveMarkets: number; // real — from /v1/markets/summary status count
+  totalBatches: number | null; // null until latest block is available
+  liveMarkets: number | null; // null until /v1/markets/summary is available
 };
 
 export type ActivityOverview = {
