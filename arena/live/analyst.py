@@ -479,13 +479,27 @@ class PersonaAnalyst:
             lines.append(f"- [{t}] FV={fv:.2f} | {motivation}")
         return "\n".join(lines).rstrip()
 
-    def _build_prompt(self, articles: list[LiveArticle], market: "Market", block: Block) -> str:
+    def _build_prompt(
+        self,
+        articles: list[LiveArticle],
+        market: "Market",
+        block: Block,
+        reference_price: float | None = None,
+    ) -> str:
         market_id = market.id
-        yes_price = market_price(self.news_feed, self.markets_info, market_id, block)
+        yes_price = (
+            reference_price
+            if reference_price is not None
+            else market_price(self.news_feed, self.markets_info, market_id, block)
+        )
         if yes_price <= 0:
             return ""
 
-        poly_price = self.news_feed.polymarket_prices.get_price(market_id)
+        poly_price = (
+            reference_price
+            if reference_price is not None
+            else self.news_feed.polymarket_prices.get_price(market_id)
+        )
         if poly_price and poly_price > 0:
             price_line = f"- Polymarket consensus: YES=${poly_price:.4f} | NO=${1 - poly_price:.4f}"
         else:
@@ -656,7 +670,13 @@ class PersonaAnalyst:
             if self._last_llm_call != 0 and elapsed_llm < self.min_llm_interval_s:
                 break
 
-            articles = await self.news_sub.drain(market_id) if self.news_sub else []
+            batch_reference_price = None
+            if isinstance(self.news_sub, PairedNewsBatchView):
+                batch = await self.news_sub.drain_batch(market_id)
+                articles = batch.articles if batch is not None else []
+                batch_reference_price = batch.reference_price if batch is not None else None
+            else:
+                articles = await self.news_sub.drain(market_id) if self.news_sub else []
             if not articles:
                 continue
             clusters = cluster_near_duplicate_articles(articles)
@@ -675,7 +695,11 @@ class PersonaAnalyst:
             if not market:
                 continue
 
-            ref_price = market_price(self.news_feed, self.markets_info, market_id, block)
+            ref_price = (
+                batch_reference_price
+                if batch_reference_price is not None
+                else market_price(self.news_feed, self.markets_info, market_id, block)
+            )
             if ref_price <= 0:
                 continue
 
@@ -701,7 +725,12 @@ class PersonaAnalyst:
                 titles,
             )
 
-            prompt = self._build_prompt(articles, market, block)
+            prompt = self._build_prompt(
+                articles,
+                market,
+                block,
+                reference_price=batch_reference_price,
+            )
             if not prompt:
                 continue
 
@@ -757,6 +786,7 @@ class PersonaAnalyst:
                     articles=articles,
                     block_height=block.height,
                     ts=now,
+                    analysis_reference_price=batch_reference_price,
                 )
             )
 

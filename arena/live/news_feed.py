@@ -20,6 +20,7 @@ import urllib.parse
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Callable
 
 import feedparser
 import httpx
@@ -321,6 +322,12 @@ class NewsSubscription:
         return articles
 
 
+@dataclass(frozen=True)
+class PairedNewsBatch:
+    articles: list[LiveArticle]
+    reference_price: float
+
+
 class PairedNewsBatchView:
     """One arm's exactly-once view of a two-party analysis batch barrier."""
 
@@ -329,24 +336,37 @@ class PairedNewsBatchView:
         self.name = arm_name
 
     async def drain(self, market_id: int) -> list[LiveArticle]:
-        return await self._barrier.drain(self.name, market_id)
+        batch = await self.drain_batch(market_id)
+        return batch.articles if batch is not None else []
+
+    async def drain_batch(self, market_id: int) -> PairedNewsBatch | None:
+        return await self._barrier.drain_batch(self.name, market_id)
 
 
 class PairedNewsBatchBarrier:
     """Hold one shared per-market batch until both experiment arms consume it.
 
     The barrier owns exactly one ordinary feed subscription. The first arm to
-    drain a market snapshots that subscription's current pending list; both arm
-    views receive that same list object exactly once. Further upstream articles
-    remain queued until both arms have consumed the active batch.
+    drain a market snapshots that subscription's current pending list and one
+    fresh-or-startup reference price; both arm views receive that same immutable
+    batch exactly once. Further upstream articles remain queued until both arms
+    have consumed the active batch.
     """
 
-    def __init__(self, subscription: NewsSubscription, arm_names: tuple[str, str]):
+    def __init__(
+        self,
+        subscription: NewsSubscription,
+        arm_names: tuple[str, str],
+        startup_reference_prices: dict[int, float],
+        fresh_reference_price: Callable[[int], float | None],
+    ):
         if len(set(arm_names)) != 2:
             raise ValueError("paired news barrier requires two distinct arm names")
         self.subscription = subscription
         self.arm_names = frozenset(arm_names)
-        self._active: dict[int, tuple[list[LiveArticle], set[str]]] = {}
+        self.startup_reference_prices = dict(startup_reference_prices)
+        self.fresh_reference_price = fresh_reference_price
+        self._active: dict[int, tuple[PairedNewsBatch, set[str]]] = {}
         self._lock = asyncio.Lock()
 
     def view(self, arm_name: str) -> PairedNewsBatchView:
@@ -355,6 +375,10 @@ class PairedNewsBatchBarrier:
         return PairedNewsBatchView(self, arm_name)
 
     async def drain(self, arm_name: str, market_id: int) -> list[LiveArticle]:
+        batch = await self.drain_batch(arm_name, market_id)
+        return batch.articles if batch is not None else []
+
+    async def drain_batch(self, arm_name: str, market_id: int) -> PairedNewsBatch | None:
         if arm_name not in self.arm_names:
             raise ValueError(f"unknown paired news arm: {arm_name}")
 
@@ -363,17 +387,27 @@ class PairedNewsBatchBarrier:
             if active is None:
                 articles = await self.subscription.drain(market_id)
                 if not articles:
-                    return []
-                active = (articles, set())
+                    return None
+                fresh = self.fresh_reference_price(market_id)
+                reference_price = (
+                    float(fresh)
+                    if fresh is not None and 0 < float(fresh) <= 1
+                    else self.startup_reference_prices.get(market_id, 0.0)
+                )
+                if not 0 < reference_price <= 1:
+                    raise RuntimeError(
+                        f"paired analysis batch has no positive reference price for market {market_id}"
+                    )
+                active = (PairedNewsBatch(articles, reference_price), set())
                 self._active[market_id] = active
 
-            articles, consumed = active
+            batch, consumed = active
             if arm_name in consumed:
-                return []
+                return None
             consumed.add(arm_name)
             if consumed == self.arm_names:
                 del self._active[market_id]
-            return articles
+            return batch
 
 
 # --------------------------------------------------------------------------- #

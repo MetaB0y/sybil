@@ -188,6 +188,7 @@ def _select_decisions(
         "market_category",
         "market_tags",
         "analysis_batch_id",
+        "analysis_reference_price",
     ]
     selected = [
         "id",
@@ -376,6 +377,8 @@ def _surprises(rows: list[dict[str, Any]], top_n: int) -> list[dict[str, Any]]:
         {
             "decision_id": row["id"],
             "analysis_batch_id": row["analysis_batch_id"],
+            "analysis_reference_price": row.get("analysis_reference_price"),
+            "analysis_market_price": row.get("analysis_market_price"),
             "persona": row["persona"],
             "trader_name": row["trader_name"],
             "market_id": row["market_id"],
@@ -411,27 +414,70 @@ _AB_PERSONA_RE = re.compile(
 
 
 def _analysis_batch_matching(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Report control/Stage-1 batch overlap for each durable experiment persona."""
-    groups: dict[tuple[str, str], dict[str, set[str]]] = {}
+    """Score control/Stage-1 only on their exact shared evidence batches."""
+    groups: dict[tuple[str, str], dict[str, dict[str, dict[str, Any]]]] = {}
     for row in rows:
         match = _AB_PERSONA_RE.fullmatch(row["persona"])
         if match is None:
             continue
         key = (match.group("experiment"), match.group("persona"))
-        variants = groups.setdefault(key, {"control": set(), "stage1": set()})
-        variants[match.group("variant")].add(row["analysis_batch_id"])
+        variants = groups.setdefault(key, {"control": {}, "stage1": {}})
+        variants[match.group("variant")][row["analysis_batch_id"]] = row
 
     result = []
     for (experiment_id, persona), variants in sorted(groups.items()):
         control = variants["control"]
         stage1 = variants["stage1"]
+        matched_ids = sorted(control.keys() & stage1.keys())
+
+        def metrics(variant_rows: dict[str, dict[str, Any]]) -> dict[str, Any]:
+            matched_rows = [variant_rows[batch_id] for batch_id in matched_ids]
+            return {
+                "n": len(matched_rows),
+                "brier": _brier(
+                    [(row["forecast"], row["outcome"]) for row in matched_rows]
+                ),
+                "market_price_brier": _brier(
+                    [
+                        (row["analysis_market_price"], row["outcome"])
+                        for row in matched_rows
+                    ]
+                ),
+                "analysis_market_prices": [
+                    row["analysis_market_price"] for row in matched_rows
+                ],
+            }
+
+        control_metrics = metrics(control)
+        stage1_metrics = metrics(stage1)
+        comparable = bool(matched_ids)
         result.append(
             {
                 "experiment_id": experiment_id,
                 "persona": persona,
-                "matched_count": len(control & stage1),
-                "unmatched_control_count": len(control - stage1),
-                "unmatched_stage1_count": len(stage1 - control),
+                "comparison_semantics": "Stage1 minus control on exact analysis_batch_id intersection",
+                "comparable": comparable,
+                "not_comparable_reason": (
+                    None if comparable else "no matched analysis batches"
+                ),
+                "matched_count": len(matched_ids),
+                "unmatched_control_count": len(control.keys() - stage1.keys()),
+                "unmatched_stage1_count": len(stage1.keys() - control.keys()),
+                "control": control_metrics,
+                "stage1": stage1_metrics,
+                "stage1_minus_control": {
+                    "brier": (
+                        stage1_metrics["brier"] - control_metrics["brier"]
+                        if comparable
+                        else None
+                    ),
+                    "market_price_brier": (
+                        stage1_metrics["market_price_brier"]
+                        - control_metrics["market_price_brier"]
+                        if comparable
+                        else None
+                    ),
+                },
             }
         )
     return result
@@ -555,6 +601,11 @@ def analyze_decisions_db(
             # unique batch rather than inventing false de-duplication.
             if not analysis_id:
                 analysis_id = f"legacy-row:{int(row['id'])}"
+            analysis_reference_price = (
+                _clamp_probability(row["analysis_reference_price"])
+                if "analysis_reference_price" in row.keys()
+                else None
+            )
             scoreable_rows.append(
                 {
                     "id": int(row["id"]),
@@ -564,6 +615,12 @@ def analyze_decisions_db(
                     "market_name": str(row["market_name"] or ""),
                     "timestamp": str(row["timestamp"] or ""),
                     "analysis_batch_id": analysis_id,
+                    "analysis_reference_price": analysis_reference_price,
+                    "analysis_market_price": (
+                        analysis_reference_price
+                        if analysis_reference_price is not None
+                        else market_forecast
+                    ),
                     "forecast": forecast,
                     "raw_forecast": _raw_forecast(row),
                     "market_price": market_forecast,
@@ -666,9 +723,13 @@ def analyze_decisions_db(
             "portfolio_pnl_by_trader": portfolio_pnl_by_trader,
             "portfolio_pnl_scope": "all_trader_positions",
             "analysis_batches": {
-                "identity": "sha256(market_id + sorted article URLs)",
+                "identity": "sha256(market_id + snapped reference price + sorted article URLs)",
                 "scoring_semantics": (
                     "first forecast per durable trader_name + market_id + analysis_batch_id"
+                ),
+                "primary_experiment_comparison": "control_stage1_matching",
+                "full_arm_metrics_semantics": (
+                    "diagnostic only; unmatched analysis batches are included"
                 ),
                 "unique_scored_rows": len(rows),
                 "duplicate_decision_rows_excluded": duplicate_decision_rows_excluded,
@@ -706,13 +767,44 @@ def format_report(result: dict[str, Any]) -> str:
                 "",
             ]
         )
+    matched_comparisons = result.get("analysis_batches", {}).get(
+        "control_stage1_matching", []
+    )
+    if matched_comparisons:
+        lines.append("Stage 1 matched-batch experiment comparison (primary)")
+        for comparison in matched_comparisons:
+            label = f"{comparison['persona']} [SYB-114:{comparison['experiment_id']}]"
+            if not comparison["comparable"]:
+                lines.append(
+                    f"  {label}: not comparable ({comparison['not_comparable_reason']}); "
+                    f"unmatched-control={comparison['unmatched_control_count']} "
+                    f"unmatched-stage1={comparison['unmatched_stage1_count']}"
+                )
+                continue
+            control = comparison["control"]
+            stage1 = comparison["stage1"]
+            delta = comparison["stage1_minus_control"]
+            lines.extend(
+                [
+                    f"  {label}: matched={comparison['matched_count']} "
+                    f"unmatched-control={comparison['unmatched_control_count']} "
+                    f"unmatched-stage1={comparison['unmatched_stage1_count']}",
+                    f"    control n={control['n']} brier={_fmt(control['brier'])} "
+                    f"market={_fmt(control['market_price_brier'])}",
+                    f"    stage1  n={stage1['n']} brier={_fmt(stage1['brier'])} "
+                    f"market={_fmt(stage1['market_price_brier'])}",
+                    f"    Stage1-control delta: brier={_fmt(delta['brier'])} "
+                    f"market={_fmt(delta['market_price_brier'])}",
+                ]
+            )
+        lines.append("")
     persona_width = max(
         28,
         *(len(str(persona["persona"])) for persona in result["personas"]),
     )
     lines.extend(
         [
-            "Calibration by persona",
+            "Full-arm calibration by persona (diagnostic; unmatched batches included)",
             (
                 f"{'persona':{persona_width}s}     n    brier  market   delta  "
                 "reject  acted_b  reject_b  conf"

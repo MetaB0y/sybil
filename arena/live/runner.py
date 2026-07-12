@@ -140,7 +140,11 @@ def _validate_stage1_ab_config(config: LiveConfig) -> str | None:
     return experiment_id
 
 
-def _stage1_ab_configuration(config: LiveConfig, genesis_hash: str) -> dict:
+def _stage1_ab_configuration(
+    config: LiveConfig,
+    genesis_hash: str,
+    startup_reference_prices: dict[int, float],
+) -> dict:
     """Canonical immutable configuration persisted for restart validation."""
     analyst_count = 2 * len(config.personas)
     total_llm_pause_threshold = (
@@ -150,6 +154,10 @@ def _stage1_ab_configuration(config: LiveConfig, genesis_hash: str) -> dict:
     return {
         "genesis_hash": genesis_hash,
         "market_ids": sorted(config.market_ids or []),
+        "startup_reference_prices": {
+            str(market_id): startup_reference_prices[market_id]
+            for market_id in sorted(startup_reference_prices)
+        },
         "model": config.model_name,
         "llm_generation_parameters": llm_generation_parameters(),
         "variants": [
@@ -209,6 +217,28 @@ def _require_new_experiment(metadata: dict) -> None:
             f"experiment {metadata['experiment_id']!r} already exists; window invalidated by "
             "restart, so use a new --stage1-ab-experiment-id"
         )
+
+
+def _require_stage1_ab_startup_reference_prices(markets: list) -> dict[int, float]:
+    """Require a positive external reference for every frozen experiment market."""
+    references = {}
+    missing = []
+    for market in markets:
+        reference_nanos = getattr(market, "reference_price_nanos", None)
+        if (
+            not isinstance(reference_nanos, int)
+            or reference_nanos <= 0
+            or reference_nanos > NANOS_PER_DOLLAR
+        ):
+            missing.append(int(market.id))
+            continue
+        references[int(market.id)] = reference_nanos / NANOS_PER_DOLLAR
+    if missing:
+        raise ValueError(
+            "Stage 1 A/B requires a positive external startup reference for every selected "
+            f"market; missing market ids: {missing}"
+        )
+    return references
 
 
 def _env_int(name: str, default: int) -> int:
@@ -561,6 +591,7 @@ def _wire_live_inputs(
     traders: list[LiveLlmTrader],
     feed: NewsFeed,
     paired_analyst_groups: list[tuple[PersonaAnalyst, PersonaAnalyst]] | None = None,
+    startup_reference_prices: dict[int, float] | None = None,
 ) -> None:
     """Attach default or paired analyst feed views and each sizer's price feed."""
     paired_analysts = set()
@@ -569,7 +600,12 @@ def _wire_live_inputs(
         subscription = feed.subscribe(
             name=f"paired:{control.persona_key.rsplit(':', 1)[0]}"
         )
-        barrier = PairedNewsBatchBarrier(subscription, (control.name, stage1.name))
+        barrier = PairedNewsBatchBarrier(
+            subscription,
+            (control.name, stage1.name),
+            startup_reference_prices or {},
+            feed.polymarket_prices.get_price,
+        )
         control.attach_feed_and_bus(feed, control.bus, barrier.view(control.name))
         stage1.attach_feed_and_bus(feed, stage1.bus, barrier.view(stage1.name))
     for analyst in analysts:
@@ -721,9 +757,15 @@ async def run_live(config: LiveConfig):
         # 2. Create analyst/sizer accounts. The experiment is a fully opt-in
         # alternate topology; without an id, preserve the ordinary live graph
         # and names exactly (one analyst feeding Kelly + Flat per persona).
+        startup_reference_prices = {}
         if experiment_id is not None:
+            startup_reference_prices = _require_stage1_ab_startup_reference_prices(active)
             genesis_hash = await _require_committed_genesis_hash(client)
-            experiment_config = _stage1_ab_configuration(config, genesis_hash)
+            experiment_config = _stage1_ab_configuration(
+                config,
+                genesis_hash,
+                startup_reference_prices,
+            )
             metadata = db.ensure_experiment(
                 experiment_id,
                 STAGE1_AB_MODE,
@@ -856,7 +898,13 @@ async def run_live(config: LiveConfig):
         # every persona sees every article (SYB-192); the two sizers of a
         # persona no longer subscribe to news — they consume the analyst's
         # FairValueBus instead (SYB-210).
-        _wire_live_inputs(analysts, traders, feed, topology.paired_analyst_groups)
+        _wire_live_inputs(
+            analysts,
+            traders,
+            feed,
+            topology.paired_analyst_groups,
+            startup_reference_prices,
+        )
 
         # 5. Run everything
         log.info(

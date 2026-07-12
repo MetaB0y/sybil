@@ -148,7 +148,9 @@ async def test_two_subscribers_both_receive_same_article():
 async def test_paired_batch_barrier_holds_next_batch_until_both_arms_drain():
     feed = NewsFeed([_market(1, "Market")], api_key=None)
     upstream = feed.subscribe(name="paired")
-    barrier = PairedNewsBatchBarrier(upstream, ("control", "stage1"))
+    barrier = PairedNewsBatchBarrier(
+        upstream, ("control", "stage1"), {1: 0.5}, lambda _market_id: None
+    )
     control = barrier.view("control")
     stage1 = barrier.view("stage1")
     first = _article("http://ex/first")
@@ -176,7 +178,9 @@ async def test_paired_batch_barrier_holds_next_batch_until_both_arms_drain():
 async def test_paired_batch_barrier_concurrent_drains_share_one_snapshot():
     feed = NewsFeed([_market(1, "Market")], api_key=None)
     upstream = feed.subscribe(name="paired")
-    barrier = PairedNewsBatchBarrier(upstream, ("control", "stage1"))
+    barrier = PairedNewsBatchBarrier(
+        upstream, ("control", "stage1"), {1: 0.5}, lambda _market_id: None
+    )
     article = _article("http://ex/shared")
     async with feed._lock:
         upstream._deliver(1, article)

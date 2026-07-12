@@ -56,6 +56,7 @@ class PriceSnapshot:
 class TradeRecord:
     market_id: int
     analysis_batch_id: str
+    analysis_reference_price: float | None
     articles: list[LiveArticle]
     analysis: str
     fair_value: float
@@ -224,6 +225,7 @@ class LiveLlmTrader(BaseAgent):
         countercase: str = "",
         rejection_reason: str | None = None,
         analysis_batch_id: str = "",
+        analysis_reference_price: float | None = None,
     ) -> None:
         if orders and rejection_reason is not None:
             raise ValueError("submitted decisions cannot have a rejection_reason")
@@ -234,6 +236,7 @@ class LiveLlmTrader(BaseAgent):
         record = TradeRecord(
             market_id=market_id,
             analysis_batch_id=analysis_batch_id,
+            analysis_reference_price=analysis_reference_price,
             articles=articles or [],
             analysis=analysis,
             fair_value=fair_value,
@@ -295,6 +298,7 @@ class LiveLlmTrader(BaseAgent):
                 market_category=market_category,
                 market_tags=[str(tag) for tag in market_tags],
                 analysis_batch_id=analysis_batch_id,
+                analysis_reference_price=analysis_reference_price,
             )
 
     # -- Price helpers --
@@ -566,6 +570,9 @@ class LiveLlmTrader(BaseAgent):
                     "timestamp": now,
                     "rejection_reason": self._latest_rejection_reasons[market_id],
                     "analysis_batch_id": update.analysis_batch_id if update else "",
+                    "analysis_reference_price": (
+                        update.analysis_reference_price if update else None
+                    ),
                 }
                 self._record_trade(
                     market_id=entry["market_id"],
@@ -588,6 +595,7 @@ class LiveLlmTrader(BaseAgent):
                     countercase=entry["countercase"],
                     rejection_reason=entry["rejection_reason"],
                     analysis_batch_id=entry["analysis_batch_id"],
+                    analysis_reference_price=entry["analysis_reference_price"],
                 )
             all_orders.extend(rebalance_orders)
             self._last_rebalance = self._monotonic()

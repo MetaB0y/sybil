@@ -187,6 +187,7 @@ def test_decision_db_migrates_old_decisions_table_with_stage_metadata(tmp_path):
         assert "rejection_reason" in columns
         assert "restate" in columns
         assert "analysis_batch_id" in columns
+        assert "analysis_reference_price" in columns
     finally:
         db.close()
 

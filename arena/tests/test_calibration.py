@@ -33,7 +33,8 @@ def _fixture_db(path):
             rejection_reason TEXT,
             market_category TEXT,
             market_tags TEXT,
-            analysis_batch_id TEXT
+            analysis_batch_id TEXT,
+            analysis_reference_price REAL
         );
         INSERT INTO decisions
             (trader_name, market_id, market_name, timestamp, fair_value,
@@ -108,7 +109,7 @@ def test_calibration_harness_computes_brier_reliability_and_noise_baseline(tmp_p
     }
 
     report = format_report(result)
-    assert "Calibration by persona" in report
+    assert "Full-arm calibration by persona" in report
     assert "Market-price baseline Brier" in report
     assert "NativeNoiseTrader PnL baseline" in report
 
@@ -222,38 +223,46 @@ def test_calibration_keeps_stage1_ab_flat_variants_separate(tmp_path):
            (trader_name, market_id, market_name, timestamp, fair_value,
             market_price, orders, raw_fair_value, effective_fair_value,
             fair_value_age_s, confidence, countercase, rejection_reason,
-            market_category, market_tags, analysis_batch_id)
-           VALUES (?, 1, 'M1', '2026-01-01T00:03:00Z', ?, 0.50,
+            market_category, market_tags, analysis_batch_id, analysis_reference_price)
+           VALUES (?, 1, 'M1', '2026-01-01T00:03:00Z', ?, ?,
                    '[{"side":"BUY_YES"}]', ?, ?, 0, 0.7, 'c', NULL,
-                   'Politics', '[]', ?)""",
+                   'Politics', '[]', ?, ?)""",
         [
             (
                 "News Trader [SYB-114:exp:control] (Flat)",
                 0.60,
+                0.40,
                 0.60,
                 0.60,
                 "batch-shared",
+                0.52,
             ),
             (
                 "News Trader [SYB-114:exp:control] (Flat)",
                 0.61,
+                0.45,
                 0.61,
                 0.61,
                 "batch-shared",
+                0.52,
             ),
             (
                 "News Trader [SYB-114:exp:stage1] (Flat)",
                 0.70,
+                0.80,
                 0.70,
                 0.70,
                 "batch-shared",
+                0.52,
             ),
             (
                 "News Trader [SYB-114:exp:stage1] (Flat)",
                 0.75,
+                0.85,
                 0.75,
                 0.75,
                 "batch-stage1-only",
+                0.53,
             ),
         ],
     )
@@ -282,12 +291,69 @@ def test_calibration_keeps_stage1_ab_flat_variants_separate(tmp_path):
         {
             "experiment_id": "exp",
             "persona": "News Trader",
+            "comparison_semantics": "Stage1 minus control on exact analysis_batch_id intersection",
+            "comparable": True,
+            "not_comparable_reason": None,
             "matched_count": 1,
             "unmatched_control_count": 0,
             "unmatched_stage1_count": 1,
+            "control": {
+                "n": 1,
+                "brier": pytest.approx(0.16),
+                "market_price_brier": pytest.approx(0.2304),
+                "analysis_market_prices": [0.52],
+            },
+            "stage1": {
+                "n": 1,
+                "brier": pytest.approx(0.09),
+                "market_price_brier": pytest.approx(0.2304),
+                "analysis_market_prices": [0.52],
+            },
+            "stage1_minus_control": {
+                "brier": pytest.approx(-0.07),
+                "market_price_brier": pytest.approx(0.0),
+            },
         }
     ]
+    assert "Stage 1 matched-batch experiment comparison (primary)" in report
+    assert "Full-arm calibration by persona (diagnostic" in report
     assert "matched=1 unmatched-control=0 unmatched-stage1=1" in report
+
+
+def test_stage1_ab_with_only_asymmetric_batches_is_not_comparable(tmp_path):
+    db_path = tmp_path / "decisions.db"
+    _fixture_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        """INSERT INTO decisions
+           (trader_name, market_id, market_name, timestamp, fair_value,
+            market_price, orders, analysis_batch_id, analysis_reference_price)
+           VALUES (?, 1, 'M1', '2026-01-01T00:03:00Z', ?, ?, '[]', ?, 0.55)""",
+        [
+            ("News Trader [SYB-114:exp:control] (Flat)", 0.60, 0.40, "control-only"),
+            ("News Trader [SYB-114:exp:stage1] (Flat)", 0.70, 0.80, "stage1-only"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    result = analyze_decisions_db(str(db_path))
+    comparison = result["analysis_batches"]["control_stage1_matching"][0]
+
+    assert comparison["comparable"] is False
+    assert comparison["not_comparable_reason"] == "no matched analysis batches"
+    assert comparison["control"] == {
+        "n": 0,
+        "brier": None,
+        "market_price_brier": None,
+        "analysis_market_prices": [],
+    }
+    assert comparison["stage1_minus_control"] == {
+        "brier": None,
+        "market_price_brier": None,
+    }
+    report = format_report(result)
+    assert "not comparable (no matched analysis batches)" in report
 
 
 def test_calibration_window_reason_counterfactuals_categories_and_surprises(tmp_path):

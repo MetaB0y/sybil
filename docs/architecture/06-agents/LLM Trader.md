@@ -52,12 +52,15 @@ market set:
 Analyst, sizer, bus, and account identities include the experiment id, persona, and variant, so
 token spend, decisions, snapshots, and portfolios cannot be confused across arms. Each persona's
 two analysts share one feed subscription through a paired batch barrier. The first drain snapshots
-the current per-market article list; each arm receives that exact list once, and the next pending
-batch remains blocked until both views consume the active batch. A paused or lagging arm therefore
-cannot let the other advance onto differently grouped evidence. The per-analyst LLM pause threshold
-is unchanged. Two analysts per persona make the configured per-persona threshold exactly twice the
-ordinary one-analyst threshold (for example, `$5 + $5 = $10`); this is not a hard ceiling because
-each arm may cross its threshold by one completed call.
+the current per-market article list and one reference price (a positive fresh Polymarket value when
+available, otherwise the frozen startup reference). Each arm receives that exact evidence-and-price
+batch once, and the next pending batch remains blocked until both views consume the active batch.
+A paused or lagging arm therefore cannot let the other advance onto differently grouped evidence or
+a later price context. Experiment startup rejects any selected market without a positive external
+reference before metadata or accounts are created. The per-analyst LLM pause threshold is unchanged.
+Two analysts per persona make the configured per-persona threshold exactly twice the ordinary
+one-analyst threshold (for example, `$5 + $5 = $10`); this is not a hard ceiling because each arm may
+cross its threshold by one completed call.
 
 Activation is intentionally CLI-only and does not alter the Compose default. Use a new experiment
 id for each measurement and chain genesis:
@@ -106,10 +109,14 @@ durable variant identity for a direct spend audit. Starting a different cohort r
 experiment id. Per-trader PnL can be read during an unresolved experiment; Brier, reliability, and
 rejection counterfactuals require explicit resolved outcomes and should not be treated as final
 before those labels exist. Each fair-value update and decision also persists a deterministic
-`analysis_batch_id` derived from the market id and sorted article URLs. Forecast scoring keeps only
-the first row per durable trader, market, and batch, and reports unmatched control/Stage-1 batches
-instead of overweighting repeatedly rebalanced fair values. Cross-window PnL comparison uses only
-the exact intersection of durable trader names per arm and reports every excluded identity.
+`analysis_batch_id` derived from the market id, snapped reference price, and sorted article URLs.
+The same snapped price is persisted as `analysis_reference_price` and supplies both arms' prompt,
+resolution check, and matched market-price baseline even if the provider moves between drains.
+Forecast scoring keeps only the first row per durable trader, market, and batch. The primary Stage 1
+comparison computes control/Stage-1 Brier and analysis-price baseline only on the exact batch-id
+intersection, with Stage1-minus-control deltas; zero matches are explicitly not comparable.
+Full-arm metrics remain diagnostic and report asymmetric batches. Cross-window PnL comparison uses
+only the exact intersection of durable trader names per arm and reports every excluded identity.
 
 For a before/after comparison, use explicit half-open windows. The command fails if the Flat arm
 has no exact durable-name intersection, which catches account/cohort changes instead of subtracting

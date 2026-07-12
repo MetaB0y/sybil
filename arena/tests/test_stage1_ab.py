@@ -18,6 +18,7 @@ from live.runner import (
     _create_stage1_ab_topology,
     _require_committed_genesis_hash,
     _require_new_experiment,
+    _require_stage1_ab_startup_reference_prices,
     _stage1_ab_configuration,
     _validate_stage1_ab_config,
     _wire_live_inputs,
@@ -37,6 +38,17 @@ def _market(mid: int = 7):
     market.resolution_criteria = "The event occurs before the deadline."
     market.reference_price_nanos = None
     return market
+
+
+def test_stage1_ab_requires_positive_startup_reference_for_every_market():
+    valid = _market(7)
+    valid.reference_price_nanos = 550_000_000
+    missing = _market(11)
+    missing.reference_price_nanos = None
+
+    assert _require_stage1_ab_startup_reference_prices([valid]) == {7: 0.55}
+    with pytest.raises(ValueError, match="positive external startup reference.*11"):
+        _require_stage1_ab_startup_reference_prices([valid, missing])
 
 
 def _block() -> Block:
@@ -230,7 +242,11 @@ async def test_stage1_ab_prompt_contracts_differ_only_where_intended(
 
 def test_experiment_metadata_rejects_all_resumes_and_diagnoses_drift(tmp_path, experiment_config):
     db_path = tmp_path / "metadata.db"
-    configuration = _stage1_ab_configuration(experiment_config, GENESIS_A)
+    configuration = _stage1_ab_configuration(
+        experiment_config,
+        GENESIS_A,
+        {7: 0.55, 11: 0.60},
+    )
     db = DecisionDB(str(db_path))
     first = db.ensure_experiment("stage1-july", STAGE1_AB_MODE, configuration)
     assert first["preexisting"] is False
@@ -246,6 +262,10 @@ def test_experiment_metadata_rejects_all_resumes_and_diagnoses_drift(tmp_path, e
         persisted = restarted.get_experiment("stage1-july")
         assert persisted["started_at_utc"] == first["started_at_utc"]
         assert persisted["configuration"]["market_ids"] == [7, 11]
+        assert persisted["configuration"]["startup_reference_prices"] == {
+            "7": 0.55,
+            "11": 0.60,
+        }
         assert persisted["configuration"]["genesis_hash"] == GENESIS_A
         assert persisted["configuration"]["model"] == experiment_config.model_name
         assert persisted["configuration"]["llm_pause_threshold_usd_per_analyst"] == 5.0
@@ -343,6 +363,7 @@ async def test_stage1_ab_analysts_share_one_paired_feed_subscription(
             topology.traders,
             feed,
             topology.paired_analyst_groups,
+            {7: 0.55, 11: 0.60},
         )
     finally:
         db.close()
@@ -365,3 +386,68 @@ async def test_stage1_ab_analysts_share_one_paired_feed_subscription(
     stage1_articles = await topology.analysts[1].news_sub.drain(7)
     assert control_articles is stage1_articles
     assert control_articles == [article]
+
+
+async def test_paired_analysts_use_same_snapped_price_when_provider_moves(
+    tmp_path, monkeypatch, experiment_config
+):
+    monkeypatch.setattr("live.runner._resolve_bot_account", AsyncMock(side_effect=[201, 202]))
+    market = _market(7)
+    db = DecisionDB(str(tmp_path / "price-snapshot.db"))
+    try:
+        topology = await _create_stage1_ab_topology(
+            MagicMock(),
+            db,
+            experiment_config,
+            "stage1-july",
+            [7],
+            {7: market},
+            ArenaMetrics(),
+        )
+        feed = NewsFeed([], api_key=None)
+        feed.polymarket_prices._prices[7] = 0.55
+        _wire_live_inputs(
+            topology.analysts,
+            topology.traders,
+            feed,
+            topology.paired_analyst_groups,
+            {7: 0.50},
+        )
+        article = LiveArticle(
+            url="https://example.test/price-snapshot",
+            title="Shared evidence",
+            source="Wire",
+            published=MagicMock(),
+            full_text="Evidence.",
+        )
+        async with feed._lock:
+            feed._subscribers[0]._deliver(7, article)
+
+        control, stage1 = topology.analysts
+        for analyst in (control, stage1):
+            analyst._observed_first_block = True
+            analyst._call_llm = AsyncMock(
+                return_value=(
+                    "FAIR_VALUE: 0.61\nCOUNTERCASE: c\nCONFIDENCE: 0.7\n"
+                    "MOTIVATION: m\nANALYSIS: a",
+                    0.1,
+                )
+            )
+
+        await control.on_block(_block())
+        feed.polymarket_prices._prices[7] = 0.80
+        await stage1.on_block(_block())
+
+        control_prompt = control._call_llm.await_args.args[0]
+        stage1_prompt = stage1._call_llm.await_args.args[0]
+        assert "YES=$0.5500" in control_prompt
+        assert "YES=$0.5500" in stage1_prompt
+        assert "YES=$0.8000" not in stage1_prompt
+
+        control_update = (await topology.traders[0].fv_sub.drain(7))[0]
+        stage1_update = (await topology.traders[1].fv_sub.drain(7))[0]
+        assert control_update.analysis_reference_price == 0.55
+        assert stage1_update.analysis_reference_price == 0.55
+        assert control_update.analysis_batch_id == stage1_update.analysis_batch_id
+    finally:
+        db.close()

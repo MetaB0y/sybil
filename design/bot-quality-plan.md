@@ -15,7 +15,8 @@ ticket: SYB-114
 > pre-Stage-1 control/current-Stage-1 Flat arms on the same feed. The ordinary live topology is
 > unchanged. Metadata is also bound to the committed chain `genesis_hash`, so a fresh genesis needs
 > a new experiment id. A paired batch barrier holds each article batch until both arms consume it,
-> and experiment ids are single-run because in-memory analyst/Flat state cannot resume safely.
+> snapshots one shared reference price for both prompts, and experiment ids are single-run because
+> in-memory analyst/Flat state cannot resume safely.
 > This documents available measurement machinery, not a completed window.
 
 Implementation is gated on the first calibration window (Valery runs `scripts/calibration.py`
@@ -187,9 +188,10 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
   filter does not reconstruct per-market PnL: portfolio PnL remains the whole trader account,
   so the runner-level cohort pin is still required for the PnL comparison.
 - **A/B harness already exists**: each persona's control/variant analysts consume the same
-  per-market article list through a paired batch barrier, then publish onto separate buses for
-  separate Flat sizers/accounts. The next feed batch stays blocked until both arms consume the
-  active one. Flat is the primary PnL readout (Kelly is out of scope and higher-variance).
+  per-market article list and snapped reference price through a paired batch barrier, then publish
+  onto separate buses for separate Flat sizers/accounts. The next feed batch stays blocked until
+  both arms consume the active one. Flat is the primary PnL readout (Kelly is out of scope and
+  higher-variance).
 - **Metrics per window** (calibration.py): per-analyst Brier vs market-price baseline (the
   delta column), reliability curve, rejection accuracy (per reason, Stage 0), Flat-arm PnL vs
   NativeNoiseTrader baseline, LLM $/decision from `token_usage`. When `--since` is supplied,
@@ -198,8 +200,10 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
   Cross-window deltas match the exact intersection of durable trader names per arm and fail if
   Flat has no matched accounts; added/removed identities are reported rather than averaged in.
 - **Windows**: ≥1 day per side, or concurrent A/B (preferred — same news, same prices). Persisted
-  `analysis_batch_id` values de-duplicate repeated sizer rows and expose unmatched arm batches.
-  Experiment ids cannot resume; any restart requires a new window/id.
+  `analysis_batch_id` values bind market + sorted URLs + snapped price, de-duplicate repeated sizer
+  rows, and expose unmatched arm batches. Primary Brier/baseline deltas use only the exact matched
+  batch intersection; full-arm metrics are diagnostic. Experiment ids cannot resume; any restart
+  requires a new window/id.
 - **Guardrail**: any stage that raises analyst spend must show cost per decision; abort a stage
   if projected spend exceeds 2× baseline. Configured thresholds are $5–10, not hard ceilings;
   each analyst may overshoot by one completed call.

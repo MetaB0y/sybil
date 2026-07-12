@@ -42,6 +42,7 @@ class DecisionDB:
                 ("decisions", "market_category", "TEXT"),
                 ("decisions", "market_tags", "TEXT"),
                 ("decisions", "analysis_batch_id", "TEXT"),
+                ("decisions", "analysis_reference_price", "REAL"),
             ]:
                 try:
                     self.conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
@@ -91,7 +92,8 @@ class DecisionDB:
                     rejection_reason TEXT,
                     market_category TEXT,
                     market_tags TEXT,
-                    analysis_batch_id TEXT
+                    analysis_batch_id TEXT,
+                    analysis_reference_price REAL
                 );
 
                 CREATE TABLE IF NOT EXISTS portfolio_snapshots (
@@ -268,6 +270,7 @@ class DecisionDB:
         market_category: str = "",
         market_tags: list[str] | None = None,
         analysis_batch_id: str = "",
+        analysis_reference_price: float | None = None,
     ) -> int:
         if orders and rejection_reason is not None:
             raise ValueError("submitted decisions cannot have a rejection_reason")
@@ -282,8 +285,8 @@ class DecisionDB:
                     yes_pos, no_pos, raw_fair_value, effective_fair_value,
                     fair_value_age_s, confidence, countercase, restate,
                     rejection_reason, market_category, market_tags,
-                    analysis_batch_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    analysis_batch_id, analysis_reference_price)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trader_name,
                     market_id,
@@ -311,6 +314,7 @@ class DecisionDB:
                     market_category,
                     json.dumps(market_tags or []),
                     analysis_batch_id,
+                    analysis_reference_price,
                 ),
             )
             self.conn.commit()

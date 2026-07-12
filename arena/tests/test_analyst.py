@@ -205,6 +205,7 @@ def test_analysis_batch_id_is_stable_for_sorted_article_urls():
 
     assert analysis_batch_id(7, [first, second]) == analysis_batch_id(7, [second, first])
     assert analysis_batch_id(7, [first]) != analysis_batch_id(8, [first])
+    assert analysis_batch_id(7, [first], 0.55) != analysis_batch_id(7, [first], 0.56)
 
 
 def test_prompt_includes_full_resolution_criteria():
@@ -350,6 +351,7 @@ async def test_sizer_logs_decision_per_trader_for_reader_compat(tmp_path):
             market_id=7, persona_key="test", fair_value=0.66,
             motivation="m", analysis="a",
             restate="YES resolves if the event occurs by the deadline.",
+            analysis_reference_price=0.55,
             articles=[], block_height=2,
             ts=datetime(2026, 1, 1, tzinfo=timezone.utc),
         ))
@@ -357,7 +359,8 @@ async def test_sizer_logs_decision_per_trader_for_reader_compat(tmp_path):
         await flat.on_block(_block())
 
         rows = db.conn.execute(
-            "SELECT trader_name, analysis, fair_value, restate, analysis_batch_id FROM decisions "
+            "SELECT trader_name, analysis, fair_value, restate, analysis_batch_id, "
+            "analysis_reference_price FROM decisions "
             "WHERE analysis = 'a' ORDER BY trader_name"
         ).fetchall()
         names = sorted(r["trader_name"] for r in rows)
@@ -368,5 +371,6 @@ async def test_sizer_logs_decision_per_trader_for_reader_compat(tmp_path):
         )
         assert len({r["analysis_batch_id"] for r in rows}) == 1
         assert rows[0]["analysis_batch_id"]
+        assert all(r["analysis_reference_price"] == 0.55 for r in rows)
     finally:
         db.close()

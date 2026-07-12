@@ -34,10 +34,15 @@ log = logging.getLogger(__name__)
 MAX_SUBSCRIBER_QUEUE = 500
 
 
-def analysis_batch_id(market_id: int, articles: list[LiveArticle]) -> str:
-    """Domain-separated id for one market and its sorted article URL batch."""
+def analysis_batch_id(
+    market_id: int,
+    articles: list[LiveArticle],
+    reference_price: float | None = None,
+) -> str:
+    """Domain-separated id for one market, article URL batch, and price context."""
     urls = sorted(article.url for article in articles)
-    material = "\0".join(("sybil/analysis-batch/v1", str(market_id), *urls))
+    price = "none" if reference_price is None else float(reference_price).hex()
+    material = "\0".join(("sybil/analysis-batch/v2", str(market_id), price, *urls))
     return sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -56,11 +61,16 @@ class FairValueUpdate:
     articles: list[LiveArticle] = field(default_factory=list)
     block_height: int = 0
     ts: datetime | None = None
+    analysis_reference_price: float | None = None
     analysis_batch_id: str = ""
 
     def __post_init__(self) -> None:
         if not self.analysis_batch_id:
-            self.analysis_batch_id = analysis_batch_id(self.market_id, self.articles)
+            self.analysis_batch_id = analysis_batch_id(
+                self.market_id,
+                self.articles,
+                self.analysis_reference_price,
+            )
 
 
 class FairValueSubscription:
