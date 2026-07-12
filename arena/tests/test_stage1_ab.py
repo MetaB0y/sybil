@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from hashlib import sha256
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -16,6 +16,7 @@ from live.runner import (
     LiveConfig,
     _create_default_live_topology,
     _create_stage1_ab_topology,
+    _discover_markets_until_ready,
     _require_committed_genesis_hash,
     _require_new_experiment,
     _require_stage1_ab_startup_reference_prices,
@@ -135,6 +136,95 @@ def test_stage1_ab_requires_positive_startup_reference_for_every_market():
     assert _require_stage1_ab_startup_reference_prices([valid]) == {7: 0.55}
     with pytest.raises(ValueError, match="positive external startup reference.*11"):
         _require_stage1_ab_startup_reference_prices([valid, missing])
+
+
+@pytest.mark.parametrize("pending_reference", [None, 0])
+async def test_stage1_ab_discovery_waits_for_manual_cohort_references(
+    pending_reference, monkeypatch
+):
+    first_ready = _market(7)
+    first_ready.reference_price_nanos = 550_000_000
+    first_pending = _market(11)
+    first_pending.reference_price_nanos = pending_reference
+    refreshed_ready = _market(7)
+    refreshed_ready.reference_price_nanos = 550_000_000
+    refreshed_pending = _market(11)
+    refreshed_pending.reference_price_nanos = 440_000_000
+    client = MagicMock()
+    client.list_markets = AsyncMock(
+        side_effect=[
+            [first_ready, first_pending],
+            [refreshed_ready, refreshed_pending],
+        ]
+    )
+    metrics = MagicMock()
+    sleep = AsyncMock()
+    monkeypatch.setattr("live.runner.asyncio.sleep", sleep)
+    config = LiveConfig(
+        market_ids=[7, 11],
+        stage1_ab_experiment_id="stage1-july",
+    )
+
+    all_markets, active = await _discover_markets_until_ready(
+        client,
+        config,
+        "stage1-july",
+        metrics,
+    )
+
+    assert all_markets == [refreshed_ready, refreshed_pending]
+    assert active == [refreshed_ready, refreshed_pending]
+    assert client.list_markets.await_count == 2
+    sleep.assert_awaited_once_with(30)
+    assert metrics.set_market_selection.call_args_list == [call(0, 0), call(2, 2)]
+
+
+@pytest.mark.parametrize(
+    "reference", [-1, 1_000_000_001, "550000000", False, True, 0.0]
+)
+async def test_stage1_ab_discovery_rejects_malformed_references_without_waiting(
+    reference, monkeypatch
+):
+    malformed = _market(7)
+    malformed.reference_price_nanos = reference
+    client = MagicMock()
+    client.list_markets = AsyncMock(return_value=[malformed])
+    metrics = MagicMock()
+    sleep = AsyncMock()
+    monkeypatch.setattr("live.runner.asyncio.sleep", sleep)
+
+    with pytest.raises(ValueError, match="positive external startup reference"):
+        await _discover_markets_until_ready(
+            client,
+            LiveConfig(market_ids=[7], stage1_ab_experiment_id="stage1-july"),
+            "stage1-july",
+            metrics,
+        )
+
+    client.list_markets.assert_awaited_once()
+    sleep.assert_not_awaited()
+
+
+async def test_stage1_ab_discovery_rejects_absent_cohort_id_without_waiting(monkeypatch):
+    present = _market(7)
+    present.reference_price_nanos = 550_000_000
+    client = MagicMock()
+    client.list_markets = AsyncMock(return_value=[present])
+    metrics = MagicMock()
+    sleep = AsyncMock()
+    monkeypatch.setattr("live.runner.asyncio.sleep", sleep)
+
+    with pytest.raises(ValueError, match="market ids absent from the server: 11"):
+        await _discover_markets_until_ready(
+            client,
+            LiveConfig(market_ids=[7, 11], stage1_ab_experiment_id="stage1-july"),
+            "stage1-july",
+            metrics,
+        )
+
+    client.list_markets.assert_awaited_once()
+    sleep.assert_not_awaited()
+    metrics.set_market_selection.assert_not_called()
 
 
 def _block() -> Block:

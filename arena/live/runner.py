@@ -233,11 +233,7 @@ def _require_stage1_ab_startup_reference_prices(markets: list) -> dict[int, floa
     missing = []
     for market in markets:
         reference_nanos = getattr(market, "reference_price_nanos", None)
-        if (
-            not isinstance(reference_nanos, int)
-            or reference_nanos <= 0
-            or reference_nanos > NANOS_PER_DOLLAR
-        ):
+        if not _valid_startup_reference_nanos(reference_nanos):
             missing.append(int(market.id))
             continue
         references[int(market.id)] = reference_nanos / NANOS_PER_DOLLAR
@@ -247,6 +243,14 @@ def _require_stage1_ab_startup_reference_prices(markets: list) -> dict[int, floa
             f"market; missing market ids: {missing}"
         )
     return references
+
+
+def _valid_startup_reference_nanos(value: object) -> bool:
+    return type(value) is int and 0 < value <= NANOS_PER_DOLLAR
+
+
+def _pending_startup_reference(value: object) -> bool:
+    return value is None or (type(value) is int and value == 0)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -774,6 +778,95 @@ def _start_outcome_recorder_task(
     )
 
 
+async def _discover_markets_until_ready(
+    client: SybilClient,
+    config: LiveConfig,
+    experiment_id: str | None,
+    metrics: ArenaMetrics,
+) -> tuple[list, list]:
+    """Discover the live cohort, waiting for transient reference hydration.
+
+    A manual Stage 1 cohort is frozen by ID, but those markets can appear in
+    the API a few seconds before the Polymarket mirror publishes their external
+    reference prices. Keep the process alive until those *absent* values arrive;
+    missing IDs and malformed/out-of-range values remain hard failures.
+    """
+    while True:
+        all_markets = await client.list_markets()
+        log.info("Total markets on server: %d", len(all_markets))
+
+        if config.market_ids:
+            market_by_id = {m.id: m for m in all_markets}
+            if experiment_id is not None:
+                missing = [mid for mid in config.market_ids if mid not in market_by_id]
+                if missing:
+                    raise ValueError(
+                        "Stage 1 A/B cohort contains market ids absent from the server: "
+                        + ", ".join(str(mid) for mid in missing)
+                    )
+            active = []
+            for mid in config.market_ids:
+                if mid in market_by_id:
+                    active.append(market_by_id[mid])
+                else:
+                    log.warning("Market ID %d not found on server, skipping", mid)
+            log.info("Manual market selection: %d markets", len(active))
+        else:
+            active = _select_markets_resilient(
+                all_markets,
+                config.max_markets,
+                config.market_profile,
+                require_reference_price=config.require_reference_prices,
+            )
+
+        if active:
+            if experiment_id is not None:
+                pending_reference_ids = [
+                    int(m.id)
+                    for m in active
+                    if _pending_startup_reference(
+                        getattr(m, "reference_price_nanos", None)
+                    )
+                ]
+                if pending_reference_ids:
+                    # The cohort is frozen, but it is not selected *for live
+                    # trading* until every reference is ready. Keep the existing
+                    # ArenaNoMarketsSelected alert meaningful if this persists.
+                    metrics.set_market_selection(0, 0)
+                    log.warning(
+                        "Stage 1 A/B startup references not published for market ids %s; "
+                        "retrying in %ss",
+                        pending_reference_ids,
+                        MARKET_DISCOVERY_RETRY_SECONDS,
+                    )
+                    await asyncio.sleep(MARKET_DISCOVERY_RETRY_SECONDS)
+                    continue
+                # Preserve fail-closed validation for negative, non-integer,
+                # or out-of-range values instead of retrying malformed state.
+                _require_stage1_ab_startup_reference_prices(active)
+            reference_count = sum(
+                1
+                for m in active
+                if _valid_startup_reference_nanos(
+                    getattr(m, "reference_price_nanos", None)
+                )
+            )
+            metrics.set_market_selection(len(active), reference_count)
+            return all_markets, active
+
+        metrics.set_market_selection(0, 0)
+        if not config.require_reference_prices:
+            log.error("No suitable markets found!")
+            return all_markets, active
+
+        log.warning(
+            "No reference-backed markets found for profile=%s; retrying in %ss",
+            config.market_profile,
+            MARKET_DISCOVERY_RETRY_SECONDS,
+        )
+        await asyncio.sleep(MARKET_DISCOVERY_RETRY_SECONDS)
+
+
 async def run_live(config: LiveConfig):
     """Main entry point for live trading."""
     experiment_id = _validate_stage1_ab_config(config)
@@ -793,53 +886,14 @@ async def run_live(config: LiveConfig):
         # 1. Discover markets. When reference prices are required, arena may
         # start before the Polymarket mirror has published any; retry instead of
         # exiting so a cold start self-heals once the mirror catches up.
-        active = []
-        while not active:
-            all_markets = await client.list_markets()
-            log.info("Total markets on server: %d", len(all_markets))
-
-            if config.market_ids:
-                # Manual market selection by ID
-                market_by_id = {m.id: m for m in all_markets}
-                if experiment_id is not None:
-                    missing = [mid for mid in config.market_ids if mid not in market_by_id]
-                    if missing:
-                        raise ValueError(
-                            "Stage 1 A/B cohort contains market ids absent from the server: "
-                            + ", ".join(str(mid) for mid in missing)
-                        )
-                active = []
-                for mid in config.market_ids:
-                    if mid in market_by_id:
-                        active.append(market_by_id[mid])
-                    else:
-                        log.warning("Market ID %d not found on server, skipping", mid)
-                log.info("Manual market selection: %d markets", len(active))
-            else:
-                active = _select_markets_resilient(
-                    all_markets,
-                    config.max_markets,
-                    config.market_profile,
-                    require_reference_price=config.require_reference_prices,
-                )
-
-            metrics.set_market_selection(
-                len(active),
-                sum(1 for m in active if (getattr(m, "reference_price_nanos", 0) or 0) > 0),
-            )
-            if active:
-                break
-
-            if not config.require_reference_prices:
-                log.error("No suitable markets found!")
-                return
-
-            log.warning(
-                "No reference-backed markets found for profile=%s; retrying in %ss",
-                config.market_profile,
-                MARKET_DISCOVERY_RETRY_SECONDS,
-            )
-            await asyncio.sleep(MARKET_DISCOVERY_RETRY_SECONDS)
+        all_markets, active = await _discover_markets_until_ready(
+            client,
+            config,
+            experiment_id,
+            metrics,
+        )
+        if not active:
+            return
 
         log.info(
             "Selected %d markets for trading with profile=%s:",
