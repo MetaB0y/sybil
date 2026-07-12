@@ -68,6 +68,7 @@ export function useArenaEquitySeries({
       if (error || !data) throw new Error("/v1/bots/equity-series failed");
       return data;
     },
+    enabled: cleanTrader != null,
     refetchInterval: 30_000,
   });
 }
