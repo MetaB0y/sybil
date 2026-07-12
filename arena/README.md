@@ -49,6 +49,14 @@ Do not put provider keys in source, command examples committed with real
 values, or process arguments on a deployed host. The deployment path reads the
 key from `/opt/sybil/arena.env`.
 
+The concurrent SYB-114 Stage 1 experiment can also be activated through that
+file by setting both `ARENA_STAGE1_AB_EXPERIMENT_ID` and comma-separated
+`ARENA_MARKET_IDS`. Both are opt-in: unset/empty values keep the normal topology,
+and a partial environment configuration is rejected. CLI flags of the same
+meaning take precedence; see the canonical
+[`LLM Trader`](../docs/architecture/06-agents/LLM%20Trader.md) note for the run
+and measurement contract.
+
 ## Layout
 
 | Path | Responsibility |

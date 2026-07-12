@@ -19,6 +19,7 @@ from live.runner import (
     _require_committed_genesis_hash,
     _require_new_experiment,
     _require_stage1_ab_startup_reference_prices,
+    _resolve_stage1_ab_activation,
     _stage1_ab_configuration,
     _validate_stage1_ab_config,
     _wire_live_inputs,
@@ -28,6 +29,91 @@ from sybil_client.types import Block
 
 GENESIS_A = "a" * 64
 GENESIS_B = "b" * 64
+
+
+def test_stage1_ab_env_activation_defaults_to_off_and_parses_explicit_pair():
+    assert _resolve_stage1_ab_activation(None, None, {}) == (None, None)
+    assert _resolve_stage1_ab_activation(
+        None,
+        None,
+        {
+            "ARENA_STAGE1_AB_EXPERIMENT_ID": "  ",
+            "ARENA_MARKET_IDS": " ",
+        },
+    ) == (None, None)
+    assert _resolve_stage1_ab_activation(
+        None,
+        None,
+        {
+            "ARENA_STAGE1_AB_EXPERIMENT_ID": "stage1-july",
+            "ARENA_MARKET_IDS": "7, 11,29",
+        },
+    ) == ("stage1-july", [7, 11, 29])
+
+
+@pytest.mark.parametrize(
+    "environ",
+    [
+        {"ARENA_STAGE1_AB_EXPERIMENT_ID": "stage1-july"},
+        {"ARENA_MARKET_IDS": "7,11"},
+    ],
+)
+def test_stage1_ab_env_activation_fails_closed_when_partial(environ):
+    with pytest.raises(ValueError, match="requires"):
+        _resolve_stage1_ab_activation(None, None, environ)
+
+
+@pytest.mark.parametrize("raw", ["7,,11", "7,two", "-1,11", "7.0,11", ",7"])
+def test_stage1_ab_env_market_ids_reject_malformed_values(raw):
+    with pytest.raises(ValueError, match="ARENA_MARKET_IDS must be a comma-separated"):
+        _resolve_stage1_ab_activation(
+            None,
+            None,
+            {
+                "ARENA_STAGE1_AB_EXPERIMENT_ID": "stage1-july",
+                "ARENA_MARKET_IDS": raw,
+            },
+        )
+
+
+def test_stage1_ab_cli_fields_override_environment_independently():
+    assert _resolve_stage1_ab_activation(
+        "cli-id",
+        [17, 19],
+        {
+            "ARENA_STAGE1_AB_EXPERIMENT_ID": "env-id",
+            "ARENA_MARKET_IDS": "malformed",
+        },
+    ) == ("cli-id", [17, 19])
+    assert _resolve_stage1_ab_activation(
+        "cli-id",
+        None,
+        {"ARENA_MARKET_IDS": "23,31"},
+    ) == ("cli-id", [23, 31])
+    assert _resolve_stage1_ab_activation(
+        None,
+        [37, 41],
+        {"ARENA_STAGE1_AB_EXPERIMENT_ID": "env-id"},
+    ) == ("env-id", [37, 41])
+
+
+def test_cli_market_ids_remain_valid_without_stage1_activation():
+    assert _resolve_stage1_ab_activation(None, [7, 11], {}) == (None, [7, 11])
+
+
+def test_stage1_ab_env_experiment_id_uses_strict_identity_validation():
+    experiment_id, market_ids = _resolve_stage1_ab_activation(
+        None,
+        None,
+        {
+            "ARENA_STAGE1_AB_EXPERIMENT_ID": " stage1-july ",
+            "ARENA_MARKET_IDS": "7,11",
+        },
+    )
+    with pytest.raises(ValueError, match="without surrounding whitespace"):
+        _validate_stage1_ab_config(
+            LiveConfig(stage1_ab_experiment_id=experiment_id, market_ids=market_ids)
+        )
 
 
 def _market(mid: int = 7):

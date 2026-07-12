@@ -62,8 +62,8 @@ Two analysts per persona make the configured per-persona threshold exactly twice
 one-analyst threshold (for example, `$5 + $5 = $10`); this is not a hard ceiling because each arm may
 cross its threshold by one completed call.
 
-Activation is intentionally CLI-only and does not alter the Compose default. Use a new experiment
-id for each measurement and chain genesis:
+Activation is opt-in and does not alter the Compose default. Use a new experiment id for each
+measurement and chain genesis. Operators can either pass both CLI flags:
 
 ```bash
 cd arena
@@ -74,6 +74,19 @@ OPENROUTER_API_KEY="$OPENROUTER_API_KEY" uv run python -m live.runner \
   --llm-budget-usd 5 \
   --db-path live/decisions.db
 ```
+
+or set the paired environment fallbacks in `/opt/sybil/arena.env`, which Compose already supplies
+to the arena container:
+
+```bash
+ARENA_STAGE1_AB_EXPERIMENT_ID=stage1-2026-07-12-a
+ARENA_MARKET_IDS=17,29,44
+```
+
+CLI values override their corresponding environment values. Empty or unset variables preserve the
+ordinary topology exactly. Environment activation fails closed unless both variables are present;
+`ARENA_MARKET_IDS` alone never changes ordinary automatic market selection. The CLI continues to
+allow `--market-ids` by itself for non-experiment manual selection.
 
 Before resolving any experiment account, startup requires `/v1/health` to report height at least 1
 and a nonzero 32-byte `genesis_hash`. On first start, `live_experiments` in `decisions.db` records

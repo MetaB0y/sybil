@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import signal
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
@@ -269,6 +270,57 @@ def _env_market_profile(name: str, default: MarketProfile = "all") -> MarketProf
     if raw in ("all", "important-news"):
         return raw
     raise ValueError(f"{name} must be one of: all, important-news")
+
+
+def _env_stage1_market_ids(environ: Mapping[str, str]) -> list[int] | None:
+    """Parse the explicit Stage 1 cohort without accepting ambiguous values."""
+    raw = environ.get("ARENA_MARKET_IDS", "")
+    if not raw.strip():
+        return None
+
+    values = raw.split(",")
+    if any(not re.fullmatch(r"[0-9]+", value.strip()) for value in values):
+        raise ValueError(
+            "ARENA_MARKET_IDS must be a comma-separated list of nonnegative integer ids "
+            "without empty values"
+        )
+    return [int(value.strip()) for value in values]
+
+
+def _resolve_stage1_ab_activation(
+    cli_experiment_id: str | None,
+    cli_market_ids: list[int] | None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[str | None, list[int] | None]:
+    """Resolve CLI-over-env Stage 1 activation and reject env-only half-configs.
+
+    ``--market-ids`` remains a valid ordinary manual selection when no experiment
+    id is configured. ``ARENA_MARKET_IDS`` is deliberately narrower: it is only an
+    environment fallback for the A/B experiment, so setting it alone cannot
+    silently change the default live topology.
+    """
+    env = os.environ if environ is None else environ
+
+    if cli_experiment_id is not None:
+        experiment_id = cli_experiment_id
+    else:
+        raw_experiment_id = env.get("ARENA_STAGE1_AB_EXPERIMENT_ID", "")
+        experiment_id = raw_experiment_id if raw_experiment_id.strip() else None
+
+    if cli_market_ids is not None:
+        market_ids = list(cli_market_ids)
+    else:
+        market_ids = _env_stage1_market_ids(env)
+
+    if experiment_id is None and cli_market_ids is None and market_ids is not None:
+        raise ValueError(
+            "ARENA_MARKET_IDS requires ARENA_STAGE1_AB_EXPERIMENT_ID; set both to opt in"
+        )
+    if experiment_id is not None and market_ids is None:
+        raise ValueError(
+            "Stage 1 A/B activation requires --market-ids or ARENA_MARKET_IDS"
+        )
+    return experiment_id, market_ids
 
 
 def _fallback_unfiltered_markets(markets, max_n: int = 0, require_reference_price: bool = False):
@@ -1137,14 +1189,18 @@ def main():
         nargs="+",
         type=int,
         default=None,
-        help="Manually specify market IDs to trade (overrides --max-markets)",
+        help=(
+            "Manually specify market IDs to trade (overrides --max-markets). In Stage 1 A/B "
+            "mode, falls back to comma-separated ARENA_MARKET_IDS."
+        ),
     )
     parser.add_argument(
         "--stage1-ab-experiment-id",
         default=None,
         help=(
             "Opt into the concurrent SYB-114 Stage 1 control-vs-Stage1 experiment. "
-            "Requires an explicit nonempty --market-ids cohort."
+            "Falls back to ARENA_STAGE1_AB_EXPERIMENT_ID and requires an explicit "
+            "nonempty --market-ids or ARENA_MARKET_IDS cohort."
         ),
     )
     parser.add_argument(
@@ -1225,6 +1281,10 @@ def main():
             half_life_s=fair_value_half_life_s,
             hard_expiry_s=fair_value_hard_expiry_s,
         )
+        stage1_ab_experiment_id, market_ids = _resolve_stage1_ab_activation(
+            args.stage1_ab_experiment_id,
+            args.market_ids,
+        )
     except ValueError as e:
         parser.error(str(e))
 
@@ -1279,9 +1339,9 @@ def main():
         metrics_host=args.metrics_host,
         metrics_port=args.metrics_port,
         personas=args.personas,
-        market_ids=args.market_ids,
+        market_ids=market_ids,
         mapping_path=args.mapping_path,
-        stage1_ab_experiment_id=args.stage1_ab_experiment_id,
+        stage1_ab_experiment_id=stage1_ab_experiment_id,
     )
 
     try:
