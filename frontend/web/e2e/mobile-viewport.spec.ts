@@ -42,6 +42,20 @@ test.describe("mobile viewport smoke", () => {
     await expect(page.getByTestId("market-detail-grid")).toBeVisible({
       timeout: 30_000,
     });
+    const chart = page.getByTestId("price-chart-interaction");
+    await expect(chart).toBeVisible();
+    await chart.scrollIntoViewIfNeeded();
+    const chartBox = await chart.boundingBox();
+    expect(chartBox).not.toBeNull();
+    await chart.tap({
+      position: {
+        x: chartBox!.width * 0.95,
+        y: chartBox!.height * 0.5,
+      },
+    });
+    await expect(page.getByTestId("price-chart-tooltip")).toBeVisible();
+    await expect(chart).toHaveCSS("touch-action", "pan-y");
+
     const placeOrder = page.getByRole("button", { name: "Place order" });
     await expect(placeOrder).toBeVisible();
     await placeOrder.click();

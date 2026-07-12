@@ -163,11 +163,22 @@ export function PriceChart({
     return { frac, t: t0 + frac * span };
   });
 
-  const onMove = (e: React.MouseEvent) => {
+  const updateHover = (clientX: number) => {
     const el = containerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setHover(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+    setHover(Math.max(0, Math.min(1, (clientX - r.left) / r.width)));
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    updateHover(e.clientX);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
   };
 
   // The crosshair follows the cursor itself; the readout is the line's value
@@ -179,9 +190,20 @@ export function PriceChart({
     <div style={{ width: "100%" }}>
       <div
         ref={containerRef}
-        onMouseMove={onMove}
-        onMouseLeave={() => setHover(null)}
-        style={{ position: "relative", width: "100%", height: PLOT_H }}
+        data-testid="price-chart-interaction"
+        onPointerDown={onPointerDown}
+        onPointerMove={(e) => updateHover(e.clientX)}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => setHover(null)}
+        onPointerLeave={(e) => {
+          if (e.pointerType === "mouse") setHover(null);
+        }}
+        style={{
+          position: "relative",
+          width: "100%",
+          height: PLOT_H,
+          touchAction: "pan-y",
+        }}
       >
         <svg
           viewBox={`0 0 ${W} ${PLOT_H}`}
@@ -276,6 +298,7 @@ export function PriceChart({
 
         {showHover && (
           <div
+            data-testid="price-chart-tooltip"
             style={{
               position: "absolute",
               top: 8,
