@@ -244,7 +244,34 @@ deploy_verify_recipe=$(
 )
 grep -Fq 'post-deploy-smoke.sh --require-signer' <<<"$deploy_verify_recipe" \
     || fail "deploy-verify does not require the signed order/cancel smoke helper"
+if grep -Fq -- '--skip-fill-seed' <<<"$deploy_verify_recipe"; then
+    fail "deploy-verify must retain the full deterministic fill seed"
+fi
+grep -Fq -- '--service-token' <<<"$deploy_verify_recipe" \
+    || fail "deploy-verify lost the valid service-token gating checks"
 pass "deploy-verify fails closed when signed order/cancel smoke cannot run"
+
+deploy_verify_scoped_recipe=$(
+    awk '
+        /^deploy-verify-scoped:/ { in_recipe = 1; next }
+        in_recipe && /^[[:alnum:]_-]+[^:]*:/ { exit }
+        in_recipe { print }
+    ' justfile
+)
+grep -Fq 'post-deploy-smoke.sh --require-signer --skip-fill-seed' \
+    <<<"$deploy_verify_scoped_recipe" \
+    || fail "deploy-verify-scoped does not skip only the persistent fill fixture"
+grep -Fq -- '--service-token' <<<"$deploy_verify_scoped_recipe" \
+    || fail "deploy-verify-scoped lost the valid service-token gating checks"
+grep -Eq '^deploy-web:.*&& deploy-verify-scoped$' justfile \
+    || fail "deploy-web does not use the scoped post-deploy verifier"
+grep -Eq '^deploy-arena:.*&& deploy-verify-scoped$' justfile \
+    || fail "deploy-arena does not use the scoped post-deploy verifier"
+grep -Eq '^deploy-api:.*&& deploy-verify$' justfile \
+    || fail "deploy-api no longer uses the full deterministic-fill verifier"
+grep -Eq '^deploy-all:.*&& deploy-verify$' justfile \
+    || fail "deploy-all no longer uses the full deterministic-fill verifier"
+pass "scoped web/arena deploys avoid persistent fill fixtures; API/all remain full"
 
 grep -Eq '^COPY[[:space:]]+scripts/[[:space:]]+scripts/$' arena/Dockerfile \
     || fail "arena image does not include offline calibration scripts"

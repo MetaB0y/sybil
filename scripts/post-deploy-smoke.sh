@@ -25,6 +25,7 @@
 #                                           [--app-origin ORIGIN]
 #                                           [--block-interval SECONDS]
 #                                           [--require-signer]
+#                                           [--skip-fill-seed]
 #
 # Configuration (flags override env; env overrides defaults):
 #   base_url / SYBIL_SMOKE_BASE          API root host
@@ -44,6 +45,12 @@
 #                                        signer is unavailable. Deploy recipes
 #                                        always set this because they run from
 #                                        a source checkout with Cargo available.
+#   --skip-fill-seed / SYBIL_SMOKE_SKIP_FILL_SEED=1
+#                                        Skip only the persistent deterministic
+#                                        market/fill fixture. Scoped web/Arena
+#                                        promotions use this because the matcher
+#                                        image did not change; API/all-stack
+#                                        promotions always run the full gate.
 #
 #   SYBIL_SMOKE_DOCKER_SSH   run the container-health probe over this ssh target
 #                            (e.g. root@172.104.31.54) instead of local docker.
@@ -63,6 +70,7 @@ INTERVAL="${SYBIL_SMOKE_INTERVAL:-10}"
 STARTUP_TIMEOUT="${SYBIL_SMOKE_STARTUP_TIMEOUT:-60}"
 STARTUP_POLL="${SYBIL_SMOKE_STARTUP_POLL:-2}"
 REQUIRE_SIGNER="${SYBIL_SMOKE_REQUIRE_SIGNER:-0}"
+SKIP_FILL_SEED="${SYBIL_SMOKE_SKIP_FILL_SEED:-0}"
 DOCKER_SSH="${SYBIL_SMOKE_DOCKER_SSH:-}"
 COMPOSE_PROJECT="${SYBIL_COMPOSE_PROJECT:-sybil}"
 BASE_SET_BY_ARG=0
@@ -79,6 +87,7 @@ while [[ $# -gt 0 ]]; do
         --app-origin) APP_ORIGIN="${2:-}"; shift 2 ;;
         --block-interval) INTERVAL="${2:-10}"; shift 2 ;;
         --require-signer) REQUIRE_SIGNER=1; shift ;;
+        --skip-fill-seed) SKIP_FILL_SEED=1; shift ;;
         --*) echo "unknown flag: $1" >&2; usage 2 ;;
         *)
             if [[ "$BASE_SET_BY_ARG" -eq 0 ]]; then BASE="$1"; BASE_SET_BY_ARG=1; shift
@@ -96,6 +105,10 @@ done
 
 if ! [[ "$STARTUP_TIMEOUT" =~ ^[0-9]+$ ]]; then
     echo "error: SYBIL_SMOKE_STARTUP_TIMEOUT must be a non-negative integer" >&2
+    exit 2
+fi
+if [[ "$SKIP_FILL_SEED" != "0" && "$SKIP_FILL_SEED" != "1" ]]; then
+    echo "error: SYBIL_SMOKE_SKIP_FILL_SEED must be 0 or 1" >&2
     exit 2
 fi
 python3 - "$INTERVAL" "$STARTUP_POLL" <<'PY' || exit 2
@@ -798,6 +811,7 @@ echo "  API base   : $BASE"
 echo "  app origin : $APP_ORIGIN"
 echo "  block time : ${INTERVAL}s   service-token: $([[ -n "$SERVICE_TOKEN" ]] && echo present || echo absent)"
 echo "  docker     : $([[ -n "$DOCKER_SSH" ]] && echo "ssh $DOCKER_SSH" || echo local)"
+echo "  fill seed  : $([[ "$SKIP_FILL_SEED" == "1" ]] && echo scoped-skip || echo required)"
 
 check_liveness
 check_services
@@ -805,7 +819,12 @@ check_web_app
 check_cors
 check_onboarding
 check_markets
-check_orders_and_fills
+if [[ "$SKIP_FILL_SEED" == "1" ]]; then
+    section "5. Order placement + fills-after-seed gate"
+    skip "deterministic market seed is out of scope for a non-API promotion"
+else
+    check_orders_and_fills
+fi
 check_gating
 check_signed_order
 check_signed_cancel_lifecycle
