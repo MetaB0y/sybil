@@ -91,7 +91,7 @@ prom_label_escape() {
 }
 
 push_metric_line() {
-    local line=$1 vm_container
+    local line=$1 vm_container line_q
 
     if [[ -n "$VM_URL" ]]; then
         curl -fsS --max-time 10 --data-binary "$line" \
@@ -99,14 +99,15 @@ push_metric_line() {
         return
     fi
 
-    command -v docker >/dev/null 2>&1 || return 1
-    vm_container="$(docker ps -q \
-        --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-        --filter 'label=com.docker.compose.service=victoriametrics' | head -1)"
+    smoke_docker_available "$DOCKER_SSH" || return 1
+    vm_container="$(smoke_docker_run "$DOCKER_SSH" \
+        "docker ps -q --filter label=com.docker.compose.project=$COMPOSE_PROJECT --filter label=com.docker.compose.service=victoriametrics" \
+        | head -1)"
     [[ -n "$vm_container" ]] || return 1
-    docker exec "$vm_container" wget -qO- \
-        --header='Content-Type: text/plain' --post-data="$line" \
-        'http://127.0.0.1:8428/api/v1/import/prometheus' >/dev/null 2>&1
+    printf -v line_q '%q' "$line"
+    smoke_docker_run "$DOCKER_SSH" \
+        "docker exec $vm_container wget -qO- --header='Content-Type: text/plain' --post-data=$line_q http://127.0.0.1:8428/api/v1/import/prometheus" \
+        >/dev/null
 }
 
 push_result_metric() {
