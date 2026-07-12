@@ -50,6 +50,7 @@ export function BinaryCard({ market, price }: Props) {
     <Link
       ref={ref}
       href={`/m/${market.market_id}`}
+      prefetch={false}
       draggable={false}
       onClick={(e) => {
         if (window.getSelection()?.toString()) e.preventDefault();

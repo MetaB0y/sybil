@@ -252,6 +252,7 @@ function TitleRow({
   return (
     <Link
       href={href}
+      prefetch={false}
       draggable={false}
       onClick={(e) => {
         if (window.getSelection()?.toString()) e.preventDefault();
@@ -333,6 +334,7 @@ function FeaturedOutcome({
   return (
     <Link
       href={`/m/${leader.market_id}`}
+      prefetch={false}
       draggable={false}
       onClick={(e) => {
         if (window.getSelection()?.toString()) e.preventDefault();
@@ -497,6 +499,7 @@ function SecondaryRow({
   return (
     <Link
       href={`/m/${market.market_id}`}
+      prefetch={false}
       draggable={false}
       onClick={(e) => {
         if (window.getSelection()?.toString()) e.preventDefault();
