@@ -275,8 +275,11 @@ async fn record_live_market_metrics(state: &AppState) {
     };
 
     let ref_prices = state.reference_prices.read().await;
+    let market_ref_data = state.market_ref_data.read().await;
     let updated_at_ms = *state.reference_prices_updated_at_ms.read().await;
     let mut active_markets = 0u64;
+    let mut active_reference_eligible_markets = 0u64;
+    let mut active_reference_prices = 0u64;
     let mut priced_markets = 0u64;
     let mut volume_markets = 0u64;
     let mut diff_count = 0u64;
@@ -288,8 +291,22 @@ async fn record_live_market_metrics(state: &AppState) {
             .get(&market.id)
             .cloned()
             .unwrap_or(matching_sequencer::MarketStatus::Active);
-        if status.as_str() == "active" {
+        let is_active = status.as_str() == "active";
+        if is_active {
             active_markets += 1;
+            // Coverage alerts must compare like with like: only active mirror
+            // markets are eligible for a Polymarket reference. The raw map is
+            // append/update-only and intentionally remains a separate gauge.
+            let is_reference_eligible = market_ref_data
+                .get(&market.id.0)
+                .and_then(|data| data.polymarket_condition_id.as_ref())
+                .is_some();
+            if is_reference_eligible {
+                active_reference_eligible_markets += 1;
+                if ref_prices.contains_key(&market.id.0) {
+                    active_reference_prices += 1;
+                }
+            }
         }
 
         let yes_price = prices
@@ -322,6 +339,9 @@ async fn record_live_market_metrics(state: &AppState) {
     metrics::gauge!("sybil_markets_priced_total").set(priced_markets as f64);
     metrics::gauge!("sybil_markets_with_volume_total").set(volume_markets as f64);
     metrics::gauge!("sybil_reference_prices_total").set(ref_prices.len() as f64);
+    metrics::gauge!("sybil_reference_eligible_markets_active_total")
+        .set(active_reference_eligible_markets as f64);
+    metrics::gauge!("sybil_reference_prices_active_total").set(active_reference_prices as f64);
     metrics::gauge!("sybil_price_reference_pairs_total").set(diff_count as f64);
     metrics::gauge!("sybil_price_reference_max_abs_diff_nanos").set(diff_max as f64);
     metrics::gauge!("sybil_price_reference_avg_abs_diff_nanos").set(if diff_count == 0 {

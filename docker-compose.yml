@@ -157,6 +157,7 @@ services:
       - "--sybil-url=http://sybil-api:3000"
       - "--model=deepseek/deepseek-v4-flash"
       - "--db-path=/data/decisions.db"
+      - "--metrics-port=9101"
     environment:
       PYTHONUNBUFFERED: "1"
     volumes:

@@ -936,6 +936,8 @@ async def run_live(config: LiveConfig):
             analysts = topology.analysts
             traders = topology.traders
 
+        metrics.set_active_traders(trader.name for trader in traders)
+
         # 3. Create synthetic fast/noise traders. Fast traders only act on
         # reference-backed mirror markets; noise traders only act on native
         # no-reference markets. Both consume the same config shape with per-bot

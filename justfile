@@ -375,7 +375,7 @@ store-tools-check:
     bash -n scripts/store-backup.sh scripts/store-restore-drill.sh
 
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
-check-all: check-fast test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check contracts-fmt-check contracts-build contracts-test
+check-all: check-fast test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check monitoring-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any
@@ -535,6 +535,25 @@ smoke:
 # Smoke-test compose profile boundaries without starting containers
 compose-smoke:
     ./scripts/compose-profile-smoke.sh
+
+# Validate the monitoring scrape config, alert syntax, and focused rule semantics.
+# Use a local promtool when installed; otherwise run the pinned tool image locally.
+monitoring-check: compose-smoke
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v promtool >/dev/null 2>&1; then
+        promtool check config deploy/prometheus.yml
+        promtool check rules deploy/vmalert/rules.yml
+        promtool test rules deploy/vmalert/tests/arena-liveness_test.yml
+    elif command -v docker >/dev/null 2>&1; then
+        image="prom/prometheus:v2.52.0"
+        docker run --rm --entrypoint promtool -v "$PWD/deploy:/work:ro" "$image" check config /work/prometheus.yml
+        docker run --rm --entrypoint promtool -v "$PWD/deploy/vmalert:/work:ro" "$image" check rules /work/rules.yml
+        docker run --rm --entrypoint promtool -v "$PWD/deploy/vmalert:/work:ro" "$image" test rules /work/tests/arena-liveness_test.yml
+    else
+        echo "monitoring-check requires promtool or Docker" >&2
+        exit 2
+    fi
 
 # Isolated Docker money-path E2E (SYB-243). Builds sybil-api, runs the shared
 # deterministic signed seeder, asserts exact fills/prices/balances, then down -v.

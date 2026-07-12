@@ -87,6 +87,14 @@ compose config --quiet
 COMPOSE_PROFILES=prover-worker compose config --quiet
 pass "compose config parses with and without prover-worker profile"
 
+for compose_file in docker-compose.yml docker-compose.prod.yml; do
+    grep -Fq -- '"--metrics-port=9101"' "$compose_file" \
+        || fail "$compose_file does not enable the arena metrics exporter"
+done
+grep -Fq 'targets: ["sybil-arena:9101"]' deploy/prometheus.yml \
+    || fail "VictoriaMetrics does not scrape the arena metrics exporter"
+pass "arena desired-state metrics are enabled and scraped in dev/prod compose"
+
 retention_env=$(
     compose config | python3 -c '
 import re

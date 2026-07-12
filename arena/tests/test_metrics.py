@@ -56,6 +56,25 @@ def test_set_market_selection_sets_gauges():
     assert _value(metrics, "sybil_arena_selected_reference_markets") == 7
 
 
+def test_set_active_traders_replaces_retired_series():
+    metrics = ArenaMetrics()
+    metrics.set_active_traders(["Contrarian (Flat)", "Fundamentals (Flat)"])
+    assert _value(metrics, "sybil_arena_trader_active", {"trader": "Contrarian (Flat)"}) == 1
+    assert _value(metrics, "sybil_arena_trader_active", {"trader": "Fundamentals (Flat)"}) == 1
+
+    metrics.set_active_traders(["Contrarian [experiment] (Flat)"])
+    assert _value(metrics, "sybil_arena_trader_active", {"trader": "Contrarian (Flat)"}) is None
+    assert _value(metrics, "sybil_arena_trader_active", {"trader": "Fundamentals (Flat)"}) is None
+    assert (
+        _value(
+            metrics,
+            "sybil_arena_trader_active",
+            {"trader": "Contrarian [experiment] (Flat)"},
+        )
+        == 1
+    )
+
+
 def test_news_poll_success_updates_counters_and_gauges():
     metrics = ArenaMetrics()
     metrics.record_news_poll_start()

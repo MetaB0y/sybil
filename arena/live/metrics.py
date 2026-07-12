@@ -20,6 +20,7 @@ belt-and-suspenders for the unexpected.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import logging
 import time
 
@@ -50,6 +51,13 @@ class ArenaMetrics:
             "Selected arena markets that have an external reference price.",
             registry=self.registry,
         )
+        self.active_trader = Gauge(
+            "sybil_arena_trader_active",
+            "Whether a named arena trader is configured in this runner process.",
+            ["trader"],
+            registry=self.registry,
+        )
+        self._active_traders: set[str] = set()
 
         # -- News feed poll health (arena-only: feed internals) --
         self.news_feed_poll_in_progress = Gauge(
@@ -134,6 +142,24 @@ class ArenaMetrics:
             self.selected_reference_markets.set(reference_markets)
         except Exception:  # pragma: no cover - defensive
             log.debug("set_market_selection metrics update failed", exc_info=True)
+
+    def set_active_traders(self, trader_names: Iterable[str]) -> None:
+        """Publish the runner's desired trader set, removing retired labels.
+
+        The API's bot metrics are sourced from the full historical decisions
+        database, so they cannot distinguish a stopped trader from a crashed
+        one. This desired-state gauge lets vmalert join liveness only against
+        traders configured in the current runner process.
+        """
+        try:
+            current = {str(name) for name in trader_names if str(name)}
+            for retired in self._active_traders - current:
+                self.active_trader.remove(retired)
+            for trader in current:
+                self.active_trader.labels(trader=trader).set(1)
+            self._active_traders = current
+        except Exception:  # pragma: no cover - defensive
+            log.debug("set_active_traders metrics update failed", exc_info=True)
 
     def record_news_poll_start(self) -> None:
         try:
