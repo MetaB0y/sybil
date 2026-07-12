@@ -82,7 +82,7 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "market", label: "Market", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
-  { key: "placed", label: "Placed / Filled", align: "right" },
+  { key: "placed", label: "Filled / Placed", align: "right" },
   { key: "limit", label: "Limit", align: "right" },
   { key: "avgfill", label: "Avg fill", align: "right" },
   { key: "value", label: "Value", align: "right" },
@@ -139,6 +139,8 @@ interface Props {
    *  (see `fillAggByOrder`) — the `/fills` endpoint is empty in prod. */
   fillsByOrder: Map<number, OrderFillAgg>;
   marketsById: Map<number, Market>;
+  /** Natural question titles where a Polymarket snapshot is available. */
+  titleByMarket: Map<number, string>;
 }
 
 export function OpenOrdersList({
@@ -148,6 +150,7 @@ export function OpenOrdersList({
   orders,
   fillsByOrder,
   marketsById,
+  titleByMarket,
 }: Props) {
   const [sort, setSort] = useState<Sort | null>(null);
   const [query, setQuery] = useState("");
@@ -175,7 +178,10 @@ export function OpenOrdersList({
       return {
         order: o,
         market: marketsById.get(o.market_id),
-        label: marketsById.get(o.market_id)?.name ?? `#${o.market_id}`,
+        label:
+          titleByMarket.get(o.market_id) ??
+          marketsById.get(o.market_id)?.name ??
+          `#${o.market_id}`,
         action: sideRaw.includes("buy") ? "BUY" : "SELL",
         outcome: sideRaw.includes("yes")
           ? "YES"
@@ -203,7 +209,7 @@ export function OpenOrdersList({
     }
     const factor = sort.dir === "asc" ? 1 : -1;
     return [...decorated].sort((a, b) => compareBy(a, b, sort.key) * factor);
-  }, [orders, fillsByOrder, marketsById, sort]);
+  }, [orders, fillsByOrder, marketsById, titleByMarket, sort]);
 
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -289,7 +295,8 @@ export function OrderRow({
   publicKeyHex: string;
   onCancelled: (orderId: number) => void;
 }) {
-  const { order, market, action, outcome, placed, filled, remaining } = row;
+  const { order, market, label, action, outcome, placed, filled, remaining } =
+    row;
   const isBuy = action === "BUY";
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -327,7 +334,7 @@ export function OrderRow({
     >
       <Link
         href={`/m/${order.market_id}`}
-        title={market?.name ?? `#${order.market_id}`}
+        title={label}
         style={{
           gridColumn: "1 / span 2",
           display: "grid",
@@ -342,7 +349,7 @@ export function OrderRow({
       >
         <MarketThumb
           marketId={order.market_id}
-          name={market?.name ?? `#${order.market_id}`}
+          name={label}
           imageUrl={market?.market_image_url ?? market?.event_image_url ?? null}
           fallbackIconUrl={
             market?.market_icon_url ?? market?.event_icon_url ?? null
@@ -359,7 +366,7 @@ export function OrderRow({
             fontSize: 13,
           }}
         >
-          {market?.name ?? `#${order.market_id}`}
+          {label}
         </span>
       </Link>
       <span
@@ -386,7 +393,13 @@ export function OrderRow({
       <RightCell mono>
         {formatDollars(row.valueNanos, { decimals: 2 })}
       </RightCell>
-      <CreatedCell ms={row.createdMs} block={row.createdBlock} nowMs={nowMs} />
+      <RightCell mono>
+        <CreatedCell
+          ms={row.createdMs}
+          block={row.createdBlock}
+          nowMs={nowMs}
+        />
+      </RightCell>
       <RightCell>
         <TifCell expiresAtBlock={order.expires_at_block} />
       </RightCell>
@@ -430,7 +443,7 @@ export function OrderRow({
   );
 }
 
-/** Created-time cell — exact wall-clock from backend `created_at_ms`. */
+/** Compact relative admission time; exact wall clock and block remain on hover. */
 function CreatedCell({
   ms,
   block,
@@ -440,34 +453,20 @@ function CreatedCell({
   block: number;
   nowMs: number | null;
 }) {
+  if (ms == null || nowMs == null) {
+    return <span style={{ color: "var(--fg-4)" }}>—</span>;
+  }
   return (
     <span
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "flex-end",
-        gap: 1,
-        fontFamily: "var(--font-mono)",
-        textAlign: "right",
-      }}
+      title={`${new Date(ms).toLocaleString()} · batch #${block.toLocaleString()}`}
+      style={{ whiteSpace: "nowrap" }}
     >
-      <span style={{ fontSize: 11, color: "var(--fg-2)" }}>
-        {ms == null || nowMs == null ? "—" : `${formatAge(nowMs - ms)} ago`}
-      </span>
-      <span
-        style={{
-          fontSize: 9.5,
-          color: "var(--fg-4)",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        #{block.toLocaleString()}
-      </span>
+      {formatAge(nowMs - ms)} ago
     </span>
   );
 }
 
-/** Placed / filled cell with a thin filled-fraction progress bar. */
+/** Filled / placed on one line, matching the vetted market-detail table. */
 function FilledCell({
   placed,
   filled,
@@ -479,76 +478,38 @@ function FilledCell({
 }) {
   // Pre-B8 orders have no authoritative placed count — show bare remaining.
   if (placed === 0) {
-    return <>{formatShareUnits(remaining)}</>;
+    return <>{formatShareUnits(remaining, 1)}</>;
   }
-  const pct = Math.min(1, Math.max(0, filled / placed));
   const placedLabel = formatShareUnits(placed);
   const filledLabel = formatShareUnits(filled);
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "flex-end",
-        gap: 2,
-      }}
-      title={`${filledLabel} filled of ${placedLabel} placed`}
-    >
-      <span>{`${placedLabel} / ${filledLabel}`}</span>
-      <span
-        style={{
-          height: 2,
-          width: 60,
-          background: "var(--border-1)",
-          borderRadius: 1,
-          overflow: "hidden",
-        }}
-      >
-        <span
-          style={{
-            display: "block",
-            height: "100%",
-            width: `${pct * 100}%`,
-            background: "var(--accent)",
-          }}
-        />
-      </span>
+    <span title={`${filledLabel} filled of ${placedLabel} placed`}>
+      {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
     </span>
   );
 }
 
-/** Avg fill price (WAC of matched fills) with fill count beneath. */
+/** Avg fill price with the fill count as a quiet one-line suffix. */
 function AvgFillCell({ agg }: { agg: OrderFillAgg }) {
   const count = agg.count;
   return (
     <span
       style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "flex-end",
-        gap: 1,
         fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        whiteSpace: "nowrap",
       }}
     >
-      <span
-        style={{
-          fontSize: 12,
-          color: count > 0 ? "var(--fg-1)" : "var(--fg-3)",
-        }}
-      >
+      <span style={{ color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
         {agg.avgPriceNanos != null
           ? formatCentsPrecise(agg.avgPriceNanos)
           : "—"}
       </span>
-      <span
-        style={{
-          fontSize: 9.5,
-          color: "var(--fg-4)",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {count === 1 ? "1 fill" : `${count} fills`}
-      </span>
+      {count > 0 && (
+        <span
+          style={{ color: "var(--fg-4)", fontSize: 10 }}
+        >{` ·${count}`}</span>
+      )}
     </span>
   );
 }
@@ -595,7 +556,7 @@ function rowGrid(color: string): React.CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns:
-      "28px minmax(0, 1.3fr) 56px 48px 108px 56px 76px 82px 88px 92px 64px",
+      "28px minmax(0, 1.3fr) 56px 48px 100px 56px 84px 82px 76px 92px 64px",
     gap: 14,
     alignItems: "center",
     padding: "10px 14px",

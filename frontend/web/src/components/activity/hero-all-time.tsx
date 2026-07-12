@@ -29,30 +29,43 @@ export function HeroAllTime({
       className="activity-hero-section"
       style={{
         padding: "28px 24px 28px",
+        borderTop: "1px solid var(--border-1)",
         borderBottom: "1px solid var(--border-1)",
         position: "relative",
       }}
     >
       <div
-        className="activity-hero-grid"
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 14,
+          paddingBottom: 18,
+        }}
       >
+        <h3
+          style={{
+            fontFamily: "var(--font-sans)",
+            fontSize: 13,
+            fontWeight: 600,
+            margin: 0,
+            color: "var(--fg-2)",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          All time
+        </h3>
+        <span className="text-annotation" style={{ fontSize: 11 }}>
+          since launch
+        </span>
+      </div>
+      <div className="activity-hero-grid">
         {/* Left: two hero numbers — matched volume + welfare, same size */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div
-            className="activity-hero-numbers"
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 80,
-              alignItems: "flex-start",
-            }}
-          >
+          <div className="activity-hero-numbers">
+            <HeroNumber label="Matched volume" value={allTime.matchedVolume} />
             <HeroNumber
-              label="All-time matched volume"
-              value={allTime.matchedVolume}
-            />
-            <HeroNumber
-              label="All-time welfare"
+              label="Welfare"
               value={allTime.welfare}
               glossaryTerm="All-time welfare"
             />
@@ -87,15 +100,11 @@ export function HeroAllTime({
         </div>
 
         {/* Right: 2x2 stat grid */}
-        <div
-          className="activity-hero-stats"
-        >
+        <div className="activity-hero-stats">
           <BigKv
             label="Active traders"
             value={
-              allTime.traders == null
-                ? "—"
-                : formatCompactInt(allTime.traders)
+              allTime.traders == null ? "—" : formatCompactInt(allTime.traders)
             }
             sub="addresses placed ≥1 order"
           />
@@ -123,16 +132,6 @@ export function HeroAllTime({
             }
             sub="successfully filled at clear"
             accent="var(--yes)"
-          />
-          <BigKv
-            label="Unmatched orders"
-            value={
-              allTime.ordersUnmatched == null
-                ? "—"
-                : formatCompactInt(allTime.ordersUnmatched)
-            }
-            sub="expired without a fill"
-            accent="var(--fg-2)"
           />
         </div>
       </div>

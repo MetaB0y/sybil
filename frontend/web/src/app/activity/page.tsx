@@ -22,7 +22,9 @@ export default function ActivityPage() {
   const bots = useArenaFeed({ limit: 1 });
   const batches = useBatches(60);
   const botCount =
-    bots.data?.db_available === true ? (bots.data.stats?.traders ?? null) : null;
+    bots.data?.db_available === true
+      ? (bots.data.stats?.traders ?? null)
+      : null;
 
   return (
     <main
@@ -41,6 +43,7 @@ export default function ActivityPage() {
           // +36px = markets ClearingTicker height, so the title aligns
           // with /'s "All markets" across pages
           paddingTop: "calc(var(--space-6) + 36px)",
+          paddingBottom: "var(--space-6)",
         }}
       >
         <PageHeader

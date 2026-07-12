@@ -36,7 +36,10 @@ export interface EquityPoint {
 }
 
 export interface EquityCurve {
+  /** The range selected in the controls. */
   range: EquityRange;
+  /** The range the visible points belong to while a range swap is in flight. */
+  drawnRange: EquityRange;
   points: EquityPoint[]; // real samples, oldest-first (+ a live tip at "now")
   baseline: number; // net deposits (dollars) — the dashed floor
   startEquity: number;
@@ -48,6 +51,8 @@ export interface EquityCurve {
   error: Error | null;
   refetch: () => Promise<unknown>;
   isEmpty: boolean; // fewer than 2 points → nothing to draw
+  /** Previous points remain visible, softened, while the next range loads. */
+  isSwapping: boolean;
 }
 
 export function useEquityCurve(args: {
@@ -76,8 +81,9 @@ export function useEquityCurve(args: {
         },
       });
       if (error || !data) throw new Error("fetch equity series failed");
-      return data;
+      return { range, points: data.points };
     },
+    placeholderData: (previous) => previous,
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
@@ -105,6 +111,7 @@ export function useEquityCurve(args: {
 
     return {
       range,
+      drawnRange: q.data?.range ?? range,
       points,
       baseline: baselineDepositsDollars,
       startEquity,
@@ -116,11 +123,13 @@ export function useEquityCurve(args: {
       error: q.error,
       refetch: q.refetch,
       isEmpty: points.length < 2,
+      isSwapping: q.isPlaceholderData,
     };
   }, [
     q.data,
     q.isFetching,
     q.isPending,
+    q.isPlaceholderData,
     q.error,
     q.refetch,
     range,

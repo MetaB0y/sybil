@@ -108,18 +108,14 @@ export function BatchesTable({
       </div>
 
       {backfillStale && (
-        <BatchBackfillNotice
-          stale
-          retrying={retrying}
-          onRetry={onRetry}
-        />
+        <BatchBackfillNotice stale retrying={retrying} onRetry={onRetry} />
       )}
 
       <div
         className="activity-grid-table"
         style={{
           background: "var(--surface-1)",
-          border: "1px solid var(--border-1)",
+          border: "1px solid var(--border-2)",
           borderRadius: 6,
           overflowY: "hidden",
         }}
@@ -138,9 +134,7 @@ export function BatchesTable({
           />
         )}
         {!isBackfilling && !backfillUnavailable && displayRows.length === 0 && (
-          <div
-            style={emptyStyle}
-          >
+          <div style={emptyStyle}>
             no batches yet — waiting for the first committed batch
           </div>
         )}
@@ -250,60 +244,123 @@ function LiveToggle({
   onToggle: () => void;
 }) {
   return (
+    <span
+      role="group"
+      aria-label="Batch tail"
+      style={{
+        display: "inline-flex",
+        gap: 4,
+        padding: 3,
+        background: "var(--bg-0)",
+        border: "1px solid var(--border-1)",
+        borderRadius: "var(--radius-lg)",
+      }}
+    >
+      <TailSegment active={!live} onClick={() => live && onToggle()}>
+        <TailDot active={!live} />
+        Frozen
+      </TailSegment>
+      <TailSegment
+        active={live}
+        disabled={disabled}
+        accent={!live && newWhileFrozen > 0}
+        onClick={() => !live && onToggle()}
+      >
+        <TailDot active={live} live />
+        Live
+        {!live && newWhileFrozen > 0 && (
+          <span
+            style={{
+              padding: "1px 5px",
+              borderRadius: "var(--radius-sm)",
+              background: "color-mix(in srgb, var(--accent) 18%, transparent)",
+              color: "var(--accent)",
+              fontSize: 9,
+            }}
+          >
+            +{formatInt(newWhileFrozen)}
+          </span>
+        )}
+      </TailSegment>
+    </span>
+  );
+}
+
+function TailSegment({
+  active,
+  accent = false,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  accent?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
     <button
       type="button"
-      onClick={onToggle}
+      onClick={onClick}
       disabled={disabled}
-      aria-pressed={live}
-      title={
-        disabled
-          ? "Waiting for the first committed batch"
-          : live
-          ? "Pause the live tail to inspect a batch — rows stop updating"
-          : "Resume live updates"
-      }
+      aria-pressed={active}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 6,
         padding: "4px 10px",
-        borderRadius: 999,
-        cursor: disabled ? "not-allowed" : "pointer",
-        border: `1px solid ${live ? "var(--border-2)" : "var(--accent)"}`,
-        background: live
-          ? "var(--surface-1)"
-          : "color-mix(in srgb, var(--accent) 12%, transparent)",
+        borderRadius: "var(--radius-md)",
+        cursor: disabled ? "not-allowed" : active ? "default" : "pointer",
+        border: 0,
+        background: active ? "var(--surface-2)" : "transparent",
+        boxShadow: active ? "inset 0 0 0 1px var(--border-2)" : "none",
         color: disabled
           ? "var(--fg-4)"
-          : live
-            ? "var(--fg-2)"
-            : "var(--accent)",
-        opacity: disabled ? 0.7 : 1,
+          : active
+            ? "var(--fg-1)"
+            : accent
+              ? "var(--accent)"
+              : "var(--fg-3)",
         fontFamily: "var(--font-mono)",
         fontSize: 10,
         textTransform: "uppercase",
         letterSpacing: "0.05em",
         lineHeight: 1,
+        transition:
+          "background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)",
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: live ? "var(--yes)" : "var(--fg-4)",
-          boxShadow: live
+      {children}
+    </button>
+  );
+}
+
+function TailDot({
+  active,
+  live = false,
+}: {
+  active: boolean;
+  live?: boolean;
+}) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 6,
+        height: 6,
+        borderRadius: "50%",
+        background: active
+          ? live
+            ? "var(--yes)"
+            : "var(--fg-2)"
+          : "var(--fg-4)",
+        boxShadow:
+          active && live
             ? "0 0 0 3px color-mix(in srgb, var(--yes) 25%, transparent)"
             : "none",
-        }}
-      />
-      {live
-        ? "Live"
-        : newWhileFrozen > 0
-          ? `Frozen · ${newWhileFrozen} new`
-          : "Frozen"}
-    </button>
+      }}
+    />
   );
 }
 

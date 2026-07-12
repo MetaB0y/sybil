@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 
 /** The subset of a raw Polymarket market we read from the event snapshot. */
 export type RawEventMarket = {
@@ -42,7 +42,7 @@ function hasRawSnapshot(eventId: string | undefined): eventId is string {
  * Kept separate from the hook so the query contract remains easy to test.
  */
 async function fetchEventRawMap(
-  eventId: string
+  eventId: string,
 ): Promise<Map<string, RawEventMarket>> {
   const res = await fetch(`${baseUrl}/v1/events/${eventId}/raw`);
   if (!res.ok) return new Map();
@@ -72,5 +72,33 @@ export function useEventRaw(eventId: string | undefined, enabled: boolean) {
     gcTime: RAW_GC_MS,
     retry: 1,
     queryFn: () => fetchEventRawMap(eventId!),
+  });
+}
+
+/**
+ * Resolve natural Polymarket questions for the events currently represented in
+ * a portfolio. The queries share `useEventRaw`'s cache; native events are
+ * skipped because they have no raw snapshot and callers retain their names.
+ */
+export function useEventQuestions(eventIds: string[]): Map<string, string> {
+  return useQueries({
+    queries: eventIds.filter(hasRawSnapshot).map((id) => ({
+      queryKey: ["event-raw", id],
+      staleTime: RAW_STALE_MS,
+      gcTime: RAW_GC_MS,
+      retry: 1,
+      queryFn: () => fetchEventRawMap(id),
+    })),
+    combine: (results) => {
+      const byCondition = new Map<string, string>();
+      for (const result of results) {
+        if (!result.data) continue;
+        for (const [conditionId, market] of result.data) {
+          const question = market.question?.trim();
+          if (question) byCondition.set(conditionId, question);
+        }
+      }
+      return byCondition;
+    },
   });
 }

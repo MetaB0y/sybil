@@ -22,7 +22,7 @@ import { useBatchDetail } from "@/lib/activity/use-batch-detail";
 import type { BatchMarketRow, BatchRow } from "@/lib/activity/types";
 import { DonutOutcome } from "./donut-outcome";
 
-const ROWS_INITIAL = 6;
+const ROWS_INITIAL = 8;
 const ROWS_STEP = 10;
 
 const GRID = "2fr 70px 60px 110px 100px 130px";
@@ -102,9 +102,12 @@ export function BatchDetail({ row }: { row: BatchRow }) {
         style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}
       >
         {/* Left: market rows */}
-        <div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
           <div
             style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
               background: "var(--surface-1)",
               border: "1px solid var(--border-1)",
               borderRadius: 6,
@@ -142,19 +145,20 @@ export function BatchDetail({ row }: { row: BatchRow }) {
 
             {(remaining > 0 || shown > ROWS_INITIAL) && (
               <button
+                type="button"
                 onClick={() =>
                   setShown((s) =>
                     remaining > 0
                       ? Math.min(rows.length, s + ROWS_STEP)
-                      : ROWS_INITIAL
+                      : ROWS_INITIAL,
                   )
                 }
                 style={{
                   display: "block",
                   width: "100%",
+                  marginTop: "auto",
                   background: "transparent",
                   border: 0,
-                  borderTop: "1px solid var(--border-1)",
                   padding: "10px 14px",
                   cursor: "pointer",
                   color: "var(--accent)",
@@ -324,8 +328,10 @@ function sortMarketRows(
     if (p !== 0) return p;
     const v = cmpBig(a.matchedVolumeNanos, b.matchedVolumeNanos);
     if (v !== 0) return -v;
-    if (a.ordersMatched !== b.ordersMatched) return b.ordersMatched - a.ordersMatched;
-    if (a.ordersPlaced !== b.ordersPlaced) return b.ordersPlaced - a.ordersPlaced;
+    if (a.ordersMatched !== b.ordersMatched)
+      return b.ordersMatched - a.ordersMatched;
+    if (a.ordersPlaced !== b.ordersPlaced)
+      return b.ordersPlaced - a.ordersPlaced;
     return a.marketId - b.marketId;
   });
 }
@@ -345,7 +351,9 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
       }}
     >
       {/* Title + category dot */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}
+      >
         <span
           style={{
             width: 6,
@@ -374,7 +382,7 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
       </div>
 
       {/* Clear price (real) */}
-      <span style={cellNumber("var(--fg-1)", 13)}>
+      <span style={cellNumber("var(--fg-1)", 12)}>
         {formatCents(row.clearPriceNanos)}
       </span>
 
@@ -384,11 +392,11 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
           deltaCents == null
             ? "var(--fg-4)"
             : deltaCents > 0
-            ? "var(--yes)"
-            : deltaCents < 0
-            ? "var(--no)"
-            : "var(--fg-3)",
-          11
+              ? "var(--yes)"
+              : deltaCents < 0
+                ? "var(--no)"
+                : "var(--fg-3)",
+          11,
         )}
       >
         {deltaCents == null
@@ -435,7 +443,10 @@ function SidebarPanel({
         padding: "12px 14px",
       }}
     >
-      <div className="eyebrow" style={{ color: "var(--fg-3)", paddingBottom: 10 }}>
+      <div
+        className="eyebrow"
+        style={{ color: "var(--fg-3)", paddingBottom: 10 }}
+      >
         {title}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

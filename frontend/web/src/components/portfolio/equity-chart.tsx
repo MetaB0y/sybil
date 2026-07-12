@@ -7,6 +7,14 @@
  * REDESIGN (drop-in replacement — same props, same tokens, same data hook):
  *   - A *fitted* Y-axis — scaled to the data's own range with ~8% headroom and
  *     rounded "nice" gridlines/labels — not anchored to $0. (Unchanged.)
+ *   - A monotone-cubic stroke rather than a raw polyline, so the equity series
+ *     reads as a curve instead of a run of sharp corners. Monotone (Fritsch–
+ *     Carlson) specifically: the spline passes through every sample and cannot
+ *     overshoot between them, so it never invents a peak the data doesn't have.
+ *   - Range swaps crossfade. `useEquityCurve` holds the previous range's series
+ *     while the new one loads (`placeholderData`); we blur it, then re-key on
+ *     the range that actually landed so the incoming curve focuses in — the
+ *     same `sybil-fade-swap` motion the market-page activity chart uses.
  *   - A gradient AREA FILL under the line, tinted by the range's net P&L:
  *     mint (`--yes`) when up, coral (`--no`) when down, neutral cyan when flat.
  *     The fill gives the volatile "canyon" marks visible mass so they read as
@@ -44,7 +52,7 @@ const MIN_H = 200;
 const FLAT_EPS = 0.001;
 
 export function EquityChart({ curve, headerRight }: Props) {
-  const { points, range, isLoading, isEmpty } = curve;
+  const { points, drawnRange: range, isLoading, isEmpty, isSwapping } = curve;
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 560, h: 320 });
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -92,9 +100,9 @@ export function EquityChart({ curve, headerRight }: Props) {
   const xFor = (t: number) => PAD_L + ((t - tMin) / tSpan) * innerW;
   const yFor = (v: number) => PAD_T + (1 - (v - yMin) / ySpan) * innerH;
 
-  const lineD = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xFor(p.t).toFixed(2)} ${yFor(p.value).toFixed(2)}`)
-    .join(" ");
+  const lineD = monotoneCubicPath(
+    points.map((p) => ({ x: xFor(p.t), y: yFor(p.value) })),
+  );
   // Close the area down to the plot floor for the gradient fill.
   const areaD =
     points.length >= 2
@@ -106,11 +114,17 @@ export function EquityChart({ curve, headerRight }: Props) {
   const endV = points.length ? points[points.length - 1]!.value : 0;
   const pctMove = startV !== 0 ? Math.abs((endV - startV) / startV) : 0;
   const fillTone =
-    pctMove < FLAT_EPS ? "var(--accent)" : endV >= startV ? "var(--yes)" : "var(--no)";
+    pctMove < FLAT_EPS
+      ? "var(--accent)"
+      : endV >= startV
+        ? "var(--yes)"
+        : "var(--no)";
 
   const last = points[points.length - 1];
   const hovered = hoverIdx != null ? points[hoverIdx] : null;
-  const gridTicks = scale.ticks.filter((t) => t >= yMin - 1e-6 && t <= yMax + 1e-6);
+  const gridTicks = scale.ticks.filter(
+    (t) => t >= yMin - 1e-6 && t <= yMax + 1e-6,
+  );
 
   const intraday = points.length >= 2 && sameDay(tMin, tMax);
 
@@ -118,7 +132,9 @@ export function EquityChart({ curve, headerRight }: Props) {
   const tagW = 54;
   const tagH = 17;
   const tagX = Math.min(W - PAD_R + 4, W - tagW - 1);
-  const tagY = last ? Math.max(1, Math.min(H - tagH - 1, yFor(last.value) - tagH / 2)) : 0;
+  const tagY = last
+    ? Math.max(1, Math.min(H - tagH - 1, yFor(last.value) - tagH / 2))
+    : 0;
 
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
     if (points.length < 2) return;
@@ -140,8 +156,24 @@ export function EquityChart({ curve, headerRight }: Props) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        height: "100%",
+        minHeight: 0,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         {headerRight}
       </div>
       <div
@@ -158,127 +190,198 @@ export function EquityChart({ curve, headerRight }: Props) {
         }}
       >
         {isEmpty ? (
-          <Centered>{isLoading ? "loading…" : "no equity history yet"}</Centered>
+          <Centered>
+            {isLoading ? "loading…" : "no equity history yet"}
+          </Centered>
         ) : (
-          <>
-            <svg
-              viewBox={`0 0 ${W} ${H}`}
-              width="100%"
-              height="100%"
-              preserveAspectRatio="none"
-              // Absolutely positioned so the SVG contributes ZERO intrinsic
-              // height: an in-flow SVG with a viewBox collapses to its aspect
-              // ratio during the grid's intrinsic-sizing pass, which—fed by the
-              // ResizeObserver below—creates a feedback loop that ratchets the
-              // box taller on every window resize. Out of flow, the box height
-              // is driven solely by the grid row (matching the hero).
-              style={{ position: "absolute", inset: 0, display: "block", touchAction: "none" }}
-              onPointerMove={onMove}
-              onPointerLeave={() => setHoverIdx(null)}
+          <div
+            // Outer layer carries the blur/dim while the newly-picked range is
+            // in flight; the inner layer re-keys on the range that landed, so
+            // the incoming curve focuses in rather than hard-cutting.
+            style={{
+              position: "absolute",
+              inset: 0,
+              filter: isSwapping ? "blur(5px)" : undefined,
+              opacity: isSwapping ? 0.5 : 1,
+              transition:
+                "filter var(--dur-slow) var(--ease-standard), opacity var(--dur-slow) var(--ease-standard)",
+            }}
+          >
+            <div
+              key={range}
+              style={{
+                position: "absolute",
+                inset: 0,
+                animation:
+                  "sybil-fade-swap var(--dur-slow) var(--ease-standard)",
+              }}
             >
-              <defs>
-                <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor={fillTone} stopOpacity={0.24} />
-                  <stop offset="0.55" stopColor={fillTone} stopOpacity={0.08} />
-                  <stop offset="1" stopColor={fillTone} stopOpacity={0} />
-                </linearGradient>
-              </defs>
+              <svg
+                viewBox={`0 0 ${W} ${H}`}
+                width="100%"
+                height="100%"
+                preserveAspectRatio="none"
+                // Absolutely positioned so the SVG contributes ZERO intrinsic
+                // height: an in-flow SVG with a viewBox collapses to its aspect
+                // ratio during the grid's intrinsic-sizing pass, which—fed by the
+                // ResizeObserver below—creates a feedback loop that ratchets the
+                // box taller on every window resize. Out of flow, the box height
+                // is driven solely by the grid row (matching the hero).
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "block",
+                  touchAction: "none",
+                }}
+                onPointerMove={onMove}
+                onPointerLeave={() => setHoverIdx(null)}
+              >
+                <defs>
+                  <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stopColor={fillTone} stopOpacity={0.24} />
+                    <stop
+                      offset="0.55"
+                      stopColor={fillTone}
+                      stopOpacity={0.08}
+                    />
+                    <stop offset="1" stopColor={fillTone} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
 
-              {/* Horizontal gridlines at nice round values + right-axis labels */}
-              {gridTicks.map((t) => {
-                const gy = yFor(t);
-                return (
-                  <g key={t}>
-                    <line
-                      x1={PAD_L}
-                      x2={W - PAD_R}
-                      y1={gy}
-                      y2={gy}
-                      stroke="var(--chart-grid)"
-                      strokeWidth={1}
+                {/* Horizontal gridlines at nice round values + right-axis labels */}
+                {gridTicks.map((t) => {
+                  const gy = yFor(t);
+                  return (
+                    <g key={t}>
+                      <line
+                        x1={PAD_L}
+                        x2={W - PAD_R}
+                        y1={gy}
+                        y2={gy}
+                        stroke="var(--chart-grid)"
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <text
+                        x={W - PAD_R + 8}
+                        y={gy + 3}
+                        fill="var(--fg-4)"
+                        fontFamily="var(--font-mono)"
+                        fontSize={9}
+                        letterSpacing="0.04em"
+                        textAnchor="start"
+                      >
+                        {fmtAxisY(t)}
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {/* Gradient area fill — sign-tinted */}
+                {areaD && (
+                  <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
+                )}
+
+                {/* Equity line — ALWAYS cyan */}
+                <path
+                  d={lineD}
+                  fill="none"
+                  stroke="var(--accent)"
+                  strokeWidth={1.75}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+
+                {/* End dot + value tag (hidden while scrubbing) */}
+                {!hovered && last && (
+                  <>
+                    <circle
+                      cx={xFor(last.t)}
+                      cy={yFor(last.value)}
+                      r={3}
+                      fill="var(--accent)"
                       vectorEffect="non-scaling-stroke"
                     />
+                    <rect
+                      x={tagX}
+                      y={tagY}
+                      width={tagW}
+                      height={tagH}
+                      rx={3}
+                      fill="var(--accent)"
+                    />
                     <text
-                      x={W - PAD_R + 8}
-                      y={gy + 3}
-                      fill="var(--fg-4)"
+                      x={tagX + tagW / 2}
+                      y={tagY + tagH / 2 + 3}
+                      fill="var(--fg-on-accent)"
                       fontFamily="var(--font-mono)"
-                      fontSize={9}
-                      letterSpacing="0.04em"
-                      textAnchor="start"
+                      fontSize={9.5}
+                      fontWeight={600}
+                      textAnchor="middle"
                     >
-                      {fmtAxisY(t)}
+                      {fmtAxisY(last.value)}
                     </text>
-                  </g>
-                );
-              })}
+                  </>
+                )}
 
-              {/* Gradient area fill — sign-tinted */}
-              {areaD && <path d={areaD} fill={`url(#${gradId})`} stroke="none" />}
+                {/* Crosshair + hover dot */}
+                {hovered && (
+                  <>
+                    <line
+                      x1={xFor(hovered.t)}
+                      x2={xFor(hovered.t)}
+                      y1={PAD_T}
+                      y2={bottom}
+                      stroke="var(--chart-axis)"
+                      strokeWidth={1}
+                      strokeDasharray="3 3"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    <circle
+                      cx={xFor(hovered.t)}
+                      cy={yFor(hovered.value)}
+                      r={4.5}
+                      fill="var(--accent)"
+                      stroke="var(--surface-1)"
+                      strokeWidth={2}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </>
+                )}
 
-              {/* Equity line — ALWAYS cyan */}
-              <path
-                d={lineD}
-                fill="none"
-                stroke="var(--accent)"
-                strokeWidth={1.75}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                vectorEffect="non-scaling-stroke"
-              />
+                {/* Bottom-axis labels — intraday → times, else dates */}
+                <AxisLabel
+                  x={PAD_L}
+                  y={H - 8}
+                  text={fmtAxisX(tMin, range, intraday)}
+                  anchor="start"
+                />
+                <AxisLabel
+                  x={PAD_L + innerW / 2}
+                  y={H - 8}
+                  text={fmtAxisX((tMin + tMax) / 2, range, intraday)}
+                  anchor="middle"
+                />
+                <AxisLabel
+                  x={W - PAD_R}
+                  y={H - 8}
+                  text={fmtAxisX(tMax, range, intraday)}
+                  anchor="end"
+                />
+              </svg>
 
-              {/* End dot + value tag (hidden while scrubbing) */}
-              {!hovered && last && (
-                <>
-                  <circle cx={xFor(last.t)} cy={yFor(last.value)} r={3} fill="var(--accent)" vectorEffect="non-scaling-stroke" />
-                  <rect x={tagX} y={tagY} width={tagW} height={tagH} rx={3} fill="var(--accent)" />
-                  <text
-                    x={tagX + tagW / 2}
-                    y={tagY + tagH / 2 + 3}
-                    fill="var(--fg-on-accent)"
-                    fontFamily="var(--font-mono)"
-                    fontSize={9.5}
-                    fontWeight={600}
-                    textAnchor="middle"
-                  >
-                    {fmtAxisY(last.value)}
-                  </text>
-                </>
-              )}
-
-              {/* Crosshair + hover dot */}
               {hovered && (
-                <>
-                  <line
-                    x1={xFor(hovered.t)}
-                    x2={xFor(hovered.t)}
-                    y1={PAD_T}
-                    y2={bottom}
-                    stroke="var(--chart-axis)"
-                    strokeWidth={1}
-                    strokeDasharray="3 3"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <circle
-                    cx={xFor(hovered.t)}
-                    cy={yFor(hovered.value)}
-                    r={4.5}
-                    fill="var(--accent)"
-                    stroke="var(--surface-1)"
-                    strokeWidth={2}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                </>
+                <HoverReadout
+                  point={hovered}
+                  x={xFor(hovered.t)}
+                  W={W}
+                  boxW={box.w}
+                  intraday={intraday}
+                />
               )}
-
-              {/* Bottom-axis labels — intraday → times, else dates */}
-              <AxisLabel x={PAD_L} y={H - 8} text={fmtAxisX(tMin, range, intraday)} anchor="start" />
-              <AxisLabel x={PAD_L + innerW / 2} y={H - 8} text={fmtAxisX((tMin + tMax) / 2, range, intraday)} anchor="middle" />
-              <AxisLabel x={W - PAD_R} y={H - 8} text={fmtAxisX(tMax, range, intraday)} anchor="end" />
-            </svg>
-
-            {hovered && <HoverReadout point={hovered} x={xFor(hovered.t)} W={W} boxW={box.w} intraday={intraday} />}
-          </>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -319,10 +422,26 @@ function HoverReadout({
         whiteSpace: "nowrap",
       }}
     >
-      <div style={{ fontSize: 9.5, color: "var(--fg-4)", letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: "var(--font-mono)" }}>
+      <div
+        style={{
+          fontSize: 9.5,
+          color: "var(--fg-4)",
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          fontFamily: "var(--font-mono)",
+        }}
+      >
         {fmtReadoutDate(point.t, intraday)}
       </div>
-      <div style={{ fontSize: 16, color: "var(--fg-1)", marginTop: 3, fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums" }}>
+      <div
+        style={{
+          fontSize: 16,
+          color: "var(--fg-1)",
+          marginTop: 3,
+          fontFamily: "var(--font-mono)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
         {usd(point.value)}
       </div>
     </div>
@@ -341,7 +460,15 @@ function AxisLabel({
   anchor?: "start" | "middle" | "end";
 }) {
   return (
-    <text x={x} y={y} fill="var(--fg-4)" fontFamily="var(--font-mono)" fontSize={9} letterSpacing="0.04em" textAnchor={anchor}>
+    <text
+      x={x}
+      y={y}
+      fill="var(--fg-4)"
+      fontFamily="var(--font-mono)"
+      fontSize={9}
+      letterSpacing="0.04em"
+      textAnchor={anchor}
+    >
       {text}
     </text>
   );
@@ -368,9 +495,68 @@ function Centered({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Monotone cubic (Fritsch–Carlson) interpolation through `pts`, emitted as an
+ * SVG path of cubic Béziers. Softens the polyline's corners while guaranteeing
+ * the curve stays inside each segment's own value range — a plain Catmull-Rom
+ * would bulge past a local max and show equity the account never had.
+ *
+ * Operates in screen space; `xFor`/`yFor` are affine, so monotonicity there is
+ * monotonicity in the data.
+ */
+function monotoneCubicPath(pts: { x: number; y: number }[]): string {
+  const n = pts.length;
+  if (n === 0) return "";
+  const head = `M ${pts[0]!.x.toFixed(2)} ${pts[0]!.y.toFixed(2)}`;
+  if (n === 1) return head;
+  if (n === 2)
+    return `${head} L ${pts[1]!.x.toFixed(2)} ${pts[1]!.y.toFixed(2)}`;
+
+  // Secant slopes between consecutive samples.
+  const dx: number[] = [];
+  const slope: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const h = pts[i + 1]!.x - pts[i]!.x;
+    dx.push(h);
+    slope.push(h === 0 ? 0 : (pts[i + 1]!.y - pts[i]!.y) / h);
+  }
+
+  // Tangents: zero at every local extremum (that's what kills overshoot),
+  // weighted harmonic mean of the neighbouring secants elsewhere.
+  const m: number[] = new Array(n);
+  m[0] = slope[0]!;
+  m[n - 1] = slope[n - 2]!;
+  for (let i = 1; i < n - 1; i++) {
+    const s0 = slope[i - 1]!;
+    const s1 = slope[i]!;
+    if (s0 * s1 <= 0) {
+      m[i] = 0;
+    } else {
+      const w1 = 2 * dx[i]! + dx[i - 1]!;
+      const w2 = dx[i]! + 2 * dx[i - 1]!;
+      m[i] = (w1 + w2) / (w1 / s0 + w2 / s1);
+    }
+  }
+
+  let d = head;
+  for (let i = 0; i < n - 1; i++) {
+    const t = dx[i]! / 3;
+    const c1x = pts[i]!.x + t;
+    const c1y = pts[i]!.y + m[i]! * t;
+    const c2x = pts[i + 1]!.x - t;
+    const c2y = pts[i + 1]!.y - m[i + 1]! * t;
+    d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)} ${c2x.toFixed(2)} ${c2y.toFixed(2)} ${pts[i + 1]!.x.toFixed(2)} ${pts[i + 1]!.y.toFixed(2)}`;
+  }
+  return d;
+}
+
 /** Round a [lo, hi] range out to "nice" bounds and produce evenly spaced ticks
  *  at human-friendly values (1/2/5 × 10ⁿ). Standard axis-scaling algorithm. */
-function niceScale(lo: number, hi: number, maxTicks: number): { lo: number; hi: number; ticks: number[] } {
+function niceScale(
+  lo: number,
+  hi: number,
+  maxTicks: number,
+): { lo: number; hi: number; ticks: number[] } {
   const range = niceNum(Math.max(1e-9, hi - lo), false);
   const step = niceNum(range / Math.max(1, maxTicks - 1), true);
   const niceLo = Math.floor(lo / step) * step;
@@ -398,22 +584,36 @@ function sameDay(a: number, b: number): boolean {
   const x = new Date(a);
   const y = new Date(b);
   return (
-    x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate()
+    x.getFullYear() === y.getFullYear() &&
+    x.getMonth() === y.getMonth() &&
+    x.getDate() === y.getDate()
   );
 }
 
 function fmtAxisX(t: number, range: EquityRange, intraday: boolean): string {
   const d = new Date(t);
   if (range === "24H" || intraday) {
-    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function fmtReadoutDate(t: number, intraday: boolean): string {
   const d = new Date(t);
-  if (intraday) return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  if (intraday)
+    return d.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function usd(v: number): string {

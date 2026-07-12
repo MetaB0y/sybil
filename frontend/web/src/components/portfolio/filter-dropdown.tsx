@@ -59,7 +59,8 @@ export function FilterDropdown({
           padding: "5px 11px",
           background: open ? "var(--surface-2)" : "var(--bg-2)",
           border: `1px solid ${isActive ? "var(--accent)" : "var(--border-1)"}`,
-          borderRadius: 999,
+          // Rectangular (radius-sm) to match the markets filter buttons, not a pill.
+          borderRadius: "var(--radius-sm)",
           color: isActive ? "var(--fg-1)" : "var(--fg-2)",
           fontFamily: "var(--font-mono)",
           fontSize: 11,
@@ -69,7 +70,11 @@ export function FilterDropdown({
         }}
       >
         <span
-          style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
         >
           {current?.label}
         </span>
@@ -164,11 +169,20 @@ function DropdownOption({
         cursor: "pointer",
       }}
     >
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span
+        style={{
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
         {label}
       </span>
       {selected && (
-        <span aria-hidden style={{ color: "var(--accent)", fontSize: 10, flexShrink: 0 }}>
+        <span
+          aria-hidden
+          style={{ color: "var(--accent)", fontSize: 10, flexShrink: 0 }}
+        >
           ✓
         </span>
       )}
