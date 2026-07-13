@@ -1,5 +1,9 @@
 use axum::Json;
 use axum::extract::{Query, State};
+use std::collections::HashMap;
+
+use matching_sequencer::LeaderboardRow;
+use sybil_history_types::EquityBaselinesQuery;
 
 use crate::state::AppState;
 use crate::types::error::AppError;
@@ -50,7 +54,8 @@ pub struct LeaderboardParams {
         ("limit" = Option<usize>, Query, description = "Result limit (default 50, cap 100)"),
     ),
     responses(
-        (status = 200, description = "Ranked trader leaderboard, best PnL first", body = LeaderboardResponse)
+        (status = 200, description = "Ranked trader leaderboard, best PnL first", body = LeaderboardResponse),
+        (status = 503, description = "History service unavailable for windowed ranking")
     )
 )]
 pub async fn get_leaderboard(
@@ -61,7 +66,72 @@ pub async fn get_leaderboard(
     let window = normalize_window(params.window.as_deref());
     let since_ms = window_since_ms(window, now_ms());
 
-    let rows = state.sequencer.leaderboard(since_ms, limit).await?;
+    let bases = state.cached_leaderboard_bases().await?;
+    let baselines = if since_ms == 0 {
+        HashMap::new()
+    } else {
+        let history = state.history.as_ref().ok_or_else(|| {
+            AppError::history_unavailable("Historical data service is not configured")
+        })?;
+        let response = history
+            .equity_baselines(&EquityBaselinesQuery {
+                account_ids: bases.iter().map(|base| base.account_id.0).collect(),
+                at_or_before_ms: since_ms,
+            })
+            .await?;
+        if response
+            .status
+            .first_height
+            .is_some_and(|height| height > 1)
+            && response
+                .status
+                .first_timestamp_ms
+                .is_some_and(|first| first > since_ms)
+        {
+            return Err(AppError::history_unavailable(
+                "Leaderboard window predates available historical data",
+            ));
+        }
+        response
+            .baselines
+            .into_iter()
+            .map(|point| (point.account_id, point))
+            .collect()
+    };
+    let mut rows: Vec<LeaderboardRow> = bases
+        .into_iter()
+        .map(|base| {
+            let (pnl_nanos, basis_nanos) = baselines.get(&base.account_id.0).map_or(
+                (base.pnl_nanos, base.deposited_nanos),
+                |point| {
+                    (
+                        base.pnl_nanos - (point.portfolio_value_nanos - point.deposited_nanos),
+                        point.portfolio_value_nanos,
+                    )
+                },
+            );
+            let roi_bps = if basis_nanos > 0 {
+                ((pnl_nanos as i128 * 10_000) / basis_nanos as i128) as i64
+            } else {
+                0
+            };
+            LeaderboardRow {
+                account_id: base.account_id,
+                display_name: base.display_name,
+                avatar_seed: base.avatar_seed,
+                pnl_nanos,
+                roi_bps,
+                markets_traded: base.markets_traded,
+                equity_nanos: base.equity_nanos,
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.pnl_nanos
+            .cmp(&a.pnl_nanos)
+            .then(a.account_id.0.cmp(&b.account_id.0))
+    });
+    rows.truncate(limit);
     let entries: Vec<LeaderboardEntryResponse> = rows
         .into_iter()
         .enumerate()

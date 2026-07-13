@@ -9,6 +9,7 @@ use matching_sequencer::{
     DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_PRICE_HISTORY_QUERY_POINTS, MarketMetadata,
     ResolutionConfig,
 };
+use sybil_history_types::{PriceCandleQuery, PriceHistoryQuery};
 use sybil_oracle::{FeedPubkey, ResolutionAttestation, SignedAttestation};
 
 use crate::convert::prices_to_response;
@@ -654,7 +655,8 @@ pub async fn resolve_market(
         ("limit" = Option<usize>, Query, description = "Maximum returned points, newest matching points first by cap, clamped server-side"),
     ),
     responses(
-        (status = 200, description = "Price history", body = PriceHistoryResponse)
+        (status = 200, description = "Price history", body = PriceHistoryResponse),
+        (status = 503, description = "History service unavailable")
     )
 )]
 pub async fn get_price_history(
@@ -667,29 +669,37 @@ pub async fn get_price_history(
         .limit
         .unwrap_or(DEFAULT_PRICE_HISTORY_QUERY_POINTS)
         .min(MAX_PRICE_HISTORY_QUERY_POINTS);
-    let page = state
-        .sequencer
-        .get_price_history(
-            mid,
-            params.from_ms,
-            params.to_ms,
-            params.before_height,
+    let history = state.history.as_ref().ok_or_else(|| {
+        AppError::history_unavailable("Historical data service is not configured")
+    })?;
+    let page = history
+        .prices(&PriceHistoryQuery {
+            market_id: mid.0,
+            from_ms: params.from_ms,
+            to_ms: params.to_ms,
+            before_height: params.before_height,
             limit,
-        )
+        })
         .await?;
+
+    let retention_min_height = page.status.first_height.filter(|height| *height > 1);
+    let indexed_through_height = page.status.indexed_through_height;
+    let history_complete_from_height = page.status.first_height;
 
     let response = PriceHistoryResponse {
         market_id: id,
         next_before_height: page.next_before_height,
-        retention_min_height: page.retention_min_height,
+        retention_min_height,
+        indexed_through_height,
+        history_complete_from_height,
         points: page
             .points
             .into_iter()
             .map(|p| PricePointResponse {
                 height: p.height,
                 timestamp_ms: p.timestamp_ms,
-                yes_price_nanos: p.yes_price.0,
-                no_price_nanos: p.no_price.0,
+                yes_price_nanos: p.yes_price_nanos,
+                no_price_nanos: p.no_price_nanos,
                 volume_nanos: p.volume_nanos,
             })
             .collect(),
@@ -711,7 +721,8 @@ pub async fn get_price_history(
         ("limit" = Option<usize>, Query, description = "Maximum returned candles, clamped server-side"),
     ),
     responses(
-        (status = 200, description = "Price candles", body = PriceCandlesResponse)
+        (status = 200, description = "Price candles", body = PriceCandlesResponse),
+        (status = 503, description = "History service unavailable")
     )
 )]
 pub async fn get_price_candles(
@@ -725,23 +736,39 @@ pub async fn get_price_candles(
         .limit
         .unwrap_or(DEFAULT_PRICE_HISTORY_QUERY_POINTS)
         .min(MAX_PRICE_HISTORY_QUERY_POINTS);
-    let page = state
-        .sequencer
-        .get_price_candles(
-            mid,
+    let history = state.history.as_ref().ok_or_else(|| {
+        AppError::history_unavailable("Historical data service is not configured")
+    })?;
+    let page = history
+        .candles(&PriceCandleQuery {
+            market_id: mid.0,
             resolution_secs,
-            params.from_ms,
-            params.to_ms,
-            params.before_ms,
+            from_ms: params.from_ms,
+            to_ms: params.to_ms,
+            before_ms: params.before_ms,
             limit,
-        )
+        })
         .await?;
+
+    let retention_min_bucket_ms = page
+        .status
+        .first_height
+        .filter(|height| *height > 1)
+        .and(page.status.first_timestamp_ms)
+        .map(|timestamp_ms| {
+            let resolution_ms = u64::from(resolution_secs).saturating_mul(1_000);
+            timestamp_ms - timestamp_ms % resolution_ms.max(1)
+        });
+    let indexed_through_height = page.status.indexed_through_height;
+    let history_complete_from_height = page.status.first_height;
 
     Ok(Json(PriceCandlesResponse {
         market_id: id,
         resolution_secs: page.resolution_secs,
         next_before_ms: page.next_before_ms,
-        retention_min_bucket_ms: page.retention_min_bucket_ms,
+        retention_min_bucket_ms,
+        indexed_through_height,
+        history_complete_from_height,
         candles: page
             .candles
             .into_iter()
@@ -750,14 +777,14 @@ pub async fn get_price_candles(
                 bucket_end_ms: c.bucket_end_ms,
                 first_height: c.first_height,
                 last_height: c.last_height,
-                open_yes_price_nanos: c.open_yes_price.0,
-                high_yes_price_nanos: c.high_yes_price.0,
-                low_yes_price_nanos: c.low_yes_price.0,
-                close_yes_price_nanos: c.close_yes_price.0,
-                open_no_price_nanos: c.open_no_price.0,
-                high_no_price_nanos: c.high_no_price.0,
-                low_no_price_nanos: c.low_no_price.0,
-                close_no_price_nanos: c.close_no_price.0,
+                open_yes_price_nanos: c.open_yes_price_nanos,
+                high_yes_price_nanos: c.high_yes_price_nanos,
+                low_yes_price_nanos: c.low_yes_price_nanos,
+                close_yes_price_nanos: c.close_yes_price_nanos,
+                open_no_price_nanos: c.open_no_price_nanos,
+                high_no_price_nanos: c.high_no_price_nanos,
+                low_no_price_nanos: c.low_no_price_nanos,
+                close_no_price_nanos: c.close_no_price_nanos,
                 volume_nanos: c.volume_nanos,
                 point_count: c.point_count,
             })

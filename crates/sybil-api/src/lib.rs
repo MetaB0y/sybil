@@ -3,6 +3,7 @@ pub(crate) mod arena;
 pub mod auto_resolution;
 pub mod config;
 pub mod convert;
+pub mod history;
 pub mod preflight;
 pub mod routes;
 pub mod sse;

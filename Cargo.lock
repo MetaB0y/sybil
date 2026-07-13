@@ -4018,6 +4018,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "sha3 0.12.0",
+ "sybil-history-types",
  "sybil-l1-protocol",
  "sybil-oracle",
  "sybil-signing",
@@ -6490,6 +6491,7 @@ dependencies = [
  "opentelemetry_sdk 0.32.1",
  "p256 0.14.0",
  "reqwest 0.13.4",
+ "rmp-serde",
  "rusqlite",
  "serde",
  "serde_json",
@@ -6497,10 +6499,13 @@ dependencies = [
  "sha2 0.11.0",
  "sybil-api-types",
  "sybil-client",
+ "sybil-history",
+ "sybil-history-types",
  "sybil-l1-protocol",
  "sybil-oracle",
  "sybil-verifier",
  "sybil-zk",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.30.0",
@@ -6599,6 +6604,38 @@ dependencies = [
  "sybil-l1-protocol",
  "sybil-verifier",
  "sybil-zk",
+]
+
+[[package]]
+name = "sybil-history"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "http-body-util",
+ "ractor",
+ "redb",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "sybil-history-types",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+]
+
+[[package]]
+name = "sybil-history-types"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "borsh",
+ "rmp-serde",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

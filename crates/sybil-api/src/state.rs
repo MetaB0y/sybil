@@ -4,12 +4,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use axum::http::HeaderValue;
-use matching_sequencer::SequencerHandle;
+use matching_sequencer::{AccountId, LeaderboardBase, SequencerHandle};
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex as AsyncMutex, RwLock, Semaphore};
 
 use crate::config::ApiConfig;
+use crate::history::HistoryClient;
 use crate::webauthn::WebAuthnVerifierConfig;
 
 const MAX_HTTP_RATE_LIMIT_CLIENTS: usize = 10_000;
@@ -223,6 +224,17 @@ impl HttpDaRateLimiter {
 #[derive(Clone)]
 pub struct AppState {
     pub sequencer: SequencerHandle,
+    /// Private remote history projection. Historical endpoints fail explicitly
+    /// when absent; they never fall back to scanning the sequencer actor.
+    pub history: Option<HistoryClient>,
+    /// API-owned immutable authorization view. `None` means it has not yet
+    /// been initialized; the first read performs one snapshot RPC. Normal
+    /// history reads never enter the sequencer mailbox.
+    read_api_key_owners: Arc<RwLock<Option<HashMap<[u8; 32], AccountId>>>>,
+    /// Published current-state inputs for leaderboard ranking. Refreshed once
+    /// per committed block, never recomputed by each HTTP request.
+    leaderboard_bases: Arc<RwLock<Option<Vec<LeaderboardBase>>>>,
+    read_model_init_lock: Arc<AsyncMutex<()>>,
     pub dev_mode: bool,
     /// Bearer token for service/operator routes. `None` fails closed when
     /// `dev_mode` is false.
@@ -317,6 +329,16 @@ impl AppState {
             .collect();
         Self {
             sequencer,
+            history: match HistoryClient::from_config(config) {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::warn!(%error, "history client disabled");
+                    None
+                }
+            },
+            read_api_key_owners: Arc::new(RwLock::new(None)),
+            leaderboard_bases: Arc::new(RwLock::new(None)),
+            read_model_init_lock: Arc::new(AsyncMutex::new(())),
             dev_mode: config.dev_mode,
             service_token,
             cors_origins,
@@ -345,5 +367,92 @@ impl AppState {
         let records = self.sequencer.list_auto_resolution_records().await?;
         self.auto_resolutions.rehydrate(records);
         Ok(())
+    }
+
+    /// Populate API-owned read models before accepting traffic. Tests that
+    /// construct a router directly retain a one-time lazy fallback.
+    pub async fn initialize_read_models(&self) -> Result<(), matching_sequencer::SequencerError> {
+        let _guard = self.read_model_init_lock.lock().await;
+        let owners = self.sequencer.active_api_key_owners().await?;
+        *self.read_api_key_owners.write().await = Some(owners.into_iter().collect());
+        *self.leaderboard_bases.write().await = Some(self.sequencer.leaderboard_bases().await?);
+        Ok(())
+    }
+
+    pub async fn read_api_key_owner(
+        &self,
+        token_hash: [u8; 32],
+    ) -> Result<Option<AccountId>, matching_sequencer::SequencerError> {
+        if let Some(owners) = self.read_api_key_owners.read().await.as_ref() {
+            return Ok(owners.get(&token_hash).copied());
+        }
+        let _guard = self.read_model_init_lock.lock().await;
+        if self.read_api_key_owners.read().await.is_none() {
+            let owners = self.sequencer.active_api_key_owners().await?;
+            *self.read_api_key_owners.write().await = Some(owners.into_iter().collect());
+        }
+        Ok(self
+            .read_api_key_owners
+            .read()
+            .await
+            .as_ref()
+            .and_then(|owners| owners.get(&token_hash).copied()))
+    }
+
+    pub async fn insert_read_api_key_owner(&self, hash: [u8; 32], account_id: AccountId) {
+        let mut owners = self.read_api_key_owners.write().await;
+        owners
+            .get_or_insert_with(HashMap::new)
+            .insert(hash, account_id);
+    }
+
+    pub async fn remove_read_api_key(&self, hash: &[u8; 32]) {
+        if let Some(owners) = self.read_api_key_owners.write().await.as_mut() {
+            owners.remove(hash);
+        }
+    }
+
+    pub async fn cached_leaderboard_bases(
+        &self,
+    ) -> Result<Vec<LeaderboardBase>, matching_sequencer::SequencerError> {
+        if let Some(bases) = self.leaderboard_bases.read().await.as_ref() {
+            return Ok(bases.clone());
+        }
+        let _guard = self.read_model_init_lock.lock().await;
+        if self.leaderboard_bases.read().await.is_none() {
+            *self.leaderboard_bases.write().await = Some(self.sequencer.leaderboard_bases().await?);
+        }
+        Ok(self
+            .leaderboard_bases
+            .read()
+            .await
+            .as_ref()
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Refresh the published leaderboard input after each committed block.
+    /// The refresh is one actor read per block, independent of HTTP volume.
+    pub fn spawn_leaderboard_read_model_refresher(&self) -> tokio::task::JoinHandle<()> {
+        let state = self.clone();
+        tokio::spawn(async move {
+            let Ok(mut blocks) = state.sequencer.subscribe_blocks().await else {
+                tracing::warn!("failed to subscribe leaderboard read model to blocks");
+                return;
+            };
+            loop {
+                match blocks.recv().await {
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        match state.sequencer.leaderboard_bases().await {
+                            Ok(bases) => *state.leaderboard_bases.write().await = Some(bases),
+                            Err(error) => {
+                                tracing::warn!(%error, "failed to refresh leaderboard read model")
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        })
     }
 }

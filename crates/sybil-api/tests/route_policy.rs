@@ -760,6 +760,11 @@ async fn account_reads_enforce_owner_or_service_matrix() {
         "/private-summary",
     ] {
         let uri = format!("/v1/accounts/{owner_id}{suffix}");
+        let authorized_status = if matches!(suffix, "/fills" | "/equity" | "/events") {
+            StatusCode::SERVICE_UNAVAILABLE
+        } else {
+            StatusCode::OK
+        };
 
         let (status, _) = request_json(app.clone(), Method::GET, &uri, None, json!({})).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "no auth: {uri}");
@@ -784,7 +789,7 @@ async fn account_reads_enforce_owner_or_service_matrix() {
         .await;
         assert_eq!(
             status,
-            StatusCode::OK,
+            authorized_status,
             "owner: {uri}: {}",
             String::from_utf8_lossy(&body)
         );
@@ -793,7 +798,7 @@ async fn account_reads_enforce_owner_or_service_matrix() {
             request_json(app.clone(), Method::GET, &uri, Some(TOKEN), json!({})).await;
         assert_eq!(
             status,
-            StatusCode::OK,
+            authorized_status,
             "service: {uri}: {}",
             String::from_utf8_lossy(&body)
         );

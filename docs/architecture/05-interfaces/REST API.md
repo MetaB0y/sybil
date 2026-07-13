@@ -3,10 +3,14 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
-The REST API is the external interface to the exchange. Built with Axum (a Rust async web framework), it exposes endpoints for account management, market operations, order submission, and block retrieval. An OpenAPI schema is auto-generated for client code generation. The API communicates with the sequencer via message passing through a `SequencerHandle` — no shared mutable state.
+The REST API is the external interface to the exchange. Built with Axum, it
+exposes account management, market operations, order submission, block
+retrieval, and historical product views. OpenAPI is generated for clients.
+Current exchange reads/writes use `SequencerHandle`; historical reads are
+owner-authorized here and proxied to the private `sybil-history` service.
 
 The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
 
@@ -43,8 +47,9 @@ service-only.
 > [!warning] Public onboarding is not production-safe yet
 > The route currently permits unlimited free accounts and caller-selected demo
 > balances. Read-API-key recovery state and durable resting-order admission are
-> now bounded, but free account creation and several unbounded history paths
-> still lack stock or byte budgets. Order token buckets limit flow, not all
+> now bounded, but free account creation and the history outbox during a
+> prolonged projector outage still lack stock or byte budgets. Order token
+> buckets limit flow, not all
 > accumulated state. See the
 > [2026-07-11 resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md).
 
@@ -72,36 +77,35 @@ layers may expose ordinary decimal shares, but signed/canonical API payloads
 use integer units.
 
 Market raw price history is served through
-`GET /v1/markets/{id}/prices/history`, backed by durable `price_points` when a
-store is configured. The endpoint is bounded by `limit` and pages older raw
-points with `before_height` / `next_before_height`. When raw price retention is
-active, responses include `retention_min_height` so clients can distinguish an
-empty in-retention range from data older than retained history.
+`GET /v1/markets/{id}/prices/history`, backed by the private history projector.
+The endpoint is bounded by `limit` and pages older committed points with
+`before_height` / `next_before_height`.
 
-Long-window charting uses `GET /v1/markets/{id}/prices/candles`, backed by
-durable post-seal price candles. Candles are built only from committed batch
-price points: open/high/low/close are over sealed YES/NO prices, volume is
-post-seal traded notional, and empty buckets are omitted. This preserves the
-private-batch boundary because no in-flight order-book information is exposed.
+Long-window charting uses `GET /v1/markets/{id}/prices/candles`. The history
+service builds candles only from committed batch price facts:
+open/high/low/close are over sealed YES/NO prices, volume is post-seal traded
+notional, and empty buckets are omitted. No in-flight order-book information is
+exposed.
 
 Account fill history is served by `GET /v1/accounts/{id}/fills`. New clients
-tail with `after=<cursor>&limit=N`. The response envelope contains `fills`,
-`next_after`, `retention_min_timestamp_ms`, `pruned_through_height`,
-`cursor_gap`, and `history_truncated`; rows are oldest-to-newest and each
-contains an opaque stable cursor. The older `offset` query remains
-compatibility-only and pages newest-first.
-
-`cursor_gap` is account-specific and includes the `0.0` start sentinel after
-that account has lost fills. Clients must reconcile canonical portfolio state
-instead of silently accepting a partial fill stream.
+tail with `after=<cursor>&limit=N`. The response envelope includes the
+compatibility retention fields plus `indexed_through_height` and
+`history_complete_from_height`; forward rows are oldest-to-newest and each has
+a stable cursor. The older `offset` query remains compatibility-only and pages
+newest-first.
 
 `GET /v1/accounts/{id}/events` uses the analogous `events`/`next_before`
-envelope. Equity responses carry the same retained-boundary fields. `all`
-means all retained derived history. Persistent-store read failures propagate
-as errors and are never replaced by an empty in-memory response.
-In-memory-only development responses declare `history_scope=memory`. Equity is
-bounded to 5,000 represented points and reports `source_points` plus
-`downsampled`.
+envelope. Equity responses carry the same projector checkpoint/completeness
+fields. `all` means all rows available to the current projector. History
+service failures return `503 HISTORY_UNAVAILABLE`; they are never replaced by
+an empty in-memory response. Equity is bounded to 5,000 represented points and
+reports `source_points` plus `downsampled`.
+
+All account history remains owner-scoped at the public API. Internal history
+routes and raw account-attributed batches use a dedicated
+`SYBIL_HISTORY_TOKEN`, are private service surfaces, and are not browser
+endpoints. Public market history uses the same projector but only committed
+market facts. See [[Historical Data Serving]].
 
 Block history reads distinguish missing data from retained-history gaps:
 `GET /v1/blocks/{height}` returns `410 Gone` with code `RETENTION_GONE` when
@@ -111,7 +115,13 @@ closing when `?from_block=` starts before durable block retention. SSE remains
 a live-only convenience stream and does not expose a replay cursor or retained
 floor.
 
-The API is stateless — all exchange state lives in the `SequencerActor`. Order-write endpoints first pass through a cheap HTTP token bucket keyed globally and by client address/header. This happens before JSON parsing and P256 signature verification, so malformed or invalid signed traffic cannot consume unbounded CPU. When an order submission arrives at `POST /v1/orders`, the API handler converts the [[Order Types|OrderSpec]] to the engine's internal representation and sends it to the sequencer via a channel. The sequencer either directly admits simple single-market orders into the resting book or defers MM / bundle / multi-market submissions via the [[Order Admission|deferred-submission buffer]]. When a client queries `GET /v1/blocks/latest`, the API reads the latest sealed block and projects only its public commitments, prices, and analytics. A sealed block remains a canonical `Block` plus the derived [[Block Data Boundaries|`BlockAnalytics` sidecar]] internally; verifier/prover and authenticated service paths consume canonical data without making it public. This actor-model architecture (inspired by Tokio actor patterns) means the API layer can be horizontally scaled without coordination — all instances talk to the same sequencer actor.
+All exchange mutation remains in the `SequencerActor`. Order-write endpoints
+first pass through cheap global/per-client HTTP token buckets before JSON or
+P256 work. Handlers convert public DTOs to domain instructions and send them to
+the actor, which directly admits ordinary supported orders or defers atomic
+bundles/MM submissions. Current block/account reads also come from actor
+snapshots. Historical range queries take the independent private service path
+and therefore cannot occupy the sequencer actor or scan its database.
 
 The sequencer message path is monitored by [[Actor Mailbox Monitoring]]. The API exports `sybil_actor_queue_depth{actor="sequencer"}` from `/metrics`, with configurable warning and critical thresholds, so operator alerts distinguish actor backlog from solver latency or HTTP rejection pressure.
 
@@ -142,7 +152,7 @@ hard in-flight concurrency cap before dispatching store work.
 
 ## Key Properties
 - Axum-based, async, with OpenAPI auto-generation
-- Actor model: API → message channel → `SequencerActor`
+- Actor model for current state/mutation; private HTTP projection for history
 - All values in [[Nanos and Integer Arithmetic|nanos]] (u64)
 - Service bearer auth gates operator writes in production; dev mode is limited to local conveniences and diagnostics
 - Order-write endpoints return `429 Too Many Requests` with `Retry-After` under abnormal load

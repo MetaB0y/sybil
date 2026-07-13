@@ -28,12 +28,18 @@ class PriceHistoryResponse:
         Attributes:
             market_id (int):
             points (list[PricePointResponse]):
+            history_complete_from_height (int | None | Unset): First source height represented after projection
+                bootstrap/retention.
+            indexed_through_height (int | None | Unset): Highest source block durably projected by the private history
+                service.
             next_before_height (int | None | Unset):
             retention_min_height (int | None | Unset):
      """
 
     market_id: int
     points: list[PricePointResponse]
+    history_complete_from_height: int | None | Unset = UNSET
+    indexed_through_height: int | None | Unset = UNSET
     next_before_height: int | None | Unset = UNSET
     retention_min_height: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -52,6 +58,18 @@ class PriceHistoryResponse:
             points.append(points_item)
 
 
+
+        history_complete_from_height: int | None | Unset
+        if isinstance(self.history_complete_from_height, Unset):
+            history_complete_from_height = UNSET
+        else:
+            history_complete_from_height = self.history_complete_from_height
+
+        indexed_through_height: int | None | Unset
+        if isinstance(self.indexed_through_height, Unset):
+            indexed_through_height = UNSET
+        else:
+            indexed_through_height = self.indexed_through_height
 
         next_before_height: int | None | Unset
         if isinstance(self.next_before_height, Unset):
@@ -72,6 +90,10 @@ class PriceHistoryResponse:
             "market_id": market_id,
             "points": points,
         })
+        if history_complete_from_height is not UNSET:
+            field_dict["history_complete_from_height"] = history_complete_from_height
+        if indexed_through_height is not UNSET:
+            field_dict["indexed_through_height"] = indexed_through_height
         if next_before_height is not UNSET:
             field_dict["next_before_height"] = next_before_height
         if retention_min_height is not UNSET:
@@ -97,6 +119,26 @@ class PriceHistoryResponse:
             points.append(points_item)
 
 
+        def _parse_history_complete_from_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        history_complete_from_height = _parse_history_complete_from_height(d.pop("history_complete_from_height", UNSET))
+
+
+        def _parse_indexed_through_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        indexed_through_height = _parse_indexed_through_height(d.pop("indexed_through_height", UNSET))
+
+
         def _parse_next_before_height(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -120,6 +162,8 @@ class PriceHistoryResponse:
         price_history_response = cls(
             market_id=market_id,
             points=points,
+            history_complete_from_height=history_complete_from_height,
+            indexed_through_height=indexed_through_height,
             next_before_height=next_before_height,
             retention_min_height=retention_min_height,
         )

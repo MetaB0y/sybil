@@ -1090,6 +1090,12 @@ pub struct PriceHistoryResponse {
     pub next_before_height: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_min_height: Option<u64>,
+    /// Highest source block durably projected by the private history service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed_through_height: Option<u64>,
+    /// First source height represented after projection bootstrap/retention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_complete_from_height: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1117,6 +1123,10 @@ pub struct PriceCandlesResponse {
     pub next_before_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_min_bucket_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed_through_height: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_complete_from_height: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1183,6 +1193,10 @@ pub struct EquitySeriesResponse {
     /// Number of retained source samples represented by `points`.
     pub source_points: usize,
     pub downsampled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed_through_height: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_complete_from_height: Option<u64>,
 }
 
 // --- Leaderboard (SYB-59) ---
@@ -1252,6 +1266,10 @@ pub struct AccountFillPageResponse {
     /// True means rows older than the retention boundary are unavailable.
     pub history_truncated: bool,
     pub history_scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed_through_height: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_complete_from_height: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1271,6 +1289,10 @@ pub struct AccountHistoryPageResponse {
     pub retention_min_timestamp_ms: Option<u64>,
     pub history_truncated: bool,
     pub history_scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed_through_height: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_complete_from_height: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

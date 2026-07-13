@@ -70,6 +70,16 @@ impl SequencerHandle {
         Self::spawn_with_store_arc(sequencer, store.map(Arc::new))
     }
 
+    /// Spawn while allowing an out-of-actor delivery worker to retain a clone
+    /// of the store. The shared handle may read/ack the history outbox directly;
+    /// it must never mutate canonical exchange state outside the actor.
+    pub fn spawn_with_shared_store(
+        sequencer: BlockSequencer,
+        store: Option<Arc<crate::store::Store>>,
+    ) -> Self {
+        Self::spawn_with_store_arc(sequencer, store)
+    }
+
     fn spawn_with_store_arc(
         sequencer: BlockSequencer,
         store: Option<Arc<crate::store::Store>>,
@@ -681,6 +691,15 @@ impl SequencerHandle {
             .await
     }
 
+    /// One-time API authorization snapshot. Per-request bearer validation must
+    /// use the API-owned copy rather than enqueueing a sequencer query.
+    pub async fn active_api_key_owners(
+        &self,
+    ) -> Result<Vec<([u8; 32], AccountId)>, SequencerError> {
+        self.read_query(|state| state.sequencer.active_api_key_owners())
+            .await
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn list_markets(&self) -> Result<MarketSet, SequencerError> {
         self.read_query(|state| state.sequencer.markets().clone())
@@ -892,101 +911,12 @@ impl SequencerHandle {
             .await
     }
 
-    pub async fn get_price_history(
-        &self,
-        market_id: MarketId,
-        from_ms: Option<u64>,
-        to_ms: Option<u64>,
-        before_height: Option<u64>,
-        limit: usize,
-    ) -> Result<PriceHistoryPage, SequencerError> {
-        self.rpc(|reply| {
-            SequencerMsg::GetPriceHistory(market_id, from_ms, to_ms, before_height, limit, reply)
-        })
-        .await?
-    }
-
-    pub async fn get_price_candles(
-        &self,
-        market_id: MarketId,
-        resolution_secs: u32,
-        from_ms: Option<u64>,
-        to_ms: Option<u64>,
-        before_ms: Option<u64>,
-        limit: usize,
-    ) -> Result<PriceCandlePage, SequencerError> {
-        self.rpc(|reply| {
-            SequencerMsg::GetPriceCandles(
-                market_id,
-                resolution_secs,
-                from_ms,
-                to_ms,
-                before_ms,
-                limit,
-                reply,
-            )
-        })
-        .await?
-    }
-
-    pub async fn get_account_fills(
-        &self,
-        account_id: AccountId,
-        market_id: Option<MarketId>,
-        limit: usize,
-        offset: usize,
-    ) -> Result<RetainedHistoryPage<AccountFillRecord>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetAccountFills(account_id, market_id, limit, offset, reply))
-            .await?
-    }
-
-    pub async fn get_account_fills_after(
-        &self,
-        account_id: AccountId,
-        market_id: Option<MarketId>,
-        after: Option<AccountFillCursor>,
-        limit: usize,
-    ) -> Result<RetainedHistoryPage<AccountFillRecord>, SequencerError> {
-        self.rpc(|reply| {
-            SequencerMsg::GetAccountFillsAfter(account_id, market_id, after, limit, reply)
-        })
-        .await?
-    }
-
-    /// Equity series for an account, restricted to points with
-    /// `timestamp_ms >= since_ms` plus one opening anchor immediately before the
-    /// range (pass `0` for the full series). The range is applied in storage.
-    pub async fn get_equity_series(
-        &self,
-        account_id: AccountId,
-        since_ms: u64,
-    ) -> Result<RetainedHistoryPage<crate::aggregates::EquityPoint>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetEquitySeries(account_id, since_ms, reply))
-            .await?
-    }
-
-    /// Ranked leaderboard (SYB-59) over a window. `since_ms == 0` is all-time;
-    /// a non-zero `since_ms` computes per-account windowed PnL from the durable
-    /// equity store. Returns at most `limit` rows, PnL-descending with an
-    /// account-id tie-break.
-    pub async fn leaderboard(
-        &self,
-        since_ms: u64,
-        limit: usize,
-    ) -> Result<Vec<LeaderboardRow>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::Leaderboard(since_ms, limit, reply))
-            .await?
-    }
-
-    pub async fn get_account_events(
-        &self,
-        account_id: AccountId,
-        limit: usize,
-        before: Option<(u64, u64)>,
-        category: Option<String>,
-    ) -> Result<RetainedHistoryPage<crate::aggregates::HistoryEvent>, SequencerError> {
-        self.rpc(|reply| SequencerMsg::GetAccountEvents(account_id, limit, before, category, reply))
-            .await?
+    /// Current, all-time leaderboard inputs from live state. Historical
+    /// window baselines belong to the history service and must not be read by
+    /// the sequencer actor.
+    pub async fn leaderboard_bases(&self) -> Result<Vec<LeaderboardBase>, SequencerError> {
+        self.read_query(|state| state.sequencer.leaderboard_bases())
+            .await
     }
 
     pub async fn list_auto_resolution_records(
@@ -3374,7 +3304,17 @@ mod tests {
         let block3 = handle.produce_block().await.unwrap();
         assert_eq!(block3.canonical.header.height, 3);
 
-        let meta = store.history_retention_meta().unwrap();
+        let meta = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let meta = store.history_retention_meta().unwrap();
+                if meta.last_history_prune_height == Some(3) {
+                    break meta;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("post-commit block/DA pruning should finish");
         assert_eq!(meta.blocks_full_min_height, Some(3));
         assert_eq!(meta.last_history_prune_height, Some(3));
         assert!(store.load_block(1).await.unwrap().is_none());
@@ -3412,7 +3352,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn store_backed_price_history_survives_cache_eviction_and_restart() {
+    async fn committed_price_facts_are_written_to_the_durable_history_outbox() {
         let path = temp_store_path("price-history");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
@@ -3492,77 +3432,60 @@ mod tests {
             .unwrap();
         let block2 = handle.produce_block().await.unwrap();
 
-        let page = handle
-            .get_price_history(market_id, None, None, None, 2)
-            .await
-            .unwrap();
-        assert_eq!(page.next_before_height, None);
-        let heights: Vec<_> = page.points.iter().map(|point| point.height).collect();
+        let batches = store.history_outbox_batches(10).unwrap();
+        let heights: Vec<_> = batches.iter().map(|batch| batch.height).collect();
         assert_eq!(
             heights,
             vec![
                 block1.canonical.header.height,
                 block2.canonical.header.height
             ],
-            "store-backed reads should include points older than the hot price cache"
+            "each fenced block commit must append exactly one history batch"
         );
-        assert!(page.points.iter().all(|point| point.volume_nanos > 0));
-
-        let newest_page = handle
-            .get_price_history(market_id, None, None, None, 1)
-            .await
-            .unwrap();
-        assert_eq!(newest_page.next_before_height, Some(2));
-        assert_eq!(newest_page.points.len(), 1);
-        assert_eq!(newest_page.points[0].height, 2);
-        let older_page = handle
-            .get_price_history(market_id, None, None, newest_page.next_before_height, 1)
-            .await
-            .unwrap();
-        assert_eq!(older_page.next_before_height, None);
-        assert_eq!(older_page.points.len(), 1);
-        assert_eq!(older_page.points[0].height, 1);
-        let candle_page = handle
-            .get_price_candles(market_id, 60, None, None, None, 10)
-            .await
-            .unwrap();
-        assert!(!candle_page.candles.is_empty());
-        assert_eq!(
-            candle_page
-                .candles
-                .iter()
-                .map(|candle| candle.point_count)
-                .sum::<u64>(),
-            2,
-            "candles should aggregate the two committed raw price points"
-        );
+        assert!(batches.iter().all(|batch| {
+            batch.prices.len() == 1
+                && batch.prices[0].market_id == market_id.0
+                && batch.prices[0].volume_nanos > 0
+        }));
 
         drop(handle);
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let restored = store.load_state().await.unwrap().unwrap();
-        let restored_seq =
-            BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
-        let reader = SequencerHandle::spawn_with_store_arc(restored_seq, Some(store.clone()));
-        let restored_page = reader
-            .get_price_history(market_id, None, None, None, 2)
-            .await
-            .unwrap();
-        let restored_heights: Vec<_> = restored_page
-            .points
+        assert_eq!(store.history_outbox_batches(10).unwrap(), batches);
+
+        let mut bad_second = batches[1].payload_hash;
+        bad_second[0] ^= 1;
+        let bad_acks = [
+            crate::store::HistoryOutboxAck {
+                height: batches[0].height,
+                payload_hash: batches[0].payload_hash,
+            },
+            crate::store::HistoryOutboxAck {
+                height: batches[1].height,
+                payload_hash: bad_second,
+            },
+        ];
+        assert!(store.acknowledge_history_batches(&bad_acks).is_err());
+        assert_eq!(
+            store.history_outbox_batches(10).unwrap(),
+            batches,
+            "a bad hash must roll back the complete acknowledgement transaction"
+        );
+
+        let acks: Vec<_> = batches
             .iter()
-            .map(|point| point.height)
+            .map(|batch| crate::store::HistoryOutboxAck {
+                height: batch.height,
+                payload_hash: batch.payload_hash,
+            })
             .collect();
-        assert_eq!(restored_heights, heights);
-        let restored_candles = reader
-            .get_price_candles(market_id, 60, None, None, None, 10)
-            .await
-            .unwrap();
-        assert_eq!(restored_candles.candles, candle_page.candles);
+        assert_eq!(store.acknowledge_history_batches(&acks).unwrap(), 2);
+        assert_eq!(store.history_outbox_len().unwrap(), 0);
+        assert_eq!(store.acknowledge_history_batches(&acks).unwrap(), 0);
     }
 
     #[tokio::test]
-    async fn store_backed_direct_admit_read_model_rows_survive_empty_block() {
+    async fn direct_admit_facts_survive_an_empty_block_in_the_history_outbox() {
         let path = temp_store_path("direct-admit-read-model");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
@@ -3603,33 +3526,43 @@ mod tests {
             "the regression targets empty non-system blocks"
         );
 
-        let events = store
-            .account_events(aid, 10, None, Some("trades".into()))
-            .unwrap();
-        let placed_count = events
+        let batches = store.history_outbox_batches(10).unwrap();
+        let committed = batches
             .iter()
-            .filter(|event| matches!(event.kind, crate::aggregates::HistoryKind::Placed))
+            .find(|batch| batch.height == block.canonical.header.height)
+            .expect("empty block history batch");
+        let placed_count = committed
+            .events
+            .iter()
+            .filter(|event| {
+                event.account_id == aid.0
+                    && matches!(event.kind, sybil_history_types::AccountEventKind::Placed)
+            })
             .count();
         assert_eq!(
             placed_count, 1,
             "direct-admit Placed history must be durable exactly once even with no in-memory fallback"
         );
 
-        let equity = store.equity_series(aid, 0).unwrap();
         assert!(
-            equity
+            committed
+                .equity
                 .iter()
-                .any(|point| point.height == block.canonical.header.height),
+                .any(|point| point.account_id == aid.0
+                    && point.height == block.canonical.header.height),
             "equity point from the empty-fill block must be durable"
         );
 
         handle.produce_block().await.unwrap();
-        let events_after_next_block = store
-            .account_events(aid, 10, None, Some("trades".into()))
-            .unwrap();
-        let placed_count_after_next_block = events_after_next_block
+        let placed_count_after_next_block = store
+            .history_outbox_batches(10)
+            .unwrap()
             .iter()
-            .filter(|event| matches!(event.kind, crate::aggregates::HistoryKind::Placed))
+            .flat_map(|batch| &batch.events)
+            .filter(|event| {
+                event.account_id == aid.0
+                    && matches!(event.kind, sybil_history_types::AccountEventKind::Placed)
+            })
             .count();
         assert_eq!(
             placed_count_after_next_block, 1,

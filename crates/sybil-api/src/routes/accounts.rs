@@ -9,7 +9,7 @@ use matching_sequencer::crypto::{
     canonical_profile_update_bytes,
 };
 use matching_sequencer::{
-    AccountAuthScheme, AccountFillCursor, AccountFillRecord, AccountId, AuthenticatedApiKeyCreate,
+    AccountAuthScheme, AccountFillCursor, AccountId, AuthenticatedApiKeyCreate,
     AuthenticatedApiKeyRevoke, AuthenticatedKeyRegistration, AuthenticatedKeyRevocation,
     AuthenticatedProfileUpdate, KeyScope, MAX_API_KEY_LABEL_BYTES, PublicKey, RegisteredPubkey,
     SignedApiKeyCreate, SignedApiKeyRevoke, SignedKeyRegistration, SignedKeyRevocation,
@@ -17,6 +17,9 @@ use matching_sequencer::{
 };
 use p256::Sec1Point;
 use p256::ecdsa::{Signature, VerifyingKey};
+use sybil_history_types::{
+    AccountEventQuery, EquityQuery, FillCursor, FillQuery, ProjectionStatus,
+};
 
 use crate::convert::{account_balance_breakdown, account_to_response};
 use crate::state::AppState;
@@ -655,7 +658,7 @@ pub async fn get_portfolio(
         (status = 400, description = "Invalid cursor"),
         (status = 401, description = "Missing/invalid bearer token"),
         (status = 403, description = "Token belongs to a different account"),
-        (status = 500, description = "Durable history unavailable")
+        (status = 503, description = "Private history service unavailable")
     ),
     security(("bearer_read" = []))
 )]
@@ -671,27 +674,47 @@ pub async fn get_account_fills(
     let request_limit = limit.saturating_add(1);
     let forward = params.after.is_some();
     let mut requested_cursor = None;
+    let history = state.history.as_ref().ok_or_else(|| {
+        AppError::history_unavailable("Historical data service is not configured")
+    })?;
     let page = if let Some(after) = params.after.as_deref() {
         let cursor = AccountFillCursor::parse(after)
             .ok_or_else(|| AppError::bad_request("Invalid fill cursor"))?;
         requested_cursor = Some(cursor);
-        state
-            .sequencer
-            .get_account_fills_after(AccountId(id), market_id, Some(cursor), request_limit)
+        history
+            .fills(&FillQuery {
+                account_id: id,
+                market_id: market_id.map(|market_id| market_id.0),
+                after: Some(FillCursor {
+                    block_height: cursor.block_height,
+                    order_id: cursor.order_id,
+                }),
+                limit: request_limit,
+                offset: 0,
+            })
             .await?
     } else {
         let offset = params.offset.unwrap_or(0);
-        state
-            .sequencer
-            .get_account_fills(AccountId(id), market_id, request_limit, offset)
+        history
+            .fills(&FillQuery {
+                account_id: id,
+                market_id: market_id.map(|market_id| market_id.0),
+                after: None,
+                limit: request_limit,
+                offset,
+            })
             .await?
     };
 
-    let retention_min_timestamp_ms = page.retention_min_timestamp_ms;
-    let pruned_through_height = page.pruned_through_height;
-    let durable = page.durable;
-    let mut fills: Vec<AccountFillResponse> =
-        page.items.into_iter().map(account_fill_response).collect();
+    let (retention_min_timestamp_ms, pruned_through_height, history_truncated) =
+        projection_floor(&page.status);
+    let indexed_through_height = page.status.indexed_through_height;
+    let history_complete_from_height = page.status.first_height;
+    let mut fills: Vec<AccountFillResponse> = page
+        .items
+        .into_iter()
+        .map(account_fill_fact_response)
+        .collect();
     let has_more = fills.len() > limit;
     fills.truncate(limit);
     let next_after = (forward && has_more)
@@ -704,30 +727,43 @@ pub async fn get_account_fills(
         retention_min_timestamp_ms,
         pruned_through_height,
         cursor_gap: fill_cursor_has_gap(requested_cursor, pruned_through_height),
-        history_truncated: !durable || retention_min_timestamp_ms.is_some(),
-        history_scope: if durable { "durable" } else { "memory" }.to_string(),
+        history_truncated,
+        history_scope: "remote".to_string(),
+        indexed_through_height,
+        history_complete_from_height,
     }))
 }
 
-fn account_fill_response(f: AccountFillRecord) -> AccountFillResponse {
+fn projection_floor(status: &ProjectionStatus) -> (Option<u64>, Option<u64>, bool) {
+    match status.first_height {
+        Some(first_height) if first_height > 1 => (
+            status.first_timestamp_ms,
+            Some(first_height.saturating_sub(1)),
+            true,
+        ),
+        _ => (None, None, false),
+    }
+}
+
+fn account_fill_fact_response(f: sybil_history_types::AccountFillFact) -> AccountFillResponse {
     AccountFillResponse {
-        cursor: AccountFillCursor::from_record(&f).to_string(),
+        cursor: format!("{}.{}", f.block_height, f.order_id),
         order_id: f.order_id,
         fill_qty: f.fill_qty,
-        fill_price_nanos: f.fill_price.0,
+        fill_price_nanos: f.fill_price_nanos,
         block_height: f.block_height,
         timestamp_ms: f.timestamp_ms,
         position_deltas: f
             .position_deltas
             .into_iter()
-            .map(|(mid, outcome, delta)| PositionDeltaResponse {
-                market_id: mid.0,
-                outcome: if outcome == 0 {
+            .map(|delta| PositionDeltaResponse {
+                market_id: delta.market_id,
+                outcome: if delta.outcome == 0 {
                     "YES".to_string()
                 } else {
                     "NO".to_string()
                 },
-                delta,
+                delta: delta.delta,
             })
             .collect(),
     }
@@ -762,7 +798,7 @@ fn parse_cursor(s: &str) -> Option<(u64, u64)> {
         (status = 400, description = "Invalid cursor"),
         (status = 401, description = "Missing/invalid bearer token"),
         (status = 403, description = "Token belongs to a different account"),
-        (status = 500, description = "Durable history unavailable")
+        (status = 503, description = "Private history service unavailable")
     ),
     security(("bearer_read" = []))
 )]
@@ -781,36 +817,39 @@ pub async fn get_account_history(
             parse_cursor(cursor).ok_or_else(|| AppError::bad_request("Invalid event cursor"))
         })
         .transpose()?;
-    let page = state
-        .sequencer
-        .get_account_events(
-            AccountId(id),
-            limit.saturating_add(1),
+    let history = state.history.as_ref().ok_or_else(|| {
+        AppError::history_unavailable("Historical data service is not configured")
+    })?;
+    let page = history
+        .events(&AccountEventQuery {
+            account_id: id,
+            limit: limit.saturating_add(1),
             before,
-            params.category,
-        )
+            category: params.category,
+        })
         .await?;
-    let retention_min_timestamp_ms = page.retention_min_timestamp_ms;
-    let durable = page.durable;
+    let (retention_min_timestamp_ms, _, history_truncated) = projection_floor(&page.status);
+    let indexed_through_height = page.status.indexed_through_height;
+    let history_complete_from_height = page.status.first_height;
     let mut events: Vec<HistoryEventResponse> = page
         .items
         .into_iter()
         .map(|e| HistoryEventResponse {
-            id: e.id(),
+            id: format!("{}.{}", e.block_height, e.seq),
             event_type: e.kind.as_str().to_string(),
             category: e.kind.category().to_string(),
             timestamp_ms: e.timestamp_ms,
             block_height: e.block_height,
-            market_id: e.market_id.map(|m| m.0),
+            market_id: e.market_id,
             order_id: e.order_id,
-            side: e.side.map(|s| s.to_string()),
-            outcome: e.outcome.map(|o| o.to_string()),
+            side: e.side,
+            outcome: e.outcome,
             qty: e.qty,
             price_nanos: e.price_nanos,
             amount_nanos: e.amount_nanos,
             realized_pnl_nanos: e.realized_pnl_nanos,
-            payout_outcome: e.payout_outcome.map(|p| p.to_string()),
-            reason: e.reason.map(|r| r.to_string()),
+            payout_outcome: e.payout_outcome,
+            reason: e.reason,
             required_nanos: e.required_nanos,
             available_nanos: e.available_nanos,
         })
@@ -824,8 +863,10 @@ pub async fn get_account_history(
         events,
         next_before,
         retention_min_timestamp_ms,
-        history_truncated: !durable || retention_min_timestamp_ms.is_some(),
-        history_scope: if durable { "durable" } else { "memory" }.to_string(),
+        history_truncated,
+        history_scope: "remote".to_string(),
+        indexed_through_height,
+        history_complete_from_height,
     }))
 }
 
@@ -870,7 +911,7 @@ pub struct EquityRangeParams {
         (status = 200, description = "Per-account equity series", body = EquitySeriesResponse),
         (status = 401, description = "Missing/invalid bearer token"),
         (status = 403, description = "Token belongs to a different account"),
-        (status = 500, description = "Durable history unavailable")
+        (status = 503, description = "Private history service unavailable")
     ),
     security(("bearer_read" = []))
 )]
@@ -888,12 +929,18 @@ pub async fn get_equity(
         Some("30d") => now_ms.saturating_sub(30 * 24 * 3_600_000),
         _ => 0,
     };
-    let page = state
-        .sequencer
-        .get_equity_series(AccountId(id), since_ms)
+    let history = state.history.as_ref().ok_or_else(|| {
+        AppError::history_unavailable("Historical data service is not configured")
+    })?;
+    let page = history
+        .equity(&EquityQuery {
+            account_id: id,
+            since_ms,
+        })
         .await?;
-    let retention_min_timestamp_ms = page.retention_min_timestamp_ms;
-    let durable = page.durable;
+    let (retention_min_timestamp_ms, _, projection_truncated) = projection_floor(&page.status);
+    let indexed_through_height = page.status.indexed_through_height;
+    let history_complete_from_height = page.status.first_height;
     let source_points = page.source_points;
     let downsampled = page.downsampled;
     let points: Vec<EquityPointResponse> = page
@@ -910,11 +957,13 @@ pub async fn get_equity(
         account_id: id,
         points,
         retention_min_timestamp_ms,
-        history_truncated: !durable
+        history_truncated: projection_truncated
             || retention_min_timestamp_ms.is_some_and(|floor| since_ms < floor),
-        history_scope: if durable { "durable" } else { "memory" }.to_string(),
+        history_scope: "remote".to_string(),
         source_points,
         downsampled,
+        indexed_through_height,
+        history_complete_from_height,
     }))
 }
 
@@ -1254,6 +1303,9 @@ pub async fn create_api_key(
                 .await?
         }
     };
+    state
+        .insert_read_api_key_owner(token_hash, account_id)
+        .await;
     Ok(Json(CreateApiKeyResponse {
         id: key_id,
         token,
@@ -1314,7 +1366,15 @@ pub async fn revoke_api_key(
     let signer = parse_signer(&req.signer_pubkey_hex)?;
     let canonical = canonical_api_key_revoke_bytes(account_id, req.api_key_id, req.nonce);
 
-    match req.auth_scheme {
+    let revoked_hash = state
+        .sequencer
+        .api_keys_for_account(account_id)
+        .await?
+        .into_iter()
+        .find(|key| key.id == req.api_key_id && key.is_active())
+        .map(|key| key.hash);
+
+    let revoke_result = match req.auth_scheme {
         AuthScheme::RawP256 => {
             let signed = SignedApiKeyRevoke {
                 account_id,
@@ -1323,11 +1383,17 @@ pub async fn revoke_api_key(
                 signer,
                 signature: parse_raw_signature(req.signature_hex.as_deref())?,
             };
-            state.sequencer.revoke_api_key_signed(signed).await?;
+            if let Some(hash) = revoked_hash {
+                state.remove_read_api_key(&hash).await;
+            }
+            state.sequencer.revoke_api_key_signed(signed).await
         }
         AuthScheme::WebAuthn => {
             verify_webauthn_intent(&state, &signer, &canonical, req.webauthn_assertion.as_ref())
                 .await?;
+            if let Some(hash) = revoked_hash {
+                state.remove_read_api_key(&hash).await;
+            }
             state
                 .sequencer
                 .revoke_api_key_authenticated(AuthenticatedApiKeyRevoke {
@@ -1336,8 +1402,14 @@ pub async fn revoke_api_key(
                     nonce: req.nonce,
                     signer,
                 })
-                .await?;
+                .await
         }
+    };
+    if let Err(error) = revoke_result {
+        if let Some(hash) = revoked_hash {
+            state.insert_read_api_key_owner(hash, account_id).await;
+        }
+        return Err(error.into());
     }
     Ok(Json(serde_json::json!({ "success": true })))
 }
@@ -1356,8 +1428,7 @@ async fn bearer_account(state: &AppState, headers: &HeaderMap) -> Result<Account
         .trim();
     let token_hash = api_key_hash(token.as_bytes());
     state
-        .sequencer
-        .lookup_api_key(token_hash)
+        .read_api_key_owner(token_hash)
         .await?
         .ok_or_else(|| AppError::unauthorized("Invalid or revoked API key"))
 }

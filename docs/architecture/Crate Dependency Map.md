@@ -33,7 +33,25 @@ user-side client and never mutates sequencer state directly.
 
 The client tier sits below the DTO crate. `sybil-api-types` is the shared source of truth for request/response shapes; `sybil-client` is THE Rust HTTP client for `sybil-api` (SYB-171), typed against those DTOs. In-tree Rust consumers use it: `sybil-polymarket` (the mirror + market maker), the `sybil-admin` CLI (a binary inside `sybil-api`), and the dev L1 bridge indexer. It replaced two hand-written clients that had drifted independently — there is now exactly one, so no third should be added. It owns base-url + optional service-token (`SYBIL_SERVICE_TOKEN`) auth, response decoding, bridge service-route helpers, and the SSE block-stream consumption; each consumer keeps its own concerns (the mirror's reconnect loop and poisoned-market parsing, the indexer's L1 JSON-RPC polling, the admin's audit log) around it. `sybil-signing` is separate from the commitment schemas: it owns stable Borsh signable payload bytes for client signatures (orders, cancels, attestations, bridge withdrawals), and is used by the sequencer's signed-write verification and by signing clients.
 
-The L1 bridge scaffolding separates guest-safe protocol domains from host Ethereum plumbing. `sybil-l1-protocol` owns deposit/withdrawal hash domains and the small neutral event structs/parser shared with `SybilVault`; it remains dependency-light because it is compiled into OpenVM guests. `sybil-l1-abi` owns unconditional Alloy-generated contract calls, structs, and events for host clients. `sybil-l1-indexer` uses those crates plus `sybil-client`: it queries L1 through an Alloy provider, resolves the Sybil account through the service-only reverse bridge-key route, and submits deposits through the existing API bridge endpoint. The sequencer still receives deposits through its current `pending_l1_deposits` WAL path; the indexer does not bypass `sybil-api` or introduce a new storage dependency.
+Historical serving has a dependency-light private contract.
+`sybil-history-types` owns the versioned committed-fact batch, projector status,
+and internal query DTOs. `matching-sequencer` depends on it only to append the
+transactional outbox; standalone `sybil-history` depends on it to project and
+query a separate store; `sybil-api` depends on both the sequencer and history
+types to deliver the outbox and proxy owner-authorized reads. `sybil-history`
+does not depend on the sequencer, verifier, solver, or public API DTO crate.
+
+The L1 bridge scaffolding separates guest-safe protocol domains from host
+Ethereum plumbing. `sybil-l1-protocol` owns deposit/withdrawal hash domains and
+the small neutral event structs/parser shared with `SybilVault`; it remains
+dependency-light because it is compiled into OpenVM guests. `sybil-l1-abi`
+owns unconditional Alloy-generated contract calls, structs, and events for
+host clients. `sybil-l1-indexer` uses those crates plus `sybil-client`: it
+queries L1 through an Alloy provider, resolves the Sybil account through the
+service-only reverse bridge-key route, and submits deposits through the
+existing API bridge endpoint. The sequencer still receives deposits through
+its current `pending_l1_deposits` WAL path; the indexer does not bypass
+`sybil-api` or introduce a new storage dependency.
 
 The Python `arena/` sits outside the Rust workspace entirely, connected only via HTTP to `sybil-api`. This clean boundary means the Python bots can be developed, tested, and deployed independently of the Rust code — they only need a running server. The separation also means the arena doesn't need to compile any Rust code, which is important for Python-first developers who want to build bots without a Rust toolchain.
 
@@ -52,6 +70,10 @@ graph TB
     ZK --> SEQ
 
     SEQ --> API["sybil-api"]
+    HISTTYPES["sybil-history-types<br/>private committed facts + queries"] --> SEQ
+    HISTTYPES --> HIST["sybil-history<br/>private projector + query service"]
+    HISTTYPES --> API
+    API -.->|"private HTTP"| HIST
     SEQ --> SEQSIM["sequencer-sim<br/>dev-only · sybil-sim bin"]
     API -.->|"HTTP"| ARENA["arena/ · Python"]
 
@@ -94,6 +116,8 @@ graph TB
   stay narrower where possible
 - No upward dependencies: engine doesn't know about solvers, solvers don't know about API
 - Sequencer composes middle-tier crates into the block production pipeline
+- `sybil-history-types` is the narrow replay contract; `sybil-history` owns
+  product-history storage/query load without depending on the sequencer
 - `sybil-zk` is guest-safe verification; `sybil-prover` owns portable proof jobs and host-side prover input construction
 - `sybil-prover witgen ...` is sequencer-side tooling for exporting latest-block proof jobs from the store, gated behind `sequencer-store`
 - Default `sybil-prover` builds are the proof-job CLI/service boundary and settlement calldata encoder; they do not depend on the sequencer

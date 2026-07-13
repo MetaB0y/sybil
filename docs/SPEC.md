@@ -120,12 +120,21 @@ Two products leave the transition:
 Sybil uses block snapshots plus small acknowledged-write WALs—not event sourcing.
 
 - **qMDB A/B slots** store authenticated account and complete typed state. The committed typed-state root equals the header `state_root`.
-- **redb** stores the commit fence, blocks/witnesses, configuration/state records, WAL tables, and durable derived history.
+- **sequencer redb** stores the commit fence, blocks/witnesses,
+  configuration/state records, WAL tables, and one transactional history
+  outbox row per committed block.
+- **history redb** is owned by the private `sybil-history` process and stores
+  immutable raw history batches plus account/time/market query projections.
 - **The redb fence is the commit decision.** Recovery opens exactly the fenced qMDB slot and rejects height/root mismatch.
 
 Between blocks, separate WAL tables protect direct admits, deferred bundles, control-plane commands, deposits, withdrawals, and L1 lifecycle inputs. Replay order is fixed and tested: committed snapshot/book → admit rows/id advance → control plane/expiry → deposits → withdrawal creation → L1 lifecycle inputs; deferred bundles wait for the next normal solve.
 
-History tables—full blocks, fills, account events, raw prices, candles, and aggregates—are derived from committed blocks. They support bounded pagination, explicit retention floors, WebSocket replay, restart tests, and backup/restore drills. They never become validity inputs.
+Full canonical block replay and private recovery DA remain sequencer concerns.
+Product history—fills, account events, equity, committed prices, and candles—is
+delivered at least once from the fenced outbox. Projection is contiguous,
+genesis-bound, idempotent, and atomic. Historical reads bypass the sequencer
+actor and expose indexing/completeness metadata. Neither the outbox nor its
+projections are validity inputs or recovery DA.
 
 Canonical witness import can initialize a fresh store at a verified height. This is the implemented disaster-recovery basis for operator replacement.
 
@@ -176,7 +185,14 @@ hostile-operator successor governance remain incomplete.
 
 ## 9. API, oracle, mirrors, and agents
 
-`sybil-api` is a thin transport/operations layer around the actor. It owns REST, OpenAPI, rate limits, deployment/service auth, read-scoped bearers, P256/WebAuthn ceremonies, metrics, resumable WebSocket, convenience SSE, bounded history, proofs/DA endpoints, and static-free frontend integration. First-party realtime clients use WebSocket height resume; SSE remains a simple third-party stream.
+`sybil-api` is the transport/operations boundary around the actor and the
+private history service. It owns REST, OpenAPI, rate limits,
+deployment/service auth, account-owner checks, read-scoped bearers,
+P256/WebAuthn ceremonies, metrics, resumable WebSocket, convenience SSE,
+proofs/DA endpoints, and static-free frontend integration. Historical requests
+are owner-authorized here, then proxied with a separate private history token.
+First-party realtime clients use WebSocket height resume; SSE remains a simple
+third-party stream.
 
 `sybil-oracle` implements immediate signed-feed resolution. It verifies feed identity, market binding, signature, payout range, and irreversible lifecycle state. Truthfulness of the feed remains a trust assumption; richer quorum/bond/challenge policy is not part of the core implementation.
 
@@ -186,14 +202,19 @@ The Python arena and web frontend use the same public interfaces. The Rust clien
 
 ## 10. Deployment and trust boundary
 
-`SYBIL_DEPLOYMENT_PROFILE` distinguishes local, devnet, and prod postures. Production preflight fail-closes dangerous combinations such as dev mode, missing service token, or missing persistent data directory. The current public devnet is intentionally not the production trust posture.
+`SYBIL_DEPLOYMENT_PROFILE` distinguishes local, devnet, and prod postures.
+Production preflight fail-closes dangerous combinations such as dev mode,
+missing service/history tokens, missing history URL, or missing persistent
+sequencer data directory. The current public devnet is intentionally not the
+production trust posture.
 
 Before real value, operators must deploy the pinned real verifier, eliminate mock/unsafe acceptance, retain DA payloads, exercise backup/import/withdrawal/escape drills, configure L1 confirmation depth and monitoring, and protect admin/feed/verifier keys under the chosen governance policy. See [[Threat Model]] and [[Deployment Profiles]].
 
 The current permissionless API is also not economically resource-bounded:
 unlimited demo accounts, unbounded API-key records, zero-reservation orders,
-and unbudgeted history/read paths can grow or wedge state without deposited
-capital. These critical availability gaps must be closed or service-gated
+and an unbounded history outbox during a prolonged projector outage can grow
+state without deposited capital. These critical availability gaps must be
+closed, monitored, or service-gated
 before real-value deployment; the [dated audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md)
 owns the detailed evidence and remediation order.
 
@@ -220,7 +241,8 @@ owns the detailed evidence and remediation order.
 |---|---|
 | Domain and settlement arithmetic | `crates/matching-engine` |
 | Solvers and integer landing | `crates/matching-solver` |
-| Admission, blocks, persistence, history, bridge | `crates/matching-sequencer` |
+| Admission, blocks, canonical persistence, history outbox, bridge | `crates/matching-sequencer` |
+| Private history contract, projection, and query serving | `crates/sybil-history-types`, `crates/sybil-history` |
 | Wire types, API, WebAuthn, realtime, operations | `crates/sybil-api-types`, `crates/sybil-api` |
 | Resolution policy | `crates/sybil-oracle` |
 | Native witness and canonical verification | `crates/sybil-verifier` |

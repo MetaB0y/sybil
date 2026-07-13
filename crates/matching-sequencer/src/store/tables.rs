@@ -38,6 +38,12 @@ pub(super) const BLOCK_HEADERS: TableDefinition<u64, &[u8]> = TableDefinition::n
 pub(super) const BLOCK_WITNESSES: TableDefinition<u64, &[u8]> =
     TableDefinition::new("block_witnesses");
 
+/// Private, versioned product-history batches awaiting durable ingestion by
+/// `sybil-history`. One compact row is written atomically with the block fence;
+/// per-record indexes and rollups belong to the projector, not this database.
+pub(super) const HISTORY_OUTBOX: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("history_outbox_v1");
+
 /// Pubkey registry: compressed_point (33 bytes) → account_id (u64)
 pub(super) const PUBKEY_REGISTRY: TableDefinition<&[u8], u64> =
     TableDefinition::new("pubkey_registry");
@@ -263,7 +269,6 @@ pub(super) const KEY_FILL_HISTORY_PRUNED_THROUGH_HEIGHT: &str =
 pub(super) const KEY_EQUITY_POINTS_MIN_TIMESTAMP_MS: &str = "equity_points_min_timestamp_ms";
 pub(super) const KEY_HISTORY_EVENTS_MIN_TIMESTAMP_MS: &str = "history_events_min_timestamp_ms";
 pub(super) const KEY_LAST_HISTORY_PRUNE_HEIGHT: &str = "last_history_prune_height";
-pub(super) const KEY_ACCOUNT_HISTORY_INDEX_VERSION: &str = "account_history_index_version";
 pub(super) const KEY_PRICE_CANDLES_MIN_BUCKET_MS_PREFIX: &str = "price_candles_min_bucket_ms:";
 
 pub(super) const STORE_LAYOUT_VERSION: u64 = 1;

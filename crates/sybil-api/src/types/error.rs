@@ -126,6 +126,18 @@ impl AppError {
         }
     }
 
+    pub fn history_unavailable(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            body: ErrorBody {
+                error: error.into(),
+                code: "HISTORY_UNAVAILABLE".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
     pub fn mempool_full() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -291,6 +303,13 @@ impl From<matching_sequencer::SequencerError> for AppError {
                 AppError::internal(format!("Persistence error: {msg}"))
             }
         }
+    }
+}
+
+impl From<crate::history::HistoryClientError> for AppError {
+    fn from(error: crate::history::HistoryClientError) -> Self {
+        tracing::warn!(%error, "private history service request failed");
+        AppError::history_unavailable("Historical data is temporarily unavailable")
     }
 }
 

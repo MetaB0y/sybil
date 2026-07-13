@@ -849,12 +849,15 @@ impl Harness {
         account_id: AccountId,
         context: &str,
     ) -> Vec<crate::aggregates::HistoryEvent> {
-        let mut events = self
+        let mut events: Vec<_> = self
             .store
-            .account_events(account_id, 10_000, None, None)
-            .unwrap_or_else(|error| {
-                panic!("{context}: durable account history read failed for {account_id:?}: {error}")
-            });
+            .history_outbox_batches(10_000)
+            .unwrap_or_else(|error| panic!("{context}: history outbox read failed: {error}"))
+            .into_iter()
+            .flat_map(|batch| batch.events)
+            .filter(|event| event.account_id == account_id.0)
+            .map(history_event_from_fact)
+            .collect();
         events.extend(
             seq.analytics()
                 .pending_account_history(account_id, None, None),
@@ -863,6 +866,42 @@ impl Harness {
         events.dedup_by_key(|event| (event.account_id.0, event.block_height, event.seq));
         events
     }
+}
+
+fn history_event_from_fact(
+    fact: sybil_history_types::AccountEventFact,
+) -> crate::aggregates::HistoryEvent {
+    use crate::aggregates::{HistoryEvent, HistoryKind};
+    use sybil_history_types::AccountEventKind;
+
+    let kind = match fact.kind {
+        AccountEventKind::Created => HistoryKind::Created,
+        AccountEventKind::Placed => HistoryKind::Placed,
+        AccountEventKind::PartialFill => HistoryKind::PartialFill,
+        AccountEventKind::Filled => HistoryKind::Filled,
+        AccountEventKind::Cancelled => HistoryKind::Cancelled,
+        AccountEventKind::Expired => HistoryKind::Expired,
+        AccountEventKind::Deposit => HistoryKind::Deposit,
+        AccountEventKind::Withdrawal => HistoryKind::Withdrawal,
+        AccountEventKind::Resolved => HistoryKind::Resolved,
+        AccountEventKind::Rejected => HistoryKind::Rejected,
+    };
+    let mut event = HistoryEvent::new(
+        AccountId(fact.account_id),
+        kind,
+        fact.block_height,
+        fact.timestamp_ms,
+    );
+    event.seq = fact.seq;
+    event.market_id = fact.market_id.map(MarketId::new);
+    event.order_id = fact.order_id;
+    event.qty = fact.qty;
+    event.price_nanos = fact.price_nanos;
+    event.amount_nanos = fact.amount_nanos;
+    event.realized_pnl_nanos = fact.realized_pnl_nanos;
+    event.required_nanos = fact.required_nanos;
+    event.available_nanos = fact.available_nanos;
+    event
 }
 
 fn assert_no_negative_non_mint_balances(seq: &BlockSequencer, context: &str) {
@@ -958,7 +997,7 @@ async fn randomized_persistence_crashpoints_default_profile() {
 }
 
 #[tokio::test]
-async fn cold_restore_bounds_fill_history_per_account_to_newest_window() {
+async fn cold_restore_does_not_scan_legacy_fill_history() {
     const ACCOUNT_COUNT: usize = 4;
     const FILLS_PER_ACCOUNT: usize = 37;
     const CAP: usize = 5;
@@ -1025,20 +1064,20 @@ async fn cold_restore_bounds_fill_history_per_account_to_newest_window() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(restored.analytics.account_fills, recovered);
+    assert!(
+        restored.analytics.account_fills.is_empty(),
+        "product history belongs to sybil-history and must not extend sequencer startup"
+    );
     let restored_seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
     for &account_id in &account_ids {
-        let heights: Vec<_> = restored_seq
+        let fills = restored_seq
             .analytics()
             .account_fills(account_id, None, usize::MAX, 0)
-            .into_iter()
-            .map(|record| record.block_height)
-            .collect();
+            .into_iter();
         assert_eq!(
-            heights,
-            ((FILLS_PER_ACCOUNT - CAP + 1) as u64..=FILLS_PER_ACCOUNT as u64)
-                .rev()
-                .collect::<Vec<_>>()
+            fills.count(),
+            0,
+            "restart must not hydrate the hot fill recorder from product history"
         );
     }
 }

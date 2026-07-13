@@ -2,148 +2,157 @@
 tags: [infrastructure, storage, history]
 layer: sequencer
 status: current
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
 # Historical data serving
 
 > [!summary] In one paragraph
-> Live state, recovery state, and query history are different products. The
-> actor keeps small hot caches; redb stores committed blocks, DA, prices,
-> candles, account/fill/equity history, and aggregate read models. Historical
-> rows are written only with a committed block and never feed validity. Reads
-> are bounded and expose retention gaps explicitly. Derived account history is
-> age-bounded and globally row-capped in production.
+> Live exchange state, canonical recovery data, and product history are three
+> different products. A fenced sequencer commit appends one immutable private
+> history batch to a transactional outbox. `sybil-history` consumes those
+> batches at least once, atomically advances a contiguous checkpoint, and owns
+> historical indexes, candles, pagination, and query load. History never feeds
+> matching, settlement, roots, proofs, or escape reconstruction.
 
 ## Data path
 
 ```mermaid
 flowchart LR
-    BLOCK["Prepared block"] --> TX["One redb commit transaction"]
-    TX --> CANON["Canonical block + witness / DA"]
-    TX --> DERIVED["Fills · events · prices · candles · equity · aggregates"]
-    TX --> FENCE["Commit fence"]
-    CANON --> HOT["Small actor hot ring"]
-    DERIVED --> API["Paginated REST reads"]
-    CANON --> REPLAY["WS replay / exact block / DA"]
-    HOT --> REPLAY
+    BLOCK["Prepared block"] --> FENCE["Sequencer redb fence transaction"]
+    FENCE --> STATE["Canonical state · block metadata"]
+    FENCE --> OUTBOX["CommittedHistoryBatchV1 outbox"]
+    OUTBOX -.->|"at least once · private HTTP"| HIST["sybil-history projector"]
+    HIST --> RAW["Immutable raw batches"]
+    HIST --> VIEWS["Fills · events · equity · prices · candles"]
+    API["sybil-api owner auth"] -->|"private query"| VIEWS
+    USER["Authenticated client"] --> API
+    FENCE -.->|"post-commit"| DA["Canonical block / recovery DA"]
 ```
 
-History is visible only after the same transaction that commits the block and
-fence succeeds. Failed candidate blocks do not leak derived rows. Pruning is a
-separate bounded transaction and may lag; APIs advertise only committed
-retention floors.
+The outbox row is committed or rolled back with the canonical fence, so a
+failed candidate block cannot leak derived facts. Delivery is outside both the
+sequencer actor and the commit path. The publisher deletes a row only after the
+history checkpoint covers its height. A service outage therefore makes history
+lag and grows the durable backlog; it does not stop trading or block production.
 
-## Stored families
+`CommittedHistoryBatchV1` is genesis-bound and contains the block/state hashes,
+commit timestamp, account-attributed fill/event/equity facts, public committed
+price facts, and a canonical payload hash. It contains stable domain facts, not
+sequencer redb keys. The batch is private because account attribution is not on
+the public tape described by [[Block Data Boundaries]]. It is derived product
+data, not [[Data Availability|recovery DA]].
 
-| Family | Role | Validity status |
-|---|---|---|
-| Full sealed blocks | Exact-height reads and WebSocket replay | Canonical block data |
-| Canonical witnesses / DA artifacts | Audit, proving, recovery | Commitment-bound private payload |
-| Fill and account events | Portfolio/activity history | Derived index |
-| Raw committed prices | Short-range charts/backtests | Derived from sealed blocks |
-| OHLCV candles | Long-window charts | Derived rollup |
-| Equity and aggregate trackers | Product analytics | Derived read model |
-| Arena decision SQLite | Bot reasoning/cost/equity | Separate non-exchange database |
+## Projector rules
 
-Derived rows can be rebuilt from retained canonical blocks where sufficient
-inputs remain, but the implementation does not currently promise a universal
-rebuild command for every table.
+`sybil-history` has one write actor. Applying a batch stores the raw batch,
+updates every projection and configured candle resolution, and advances the
+checkpoint in one redb transaction. Exact redelivery is a verified no-op.
+Unsupported schema versions, invalid fact order/heights, gaps, genesis changes,
+parent mismatches, and same-height/different-payload replays fail closed.
 
-## Read contracts
+Queries bypass the write actor and run as blocking reads in the history process.
+This is the critical isolation property: arbitrarily busy historical clients
+cannot fill the sequencer mailbox or execute range scans in the sequencer
+database. Cursor and account/time indexes bound pages and support opening
+equity anchors and windowed leaderboard baselines without scanning from
+genesis. A semaphore remains owned by the blocking worker, so timed-out clients
+cannot leave unbounded orphaned scans. Candle resolutions are part of the
+persisted projection configuration and a changed set fails startup rather than
+claiming false completeness.
 
-- `GET /v1/blocks/{height}` checks the hot ring then durable full blocks.
-- `GET /v1/blocks?before_height=&limit=` pages newest-first with bounded limits.
-- WebSocket `from_block` replays durable blocks and emits a typed
-  `retention_gap` when the requested height is no longer retained.
-- Raw market prices page by time/height and return `retention_min_height`.
-- Candles return committed sparse buckets; empty buckets are omitted.
-- Account fills use opaque stable cursors. Fill/event response envelopes and
-  equity responses expose `retention_min_timestamp_ms` and
-  `history_truncated`; durable read failure is an error, not an empty page.
-- Account truncation comes from per-account deletion high-water marks, not a
-  global oldest row. In-memory dev fallback declares `history_scope=memory`.
-- Equity ranges include the last retained point before the requested boundary
-  as an opening anchor for chart and leaderboard arithmetic, and represent at
-  most 5,000 samples with explicit `source_points` / `downsampled` metadata.
-
-SSE remains a live convenience stream without replay guarantees. A missing row
-inside retention, a height below retention, and an in-memory deployment with no
-durable history are distinct API outcomes; see [[REST API]].
-
-## Retention
-
-Block/DA, raw-price, candle, fill, equity, and account-event retention are
-configured independently. `0` means unbounded for that knob. Pruning must:
-
-1. delete only rows older than the committed policy floor;
-2. update metadata in the same transaction;
-3. preserve rows required by the live head/fence and recovery invariants;
-4. make API gap semantics agree with the committed floor.
-
-`docker-compose.prod.yml` retains block/DA, raw-price, and candle data for seven
-days. At its 10-second block cadence that is
-60,480 `blocks_full` heights and their paired DA artifact/manifest rows, plus
-60,480 raw-price heights per market. Candle windows are 604,800 seconds for
-the 60-, 300-, and 3,600-second resolutions (10,080, 2,016, and 168 buckets per
-market respectively). Local/base configuration retains the binary defaults;
-it does not inherit these production values.
-
-The overlay schedules age pruning every 60 blocks (ten minutes) and keeps the
-existing 10,000-row ceiling per pass. This is deliberately more frequent than
-the local 1,000-block default so per-market raw rows are less likely to outrun
-the bounded worker; it remains possible to lag if sustained ingress exceeds
-that delete throughput.
-
-Fills and account events retain 30 days and at most 1,000,000 global rows each.
-Equity retains 31 days and at most 2,000,000 rows so the existing 30-day view
-fits within the age policy. Timestamp-first indexes make age eviction ordered;
-the global stock ceilings are enforced in each block commit transaction, so
-ingress cannot outrun the periodic maintenance pass.
-
-The age settings are target floors, not physical redb byte quotas: per-row sizes
-vary, market count multiplies price/candle stock, and the bounded maintenance
-pass can temporarily lag. It does not prune canonical fenced state, the
-latest-only recovery header/witness, account or live-order state, and it does
-not promise that the redb file immediately shrinks after deletion. Global row
-ceilings nevertheless bound logical stock for the three account-history tables.
-
-Retention is not DA availability. Deleting the only canonical payload can make
-an accepted validium root unrecoverable even if product history remains. The
-devnet's seven-day local DA window must not be used as the future escape
-retention SLO; accepted-root reconstruction artifacts need independent
-retention, disclosure, monitoring, and restore drills.
-
-## When to split a history service
-
-Keep history inside the sequencer process while commit coupling and query load
-remain manageable. Split only when measurements show read/retention work
-competing with block production. A split service must consume a committed,
-replayable boundary; it must not invent a second source of exchange truth.
-
-## Invariants and checks
-
-- No history/analytics row changes state roots, matching, or settlement.
-- All list/range APIs have bounded allocation and stable pagination.
-- Restart tests cover cold reads beyond hot-cache eviction.
-- Retention tests cover exact floors, typed gaps, and restart persistence.
-- Candle/price tests use sealed marks only; no private open-batch data leaks.
-- `frontend/DATA_MAP.md` changes with any page-visible endpoint or provenance.
-
-## Implementation map
+## Ownership
 
 | Concern | Owner |
 |---|---|
-| Commit and history tables | `matching-sequencer/src/store/` |
-| Retention job/metadata | `store/retention.rs` |
-| Fill/event/equity/aggregate deltas | sequencer analytics/aggregate modules |
-| REST pagination/gap mapping | `sybil-api/src/routes/` |
-| Realtime replay/gaps | API WebSocket plus sequencer block queries |
+| Current balances, positions, orders, counters | sequencer/qMDB + fenced redb |
+| One committed batch and unacknowledged delivery backlog | sequencer redb outbox |
+| Raw product-history facts and query projections | `sybil-history` |
+| Browser/session/passkey and account ownership checks | `sybil-api` |
+| Exact blocks, witnesses, proof material, reconstruction/escape data | canonical block/DA pipeline |
+
+The API uses a dedicated `SYBIL_HISTORY_TOKEN`; it does not reuse the operator
+service token. Internal ingestion/query routes are not browser routes. Public
+account-history handlers authenticate the owner before sending an
+account-scoped internal query. Active read-key ownership is snapshotted into
+the API at startup and maintained after key create/revoke acknowledgements, so
+this authorization check is O(1) and does not enqueue a sequencer RPC.
+
+## Read contracts
+
+- Fills and events are stable cursor pages with existing account-ownership
+  authorization.
+- Equity includes the last sample before a requested boundary as an opening
+  anchor and bounds/downsamples large responses explicitly.
+- Leaderboard bases are refreshed into an API read model once per committed
+  block. Windowed rankings combine that model with history-service opening
+  anchors; all-time rankings need no historical scan and neither path performs
+  per-request sequencer work.
+- Price points and sparse OHLCV candles page by stable height/time cursors.
+- Responses expose `indexed_through_height` and
+  `history_complete_from_height`. An unavailable/unconfigured backend is a
+  typed `HISTORY_UNAVAILABLE` response, never an empty successful history.
+
+The first indexed batch may be above height one when a new projector is
+bootstrapped from an existing sequencer. That floor is disclosed as incomplete
+history. A new genesis is a distinct history domain and invalidates old cursors.
+
+## Retention and storage evolution
+
+The initial service deliberately uses a separate redb file and retains raw
+batches and projections without the sequencer's former 30/31-day and global-row
+caps. This is appropriate for the current devnet, not a claim that one local
+redb file is the permanent archive.
+
+Before network-lifetime preservation is promised, raw committed batches need an
+immutable off-host archive plus restore/reprojection drills. The stable batch
+contract permits a later PostgreSQL serving projection, object storage archive,
+coarser equity rollups, or analytical store without changing the sequencer.
+Policy for deletion/export of private account history remains a product/legal
+decision.
+
+Canonical block/DA retention is separate. Deleting product history does not
+invalidate a root; retaining product history does not make positions
+reconstructable or supply an escape witness.
+
+## Operations and failure behavior
+
+- Monitor outbox rows/oldest height, delivery failures/duration, history
+  checkpoint, and lag to the sequencer head.
+- Back up the history volume independently from canonical sequencer state.
+- A prolonged service outage can exhaust sequencer disk through the unbounded
+  outbox. Devnet alerts and discloses; a production halt/drop policy requires a
+  separate explicit decision. Silent dropping is forbidden.
+- The current Compose topology puts both processes on one host. It isolates
+  CPU/mailbox/database work, not host failure or disk contention.
+- Outbox catch-up delivers and acknowledges bounded prefixes; one local redb
+  commit removes the whole delivered prefix to limit contention with future
+  block fences.
+
+## Invariants and checks
+
+1. History rows never affect state roots, matching, settlement, or verification.
+2. No history network call occurs in the fenced commit or sequencer actor.
+3. Outbox acknowledgement follows verified durable application.
+4. Apply is contiguous, genesis-bound, idempotent, and atomic.
+5. Historical list/range APIs bound allocation and expose lag/completeness.
+6. Load tests saturate authenticated history reads while checking live
+   health/admission/block latency independently.
+
+## Implementation map
+
+| Concern | Location |
+|---|---|
+| Shared batch/query contract | `crates/sybil-history-types` |
+| Atomic outbox append/ack | `matching-sequencer/src/store/commit.rs`, `history_outbox.rs` |
+| Delivery and private client | `sybil-api/src/history.rs` |
+| Projector/store/private HTTP | `crates/sybil-history` |
+| Public history handlers | `sybil-api/src/routes/accounts.rs`, `markets.rs`, `leaderboard.rs` |
 
 ## See also
 
 - [[Persistence]]
 - [[Block Data Boundaries]]
-- [[WebSocket Block Stream]]
-- [[Fill History Persistence]]
+- [[REST API]]
 - [[Data Availability]]
+- [ADR-0018](../../adr/0018-extract-private-history-service.md)

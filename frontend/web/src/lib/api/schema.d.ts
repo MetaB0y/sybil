@@ -1275,9 +1275,13 @@ export interface components {
       /** @description The supplied forward cursor may have skipped pruned fills. */
       cursor_gap: boolean;
       fills: components["schemas"]["AccountFillResponse"][];
+      /** Format: int64 */
+      history_complete_from_height?: number | null;
       history_scope: string;
       /** @description True means rows older than the retention boundary are unavailable. */
       history_truncated: boolean;
+      /** Format: int64 */
+      indexed_through_height?: number | null;
       /** @description Cursor to continue forward pagination, when this was a forward page. */
       next_after?: string | null;
       /**
@@ -1315,8 +1319,12 @@ export interface components {
     };
     AccountHistoryPageResponse: {
       events: components["schemas"]["HistoryEventResponse"][];
+      /** Format: int64 */
+      history_complete_from_height?: number | null;
       history_scope: string;
       history_truncated: boolean;
+      /** Format: int64 */
+      indexed_through_height?: number | null;
       next_before?: string | null;
       /** Format: int64 */
       retention_min_timestamp_ms?: number | null;
@@ -2080,10 +2088,14 @@ export interface components {
       /** Format: int64 */
       account_id: number;
       downsampled: boolean;
+      /** Format: int64 */
+      history_complete_from_height?: number | null;
       /** @description `durable` for redb-backed history, `memory` for bounded dev fallback. */
       history_scope: string;
       /** @description True when the requested range begins before the retained boundary. */
       history_truncated: boolean;
+      /** Format: int64 */
+      indexed_through_height?: number | null;
       points: components["schemas"]["EquityPointResponse"][];
       /**
        * Format: int64
@@ -2940,6 +2952,10 @@ export interface components {
     };
     PriceCandlesResponse: {
       candles: components["schemas"]["PriceCandleResponse"][];
+      /** Format: int64 */
+      history_complete_from_height?: number | null;
+      /** Format: int64 */
+      indexed_through_height?: number | null;
       /** Format: int32 */
       market_id: number;
       /** Format: int64 */
@@ -2950,6 +2966,16 @@ export interface components {
       retention_min_bucket_ms?: number | null;
     };
     PriceHistoryResponse: {
+      /**
+       * Format: int64
+       * @description First source height represented after projection bootstrap/retention.
+       */
+      history_complete_from_height?: number | null;
+      /**
+       * Format: int64
+       * @description Highest source block durably projected by the private history service.
+       */
+      indexed_through_height?: number | null;
       /** Format: int32 */
       market_id: number;
       /** Format: int64 */
@@ -4161,8 +4187,8 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Durable history unavailable */
-      500: {
+      /** @description Private history service unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -4198,6 +4224,13 @@ export interface operations {
           "application/json": components["schemas"]["AccountHistoryPageResponse"];
         };
       };
+      /** @description Invalid cursor */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4212,8 +4245,8 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Durable history unavailable */
-      500: {
+      /** @description Private history service unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -4254,6 +4287,13 @@ export interface operations {
           "application/json": components["schemas"]["AccountFillPageResponse"];
         };
       };
+      /** @description Invalid cursor */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Missing/invalid bearer token */
       401: {
         headers: {
@@ -4268,8 +4308,8 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Durable history unavailable */
-      500: {
+      /** @description Private history service unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -5629,6 +5669,13 @@ export interface operations {
           "application/json": components["schemas"]["LeaderboardResponse"];
         };
       };
+      /** @description History service unavailable for windowed ranking */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   list_markets: {
@@ -6006,6 +6053,13 @@ export interface operations {
           "application/json": components["schemas"]["PriceCandlesResponse"];
         };
       };
+      /** @description History service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   get_price_history: {
@@ -6037,6 +6091,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["PriceHistoryResponse"];
         };
+      };
+      /** @description History service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

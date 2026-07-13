@@ -25,6 +25,8 @@ sybil/
 │   ├── sequencer-sim/             # Dev-only agent-based simulation driving the sequencer (bin: sybil-sim)
 │   ├── sybil-api/                 # HTTP API server for agent trading
 │   ├── sybil-api-types/           # Shared REST/WebSocket DTOs and OpenAPI schema
+│   ├── sybil-history/             # Private durable history projector and query service
+│   ├── sybil-history-types/       # Neutral sequencer-to-history facts and query DTOs
 │   ├── sybil-client/              # Shared Rust HTTP/SSE client
 │   ├── sybil-signing/             # Canonical client-action signing bytes
 │   ├── sybil-oracle/              # Oracle/resolution service

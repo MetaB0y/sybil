@@ -4,7 +4,7 @@
 // observability). No value here is committed into a block's state root.
 #![allow(clippy::disallowed_types)]
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -33,13 +33,10 @@ use crate::crypto::{
     verify_signed_order, verify_signed_profile_update,
 };
 use crate::error::SequencerError;
-use crate::market_info::{
-    AccountFillCursor, AccountFillRecord, MarketMetadata, MarketSearchQuery, PriceCandle,
-    PriceCandlePage, PriceHistoryPage, PricePoint, RetainedHistoryPage,
-};
+use crate::market_info::{MarketMetadata, MarketSearchQuery};
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
-    BlockSequencer, LeaderboardRow, OrderSubmission, PendingOrderInfo, PreparedBlock,
+    BlockSequencer, LeaderboardBase, OrderSubmission, PendingOrderInfo, PreparedBlock,
     SequencerConfig,
 };
 use crate::store::{
@@ -64,7 +61,6 @@ use self::infra::{IndicativeSolveGate, MailboxMonitor, TokenBucket};
 use self::messages::SequencerTestCrashpoint;
 use self::messages::{SequencerActor, SequencerActorArgs, SequencerActorState};
 use self::production::BlockTickOutcome;
-use self::queries::{limit_price_point_page, price_candle_page_from_points};
 use self::supervisor::{
     SequencerHandleInner, SequencerSupervisor, SequencerSupervisorArgs, SequencerSupervisorMsg,
 };

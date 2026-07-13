@@ -30,6 +30,8 @@ class AccountFillPageResponse:
             fills (list[AccountFillResponse]):
             history_scope (str):
             history_truncated (bool): True means rows older than the retention boundary are unavailable.
+            history_complete_from_height (int | None | Unset):
+            indexed_through_height (int | None | Unset):
             next_after (None | str | Unset): Cursor to continue forward pagination, when this was a forward page.
             pruned_through_height (int | None | Unset): Highest block from which this account had a fill row removed.
             retention_min_timestamp_ms (int | None | Unset):
@@ -39,6 +41,8 @@ class AccountFillPageResponse:
     fills: list[AccountFillResponse]
     history_scope: str
     history_truncated: bool
+    history_complete_from_height: int | None | Unset = UNSET
+    indexed_through_height: int | None | Unset = UNSET
     next_after: None | str | Unset = UNSET
     pruned_through_height: int | None | Unset = UNSET
     retention_min_timestamp_ms: int | None | Unset = UNSET
@@ -62,6 +66,18 @@ class AccountFillPageResponse:
         history_scope = self.history_scope
 
         history_truncated = self.history_truncated
+
+        history_complete_from_height: int | None | Unset
+        if isinstance(self.history_complete_from_height, Unset):
+            history_complete_from_height = UNSET
+        else:
+            history_complete_from_height = self.history_complete_from_height
+
+        indexed_through_height: int | None | Unset
+        if isinstance(self.indexed_through_height, Unset):
+            indexed_through_height = UNSET
+        else:
+            indexed_through_height = self.indexed_through_height
 
         next_after: None | str | Unset
         if isinstance(self.next_after, Unset):
@@ -90,6 +106,10 @@ class AccountFillPageResponse:
             "history_scope": history_scope,
             "history_truncated": history_truncated,
         })
+        if history_complete_from_height is not UNSET:
+            field_dict["history_complete_from_height"] = history_complete_from_height
+        if indexed_through_height is not UNSET:
+            field_dict["indexed_through_height"] = indexed_through_height
         if next_after is not UNSET:
             field_dict["next_after"] = next_after
         if pruned_through_height is not UNSET:
@@ -120,6 +140,26 @@ class AccountFillPageResponse:
         history_scope = d.pop("history_scope")
 
         history_truncated = d.pop("history_truncated")
+
+        def _parse_history_complete_from_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        history_complete_from_height = _parse_history_complete_from_height(d.pop("history_complete_from_height", UNSET))
+
+
+        def _parse_indexed_through_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        indexed_through_height = _parse_indexed_through_height(d.pop("indexed_through_height", UNSET))
+
 
         def _parse_next_after(data: object) -> None | str | Unset:
             if data is None:
@@ -156,6 +196,8 @@ class AccountFillPageResponse:
             fills=fills,
             history_scope=history_scope,
             history_truncated=history_truncated,
+            history_complete_from_height=history_complete_from_height,
+            indexed_through_height=indexed_through_height,
             next_after=next_after,
             pruned_through_height=pruned_through_height,
             retention_min_timestamp_ms=retention_min_timestamp_ms,

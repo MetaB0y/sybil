@@ -1,80 +1,63 @@
 ---
 tags: [infrastructure, storage]
 layer: sequencer
-crate: matching-sequencer
+crate: sybil-history
 status: current
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
-# Fill History Persistence
+# Fill history persistence
 
-`GET /v1/accounts/{id}/fills` is a user-facing history endpoint. It should survive restarts for the same reason balances and resting orders do: after a trade happens, the account owner expects the audit trail, portfolio UI, and bot status dashboard to remain consistent.
+`GET /v1/accounts/{id}/fills` is a private owner-facing audit/product endpoint.
+Balances and positions are canonical current state; fill rows are durable
+derived facts that explain how that state changed.
 
-## Data Model
+## Data model and commit boundary
 
-The sequencer already derives `AccountFillRecord` when finalizing a block. Each record stores:
+The sequencer derives `AccountFillRecord` during committed block production.
+The record contains the order id, fill quantity/price, block height, timestamp,
+and signed per-market/outcome position deltas. Before the fenced redb commit it
+converts the current block delta to `AccountFillFact` inside a
+`CommittedHistoryBatchV1`.
 
-- `order_id`
-- `fill_qty`
-- `fill_price`
-- `block_height`
-- `timestamp_ms`
-- `position_deltas`: `(market_id, outcome, signed_delta)`
+The batch outbox row is written in the same transaction as the canonical state
+fence. Therefore a committed block always has a replayable fill export and an
+uncommitted candidate never leaks one. The sequencer does not write the serving
+index, call the history process, or wait for projection.
 
-Persistence stores these records in redb table `fill_history`:
+`sybil-history` applies the raw batch and its fill projection atomically. The
+key is ordered by `(account_id, block_height, order_id)`, making the public
+`"<block_height>.<order_id>"` cursor stable. Exact batch redelivery is a no-op;
+same-height content conflicts fail closed.
 
-```text
-key   = account_id || block_height || order_id
-value = msgpack(AccountFillRecord)
-```
+## Serving
 
-All key components are big-endian `u64`, so lexicographic order groups records
-by account and then by block height. `save_block()` inserts the untrimmed delta
-produced by the committing block; post-commit callers may contribute only cache
-rows whose height equals that block. It never replays older hot-cache rows,
-because that would resurrect rows removed by retention.
+`sybil-api` first authorizes the account owner, then sends an account-scoped
+query to the private history service with a dedicated service credential.
+Forward cursor pages are ascending; default/offset pages remain newest-first
+for compatibility. Market filtering checks the fill's position deltas.
 
-The timestamp-first `fill_history_by_time` index is committed atomically with
-the primary row. It supports global age and row-ceiling eviction without an
-all-table scan.
+The response exposes the projector's `indexed_through_height` and
+`history_complete_from_height`. History service failure is a typed unavailable
+response, not an empty page and not a reason to stop trading. The API does not
+merge in-memory sequencer records with remote pages because dual-source cursor
+semantics are unsafe.
 
-The public cursor is the stable string `"<block_height>.<order_id>"`, returned
-on each fill as `cursor`. `GET /v1/accounts/{id}/fills?after=<cursor>&limit=N`
-returns matching fills strictly after that cursor in ascending cursor order.
-`0.0` is the start sentinel. The older `offset` query remains deprecated. The
-response envelope includes `fills`, `next_after`,
-`retention_min_timestamp_ms`, `pruned_through_height`, `cursor_gap`, and
-`history_truncated`; start means all retained history, not an indefinite
-archive. Bot clients stop and reconcile canonical portfolio state when a saved
-forward cursor falls at or below the pruned-through height.
+Sequencer restart restores canonical counters and aggregate snapshots, not
+fill rows. The hot fill recorder may be empty after restart without affecting
+the durable history endpoint or the canonical all-time fill count.
 
-## Recovery
+## Privacy and authority
 
-Startup reads retained `fill_history` rows, decodes the account id from the key,
-and hydrates `FillRecorder` before the actor starts serving traffic. Store-backed
-deployments serve directly from redb; durable read failures are errors, never
-fake empty hot-cache responses.
+Account-attributed fills are not on the public market tape and the internal raw
+batch/queries are not browser surfaces. Fill history is not a state-root input,
+proof input, balance authority, recovery witness, or DA substitute. Deleting or
+rebuilding the projection cannot change exchange state.
 
-Market filtering remains in memory for now by checking each record's `position_deltas`. That is acceptable at current scale and keeps the first implementation simple. If fill history grows enough to make scans expensive, add a second index keyed by `(account_id, market_id, block_height, order_id)` rather than changing the API.
+## See also
 
-## Transaction Boundary
-
-Fill history is committed inside the same redb transaction as the block header, market metadata, clearing prices, order-book snapshot, and account-state fence flip. The durable rows are sourced from an untrimmed per-block delta captured before the hot cache applies `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT`, so a cap of `0` disables only the hot window and never suppresses durable rows. That gives a simple guarantee:
-
-- If a block is committed, its fill history is committed.
-- If a block is not committed, its fill history is ignored with the rest of the uncommitted block.
-
-The table is derived, not validity-critical. It must match committed blocks, but account balances and positions remain authoritative in qmdb/redb state.
-
-## Non-Goals
-
-- Reconstructing history from old block witnesses on startup.
-- Persisting price history or SSE replay buffers.
-- Adding a market-level fill index before there is evidence the account-level scan is too slow.
-- Treating derived fill rows as canonical balances or an indefinite audit archive.
-
-## See Also
-
-- [[Persistence]] — store layout and recovery rules
-- [[Settlement]] — where fills mutate account state
-- [[REST API]] — account fill endpoint
+- [[Historical Data Serving]]
+- [[Persistence]]
+- [[Settlement]]
+- [[REST API]]
+- [ADR-0018](../../adr/0018-extract-private-history-service.md)

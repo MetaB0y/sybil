@@ -69,17 +69,12 @@ struct RedbBlockCommit {
     header_bytes: Vec<u8>,
     history_block_bytes: Option<Vec<u8>>,
     witness_bytes: Option<Vec<u8>>,
+    history_batch_bytes: Option<Vec<u8>>,
     pubkey_rows: Vec<(Vec<u8>, crate::crypto::RegisteredPubkey)>,
     clearing_price_rows: Vec<(u32, Vec<u8>)>,
     market_volume_rows: Vec<(u32, u64)>,
     resting_orders_bytes: Vec<u8>,
-    fill_history_rows: Vec<([u8; 24], [u8; 32], Vec<u8>)>,
-    equity_point_rows: Vec<([u8; 16], [u8; 24], Vec<u8>)>,
-    history_event_rows: Vec<([u8; 24], [u8; 32], Vec<u8>)>,
     history_event_next_seq: u64,
-    durable_history_row_caps: DurableHistoryRowCaps,
-    price_point_rows: Vec<RedbPricePointRow>,
-    price_candle_resolutions_secs: Vec<u32>,
     data_feed_rows: Vec<(u64, Vec<u8>)>,
     resolution_template_rows: Vec<(String, Vec<u8>)>,
     bridge_state_bytes: Vec<u8>,
@@ -95,13 +90,7 @@ struct RedbBlockCommit {
     counters: PersistedCoreCounters,
 }
 
-struct RedbPricePointRow {
-    market_id: MarketId,
-    point: PricePoint,
-    key: [u8; 12],
-    bytes: Vec<u8>,
-}
-
+#[allow(dead_code)]
 fn enforce_durable_history_row_caps(
     txn: &redb::WriteTransaction,
     caps: DurableHistoryRowCaps,
@@ -273,6 +262,133 @@ fn enforce_durable_history_row_caps(
     Ok(())
 }
 
+fn history_event_kind(
+    kind: crate::aggregates::HistoryKind,
+) -> sybil_history_types::AccountEventKind {
+    use crate::aggregates::HistoryKind;
+    use sybil_history_types::AccountEventKind;
+    match kind {
+        HistoryKind::Created => AccountEventKind::Created,
+        HistoryKind::Placed => AccountEventKind::Placed,
+        HistoryKind::PartialFill => AccountEventKind::PartialFill,
+        HistoryKind::Filled => AccountEventKind::Filled,
+        HistoryKind::Cancelled => AccountEventKind::Cancelled,
+        HistoryKind::Expired => AccountEventKind::Expired,
+        HistoryKind::Deposit => AccountEventKind::Deposit,
+        HistoryKind::Withdrawal => AccountEventKind::Withdrawal,
+        HistoryKind::Resolved => AccountEventKind::Resolved,
+        HistoryKind::Rejected => AccountEventKind::Rejected,
+    }
+}
+
+fn build_committed_history_batch(
+    snapshot: &SequencerSnapshot<'_>,
+) -> Result<sybil_history_types::CommittedHistoryBatchV1, StoreError> {
+    use std::collections::BTreeMap;
+    use sybil_history_types::{
+        AccountEquityFact, AccountEventFact, AccountFillFact, MarketPriceFact, PositionDeltaFact,
+    };
+
+    // The explicit delta is authoritative. Current-height cache rows cover
+    // standalone/test callers that have already cleared pending state; the map
+    // makes the overlap idempotent without re-exporting older hot-cache rows.
+    let mut fills = BTreeMap::new();
+    for (account_id, record) in snapshot
+        .analytics
+        .account_fills
+        .iter()
+        .filter(|(_, record)| record.block_height == snapshot.header.height)
+        .chain(snapshot.analytics.fill_history_delta.iter())
+    {
+        fills.insert(
+            (account_id.0, record.block_height, record.order_id),
+            AccountFillFact {
+                account_id: account_id.0,
+                order_id: record.order_id,
+                fill_qty: record.fill_qty,
+                fill_price_nanos: record.fill_price.0,
+                block_height: record.block_height,
+                timestamp_ms: record.timestamp_ms,
+                position_deltas: record
+                    .position_deltas
+                    .iter()
+                    .map(|(market_id, outcome, delta)| PositionDeltaFact {
+                        market_id: market_id.0,
+                        outcome: *outcome,
+                        delta: *delta,
+                    })
+                    .collect(),
+            },
+        );
+    }
+
+    let equity = snapshot
+        .analytics
+        .equity_points_delta
+        .iter()
+        .map(|(account_id, point)| AccountEquityFact {
+            account_id: account_id.0,
+            height: point.height,
+            timestamp_ms: point.timestamp_ms,
+            portfolio_value_nanos: point.portfolio_value_nanos,
+            deposited_nanos: point.deposited_nanos,
+        })
+        .collect();
+
+    let events = snapshot
+        .analytics
+        .history_events_delta
+        .iter()
+        .map(|event| AccountEventFact {
+            account_id: event.account_id,
+            seq: event.seq,
+            block_height: event.block_height,
+            timestamp_ms: event.timestamp_ms,
+            kind: history_event_kind(event.kind),
+            market_id: event.market_id,
+            order_id: event.order_id,
+            side: event.side.clone(),
+            outcome: event.outcome.clone(),
+            qty: event.qty,
+            price_nanos: event.price_nanos,
+            amount_nanos: event.amount_nanos,
+            realized_pnl_nanos: event.realized_pnl_nanos,
+            payout_outcome: event.payout_outcome.clone(),
+            reason: event.reason.clone(),
+            required_nanos: event.required_nanos,
+            available_nanos: event.available_nanos,
+        })
+        .collect();
+
+    let prices = snapshot
+        .analytics
+        .price_points_delta
+        .iter()
+        .map(|(market_id, point)| MarketPriceFact {
+            market_id: market_id.0,
+            height: point.height,
+            timestamp_ms: point.timestamp_ms,
+            yes_price_nanos: point.yes_price.0,
+            no_price_nanos: point.no_price.0,
+            volume_nanos: point.volume_nanos,
+        })
+        .collect();
+
+    sybil_history_types::CommittedHistoryBatchV1::new(
+        snapshot.genesis_hash,
+        snapshot.header.height,
+        snapshot.header.parent_hash,
+        crate::block::hash_header(snapshot.header),
+        snapshot.header.state_root,
+        snapshot.header.timestamp_ms,
+        fills.into_values().collect(),
+        equity,
+        events,
+        prices,
+    )
+    .map_err(|error| StoreError::CorruptLayout(format!("build history batch: {error}")))
+}
+
 fn build_redb_block_commit(
     snapshot: &SequencerSnapshot<'_>,
     witness: Option<&BlockWitness>,
@@ -303,6 +419,12 @@ fn build_redb_block_commit(
 
     let witness_bytes = witness.map(rmp_serde::to_vec).transpose()?;
     let history_block_bytes = history_block.map(rmp_serde::to_vec).transpose()?;
+    // Every fenced state commit must emit its history batch. `history_block`
+    // only controls retention of the optional full block and must not silently
+    // disable the durable export contract for lower-level Store callers.
+    let history_batch_bytes = Some(rmp_serde::to_vec(&build_committed_history_batch(
+        snapshot,
+    )?)?);
 
     let pubkey_rows = snapshot
         .pubkey_registry
@@ -321,71 +443,6 @@ fn build_redb_block_commit(
         .iter()
         .map(|(&market_id, &volume)| (market_id.0, volume))
         .collect();
-
-    let mut fill_history_rows = Vec::new();
-    // A post-commit caller may have cleared the explicit delta already, so
-    // retain hot-cache rows only when they belong to this exact block. Older
-    // cache rows must never be replayed: that would resurrect pruned history.
-    for (account_id, record) in &snapshot.analytics.account_fills {
-        if record.block_height != snapshot.header.height {
-            continue;
-        }
-        fill_history_rows.push((
-            fill_history_key(*account_id, record),
-            fill_history_by_time_key(
-                record.timestamp_ms,
-                *account_id,
-                record.block_height,
-                record.order_id,
-            ),
-            rmp_serde::to_vec(record)?,
-        ));
-    }
-    for (account_id, record) in &snapshot.analytics.fill_history_delta {
-        fill_history_rows.push((
-            fill_history_key(*account_id, record),
-            fill_history_by_time_key(
-                record.timestamp_ms,
-                *account_id,
-                record.block_height,
-                record.order_id,
-            ),
-            rmp_serde::to_vec(record)?,
-        ));
-    }
-
-    let mut equity_point_rows = Vec::new();
-    for (aid, point) in &snapshot.analytics.equity_points_delta {
-        equity_point_rows.push((
-            equity_key(*aid, point.height),
-            equity_by_time_key(point.timestamp_ms, *aid, point.height),
-            rmp_serde::to_vec(point)?,
-        ));
-    }
-
-    let mut history_event_rows = Vec::new();
-    for event in &snapshot.analytics.history_events_delta {
-        history_event_rows.push((
-            history_event_key(AccountId(event.account_id), event.block_height, event.seq),
-            history_event_by_time_key(
-                event.timestamp_ms,
-                AccountId(event.account_id),
-                event.block_height,
-                event.seq,
-            ),
-            rmp_serde::to_vec(event)?,
-        ));
-    }
-
-    let mut price_point_rows = Vec::new();
-    for (market_id, point) in &snapshot.analytics.price_points_delta {
-        price_point_rows.push(RedbPricePointRow {
-            market_id: *market_id,
-            point: point.clone(),
-            key: price_point_key(*market_id, point.height),
-            bytes: rmp_serde::to_vec(point)?,
-        });
-    }
 
     let mut data_feed_rows = Vec::new();
     for feed in snapshot.lifecycle.feeds().iter() {
@@ -423,17 +480,12 @@ fn build_redb_block_commit(
         header_bytes: rmp_serde::to_vec(snapshot.header)?,
         history_block_bytes,
         witness_bytes,
+        history_batch_bytes,
         pubkey_rows,
         clearing_price_rows,
         market_volume_rows,
         resting_orders_bytes: rmp_serde::to_vec(&snapshot.resting_orders)?,
-        fill_history_rows,
-        equity_point_rows,
-        history_event_rows,
         history_event_next_seq: snapshot.analytics.history_event_next_seq,
-        durable_history_row_caps: snapshot.durable_history_row_caps,
-        price_point_rows,
-        price_candle_resolutions_secs: snapshot.price_candle_resolutions_secs.to_vec(),
         data_feed_rows,
         resolution_template_rows,
         bridge_state_bytes: rmp_serde::to_vec(snapshot.bridge_state)?,
@@ -529,6 +581,20 @@ where
         table.insert(commit.height, bytes.as_slice())?;
     }
 
+    if let Some(bytes) = &commit.history_batch_bytes {
+        let mut table = txn.open_table(HISTORY_OUTBOX)?;
+        if let Some(existing) = table.get(commit.height)? {
+            if existing.value() != bytes.as_slice() {
+                return Err(StoreError::CorruptLayout(format!(
+                    "conflicting history outbox batch at height {}",
+                    commit.height
+                )));
+            }
+            drop(existing);
+        }
+        table.insert(commit.height, bytes.as_slice())?;
+    }
+
     {
         let mut table = txn.open_table(BLOCK_WITNESSES)?;
         table.retain(|height, _| height == commit.height)?;
@@ -588,79 +654,8 @@ where
     }
 
     {
-        let mut table = txn.open_table(FILL_HISTORY)?;
-        let mut by_time = txn.open_table(FILL_HISTORY_BY_TIME)?;
-        for (key, time_key, bytes) in &commit.fill_history_rows {
-            table.insert(key.as_slice(), bytes.as_slice())?;
-            by_time.insert(time_key.as_slice(), 0)?;
-        }
-    }
-
-    {
-        let mut table = txn.open_table(EQUITY_POINTS)?;
-        let mut by_time = txn.open_table(EQUITY_POINTS_BY_TIME)?;
-        for (key, time_key, bytes) in &commit.equity_point_rows {
-            table.insert(key.as_slice(), bytes.as_slice())?;
-            by_time.insert(time_key.as_slice(), 0)?;
-        }
-    }
-
-    {
-        let mut table = txn.open_table(HISTORY_EVENTS)?;
-        let mut by_time = txn.open_table(HISTORY_EVENTS_BY_TIME)?;
-        for (key, time_key, bytes) in &commit.history_event_rows {
-            table.insert(key.as_slice(), bytes.as_slice())?;
-            by_time.insert(time_key.as_slice(), 0)?;
-        }
-    }
-    {
         let mut counters = txn.open_table(COUNTERS)?;
         counters.insert(KEY_HISTORY_EVENT_NEXT_SEQ, commit.history_event_next_seq)?;
-    }
-
-    enforce_durable_history_row_caps(&txn, commit.durable_history_row_caps)?;
-
-    {
-        let mut table = txn.open_table(PRICE_POINTS)?;
-        let mut by_height = txn.open_table(PRICE_POINTS_BY_HEIGHT)?;
-        for row in &commit.price_point_rows {
-            table.insert(row.key.as_slice(), row.bytes.as_slice())?;
-            by_height.insert(
-                price_point_by_height_key(row.point.height, row.market_id).as_slice(),
-                0,
-            )?;
-        }
-    }
-
-    if !commit.price_point_rows.is_empty() && !commit.price_candle_resolutions_secs.is_empty() {
-        let mut candles = txn.open_table(PRICE_CANDLES)?;
-        let mut candles_by_resolution = txn.open_table(PRICE_CANDLES_BY_RESOLUTION)?;
-        for row in &commit.price_point_rows {
-            for &resolution_secs in &commit.price_candle_resolutions_secs {
-                if resolution_secs == 0 {
-                    continue;
-                }
-                let mut candle = PriceCandle::from_point(resolution_secs, &row.point);
-                let key = price_candle_key(row.market_id, resolution_secs, candle.bucket_start_ms);
-                let index_key = price_candle_by_resolution_key(
-                    resolution_secs,
-                    candle.bucket_start_ms,
-                    row.market_id,
-                );
-                if let Some(existing) = {
-                    candles
-                        .get(key.as_slice())?
-                        .map(|value| rmp_serde::from_slice(value.value()))
-                        .transpose()?
-                } {
-                    candle = existing;
-                    candle.merge_point(&row.point);
-                }
-                let bytes = rmp_serde::to_vec(&candle)?;
-                candles.insert(key.as_slice(), bytes.as_slice())?;
-                candles_by_resolution.insert(index_key.as_slice(), 0)?;
-            }
-        }
     }
 
     {
@@ -801,6 +796,7 @@ impl Store {
         txn.open_table(BLOCK_HEADERS)?;
         txn.open_table(BLOCKS_FULL)?;
         txn.open_table(BLOCK_WITNESSES)?;
+        txn.open_table(HISTORY_OUTBOX)?;
         txn.open_table(DA_ARTIFACTS)?;
         txn.open_table(DA_MANIFESTS)?;
         txn.open_table(PUBKEY_REGISTRY)?;
@@ -847,7 +843,6 @@ impl Store {
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
-        backfill_history_indexes(&db)?;
         if prune_historical_block_rows(&db)? {
             match db.compact() {
                 Ok(true) => info!(?path, "compacted store after pruning historical block rows"),

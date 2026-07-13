@@ -68,10 +68,12 @@ impl Store {
         .await
     }
 
-    /// Load state while bounding each account's restored hot fill window.
+    /// Compatibility entry point retained for callers that still pass the old
+    /// hot-history cap. Historical rows now live in `sybil-history`, so startup
+    /// never scans account fill history.
     pub async fn load_state_with_fill_history_cap(
         &self,
-        max_fill_history_per_account: usize,
+        _max_fill_history_per_account: usize,
     ) -> Result<Option<RestoredState>, StoreError> {
         let txn = self.db.begin_read()?;
         let Some(recovery_metadata) = read_recovery_metadata(&txn)? else {
@@ -84,8 +86,6 @@ impl Store {
             .await?;
         let num_accounts = accounts_map.len();
         let mut accounts = AccountStore::restore(accounts_map, recovery_metadata.next_account_id);
-        let mut account_ids: Vec<_> = accounts.iter().map(|(account_id, _)| *account_id).collect();
-        account_ids.sort_by_key(|account_id| account_id.0);
 
         // Markets
         let markets = {
@@ -293,8 +293,7 @@ impl Store {
             out
         };
 
-        let account_fills =
-            self.recover_account_fills(&account_ids, max_fill_history_per_account)?;
+        let account_fills = Vec::new();
 
         let bridge_state: BridgeState = {
             let table = txn.open_table(BRIDGE_STATE)?;
@@ -452,22 +451,10 @@ impl Store {
                 .get(KEY_HISTORY_EVENT_NEXT_SEQ)?
                 .map(|value| value.value())
         };
-        let history_event_next_seq = match history_event_next_seq {
-            Some(seq) => seq,
-            None => {
-                let table = txn.open_table(HISTORY_EVENTS)?;
-                let mut max_seq = None;
-                for entry in table.iter()? {
-                    let (key, _) = entry?;
-                    let Some(seq) = seq_from_history_event_key(key.value()) else {
-                        warn!("invalid history event key in store, skipping for next_seq recovery");
-                        continue;
-                    };
-                    max_seq = Some(max_seq.map_or(seq, |current: u64| current.max(seq)));
-                }
-                max_seq.map_or(0, |seq| seq.saturating_add(1))
-            }
-        };
+        // This counter is canonical sequencer metadata. It is persisted in the
+        // same block fence as the history outbox and must not be recovered by
+        // scanning the history projection.
+        let history_event_next_seq = history_event_next_seq.unwrap_or(0);
 
         info!(
             height = recovery_metadata.height,

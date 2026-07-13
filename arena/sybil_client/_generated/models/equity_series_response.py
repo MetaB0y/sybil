@@ -32,6 +32,8 @@ class EquitySeriesResponse:
             history_truncated (bool): True when the requested range begins before the retained boundary.
             points (list[EquityPointResponse]):
             source_points (int): Number of retained source samples represented by `points`.
+            history_complete_from_height (int | None | Unset):
+            indexed_through_height (int | None | Unset):
             retention_min_timestamp_ms (int | None | Unset): Oldest timestamp for which durable history is guaranteed
                 complete.
                 `None` means retention is disabled.
@@ -43,6 +45,8 @@ class EquitySeriesResponse:
     history_truncated: bool
     points: list[EquityPointResponse]
     source_points: int
+    history_complete_from_height: int | None | Unset = UNSET
+    indexed_through_height: int | None | Unset = UNSET
     retention_min_timestamp_ms: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -69,6 +73,18 @@ class EquitySeriesResponse:
 
         source_points = self.source_points
 
+        history_complete_from_height: int | None | Unset
+        if isinstance(self.history_complete_from_height, Unset):
+            history_complete_from_height = UNSET
+        else:
+            history_complete_from_height = self.history_complete_from_height
+
+        indexed_through_height: int | None | Unset
+        if isinstance(self.indexed_through_height, Unset):
+            indexed_through_height = UNSET
+        else:
+            indexed_through_height = self.indexed_through_height
+
         retention_min_timestamp_ms: int | None | Unset
         if isinstance(self.retention_min_timestamp_ms, Unset):
             retention_min_timestamp_ms = UNSET
@@ -86,6 +102,10 @@ class EquitySeriesResponse:
             "points": points,
             "source_points": source_points,
         })
+        if history_complete_from_height is not UNSET:
+            field_dict["history_complete_from_height"] = history_complete_from_height
+        if indexed_through_height is not UNSET:
+            field_dict["indexed_through_height"] = indexed_through_height
         if retention_min_timestamp_ms is not UNSET:
             field_dict["retention_min_timestamp_ms"] = retention_min_timestamp_ms
 
@@ -117,6 +137,26 @@ class EquitySeriesResponse:
 
         source_points = d.pop("source_points")
 
+        def _parse_history_complete_from_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        history_complete_from_height = _parse_history_complete_from_height(d.pop("history_complete_from_height", UNSET))
+
+
+        def _parse_indexed_through_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        indexed_through_height = _parse_indexed_through_height(d.pop("indexed_through_height", UNSET))
+
+
         def _parse_retention_min_timestamp_ms(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -134,6 +174,8 @@ class EquitySeriesResponse:
             history_truncated=history_truncated,
             points=points,
             source_points=source_points,
+            history_complete_from_height=history_complete_from_height,
+            indexed_through_height=indexed_through_height,
             retention_min_timestamp_ms=retention_min_timestamp_ms,
         )
 

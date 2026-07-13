@@ -29,6 +29,8 @@ class PriceCandlesResponse:
             candles (list[PriceCandleResponse]):
             market_id (int):
             resolution_secs (int):
+            history_complete_from_height (int | None | Unset):
+            indexed_through_height (int | None | Unset):
             next_before_ms (int | None | Unset):
             retention_min_bucket_ms (int | None | Unset):
      """
@@ -36,6 +38,8 @@ class PriceCandlesResponse:
     candles: list[PriceCandleResponse]
     market_id: int
     resolution_secs: int
+    history_complete_from_height: int | None | Unset = UNSET
+    indexed_through_height: int | None | Unset = UNSET
     next_before_ms: int | None | Unset = UNSET
     retention_min_bucket_ms: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -57,6 +61,18 @@ class PriceCandlesResponse:
 
         resolution_secs = self.resolution_secs
 
+        history_complete_from_height: int | None | Unset
+        if isinstance(self.history_complete_from_height, Unset):
+            history_complete_from_height = UNSET
+        else:
+            history_complete_from_height = self.history_complete_from_height
+
+        indexed_through_height: int | None | Unset
+        if isinstance(self.indexed_through_height, Unset):
+            indexed_through_height = UNSET
+        else:
+            indexed_through_height = self.indexed_through_height
+
         next_before_ms: int | None | Unset
         if isinstance(self.next_before_ms, Unset):
             next_before_ms = UNSET
@@ -77,6 +93,10 @@ class PriceCandlesResponse:
             "market_id": market_id,
             "resolution_secs": resolution_secs,
         })
+        if history_complete_from_height is not UNSET:
+            field_dict["history_complete_from_height"] = history_complete_from_height
+        if indexed_through_height is not UNSET:
+            field_dict["indexed_through_height"] = indexed_through_height
         if next_before_ms is not UNSET:
             field_dict["next_before_ms"] = next_before_ms
         if retention_min_bucket_ms is not UNSET:
@@ -104,6 +124,26 @@ class PriceCandlesResponse:
 
         resolution_secs = d.pop("resolution_secs")
 
+        def _parse_history_complete_from_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        history_complete_from_height = _parse_history_complete_from_height(d.pop("history_complete_from_height", UNSET))
+
+
+        def _parse_indexed_through_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        indexed_through_height = _parse_indexed_through_height(d.pop("indexed_through_height", UNSET))
+
+
         def _parse_next_before_ms(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -128,6 +168,8 @@ class PriceCandlesResponse:
             candles=candles,
             market_id=market_id,
             resolution_secs=resolution_secs,
+            history_complete_from_height=history_complete_from_height,
+            indexed_through_height=indexed_through_height,
             next_before_ms=next_before_ms,
             retention_min_bucket_ms=retention_min_bucket_ms,
         )

@@ -3,7 +3,7 @@ tags: [infrastructure, analytics]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-05-27
+last_verified: 2026-07-13
 ---
 
 Sybil keeps canonical block data separate from derived product data. A
@@ -51,19 +51,17 @@ remains explicit.
 
 ## Rolling Analytics
 
-Rolling analytics such as 24h volume, price history, trader counts, order
-statistics, liquidity scores, and cost-basis summaries live in dedicated
-analytics trackers owned by the sequencer sidecar state. They are derived from
-blocks, orders, fills, and account state; they are not canonical block fields.
-Some of these trackers are persisted for operational continuity, but
-persistence does not make them protocol source-of-truth.
+Current aggregates such as 24h volume, trader counts, order statistics,
+liquidity scores, and cost-basis summaries live in dedicated sequencer tracker
+snapshots. They are derived from blocks, orders, fills, and account state; they
+are not canonical block fields. Persistence for operational continuity does
+not make them protocol truth.
 
-Per-account equity series and account history feeds are store-backed product
-analytics. New points/events are accumulated as a small block-local delta and
-appended to redb at the same commit boundary as the block snapshot. The actor
-keeps only a configurable in-memory serving fallback; production sets that
-fallback to zero and serves these endpoints from redb. This prevents account UI
-history from growing with total account cardinality in the hot sequencer heap.
+Long-lived fills, account events, equity series, price history, candles, and
+windowed leaderboard anchors belong to `sybil-history`. The sequencer exports a
+small block-local fact batch through its fenced transactional outbox, but does
+not own the serving indexes or execute historical scans. See [[Historical Data
+Serving]].
 
 ## Indicative Cache
 
