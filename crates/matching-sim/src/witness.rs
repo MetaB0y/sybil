@@ -83,6 +83,7 @@ pub fn witness_from_pipeline(problem: &Problem, result: &PipelineResult) -> Bloc
 }
 
 /// Build a `BlockWitness` from a `MilpResult` using real orders and fills.
+#[cfg(feature = "milp")]
 pub fn witness_from_milp(problem: &Problem, result: &matching_solver::MilpResult) -> BlockWitness {
     build_witness(problem, &result.result, result.clearing_prices.clone())
 }

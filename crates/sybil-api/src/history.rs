@@ -11,6 +11,7 @@ use sybil_history_types::{
     HistoryPage, PriceCandlePage, PriceCandleQuery, PriceHistoryPage, PriceHistoryQuery,
     ProjectionStatus,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::config::ApiConfig;
 
@@ -147,112 +148,127 @@ async fn decode_response<T: DeserializeOwned>(
     Err(HistoryClientError::Response { status, body })
 }
 
-pub fn spawn_outbox_publisher(
+pub async fn run_outbox_publisher(
     store: Arc<Store>,
     client: HistoryClient,
     poll_interval: Duration,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let poll_interval = poll_interval.max(Duration::from_millis(10));
-        loop {
-            let read_store = Arc::clone(&store);
-            let read = tokio::task::spawn_blocking(move || {
-                let backlog = read_store.product_history_outbox_len()?;
-                let batches = read_store.product_history_outbox_batches(OUTBOX_READ_BATCH_SIZE)?;
-                Ok::<_, matching_sequencer::store::StoreError>((backlog, batches))
-            })
-            .await;
-            let (backlog, batches) = match read {
-                Ok(Ok(result)) => result,
-                Ok(Err(error)) => {
-                    metrics::counter!("sybil_product_history_outbox_read_failures_total")
-                        .increment(1);
-                    tracing::warn!(%error, "failed to read product-history outbox");
-                    tokio::time::sleep(poll_interval).await;
-                    continue;
+    cancel: CancellationToken,
+) {
+    let poll_interval = poll_interval.max(Duration::from_millis(10));
+    loop {
+        let read_store = Arc::clone(&store);
+        let read = tokio::task::spawn_blocking(move || {
+            let backlog = read_store.product_history_outbox_len()?;
+            let batches = read_store.product_history_outbox_batches(OUTBOX_READ_BATCH_SIZE)?;
+            Ok::<_, matching_sequencer::store::StoreError>((backlog, batches))
+        });
+        let read = tokio::select! {
+            _ = cancel.cancelled() => return,
+            result = read => result,
+        };
+        let (backlog, batches) = match read {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => {
+                metrics::counter!("sybil_product_history_outbox_read_failures_total").increment(1);
+                tracing::warn!(%error, "failed to read product-history outbox");
+                if wait_or_cancel(&cancel, poll_interval).await {
+                    return;
                 }
-                Err(error) => {
-                    metrics::counter!("sybil_product_history_outbox_read_failures_total")
-                        .increment(1);
-                    tracing::warn!(%error, "product-history outbox task failed");
-                    tokio::time::sleep(poll_interval).await;
-                    continue;
-                }
-            };
-            metrics::gauge!("sybil_product_history_outbox_backlog_rows").set(backlog as f64);
-            if batches.is_empty() {
-                tokio::time::sleep(poll_interval).await;
                 continue;
             }
+            Err(error) => {
+                metrics::counter!("sybil_product_history_outbox_read_failures_total").increment(1);
+                tracing::warn!(%error, "product-history outbox task failed");
+                if wait_or_cancel(&cancel, poll_interval).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        metrics::gauge!("sybil_product_history_outbox_backlog_rows").set(backlog as f64);
+        if batches.is_empty() {
+            if wait_or_cancel(&cancel, poll_interval).await {
+                return;
+            }
+            continue;
+        }
 
-            let mut delivery_failed = false;
-            let mut delivered = Vec::with_capacity(batches.len());
-            let mut delivery_durations = Vec::with_capacity(batches.len());
-            for batch in batches {
-                tracing::debug!(
-                    height = batch.height,
-                    fills = batch.fills.len(),
-                    events = batch.events.len(),
-                    equity = batch.equity.len(),
-                    prices = batch.prices.len(),
-                    "delivering committed history batch"
-                );
-                let started = std::time::Instant::now();
-                match client.apply_batch(&batch).await {
-                    Ok(response) if response.indexed_through_height >= batch.height => {
-                        delivered.push(ProductHistoryOutboxAck {
-                            height: batch.height,
-                            payload_hash: batch.payload_hash,
-                        });
-                        delivery_durations.push(started.elapsed().as_secs_f64());
-                    }
-                    Ok(response) => {
-                        tracing::warn!(
-                            height = batch.height,
-                            indexed_through_height = response.indexed_through_height,
-                            "history service acknowledgement did not cover delivered batch"
-                        );
-                        delivery_failed = true;
-                        break;
-                    }
-                    Err(error) => {
-                        metrics::counter!("sybil_history_batch_delivery_failures_total")
-                            .increment(1);
-                        tracing::warn!(height = batch.height, %error, "history batch delivery failed; retaining outbox row");
-                        delivery_failed = true;
-                        break;
-                    }
+        let mut delivery_failed = false;
+        let mut delivered = Vec::with_capacity(batches.len());
+        let mut delivery_durations = Vec::with_capacity(batches.len());
+        for batch in batches {
+            tracing::debug!(
+                height = batch.height,
+                fills = batch.fills.len(),
+                events = batch.events.len(),
+                equity = batch.equity.len(),
+                prices = batch.prices.len(),
+                "delivering committed history batch"
+            );
+            let started = std::time::Instant::now();
+            let response = tokio::select! {
+                _ = cancel.cancelled() => return,
+                result = client.apply_batch(&batch) => result,
+            };
+            match response {
+                Ok(response) if response.indexed_through_height >= batch.height => {
+                    delivered.push(ProductHistoryOutboxAck {
+                        height: batch.height,
+                        payload_hash: batch.payload_hash,
+                    });
+                    delivery_durations.push(started.elapsed().as_secs_f64());
                 }
-            }
-            if !delivered.is_empty() {
-                let ack_store = Arc::clone(&store);
-                let ack_count = delivered.len() as u64;
-                let ack_result = tokio::task::spawn_blocking(move || {
-                    ack_store.acknowledge_product_history_batches(&delivered)
-                })
-                .await;
-                match ack_result {
-                    Ok(Ok(_)) => {
-                        metrics::counter!("sybil_history_batches_delivered_total")
-                            .increment(ack_count);
-                        for duration in delivery_durations {
-                            metrics::histogram!("sybil_history_batch_delivery_duration_seconds")
-                                .record(duration);
-                        }
-                    }
-                    Ok(Err(error)) => {
-                        tracing::warn!(%error, "failed to acknowledge delivered product-history outbox prefix");
-                        delivery_failed = true;
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "product-history outbox acknowledgement task failed");
-                        delivery_failed = true;
-                    }
+                Ok(response) => {
+                    tracing::warn!(
+                        height = batch.height,
+                        indexed_through_height = response.indexed_through_height,
+                        "history service acknowledgement did not cover delivered batch"
+                    );
+                    delivery_failed = true;
+                    break;
                 }
-            }
-            if delivery_failed {
-                tokio::time::sleep(poll_interval).await;
+                Err(error) => {
+                    metrics::counter!("sybil_history_batch_delivery_failures_total").increment(1);
+                    tracing::warn!(height = batch.height, %error, "history batch delivery failed; retaining outbox row");
+                    delivery_failed = true;
+                    break;
+                }
             }
         }
-    })
+        if !delivered.is_empty() {
+            let ack_store = Arc::clone(&store);
+            let ack_count = delivered.len() as u64;
+            let ack_result = tokio::task::spawn_blocking(move || {
+                ack_store.acknowledge_product_history_batches(&delivered)
+            })
+            .await;
+            match ack_result {
+                Ok(Ok(_)) => {
+                    metrics::counter!("sybil_history_batches_delivered_total").increment(ack_count);
+                    for duration in delivery_durations {
+                        metrics::histogram!("sybil_history_batch_delivery_duration_seconds")
+                            .record(duration);
+                    }
+                }
+                Ok(Err(error)) => {
+                    tracing::warn!(%error, "failed to acknowledge delivered product-history outbox prefix");
+                    delivery_failed = true;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "product-history outbox acknowledgement task failed");
+                    delivery_failed = true;
+                }
+            }
+        }
+        if delivery_failed && wait_or_cancel(&cancel, poll_interval).await {
+            return;
+        }
+    }
+}
+
+async fn wait_or_cancel(cancel: &CancellationToken, duration: Duration) -> bool {
+    tokio::select! {
+        () = cancel.cancelled() => true,
+        () = tokio::time::sleep(duration) => false,
+    }
 }

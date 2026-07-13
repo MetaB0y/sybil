@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use matching_sequencer::{SequencerConfig, SequencerHandle};
+use matching_sequencer::{SequencerConfig, SequencerError, SequencerHandle};
 use sybil_api_types::ws::{PublicBlockStreamMessage, PublicBlockStreamPayload};
 use sybil_client::SybilClient;
 use tokio::net::TcpListener;
@@ -267,6 +267,29 @@ async fn ws_from_block_older_than_retention_sends_gap_envelope() {
     let b0 = handle.produce_block().await.unwrap();
     handle.produce_block().await.unwrap();
     let b2 = handle.produce_block().await.unwrap();
+
+    let retained_floor = timeout(Duration::from_secs(5), async {
+        loop {
+            match handle.get_block(b0.canonical.header.height).await {
+                Err(SequencerError::BlockPruned {
+                    retention_min_height,
+                    ..
+                }) if retention_min_height >= b2.canonical.header.height => {
+                    break retention_min_height;
+                }
+                Err(SequencerError::BlockPruned { .. }) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Ok(_) | Err(SequencerError::BlockNotFound) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("unexpected block lookup failure: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("canonical archive retention should reach the latest block");
+    assert_eq!(retained_floor, b2.canonical.header.height);
 
     let url = format!(
         "ws://{}/v2/blocks/ws?from_block={}",

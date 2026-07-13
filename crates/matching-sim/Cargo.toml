@@ -12,12 +12,12 @@ path = "src/main.rs"
 [[bin]]
 name = "solver-experiments"
 path = "src/bin/solver-experiments.rs"
-required-features = ["lp", "conic"]
+required-features = ["lp", "conic", "milp"]
 
 [dependencies]
 blake3 = { workspace = true }
 matching-engine = { path = "../matching-engine" }
-matching-solver = { path = "../matching-solver", features = ["milp"] }
+matching-solver = { path = "../matching-solver" }
 matching-scenarios = { path = "../matching-scenarios" }
 sybil-verifier = { path = "../sybil-verifier" }
 clap = { workspace = true, features = ["derive"] }
@@ -30,6 +30,7 @@ default = ["lp", "conic"]
 viz = ["matching-solver/viz"]
 lp = ["matching-solver/lp"]
 conic = ["matching-solver/conic"]
+milp = ["matching-solver/milp"]
 parallel = ["matching-solver/parallel"]
 
 [lints.clippy]

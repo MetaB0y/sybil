@@ -63,9 +63,10 @@ Each crate has its own AGENTS.md with focused ownership, boundaries, and checks.
 ```bash
 just build            # cargo build --release
 just test             # cargo test --workspace
-just lint             # cargo clippy --workspace --all-features
+just lint             # clippy for normal targets and default features
 just fmt              # cargo fmt --all
-just check-fast       # Rust metadata + fmt + check + clippy
+just check-fast       # fast Rust metadata + fmt + default-feature check/clippy
+just check-features   # exhaustive all-target/all-feature check + clippy
 just check-consensus  # goldens + guest fingerprints + deployment pins
 just check-all        # all workspaces and language/tooling gates (CI equivalent)
 just clean            # cargo clean in root, fuzz, and all OpenVM workspaces

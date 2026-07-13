@@ -1,6 +1,7 @@
+use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use axum::extract::{MatchedPath, State};
+use axum::extract::{ConnectInfo, MatchedPath, State};
 use axum::http::{Method, Request, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -354,22 +355,60 @@ fn unmatched_metric_label(path: &str) -> &'static str {
     }
 }
 
-fn http_rate_limit_client_key(req: &Request<axum::body::Body>) -> String {
-    req.headers()
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            req.headers()
-                .get("x-real-ip")
-                .and_then(|value| value.to_str().ok())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-        })
-        .unwrap_or("direct")
+fn http_rate_limit_client_key(
+    req: &Request<axum::body::Body>,
+    trusted_proxies: &[ipnet::IpNet],
+) -> String {
+    let Some(peer) = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|connect| connect.0.ip())
+    else {
+        return "direct".to_string();
+    };
+    if !is_trusted_proxy(peer, trusted_proxies) {
+        return peer.to_string();
+    }
+
+    forwarded_for_client(req, peer, trusted_proxies)
+        .or_else(|| header_ip(req, "x-real-ip"))
+        .unwrap_or(peer)
         .to_string()
+}
+
+fn is_trusted_proxy(ip: IpAddr, trusted_proxies: &[ipnet::IpNet]) -> bool {
+    trusted_proxies.iter().any(|network| network.contains(&ip))
+}
+
+fn header_ip(req: &Request<axum::body::Body>, name: &str) -> Option<IpAddr> {
+    req.headers().get(name)?.to_str().ok()?.trim().parse().ok()
+}
+
+/// Walk X-Forwarded-For from the trusted edge inward. A client cannot spoof
+/// an address to the left of its own address because the first untrusted hop
+/// encountered from the right wins.
+fn forwarded_for_client(
+    req: &Request<axum::body::Body>,
+    peer: IpAddr,
+    trusted_proxies: &[ipnet::IpNet],
+) -> Option<IpAddr> {
+    let value = req.headers().get("x-forwarded-for")?.to_str().ok()?;
+    let mut chain = value
+        .split(',')
+        .map(str::trim)
+        .map(str::parse::<IpAddr>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if chain.is_empty() {
+        return None;
+    }
+    chain.push(peer);
+    chain
+        .iter()
+        .rev()
+        .copied()
+        .find(|ip| !is_trusted_proxy(*ip, trusted_proxies))
+        .or_else(|| chain.first().copied())
 }
 
 fn is_order_write_path(path: &str) -> bool {
@@ -385,7 +424,8 @@ async fn order_rate_limit(
     next: Next,
 ) -> Response {
     if req.method() == axum::http::Method::POST && is_order_write_path(req.uri().path()) {
-        let client_key = http_rate_limit_client_key(&req);
+        let client_key =
+            http_rate_limit_client_key(&req, state.http_trusted_proxy_cidrs.as_slice());
         let allowed = state.http_order_limiter.allow(&client_key);
         if let Err(retry_after_secs) = allowed {
             metrics::counter!("sybil_http_order_rate_limited_total").increment(1);
@@ -415,7 +455,7 @@ async fn da_read_limit(
         return next.run(req).await;
     }
 
-    let client_key = http_rate_limit_client_key(&req);
+    let client_key = http_rate_limit_client_key(&req, state.http_trusted_proxy_cidrs.as_slice());
     let allowed = state.http_da_limiter.allow(&client_key);
     if let Err(retry_after_secs) = allowed {
         metrics::counter!("sybil_http_da_rate_limited_total", "reason" => "rate").increment(1);
@@ -783,10 +823,14 @@ fn public_routes() -> OpenApiRouter<AppState> {
         ))
         .routes(openapi_routes!(routes::accounts::revoke_api_key))
         .routes(openapi_routes!(routes::accounts::get_private_summary))
-        .routes(openapi_routes!(routes::accounts::get_portfolio))
-        .routes(openapi_routes!(routes::accounts::get_account_fills))
-        .routes(openapi_routes!(routes::accounts::get_equity))
-        .routes(openapi_routes!(routes::accounts::get_account_history))
+        .routes(openapi_routes!(routes::accounts::history::get_portfolio))
+        .routes(openapi_routes!(
+            routes::accounts::history::get_account_fills
+        ))
+        .routes(openapi_routes!(routes::accounts::history::get_equity))
+        .routes(openapi_routes!(
+            routes::accounts::history::get_account_history
+        ))
         .routes(openapi_routes!(routes::bridge::account_key))
         .routes(openapi_routes!(routes::bridge::list_account_withdrawals))
         .routes(openapi_routes!(routes::orders::get_account_orders))
@@ -1016,9 +1060,11 @@ pub fn create_router(state: AppState) -> Router {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use axum::Router;
     use axum::body::Body;
+    use axum::extract::ConnectInfo;
     use axum::http::{Request, StatusCode};
     use axum::middleware::{self, Next};
     use axum::response::Response;
@@ -1026,9 +1072,23 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{
-        DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE, metric_path_label,
-        unmatched_metric_label,
+        DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE, http_rate_limit_client_key,
+        metric_path_label, unmatched_metric_label,
     };
+
+    fn client_key_request(peer: Option<IpAddr>, forwarded_for: Option<&str>) -> Request<Body> {
+        let mut request = Request::builder().uri("/v1/orders");
+        if let Some(forwarded_for) = forwarded_for {
+            request = request.header("x-forwarded-for", forwarded_for);
+        }
+        let mut request = request.body(Body::empty()).unwrap();
+        if let Some(peer) = peer {
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::new(peer, 9_999)));
+        }
+        request
+    }
 
     /// Middleware that stamps the derived metric label onto the response so a
     /// test can observe what `http_metrics` would record.
@@ -1096,6 +1156,39 @@ mod tests {
             "/v1/{unmatched}"
         );
         assert_eq!(unmatched_metric_label("/wp-login.php"), "/{unmatched}");
+    }
+
+    #[test]
+    fn untrusted_peers_cannot_spoof_forwarding_headers() {
+        let request = client_key_request(
+            Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 7))),
+            Some("192.0.2.123"),
+        );
+        let trusted = ["10.0.0.0/8".parse().unwrap()];
+        assert_eq!(
+            http_rate_limit_client_key(&request, &trusted),
+            "198.51.100.7"
+        );
+    }
+
+    #[test]
+    fn trusted_proxy_chain_selects_first_untrusted_hop_from_right() {
+        let request = client_key_request(
+            Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+            Some("192.0.2.123, 203.0.113.9, 10.1.0.4"),
+        );
+        let trusted = ["10.0.0.0/8".parse().unwrap()];
+        assert_eq!(
+            http_rate_limit_client_key(&request, &trusted),
+            "203.0.113.9"
+        );
+    }
+
+    #[test]
+    fn requests_without_connection_metadata_share_the_safe_direct_bucket() {
+        let request = client_key_request(None, Some("192.0.2.123"));
+        let trusted = ["0.0.0.0/0".parse().unwrap()];
+        assert_eq!(http_rate_limit_client_key(&request, &trusted), "direct");
     }
 
     /// Requests that match no route carry no `MatchedPath`, so the middleware

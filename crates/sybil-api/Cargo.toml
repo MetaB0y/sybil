@@ -27,6 +27,7 @@ sybil-oracle = { path = "../sybil-oracle" }
 sybil-verifier = { path = "../sybil-verifier" }
 axum = { version = "0.8", features = ["json", "ws"] }
 tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -42,12 +43,13 @@ metrics-exporter-prometheus = "0.18"
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.2"
 hex = { workspace = true }
+ipnet = { workspace = true }
 p256 = { workspace = true, features = ["ecdsa"] }
 ratelimit = { workspace = true }
 getrandom = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { workspace = true, features = ["json"] }
 rmp-serde = { workspace = true }
 serde_yaml = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }

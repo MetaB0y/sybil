@@ -28,7 +28,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 url = "2"
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { workspace = true }
 async-trait = "0.1"
 
 [dev-dependencies]

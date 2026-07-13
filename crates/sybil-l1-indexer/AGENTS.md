@@ -19,5 +19,13 @@ lifecycle inputs through service-authenticated API routes.
 - Reorg/root mismatch is fatal; retry only genuinely transient RPC/HTTP errors.
 - Public-chain operation still depends on the configured RPC/finality policy.
 
+## Code map
+
+| Area | Location |
+|---|---|
+| Polling/reconciliation orchestration | `src/main.rs` |
+| Vault-log decoding and ordering | `src/events.rs` |
+| Deployment-bound cursor durability | `src/cursor.rs` |
+
 Run `cargo test -p sybil-l1-indexer`. Exercise compose bridge tests for changes
 to scanning, cursor, or API submission behavior.

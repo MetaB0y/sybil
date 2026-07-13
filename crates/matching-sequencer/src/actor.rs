@@ -11,6 +11,8 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use ratelimit::Ratelimiter;
 use tokio::sync::broadcast;
 use tokio::time::{Instant, interval_at};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos, Order, Problem};
 use sybil_oracle::{
@@ -19,9 +21,7 @@ use sybil_oracle::{
 
 use crate::account::{Account, AccountId};
 use crate::block::{BlockProduction, SealedBlock};
-use crate::bridge::{
-    BridgeState, BridgeWithdrawalL1Event, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf,
-};
+use crate::bridge::{BridgeWithdrawalL1Event, BridgeWithdrawalRequest, L1Deposit, WithdrawalLeaf};
 use crate::crypto::{
     AccountAuthScheme, AuthenticatedApiKeyCreate, AuthenticatedApiKeyRevoke,
     AuthenticatedBridgeWithdrawal, AuthenticatedCancel, AuthenticatedKeyRegistration,

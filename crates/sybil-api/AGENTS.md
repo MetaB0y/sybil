@@ -27,6 +27,8 @@ Do not maintain an endpoint list here:
 - Production preflight fails closed on dev mode, missing service auth,
   persistence, or invalid WebAuthn configuration.
 - Browser CORS is same-origin unless an explicit allowlist is configured.
+- Forwarded client IP headers are ignored unless the socket peer belongs to an
+  explicit `SYBIL_HTTP_TRUSTED_PROXY_CIDRS` network.
 - Public trading accepts only supported single-market `OrderSpec` shapes.
 - First-key bootstrap is service-gated and zero-key-only. Additional key
   registration/revocation is state-bound and signed by an active key.
@@ -39,9 +41,9 @@ Do not maintain an endpoint list here:
 | Area | Location |
 |---|---|
 | Router/OpenAPI/policy | `app.rs` |
-| Config/preflight | `config.rs`, `preflight.rs`, `main.rs` |
+| Config/preflight and worker lifecycle | `config.rs`, `preflight.rs`, `main.rs` |
 | App state/off-block ref data | `state.rs` |
-| REST handlers | `routes/` |
+| REST handlers | `routes/`; account product-history reads in `routes/accounts/history.rs` |
 | WebAuthn | `webauthn.rs`, account routes |
 | Realtime | `ws.rs`, `sse.rs` |
 | Admin CLI | `bin/sybil_admin.rs` |

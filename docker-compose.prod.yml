@@ -20,6 +20,10 @@ services:
       SYBIL_DEV_MODE: "false"
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
       SYBIL_CORS_ORIGINS: "${SYBIL_CORS_ORIGINS:-}"
+      # Empty is safe: forwarding headers are ignored and rate limits key on
+      # Caddy's peer IP. Set only to the exact Caddy-facing Docker CIDR after
+      # pinning/auditing that network; never use a broad private-address range.
+      SYBIL_HTTP_TRUSTED_PROXY_CIDRS: "${SYBIL_HTTP_TRUSTED_PROXY_CIDRS:-}"
       # WebAuthn (passkey) relying-party config MUST equal the public web origin
       # the browser registers passkeys under. If these stay at the localhost
       # defaults, every assertion fails RpIdHashMismatch/OriginMismatch and ALL

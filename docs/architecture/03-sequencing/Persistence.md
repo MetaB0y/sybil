@@ -195,6 +195,13 @@ price, candle, and timestamp/account projections in a separate redb. Those
 tables are not part of sequencer recovery and are not validity inputs. See
 [[Historical Data Serving]] and [[Fill History Persistence]].
 
+Shutdown preserves these ownership boundaries. The API runtime cancels and
+waits for its history publisher/read-model workers before stopping the
+sequencer actor. The sequencer actor in turn tracks its own post-commit DA and
+archive-maintenance futures and waits for them during a graceful ractor stop.
+Ractor supervision owns actor restart relationships; Tokio task tracking is
+only for non-actor child futures.
+
 Other sequencer-owned durable serving rows are:
 
 - **Canonical block replay payloads**: `SealedBlock` rows in the

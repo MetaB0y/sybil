@@ -24,6 +24,7 @@ use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
 use sybil_history::{HistoryHandle, HistoryHttpConfig, HistoryStore};
 use sybil_oracle::{FeedId, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
+use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
 #[allow(dead_code)]
@@ -73,9 +74,21 @@ async fn history_backed_state(
         .initialize_read_models()
         .await
         .expect("API read models initialize");
-    state.spawn_leaderboard_read_model_refresher();
+    let cancel = CancellationToken::new();
+    let refresher_state = state.clone();
+    let refresher_cancel = cancel.clone();
+    tokio::spawn(async move {
+        refresher_state
+            .refresh_leaderboard_read_model(refresher_cancel)
+            .await;
+    });
     let history = state.history.clone().expect("history client configured");
-    sybil_api::history::spawn_outbox_publisher(store, history, Duration::from_millis(1));
+    tokio::spawn(sybil_api::history::run_outbox_publisher(
+        store,
+        history,
+        Duration::from_millis(1),
+        cancel,
+    ));
     state
 }
 

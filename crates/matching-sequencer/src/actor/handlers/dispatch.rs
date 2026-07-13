@@ -28,6 +28,8 @@ impl Actor for SequencerActor {
             mailbox_monitor: args.mailbox_monitor,
             indicative_cache: HashMap::new(),
             indicative_solve_gate: IndicativeSolveGate::default(),
+            background_tasks: TaskTracker::new(),
+            background_cancel: CancellationToken::new(),
             #[cfg(test)]
             next_tick_hold: None,
         })
@@ -41,10 +43,14 @@ impl Actor for SequencerActor {
         let actor = myself.clone();
         let block_interval = state.sequencer.config.block_interval;
         let mailbox_monitor = state.mailbox_monitor.clone();
-        tokio::spawn(async move {
+        let cancel = state.background_cancel.child_token();
+        state.background_tasks.spawn(async move {
             let mut ticker = interval_at(Instant::now() + block_interval, block_interval);
             loop {
-                ticker.tick().await;
+                tokio::select! {
+                    _ = cancel.cancelled() => return,
+                    _ = ticker.tick() => {}
+                }
                 mailbox_monitor.queued();
                 if actor.send_message(SequencerMsg::Tick).is_err() {
                     mailbox_monitor.send_failed();
@@ -60,10 +66,14 @@ impl Actor for SequencerActor {
         let actor_indicative = myself.clone();
         let mailbox_indicative = state.mailbox_monitor.clone();
         let indicative_interval = std::time::Duration::from_millis(750);
-        tokio::spawn(async move {
+        let indicative_cancel = state.background_cancel.child_token();
+        state.background_tasks.spawn(async move {
             let mut ticker = interval_at(Instant::now() + indicative_interval, indicative_interval);
             loop {
-                ticker.tick().await;
+                tokio::select! {
+                    _ = indicative_cancel.cancelled() => return,
+                    _ = ticker.tick() => {}
+                }
                 mailbox_indicative.queued();
                 if actor_indicative
                     .send_message(SequencerMsg::IndicativeTick)
@@ -74,6 +84,17 @@ impl Actor for SequencerActor {
                 }
             }
         });
+        Ok(())
+    }
+
+    async fn post_stop(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        state.background_cancel.cancel();
+        state.background_tasks.close();
+        state.background_tasks.wait().await;
         Ok(())
     }
 

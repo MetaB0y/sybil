@@ -256,27 +256,32 @@ impl SequencerActorState {
         let solver = self.sequencer.solver();
         let solver_name = solver.name().to_string();
 
-        tokio::task::spawn_blocking(move || {
-            let message = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                solver.solve(&problem)
-            })) {
-                Ok(result) => {
-                    let snapshots = build_indicative_snapshots(
-                        &problem,
-                        &result,
-                        &last_clearing,
-                        computed_at_ms,
-                    );
-                    SequencerMsg::IndicativeUpdate(snapshots)
+        self.background_tasks.spawn(async move {
+            let solve = tokio::task::spawn_blocking(move || {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    solver.solve(&problem)
+                })) {
+                    Ok(result) => {
+                        let snapshots = build_indicative_snapshots(
+                            &problem,
+                            &result,
+                            &last_clearing,
+                            computed_at_ms,
+                        );
+                        SequencerMsg::IndicativeUpdate(snapshots)
+                    }
+                    Err(payload) => SequencerMsg::IndicativeSolveFailed {
+                        solver: solver_name,
+                        error: panic_payload_to_string(payload.as_ref()),
+                    },
                 }
-                Err(payload) => SequencerMsg::IndicativeSolveFailed {
-                    solver: solver_name,
-                    error: panic_payload_to_string(payload.as_ref()),
-                },
-            };
-            mailbox.queued();
-            if target.send_message(message).is_err() {
-                mailbox.send_failed();
+            })
+            .await;
+            if let Ok(message) = solve {
+                mailbox.queued();
+                if target.send_message(message).is_err() {
+                    mailbox.send_failed();
+                }
             }
         });
     }
@@ -301,7 +306,7 @@ impl SequencerActorState {
             let da_witness = prepared.production().witness.clone();
             let da_writes_in_flight = metrics::gauge!("sybil_da_artifact_writes_in_flight");
             da_writes_in_flight.increment(1.0);
-            tokio::spawn(async move {
+            self.background_tasks.spawn(async move {
                 let started = Instant::now();
                 let artifact = DaArtifact::from_witness(&da_witness);
                 let height = artifact.manifest.height;
@@ -342,7 +347,7 @@ impl SequencerActorState {
                 // commit fence. Never hold the single-writer actor while it
                 // scans or deletes archive rows.
                 let retention_store = Arc::clone(store);
-                tokio::spawn(async move {
+                self.background_tasks.spawn(async move {
                     match retention_store
                         .prune_canonical_archive(height, policy)
                         .await

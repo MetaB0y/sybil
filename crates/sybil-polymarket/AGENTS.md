@@ -62,8 +62,10 @@ Loaders validate both files, and malformed configured catalogs fail startup.
 |---|---|
 | Configuration/orchestration | `config.rs`, `main.rs` |
 | Gamma/CLOB clients | `polymarket/` |
-| Sync/mapping/catalog | `sync.rs`, `mapping.rs`, `curated.rs`, `native.rs` |
-| Price feed/MM | `feed.rs`, `mm.rs` |
+| Sync runtime/mapping/catalog | `sync.rs`, `mapping.rs`, `curated.rs`, `native.rs` |
+| Pure sync/group/metadata planning | `sync/planning.rs` |
+| Price feed/MM runtime | `feed.rs`, `mm.rs` |
+| Pure MM quote construction | `mm/quotes.rs` |
 | Resolution | `resolution.rs`, `signer.rs` |
 | Optional LLM resolver | `autoresolve.rs`, `llm.rs` |
 | Display categorization | `categorize.rs` |

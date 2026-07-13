@@ -110,22 +110,28 @@ fn decode_provider_refs(manifest: &Value) -> Vec<Vec<u8>> {
         .collect()
 }
 
-async fn wait_for_da_manifest(app: axum::Router, height: u64) -> Value {
-    let path = format!("/v1/da/{height}/manifest");
-    for _ in 0..50 {
-        let (status, body) = get(app.clone(), &path).await;
-        if status == StatusCode::OK {
-            return parse_json(&body);
+async fn wait_for_da_manifest(app: axum::Router, handle: &SequencerHandle, height: u64) -> Value {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let lookup = handle.get_da_manifest(height).await.unwrap();
+            if lookup.manifest.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert_eq!(
-            status,
-            StatusCode::NOT_FOUND,
-            "unexpected DA manifest status: {status}, body={}",
-            String::from_utf8_lossy(&body)
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("DA manifest was not persisted for height {height}");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("DA manifest was not persisted for height {height}"));
+
+    let path = format!("/v1/da/{height}/manifest");
+    let (status, body) = get(app, &path).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "unexpected DA manifest status: {status}, body={}",
+        String::from_utf8_lossy(&body)
+    );
+    parse_json(&body)
 }
 
 async fn ensure_genesis_hash(handle: &SequencerHandle) -> [u8; 32] {
@@ -560,7 +566,7 @@ async fn da_manifest_and_payload_verify_binding_chain() {
     let block = handle.produce_block().await.unwrap();
     let height = block.canonical.header.height;
 
-    let manifest = wait_for_da_manifest(app.clone(), height).await;
+    let manifest = wait_for_da_manifest(app.clone(), &handle, height).await;
     let (status, headers, payload) =
         get_with_headers(app, &format!("/v1/da/{height}/payload"), service_headers()).await;
     assert_eq!(status, StatusCode::OK);

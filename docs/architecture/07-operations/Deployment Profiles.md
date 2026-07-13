@@ -46,6 +46,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_HISTORY_URL` | compose service | compose service | `http://sybil-history:3003` | **yes — blocks** |
 | `SYBIL_HISTORY_TOKEN` | Compose dev secret | Compose dev secret | **set, dedicated** | **yes — blocks** |
 | `SYBIL_CORS_ORIGINS` | permissive (dev) | permissive (dev) | explicit allowlist | no |
+| `SYBIL_HTTP_TRUSTED_PROXY_CIDRS` | empty (peer IP only) | empty (peer IP only) | exact audited Caddy-facing CIDR or empty | no |
 | `SYBIL_ALLOW_DEV_KNOBS` | n/a | n/a | `false` | override only |
 
 ### Durability / persistence

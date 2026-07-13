@@ -4248,6 +4248,7 @@ dependencies = [
  "sybil-zk",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -6832,6 +6833,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hex",
  "http-body-util",
+ "ipnet",
  "matching-engine",
  "matching-sequencer",
  "metrics",
@@ -6860,6 +6862,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.30.0",
+ "tokio-util",
  "tower",
  "tower-http 0.7.0",
  "tracing",
@@ -7030,7 +7033,7 @@ name = "sybil-loadtest"
 version = "0.1.0"
 dependencies = [
  "goose",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "tokio",
 ]
 

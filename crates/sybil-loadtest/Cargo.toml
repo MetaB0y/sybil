@@ -11,5 +11,5 @@ path = "src/bin/history_load.rs"
 
 [dependencies]
 goose = { version = "0.18.1", default-features = false, features = ["rustls-tls"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

@@ -56,6 +56,12 @@ pub struct ApiConfig {
     #[arg(long, env = "SYBIL_CORS_ORIGINS", value_delimiter = ',')]
     pub cors_origins: Vec<String>,
 
+    /// Immediate reverse-proxy networks allowed to supply client IP headers.
+    /// Empty means `X-Forwarded-For` and `X-Real-IP` are ignored. Each trusted
+    /// proxy must sanitize or append to X-Forwarded-For before forwarding.
+    #[arg(long, env = "SYBIL_HTTP_TRUSTED_PROXY_CIDRS", value_delimiter = ',')]
+    pub http_trusted_proxy_cidrs: Vec<ipnet::IpNet>,
+
     /// Block production interval in milliseconds.
     #[arg(long, default_value = "500", env = "SYBIL_BLOCK_INTERVAL_MS")]
     pub block_interval_ms: u64,
@@ -336,6 +342,7 @@ impl Default for ApiConfig {
             history_poll_ms: 250,
             history_timeout_ms: 10_000,
             cors_origins: Vec::new(),
+            http_trusted_proxy_cidrs: Vec::new(),
             block_interval_ms: 500,
             seed_markets: Vec::new(),
             order_ttl_blocks: 63_072_000,

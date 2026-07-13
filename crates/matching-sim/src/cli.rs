@@ -4,7 +4,10 @@ use std::fmt;
 
 use clap::{Parser, ValueEnum};
 use matching_scenarios::ScenarioConfig;
-use matching_solver::{MilpConfig, MilpSolver, MmBudgetMode};
+#[cfg(feature = "milp")]
+pub use matching_solver::MmBudgetMode;
+#[cfg(feature = "milp")]
+use matching_solver::{MilpConfig, MilpSolver};
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum Preset {
@@ -13,6 +16,7 @@ enum Preset {
     Medium,
     Large,
     Extreme,
+    #[cfg(feature = "milp")]
     #[value(alias = "milp_killer")]
     MilpKiller,
 }
@@ -25,11 +29,13 @@ impl Preset {
             Self::Medium => ScenarioConfig::medium(),
             Self::Large => ScenarioConfig::large(),
             Self::Extreme => ScenarioConfig::extreme(),
+            #[cfg(feature = "milp")]
             Self::MilpKiller => ScenarioConfig::milp_killer(),
         }
     }
 }
 
+#[cfg(feature = "milp")]
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 enum MmMode {
     #[default]
@@ -38,6 +44,7 @@ enum MmMode {
     Ignore,
 }
 
+#[cfg(feature = "milp")]
 impl From<MmMode> for MmBudgetMode {
     fn from(value: MmMode) -> Self {
         match value {
@@ -105,10 +112,12 @@ pub struct Cli {
     pub solver: SolverChoice,
 
     /// MILP time limit in seconds.
+    #[cfg(feature = "milp")]
     #[arg(long)]
-    pub milp_timeout: Option<f64>,
+    milp_timeout: Option<f64>,
 
     /// MM budget constraint mode used by the MILP solver.
+    #[cfg(feature = "milp")]
     #[arg(long, value_enum, default_value_t)]
     mm_mode: MmMode,
 
@@ -175,8 +184,19 @@ impl Cli {
         config
     }
 
+    #[cfg(feature = "milp")]
     pub fn mm_budget_mode(&self) -> MmBudgetMode {
         self.mm_mode.into()
+    }
+
+    #[cfg(feature = "milp")]
+    pub fn milp_timeout(&self) -> Option<f64> {
+        self.milp_timeout
+    }
+
+    #[cfg(not(feature = "milp"))]
+    pub fn milp_timeout(&self) -> Option<f64> {
+        None
     }
 
     #[cfg(feature = "conic")]
@@ -191,6 +211,7 @@ impl Cli {
 
 #[derive(Clone, Debug, PartialEq, ValueEnum)]
 pub enum SolverChoice {
+    #[cfg(feature = "milp")]
     Milp,
     #[cfg(feature = "lp")]
     Lp,
@@ -216,7 +237,7 @@ pub enum SolverChoice {
 }
 
 // The default follows the enabled solver features. `derive(Default)` cannot
-// express the `Milp` fallback when this crate is built without `lp`.
+// express a feature-dependent fallback.
 #[allow(clippy::derivable_impls)]
 impl Default for SolverChoice {
     fn default() -> Self {
@@ -224,7 +245,11 @@ impl Default for SolverChoice {
         {
             Self::RetainedCash
         }
-        #[cfg(not(feature = "lp"))]
+        #[cfg(all(not(feature = "lp"), feature = "conic"))]
+        {
+            Self::Conic
+        }
+        #[cfg(all(not(feature = "lp"), not(feature = "conic"), feature = "milp"))]
         {
             Self::Milp
         }
@@ -252,10 +277,13 @@ pub fn supports_detailed_pipeline(choice: &SolverChoice) -> bool {
         | SolverChoice::DecomposedIterLp => true,
         #[cfg(feature = "conic")]
         SolverChoice::Conic | SolverChoice::DecomposedConic => true,
-        SolverChoice::Milp | SolverChoice::All => false,
+        #[cfg(feature = "milp")]
+        SolverChoice::Milp => false,
+        SolverChoice::All => false,
     }
 }
 
+#[cfg(feature = "milp")]
 pub fn create_milp_solver(milp_timeout: Option<f64>, mm_mode: MmBudgetMode) -> MilpSolver {
     let timeout = milp_timeout.unwrap_or(5.0);
     MilpSolver::with_config(MilpConfig {
@@ -273,6 +301,7 @@ pub fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
     match choice {
         SolverChoice::All => {
             let mut choices = Vec::new();
+            #[cfg(feature = "milp")]
             choices.push(SolverChoice::Milp);
             #[cfg(feature = "lp")]
             choices.push(SolverChoice::Lp);
@@ -293,8 +322,10 @@ pub fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
 }
 
 /// Get the display name for a solver choice.
+#[allow(unused_variables)]
 pub fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> String {
     match choice {
+        #[cfg(feature = "milp")]
         SolverChoice::Milp => {
             if milp_timeout.is_some() {
                 "MILP (time-limited)".to_string()
@@ -351,15 +382,15 @@ mod tests {
 
     #[test]
     fn legacy_solver_and_preset_aliases_are_retained() {
-        let cli = Cli::try_parse_from([
-            "matching-sim",
-            "--preset",
-            "milp_killer",
-            "--solver",
-            "decomposed",
-        ])
-        .unwrap();
+        #[cfg(feature = "milp")]
+        let preset = "milp_killer";
+        #[cfg(not(feature = "milp"))]
+        let preset = "quick";
+        let cli =
+            Cli::try_parse_from(["matching-sim", "--preset", preset, "--solver", "decomposed"])
+                .unwrap();
 
+        #[cfg(feature = "milp")]
         assert_eq!(
             cli.scenario_config().num_orders,
             ScenarioConfig::milp_killer().num_orders

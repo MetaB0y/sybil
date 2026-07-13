@@ -45,6 +45,14 @@ CADDY_OPS_AUTH_HASH='<bcrypt hash from caddy hash-password>'
 `SYBIL_CORS_ORIGINS` may be set to a comma-separated browser-origin allowlist;
 empty/unset keeps CORS same-origin only.
 
+`SYBIL_HTTP_TRUSTED_PROXY_CIDRS` is also optional and empty by default. Empty
+means the API ignores `X-Forwarded-For`/`X-Real-IP` and conservatively shares
+each per-client HTTP bucket across Caddy. If the Caddy-facing Docker network is
+pinned, set this to that exact CIDR so the API can recover individual client
+addresses. Do not trust a broad private range: every address in this list is
+allowed to influence rate-limit identity, and Caddy must sanitize or append
+`X-Forwarded-For`.
+
 The admin resolution key is not supplied through `.env`. The production
 overlay pins `SYBIL_ADMIN_FEED_KEY_PATH=/data/admin-feed.key`; `sybil-api`
 creates it on the first boot of the persistent `sybil-data` volume and reuses

@@ -42,7 +42,7 @@ the persistence-aware prepare/persist/commit path and publish `SealedBlock`.
 | Area | Location |
 |---|---|
 | State transition | `sequencer.rs`, `sequencer/production/`, `sequencer/*` |
-| Actor/RPC/supervision | `actor.rs`, `actor/` |
+| Actor/RPC/supervision | `actor.rs`, `actor/`; handle domains in `actor/handle/` |
 | Resting orders | `order_book.rs` |
 | Shared settlement orchestration | `settlement.rs` |
 | Canonical state/block | `canonical_state.rs`, `block.rs`, `system_event.rs` |

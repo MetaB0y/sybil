@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use alloy::primitives::{Address, B256, Bytes};
@@ -6,10 +6,10 @@ use alloy::providers::{DynProvider, Provider, ProviderBuilder};
 use alloy::rpc::types::{Filter, Log as EthLog, TransactionRequest};
 use alloy::sol_types::SolCall;
 use clap::Parser;
-use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use sybil_api_types::request::BridgeWithdrawalL1Status;
 use sybil_api_types::request::{
-    BridgeWithdrawalL1Status, ObserveL1HeightRequest, SubmitL1DepositRequest,
-    SubmitL1WithdrawalEventRequest,
+    ObserveL1HeightRequest, SubmitL1DepositRequest, SubmitL1WithdrawalEventRequest,
 };
 #[cfg(test)]
 use sybil_api_types::response::BridgeWithdrawalResponse;
@@ -20,11 +20,19 @@ use sybil_api_types::response::{
 use sybil_client::SybilClient;
 use sybil_l1_abi::SybilVault;
 use sybil_l1_protocol::{
-    Bytes32, EthAddress, L1Log, L1ProtocolError, WithdrawalEvent, deposit_received_topic0,
-    parse_deposit_received_log, parse_withdrawal_event_log, withdrawal_cancelled_topic0,
+    Bytes32, EthAddress, L1ProtocolError, deposit_received_topic0, withdrawal_cancelled_topic0,
     withdrawal_finalized_topic0, withdrawal_queued_topic0,
 };
 use tokio::time::sleep;
+
+mod cursor;
+mod events;
+
+use cursor::{load_cursor, save_cursor};
+use events::{
+    IndexedDeposit, indexed_deposit_from_log, indexed_withdrawal_event_from_log, sort_deposits,
+    sort_withdrawal_events, withdrawal_event_request,
+};
 
 /// Default L1 confirmation depth.
 ///
@@ -216,27 +224,6 @@ fn effective_scan_start(start_block: u64, persisted_cursor: Option<u64>) -> Resu
         Some(cursor) => Ok(cursor),
         None => Ok(start_block),
     }
-}
-
-#[derive(Clone, Debug)]
-struct IndexedDeposit {
-    log: EthLog,
-    event: sybil_l1_protocol::DepositReceived,
-}
-
-#[derive(Clone, Debug)]
-struct IndexedWithdrawalEvent {
-    log: EthLog,
-    event: WithdrawalEvent,
-}
-
-/// Persisted scan cursor. Stored alongside the targeted vault/chain so a cursor
-/// left over from a different deployment is rejected rather than silently reused.
-#[derive(Debug, Serialize, Deserialize)]
-struct CursorState {
-    next_from: u64,
-    vault_address_hex: String,
-    chain_id: u64,
 }
 
 /// L1 JSON-RPC surface the indexer depends on. Abstracted so tests can drive the
@@ -631,122 +618,6 @@ async fn submit_deposit<S: DepositSink>(
         deposit_root_hex: hex::encode(deposit.event.deposit_root),
     };
     sink.submit_l1_deposit(&body).await
-}
-
-fn indexed_deposit_from_log(log: EthLog) -> Result<IndexedDeposit> {
-    let l1_log = L1Log {
-        address: log.address().into(),
-        topics: log.topics().iter().copied().map(Into::into).collect(),
-        data: log.data().data.to_vec(),
-    };
-    let event = parse_deposit_received_log(&l1_log)?;
-    Ok(IndexedDeposit { log, event })
-}
-
-fn indexed_withdrawal_event_from_log(log: EthLog) -> Result<IndexedWithdrawalEvent> {
-    let l1_log = L1Log {
-        address: log.address().into(),
-        topics: log.topics().iter().copied().map(Into::into).collect(),
-        data: log.data().data.to_vec(),
-    };
-    let event = parse_withdrawal_event_log(&l1_log)?;
-    Ok(IndexedWithdrawalEvent { log, event })
-}
-
-fn sort_deposits(deposits: &mut [IndexedDeposit]) {
-    deposits.sort_by_key(|deposit| {
-        (
-            deposit.log.block_number.unwrap_or(u64::MAX),
-            deposit.log.log_index.unwrap_or(u64::MAX),
-        )
-    });
-}
-
-fn sort_withdrawal_events(events: &mut [IndexedWithdrawalEvent]) {
-    events.sort_by_key(|event| {
-        (
-            event.log.block_number.unwrap_or(u64::MAX),
-            event.log.log_index.unwrap_or(u64::MAX),
-        )
-    });
-}
-
-fn withdrawal_event_request(
-    event: &IndexedWithdrawalEvent,
-) -> Result<SubmitL1WithdrawalEventRequest> {
-    let (nullifier, status, event_at_unix, executable_at_unix) = match &event.event {
-        WithdrawalEvent::Queued(queued) => (
-            queued.nullifier,
-            BridgeWithdrawalL1Status::Queued,
-            queued.requested_at_unix,
-            Some(queued.executable_at_unix),
-        ),
-        WithdrawalEvent::Finalized(finalized) => (
-            finalized.nullifier,
-            BridgeWithdrawalL1Status::Finalized,
-            finalized.finalized_at_unix,
-            Some(finalized.executable_at_unix),
-        ),
-        WithdrawalEvent::Cancelled(cancelled) => (
-            cancelled.nullifier,
-            BridgeWithdrawalL1Status::Cancelled,
-            cancelled.cancelled_at_unix,
-            Some(cancelled.executable_at_unix),
-        ),
-    };
-    let l1_block_height = event
-        .log
-        .block_number
-        .ok_or(IndexerError::MissingRpcResult)?;
-    Ok(SubmitL1WithdrawalEventRequest {
-        nullifier_hex: hex::encode(nullifier),
-        status,
-        event_at_unix,
-        executable_at_unix,
-        tx_hash_hex: event.transaction_hash_hex(),
-        l1_block_height,
-    })
-}
-
-impl IndexedWithdrawalEvent {
-    fn transaction_hash_hex(&self) -> Option<String> {
-        self.log.transaction_hash.map(hex::encode)
-    }
-}
-
-/// Load the persisted scan cursor, or `None` if no file exists. Fails closed if
-/// the file targets a different vault/chain than this run.
-fn load_cursor(path: &Path, vault_hex: &str, chain_id: u64) -> Result<Option<u64>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let data = std::fs::read_to_string(path)?;
-    let state: CursorState = serde_json::from_str(&data)?;
-    if state.vault_address_hex != vault_hex || state.chain_id != chain_id {
-        return Err(IndexerError::CursorConfigMismatch {
-            path: path.display().to_string(),
-            stored_vault: state.vault_address_hex,
-            stored_chain: state.chain_id,
-            arg_vault: vault_hex.to_string(),
-            arg_chain: chain_id,
-        });
-    }
-    Ok(Some(state.next_from))
-}
-
-/// Persist the scan cursor durably (write-tmp-then-rename) so a crash cannot
-/// leave a half-written file.
-fn save_cursor(path: &Path, next_from: u64, vault_hex: &str, chain_id: u64) -> Result<()> {
-    let state = CursorState {
-        next_from,
-        vault_address_hex: vault_hex.to_string(),
-        chain_id,
-    };
-    let data = serde_json::to_string_pretty(&state)?;
-    let tmp_path = path.with_extension("tmp");
-    std::fs::write(&tmp_path, data)?;
-    std::fs::rename(&tmp_path, path)?;
-    Ok(())
 }
 
 fn parse_hex_array<const N: usize>(value: &str, field: &'static str) -> Result<[u8; N]> {

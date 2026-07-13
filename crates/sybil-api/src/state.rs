@@ -8,6 +8,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use ratelimit::Ratelimiter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex as AsyncMutex, RwLock, Semaphore};
+use tokio_util::sync::CancellationToken;
 
 use crate::config::ApiConfig;
 use crate::history::HistoryClient;
@@ -176,6 +177,9 @@ pub struct AppState {
     pub service_token: Option<String>,
     /// CORS origins allowed in production. Empty means no cross-origin CORS.
     pub cors_origins: Vec<HeaderValue>,
+    /// Networks whose direct connections may supply forwarding headers for
+    /// per-client rate limits. Empty is the safe direct-peer-only default.
+    pub http_trusted_proxy_cidrs: Arc<Vec<ipnet::IpNet>>,
     pub prometheus: PrometheusHandle,
     /// Reference prices from external systems (e.g., Polymarket).
     /// Keyed by market_id (u32). Display-only — not part of matching logic.
@@ -277,6 +281,7 @@ impl AppState {
             dev_mode: config.dev_mode,
             service_token,
             cors_origins,
+            http_trusted_proxy_cidrs: Arc::new(config.http_trusted_proxy_cidrs.clone()),
             prometheus,
             reference_prices: Arc::new(RwLock::new(HashMap::new())),
             reference_prices_updated_at_ms: Arc::new(RwLock::new(0)),
@@ -378,26 +383,36 @@ impl AppState {
 
     /// Refresh the published leaderboard input after each committed block.
     /// The refresh is one actor read per block, independent of HTTP volume.
-    pub fn spawn_leaderboard_read_model_refresher(&self) -> tokio::task::JoinHandle<()> {
+    pub async fn refresh_leaderboard_read_model(&self, cancel: CancellationToken) {
         let state = self.clone();
-        tokio::spawn(async move {
-            let Ok(mut blocks) = state.sequencer.subscribe_blocks().await else {
-                tracing::warn!("failed to subscribe leaderboard read model to blocks");
-                return;
+        let subscription = tokio::select! {
+            _ = cancel.cancelled() => return,
+            result = state.sequencer.subscribe_blocks() => result,
+        };
+        let Ok(mut blocks) = subscription else {
+            tracing::warn!("failed to subscribe leaderboard read model to blocks");
+            return;
+        };
+        loop {
+            let received = tokio::select! {
+                _ = cancel.cancelled() => return,
+                result = blocks.recv() => result,
             };
-            loop {
-                match blocks.recv().await {
-                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        match state.sequencer.leaderboard_bases().await {
-                            Ok(bases) => *state.leaderboard_bases.write().await = Some(bases),
-                            Err(error) => {
-                                tracing::warn!(%error, "failed to refresh leaderboard read model")
-                            }
+            match received {
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let refresh = tokio::select! {
+                        _ = cancel.cancelled() => return,
+                        result = state.sequencer.leaderboard_bases() => result,
+                    };
+                    match refresh {
+                        Ok(bases) => *state.leaderboard_bases.write().await = Some(bases),
+                        Err(error) => {
+                            tracing::warn!(%error, "failed to refresh leaderboard read model")
                         }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
-        })
+        }
     }
 }

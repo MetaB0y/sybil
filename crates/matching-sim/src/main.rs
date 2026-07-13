@@ -36,7 +36,6 @@ use std::time::Instant;
 use clap::Parser;
 use matching_engine::{Nanos, Problem};
 use matching_scenarios::{ScenarioConfig, generate_scenario};
-use matching_solver::MmBudgetMode;
 #[cfg(any(feature = "lp", feature = "conic"))]
 use matching_solver::VizSnapshot;
 use sybil_verifier::{BlockWitness, verify_match};
@@ -55,7 +54,8 @@ fn main() {
     let cli = Cli::parse();
     let config = cli.scenario_config();
     let solver_choice = cli.solver.clone();
-    let milp_timeout = cli.milp_timeout;
+    let milp_timeout = cli.milp_timeout();
+    #[cfg(feature = "milp")]
     let mm_mode = cli.mm_budget_mode();
     let num_batches = cli.batches;
     let verbose = cli.verbose;
@@ -116,6 +116,7 @@ fn main() {
             &config,
             &solver_choice,
             milp_timeout,
+            #[cfg(feature = "milp")]
             mm_mode,
             num_batches,
             verbose,
@@ -396,10 +397,11 @@ fn run_solver_with_witness(
     choice: &SolverChoice,
     problem: &Problem,
     milp_timeout: Option<f64>,
-    mm_mode: MmBudgetMode,
+    #[cfg(feature = "milp")] mm_mode: MmBudgetMode,
     conic_config: &CliConicConfig,
 ) -> (matching_solver::MatchingResult, BlockWitness) {
     match choice {
+        #[cfg(feature = "milp")]
         SolverChoice::Milp => {
             let milp = create_milp_solver(milp_timeout, mm_mode);
             let milp_result = milp.solve_with_status(problem);
@@ -481,7 +483,7 @@ fn run_simulation(
     base_config: &ScenarioConfig,
     solver_choice: &SolverChoice,
     milp_timeout: Option<f64>,
-    mm_mode: MmBudgetMode,
+    #[cfg(feature = "milp")] mm_mode: MmBudgetMode,
     num_batches: usize,
     verbose: bool,
     export_comparison: Option<&str>,
@@ -531,8 +533,14 @@ fn run_simulation(
         for (i, choice) in choices.iter().enumerate() {
             let start = Instant::now();
 
-            let (matching_result, witness) =
-                run_solver_with_witness(choice, &problem, milp_timeout, mm_mode, conic_config);
+            let (matching_result, witness) = run_solver_with_witness(
+                choice,
+                &problem,
+                milp_timeout,
+                #[cfg(feature = "milp")]
+                mm_mode,
+                conic_config,
+            );
 
             let elapsed = start.elapsed().as_secs_f64();
 

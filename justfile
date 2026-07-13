@@ -8,12 +8,20 @@ default:
 test:
     cargo test --workspace
 
-# Run clippy lints
+# Lint the normal workspace build.
 lint:
+    cargo clippy --workspace --all-targets -- -D warnings
+
+# Lint every root-workspace target and feature combination.
+lint-all:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# Compile every root-workspace target and feature combination.
+# Compile every target in the normal workspace build.
 workspace-check:
+    cargo check --workspace --all-targets
+
+# Compile every root-workspace target and feature combination.
+workspace-check-all:
     cargo check --workspace --all-targets --all-features
 
 # Keep the compiler, Edition, manifests, workflows, and Docker image aligned.
@@ -66,12 +74,12 @@ compare preset="medium":
 
 # Exercise one declared point from every preregistered solver experiment.
 solver-bench-smoke output="/tmp/sybil-solver-smoke":
-    cargo run --release -p matching-sim --bin solver-experiments -- --output-dir {{output}} --smoke --overwrite
+    cargo run --release -p matching-sim --bin solver-experiments --features milp -- --output-dir {{output}} --smoke --overwrite
     python3 scripts/benchmarks/analyze_solver_experiments.py {{output}} --allow-incomplete
 
 # Run the complete frozen protocol against an immutable implementation commit.
 solver-bench-run revision output:
-    cargo run --release -p matching-sim --bin solver-experiments -- --source-revision {{revision}} --output-dir {{output}}
+    cargo run --release -p matching-sim --bin solver-experiments --features milp -- --source-revision {{revision}} --output-dir {{output}}
     python3 scripts/benchmarks/analyze_solver_experiments.py {{output}}
 
 # Revalidate and regenerate tables/figures from a complete retained run.
@@ -80,7 +88,7 @@ solver-bench-analyze output:
 
 # MILP-killer test (forces MILP timeout)
 milp-killer:
-    cargo run --bin matching-sim --release -- --preset milp-killer --solver all --milp-timeout 5.0
+    cargo run --bin matching-sim --release --features milp -- --preset milp-killer --solver all --milp-timeout 5.0
 
 # Run with specific preset and solver
 sim preset="medium" solver="lp" verbose="-v":
@@ -373,6 +381,10 @@ frontend-check:
 # Fast developer gate: metadata, formatting, compilation, and lints.
 check-fast: rust-workspaces-check fmt-check workspace-check lint
 
+# Exhaustive Rust feature gate. Keep this out of the edit/compile loop while
+# still making every optional integration part of the complete gate.
+check-features: workspace-check-all lint-all
+
 # Consensus/protocol gate: shared vectors, guest inputs, deployment coordination,
 # an explicit validity deployment boundary, and generated protocol documentation
 # must all agree.
@@ -390,7 +402,7 @@ store-tools-check:
     bash -n scripts/store-backup.sh scripts/store-restore-drill.sh
 
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
-check-all: check-fast test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check monitoring-check contracts-fmt-check contracts-build contracts-test
+check-all: check-fast check-features test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check monitoring-check contracts-fmt-check contracts-build contracts-test
     @echo "All checks passed!"
 
 # Run benchmarks if any
@@ -544,7 +556,7 @@ docs-verify note:
 # Pre-commit check (Rust fmt/clippy + Solidity fmt)
 pre-commit: contracts-fmt-check
     cargo fmt --all -- --check
-    cargo clippy --workspace --all-features
+    cargo clippy --workspace --all-targets
 
 # E2E smoke test (starts server, exercises API, tears down)
 smoke:

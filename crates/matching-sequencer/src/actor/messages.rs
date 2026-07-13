@@ -26,6 +26,11 @@ pub(super) struct SequencerActorState {
     /// returns `IndicativeSnapshot::default()` (None/None/0/0).
     pub(super) indicative_cache: HashMap<MarketId, IndicativeSnapshot>,
     pub(super) indicative_solve_gate: IndicativeSolveGate,
+    /// Owns timer, DA, retention, and indicative-solve futures that are not
+    /// actors themselves. Ractor owns the sequencer lifecycle; this tracker
+    /// makes those Tokio children part of its clean-stop boundary.
+    pub(super) background_tasks: TaskTracker,
+    pub(super) background_cancel: CancellationToken,
     #[cfg(test)]
     pub(super) next_tick_hold: Option<SequencerTestTickHold>,
 }

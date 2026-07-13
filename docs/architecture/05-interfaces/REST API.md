@@ -123,6 +123,14 @@ bundles/MM submissions. Current block/account reads also come from actor
 snapshots. Historical range queries take the independent private service path
 and therefore cannot occupy the sequencer actor or scan its database.
 
+Per-client HTTP buckets use the socket peer by default and ignore forwarding
+headers. `SYBIL_HTTP_TRUSTED_PROXY_CIDRS` may name the exact reverse-proxy
+networks allowed to supply `X-Forwarded-For`/`X-Real-IP`. For a trusted peer,
+the API walks `X-Forwarded-For` from right to left and selects the first
+untrusted hop, so caller-supplied addresses to its left cannot spoof the
+bucket. Empty configuration is deliberately conservative: traffic behind one
+proxy shares that proxy's client bucket.
+
 The sequencer message path is monitored by [[Actor Mailbox Monitoring]]. The API exports `sybil_actor_queue_depth{actor="sequencer"}` from `/metrics`, with configurable warning and critical thresholds, so operator alerts distinguish actor backlog from solver latency or HTTP rejection pressure.
 
 `GET /v1/proofs/state/{leaf_key_hex}` serves the current committed typed-state

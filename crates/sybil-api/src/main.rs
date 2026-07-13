@@ -1,9 +1,12 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
 use opentelemetry::trace::TracerProvider;
 use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -19,20 +22,23 @@ use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
 
 const SEQUENCER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
+const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 
 struct Telemetry {
     prometheus_handle: metrics_exporter_prometheus::PrometheusHandle,
     tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
 }
 
-fn spawn_process_metrics_task() {
-    tokio::spawn(async {
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
-        loop {
-            interval.tick().await;
-            record_process_metrics();
+async fn run_process_metrics(cancel: CancellationToken) {
+    let mut interval = tokio::time::interval(Duration::from_secs(10));
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = interval.tick() => {
+                record_process_metrics();
+            }
         }
-    });
+    }
 }
 
 fn record_process_metrics() {
@@ -262,8 +268,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         prometheus_handle,
         tracer_provider,
     } = init_telemetry();
-    spawn_process_metrics_task();
-
     let config = ApiConfig::parse();
 
     if config.import_witness {
@@ -275,6 +279,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return result;
     }
+
+    let worker_cancel = CancellationToken::new();
+    let workers = TaskTracker::new();
+    workers.spawn(run_process_metrics(worker_cancel.child_token()));
 
     // Deployment-profile preflight (SYB-133): log the active profile + every
     // knob diverging from the prod-intended baseline, and fail closed when a
@@ -397,30 +405,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let shutdown_handle = handle.clone();
     let state = AppState::new(handle, &config, prometheus_handle);
-    let history_publisher = match (store.clone(), state.history.clone()) {
-        (Some(store), Some(client)) => Some(sybil_api::history::spawn_outbox_publisher(
-            store,
-            client,
-            Duration::from_millis(config.history_poll_ms),
-        )),
+    match (store.clone(), state.history.clone()) {
+        (Some(store), Some(client)) => {
+            workers.spawn(sybil_api::history::run_outbox_publisher(
+                store,
+                client,
+                Duration::from_millis(config.history_poll_ms),
+                worker_cancel.child_token(),
+            ));
+        }
         (Some(_), None) => {
             tracing::warn!(
                 "history service is not configured; durable outbox rows will accumulate"
             );
-            None
         }
         (None, Some(_)) => {
             tracing::warn!(
                 "history service configured without persistent sequencer storage; no durable outbox can be delivered"
             );
-            None
         }
-        (None, None) => None,
-    };
+        (None, None) => {}
+    }
     if let Err(err) = state.initialize_read_models().await {
         panic!("failed to initialize API read models: {err}");
     }
-    let leaderboard_refresher = state.spawn_leaderboard_read_model_refresher();
+    let leaderboard_state = state.clone();
+    let leaderboard_cancel = worker_cancel.child_token();
+    workers.spawn(async move {
+        leaderboard_state
+            .refresh_leaderboard_read_model(leaderboard_cancel)
+            .await;
+    });
     if let Err(err) = state.rehydrate_auto_resolutions().await {
         tracing::warn!(error = %err, "failed to rehydrate auto-resolution review board");
     }
@@ -433,17 +448,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.port
     );
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .unwrap();
 
-    if let Some(publisher) = history_publisher {
-        publisher.abort();
-        let _ = publisher.await;
+    worker_cancel.cancel();
+    workers.close();
+    if tokio::time::timeout(WORKER_SHUTDOWN_TIMEOUT, workers.wait())
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            "API worker shutdown timed out after {}s",
+            WORKER_SHUTDOWN_TIMEOUT.as_secs()
+        );
+    } else {
+        tracing::info!("API background workers stopped cleanly");
     }
-    leaderboard_refresher.abort();
-    let _ = leaderboard_refresher.await;
 
     if shutdown_handle
         .stop_and_wait(SEQUENCER_SHUTDOWN_TIMEOUT)
