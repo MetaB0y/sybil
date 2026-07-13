@@ -2,7 +2,7 @@
 tags: [contracts, bridge, validium, spec]
 layer: verification
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 # L1 settlement and vault
@@ -89,10 +89,12 @@ amount_nanos = amount_token_units * 1_000
 5. The transition guest reconstructs the same deposit prefix and requires the
    credited/quarantined events and committed cursor/root to agree.
 
-Leaf/node domains, ABI padding, zero hashes, and conversion rules are shared by
-`sybil-l1-protocol` and Solidity golden tests. RPC/finality policy remains an
-operational trust boundary; root mismatch or cursor/vault identity mismatch is
-fatal in the indexer.
+Leaf/node domains, zero hashes, and conversion rules are shared by
+`sybil-l1-protocol` and Solidity golden tests. Host calldata, event, and return
+types come from the unconditional Alloy bindings in `sybil-l1-abi`, with
+existing byte-level goldens guarding the Rust/Solidity boundary. RPC/finality
+policy remains an operational trust boundary; root mismatch or cursor/vault
+identity mismatch is fatal in the indexer.
 
 ### Normal withdrawals
 
@@ -179,7 +181,8 @@ authority.
 |---|---|
 | Solidity ABI/state machine | `contracts/src/SybilSettlement.sol`, `SybilVault.sol`, `SybilTypes.sol` |
 | Authority/timelock | `contracts/src/access/SybilAccessControl.sol` |
-| L1 domains/tree/event decoding | `crates/sybil-l1-protocol` |
+| L1 domains/tree/neutral event parsing | `crates/sybil-l1-protocol` |
+| Host contract calls/events | `crates/sybil-l1-abi` |
 | Confirmed log ingestion | `crates/sybil-l1-indexer` |
 | Bridge WAL/state transition | `crates/matching-sequencer/src/bridge.rs` and bridge operations |
 | Native transition checks | `crates/sybil-verifier` |

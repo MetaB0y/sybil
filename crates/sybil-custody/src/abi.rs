@@ -1,13 +1,12 @@
+use alloy::primitives::{B256, Bytes, U256};
+use alloy::sol_types::{SolCall, SolValue};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
-use sha3::{Digest as _, Keccak256};
 use sybil_escape_claim::EscapeClaimPublicInputs;
+use sybil_l1_abi::{EscapeClaimPublicInputs as AbiEscapeClaimPublicInputs, SybilVault};
 
+#[cfg(test)]
 const WORD: usize = 32;
-const ADAPTER_HEAD_WORDS: usize = 4;
-const ESCAPE_INPUT_WORDS: usize = 6;
-const ESCAPE_CLAIM_SIGNATURE: &str =
-    "escapeClaim((bytes32,uint64,uint64,address,uint256,bytes32),bytes)";
 
 #[derive(Debug, Deserialize)]
 pub struct OpenVmEvmProof {
@@ -46,74 +45,38 @@ pub fn encode_adapter_proof(
     app_exe_commit: [u8; 32],
     app_vm_commit: [u8; 32],
 ) -> Vec<u8> {
-    let public_offset = ADAPTER_HEAD_WORDS * WORD;
-    let proof_offset = public_offset + WORD + padded_len(public_values.len());
-    let mut out = Vec::new();
-    push_usize(&mut out, public_offset);
-    push_usize(&mut out, proof_offset);
-    out.extend_from_slice(&app_exe_commit);
-    out.extend_from_slice(&app_vm_commit);
-    push_bytes(&mut out, public_values);
-    push_bytes(&mut out, proof_data);
-    out
+    (
+        Bytes::copy_from_slice(public_values),
+        Bytes::copy_from_slice(proof_data),
+        B256::from(app_exe_commit),
+        B256::from(app_vm_commit),
+    )
+        .abi_encode_params()
 }
 
 /// Six ABI words for the Solidity `EscapeClaimPublicInputs` struct. This is
 /// exposed independently so the Rust/Solidity field layout has a direct test.
 pub fn encode_escape_public_inputs(inputs: &EscapeClaimPublicInputs) -> Vec<u8> {
-    let mut out = Vec::with_capacity(ESCAPE_INPUT_WORDS * WORD);
-    out.extend_from_slice(&inputs.state_root);
-    push_u64(&mut out, inputs.height);
-    push_u64(&mut out, inputs.account_id);
-    push_address(&mut out, inputs.recipient);
-    push_u64(&mut out, inputs.amount);
-    out.extend_from_slice(&inputs.nullifier);
-    out
+    abi_escape_inputs(inputs).abi_encode_params()
 }
 
 pub fn escape_claim_calldata(inputs: &EscapeClaimPublicInputs, proof: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(&selector(ESCAPE_CLAIM_SIGNATURE));
-    out.extend_from_slice(&encode_escape_public_inputs(inputs));
-    push_usize(&mut out, (ESCAPE_INPUT_WORDS + 1) * WORD);
-    push_bytes(&mut out, proof);
-    out
+    SybilVault::escapeClaimCall {
+        inputs: abi_escape_inputs(inputs),
+        proof: Bytes::copy_from_slice(proof),
+    }
+    .abi_encode()
 }
 
-fn selector(signature: &str) -> [u8; 4] {
-    let digest = Keccak256::digest(signature.as_bytes());
-    [digest[0], digest[1], digest[2], digest[3]]
-}
-
-fn push_u64(out: &mut Vec<u8>, value: u64) {
-    let mut word = [0u8; WORD];
-    word[WORD - 8..].copy_from_slice(&value.to_be_bytes());
-    out.extend_from_slice(&word);
-}
-
-fn push_usize(out: &mut Vec<u8>, value: usize) {
-    let value = u64::try_from(value).expect("ABI payload length fits u64");
-    push_u64(out, value);
-}
-
-fn push_address(out: &mut Vec<u8>, address: [u8; 20]) {
-    let mut word = [0u8; WORD];
-    word[12..].copy_from_slice(&address);
-    out.extend_from_slice(&word);
-}
-
-fn push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
-    push_usize(out, bytes.len());
-    out.extend_from_slice(bytes);
-    out.resize(out.len() + padding(bytes.len()), 0);
-}
-
-fn padding(len: usize) -> usize {
-    (WORD - (len % WORD)) % WORD
-}
-
-fn padded_len(len: usize) -> usize {
-    len + padding(len)
+fn abi_escape_inputs(inputs: &EscapeClaimPublicInputs) -> AbiEscapeClaimPublicInputs {
+    AbiEscapeClaimPublicInputs {
+        stateRoot: inputs.state_root.into(),
+        height: inputs.height,
+        accountId: inputs.account_id,
+        recipient: inputs.recipient.into(),
+        amount: U256::from_limbs([inputs.amount, 0, 0, 0]),
+        nullifier: inputs.nullifier.into(),
+    }
 }
 
 fn decode_hex(field: &'static str, value: &str) -> Result<Vec<u8>> {
@@ -196,7 +159,7 @@ mod tests {
         let (inputs, _) = golden_inputs();
         let proof = vec![0xcc; 33];
         let calldata = escape_claim_calldata(&inputs, &proof);
-        assert_eq!(&calldata[..4], &selector(ESCAPE_CLAIM_SIGNATURE));
+        assert_eq!(&calldata[..4], &SybilVault::escapeClaimCall::SELECTOR);
         assert_eq!(&calldata[4..196], encode_escape_public_inputs(&inputs));
         assert_eq!(&calldata[220..228], &(224u64).to_be_bytes());
         assert_eq!(&calldata[252..260], &(33u64).to_be_bytes());

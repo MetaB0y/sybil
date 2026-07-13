@@ -1,0 +1,13 @@
+[package]
+name = "sybil-l1-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Host-side Alloy bindings for Sybil's Solidity contracts"
+
+[dependencies]
+alloy = { workspace = true, features = ["sol-types", "std"] }
+
+[lints.clippy]
+# Alloy's generated host-side types are outside consensus arithmetic.
+disallowed_types = "allow"

@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use alloy::primitives::{Address, B256, Bytes};
+use alloy::providers::{DynProvider, Provider, ProviderBuilder};
+use alloy::rpc::types::{Filter, Log as EthLog, TransactionRequest};
+use alloy::sol_types::SolCall;
 use clap::Parser;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use sybil_api_types::request::{
     BridgeWithdrawalL1Status, ObserveL1HeightRequest, SubmitL1DepositRequest,
     SubmitL1WithdrawalEventRequest,
@@ -16,10 +18,11 @@ use sybil_api_types::response::{
     BridgeWithdrawalL1EventResponse, ObserveL1HeightResponse,
 };
 use sybil_client::SybilClient;
+use sybil_l1_abi::SybilVault;
 use sybil_l1_protocol::{
     Bytes32, EthAddress, L1Log, L1ProtocolError, WithdrawalEvent, deposit_received_topic0,
-    deposit_root_by_count_calldata, parse_deposit_received_log, parse_withdrawal_event_log,
-    withdrawal_cancelled_topic0, withdrawal_finalized_topic0, withdrawal_queued_topic0,
+    parse_deposit_received_log, parse_withdrawal_event_log, withdrawal_cancelled_topic0,
+    withdrawal_finalized_topic0, withdrawal_queued_topic0,
 };
 use tokio::time::sleep;
 
@@ -104,14 +107,14 @@ enum IndexerError {
         field: &'static str,
         message: String,
     },
-    #[error("invalid Ethereum quantity for {field}: {value}")]
-    InvalidQuantity { field: &'static str, value: String },
-    #[error("Ethereum JSON-RPC error {code}: {message}")]
-    RpcError { code: i64, message: String },
+    #[error("invalid Ethereum RPC URL: {0}")]
+    InvalidRpcUrl(String),
+    #[error("Ethereum JSON-RPC failed: {0}")]
+    Rpc(#[from] alloy::transports::TransportError),
+    #[error("Ethereum ABI decode failed: {0}")]
+    Abi(#[from] alloy::sol_types::Error),
     #[error("missing JSON-RPC result")]
     MissingRpcResult,
-    #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
     #[error("JSON decode failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("cursor state I/O failed: {0}")]
@@ -215,37 +218,6 @@ fn effective_scan_start(start_block: u64, persisted_cursor: Option<u64>) -> Resu
     }
 }
 
-#[derive(Debug, Serialize)]
-struct JsonRpcRequest {
-    jsonrpc: &'static str,
-    id: u64,
-    method: &'static str,
-    params: Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct JsonRpcResponse<T> {
-    result: Option<T>,
-    error: Option<JsonRpcError>,
-}
-
-#[derive(Debug, Deserialize)]
-struct JsonRpcError {
-    code: i64,
-    message: String,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct EthLog {
-    address: String,
-    topics: Vec<String>,
-    data: String,
-    block_number: Option<String>,
-    transaction_hash: Option<String>,
-    log_index: Option<String>,
-}
-
 #[derive(Clone, Debug)]
 struct IndexedDeposit {
     log: EthLog,
@@ -312,15 +284,12 @@ trait DepositSink {
 }
 
 struct HttpL1Rpc {
-    client: reqwest::Client,
-    rpc_url: String,
+    provider: DynProvider,
 }
 
 impl L1Rpc for HttpL1Rpc {
     async fn block_number(&self) -> Result<u64> {
-        let value: String =
-            rpc_call(&self.client, &self.rpc_url, "eth_blockNumber", json!([])).await?;
-        parse_quantity(&value, "blockNumber")
+        Ok(self.provider.get_block_number().await?)
     }
 
     async fn deposit_logs(
@@ -329,14 +298,12 @@ impl L1Rpc for HttpL1Rpc {
         from_block: u64,
         to_block: u64,
     ) -> Result<Vec<EthLog>> {
-        let topic0 = format!("0x{}", hex::encode(deposit_received_topic0()));
-        let filter = json!({
-            "fromBlock": quantity_hex(from_block),
-            "toBlock": quantity_hex(to_block),
-            "address": format!("0x{}", hex::encode(vault)),
-            "topics": [topic0],
-        });
-        rpc_call(&self.client, &self.rpc_url, "eth_getLogs", json!([filter])).await
+        let filter = Filter::new()
+            .from_block(from_block)
+            .to_block(to_block)
+            .address(Address::from(vault))
+            .event_signature(B256::from(deposit_received_topic0()));
+        Ok(self.provider.get_logs(&filter).await?)
     }
 
     async fn withdrawal_logs(
@@ -345,19 +312,20 @@ impl L1Rpc for HttpL1Rpc {
         from_block: u64,
         to_block: u64,
     ) -> Result<Vec<EthLog>> {
-        let topics = [
+        let topics = Vec::from([
             withdrawal_queued_topic0(),
             withdrawal_finalized_topic0(),
             withdrawal_cancelled_topic0(),
-        ]
-        .map(|topic| format!("0x{}", hex::encode(topic)));
-        let filter = json!({
-            "fromBlock": quantity_hex(from_block),
-            "toBlock": quantity_hex(to_block),
-            "address": format!("0x{}", hex::encode(vault)),
-            "topics": [topics],
-        });
-        rpc_call(&self.client, &self.rpc_url, "eth_getLogs", json!([filter])).await
+        ])
+        .into_iter()
+        .map(B256::from)
+        .collect::<Vec<_>>();
+        let filter = Filter::new()
+            .from_block(from_block)
+            .to_block(to_block)
+            .address(Address::from(vault))
+            .event_signature(topics);
+        Ok(self.provider.get_logs(&filter).await?)
     }
 
     async fn deposit_root_by_count(
@@ -366,19 +334,12 @@ impl L1Rpc for HttpL1Rpc {
         count: u64,
         block: u64,
     ) -> Result<Bytes32> {
-        let calldata = deposit_root_by_count_calldata(count);
-        let call = json!({
-            "to": format!("0x{}", hex::encode(vault)),
-            "data": format!("0x{}", hex::encode(calldata)),
-        });
-        let value: String = rpc_call(
-            &self.client,
-            &self.rpc_url,
-            "eth_call",
-            json!([call, quantity_hex(block)]),
-        )
-        .await?;
-        parse_hex_array::<32>(&value, "depositRootByCount")
+        let call = SybilVault::depositRootByCountCall { count };
+        let request = TransactionRequest::default()
+            .to(Address::from(vault))
+            .input(Bytes::from(call.abi_encode()).into());
+        let output = self.provider.call(request).number(block).await?;
+        Ok(SybilVault::depositRootByCountCall::abi_decode_returns_validate(&output)?.into())
     }
 }
 
@@ -429,9 +390,12 @@ async fn main() -> Result<()> {
     let vault_address = parse_hex_array::<20>(&args.vault_address, "vault_address")?;
     let vault_hex = hex::encode(vault_address);
     let http = reqwest::Client::new();
+    let rpc_url = reqwest::Url::parse(&args.rpc_url)
+        .map_err(|error| IndexerError::InvalidRpcUrl(error.to_string()))?;
     let l1 = HttpL1Rpc {
-        client: http.clone(),
-        rpc_url: args.rpc_url.clone(),
+        provider: ProviderBuilder::new()
+            .connect_reqwest(http.clone(), rpc_url)
+            .erased(),
     };
     let sybil = SybilClient::new(
         http.clone(),
@@ -596,7 +560,7 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
             account_id = response.account_id,
             balance_nanos = response.balance_nanos,
             disposition = response.disposition,
-            tx = deposit.log.transaction_hash.as_deref().unwrap_or_default(),
+            tx = ?deposit.log.transaction_hash,
             "l1.indexer.deposit_ingested"
         );
         cursor = deposit.event.deposit_id;
@@ -610,7 +574,7 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
             nullifier = request.nullifier_hex,
             l1_status = ?request.status,
             executable_at_unix = request.executable_at_unix,
-            tx = event.log.transaction_hash.as_deref().unwrap_or_default(),
+            tx = ?event.log.transaction_hash,
             "l1.indexer.withdrawal_status_ingested"
         );
     }
@@ -624,32 +588,6 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
     .await?;
 
     Ok(Some(to.saturating_add(1)))
-}
-
-async fn rpc_call<T: DeserializeOwned>(
-    client: &reqwest::Client,
-    rpc_url: &str,
-    method: &'static str,
-    params: Value,
-) -> Result<T> {
-    let response = client
-        .post(rpc_url)
-        .json(&JsonRpcRequest {
-            jsonrpc: "2.0",
-            id: 1,
-            method,
-            params,
-        })
-        .send()
-        .await?;
-    let body: JsonRpcResponse<T> = response.error_for_status()?.json().await?;
-    if let Some(error) = body.error {
-        return Err(IndexerError::RpcError {
-            code: error.code,
-            message: error.message,
-        });
-    }
-    body.result.ok_or(IndexerError::MissingRpcResult)
 }
 
 async fn resolve_bridge_account<S: DepositSink>(
@@ -697,13 +635,9 @@ async fn submit_deposit<S: DepositSink>(
 
 fn indexed_deposit_from_log(log: EthLog) -> Result<IndexedDeposit> {
     let l1_log = L1Log {
-        address: parse_hex_array(&log.address, "log.address")?,
-        topics: log
-            .topics
-            .iter()
-            .map(|topic| parse_hex_array(topic, "log.topic"))
-            .collect::<Result<Vec<Bytes32>>>()?,
-        data: parse_hex_bytes(&log.data, "log.data")?,
+        address: log.address().into(),
+        topics: log.topics().iter().copied().map(Into::into).collect(),
+        data: log.data().data.to_vec(),
     };
     let event = parse_deposit_received_log(&l1_log)?;
     Ok(IndexedDeposit { log, event })
@@ -711,13 +645,9 @@ fn indexed_deposit_from_log(log: EthLog) -> Result<IndexedDeposit> {
 
 fn indexed_withdrawal_event_from_log(log: EthLog) -> Result<IndexedWithdrawalEvent> {
     let l1_log = L1Log {
-        address: parse_hex_array(&log.address, "log.address")?,
-        topics: log
-            .topics
-            .iter()
-            .map(|topic| parse_hex_array(topic, "log.topic"))
-            .collect::<Result<Vec<Bytes32>>>()?,
-        data: parse_hex_bytes(&log.data, "log.data")?,
+        address: log.address().into(),
+        topics: log.topics().iter().copied().map(Into::into).collect(),
+        data: log.data().data.to_vec(),
     };
     let event = parse_withdrawal_event_log(&l1_log)?;
     Ok(IndexedWithdrawalEvent { log, event })
@@ -726,18 +656,8 @@ fn indexed_withdrawal_event_from_log(log: EthLog) -> Result<IndexedWithdrawalEve
 fn sort_deposits(deposits: &mut [IndexedDeposit]) {
     deposits.sort_by_key(|deposit| {
         (
-            deposit
-                .log
-                .block_number
-                .as_deref()
-                .and_then(|value| parse_quantity(value, "blockNumber").ok())
-                .unwrap_or(u64::MAX),
-            deposit
-                .log
-                .log_index
-                .as_deref()
-                .and_then(|value| parse_quantity(value, "logIndex").ok())
-                .unwrap_or(u64::MAX),
+            deposit.log.block_number.unwrap_or(u64::MAX),
+            deposit.log.log_index.unwrap_or(u64::MAX),
         )
     });
 }
@@ -745,18 +665,8 @@ fn sort_deposits(deposits: &mut [IndexedDeposit]) {
 fn sort_withdrawal_events(events: &mut [IndexedWithdrawalEvent]) {
     events.sort_by_key(|event| {
         (
-            event
-                .log
-                .block_number
-                .as_deref()
-                .and_then(|value| parse_quantity(value, "blockNumber").ok())
-                .unwrap_or(u64::MAX),
-            event
-                .log
-                .log_index
-                .as_deref()
-                .and_then(|value| parse_quantity(value, "logIndex").ok())
-                .unwrap_or(u64::MAX),
+            event.log.block_number.unwrap_or(u64::MAX),
+            event.log.log_index.unwrap_or(u64::MAX),
         )
     });
 }
@@ -787,9 +697,7 @@ fn withdrawal_event_request(
     let l1_block_height = event
         .log
         .block_number
-        .as_deref()
-        .ok_or(IndexerError::MissingRpcResult)
-        .and_then(|value| parse_quantity(value, "blockNumber"))?;
+        .ok_or(IndexerError::MissingRpcResult)?;
     Ok(SubmitL1WithdrawalEventRequest {
         nullifier_hex: hex::encode(nullifier),
         status,
@@ -802,11 +710,7 @@ fn withdrawal_event_request(
 
 impl IndexedWithdrawalEvent {
     fn transaction_hash_hex(&self) -> Option<String> {
-        self.log
-            .transaction_hash
-            .as_deref()
-            .map(strip_hex_prefix)
-            .map(ToOwned::to_owned)
+        self.log.transaction_hash.map(hex::encode)
     }
 }
 
@@ -862,17 +766,6 @@ fn parse_hex_bytes(value: &str, field: &'static str) -> Result<Vec<u8>> {
     })
 }
 
-fn parse_quantity(value: &str, field: &'static str) -> Result<u64> {
-    u64::from_str_radix(strip_hex_prefix(value), 16).map_err(|_| IndexerError::InvalidQuantity {
-        field,
-        value: value.to_string(),
-    })
-}
-
-fn quantity_hex(value: u64) -> String {
-    format!("0x{value:x}")
-}
-
 fn strip_hex_prefix(value: &str) -> &str {
     value
         .strip_prefix("0x")
@@ -883,6 +776,8 @@ fn strip_hex_prefix(value: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::primitives::{Log as PrimitiveLog, U256};
+    use alloy::sol_types::SolEvent;
     use std::io::Write;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
@@ -918,64 +813,49 @@ mod tests {
         }
     }
 
-    fn abi_u64_word(value: u64) -> Bytes32 {
-        let mut out = [0u8; 32];
-        out[24..].copy_from_slice(&value.to_be_bytes());
-        out
-    }
-
-    fn abi_address_word(value: EthAddress) -> Bytes32 {
-        let mut out = [0u8; 32];
-        out[12..].copy_from_slice(&value);
-        out
-    }
-
     /// Build a well-formed DepositReceived EthLog for `deposit_id` at `block`
     /// with the given cumulative `root`.
     fn deposit_log(deposit_id: u64, block: u64, root: Bytes32, amount: u64) -> EthLog {
-        let token = [0x20; 20];
-        let sender = [0x30; 20];
-        let key = [0x44; 32];
-        let mut data = Vec::new();
-        data.extend_from_slice(&abi_address_word(token));
-        data.extend_from_slice(&abi_u64_word(amount));
-        data.extend_from_slice(&root);
+        let event = SybilVault::DepositReceived {
+            depositId: deposit_id,
+            sender: Address::from([0x30; 20]),
+            sybilAccountKey: B256::from([0x44; 32]),
+            token: Address::from([0x20; 20]),
+            amount: U256::from_limbs([amount, 0, 0, 0]),
+            depositRoot: B256::from(root),
+        };
         EthLog {
-            address: format!("0x{}", hex::encode([0x10; 20])),
-            topics: vec![
-                format!("0x{}", hex::encode(deposit_received_topic0())),
-                format!("0x{}", hex::encode(abi_u64_word(deposit_id))),
-                format!("0x{}", hex::encode(abi_address_word(sender))),
-                format!("0x{}", hex::encode(key)),
-            ],
-            data: format!("0x{}", hex::encode(data)),
-            block_number: Some(quantity_hex(block)),
-            transaction_hash: Some(format!("0x{}", hex::encode([0xaa; 32]))),
-            log_index: Some("0x1".to_string()),
+            inner: PrimitiveLog {
+                address: Address::from([0x10; 20]),
+                data: event.encode_log_data(),
+            },
+            block_number: Some(block),
+            transaction_hash: Some(B256::from([0xaa; 32])),
+            log_index: Some(1),
+            ..Default::default()
         }
     }
 
     fn withdrawal_queued_log(nullifier: Bytes32, block: u64, log_index: u64) -> EthLog {
-        let token = [0x20; 20];
-        let recipient = [0x30; 20];
-        let mut data = Vec::new();
-        data.extend_from_slice(&abi_address_word(token));
-        data.extend_from_slice(&abi_u64_word(1_000_000));
-        data.extend_from_slice(&[0x55; 32]);
-        data.extend_from_slice(&abi_u64_word(42));
-        data.extend_from_slice(&abi_u64_word(1_700_000_000));
-        data.extend_from_slice(&abi_u64_word(1_700_086_400));
+        let event = SybilVault::WithdrawalQueued {
+            nullifier: B256::from(nullifier),
+            recipient: Address::from([0x30; 20]),
+            token: Address::from([0x20; 20]),
+            amount: U256::from_limbs([1_000_000, 0, 0, 0]),
+            stateRoot: B256::from([0x55; 32]),
+            height: 42,
+            requestedAt: 1_700_000_000,
+            executableAt: 1_700_086_400,
+        };
         EthLog {
-            address: format!("0x{}", hex::encode([0x10; 20])),
-            topics: vec![
-                format!("0x{}", hex::encode(withdrawal_queued_topic0())),
-                format!("0x{}", hex::encode(nullifier)),
-                format!("0x{}", hex::encode(abi_address_word(recipient))),
-            ],
-            data: format!("0x{}", hex::encode(data)),
-            block_number: Some(quantity_hex(block)),
-            transaction_hash: Some(format!("0x{}", hex::encode([0xbb; 32]))),
-            log_index: Some(quantity_hex(log_index)),
+            inner: PrimitiveLog {
+                address: Address::from([0x10; 20]),
+                data: event.encode_log_data(),
+            },
+            block_number: Some(block),
+            transaction_hash: Some(B256::from([0xbb; 32])),
+            log_index: Some(log_index),
+            ..Default::default()
         }
     }
 
@@ -1020,11 +900,7 @@ mod tests {
                 .logs
                 .iter()
                 .filter(|log| {
-                    let block = log
-                        .block_number
-                        .as_deref()
-                        .and_then(|value| parse_quantity(value, "blockNumber").ok())
-                        .unwrap_or(u64::MAX);
+                    let block = log.block_number.unwrap_or(u64::MAX);
                     block >= from_block && block <= to_block
                 })
                 .cloned()
@@ -1045,11 +921,7 @@ mod tests {
                 .withdrawal_logs
                 .iter()
                 .filter(|log| {
-                    let block = log
-                        .block_number
-                        .as_deref()
-                        .and_then(|value| parse_quantity(value, "blockNumber").ok())
-                        .unwrap_or(u64::MAX);
+                    let block = log.block_number.unwrap_or(u64::MAX);
                     block >= from_block && block <= to_block
                 })
                 .cloned()
@@ -1198,12 +1070,6 @@ mod tests {
             cursor_path: None,
             once: true,
         }
-    }
-
-    #[test]
-    fn quantity_roundtrip() {
-        assert_eq!(quantity_hex(31_337), "0x7a69");
-        assert_eq!(parse_quantity("0x7a69", "chainId").unwrap(), 31_337);
     }
 
     #[test]

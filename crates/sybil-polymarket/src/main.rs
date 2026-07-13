@@ -5,6 +5,7 @@ use std::sync::Arc;
 use clap::Parser;
 use tokio::sync::{RwLock, mpsc, watch};
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use sybil_api_types::NANOS_PER_DOLLAR;
@@ -396,6 +397,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cancellation
     let cancel = CancellationToken::new();
+    let tasks = TaskTracker::new();
     let cancel_sync = cancel.clone();
     let cancel_feed = cancel.clone();
     let cancel_mm = cancel.clone();
@@ -407,7 +409,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let native_catalog_sync = native_catalog.clone();
 
     let mapping_for_sync = mapping.clone();
-    let sync_handle = tokio::spawn(async move {
+    let sync_handle = tasks.spawn(async move {
         let actor = SyncActor::new(
             config_sync,
             gamma_client,
@@ -422,12 +424,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         actor.run(cancel_sync).await;
     });
 
-    let feed_handle = tokio::spawn(async move {
+    let feed_handle = tasks.spawn(async move {
         let actor = FeedActor::new(config_feed, gamma_client_feed, price_tx, feed_rx);
         actor.run(cancel_feed).await;
     });
 
-    let mm_handle = tokio::spawn(async move {
+    let mm_handle = tasks.spawn(async move {
         let actor = MmActor::new(
             config_mm,
             sybil_client_mm,
@@ -447,7 +449,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let resolution_handle: tokio::task::JoinHandle<()> = if config.signer_key_path.is_empty() {
         info!("SIGNER_KEY_PATH not set; resolution actor disabled");
         let cancel_idle = cancel.clone();
-        tokio::spawn(async move { cancel_idle.cancelled().await })
+        tasks.spawn(async move { cancel_idle.cancelled().await })
     } else {
         let signer =
             ResolutionSigner::load_or_create(std::path::Path::new(&config.signer_key_path))?;
@@ -458,7 +460,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config_res = config.clone();
         let cancel_res = cancel.clone();
         let mapping_for_res = mapping.clone();
-        tokio::spawn(async move {
+        tasks.spawn(async move {
             let actor = ResolutionActor::new(
                 config_res,
                 gamma_client_resolution,
@@ -494,7 +496,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(reason) = disabled_reason {
             info!(reason, "auto-resolution actor disabled");
             let cancel_idle = cancel.clone();
-            tokio::spawn(async move { cancel_idle.cancelled().await })
+            tasks.spawn(async move { cancel_idle.cancelled().await })
         } else {
             let signer =
                 ResolutionSigner::load_or_create(std::path::Path::new(&config.signer_key_path))?;
@@ -529,7 +531,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mapping_for_autoresolve = mapping.clone();
             let http_autoresolve = http.clone();
             let cancel_autoresolve = cancel.clone();
-            tokio::spawn(async move {
+            tasks.spawn(async move {
                 let actor = AutoResolveActor::new(
                     autoresolve_config,
                     catalog,
@@ -581,6 +583,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     cancel.cancel();
+    tasks.close();
+    tasks.wait().await;
     info!("shutdown complete");
     Ok(())
 }

@@ -12,6 +12,7 @@ members = [
     "crates/sybil-api",
     "crates/sybil-api-types",
     "crates/sybil-client",
+    "crates/sybil-l1-abi",
     "crates/sybil-l1-indexer",
     "crates/sybil-l1-protocol",
     "crates/sybil-verifier",
@@ -42,6 +43,7 @@ disallowed_types = "deny"
 unwrap_used = "deny"
 
 [workspace.dependencies]
+alloy = { version = "2.1.1", default-features = false }
 blake3 = "1"
 clap = "4.5"
 getrandom = "0.4"

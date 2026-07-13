@@ -21,6 +21,7 @@ path = "src/bin/sybil_prover_mock.rs"
 required-features = ["mock-live"]
 
 [dependencies]
+alloy = { workspace = true, features = ["sol-types", "std"] }
 axum = { version = "0.8", features = ["json"] }
 clap = { workspace = true, features = ["derive"] }
 hex = { workspace = true }
@@ -37,6 +38,8 @@ sybil-oracle = { path = "../sybil-oracle", optional = true }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
 sybil-escape-claim = { path = "../sybil-escape-claim" }
+sybil-l1-abi = { path = "../sybil-l1-abi" }
+sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 

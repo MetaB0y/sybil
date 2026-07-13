@@ -2,18 +2,17 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
+use alloy::primitives::{B256, Bytes};
+use alloy::sol_types::{SolCall, SolValue};
 use clap::{Args, ValueEnum};
 use serde::Deserialize;
-use sha3::{Digest as _, Keccak256};
+use sybil_l1_abi::{StateTransitionPublicInputs, SybilSettlement};
 
 use crate::ProverCliError;
 use crate::artifacts::{read_guest_input, write_hex_bytes};
 
-const SUBMIT_STATE_ROOT_SIGNATURE: &str = "submitStateRoot((uint64,uint64,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,uint64),bytes)";
-const STATE_TRANSITION_PUBLIC_INPUT_WORDS: usize = 10;
 const ABI_WORD_BYTES: usize = 32;
 const SHELL_SAFE_CALLDATA_BYTES: usize = 128 * 1024;
-const OPENVM_EVM_ADAPTER_PROOF_WORDS: usize = 4;
 
 #[derive(Args)]
 pub struct SubmitStateRootArgs {
@@ -175,28 +174,13 @@ fn openvm_evm_adapter_proof(
     app_exe_commit: &[u8; ABI_WORD_BYTES],
     app_vm_commit: &[u8; ABI_WORD_BYTES],
 ) -> Vec<u8> {
-    let public_values_offset = (OPENVM_EVM_ADAPTER_PROOF_WORDS * ABI_WORD_BYTES) as u64;
-    let proof_data_offset =
-        public_values_offset + ABI_WORD_BYTES as u64 + padded_abi_len(public_values.len()) as u64;
-
-    let mut encoded = Vec::with_capacity(
-        (OPENVM_EVM_ADAPTER_PROOF_WORDS * ABI_WORD_BYTES)
-            + ABI_WORD_BYTES
-            + padded_abi_len(public_values.len())
-            + ABI_WORD_BYTES
-            + padded_abi_len(proof_data.len()),
-    );
-    append_abi_word_u64(&mut encoded, public_values_offset);
-    append_abi_word_u64(&mut encoded, proof_data_offset);
-    append_abi_word_bytes32(&mut encoded, app_exe_commit);
-    append_abi_word_bytes32(&mut encoded, app_vm_commit);
-    append_abi_word_u64(&mut encoded, public_values.len() as u64);
-    encoded.extend_from_slice(public_values);
-    encoded.resize(encoded.len() + abi_padding_len(public_values.len()), 0);
-    append_abi_word_u64(&mut encoded, proof_data.len() as u64);
-    encoded.extend_from_slice(proof_data);
-    encoded.resize(encoded.len() + abi_padding_len(proof_data.len()), 0);
-    encoded
+    (
+        Bytes::copy_from_slice(public_values),
+        Bytes::copy_from_slice(proof_data),
+        B256::from(*app_exe_commit),
+        B256::from(*app_vm_commit),
+    )
+        .abi_encode_params()
 }
 
 fn decode_bytes32_field(
@@ -281,56 +265,22 @@ fn submit_state_root_calldata(
     inputs: &sybil_zk::StateTransitionPublicInputs,
     proof: &[u8],
 ) -> Vec<u8> {
-    let mut encoded = Vec::with_capacity(
-        4 + ((STATE_TRANSITION_PUBLIC_INPUT_WORDS + 2) * ABI_WORD_BYTES)
-            + padded_abi_len(proof.len()),
-    );
-    encoded.extend_from_slice(&function_selector(SUBMIT_STATE_ROOT_SIGNATURE));
-    append_public_inputs(&mut encoded, inputs);
-    append_abi_word_u64(
-        &mut encoded,
-        ((STATE_TRANSITION_PUBLIC_INPUT_WORDS + 1) * ABI_WORD_BYTES) as u64,
-    );
-    append_abi_word_u64(&mut encoded, proof.len() as u64);
-    encoded.extend_from_slice(proof);
-    encoded.resize(encoded.len() + abi_padding_len(proof.len()), 0);
-    encoded
-}
-
-fn append_public_inputs(out: &mut Vec<u8>, inputs: &sybil_zk::StateTransitionPublicInputs) {
-    append_abi_word_u64(out, inputs.previous_height);
-    append_abi_word_u64(out, inputs.new_height);
-    append_abi_word_bytes32(out, &inputs.previous_state_root);
-    append_abi_word_bytes32(out, &inputs.new_state_root);
-    append_abi_word_bytes32(out, &inputs.block_hash);
-    append_abi_word_bytes32(out, &inputs.events_root);
-    append_abi_word_bytes32(out, &inputs.witness_root);
-    append_abi_word_bytes32(out, &inputs.da_commitment);
-    append_abi_word_bytes32(out, &inputs.deposit_root);
-    append_abi_word_u64(out, inputs.deposit_count);
-}
-
-fn append_abi_word_u64(out: &mut Vec<u8>, value: u64) {
-    let mut word = [0u8; ABI_WORD_BYTES];
-    word[ABI_WORD_BYTES - std::mem::size_of::<u64>()..].copy_from_slice(&value.to_be_bytes());
-    out.extend_from_slice(&word);
-}
-
-fn append_abi_word_bytes32(out: &mut Vec<u8>, value: &[u8; ABI_WORD_BYTES]) {
-    out.extend_from_slice(value);
-}
-
-fn function_selector(signature: &str) -> [u8; 4] {
-    let hash = Keccak256::digest(signature.as_bytes());
-    [hash[0], hash[1], hash[2], hash[3]]
-}
-
-fn abi_padding_len(len: usize) -> usize {
-    (ABI_WORD_BYTES - (len % ABI_WORD_BYTES)) % ABI_WORD_BYTES
-}
-
-fn padded_abi_len(len: usize) -> usize {
-    len + abi_padding_len(len)
+    SybilSettlement::submitStateRootCall {
+        inputs: StateTransitionPublicInputs {
+            previousHeight: inputs.previous_height,
+            newHeight: inputs.new_height,
+            previousStateRoot: inputs.previous_state_root.into(),
+            newStateRoot: inputs.new_state_root.into(),
+            blockHash: inputs.block_hash.into(),
+            eventsRoot: inputs.events_root.into(),
+            witnessRoot: inputs.witness_root.into(),
+            daCommitment: inputs.da_commitment.into(),
+            depositRoot: inputs.deposit_root.into(),
+            depositCount: inputs.deposit_count,
+        },
+        proof: Bytes::copy_from_slice(proof),
+    }
+    .abi_encode()
 }
 
 fn cast_send_data_command(
@@ -358,4 +308,54 @@ fn curl_rpc_request_command(path: &Path, rpc_url_env: &str) -> String {
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn submit_state_root_calldata_matches_solidity_layout() {
+        let inputs = sybil_zk::StateTransitionPublicInputs {
+            previous_height: 41,
+            new_height: 42,
+            previous_state_root: [0x11; 32],
+            new_state_root: [0x22; 32],
+            block_hash: [0x33; 32],
+            events_root: [0x44; 32],
+            witness_root: [0x55; 32],
+            da_commitment: [0x66; 32],
+            deposit_root: [0x77; 32],
+            deposit_count: 9,
+        };
+        let proof = vec![0xaa; 33];
+        let calldata = submit_state_root_calldata(&inputs, &proof);
+
+        assert_eq!(&calldata[..4], &[0xf2, 0x33, 0x91, 0xb1]);
+        assert_eq!(&calldata[28..36], &inputs.previous_height.to_be_bytes());
+        assert_eq!(&calldata[60..68], &inputs.new_height.to_be_bytes());
+        assert_eq!(&calldata[68..100], &inputs.previous_state_root);
+        assert_eq!(&calldata[260..292], &inputs.deposit_root);
+        assert_eq!(&calldata[316..324], &inputs.deposit_count.to_be_bytes());
+        assert_eq!(&calldata[348..356], &(352u64).to_be_bytes());
+        assert_eq!(&calldata[380..388], &(33u64).to_be_bytes());
+        assert_eq!(&calldata[388..421], proof);
+    }
+
+    #[test]
+    fn openvm_adapter_proof_matches_solidity_tuple_layout() {
+        let public_values = [0x12; 32];
+        let proof_data = [0x34; 33];
+        let encoded =
+            openvm_evm_adapter_proof(&public_values, &proof_data, &[0x56; 32], &[0x78; 32]);
+
+        assert_eq!(&encoded[24..32], &(128u64).to_be_bytes());
+        assert_eq!(&encoded[56..64], &(192u64).to_be_bytes());
+        assert_eq!(&encoded[64..96], &[0x56; 32]);
+        assert_eq!(&encoded[96..128], &[0x78; 32]);
+        assert_eq!(&encoded[152..160], &(32u64).to_be_bytes());
+        assert_eq!(&encoded[160..192], &public_values);
+        assert_eq!(&encoded[216..224], &(33u64).to_be_bytes());
+        assert_eq!(&encoded[224..257], &proof_data);
+    }
 }

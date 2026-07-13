@@ -1,19 +1,23 @@
+use alloy::primitives::{Address, Bytes};
+use alloy::providers::{DynProvider, Provider, ProviderBuilder};
+use alloy::rpc::types::TransactionRequest;
+use alloy::sol_types::SolCall;
 use anyhow::{Context, Result, bail};
-use reqwest::Client;
-use serde_json::{Value, json};
-use sha3::{Digest as _, Keccak256};
 use sybil_api_types::DaManifestResponse;
+use sybil_l1_abi::{RootRecord as AbiRootRecord, SybilSettlement};
 
 use crate::format::RootRecord;
 
 pub async fn chain_id(rpc_url: &str) -> Result<u64> {
-    let result = rpc(rpc_url, "eth_chainId", json!([])).await?;
-    parse_quantity(result.as_str().context("eth_chainId was not a string")?)
+    provider(rpc_url)?
+        .get_chain_id()
+        .await
+        .context("RPC eth_chainId")
 }
 
 pub async fn latest_height(rpc_url: &str, settlement: [u8; 20]) -> Result<u64> {
-    let output = eth_call(rpc_url, settlement, &selector("latestHeight()"), None).await?;
-    parse_word_u64(word(&output, 0)?)
+    let output = contract_call(rpc_url, settlement, SybilSettlement::latestHeightCall {}).await?;
+    Ok(output)
 }
 
 pub async fn fetch_root_record(
@@ -21,30 +25,32 @@ pub async fn fetch_root_record(
     settlement: [u8; 20],
     height: u64,
 ) -> Result<RootRecord> {
-    let mut calldata = selector("rootAt(uint64)").to_vec();
-    let mut height_word = [0u8; 32];
-    height_word[24..].copy_from_slice(&height.to_be_bytes());
-    calldata.extend_from_slice(&height_word);
-    let output = eth_call(rpc_url, settlement, &calldata, None).await?;
-    if output.len() != 11 * 32 {
-        bail!(
-            "rootAt({height}) returned {} bytes, expected 352",
-            output.len()
-        );
-    }
+    let output = contract_call(rpc_url, settlement, SybilSettlement::rootAtCall { height }).await?;
+    let AbiRootRecord {
+        height,
+        stateRoot,
+        previousStateRoot,
+        blockHash,
+        eventsRoot,
+        witnessRoot,
+        daCommitment,
+        depositRoot,
+        depositCount,
+        verifiedAt,
+        verifierVersion,
+    } = output;
     Ok(RootRecord {
-        height: parse_word_u64(word(&output, 0)?)?,
-        state_root: word(&output, 1)?.try_into().expect("word length"),
-        previous_state_root: word(&output, 2)?.try_into().expect("word length"),
-        block_hash: word(&output, 3)?.try_into().expect("word length"),
-        events_root: word(&output, 4)?.try_into().expect("word length"),
-        witness_root: word(&output, 5)?.try_into().expect("word length"),
-        da_commitment: word(&output, 6)?.try_into().expect("word length"),
-        deposit_root: word(&output, 7)?.try_into().expect("word length"),
-        deposit_count: parse_word_u64(word(&output, 8)?)?,
-        verified_at: parse_word_u64(word(&output, 9)?)?,
-        verifier_version: u32::try_from(parse_word_u64(word(&output, 10)?)?)
-            .context("verifier version exceeds u32")?,
+        height,
+        state_root: stateRoot.into(),
+        previous_state_root: previousStateRoot.into(),
+        block_hash: blockHash.into(),
+        events_root: eventsRoot.into(),
+        witness_root: witnessRoot.into(),
+        da_commitment: daCommitment.into(),
+        deposit_root: depositRoot.into(),
+        deposit_count: depositCount,
+        verified_at: verifiedAt,
+        verifier_version: verifierVersion,
     })
 }
 
@@ -114,74 +120,21 @@ pub async fn send_raw_calldata_with_cast(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-async fn eth_call(
-    rpc_url: &str,
-    to: [u8; 20],
-    calldata: &[u8],
-    from: Option<[u8; 20]>,
-) -> Result<Vec<u8>> {
-    let mut call = serde_json::Map::new();
-    call.insert(
-        "to".to_string(),
-        Value::String(format!("0x{}", hex::encode(to))),
-    );
-    call.insert(
-        "data".to_string(),
-        Value::String(format!("0x{}", hex::encode(calldata))),
-    );
-    if let Some(from) = from {
-        call.insert(
-            "from".to_string(),
-            Value::String(format!("0x{}", hex::encode(from))),
-        );
-    }
-    let result = rpc(rpc_url, "eth_call", json!([Value::Object(call), "latest"])).await?;
-    let encoded = result
-        .as_str()
-        .context("eth_call result was not a string")?;
-    hex::decode(encoded.trim_start_matches("0x")).context("decode eth_call result")
+fn provider(rpc_url: &str) -> Result<DynProvider> {
+    let url = rpc_url.parse().context("parse Ethereum RPC URL")?;
+    Ok(ProviderBuilder::new().connect_http(url).erased())
 }
 
-async fn rpc(rpc_url: &str, method: &str, params: Value) -> Result<Value> {
-    let response = Client::new()
-        .post(rpc_url)
-        .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
-        .send()
+async fn contract_call<C: SolCall>(rpc_url: &str, to: [u8; 20], call: C) -> Result<C::Return> {
+    let request = TransactionRequest::default()
+        .to(Address::from(to))
+        .input(Bytes::from(call.abi_encode()).into());
+    let output = provider(rpc_url)?
+        .call(request)
+        .latest()
         .await
-        .with_context(|| format!("RPC {method}"))?;
-    let status = response.status();
-    let body: Value = response.json().await.context("decode RPC response")?;
-    if !status.is_success() {
-        bail!("RPC {method} returned HTTP {status}: {body}");
-    }
-    if let Some(error) = body.get("error") {
-        bail!("RPC {method} failed: {error}");
-    }
-    body.get("result")
-        .cloned()
-        .with_context(|| format!("RPC {method} omitted result"))
-}
-
-fn selector(signature: &str) -> [u8; 4] {
-    let hash = Keccak256::digest(signature.as_bytes());
-    [hash[0], hash[1], hash[2], hash[3]]
-}
-
-fn word(bytes: &[u8], index: usize) -> Result<&[u8]> {
-    bytes
-        .get(index * 32..(index + 1) * 32)
-        .with_context(|| format!("missing ABI word {index}"))
-}
-
-fn parse_word_u64(word: &[u8]) -> Result<u64> {
-    if word.len() != 32 || word[..24].iter().any(|byte| *byte != 0) {
-        bail!("ABI uint does not fit u64");
-    }
-    Ok(u64::from_be_bytes(word[24..].try_into().expect("8 bytes")))
-}
-
-fn parse_quantity(value: &str) -> Result<u64> {
-    u64::from_str_radix(value.trim_start_matches("0x"), 16).context("parse RPC quantity")
+        .context("RPC eth_call")?;
+    C::abi_decode_returns_validate(&output).context("decode eth_call ABI result")
 }
 
 pub fn decode20(name: &str, value: &str) -> Result<[u8; 20]> {

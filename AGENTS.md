@@ -33,7 +33,8 @@ sybil/
 │   ├── sybil-prover/              # Proof jobs, DA artifacts, calldata/submission
 │   ├── sybil-escape-claim/         # Guest-safe conservative escape statement
 │   ├── sybil-custody/              # User snapshots, reconstruction, escape proving CLI
-│   ├── sybil-l1-protocol/          # Shared Rust/Solidity bridge hash and ABI domains
+│   ├── sybil-l1-protocol/          # Guest-safe Rust/Solidity bridge hash domains
+│   ├── sybil-l1-abi/               # Host-only Alloy contract bindings
 │   ├── sybil-l1-indexer/           # L1 deposit/withdrawal lifecycle sidecar
 │   └── sybil-polymarket/           # External market mirror and MM integration
 ├── arena/                         # Python: trading bots, client SDK, simulation framework (has its own AGENTS.md)

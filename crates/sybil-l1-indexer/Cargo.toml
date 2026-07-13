@@ -10,6 +10,7 @@ name = "sybil-l1-indexer"
 path = "src/main.rs"
 
 [dependencies]
+alloy = { workspace = true, features = ["provider-http", "reqwest-rustls-tls", "rpc-types"] }
 clap = { workspace = true, features = ["derive", "env"] }
 hex = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
@@ -17,6 +18,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sybil-api-types = { path = "../sybil-api-types" }
 sybil-client = { path = "../sybil-client" }
+sybil-l1-abi = { path = "../sybil-l1-abi" }
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
