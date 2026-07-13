@@ -3,7 +3,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::{get, post_json, test_app};
+use common::{get, post_json, test_app_with_store};
 use matching_sequencer::{
     AccountAuthScheme, AccountId, AuthenticatedProfileUpdate, PublicKey, RegisteredPubkey,
     SequencerHandle,
@@ -89,12 +89,13 @@ async fn create_ranked_pair(app: &axum::Router, handle: &SequencerHandle) -> (u6
             .await
             .unwrap();
     }
+    handle.produce_block().await.unwrap();
     (yes.id.0, no.id.0)
 }
 
 #[tokio::test]
 async fn leaderboard_ranks_deterministically_and_excludes_system_accounts() {
-    let (app, handle) = test_app(true).await;
+    let (app, handle) = test_app_with_store(true).await;
 
     let (yes, no) = create_ranked_pair(&app, &handle).await;
     let funded_without_fill = handle.create_account(1_000_000_000).await.unwrap();
@@ -145,6 +146,7 @@ async fn leaderboard_ranks_deterministically_and_excludes_system_accounts() {
         })
         .await
         .unwrap();
+    handle.produce_block().await.unwrap();
     let after_clear = leaderboard(&app, "").await;
     assert_eq!(
         account_ids(after_clear["entries"].as_array().unwrap()),
@@ -154,7 +156,7 @@ async fn leaderboard_ranks_deterministically_and_excludes_system_accounts() {
 
 #[tokio::test]
 async fn leaderboard_honours_limit_cap_and_window_param() {
-    let (app, handle) = test_app(true).await;
+    let (app, handle) = test_app_with_store(true).await;
     create_ranked_pair(&app, &handle).await;
 
     // Explicit limit truncates the result set.

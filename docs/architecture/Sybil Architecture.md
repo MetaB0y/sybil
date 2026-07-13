@@ -2,7 +2,7 @@
 tags: [moc, overview]
 layer: core
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 # Sybil architecture
@@ -40,13 +40,15 @@ flowchart TB
         SOLVE["matching-solver<br/>float search"]
         LAND["Integer landing<br/>verify limits + MM budgets"]
         SETTLE["Settlement<br/>balances · positions · minting · resolution"]
-        STORE["Commit<br/>qMDB state + redb fence/WAL/history"]
+        STORE["Commit<br/>qMDB state + redb fence/WAL<br/>history outbox"]
         BLOCK["Sealed block<br/>canonical data + derived sidecar"]
         WIT["BlockWitness v9<br/>private transition package"]
+        HIST["sybil-history<br/>private raw batches · indexes · candles"]
 
         ACTOR --> ADMIT --> BATCH --> SOLVE --> LAND --> SETTLE --> STORE
         STORE --> BLOCK
         STORE --> WIT
+        STORE -.->|"at-least-once outbox delivery"| HIST
     end
 
     subgraph validity["Validity, availability, and L1"]
@@ -70,6 +72,7 @@ flowchart TB
     OPS --> API
     PM -.->|"markets · prices · signed resolutions · liquidity"| API
     API --> ACTOR
+    API -->|"authorized historical reads"| HIST
     BLOCK -.->|"WS first-party · SSE convenience · REST history"| users
     L1 -.->|"indexed deposits / withdrawals"| API
 ```
@@ -137,7 +140,9 @@ The vault frontmatter is authoritative about document status: `current` means im
 
 - Single-market binary clearing, six solver implementations, one trusted verifier, and one net-of-minting welfare definition.
 - Direct admission plus deferred atomic submissions, resting reservations, deterministic settlement, and group-preserving resolution.
-- redb/qMDB fence-based persistence, acknowledged-write replay, durable history, retention semantics, backup/restore, witness import, and user-side custody/reconstruction/escape tooling.
+- redb/qMDB fence-based persistence, acknowledged-write replay, a private
+  history projector behind a transactional outbox, backup/restore, witness
+  import, and user-side custody/reconstruction/escape tooling.
 - WebAuthn/P256 admission, durable per-account replay nonces, and committed/in-guest-verified key operations. Ordinary order/cancel envelopes are not yet guest-proven.
 - Witness v9, committed last clearing prices, deposit quarantine, exact-keyspace proofs, and guest/native commitment agreement.
 - REST, resumable WebSocket, convenience SSE, OpenAPI, shared Rust client, Python agents, and the Polymarket integration.

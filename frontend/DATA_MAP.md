@@ -5,7 +5,7 @@
 > pages to endpoint families and records trust/durability boundaries; it does
 > not duplicate every rendered field or serve as a product backlog.
 
-Last implementation audit: 2026-07-11. A Vitest guard checks that every path
+Last implementation audit: 2026-07-13. A Vitest guard checks that every path
 named here exists in generated OpenAPI types and that every path called through
 the frontend API client appears here.
 
@@ -71,7 +71,8 @@ Read API keys cannot authorize any mutation.
 |---|---|
 | Balances, positions, markets, groups, lifecycle, orders/reservations, bridge/withdrawal state | Committed exchange state; restored from fenced store/witness |
 | Blocks and canonical witnesses | Durable store rows, subject to configured retention |
-| Fills, candles, account events/equity, platform aggregates | Durable retained derived tables; never validity inputs. Account-history APIs expose their retained boundary and may not be treated as all-time. |
+| Fills, candles, account events/equity | Private `sybil-history` projection fed by a fenced transactional outbox; never validity inputs. Responses expose indexed-through/completeness metadata and can return 503 while the independent projector is unavailable. |
+| Platform/current aggregates | Sequencer-derived current read models; not validity inputs. Leaderboard bases are published once per committed block and window baselines come from `sybil-history`. |
 | Market reference/display metadata | Off-block persisted JSON; mirror/operator supplied |
 | Arena decisions/equity | Separate arena SQLite database |
 | Browser session, selected tabs/filters | Local browser only |

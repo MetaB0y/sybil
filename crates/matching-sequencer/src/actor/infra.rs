@@ -19,46 +19,14 @@ impl IndicativeSolveGate {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct TokenBucket {
-    tokens: f64,
-    capacity: f64,
-    refill_per_second: f64,
-    last_refill: Instant,
-}
-
-impl TokenBucket {
-    pub(crate) fn new(refill_per_second: u32, capacity: u32, now: Instant) -> Self {
-        Self {
-            tokens: capacity as f64,
-            capacity: capacity as f64,
-            refill_per_second: refill_per_second as f64,
-            last_refill: now,
-        }
-    }
-
-    pub(crate) fn allow(&mut self, now: Instant) -> Result<(), u64> {
-        let elapsed = now.saturating_duration_since(self.last_refill);
-        self.last_refill = now;
-        self.tokens =
-            (self.tokens + elapsed.as_secs_f64() * self.refill_per_second).min(self.capacity);
-
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
-            Ok(())
-        } else {
-            Err(self.retry_after_secs())
-        }
-    }
-
-    fn retry_after_secs(&self) -> u64 {
-        if self.refill_per_second <= 0.0 {
-            return 1;
-        }
-        ((1.0 - self.tokens).max(0.0) / self.refill_per_second)
-            .ceil()
-            .max(1.0) as u64
-    }
+pub(crate) fn rate_limiter(rate: u32, burst: u32) -> Ratelimiter {
+    assert!(rate > 0, "rate limits must have a positive refill rate");
+    assert!(burst > 0, "rate limits must have positive burst capacity");
+    Ratelimiter::builder(u64::from(rate))
+        .max_tokens(u64::from(burst))
+        .initial_available(u64::from(burst))
+        .build()
+        .expect("validated rate limit")
 }
 
 #[derive(Clone)]

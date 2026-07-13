@@ -321,7 +321,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all(data_dir).expect("failed to create data dir");
         let db_path = data_dir.join("sybil.redb");
         match matching_sequencer::store::Store::open(&db_path) {
-            Ok(s) => Some(s),
+            Ok(s) => Some(Arc::new(s)),
             Err(e) => {
                 tracing::error!(error = %e, "failed to open persistent store");
                 return Err(
@@ -370,7 +370,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        SequencerHandle::spawn_with_store(sequencer, store)
+        SequencerHandle::spawn_with_shared_store(sequencer, store.clone())
     } else {
         let mut markets = MarketSet::new();
         for name in &config.seed_markets {
@@ -385,7 +385,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         tracing::info!(num_markets, "Starting fresh (no persistent state)");
 
-        SequencerHandle::spawn_with_store(sequencer, store)
+        SequencerHandle::spawn_with_shared_store(sequencer, store.clone())
     };
 
     tracing::info!(
@@ -405,6 +405,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let shutdown_handle = handle.clone();
     let state = AppState::new(handle, &config, prometheus_handle);
+    let history_publisher = match (store.clone(), state.history.clone()) {
+        (Some(store), Some(client)) => Some(sybil_api::history::spawn_outbox_publisher(
+            store,
+            client,
+            Duration::from_millis(config.history_poll_ms),
+        )),
+        (Some(_), None) => {
+            tracing::warn!(
+                "history service is not configured; durable outbox rows will accumulate"
+            );
+            None
+        }
+        (None, Some(_)) => {
+            tracing::warn!(
+                "history service configured without persistent sequencer storage; no durable outbox can be delivered"
+            );
+            None
+        }
+        (None, None) => None,
+    };
+    if let Err(err) = state.initialize_read_models().await {
+        panic!("failed to initialize API read models: {err}");
+    }
+    let leaderboard_refresher = state.spawn_leaderboard_read_model_refresher();
     if let Err(err) = state.rehydrate_auto_resolutions().await {
         tracing::warn!(error = %err, "failed to rehydrate auto-resolution review board");
     }
@@ -421,6 +445,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+
+    if let Some(publisher) = history_publisher {
+        publisher.abort();
+        let _ = publisher.await;
+    }
+    leaderboard_refresher.abort();
+    let _ = leaderboard_refresher.await;
 
     if shutdown_handle
         .stop_and_wait(SEQUENCER_SHUTDOWN_TIMEOUT)

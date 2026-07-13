@@ -1,9 +1,14 @@
 # ADR 0017: Bound durable account history and expose retention
 
-- Status: accepted
+- Status: Superseded by ADR-0018
 - Date: 2026-07-12
 
 ## Context
+
+> Superseded for current runtime ownership by
+> [ADR-0018](0018-extract-private-history-service.md). This record remains the
+> rationale for the bounded embedded implementation that provided the migration
+> runway.
 
 Fills, equity samples, and account events are durable derived views, but their
 redb tables grew without limit. Their HTTP responses also implied complete

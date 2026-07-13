@@ -36,7 +36,7 @@ RUN --mount=type=cache,id=sybil-cargo-registry,target=/usr/local/cargo/registry,
     --mount=type=cache,id=sybil-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=sybil-target-${TARGETARCH},target=/app/target,sharing=locked \
     cargo chef cook --release --recipe-path recipe.json \
-        -p sybil-api -p sybil-polymarket -p sybil-prover && \
+        -p sybil-api -p sybil-history -p sybil-polymarket -p sybil-prover && \
     cargo chef cook --release --recipe-path recipe.json \
         -p sybil-prover --features mock-live --bin sybil-prover-mock
 
@@ -48,11 +48,12 @@ COPY . .
 RUN --mount=type=cache,id=sybil-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=sybil-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=sybil-target-${TARGETARCH},target=/app/target,sharing=locked \
-    cargo build --release -p sybil-api -p sybil-polymarket -p sybil-prover && \
+    cargo build --release -p sybil-api -p sybil-history -p sybil-polymarket -p sybil-prover && \
     cargo build --release -p sybil-prover --features mock-live --bin sybil-prover-mock && \
     install -d /app/bin && \
     install -m 0755 \
         /app/target/release/sybil-api \
+        /app/target/release/sybil-history \
         /app/target/release/sybil-polymarket \
         /app/target/release/sybil-prover \
         /app/target/release/sybil-prover-mock \
@@ -65,10 +66,11 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/bin/sybil-api /usr/local/bin/sybil-api
+COPY --from=builder /app/bin/sybil-history /usr/local/bin/sybil-history
 COPY --from=builder /app/bin/sybil-polymarket /usr/local/bin/sybil-polymarket
 COPY --from=builder /app/bin/sybil-prover /usr/local/bin/sybil-prover
 COPY --from=builder /app/bin/sybil-prover-mock /usr/local/bin/sybil-prover-mock
 
-EXPOSE 3000 3002
+EXPOSE 3000 3002 3003
 
 ENTRYPOINT ["sybil-api"]

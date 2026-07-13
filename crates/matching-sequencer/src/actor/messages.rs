@@ -17,8 +17,8 @@ pub(super) struct SequencerActorState {
     pub(super) pause_count: u32,
     pub(super) halted_error: Option<SequencerError>,
     pub(super) store: Option<Arc<crate::store::Store>>,
-    pub(super) global_submission_bucket: TokenBucket,
-    pub(super) account_submission_buckets: HashMap<AccountId, TokenBucket>,
+    pub(super) global_submission_limiter: Ratelimiter,
+    pub(super) account_submission_limiters: HashMap<AccountId, Ratelimiter>,
     pub(super) mailbox_monitor: MailboxMonitor,
     /// Per-market indicative snapshots from the C2 shadow-solver. Cache
     /// lives on the actor (not `BlockSequencer`) so pure-core stays pure.
@@ -187,58 +187,6 @@ pub enum SequencerMsg {
         String,
         MarketMetadata,
         RpcReplyPort<Result<MarketId, SequencerError>>,
-    ),
-    GetPriceHistory(
-        MarketId,
-        Option<u64>,
-        Option<u64>,
-        Option<u64>,
-        usize,
-        RpcReplyPort<Result<PriceHistoryPage, SequencerError>>,
-    ),
-    GetPriceCandles(
-        MarketId,
-        u32,
-        Option<u64>,
-        Option<u64>,
-        Option<u64>,
-        usize,
-        RpcReplyPort<Result<PriceCandlePage, SequencerError>>,
-    ),
-    GetAccountFills(
-        AccountId,
-        Option<MarketId>,
-        usize,
-        usize,
-        RpcReplyPort<Result<RetainedHistoryPage<AccountFillRecord>, SequencerError>>,
-    ),
-    GetAccountFillsAfter(
-        AccountId,
-        Option<MarketId>,
-        Option<AccountFillCursor>,
-        usize,
-        RpcReplyPort<Result<RetainedHistoryPage<AccountFillRecord>, SequencerError>>,
-    ),
-    GetEquitySeries(
-        AccountId,
-        u64,
-        RpcReplyPort<Result<RetainedHistoryPage<crate::aggregates::EquityPoint>, SequencerError>>,
-    ),
-    /// Ranked leaderboard over a window (SYB-59). `since_ms == 0` is all-time
-    /// (fully in-memory); a non-zero `since_ms` reads per-account windowed
-    /// baselines from the durable equity store. Returns at most `limit` rows,
-    /// already sorted (PnL desc, then account id asc).
-    Leaderboard(
-        u64,
-        usize,
-        RpcReplyPort<Result<Vec<LeaderboardRow>, SequencerError>>,
-    ),
-    GetAccountEvents(
-        AccountId,
-        usize,
-        Option<(u64, u64)>,
-        Option<String>,
-        RpcReplyPort<Result<RetainedHistoryPage<crate::aggregates::HistoryEvent>, SequencerError>>,
     ),
     ListAutoResolutionRecords(RpcReplyPort<Result<Vec<AutoResolutionRecord>, SequencerError>>),
     PutAutoResolutionRecord(

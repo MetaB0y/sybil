@@ -32,6 +32,25 @@ pub struct ApiConfig {
     #[arg(long, default_value = "", env = "SYBIL_SERVICE_TOKEN")]
     pub service_token: String,
 
+    /// Private history projector base URL. Empty keeps ingestion disabled and
+    /// makes historical product endpoints explicitly unavailable; trading and
+    /// the durable outbox continue normally.
+    #[arg(long, default_value = "", env = "SYBIL_HISTORY_URL")]
+    pub history_url: String,
+
+    /// Dedicated bearer shared only with `sybil-history`. Do not reuse the
+    /// operator service token, which grants mutation capabilities.
+    #[arg(long, default_value = "", env = "SYBIL_HISTORY_TOKEN")]
+    pub history_token: String,
+
+    /// History outbox delivery polling interval.
+    #[arg(long, default_value = "250", env = "SYBIL_HISTORY_POLL_MS")]
+    pub history_poll_ms: u64,
+
+    /// Timeout for one internal history request.
+    #[arg(long, default_value = "10000", env = "SYBIL_HISTORY_TIMEOUT_MS")]
+    pub history_timeout_ms: u64,
+
     /// Comma-separated browser origins allowed by CORS in production. Empty =
     /// no cross-origin CORS headers; same-origin browser requests still work.
     #[arg(long, env = "SYBIL_CORS_ORIGINS", value_delimiter = ',')]
@@ -353,6 +372,10 @@ impl Default for ApiConfig {
             deployment_profile: "local".to_string(),
             allow_dev_knobs: false,
             service_token: String::new(),
+            history_url: String::new(),
+            history_token: String::new(),
+            history_poll_ms: 250,
+            history_timeout_ms: 10_000,
             cors_origins: Vec::new(),
             block_interval_ms: 500,
             seed_markets: Vec::new(),

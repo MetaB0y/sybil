@@ -18,12 +18,14 @@ matching-engine = { path = "../matching-engine" }
 matching-sequencer = { path = "../matching-sequencer" }
 sybil-api-types = { path = "../sybil-api-types", features = ["openapi"] }
 sybil-client = { path = "../sybil-client" }
+sybil-history-types = { path = "../sybil-history-types" }
 sybil-oracle = { path = "../sybil-oracle" }
 sybil-verifier = { path = "../sybil-verifier" }
 axum = { version = "0.8", features = ["json", "ws"] }
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 tower-http = { version = "0.7", features = ["cors", "trace"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "registry"] }
@@ -36,10 +38,12 @@ metrics-exporter-prometheus = "0.18"
 utoipa = { version = "5", features = ["axum_extras"] }
 hex = { workspace = true }
 p256 = { workspace = true, features = ["ecdsa"] }
+ratelimit = { workspace = true }
 getrandom = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+rmp-serde = { workspace = true }
 serde_yaml = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 base64 = "0.22"
@@ -49,6 +53,7 @@ sha2 = "0.11"
 [dev-dependencies]
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 sybil-zk = { path = "../sybil-zk" }
+sybil-history = { path = "../sybil-history" }
 blake3 = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

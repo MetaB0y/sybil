@@ -55,7 +55,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> PriceCandlesResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | PriceCandlesResponse | None:
     if response.status_code == 200:
         response_200 = PriceCandlesResponse.from_dict(response.json())
 
@@ -63,13 +63,17 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 503:
+        response_503 = cast(Any, None)
+        return response_503
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[PriceCandlesResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | PriceCandlesResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -88,7 +92,7 @@ def sync_detailed(
     before_ms: int | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> Response[PriceCandlesResponse]:
+) -> Response[Any | PriceCandlesResponse]:
     """ GET /v1/markets/{id}/prices/candles
 
     Args:
@@ -104,7 +108,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PriceCandlesResponse]
+        Response[Any | PriceCandlesResponse]
      """
 
 
@@ -134,7 +138,7 @@ def sync(
     before_ms: int | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> PriceCandlesResponse | None:
+) -> Any | PriceCandlesResponse | None:
     """ GET /v1/markets/{id}/prices/candles
 
     Args:
@@ -150,7 +154,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PriceCandlesResponse
+        Any | PriceCandlesResponse
      """
 
 
@@ -175,7 +179,7 @@ async def asyncio_detailed(
     before_ms: int | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> Response[PriceCandlesResponse]:
+) -> Response[Any | PriceCandlesResponse]:
     """ GET /v1/markets/{id}/prices/candles
 
     Args:
@@ -191,7 +195,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PriceCandlesResponse]
+        Response[Any | PriceCandlesResponse]
      """
 
 
@@ -221,7 +225,7 @@ async def asyncio(
     before_ms: int | Unset = UNSET,
     limit: int | Unset = UNSET,
 
-) -> PriceCandlesResponse | None:
+) -> Any | PriceCandlesResponse | None:
     """ GET /v1/markets/{id}/prices/candles
 
     Args:
@@ -237,7 +241,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PriceCandlesResponse
+        Any | PriceCandlesResponse
      """
 
 

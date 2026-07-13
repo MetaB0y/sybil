@@ -29,6 +29,8 @@ class AccountHistoryPageResponse:
             events (list[HistoryEventResponse]):
             history_scope (str):
             history_truncated (bool):
+            history_complete_from_height (int | None | Unset):
+            indexed_through_height (int | None | Unset):
             next_before (None | str | Unset):
             retention_min_timestamp_ms (int | None | Unset):
      """
@@ -36,6 +38,8 @@ class AccountHistoryPageResponse:
     events: list[HistoryEventResponse]
     history_scope: str
     history_truncated: bool
+    history_complete_from_height: int | None | Unset = UNSET
+    indexed_through_height: int | None | Unset = UNSET
     next_before: None | str | Unset = UNSET
     retention_min_timestamp_ms: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -57,6 +61,18 @@ class AccountHistoryPageResponse:
 
         history_truncated = self.history_truncated
 
+        history_complete_from_height: int | None | Unset
+        if isinstance(self.history_complete_from_height, Unset):
+            history_complete_from_height = UNSET
+        else:
+            history_complete_from_height = self.history_complete_from_height
+
+        indexed_through_height: int | None | Unset
+        if isinstance(self.indexed_through_height, Unset):
+            indexed_through_height = UNSET
+        else:
+            indexed_through_height = self.indexed_through_height
+
         next_before: None | str | Unset
         if isinstance(self.next_before, Unset):
             next_before = UNSET
@@ -77,6 +93,10 @@ class AccountHistoryPageResponse:
             "history_scope": history_scope,
             "history_truncated": history_truncated,
         })
+        if history_complete_from_height is not UNSET:
+            field_dict["history_complete_from_height"] = history_complete_from_height
+        if indexed_through_height is not UNSET:
+            field_dict["indexed_through_height"] = indexed_through_height
         if next_before is not UNSET:
             field_dict["next_before"] = next_before
         if retention_min_timestamp_ms is not UNSET:
@@ -104,6 +124,26 @@ class AccountHistoryPageResponse:
 
         history_truncated = d.pop("history_truncated")
 
+        def _parse_history_complete_from_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        history_complete_from_height = _parse_history_complete_from_height(d.pop("history_complete_from_height", UNSET))
+
+
+        def _parse_indexed_through_height(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        indexed_through_height = _parse_indexed_through_height(d.pop("indexed_through_height", UNSET))
+
+
         def _parse_next_before(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -128,6 +168,8 @@ class AccountHistoryPageResponse:
             events=events,
             history_scope=history_scope,
             history_truncated=history_truncated,
+            history_complete_from_height=history_complete_from_height,
+            indexed_through_height=indexed_through_height,
             next_before=next_before,
             retention_min_timestamp_ms=retention_min_timestamp_ms,
         )

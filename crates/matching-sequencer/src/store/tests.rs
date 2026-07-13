@@ -192,6 +192,7 @@ async fn equity_and_account_events_share_honest_age_retention() {
 }
 
 #[tokio::test]
+#[ignore = "legacy embedded fill projection; sybil-history owns this contract"]
 async fn later_commits_do_not_resurrect_pruned_hot_fill_rows() {
     let path = temp_db_path("fill-retention-no-resurrection");
     let store = Store::open(&path).unwrap();
@@ -244,50 +245,6 @@ async fn later_commits_do_not_resurrect_pruned_hot_fill_rows() {
     assert_eq!(
         store.account_fills(account_id, None, 10, 0).unwrap(),
         vec![new]
-    );
-}
-
-#[test]
-fn reopen_rebuilds_account_history_indexes_from_primary_rows() {
-    let path = temp_db_path("account-index-backfill");
-    let account_id = AccountId(11);
-    let record = AccountFillRecord {
-        order_id: 9,
-        fill_qty: 1,
-        fill_price: Nanos(1),
-        block_height: 3,
-        timestamp_ms: 3_000,
-        position_deltas: vec![],
-    };
-    {
-        let store = Store::open(&path).unwrap();
-        let txn = store.db.begin_write().unwrap();
-        let key = fill_history_key(account_id, &record);
-        let bytes = rmp_serde::to_vec(&record).unwrap();
-        txn.open_table(FILL_HISTORY)
-            .unwrap()
-            .insert(key.as_slice(), bytes.as_slice())
-            .unwrap();
-        txn.open_table(FILL_HISTORY_BY_TIME)
-            .unwrap()
-            .retain(|_, _| false)
-            .unwrap();
-        txn.open_table(HISTORY_META)
-            .unwrap()
-            .remove(KEY_ACCOUNT_HISTORY_INDEX_VERSION)
-            .unwrap();
-        txn.commit().unwrap();
-    }
-
-    let reopened = Store::open(&path).unwrap();
-    let txn = reopened.db.begin_read().unwrap();
-    assert_eq!(
-        txn.open_table(FILL_HISTORY_BY_TIME).unwrap().len().unwrap(),
-        1
-    );
-    assert_eq!(
-        reopened.account_fills(account_id, None, 10, 0).unwrap(),
-        vec![record]
     );
 }
 
@@ -406,7 +363,7 @@ async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
 }
 
 #[tokio::test]
-async fn history_pruning_deletes_blocks_and_price_points_with_metadata() {
+async fn history_pruning_deletes_canonical_blocks_and_da_with_metadata() {
     let path = temp_db_path("store-history-retention");
     let store = Store::open(&path).unwrap();
     let oracle = Arc::new(AdminOracle::new());
@@ -466,9 +423,9 @@ async fn history_pruning_deletes_blocks_and_price_points_with_metadata() {
 
     assert_eq!(report.blocks_full_pruned, 2);
     assert_eq!(report.da_artifacts_pruned, 2);
-    assert_eq!(report.price_points_pruned, 2);
+    assert_eq!(report.price_points_pruned, 0);
     assert_eq!(report.meta.blocks_full_min_height, Some(3));
-    assert_eq!(report.meta.price_points_min_height, Some(3));
+    assert_eq!(report.meta.price_points_min_height, None);
     assert_eq!(report.meta.last_history_prune_height, Some(5));
     assert!(store.load_block(1).await.unwrap().is_none());
     assert!(store.load_block(2).await.unwrap().is_none());
@@ -499,13 +456,7 @@ async fn history_pruning_deletes_blocks_and_price_points_with_metadata() {
         3
     );
 
-    let page = store
-        .load_price_history(market_id, None, None, None, 10)
-        .await
-        .unwrap();
-    assert_eq!(page.retention_min_height, Some(3));
-    let heights: Vec<_> = page.points.iter().map(|point| point.height).collect();
-    assert_eq!(heights, vec![3, 4, 5]);
+    assert_eq!(store.history_outbox_len().unwrap(), 5);
 }
 
 #[tokio::test]
@@ -571,23 +522,17 @@ async fn history_pruning_partial_budget_keeps_metadata_at_oldest_remaining_row()
         "block floor must not jump to target 4 while block 3 remains"
     );
     assert_eq!(
-        report.meta.price_points_min_height,
-        Some(1),
-        "price metadata must not advance when budget is exhausted first"
+        report.meta.price_points_min_height, None,
+        "product price history is not stored in the sequencer database"
     );
     assert_eq!(report.meta.last_history_prune_height, Some(5));
     assert!(store.load_block(3).await.unwrap().is_some());
 
-    let page = store
-        .load_price_history(market_id, None, None, None, 10)
-        .await
-        .unwrap();
-    let heights: Vec<_> = page.points.iter().map(|point| point.height).collect();
-    assert_eq!(heights, vec![1, 2, 3, 4, 5]);
-    assert_eq!(page.retention_min_height, Some(1));
+    assert_eq!(store.history_outbox_len().unwrap(), 5);
 }
 
 #[tokio::test]
+#[ignore = "price candle retention moved to sybil-history"]
 async fn price_candle_pruning_deletes_by_resolution_with_metadata() {
     let path = temp_db_path("store-price-candle-retention");
     let store = Store::open(&path).unwrap();
@@ -676,6 +621,7 @@ async fn price_candle_pruning_deletes_by_resolution_with_metadata() {
 }
 
 #[tokio::test]
+#[ignore = "price candle retention moved to sybil-history"]
 async fn price_candle_pruning_obeys_batch_limit_and_keeps_floor_actual() {
     let path = temp_db_path("store-price-candle-retention-budget");
     let store = Store::open(&path).unwrap();
@@ -747,6 +693,7 @@ async fn price_candle_pruning_obeys_batch_limit_and_keeps_floor_actual() {
 }
 
 #[tokio::test]
+#[ignore = "price candle projection moved to sybil-history"]
 async fn price_candles_merge_committed_points_without_empty_buckets() {
     let path = temp_db_path("store-price-candles");
     let store = Store::open(&path).unwrap();
@@ -1034,8 +981,8 @@ async fn test_store_restores_history_event_next_seq() {
     let restored = store.load_state().await.unwrap().unwrap();
     assert_eq!(restored.analytics.history_event_next_seq, 2);
 
-    // Backward compatibility for stores created before the explicit counter:
-    // derive the next cursor from existing history-event keys.
+    // A missing canonical counter never triggers a projection scan. Fresh
+    // genesis is required when moving a legacy store across this boundary.
     let txn = store.db.begin_write().unwrap();
     {
         let mut counters = txn.open_table(COUNTERS).unwrap();
@@ -1044,7 +991,7 @@ async fn test_store_restores_history_event_next_seq() {
     txn.commit().unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
-    assert_eq!(restored.analytics.history_event_next_seq, 2);
+    assert_eq!(restored.analytics.history_event_next_seq, 0);
 }
 
 #[tokio::test]
@@ -1733,7 +1680,7 @@ async fn test_store_clears_resting_orders_when_snapshot_empty() {
 }
 
 #[tokio::test]
-async fn test_store_roundtrips_account_fill_history() {
+async fn test_store_does_not_restore_product_fill_history_into_hot_state() {
     let path = temp_db_path("store-fill-history");
     let store = Store::open(&path).unwrap();
     let oracle = Arc::new(AdminOracle::new());
@@ -1765,22 +1712,19 @@ async fn test_store_roundtrips_account_fill_history() {
         .unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
-    assert_eq!(
-        restored.analytics.account_fills,
-        vec![(account_id, fill.clone())]
-    );
+    assert!(restored.analytics.account_fills.is_empty());
 
     let seq =
         crate::sequencer::BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
-    assert_eq!(
+    assert!(
         seq.analytics()
-            .account_fills(account_id, Some(market_id), 10, 0),
-        vec![fill]
+            .account_fills(account_id, Some(market_id), 10, 0)
+            .is_empty()
     );
 }
 
 #[tokio::test]
-async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
+async fn test_store_restores_fill_totals_without_hydrating_fill_history() {
     use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
 
@@ -1836,9 +1780,7 @@ async fn test_store_persists_fill_recorder_snapshot_from_committed_block() {
     let fills = restored_seq
         .analytics()
         .account_fills(buyer, Some(market_id), 10, 0);
-    assert_eq!(fills.len(), 1);
-    assert_eq!(fills[0].fill_qty, 5);
-    assert_eq!(fills[0].block_height, 1);
+    assert!(fills.is_empty());
     assert_eq!(restored_seq.analytics().total_fills(buyer), 1);
     assert_eq!(restored_seq.analytics().total_fills(seller), 1);
     let ranked: Vec<_> = restored_seq
@@ -2228,6 +2170,7 @@ async fn import_witness_drill_restores_head_and_produces_children() {
 }
 
 #[tokio::test]
+#[ignore = "fill serving moved to sybil-history"]
 async fn test_store_account_fills_reads_full_persisted_history() {
     use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
@@ -2333,6 +2276,7 @@ async fn test_store_account_fills_reads_full_persisted_history() {
 }
 
 #[tokio::test]
+#[ignore = "fill cursor persistence moved to sybil-history"]
 async fn test_store_fill_cursor_pagination_survives_reopen() {
     use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
@@ -2394,6 +2338,7 @@ async fn test_store_fill_cursor_pagination_survives_reopen() {
 }
 
 #[tokio::test]
+#[ignore = "fill projection moved to sybil-history; covered by outbox integration"]
 async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
     use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
@@ -2579,9 +2524,8 @@ async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
     let fills = restored_seq
         .analytics()
         .account_fills(buyer, Some(market_id), 10, 0);
-    assert_eq!(fills.len(), 1);
-    assert_eq!(fills[0].fill_qty, 5);
-    assert_eq!(fills[0].block_height, 1);
+    assert!(fills.is_empty());
+    assert_eq!(restored_seq.analytics().total_fills(buyer), 1);
 }
 
 #[test]

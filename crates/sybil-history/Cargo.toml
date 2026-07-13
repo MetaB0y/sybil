@@ -1,0 +1,30 @@
+[package]
+name = "sybil-history"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Private durable history projection and query service for Sybil"
+
+[[bin]]
+name = "sybil-history"
+path = "src/main.rs"
+
+[dependencies]
+sybil-history-types = { path = "../sybil-history-types" }
+axum = { version = "0.8", features = ["json"] }
+clap = { workspace = true, features = ["derive", "env"] }
+ractor = { version = "0.15.12", default-features = false, features = ["async-trait", "tokio_runtime"] }
+redb = "4"
+rmp-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+

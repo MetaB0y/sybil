@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use sybil_history::{HistoryHandle, HistoryHttpConfig, HistoryStore};
 use tokio::process::{Child, Command};
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
@@ -87,6 +88,44 @@ fn sybil_api_binary() -> PathBuf {
     path
 }
 
+async fn ensure_history_server(data_dir: &Path) -> String {
+    let root = data_dir.parent().expect("process test data has a root");
+    let port_path = root.join("history-port");
+    let port = if port_path.exists() {
+        std::fs::read_to_string(&port_path)
+            .expect("history port file reads")
+            .parse::<u16>()
+            .expect("history port is numeric")
+    } else {
+        let port = free_port();
+        std::fs::write(&port_path, port.to_string()).expect("history port persists");
+        let history_dir = root.join("history");
+        std::fs::create_dir_all(&history_dir).expect("history dir creates");
+        let store = HistoryStore::open(history_dir.join("history.redb"), vec![1, 60, 300, 3_600])
+            .expect("history store opens");
+        let handle = HistoryHandle::spawn(store.clone());
+        let app = sybil_history::router(
+            handle,
+            store,
+            HistoryHttpConfig {
+                dev_mode: true,
+                internal_token: None,
+                max_query_concurrency: 4,
+            },
+        );
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+            .await
+            .expect("history process-test listener binds");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("history process-test server");
+        });
+        port
+    };
+    format!("http://127.0.0.1:{port}")
+}
+
 pub async fn spawn_api(
     data_dir: &Path,
     admin_key_path: &Path,
@@ -103,6 +142,7 @@ pub async fn spawn_api_with_env(
 ) -> ApiProcess {
     let port = free_port();
     let base_url = format!("http://127.0.0.1:{port}");
+    let history_url = ensure_history_server(data_dir).await;
     let mut command = Command::new(sybil_api_binary());
     command
         .arg("--dev-mode")
@@ -115,6 +155,8 @@ pub async fn spawn_api_with_env(
         .arg("--block-interval-ms")
         .arg(block_interval_ms.to_string())
         .env("RUST_LOG", "warn")
+        .env("SYBIL_HISTORY_URL", history_url)
+        .env("SYBIL_HISTORY_POLL_MS", "1")
         .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -247,18 +289,46 @@ pub async fn post_json(client: &reqwest::Client, base_url: &str, path: &str, bod
 }
 
 pub async fn get_json(client: &reqwest::Client, base_url: &str, path: &str) -> Value {
-    let resp = client
-        .get(format!("{base_url}{path}"))
-        .send()
-        .await
-        .expect("GET request succeeds");
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    assert!(
-        status.is_success(),
-        "GET {path} failed with {status}: {text}"
-    );
-    serde_json::from_str(&text).expect("GET response is JSON")
+    let is_history = path.contains("/fills")
+        || path.contains("/events")
+        || path.contains("/equity")
+        || path.contains("/prices/history")
+        || path.contains("/prices/candles");
+    let expected_height = if is_history {
+        wait_for_health(client, base_url).await["height"].as_u64()
+    } else {
+        None
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let resp = client
+            .get(format!("{base_url}{path}"))
+            .send()
+            .await
+            .expect("GET request succeeds");
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        let value = serde_json::from_str::<Value>(&text).ok();
+        let pending = is_history
+            && (status == StatusCode::SERVICE_UNAVAILABLE
+                || (status.is_success()
+                    && value.as_ref().is_some_and(|value| {
+                        value
+                            .get("indexed_through_height")
+                            .and_then(Value::as_u64)
+                            .is_none_or(|indexed| {
+                                expected_height.is_some_and(|head| indexed < head)
+                            })
+                    })));
+        if !pending || Instant::now() >= deadline {
+            assert!(
+                status.is_success(),
+                "GET {path} failed with {status}: {text}"
+            );
+            return value.expect("GET response is JSON");
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 pub async fn get_status_and_body(

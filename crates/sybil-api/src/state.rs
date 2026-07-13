@@ -1,19 +1,21 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use axum::http::HeaderValue;
-use matching_sequencer::SequencerHandle;
+use matching_sequencer::{AccountId, LeaderboardBase, SequencerHandle};
 use metrics_exporter_prometheus::PrometheusHandle;
+use ratelimit::Ratelimiter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex as AsyncMutex, RwLock, Semaphore};
 
 use crate::config::ApiConfig;
+use crate::history::HistoryClient;
 use crate::webauthn::WebAuthnVerifierConfig;
 
 const MAX_HTTP_RATE_LIMIT_CLIENTS: usize = 10_000;
 const OVERFLOW_CLIENT_KEY: &str = "__overflow__";
+type ReadApiKeyOwners = HashMap<[u8; 32], AccountId>;
 
 /// Reference market data mirrored from external systems (e.g., Polymarket).
 ///
@@ -109,120 +111,65 @@ pub fn save_market_ref_data(data: &HashMap<u32, MarketRefData>, path: Option<&Pa
 }
 
 #[derive(Debug)]
-struct TokenBucket {
-    tokens: f64,
-    capacity: f64,
-    refill_per_second: f64,
-    last_refill: Instant,
-}
-
-impl TokenBucket {
-    fn new(refill_per_second: u32, capacity: u32) -> Self {
-        Self {
-            tokens: capacity as f64,
-            capacity: capacity as f64,
-            refill_per_second: refill_per_second as f64,
-            last_refill: Instant::now(),
-        }
-    }
-
-    fn allow(&mut self) -> Result<(), u64> {
-        let now = Instant::now();
-        let elapsed = now.saturating_duration_since(self.last_refill);
-        self.last_refill = now;
-        self.tokens =
-            (self.tokens + elapsed.as_secs_f64() * self.refill_per_second).min(self.capacity);
-
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
-            Ok(())
-        } else {
-            Err(self.retry_after_secs())
-        }
-    }
-
-    fn retry_after_secs(&self) -> u64 {
-        if self.refill_per_second <= 0.0 {
-            return 1;
-        }
-        ((1.0 - self.tokens).max(0.0) / self.refill_per_second)
-            .ceil()
-            .max(1.0) as u64
-    }
-}
-
-#[derive(Debug)]
-pub struct HttpOrderRateLimiter {
-    global: TokenBucket,
-    clients: HashMap<String, TokenBucket>,
-    client_refill_per_second: u32,
+pub struct HttpRateLimiter {
+    global: Ratelimiter,
+    clients: Mutex<HashMap<String, Ratelimiter>>,
+    client_rate: u32,
     client_burst: u32,
 }
 
-impl HttpOrderRateLimiter {
-    fn new(config: &ApiConfig) -> Self {
+impl HttpRateLimiter {
+    fn new(global_rate: u32, global_burst: u32, client_rate: u32, client_burst: u32) -> Self {
         Self {
-            global: TokenBucket::new(config.http_order_global_rps, config.http_order_global_burst),
-            clients: HashMap::new(),
-            client_refill_per_second: config.http_order_client_rps,
-            client_burst: config.http_order_client_burst,
+            global: rate_limiter(global_rate, global_burst),
+            clients: Mutex::new(HashMap::new()),
+            client_rate,
+            client_burst,
         }
     }
 
-    pub fn allow(&mut self, client_key: &str) -> Result<(), u64> {
-        self.global.allow()?;
-        let client_key = if self.clients.contains_key(client_key)
-            || self.clients.len() < MAX_HTTP_RATE_LIMIT_CLIENTS
-        {
-            client_key
-        } else {
-            OVERFLOW_CLIENT_KEY
-        };
-        self.clients
+    pub fn allow(&self, client_key: &str) -> Result<(), u64> {
+        self.global.try_wait().map_err(|_| 1_u64)?;
+        let mut clients = self.clients.lock().map_err(|_| 1_u64)?;
+        let client_key =
+            if clients.contains_key(client_key) || clients.len() < MAX_HTTP_RATE_LIMIT_CLIENTS {
+                client_key
+            } else {
+                OVERFLOW_CLIENT_KEY
+            };
+        clients
             .entry(client_key.to_string())
-            .or_insert_with(|| TokenBucket::new(self.client_refill_per_second, self.client_burst))
-            .allow()
+            .or_insert_with(|| rate_limiter(self.client_rate, self.client_burst))
+            .try_wait()
+            .map_err(|_| 1_u64)
     }
 }
 
-#[derive(Debug)]
-pub struct HttpDaRateLimiter {
-    global: TokenBucket,
-    clients: HashMap<String, TokenBucket>,
-    client_refill_per_second: u32,
-    client_burst: u32,
-}
-
-impl HttpDaRateLimiter {
-    fn new(config: &ApiConfig) -> Self {
-        Self {
-            global: TokenBucket::new(config.http_da_global_rps, config.http_da_global_burst),
-            clients: HashMap::new(),
-            client_refill_per_second: config.http_da_client_rps,
-            client_burst: config.http_da_client_burst,
-        }
-    }
-
-    pub fn allow(&mut self, client_key: &str) -> Result<(), u64> {
-        self.global.allow()?;
-        let client_key = if self.clients.contains_key(client_key)
-            || self.clients.len() < MAX_HTTP_RATE_LIMIT_CLIENTS
-        {
-            client_key
-        } else {
-            OVERFLOW_CLIENT_KEY
-        };
-        self.clients
-            .entry(client_key.to_string())
-            .or_insert_with(|| TokenBucket::new(self.client_refill_per_second, self.client_burst))
-            .allow()
-    }
+fn rate_limiter(rate: u32, burst: u32) -> Ratelimiter {
+    assert!(rate > 0, "rate limits must have a positive refill rate");
+    assert!(burst > 0, "rate limits must have positive burst capacity");
+    Ratelimiter::builder(u64::from(rate))
+        .max_tokens(u64::from(burst))
+        .initial_available(u64::from(burst))
+        .build()
+        .expect("validated rate limit")
 }
 
 /// Shared application state, available to all route handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub sequencer: SequencerHandle,
+    /// Private remote history projection. Historical endpoints fail explicitly
+    /// when absent; they never fall back to scanning the sequencer actor.
+    pub history: Option<HistoryClient>,
+    /// API-owned immutable authorization view. `None` means it has not yet
+    /// been initialized; the first read performs one snapshot RPC. Normal
+    /// history reads never enter the sequencer mailbox.
+    read_api_key_owners: Arc<RwLock<Option<ReadApiKeyOwners>>>,
+    /// Published current-state inputs for leaderboard ranking. Refreshed once
+    /// per committed block, never recomputed by each HTTP request.
+    leaderboard_bases: Arc<RwLock<Option<Vec<LeaderboardBase>>>>,
+    read_model_init_lock: Arc<AsyncMutex<()>>,
     pub dev_mode: bool,
     /// Bearer token for service/operator routes. `None` fails closed when
     /// `dev_mode` is false.
@@ -252,10 +199,10 @@ pub struct AppState {
     pub arena_db_path: String,
     /// Cheap pre-handler limiter for order endpoints. Sequencer admission has
     /// authoritative account/global limits; this bounds parsing/signature work.
-    pub http_order_limiter: Arc<Mutex<HttpOrderRateLimiter>>,
+    pub http_order_limiter: Arc<HttpRateLimiter>,
     /// Public DA reads have their own low-rate bucket and a hard in-flight cap
     /// so retained-history serving cannot monopolize the sequencer/store.
-    pub http_da_limiter: Arc<Mutex<HttpDaRateLimiter>>,
+    pub http_da_limiter: Arc<HttpRateLimiter>,
     pub http_da_concurrency: Arc<Semaphore>,
     /// Hard lifetime cap for anonymous SSE and public WebSocket block streams.
     /// A permit is held until the response stream/upgrade task is dropped.
@@ -317,6 +264,16 @@ impl AppState {
             .collect();
         Self {
             sequencer,
+            history: match HistoryClient::from_config(config) {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::warn!(%error, "history client disabled");
+                    None
+                }
+            },
+            read_api_key_owners: Arc::new(RwLock::new(None)),
+            leaderboard_bases: Arc::new(RwLock::new(None)),
+            read_model_init_lock: Arc::new(AsyncMutex::new(())),
             dev_mode: config.dev_mode,
             service_token,
             cors_origins,
@@ -327,8 +284,18 @@ impl AppState {
             market_ref_data_path,
             event_snapshot_dir,
             arena_db_path: config.arena_db_path.clone(),
-            http_order_limiter: Arc::new(Mutex::new(HttpOrderRateLimiter::new(config))),
-            http_da_limiter: Arc::new(Mutex::new(HttpDaRateLimiter::new(config))),
+            http_order_limiter: Arc::new(HttpRateLimiter::new(
+                config.http_order_global_rps,
+                config.http_order_global_burst,
+                config.http_order_client_rps,
+                config.http_order_client_burst,
+            )),
+            http_da_limiter: Arc::new(HttpRateLimiter::new(
+                config.http_da_global_rps,
+                config.http_da_global_burst,
+                config.http_da_client_rps,
+                config.http_da_client_burst,
+            )),
             http_da_concurrency: Arc::new(Semaphore::new(config.http_da_max_concurrency.max(1))),
             http_public_stream_concurrency: Arc::new(Semaphore::new(
                 config.http_public_stream_max_connections.max(1),
@@ -345,5 +312,92 @@ impl AppState {
         let records = self.sequencer.list_auto_resolution_records().await?;
         self.auto_resolutions.rehydrate(records);
         Ok(())
+    }
+
+    /// Populate API-owned read models before accepting traffic. Tests that
+    /// construct a router directly retain a one-time lazy fallback.
+    pub async fn initialize_read_models(&self) -> Result<(), matching_sequencer::SequencerError> {
+        let _guard = self.read_model_init_lock.lock().await;
+        let owners = self.sequencer.active_api_key_owners().await?;
+        *self.read_api_key_owners.write().await = Some(owners.into_iter().collect());
+        *self.leaderboard_bases.write().await = Some(self.sequencer.leaderboard_bases().await?);
+        Ok(())
+    }
+
+    pub async fn read_api_key_owner(
+        &self,
+        token_hash: [u8; 32],
+    ) -> Result<Option<AccountId>, matching_sequencer::SequencerError> {
+        if let Some(owners) = self.read_api_key_owners.read().await.as_ref() {
+            return Ok(owners.get(&token_hash).copied());
+        }
+        let _guard = self.read_model_init_lock.lock().await;
+        if self.read_api_key_owners.read().await.is_none() {
+            let owners = self.sequencer.active_api_key_owners().await?;
+            *self.read_api_key_owners.write().await = Some(owners.into_iter().collect());
+        }
+        Ok(self
+            .read_api_key_owners
+            .read()
+            .await
+            .as_ref()
+            .and_then(|owners| owners.get(&token_hash).copied()))
+    }
+
+    pub async fn insert_read_api_key_owner(&self, hash: [u8; 32], account_id: AccountId) {
+        let mut owners = self.read_api_key_owners.write().await;
+        owners
+            .get_or_insert_with(HashMap::new)
+            .insert(hash, account_id);
+    }
+
+    pub async fn remove_read_api_key(&self, hash: &[u8; 32]) {
+        if let Some(owners) = self.read_api_key_owners.write().await.as_mut() {
+            owners.remove(hash);
+        }
+    }
+
+    pub async fn cached_leaderboard_bases(
+        &self,
+    ) -> Result<Vec<LeaderboardBase>, matching_sequencer::SequencerError> {
+        if let Some(bases) = self.leaderboard_bases.read().await.as_ref() {
+            return Ok(bases.clone());
+        }
+        let _guard = self.read_model_init_lock.lock().await;
+        if self.leaderboard_bases.read().await.is_none() {
+            *self.leaderboard_bases.write().await = Some(self.sequencer.leaderboard_bases().await?);
+        }
+        Ok(self
+            .leaderboard_bases
+            .read()
+            .await
+            .as_ref()
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Refresh the published leaderboard input after each committed block.
+    /// The refresh is one actor read per block, independent of HTTP volume.
+    pub fn spawn_leaderboard_read_model_refresher(&self) -> tokio::task::JoinHandle<()> {
+        let state = self.clone();
+        tokio::spawn(async move {
+            let Ok(mut blocks) = state.sequencer.subscribe_blocks().await else {
+                tracing::warn!("failed to subscribe leaderboard read model to blocks");
+                return;
+            };
+            loop {
+                match blocks.recv().await {
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        match state.sequencer.leaderboard_bases().await {
+                            Ok(bases) => *state.leaderboard_bases.write().await = Some(bases),
+                            Err(error) => {
+                                tracing::warn!(%error, "failed to refresh leaderboard read model")
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        })
     }
 }

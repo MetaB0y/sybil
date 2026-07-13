@@ -11,6 +11,9 @@ members = [
     "crates/sybil-oracle",
     "crates/sybil-api",
     "crates/sybil-api-types",
+    "crates/sybil-history-types",
+    "crates/sybil-history",
+    "crates/sybil-loadtest",
     "crates/sybil-client",
     "crates/sybil-l1-abi",
     "crates/sybil-l1-indexer",
@@ -52,6 +55,7 @@ p256 = "0.14"
 proptest = "1.11"
 rand = "0.10"
 rand_chacha = "0.10"
+ratelimit = "2.0"
 rmp-serde = "1"
 serde = "1"
 serde_json = "1"

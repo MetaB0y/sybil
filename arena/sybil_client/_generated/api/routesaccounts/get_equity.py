@@ -59,9 +59,9 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         response_403 = cast(Any, None)
         return response_403
 
-    if response.status_code == 500:
-        response_500 = cast(Any, None)
-        return response_500
+    if response.status_code == 503:
+        response_503 = cast(Any, None)
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)

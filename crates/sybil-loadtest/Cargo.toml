@@ -1,0 +1,15 @@
+[package]
+name = "sybil-loadtest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "sybil-history-load"
+path = "src/bin/history_load.rs"
+
+[dependencies]
+goose = { version = "0.18.1", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

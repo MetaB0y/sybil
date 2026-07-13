@@ -417,7 +417,12 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
         &format!("/v1/accounts/{account_id}/events?category=funding&limit=10"),
     )
     .await;
-    assert_funding_history_once(&restored_funding_history);
+    assert!(
+        restored_funding_history["events"]
+            .as_array()
+            .is_some_and(Vec::is_empty),
+        "private history is committed-only; replayed control-plane WAL state is not exported before the next block: {restored_funding_history}"
+    );
 
     let restored_market = get_json(
         &client,
@@ -544,15 +549,12 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn history_retention_and_candles_survive_process_restart() {
+async fn extracted_history_survives_process_restart_and_canonical_block_pruning() {
     let root = ProcessTestRoot::new("process-restart-history");
     let retention_env = [
         ("SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS", "2"),
-        ("SYBIL_RAW_PRICE_RETENTION_BLOCKS", "100"),
         ("SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS", "1"),
         ("SYBIL_HISTORY_PRUNE_MAX_ROWS", "100"),
-        ("SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS", "60"),
-        ("SYBIL_PRICE_CANDLE_RETENTION_SECS", "2592000"),
     ];
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -593,7 +595,6 @@ async fn history_retention_and_candles_survive_process_restart() {
         .unwrap();
 
     let mut first_trade_height = None;
-    let mut last_trade_height = 0;
     for (yes, no) in [
         (600_000_000u64, 500_000_000u64),
         (650_000_000u64, 450_000_000u64),
@@ -616,19 +617,26 @@ async fn history_retention_and_candles_survive_process_restart() {
         )
         .await;
         resume_blocks(&client, &writer.base_url).await;
-        let committed = wait_for_height_at_least(&client, &writer.base_url, before + 1).await;
+        wait_for_height_at_least(&client, &writer.base_url, before + 1).await;
         pause_blocks(&client, &writer.base_url).await;
         first_trade_height.get_or_insert(before + 1);
-        last_trade_height = committed;
     }
     let first_trade_height = first_trade_height.expect("at least one trade committed");
+    resume_blocks(&client, &writer.base_url).await;
+    let retention_head_height = wait_for_height_at_least(
+        &client,
+        &writer.base_url,
+        first_trade_height.saturating_add(3),
+    )
+    .await;
+    pause_blocks(&client, &writer.base_url).await;
 
     let reader = restart_api_with_env(writer, &root, 60_000, &retention_env).await;
     let restored_height = wait_for_health(&client, &reader.base_url).await["height"]
         .as_u64()
         .expect("restored height");
     assert!(
-        restored_height >= last_trade_height,
+        restored_height >= retention_head_height,
         "restart should restore at least the last committed trade block"
     );
     pause_blocks(&client, &reader.base_url).await;
@@ -657,10 +665,8 @@ async fn history_retention_and_candles_survive_process_restart() {
         &format!("/v1/markets/{market_id}/prices/candles?resolution=1m&limit=10"),
     )
     .await;
-    assert!(
-        candles["retention_min_bucket_ms"].as_u64().is_some(),
-        "candle retention floor after restart: {candles}"
-    );
+    assert!(candles["retention_min_bucket_ms"].is_null());
+    assert_eq!(candles["history_complete_from_height"].as_u64(), Some(1));
     let point_count: u64 = candles["candles"]
         .as_array()
         .unwrap()

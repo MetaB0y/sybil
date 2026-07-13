@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 # Persistence
@@ -141,11 +141,11 @@ For public account onboarding, account allocation and its initial signing key
 are one `CreateAccountWithInitialKey` control-plane command; bare service-tier
 account creation and the deprecated service-tier first-key bootstrap remain
 backward-compatible commands. Account creation and dev-mode funding stage
-account-history rows at the same time as the pending system event, using the
-next block height that will commit the event. Account-history reads merge
-durable `history_events` rows with the in-memory pending rows, so an
-acknowledged create/fund remains visible immediately after a pre-block restart
-and is still persisted exactly once when the next block commits.
+history facts at the same time as the pending system event. They become
+historical only when the next block commits them into
+`CommittedHistoryBatchV1`; current account state remains visible immediately
+through live endpoints. This keeps remote history strictly committed and
+prevents dual-source pagination.
 
 Implemented today:
 
@@ -179,11 +179,24 @@ like feeds and market metadata.
 
 ## Tier 3: Derived Views
 
-Persisted today:
+The sequencer persists only the export boundary for product history:
 
-- **Fill history**: per-account fill records in `fill_history`, keyed by `(account_id, block_height, order_id)`. See [[Fill History Persistence]].
-- **Account event history**: per-account portfolio history rows in `history_events`, keyed by `(account_id, block_height, seq)`. The sequencer persists the global `history_event_next_seq` cursor so restart cannot overwrite rows at the same height.
-- **Account equity series**: per-account equity points in `equity_points`, keyed by `(account_id, height)`.
+- **History outbox**: one immutable `CommittedHistoryBatchV1` row per fenced
+  block commit. It carries fill, account-event, equity, and committed-price
+  facts plus genesis/block/state identity. A background publisher acknowledges
+  and deletes rows only after the private history projector has durably applied
+  their height.
+- **History event sequence counter**: the next event id remains canonical
+  sequencer metadata so restart never derives identity by scanning a query
+  projection.
+
+`sybil-history` persists immutable raw batches and its fill/event/equity,
+price, candle, and timestamp/account projections in a separate redb. Those
+tables are not part of sequencer recovery and are not validity inputs. See
+[[Historical Data Serving]] and [[Fill History Persistence]].
+
+Other sequencer-owned durable serving rows are:
+
 - **Full block replay payloads**: `SealedBlock` rows in `blocks_full`, keyed by
   height, used as the exact-height fallback for `GET /v1/blocks/{height}` when
   the hot block ring has evicted the block or after restart.
@@ -192,43 +205,18 @@ Persisted today:
   rows are written atomically after block commit and pruned together with the
   `blocks_full` retention floor. They are availability artifacts, not part of
   the redb commit fence.
-- **Raw price history**: per-market mark-price rows in `price_points`, keyed by
-  `(market_id, height)`, used by `GET /v1/markets/{id}/prices/history` when a
-  durable store is configured.
-- **Downsampled price candles**: per-market OHLCV rows in `price_candles`,
-  keyed by `(market_id, resolution_secs, bucket_start_ms)`, derived only from
-  committed post-seal price points.
 
-Still not durable-served / retention-complete:
+Recent in-memory fill/price/event/equity caches may still support live
+analytics computations, but no public historical endpoint depends on them and
+startup does not hydrate them from legacy history tables. Aggregate tracker
+snapshots needed for current product values (for example all-time fill counts
+and cost basis) remain sequencer snapshots rather than historical scans.
 
-- **Paginated block-list, latest-block, and WS replay reads from `blocks_full`**
-- **Per-resolution candle retention metadata/pruning**
-- **Derived aggregates such as welfare summaries**
-
-The planned durable boundary for these views is [[Historical Data Serving]]. The in-memory caches should remain hot caches only; they should not be the source of truth for replay, charts, or restart behavior.
-
-These are reconstructable or refreshable, but expensive or inconvenient to rebuild.
-
-Runtime serving caches are explicitly bounded even when the durable store keeps
-more data. The sequencer config controls the recent block ring, price-history
-points retained per market, fill records retained per account, and the
-in-memory fallback windows for account events/equity. Production deployments
-serve account events/equity from redb and set those fallback windows to zero.
-Persisted fill-history, event-history, and equity rows use timestamp-first
-retention indexes, production age windows, and global row ceilings. Their HTTP
-surfaces describe retained history rather than promising unbounded archives.
-
-Raw price-history rows and full block replay rows are durable and have
-opt-in bounded retention. `history_meta` records the lowest retained
-`blocks_full` and `price_points` heights, account-history timestamp boundaries,
-and the last prune attempt height.
-Pruning runs after a successful block save, deletes rows under a per-run row
-budget, and advances metadata only in the same committed redb transaction as
-the deletes. See [[Historical Data Serving]] for the longer candle/history
-contract. The production Compose overlay opts the current devnet into a
-seven-day target for full blocks and their paired DA rows, raw prices, and all
-three candle resolutions, plus 30/31-day account-history age windows and
-global row ceilings. It never prunes canonical recovery state.
+Canonical full-block and DA retention remains a bounded post-commit maintenance
+job. Product-history retention, backups, projections, and later archive/rollup
+policy belong entirely to `sybil-history`. The two policies must not be
+conflated: product history is not enough to reconstruct private state, and DA
+is not an account-query store.
 
 ## Recovery Order
 

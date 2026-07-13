@@ -106,7 +106,10 @@ fn is_set(value: &str) -> bool {
 ///   authenticated; fail closed (mirrors [`crate::app`] request-time posture,
 ///   promoted to startup).
 /// - `SYBIL_DATA_DIR` unset — in-memory only; the whole store (state, equity,
-///   history, price points) is lost on restart and never persisted.
+///   canonical state and the history outbox are lost on restart.
+/// - `SYBIL_HISTORY_URL` unset — product-history reads and outbox delivery are
+///   disabled.
+/// - `SYBIL_HISTORY_TOKEN` unset — the private history boundary is unauthenticated.
 /// - `SYBIL_ADMIN_FEED_KEY_PATH` unset — the admin resolution feed identity is
 ///   regenerated on every restart, so the configured signer is not durable.
 ///
@@ -146,6 +149,22 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
         out.push(Deviation {
             knob: "SYBIL_DATA_DIR",
             value: "<unset> (in-memory, no persistence)".to_string(),
+            prod_intended: "<set>",
+            dev_only: true,
+        });
+    }
+    if !is_set(&config.history_url) {
+        out.push(Deviation {
+            knob: "SYBIL_HISTORY_URL",
+            value: "<unset> (history delivery and reads disabled)".to_string(),
+            prod_intended: "<set>",
+            dev_only: true,
+        });
+    }
+    if !is_set(&config.history_token) {
+        out.push(Deviation {
+            knob: "SYBIL_HISTORY_TOKEN",
+            value: "<unset> (private history boundary unauthenticated)".to_string(),
             prod_intended: "<set>",
             dev_only: true,
         });
@@ -301,6 +320,8 @@ mod tests {
             deployment_profile: "prod".to_string(),
             dev_mode: false,
             service_token: "tok".to_string(),
+            history_url: "http://sybil-history:3003".to_string(),
+            history_token: "history-tok".to_string(),
             data_dir: "/data".to_string(),
             market_ref_data_path: "/data/ref.json".to_string(),
             admin_feed_key_path: "/data/admin.key".to_string(),

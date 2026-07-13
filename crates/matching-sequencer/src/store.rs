@@ -79,7 +79,7 @@ use crate::bridge::{
     WithdrawalLeaf,
 };
 use crate::market_info::{
-    AccountFillCursor, AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage, PricePoint,
+    AccountFillCursor, AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage,
     ResolutionConfig,
 };
 use crate::market_lifecycle::MarketLifecycle;
@@ -95,6 +95,7 @@ mod codec;
 mod commit;
 mod da;
 mod fault;
+mod history_outbox;
 mod import;
 mod restore;
 mod retention;
@@ -113,7 +114,7 @@ use self::restore::{
     AccountStateFence, PersistedCoreCounters, initialize_or_validate_layout,
     read_account_state_fence, read_recovery_metadata, validate_witness_header, write_core_counters,
 };
-use self::retention::{backfill_history_indexes, prune_historical_block_rows};
+use self::retention::prune_historical_block_rows;
 use self::tables::*;
 
 pub use self::auto_resolution::{AutoResolutionAction, AutoResolutionRecord};
@@ -127,6 +128,7 @@ pub use self::da::{
 };
 #[cfg(test)]
 pub(crate) use self::fault::StoreFaultPoint;
+pub use self::history_outbox::HistoryOutboxAck;
 pub use self::import::WitnessImportSummary;
 pub use self::restore::{AnalyticsRestoredState, RestoredState};
 pub use self::retention::{

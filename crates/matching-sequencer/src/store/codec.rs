@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn fill_history_key(account_id: AccountId, record: &AccountFillRecord) -> [u8; 24] {
     fill_history_primary_key(account_id, record.block_height, record.order_id)
 }
@@ -16,14 +17,7 @@ pub(super) fn fill_history_primary_key(
     key
 }
 
-pub(super) fn fill_history_parts_from_key(key: &[u8]) -> Option<(AccountId, u64, u64)> {
-    Some((
-        AccountId(u64::from_be_bytes(key.get(..8)?.try_into().ok()?)),
-        u64::from_be_bytes(key.get(8..16)?.try_into().ok()?),
-        u64::from_be_bytes(key.get(16..24)?.try_into().ok()?),
-    ))
-}
-
+#[cfg(test)]
 pub(super) fn fill_history_by_time_key(
     timestamp_ms: u64,
     account_id: AccountId,
@@ -65,13 +59,6 @@ pub(super) fn equity_key(account_id: AccountId, height: u64) -> [u8; 16] {
     k
 }
 
-pub(super) fn equity_parts_from_key(key: &[u8]) -> Option<(AccountId, u64)> {
-    Some((
-        AccountId(u64::from_be_bytes(key.get(..8)?.try_into().ok()?)),
-        u64::from_be_bytes(key.get(8..16)?.try_into().ok()?),
-    ))
-}
-
 pub(super) fn equity_by_time_key(
     timestamp_ms: u64,
     account_id: AccountId,
@@ -98,14 +85,6 @@ pub(super) fn history_event_key(account_id: AccountId, block_height: u64, seq: u
     k[8..16].copy_from_slice(&block_height.to_be_bytes());
     k[16..].copy_from_slice(&seq.to_be_bytes());
     k
-}
-
-pub(super) fn history_event_parts_from_key(key: &[u8]) -> Option<(AccountId, u64, u64)> {
-    Some((
-        AccountId(u64::from_be_bytes(key.get(..8)?.try_into().ok()?)),
-        u64::from_be_bytes(key.get(8..16)?.try_into().ok()?),
-        u64::from_be_bytes(key.get(16..24)?.try_into().ok()?),
-    ))
 }
 
 pub(super) fn history_event_by_time_key(
@@ -136,15 +115,6 @@ pub(super) fn price_point_key(market_id: MarketId, height: u64) -> [u8; 12] {
     key[..4].copy_from_slice(&market_id.0.to_be_bytes());
     key[4..].copy_from_slice(&height.to_be_bytes());
     key
-}
-
-pub(super) fn price_point_parts_from_key(key: &[u8]) -> Option<(MarketId, u64)> {
-    let market_bytes: [u8; 4] = key.get(..4)?.try_into().ok()?;
-    let height_bytes: [u8; 8] = key.get(4..12)?.try_into().ok()?;
-    Some((
-        MarketId(u32::from_be_bytes(market_bytes)),
-        u64::from_be_bytes(height_bytes),
-    ))
 }
 
 pub(super) fn price_point_by_height_key(height: u64, market_id: MarketId) -> [u8; 12] {
@@ -180,17 +150,6 @@ pub(super) fn price_candle_key(
     key[4..8].copy_from_slice(&resolution_secs.to_be_bytes());
     key[8..].copy_from_slice(&bucket_start_ms.to_be_bytes());
     key
-}
-
-pub(super) fn price_candle_parts_from_key(key: &[u8]) -> Option<(MarketId, u32, u64)> {
-    let market_bytes: [u8; 4] = key.get(..4)?.try_into().ok()?;
-    let resolution_bytes: [u8; 4] = key.get(4..8)?.try_into().ok()?;
-    let bucket_bytes: [u8; 8] = key.get(8..16)?.try_into().ok()?;
-    Some((
-        MarketId(u32::from_be_bytes(market_bytes)),
-        u32::from_be_bytes(resolution_bytes),
-        u64::from_be_bytes(bucket_bytes),
-    ))
 }
 
 pub(super) fn price_candle_market_resolution_bounds(
@@ -243,11 +202,6 @@ pub(super) fn parse_price_candles_min_bucket_key(key: &str) -> Option<u32> {
     key.strip_prefix(KEY_PRICE_CANDLES_MIN_BUCKET_MS_PREFIX)?
         .parse()
         .ok()
-}
-
-pub(super) fn seq_from_history_event_key(key: &[u8]) -> Option<u64> {
-    let seq_bytes: [u8; 8] = key.get(16..24)?.try_into().ok()?;
-    Some(u64::from_be_bytes(seq_bytes))
 }
 
 /// Persisted management metadata for a signing key (SYB-60).

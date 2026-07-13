@@ -19,6 +19,9 @@ services:
       SYBIL_DEV_MODE: "true"
       SYBIL_BLOCK_INTERVAL_MS: "10000"
       SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
+      SYBIL_HISTORY_URL: "http://sybil-history:3003"
+      SYBIL_HISTORY_TOKEN: "${SYBIL_HISTORY_TOKEN:-sybil-history-dev-only}"
+      SYBIL_DATA_DIR: "/data"
       # The local Compose frontend is published on localhost:3005. Keep the
       # browser ceremony and server verification on the same RP/origin by
       # default, while allowing production/alternate local hosts to override.
@@ -29,6 +32,7 @@ services:
       SYBIL_EVENT_SNAPSHOT_DIR: "/data/event_snapshots"
       RUST_LOG: "warn,sybil_api=info,matching_sequencer=info,sybil_prover=info,commonware_storage=error,tower_http=warn"
     volumes:
+      - sybil-data:/data
       - arena-data:/arena-data
     restart: unless-stopped
     stop_grace_period: 10s
@@ -39,6 +43,30 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+
+  sybil-history:
+    image: sybil-api:latest
+    mem_limit: "256m"
+    memswap_limit: "384m"
+    entrypoint: ["sybil-history"]
+    environment:
+      SYBIL_HISTORY_BIND: "0.0.0.0:3003"
+      SYBIL_HISTORY_DATA_DIR: "/history-data"
+      SYBIL_HISTORY_DEV_MODE: "false"
+      SYBIL_HISTORY_TOKEN: "${SYBIL_HISTORY_TOKEN:-sybil-history-dev-only}"
+      SYBIL_HISTORY_CANDLE_RESOLUTIONS_SECS: "60,300,3600"
+      SYBIL_HISTORY_MAX_QUERY_CONCURRENCY: "16"
+      RUST_LOG: "warn,sybil_history=info"
+    volumes:
+      - history-data:/history-data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    logging: *default-logging
 
   sybil-web:
     # Next.js frontend (standalone server, non-root). NEXT_PUBLIC_* are baked at
@@ -283,6 +311,8 @@ services:
 
     logging: *default-logging
 volumes:
+  sybil-data:
+    name: sybil-data
   vmdata:
     name: vmdata
   polymarket-data:
@@ -293,3 +323,5 @@ volumes:
     name: prover-jobs
   prover-artifacts:
     name: prover-artifacts
+  history-data:
+    name: history-data

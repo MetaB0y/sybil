@@ -181,10 +181,9 @@ impl BlockSequencer {
     }
 
     /// All-time leaderboard inputs for every ranked account, computed from
-    /// live in-memory state in a single pass. Windowing (7d/30d) is layered on
-    /// top in the actor using the durable equity store; this method always
-    /// returns the all-time PnL/equity plus the deposited basis and the
-    /// distinct-market count.
+    /// live in-memory state in a single pass. The API layers 7d/30d windowing
+    /// on top using opening anchors from the history service; the sequencer
+    /// never scans historical storage for this read.
     ///
     /// The system MINT account, never-funded accounts, accounts that have never
     /// filled, and accounts without an opt-in display name are excluded.

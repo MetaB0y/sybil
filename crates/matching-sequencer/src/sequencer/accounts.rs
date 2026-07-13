@@ -491,6 +491,17 @@ impl BlockSequencer {
         self.api_key_index.get(token_hash).copied()
     }
 
+    /// Snapshot the small active read-key index for API-side authorization.
+    /// The API refreshes this once at startup and mutates its copy only after
+    /// acknowledged key create/revoke operations, keeping history reads out of
+    /// the sequencer mailbox.
+    pub fn active_api_key_owners(&self) -> Vec<([u8; 32], AccountId)> {
+        self.api_key_index
+            .iter()
+            .map(|(hash, account_id)| (*hash, *account_id))
+            .collect()
+    }
+
     /// List an account's API keys (metadata only — never the hash/token).
     pub fn api_keys_for_account(&self, account_id: AccountId) -> Vec<crate::account::ApiKeyRecord> {
         self.accounts

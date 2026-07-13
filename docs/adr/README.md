@@ -57,7 +57,8 @@ relevant, not replaced).
 | [0014](0014-webauthn-first-auth.md) | WebAuthn / passkeys primary, verified in-guest | Accepted | Yes |
 | [0015](0015-deposit-quarantine.md) | Deposit quarantine — unresolvable keys park in committed ledger, frontier never skips | Accepted | Yes |
 | [0016](0016-public-market-tape-and-recovery-da-boundaries.md) | Public market tape, private canonical blocks, and distinct recovery DA | Accepted | No |
-| [0017](0017-bounded-durable-account-history.md) | Bounded durable account history with explicit retention semantics | Accepted | No |
+| [0017](0017-bounded-durable-account-history.md) | Bounded durable account history with explicit retention semantics | Superseded by ADR-0018 | No |
+| [0018](0018-extract-private-history-service.md) | Private history service behind a transactional outbox | Accepted | No |
 
 > These first ten are **backfilled** from decisions already made and already in
 > production; their rationale was reconstructed from the design/review estate

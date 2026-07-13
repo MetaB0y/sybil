@@ -22,6 +22,7 @@ use p256::elliptic_curve::rand_core::UnwrapErr;
 use sybil_api::app::create_router;
 use sybil_api::config::ApiConfig;
 use sybil_api::state::AppState;
+use sybil_history::{HistoryHandle, HistoryHttpConfig, HistoryStore};
 use sybil_oracle::{FeedId, FeedPubkey, ResolutionPolicy, ResolutionTemplate, TemplateId};
 use tower::ServiceExt;
 
@@ -33,6 +34,49 @@ static NEXT_STORE_ID: AtomicU64 = AtomicU64::new(0);
 fn temp_store_path() -> PathBuf {
     let id = NEXT_STORE_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!("sybil-api-test-{}-{id}.redb", std::process::id()))
+}
+
+async fn history_backed_state(
+    handle: SequencerHandle,
+    store: Arc<Store>,
+    mut config: ApiConfig,
+) -> AppState {
+    let history_path = temp_store_path().with_extension("history.redb");
+    let history_store =
+        HistoryStore::open(history_path, vec![1, 60, 300, 3_600]).expect("history store opens");
+    let history_handle = HistoryHandle::spawn(history_store.clone());
+    let history_app = sybil_history::router(
+        history_handle,
+        history_store,
+        HistoryHttpConfig {
+            dev_mode: true,
+            internal_token: None,
+            max_query_concurrency: 4,
+        },
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("history listener");
+    let addr = listener.local_addr().expect("history listener address");
+    tokio::spawn(async move {
+        axum::serve(listener, history_app)
+            .await
+            .expect("history test server");
+    });
+    config.history_url = format!("http://{addr}");
+    config.history_poll_ms = 1;
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let state = AppState::new(handle, &config, prometheus);
+    state
+        .initialize_read_models()
+        .await
+        .expect("API read models initialize");
+    state.spawn_leaderboard_read_model_refresher();
+    let history = state.history.clone().expect("history client configured");
+    sybil_api::history::spawn_outbox_publisher(store, history, Duration::from_millis(1));
+    state
 }
 
 /// Create a test app with optional dev mode. Bootstraps an `admin` feed +
@@ -72,13 +116,13 @@ pub async fn test_app_with_bootstrap(
         .await
         .unwrap();
 
-    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .build_recorder()
-        .handle();
     let config = ApiConfig {
         dev_mode,
         ..ApiConfig::default()
     };
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
     let state = AppState::new(handle.clone(), &config, prometheus);
     (create_router(state), handle, admin_key, admin_feed_id)
 }
@@ -155,12 +199,9 @@ pub async fn test_app_with_store_api_config(
     let oracle = Arc::new(AdminOracle::new());
     let sequencer =
         BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, sequencer_config);
-    let store = Store::open(&temp_store_path()).expect("test store opens");
-    let handle = SequencerHandle::spawn_with_store(sequencer, Some(store));
-    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .build_recorder()
-        .handle();
-    let state = AppState::new(handle.clone(), &api_config, prometheus);
+    let store = Arc::new(Store::open(&temp_store_path()).expect("test store opens"));
+    let handle = SequencerHandle::spawn_with_shared_store(sequencer, Some(Arc::clone(&store)));
+    let state = history_backed_state(handle.clone(), store, api_config).await;
     (create_router(state), handle)
 }
 
@@ -181,33 +222,69 @@ pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, Sequencer
         ..SequencerConfig::default()
     };
     let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config);
-    let store = Store::open(&temp_store_path()).expect("test store opens");
-    let handle = SequencerHandle::spawn_with_store(sequencer, Some(store));
-    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .build_recorder()
-        .handle();
+    let store = Arc::new(Store::open(&temp_store_path()).expect("test store opens"));
+    let handle = SequencerHandle::spawn_with_shared_store(sequencer, Some(Arc::clone(&store)));
     let api_config = ApiConfig {
         dev_mode,
         ..ApiConfig::default()
     };
-    let state = AppState::new(handle.clone(), &api_config, prometheus);
+    let state = history_backed_state(handle.clone(), store, api_config).await;
     (create_router(state), handle)
 }
 
 /// Send a GET request and return (status, body bytes).
 #[allow(dead_code)]
 pub async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
-    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    let status = resp.status();
-    let body = resp
-        .into_body()
-        .collect()
-        .await
-        .unwrap()
-        .to_bytes()
-        .to_vec();
-    (status, body)
+    let is_history = uri.contains("/fills")
+        || uri.contains("/events")
+        || uri.contains("/equity")
+        || uri.contains("/prices/history")
+        || uri.contains("/prices/candles");
+    let expected_height = if is_history {
+        let request = Request::builder()
+            .uri("/v1/health")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|value| value.get("height").and_then(serde_json::Value::as_u64))
+    } else {
+        None
+    };
+    if uri.contains("/leaderboard") {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec();
+        let projection_pending = is_history
+            && status.is_success()
+            && serde_json::from_slice::<serde_json::Value>(&body)
+                .ok()
+                .is_some_and(|value| {
+                    value
+                        .get("indexed_through_height")
+                        .and_then(serde_json::Value::as_u64)
+                        .is_none_or(|indexed| expected_height.is_some_and(|head| indexed < head))
+                });
+        if !projection_pending || tokio::time::Instant::now() >= deadline {
+            return (status, body);
+        }
+        // Projection is deliberately asynchronous. Poll the independent test
+        // service instead of reintroducing a synchronous commit dependency.
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 /// Send a POST request with JSON body and return (status, body bytes).

@@ -472,11 +472,7 @@ async fn order_rate_limit(
 ) -> Response {
     if req.method() == axum::http::Method::POST && is_order_write_path(req.uri().path()) {
         let client_key = http_rate_limit_client_key(&req);
-        let allowed = state
-            .http_order_limiter
-            .lock()
-            .map(|mut limiter| limiter.allow(&client_key))
-            .unwrap_or(Err(1));
+        let allowed = state.http_order_limiter.allow(&client_key);
         if let Err(retry_after_secs) = allowed {
             metrics::counter!("sybil_http_order_rate_limited_total").increment(1);
             return AppError::rate_limited(retry_after_secs).into_response();
@@ -506,11 +502,7 @@ async fn da_read_limit(
     }
 
     let client_key = http_rate_limit_client_key(&req);
-    let allowed = state
-        .http_da_limiter
-        .lock()
-        .map(|mut limiter| limiter.allow(&client_key))
-        .unwrap_or(Err(1));
+    let allowed = state.http_da_limiter.allow(&client_key);
     if let Err(retry_after_secs) = allowed {
         metrics::counter!("sybil_http_da_rate_limited_total", "reason" => "rate").increment(1);
         return AppError::rate_limited(retry_after_secs).into_response();
