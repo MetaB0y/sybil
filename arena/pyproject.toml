@@ -47,7 +47,6 @@ packages = ["sybil_client", "bots", "feeds", "sim", "markets", "live"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-ignore = ["E501"]
 extend-exclude = [
     "mm_backtest.py",
     "mm_param_sweep.py",
@@ -57,6 +56,9 @@ extend-exclude = [
     # `just arena-sdk-regen`; its style is not ours to lint.
     "sybil_client/_generated",
 ]
+
+[tool.ruff.lint]
+ignore = ["E501"]
 # These entrypoints extend sys.path before importing local packages.
 per-file-ignores = { "examples/full_competition.py" = ["E402"], "sim/runner.py" = ["E402"] }
 
