@@ -101,6 +101,14 @@ pub struct SolverDiagnostics {
     pub optimality_gap: Option<f64>,
     /// Number of optimization-oracle calls made by an iterative method.
     pub oracle_calls: Option<usize>,
+    /// Cheap restricted-master iterations made between expensive oracle calls.
+    pub master_iterations: Option<usize>,
+    /// Number of active primal atoms in a bundle-style recovered allocation.
+    pub active_atoms: Option<usize>,
+    /// Time spent inside optimization-oracle solves.
+    pub oracle_time_secs: Option<f64>,
+    /// Time spent optimizing a restricted bundle master.
+    pub master_time_secs: Option<f64>,
     /// Objective lost when the continuous allocation is landed into integer
     /// protocol quantities. Negative numerical noise is reported as zero.
     pub integer_landing_loss: Option<f64>,

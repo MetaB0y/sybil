@@ -138,7 +138,7 @@ The vault frontmatter is authoritative about document status: `current` means im
 
 ### Current foundations
 
-- Single-market binary clearing, five solver types, one trusted verifier, and
+- Single-market binary clearing, multiple solver implementations, one trusted verifier, and
   one net-of-minting welfare definition.
 - Direct admission plus deferred atomic submissions, resting reservations, deterministic settlement, and group-preserving resolution.
 - redb/qMDB fence-based persistence, acknowledged-write replay, a private

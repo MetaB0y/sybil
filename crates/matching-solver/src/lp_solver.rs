@@ -2,11 +2,11 @@
 //!
 //! Formulates the welfare-maximizing matching problem as a Linear Program:
 //! - Variables: fill quantities, per-market minting, group minting
-//! - Constraints: YES/NO position balance per market, quantity bounds
+//! - Constraints: YES/NO minting epigraph per market, quantity bounds
 //! - Objective: maximize total welfare (limit_price × quantity for buyers, minus for sellers)
 //!   minus minting cost ($1 per mint)
 //!
-//! Prices emerge from LP duality: the dual of the YES balance constraint for market m
+//! Prices emerge from LP duality: the dual of the YES epigraph constraint for market m
 //! gives p_YES_m, and the dual of the NO constraint gives p_NO_m. When minting is active,
 //! p_YES + p_NO = $1 automatically. When group minting is active, Σ p_YES = $1.
 //!
@@ -83,15 +83,7 @@ impl LpSolver {
         let ctx = build_solver_context(problem);
 
         // Pre-group MM orders by constraint for efficient iteration
-        let mm_constraint_orders: Vec<Vec<(usize, MmSide)>> = {
-            let mut by_mm = vec![Vec::new(); problem.mm_constraints.len()];
-            for (i, order) in problem.orders.iter().enumerate() {
-                if let Some(&(mm_idx, side)) = ctx.mm_order_info.get(&order.id) {
-                    by_mm[mm_idx].push((i, side));
-                }
-            }
-            by_mm
-        };
+        let mm_constraint_orders = mm_constraint_order_indices(problem, &ctx);
 
         // Sequential LP: solve without budgets, then add linearized budget
         // constraints and re-solve until budgets are satisfied.
@@ -228,6 +220,10 @@ pub(crate) struct LpSolution {
     pub(crate) q_values: Vec<f64>,
     pub(crate) dual_yes: HashMap<MarketId, f64>,
     pub(crate) dual_no: HashMap<MarketId, f64>,
+    /// A Lagrangian upper bound for zero-RHS matching LPs, in HiGHS objective
+    /// units. Unlike the returned primal objective, this remains a valid
+    /// oracle bound when HiGHS stops within floating-point tolerances.
+    pub(crate) objective_upper_bound_dollars: Option<f64>,
     #[cfg(test)]
     objective_value_dollars: f64,
 }
@@ -244,6 +240,8 @@ pub(crate) struct ReusableLpOracle {
     markets: Vec<MarketId>,
     yes_row_indices: HashMap<MarketId, usize>,
     no_row_indices: HashMap<MarketId, usize>,
+    column_bounds: Vec<(f64, f64)>,
+    certifiable_zero_rhs: bool,
 }
 
 impl ReusableLpOracle {
@@ -262,14 +260,28 @@ impl ReusableLpOracle {
             .map(|i| pb.add_column(0.0, 0.0..=orders[i].max_fill.0 as f64))
             .collect();
 
-        let big = 1e15_f64;
+        // Every balance variable is a signed sum of order fills, so total
+        // available quantity is a finite analytical bound. Finite bounds also
+        // let any returned row-dual vector produce a conservative Lagrangian
+        // upper bound, even when its reduced costs have numerical residuals.
+        let flow_bound = orders
+            .iter()
+            .map(|order| order.max_fill.0 as f64)
+            .sum::<f64>()
+            .max(1.0);
         let mint_cols: HashMap<MarketId, _> = markets
             .iter()
-            .map(|&market| (market, pb.add_column(-1.0, -big..=big)))
+            .map(|&market| (market, pb.add_column(-1.0, -flow_bound..=flow_bound)))
             .collect();
         let gmint_cols: Vec<_> = (0..num_groups)
-            .map(|_| pb.add_column(-1.0, 0.0..))
+            .map(|_| pb.add_column(-1.0, 0.0..=flow_bound))
             .collect();
+        let mut column_bounds: Vec<_> = orders
+            .iter()
+            .map(|order| (0.0, order.max_fill.0 as f64))
+            .collect();
+        column_bounds.extend(markets.iter().map(|_| (-flow_bound, flow_bound)));
+        column_bounds.extend((0..num_groups).map(|_| (0.0, flow_bound)));
 
         let mut yes_row_indices = HashMap::new();
         let mut no_row_indices = HashMap::new();
@@ -310,10 +322,14 @@ impl ReusableLpOracle {
             }
             no_terms.push((mint_col, -1.0));
 
-            pb.add_row(0.0..=0.0, &yes_terms);
+            // Zero-temperature minting is an epigraph: net demand for every
+            // outcome is bounded above by the amount minted. Equality would
+            // incorrectly require balanced demand before the minting sector
+            // acts and is stricter than the paper's `max_omega D_omega` cost.
+            pb.add_row(..=0.0, &yes_terms);
             yes_row_indices.insert(market, row_count);
             row_count += 1;
-            pb.add_row(0.0..=0.0, &no_terms);
+            pb.add_row(..=0.0, &no_terms);
             no_row_indices.insert(market, row_count);
             row_count += 1;
         }
@@ -334,6 +350,8 @@ impl ReusableLpOracle {
             markets: markets.to_vec(),
             yes_row_indices,
             no_row_indices,
+            column_bounds,
+            certifiable_zero_rhs: budget_rows.is_empty(),
         })
     }
 
@@ -355,6 +373,20 @@ impl ReusableLpOracle {
         let objective_value_dollars = solved.objective_value();
         let primal = solution.columns();
         let dual_rows = solution.dual_rows();
+        let objective_upper_bound_dollars = self.certifiable_zero_rhs.then(|| {
+            solution
+                .dual_columns()
+                .iter()
+                .zip(&self.column_bounds)
+                .map(|(&reduced_cost, &(lower, upper))| {
+                    if reduced_cost >= 0.0 {
+                        reduced_cost * upper
+                    } else {
+                        reduced_cost * lower
+                    }
+                })
+                .sum()
+        });
 
         let q_values = primal[..self.q_cols.len()].to_vec();
         let mut dual_yes = HashMap::new();
@@ -377,6 +409,7 @@ impl ReusableLpOracle {
                 q_values,
                 dual_yes,
                 dual_no,
+                objective_upper_bound_dollars,
                 #[cfg(test)]
                 objective_value_dollars,
             }),
@@ -388,7 +421,7 @@ impl ReusableLpOracle {
 /// Build and solve an LP with custom objective coefficients.
 ///
 /// This is the LP oracle used by both the LP solver (linear welfare) and the
-/// retained-cash solver (Frank--Wolfe gradient). The constraints (position balance,
+/// retained-cash solver (Frank--Wolfe gradient). The constraints (minting epigraph,
 /// quantity bounds, minting) are the same; only the objective varies.
 ///
 /// All orders must be single-market binary orders.
@@ -794,6 +827,19 @@ pub(crate) fn build_mm_order_info(problem: &Problem) -> HashMap<u64, (usize, MmS
         .collect()
 }
 
+fn mm_constraint_order_indices(
+    problem: &Problem,
+    ctx: &SolverContext,
+) -> Vec<Vec<(usize, MmSide)>> {
+    let mut by_mm = vec![Vec::new(); problem.mm_constraints.len()];
+    for (index, order) in problem.orders.iter().enumerate() {
+        if let Some(&(mm_index, side)) = ctx.mm_order_info.get(&order.id) {
+            by_mm[mm_index].push((index, side));
+        }
+    }
+    by_mm
+}
+
 /// Common setup shared across all LP-family solvers: collect markets,
 /// build market-to-group mapping, build MM order info.
 pub(crate) struct SolverContext {
@@ -920,23 +966,59 @@ pub(crate) fn project_and_finalize_with_objective(
         order.max_fill = Qty(core_fill.min(orders[i].max_fill.0));
     }
 
-    let Some(final_sol) = build_and_solve_lp(
-        &projected_orders,
-        &ctx.markets,
-        &ctx.market_to_group,
-        ctx.num_groups,
-        projection_obj,
-        &[],
-    ) else {
-        return PipelineResult::failure(
-            "projection-lp",
-            TerminationStatus::PostProcessingFailure,
-            "projection LP did not return a solution",
-            start.elapsed().as_secs_f64(),
-        );
-    };
+    let mm_constraint_orders = mm_constraint_order_indices(problem, ctx);
+    let mut budget_rows = Vec::new();
+    const MAX_BUDGET_PROJECTION_STEPS: usize = 8;
 
-    finalize_result(&final_sol, problem, ctx, start)
+    for iteration in 0..=MAX_BUDGET_PROJECTION_STEPS {
+        let Some(final_sol) = build_and_solve_lp(
+            &projected_orders,
+            &ctx.markets,
+            &ctx.market_to_group,
+            ctx.num_groups,
+            projection_obj,
+            &budget_rows,
+        ) else {
+            return PipelineResult::failure(
+                "projection-lp",
+                TerminationStatus::PostProcessingFailure,
+                format!(
+                    "projection LP did not return a solution at budget step {iteration} with {} rows",
+                    budget_rows.len()
+                ),
+                start.elapsed().as_secs_f64(),
+            );
+        };
+
+        let prices = normalized_yes_prices(&final_sol, &ctx.markets);
+        if !has_mm_budget_violations(
+            &final_sol,
+            &projected_orders,
+            &problem.mm_constraints,
+            &mm_constraint_orders,
+            &prices,
+        ) {
+            return finalize_result(&final_sol, problem, ctx, start);
+        }
+        if iteration == MAX_BUDGET_PROJECTION_STEPS {
+            return PipelineResult::failure(
+                "projection-lp",
+                TerminationStatus::PostProcessingFailure,
+                "integer landing did not reach an MM-budget fixed point in 8 projection steps",
+                start.elapsed().as_secs_f64(),
+            );
+        }
+
+        budget_rows.clear();
+        budget_rows.extend(linearize_mm_budgets(
+            &projected_orders,
+            &problem.mm_constraints,
+            &mm_constraint_orders,
+            &prices,
+        ));
+    }
+
+    unreachable!("bounded projection loop always returns")
 }
 
 /// Recompute welfare, volume, and fill count from scratch.
@@ -997,6 +1079,19 @@ mod tests {
                 warm.objective_value_dollars,
                 cold.objective_value_dollars,
             );
+            let upper = warm
+                .objective_upper_bound_dollars
+                .expect("zero-RHS oracle has a dual bound");
+            assert!(
+                upper + 1e-7 >= warm.objective_value_dollars,
+                "dual upper bound {upper} below primal {}",
+                warm.objective_value_dollars,
+            );
+            assert!(
+                upper - warm.objective_value_dollars <= 1e-5,
+                "unexpectedly loose dual bound: upper={upper}, primal={}",
+                warm.objective_value_dollars,
+            );
         }
     }
 
@@ -1025,6 +1120,35 @@ mod tests {
             result.result.total_welfare() > 0,
             "minting should produce positive welfare"
         );
+        let zero_temperature = crate::zero_temperature_minting_cost_for_fills(
+            &minting_problem(),
+            &result.result.fills,
+        );
+        assert!(
+            (zero_temperature - result.result.minting_cost as f64).abs() <= 1.0,
+            "landed prices must support the complete-set cost: C0={zero_temperature}, cash={}",
+            result.result.minting_cost,
+        );
+    }
+
+    #[test]
+    fn one_sided_demand_pays_the_complete_set_epigraph_cost() {
+        let mut problem = Problem::new("one_sided_minting");
+        let market = problem.markets.add_binary("market");
+        problem.orders.push(matching_engine::simple_yes_buy(
+            &problem.markets,
+            1,
+            market,
+            600_000_000,
+            100,
+        ));
+
+        let result = LpSolver::new().solve(&problem);
+        assert_eq!(
+            result.result.orders_filled, 0,
+            "a lone 60c YES bid cannot receive newly minted supply for free"
+        );
+        assert!(result.result.total_welfare() >= 0);
     }
 
     #[test]

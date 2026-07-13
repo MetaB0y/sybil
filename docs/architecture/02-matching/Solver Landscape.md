@@ -9,11 +9,12 @@ last_verified: 2026-07-13
 # Solver landscape
 
 > [!summary] In one paragraph
-> Five solver types implement the same search interface. The supported matching core is a fast LP; MM capital introduces price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] is the production default and directly optimizes the paper's convex retained-cash objective with a certified generalized Frank--Wolfe gap. Every solver lands integers and relies on the same external verifier and welfare definition.
+> Solver implementations share one interface and integer trust boundary. The supported matching core is a fast LP; shared MM capital introduces endogenous price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] remains the production default. The experimental [[Pacing Bundle Solver|`PacingBundleSolver`]] solves the same convex retained-cash program through a lower-dimensional pacing dual and a fully corrective primal bundle.
 
 | Solver | Feature | MM-budget approach | Role |
 |---|---|---|---|
 | [[Retained Cash Solver|`RetainedCashSolver`]] | `lp` | Generalized Frank--Wolfe on affine-to-log MM utility | Production default |
+| [[Pacing Bundle Solver|`PacingBundleSolver`]] | `lp` | Fully corrective primal atoms from the convex pacing dual | Research candidate |
 | [[LP Solver|`LpSolver`]] | `lp` | Solve, linearize budgets at discovered prices, re-solve once by default | Low-latency baseline |
 | [[Conic Solver|`ConicSolver`]] | `conic` | Clarabel exponential-cone formulation, then projection LP | Interior-point reference |
 | [[MILP Solver|`MilpSolver`]] | `milp` | SCIP MIQCQP or McCormick mode with timeout | Exact/reference route when optimal |
@@ -30,12 +31,21 @@ failures rather than being replaced by another solver.
 flowchart LR
     P["Problem"] --> FILTER["Supported-shape filter"]
     FILTER --> SEARCH["Chosen float search"]
-    SEARCH --> LAND["Projection / integer landing / trim"]
+    SEARCH --> LAND["Supporting projection / integer landing"]
     LAND --> INT["Integer fills + prices + net welfare"]
     INT --> VERIFY["sybil-verifier"]
 ```
 
-Shared machinery includes the HiGHS LP oracle, price normalization from duals, projection LPs, integer rounding, and MM-overflow trimming. MM sells are paced through the paper's sell-to-complementary-buy reduction, including its exact linear complete-set correction. `PipelineResult::diagnostics` reports algorithm termination separately from integer validity: convergence, a configured iteration cap, backend failure, and projection failure are not interchangeable. `matching-sim` compares results; `sybil-verifier` decides validity.
+Shared machinery includes the HiGHS LP oracle, price normalization from duals,
+projection LPs, and integer rounding. Retained-cash projections re-solve
+price-dependent budget rows and finalize only at a budget-consistent fixed
+point; the LP-SLP baseline still has a capped trimming path and is measured as
+such. MM sells are paced through the paper's sell-to-complementary-buy
+reduction, including its exact linear complete-set correction.
+`PipelineResult::diagnostics` reports algorithm termination separately from
+integer validity: convergence, a configured iteration cap, backend failure,
+and projection failure are not interchangeable. `matching-sim` compares
+results; `sybil-verifier` decides validity.
 
 ## Important boundaries
 

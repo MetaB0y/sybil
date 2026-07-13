@@ -17,6 +17,10 @@ empirical claims, not for criterion-style microbenchmarks or a single ad-hoc
   the shifted retained-cash objective as its primary objective, evaluates it on
   every landed allocation, and keeps integer net welfare as the protocol and
   approximation metric.
+- Development protocols are checked in when they define a reusable stress
+  design, but their rows are never promoted to held-out evidence. In
+  particular, `protocol-pacing-development.json` uses seeds 16000--18403 and
+  was used while implementing and diagnosing the pacing bundle.
 - LP is a production reference, not asserted to be a global optimum under the
   exact bilinear MM-budget model. MILP is called exact only when SCIP reports a
   proven optimum.
@@ -62,6 +66,44 @@ python3 scripts/benchmarks/analyze_solver_experiments.py \
 The runner copies the protocol beside `results.jsonl` and writes machine and
 toolchain metadata. The analyzer validates completeness, then creates
 `summary.json`, `summary.csv`, `summary.md`, and deterministic SVG figures.
+
+## Pacing-bundle development protocol
+
+`protocol-pacing-development.json` compares the certified RC-FW production
+solver, the experimental fully corrective pacing bundle, five-step LP-SLP, and
+corrected-epigraph Clarabel QuasiFisher. It is designed to answer two separate
+scaling questions rather than confound them:
+
+- order count grows from 80 to 10,000 with exactly two market makers;
+- pacing dimension grows from 1 to 16 market makers with 2,000 orders;
+- tight two-sided flash ladders exercise both MM bids and complementary-buy
+  reductions of MM asks;
+- random, concentrated, heavy-tailed numerical, and tiny reference books keep
+  the structural stress from becoming one hand-picked family.
+
+The detailed work metrics include P90/P95/P99/max wall time, LP-oracle calls
+and time, restricted-master steps and time, active bundle atoms, certified
+continuous gap, integer landing loss, and the landed minting-duality gap
+`|C_0(D) - p·D|`. The last metric detects allocations whose prices no longer
+support their post-processed fill vector, even if ordinary limit and budget
+checks still pass.
+
+Run every declared development row with:
+
+```bash
+cargo run --release -p matching-sim --all-features \
+  --bin solver-experiments -- \
+  --protocol benchmarks/solver/protocol-pacing-development.json \
+  --source-revision <working-or-frozen-revision> \
+  --output-dir /tmp/solver-pacing-development --overwrite
+python3 scripts/benchmarks/analyze_solver_experiments.py \
+  /tmp/solver-pacing-development
+```
+
+This protocol is intentionally diagnostic. Any later paper comparison must
+freeze the implementation and a new untouched seed range before running it;
+changing seeds, dropping failed books, or selecting a favorable budget point
+after seeing this development matrix would invalidate that comparison.
 
 ## Protocol v2 suite structure
 

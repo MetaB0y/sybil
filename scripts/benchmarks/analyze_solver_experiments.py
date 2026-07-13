@@ -27,6 +27,7 @@ COLORS = {
     "lp-unconstrained": "#9ca3af",
     "lp": "#111827",
     "retained-cash-fw": "#7c3aed",
+    "pacing-bundle": "#ea580c",
     "iter-lp": "#d97706",
     "eg": "#7c3aed",
     "conic-quasi": "#1d4ed8",
@@ -40,6 +41,7 @@ SHORT_LABELS = {
     "lp-unconstrained": "LP (no budget)",
     "lp": "LP",
     "retained-cash-fw": "RC-FW",
+    "pacing-bundle": "Pacing bundle",
     "iter-lp": "IterLP",
     "eg": "EG-FW",
     "conic-quasi": "Quasi",
@@ -174,6 +176,33 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
             if row["comparisons"]["lp_welfare_gap_bps"] is not None
         ]
         runtimes = [row["wall_time_seconds"] for row in successful]
+        iterations = [row["iterations"] for row in successful if row.get("iterations") is not None]
+        oracle_calls = [
+            row["oracle_calls"] for row in successful if row.get("oracle_calls") is not None
+        ]
+        master_iterations = [
+            row["master_iterations"]
+            for row in successful
+            if row.get("master_iterations") is not None
+        ]
+        active_atoms = [
+            row["active_atoms"] for row in successful if row.get("active_atoms") is not None
+        ]
+        oracle_times = [
+            row["oracle_time_seconds"]
+            for row in successful
+            if row.get("oracle_time_seconds") is not None
+        ]
+        master_times = [
+            row["master_time_seconds"]
+            for row in successful
+            if row.get("master_time_seconds") is not None
+        ]
+        oracle_time_fractions = [
+            row["oracle_time_seconds"] / row["wall_time_seconds"]
+            for row in successful
+            if row.get("oracle_time_seconds") is not None and row["wall_time_seconds"] > 0
+        ]
         allocation = [
             row["comparisons"]["lp_allocation_l1_ratio"]
             for row in successful
@@ -219,8 +248,13 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
         ]
         landing_losses = [
             row["integer_landing_loss"] / 1e9
-            for row in rows
+            for row in successful
             if row.get("integer_landing_loss") is not None
+        ]
+        minting_duality_gaps = [
+            row["minting_duality_gap_nanos"] / 1e9
+            for row in successful
+            if row.get("minting_duality_gap_nanos") is not None
         ]
         convergence = Counter(row["termination"] for row in rows)
         statuses = Counter(row["run_status"] for row in rows)
@@ -236,6 +270,27 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
                 "runtime_median_seconds": median(runtimes),
                 "runtime_p25_seconds": quantile(runtimes, 0.25),
                 "runtime_p75_seconds": quantile(runtimes, 0.75),
+                "runtime_p90_seconds": quantile(runtimes, 0.90),
+                "runtime_p95_seconds": quantile(runtimes, 0.95),
+                "runtime_p99_seconds": quantile(runtimes, 0.99),
+                "runtime_max_seconds": max(runtimes) if runtimes else None,
+                "iterations_median": median(iterations),
+                "iterations_p95": quantile(iterations, 0.95),
+                "iterations_max": max(iterations) if iterations else None,
+                "oracle_calls_median": median(oracle_calls),
+                "oracle_calls_p95": quantile(oracle_calls, 0.95),
+                "oracle_calls_max": max(oracle_calls) if oracle_calls else None,
+                "master_iterations_median": median(master_iterations),
+                "master_iterations_p95": quantile(master_iterations, 0.95),
+                "master_iterations_max": max(master_iterations) if master_iterations else None,
+                "active_atoms_median": median(active_atoms),
+                "active_atoms_p95": quantile(active_atoms, 0.95),
+                "active_atoms_max": max(active_atoms) if active_atoms else None,
+                "oracle_time_median_seconds": median(oracle_times),
+                "oracle_time_p95_seconds": quantile(oracle_times, 0.95),
+                "master_time_median_seconds": median(master_times),
+                "master_time_p95_seconds": quantile(master_times, 0.95),
+                "oracle_time_fraction_median": median(oracle_time_fractions),
                 "lp_gap_mean_percent": mean(gaps),
                 "lp_gap_median_percent": median(gaps),
                 "lp_gap_p25_percent": quantile(gaps, 0.25),
@@ -257,6 +312,15 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
                 "certificate_relative_gap_median_percent": median(certificate_relative),
                 "certificate_relative_gap_p95_percent": quantile(certificate_relative, 0.95),
                 "integer_landing_loss_median_dollars": median(landing_losses),
+                "integer_landing_loss_p95_dollars": quantile(landing_losses, 0.95),
+                "integer_landing_loss_max_dollars": max(landing_losses)
+                if landing_losses
+                else None,
+                "minting_duality_gap_median_dollars": median(minting_duality_gaps),
+                "minting_duality_gap_p95_dollars": quantile(minting_duality_gaps, 0.95),
+                "minting_duality_gap_max_dollars": max(minting_duality_gaps)
+                if minting_duality_gaps
+                else None,
             }
         )
         interval = bootstrap_mean_interval(gaps, json.dumps(key))
@@ -279,6 +343,8 @@ def make_summary(
     reference = [row for row in records if row["suite"] == "reference"]
     numerical = [row for row in records if row["suite"] == "numerical"]
     ablation = [row for row in records if row["suite"] == "ablation"]
+    order_scaling = [row for row in records if row["suite"] == "order_scaling"]
+    mm_scaling = [row for row in records if row["suite"] == "mm_scaling"]
     return {
         "schema_version": protocol.get("schema_version", 1),
         "protocol_id": protocol["protocol_id"],
@@ -293,6 +359,8 @@ def make_summary(
         "reference": aggregate(reference, ("solver_id",)),
         "numerical": aggregate(numerical, ("solver_id",)),
         "ablation": aggregate(ablation, ("budget_scale", "solver_id")),
+        "order_scaling": aggregate(order_scaling, ("scale", "solver_id")),
+        "mm_scaling": aggregate(mm_scaling, ("scale", "solver_id")),
         "experiments": aggregate(records, ("experiment_id", "solver_id")),
     }
 
@@ -313,6 +381,9 @@ def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
 
 def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
     integrity = summary["integrity"]
+    has_budget_blind_lp = any(
+        row["solver_id"] == "lp-unconstrained" for row in summary["overall"]
+    )
     lines = [
         "# Generated retained-cash solver summary",
         "",
@@ -325,8 +396,12 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
         ),
         "",
         "Every declared failure remains in the denominator. Runtime and quality summaries are "
-        "conditional on successful verifier-valid runs; the success column always exposes that denominator. "
-        "The budget-blind LP is an intentionally infeasible negative control.",
+        "conditional on successful verifier-valid runs; the success column always exposes that denominator."
+        + (
+            " The budget-blind LP is an intentionally infeasible negative control."
+            if has_budget_blind_lp
+            else ""
+        ),
         "",
         "## Robustness, certificate, and runtime",
         "",
@@ -360,6 +435,88 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
             rows,
         )
     )
+
+    iterative = [
+        row
+        for row in summary["overall"]
+        if row["oracle_calls_median"] is not None or row["master_iterations_median"] is not None
+    ]
+    if iterative:
+        lines.extend(["", "## Iterative work and latency tails", ""])
+        rows = []
+        for row in iterative:
+            rows.append(
+                [
+                    SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                    format_number(row["runtime_median_seconds"] * 1_000, 2),
+                    format_number(row["runtime_p95_seconds"] * 1_000, 2),
+                    format_number(row["runtime_p99_seconds"] * 1_000, 2),
+                    format_number(row["runtime_max_seconds"] * 1_000, 2),
+                    format_number(row["oracle_calls_median"], 1),
+                    format_number(row["oracle_calls_p95"], 1),
+                    format_number(row["oracle_time_median_seconds"] * 1_000, 2)
+                    if row["oracle_time_median_seconds"] is not None
+                    else "—",
+                    format_number(row["master_iterations_median"], 1),
+                    (
+                        f"{format_number(row['active_atoms_median'], 1)} / "
+                        f"{format_number(row['active_atoms_max'])}"
+                    ),
+                ]
+            )
+        lines.append(
+            markdown_table(
+                [
+                    "Solver",
+                    "P50 ms",
+                    "P95 ms",
+                    "P99 ms",
+                    "Max ms",
+                    "Oracle P50",
+                    "Oracle P95",
+                    "Oracle P50 ms",
+                    "Master P50",
+                    "Atoms P50 / max",
+                ],
+                rows,
+            )
+        )
+
+    landing = [
+        row
+        for row in summary["overall"]
+        if row["integer_landing_loss_median_dollars"] is not None
+        or row["minting_duality_gap_median_dollars"] is not None
+    ]
+    if landing:
+        lines.extend(["", "## Integer landing integrity", ""])
+        rows = []
+        for row in landing:
+            rows.append(
+                [
+                    SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                    format_number(row["integer_landing_loss_median_dollars"], 6),
+                    format_number(row["integer_landing_loss_p95_dollars"], 6),
+                    format_number(row["integer_landing_loss_max_dollars"], 6),
+                    format_number(row["minting_duality_gap_median_dollars"], 9),
+                    format_number(row["minting_duality_gap_p95_dollars"], 9),
+                    format_number(row["minting_duality_gap_max_dollars"], 9),
+                ]
+            )
+        lines.append(
+            markdown_table(
+                [
+                    "Solver",
+                    "Landing loss P50 $",
+                    "Landing loss P95 $",
+                    "Landing loss max $",
+                    "Mint duality P50 $",
+                    "Mint duality P95 $",
+                    "Mint duality max $",
+                ],
+                rows,
+            )
+        )
 
     lines.extend(["", "## Random-book quality", ""])
     rows = []
@@ -412,31 +569,86 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
         )
     )
 
-    lines.extend(["", "## Scaling", ""])
-    rows = []
-    for row in summary["scaling"]:
-        rows.append(
-            [
-                row["scale"],
-                SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
-                f"{row['successful']}/{row['declared']}",
-                format_number(row["runtime_median_seconds"], 4),
-                format_number(row["retained_gap_median_percent"], 4),
-                format_number(row["certificate_relative_gap_p95_percent"], 6),
-            ]
+    if summary["scaling"]:
+        lines.extend(["", "## Scaling", ""])
+        rows = []
+        for row in summary["scaling"]:
+            rows.append(
+                [
+                    row["scale"],
+                    SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                    f"{row['successful']}/{row['declared']}",
+                    format_number(row["runtime_median_seconds"], 4),
+                    format_number(row["retained_gap_median_percent"], 4),
+                    format_number(row["certificate_relative_gap_p95_percent"], 6),
+                ]
+            )
+        lines.append(
+            markdown_table(
+                [
+                    "Scale",
+                    "Solver",
+                    "Success",
+                    "Median s",
+                    "Retained gap %",
+                    "P95 cert. gap %",
+                ],
+                rows,
+            )
         )
-    lines.append(
-        markdown_table(
-            ["Scale", "Solver", "Success", "Median s", "Retained gap %", "P95 cert. gap %"],
-            rows,
+
+    for title, section in (
+        ("Fixed-MM order-count scaling", "order_scaling"),
+        ("Fixed-book market-maker scaling", "mm_scaling"),
+    ):
+        if not summary[section]:
+            continue
+        lines.extend(["", f"## {title}", ""])
+        rows = []
+        for row in summary[section]:
+            rows.append(
+                [
+                    row["scale"],
+                    SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                    f"{row['successful']}/{row['declared']}",
+                    format_number(row["runtime_median_seconds"] * 1_000, 2)
+                    if row["runtime_median_seconds"] is not None
+                    else "—",
+                    format_number(row["runtime_p95_seconds"] * 1_000, 2)
+                    if row["runtime_p95_seconds"] is not None
+                    else "—",
+                    format_number(row["runtime_p99_seconds"] * 1_000, 2)
+                    if row["runtime_p99_seconds"] is not None
+                    else "—",
+                    format_number(row["oracle_calls_p95"], 1),
+                    format_number(row["active_atoms_max"]),
+                    format_number(row["retained_gap_median_percent"], 4),
+                ]
+            )
+        lines.append(
+            markdown_table(
+                [
+                    "Scale",
+                    "Solver",
+                    "Success",
+                    "P50 ms",
+                    "P95 ms",
+                    "P99 ms",
+                    "Oracle P95",
+                    "Max atoms",
+                    "Retained gap %",
+                ],
+                rows,
+            )
         )
-    )
 
     for title, section in (
         ("Numerical-range stress", "numerical"),
         ("Exact small-instance reference", "reference"),
         ("Retained-cash ablation", "ablation"),
     ):
+        if not summary[section]:
+            continue
         lines.extend(["", f"## {title}", ""])
         rows = []
         for row in summary[section]:
@@ -570,6 +782,8 @@ def write_csv(summary: dict[str, Any], output: Path) -> None:
         "reference",
         "numerical",
         "ablation",
+        "order_scaling",
+        "mm_scaling",
         "experiments",
     ):
         for row in summary[section]:
@@ -658,7 +872,9 @@ def write_quality_figure(summary: dict[str, Any], output: Path) -> None:
 def write_quality_figure_v2(summary: dict[str, Any], output: Path) -> None:
     rows = summary["quality"]
     profiles = sorted({row["profile"] for row in rows})
-    solvers = ["lp", "retained-cash-fw", "conic-quasi"]
+    preferred = ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+    available = {row["solver_id"] for row in rows}
+    solvers = [solver for solver in preferred if solver in available]
     plotted = [row for row in rows if row["retained_gap_p75_percent"] is not None]
     y_max = max([row["retained_gap_p75_percent"] for row in plotted] + [0.1]) * 1.15
     width, height = 820, 390
@@ -680,7 +896,7 @@ def write_quality_figure_v2(summary: dict[str, Any], output: Path) -> None:
         body.append(text(center, y0 + plot_h + 22, profile, 11, "middle", "bold"))
         for solver_index, solver in enumerate(solvers):
             item = lookup.get((profile, solver))
-            x = center + (solver_index - 1) * 48
+            x = center + (solver_index - (len(solvers) - 1) / 2) * 48
             body.append(text(x, y0 + plot_h + 40, SHORT_LABELS[solver], 9, "middle"))
             if not item or item["retained_gap_median_percent"] is None:
                 body.append(text(x, y0 + plot_h / 2, "×", 16, "middle"))
@@ -697,25 +913,46 @@ def write_quality_figure_v2(summary: dict[str, Any], output: Path) -> None:
     output.write_text(svg_document(width, height, body))
 
 
-def write_scaling_figure(summary: dict[str, Any], records: list[dict[str, Any]], output: Path) -> None:
-    rows = summary["scaling"]
+def write_scaling_figure(
+    summary: dict[str, Any],
+    records: list[dict[str, Any]],
+    output: Path,
+    *,
+    section: str = "scaling",
+    suite: str = "scaling",
+    x_field: str = "declared_retail_orders",
+    title: str = "Solver wall time scaling",
+    x_label: str = "Declared retail orders (log-time axis)",
+) -> None:
+    rows = summary[section]
     scale_orders = {
-        row["scale"]: row["problem"]["declared_retail_orders"]
+        row["scale"]: (
+            row["problem"].get(x_field)
+            if row["problem"].get(x_field) is not None
+            else len(row.get("mm_utilization", []))
+        )
         for row in records
-        if row["suite"] == "scaling"
+        if row["suite"] == suite
     }
-    solvers = (
-        ["lp", "retained-cash-fw", "conic-quasi"]
+    preferred = (
+        ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
         if summary["schema_version"] >= 2
         else ["lp", "iter-lp", "eg", "conic-quasi"]
     )
+    available = {row["solver_id"] for row in rows}
+    solvers = [solver for solver in preferred if solver in available]
     ordered_scales = sorted(scale_orders, key=scale_orders.get)
     successful = [row for row in rows if row["runtime_median_seconds"] and row["runtime_median_seconds"] > 0]
     y_values = [row["runtime_median_seconds"] for row in successful]
+    if not ordered_scales or not y_values:
+        output.write_text(
+            svg_document(760, 120, [text(380, 60, "No successful scaling runs", 15, "middle")])
+        )
+        return
     y_min, y_max = min(y_values) / 1.5, max(y_values) * 1.5
     width, height = 760, 460
     x0, y0, plot_w, plot_h = 85, 50, 620, 300
-    body = [text(width / 2, 25, "Solver wall time scaling", 17, "middle", "bold")]
+    body = [text(width / 2, 25, title, 17, "middle", "bold")]
     body += [
         f'<line class="axis" x1="{x0}" y1="{y0}" x2="{x0}" y2="{y0 + plot_h}"/>',
         f'<line class="axis" x1="{x0}" y1="{y0 + plot_h}" x2="{x0 + plot_w}" y2="{y0 + plot_h}"/>',
@@ -749,7 +986,7 @@ def write_scaling_figure(summary: dict[str, Any], records: list[dict[str, Any]],
         body.append(f'<rect x="{legend_x}" y="{height - 30}" width="12" height="3" fill="{COLORS[solver]}"/>')
         body.append(text(legend_x + 18, height - 25, SHORT_LABELS[solver], 10))
         legend_x += 125
-    body.append(text(x0 + plot_w / 2, height - 58, "Declared retail orders (log-time axis)", 11, "middle"))
+    body.append(text(x0 + plot_w / 2, height - 58, x_label, 11, "middle"))
     output.write_text(svg_document(width, height, body))
 
 
@@ -808,7 +1045,9 @@ def write_budget_figure(summary: dict[str, Any], output: Path) -> None:
 
 def write_budget_figure_v2(summary: dict[str, Any], output: Path) -> None:
     rows = summary["budget"]
-    solvers = ["lp", "retained-cash-fw", "conic-quasi"]
+    preferred = ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+    available = {row["solver_id"] for row in rows}
+    solvers = [solver for solver in preferred if solver in available]
     scales = sorted({float(row["budget_scale"]) for row in rows})
     plotted = [
         row
@@ -909,10 +1148,15 @@ def write_certificate_figure(summary: dict[str, Any], output: Path) -> None:
     rows = [
         row
         for row in summary["experiments"]
-        if row["solver_id"] == "retained-cash-fw"
+        if row["solver_id"] in {"retained-cash-fw", "pacing-bundle"}
         and row["certificate_relative_gap_p95_percent"] is not None
     ]
-    rows.sort(key=lambda row: row["experiment_id"])
+    rows.sort(key=lambda row: (row["experiment_id"], row["solver_id"]))
+    if not rows:
+        output.write_text(
+            svg_document(900, 120, [text(450, 60, "No continuous certificates reported", 15, "middle")])
+        )
+        return
     values = [max(row["certificate_relative_gap_p95_percent"], 1e-9) for row in rows]
     log_min = math.floor(math.log10(min(values)))
     log_max = math.ceil(math.log10(max(values)))
@@ -920,7 +1164,7 @@ def write_certificate_figure(summary: dict[str, Any], output: Path) -> None:
         log_max += 1
     width, height = 900, 80 + 42 * len(rows)
     x0, y0, plot_w = 250, 45, 590
-    body = [text(width / 2, 24, "RC-FW continuous optimality certificate by experiment (P95)", 17, "middle", "bold")]
+    body = [text(width / 2, 24, "Continuous optimality certificate by experiment (P95)", 17, "middle", "bold")]
     for exponent in range(log_min, log_max + 1):
         x = x0 + (exponent - log_min) / (log_max - log_min) * plot_w
         body.append(f'<line class="grid" x1="{x}" y1="{y0}" x2="{x}" y2="{height - 45}"/>')
@@ -928,9 +1172,11 @@ def write_certificate_figure(summary: dict[str, Any], output: Path) -> None:
     for index, (row, value) in enumerate(zip(rows, values)):
         y = y0 + index * 42
         x = x0 + (math.log10(value) - log_min) / (log_max - log_min) * plot_w
-        body.append(text(x0 - 10, y + 5, row["experiment_id"], 10, "end"))
-        body.append(f'<line x1="{x0}" y1="{y}" x2="{x}" y2="{y}" stroke="{COLORS["retained-cash-fw"]}" stroke-width="3"/>')
-        body.append(f'<circle cx="{x}" cy="{y}" r="5" fill="{COLORS["retained-cash-fw"]}"/>')
+        label = f"{row['experiment_id']} · {SHORT_LABELS[row['solver_id']]}"
+        color = COLORS[row["solver_id"]]
+        body.append(text(x0 - 10, y + 5, label, 10, "end"))
+        body.append(f'<line x1="{x0}" y1="{y}" x2="{x}" y2="{y}" stroke="{color}" stroke-width="3"/>')
+        body.append(f'<circle cx="{x}" cy="{y}" r="5" fill="{color}"/>')
         body.append(text(x + 8, y + 4, f"{value:.3g}%", 9))
     output.write_text(svg_document(width, height, body))
 
@@ -994,6 +1240,27 @@ def main() -> None:
     )
     write_quality_figure(summary, figures / quality_name)
     write_scaling_figure(summary, records, figures / "scaling-runtime.svg")
+    if summary["order_scaling"]:
+        write_scaling_figure(
+            summary,
+            records,
+            figures / "order-count-scaling-runtime.svg",
+            section="order_scaling",
+            suite="order_scaling",
+            title="Runtime versus order count at fixed MM dimension",
+            x_label="Declared orders; fixed two market makers (log-time axis)",
+        )
+    if summary["mm_scaling"]:
+        write_scaling_figure(
+            summary,
+            records,
+            figures / "market-maker-scaling-runtime.svg",
+            section="mm_scaling",
+            suite="mm_scaling",
+            x_field="market_makers",
+            title="Runtime versus market-maker dimension at fixed book size",
+            x_label="Market makers; fixed 2,000-order book (log-time axis)",
+        )
     budget_name = (
         "budget-retained-objective-gap.svg"
         if summary["schema_version"] >= 2

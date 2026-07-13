@@ -11,12 +11,13 @@
 //! continuous objective suboptimality, not an iterate-stability heuristic.
 
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{
-    ReusableLpOracle, SolverContext, build_solver_context, project_and_finalize, welfare_weights,
+    ReusableLpOracle, SolverContext, build_solver_context, project_and_finalize,
+    project_and_finalize_with_objective, welfare_weights,
 };
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
@@ -98,12 +99,15 @@ impl RetainedCashSolver {
         let mut objective = model.objective(&q);
         let mut last_gap = f64::INFINITY;
         let mut oracle_calls = 0usize;
+        let mut oracle_time = Duration::ZERO;
         let mut updates = 0usize;
         let mut converged = false;
         let mut oracle_failed = false;
 
+        let mut oracle_orders = problem.orders.clone();
+        model.disable_zero_budget_orders(&mut oracle_orders);
         let Some(mut oracle) = ReusableLpOracle::new(
-            &problem.orders,
+            &oracle_orders,
             &ctx.markets,
             &ctx.market_to_group,
             ctx.num_groups,
@@ -122,7 +126,10 @@ impl RetainedCashSolver {
             let alpha_q = model.pacing_factors(&u_q);
             let oracle_objective = model.oracle_coefficients_from_alpha(&alpha_q);
 
-            let Some(oracle_solution) = oracle.solve(&oracle_objective) else {
+            let oracle_started = Instant::now();
+            let oracle_solution = oracle.solve(&oracle_objective);
+            oracle_time += oracle_started.elapsed();
+            let Some(oracle_solution) = oracle_solution else {
                 oracle_failed = true;
                 break;
             };
@@ -131,8 +138,14 @@ impl RetainedCashSolver {
             let s = &oracle_solution.q_values;
             let g_q = model.linear_component(&q);
             let g_s = model.linear_component(s);
-            let gradient_direction = model.mm_gradient_direction(&q, s, &alpha_q);
-            last_gap = (gradient_direction + g_s - g_q).max(0.0);
+            let current_score = model.affine_score(&u_q, g_q, &alpha_q);
+            let Some(oracle_upper_bound) = oracle_solution.objective_upper_bound_dollars else {
+                oracle_failed = true;
+                break;
+            };
+            let oracle_upper_score =
+                oracle_upper_bound * NANOS_PER_DOLLAR as f64 / SHARE_SCALE as f64;
+            last_gap = (oracle_upper_score - current_score).max(0.0);
 
             let tolerance = self
                 .config
@@ -223,7 +236,14 @@ impl RetainedCashSolver {
         // order is capped by ceil(q_i), and the ordinary welfare LP chooses a
         // verifier-supported point inside those caps. This LP is the explicit
         // integer-grid/pricing epilogue, not an alternative core solver.
-        let mut result = project_and_finalize(&q, problem, &ctx, start);
+        let mut result = if converged && !oracle_failed {
+            let final_utilities = model.utilities(&q);
+            let final_alpha = model.pacing_factors(&final_utilities);
+            let projection_objective = model.oracle_coefficients_from_alpha(&final_alpha);
+            project_and_finalize_with_objective(&q, problem, &ctx, &projection_objective, start)
+        } else {
+            project_and_finalize(&q, problem, &ctx, start)
+        };
 
         if result.diagnostics.status == TerminationStatus::PostProcessingFailure {
             let previous = result.diagnostics.message.take().unwrap_or_default();
@@ -233,7 +253,8 @@ impl RetainedCashSolver {
             ));
         } else {
             let landed_q = landed_quantities(problem, &result);
-            let landed_objective = model.objective(&landed_q);
+            let landed_objective =
+                model.objective_for_landed_fills(&landed_q, &result.result.fills);
             result.diagnostics = SolverDiagnostics {
                 algorithm: "retained-cash-fw".to_string(),
                 status: if oracle_failed {
@@ -248,6 +269,7 @@ impl RetainedCashSolver {
                 objective_value: Some(objective),
                 optimality_gap: last_gap.is_finite().then_some(last_gap),
                 oracle_calls: Some(oracle_calls),
+                oracle_time_secs: Some(oracle_time.as_secs_f64()),
                 integer_landing_loss: Some((objective - landed_objective).max(0.0)),
                 message: Some(
                     "objective/gap/landing loss are continuous retained-cash nanodollars"
@@ -283,7 +305,7 @@ fn convex_combination(left: &[f64], right: &[f64], gamma: f64) -> Vec<f64> {
         .collect()
 }
 
-fn landed_quantities(problem: &Problem, result: &PipelineResult) -> Vec<f64> {
+pub(crate) fn landed_quantities(problem: &Problem, result: &PipelineResult) -> Vec<f64> {
     let fills: HashMap<u64, u64> = result
         .result
         .fills
@@ -298,8 +320,12 @@ fn landed_quantities(problem: &Problem, result: &PipelineResult) -> Vec<f64> {
 }
 
 /// Evaluate the shifted retained-cash objective on landed protocol fills.
-/// The value is in nanodollars and is comparable across solvers on the same
-/// problem and budget, including LP and MILP baselines.
+///
+/// The core objective uses the LP's zero-temperature minting term. Finalizers
+/// may trim individual fills after price discovery, so landed fills instead
+/// use the protocol's signed mint/burn cost derived from their actual uniform
+/// prices. The value is therefore comparable across landed solver outputs on
+/// the same problem and budget.
 pub fn retained_cash_objective_for_fills(
     problem: &Problem,
     fills: &[matching_engine::Fill],
@@ -315,7 +341,7 @@ pub fn retained_cash_objective_for_fills(
         .iter()
         .map(|order| fill_map.get(&order.id).copied().unwrap_or(0) as f64)
         .collect();
-    model.objective(&q)
+    model.objective_for_landed_fills(&q, fills)
 }
 
 /// Instance-specific first welfare-gap bound from the paper, evaluated at an
@@ -364,7 +390,7 @@ pub(crate) fn retained_cash_utility(budget: f64, utility: f64) -> f64 {
     }
 }
 
-struct ObjectiveModel<'a> {
+pub(crate) struct ObjectiveModel<'a> {
     problem: &'a Problem,
     ctx: &'a SolverContext,
     welfare_weights: Vec<f64>,
@@ -378,7 +404,7 @@ struct ObjectiveModel<'a> {
 }
 
 impl<'a> ObjectiveModel<'a> {
-    fn new(problem: &'a Problem, ctx: &'a SolverContext) -> Self {
+    pub(crate) fn new(problem: &'a Problem, ctx: &'a SolverContext) -> Self {
         let welfare_weights = welfare_weights(&problem.orders);
         let mm_order_map = ctx.mm_order_index_map(&problem.orders);
         let mut log_mm_by_order = vec![None; problem.orders.len()];
@@ -416,11 +442,22 @@ impl<'a> ObjectiveModel<'a> {
         }
     }
 
-    fn has_reduced_form_orders(&self) -> bool {
+    pub(crate) fn has_reduced_form_orders(&self) -> bool {
         self.mm_groups.iter().any(|group| !group.is_empty())
     }
 
-    fn utilities(&self, q: &[f64]) -> Vec<f64> {
+    pub(crate) fn disable_zero_budget_orders(&self, orders: &mut [matching_engine::Order]) {
+        for (group, &budget) in self.mm_groups.iter().zip(&self.budgets) {
+            if budget > 0.0 {
+                continue;
+            }
+            for &order_index in group {
+                orders[order_index].max_fill = matching_engine::Qty::ZERO;
+            }
+        }
+    }
+
+    pub(crate) fn utilities(&self, q: &[f64]) -> Vec<f64> {
         self.mm_groups
             .iter()
             .map(|group| {
@@ -429,7 +466,7 @@ impl<'a> ObjectiveModel<'a> {
             .collect()
     }
 
-    fn pacing_factor(&self, mm_index: usize, utility: f64) -> f64 {
+    pub(crate) fn pacing_factor(&self, mm_index: usize, utility: f64) -> f64 {
         let budget = self.budgets[mm_index];
         if budget <= 0.0 {
             0.0
@@ -440,7 +477,7 @@ impl<'a> ObjectiveModel<'a> {
         }
     }
 
-    fn pacing_factors(&self, utilities: &[f64]) -> Vec<f64> {
+    pub(crate) fn pacing_factors(&self, utilities: &[f64]) -> Vec<f64> {
         utilities
             .iter()
             .enumerate()
@@ -448,7 +485,7 @@ impl<'a> ObjectiveModel<'a> {
             .collect()
     }
 
-    fn oracle_coefficients_from_alpha(&self, alpha: &[f64]) -> Vec<f64> {
+    pub(crate) fn oracle_coefficients_from_alpha(&self, alpha: &[f64]) -> Vec<f64> {
         self.welfare_weights
             .iter()
             .enumerate()
@@ -467,17 +504,24 @@ impl<'a> ObjectiveModel<'a> {
             .collect()
     }
 
-    fn objective(&self, q: &[f64]) -> f64 {
-        let mm = self
-            .utilities(q)
+    pub(crate) fn objective(&self, q: &[f64]) -> f64 {
+        self.objective_from_components(&self.utilities(q), self.linear_component(q))
+    }
+
+    pub(crate) fn objective_from_components(&self, utilities: &[f64], linear: f64) -> f64 {
+        let mm = utilities
             .iter()
             .enumerate()
             .map(|(k, &utility)| retained_cash_utility(self.budgets[k], utility))
             .sum::<f64>();
-        mm + self.linear_component(q)
+        mm + linear
     }
 
-    fn linear_component(&self, q: &[f64]) -> f64 {
+    pub(crate) fn linear_component(&self, q: &[f64]) -> f64 {
+        self.non_mint_linear_component(q) - self.minting_cost(q)
+    }
+
+    fn non_mint_linear_component(&self, q: &[f64]) -> f64 {
         let retail = self
             .welfare_weights
             .iter()
@@ -492,19 +536,72 @@ impl<'a> ObjectiveModel<'a> {
             .filter(|(i, weight)| self.log_mm_by_order[*i].is_some() && **weight < 0.0)
             .map(|(i, _)| NANOS_PER_DOLLAR as f64 * q[i] / SHARE_SCALE as f64)
             .sum::<f64>();
-        retail - sell_reduction_correction - self.minting_cost(q)
+        retail - sell_reduction_correction
     }
 
-    fn mm_gradient_direction(&self, q: &[f64], s: &[f64], alpha: &[f64]) -> f64 {
-        self.log_mm_by_order
+    pub(crate) fn objective_for_landed_fills(
+        &self,
+        q: &[f64],
+        fills: &[matching_engine::Fill],
+    ) -> f64 {
+        let mm = self
+            .utilities(q)
             .iter()
             .enumerate()
-            .filter_map(|(i, owner)| {
-                owner.map(|mm_index| {
-                    alpha[mm_index] * self.mm_values[i] * (s[i] - q[i]) / SHARE_SCALE as f64
-                })
-            })
-            .sum()
+            .map(|(k, &utility)| retained_cash_utility(self.budgets[k], utility))
+            .sum::<f64>();
+        let protocol_minting_cost =
+            matching_engine::minting_cost_from_fills(self.problem.orders.iter(), fills) as f64;
+        mm + self.non_mint_linear_component(q) - protocol_minting_cost
+    }
+
+    pub(crate) fn affine_score(&self, utilities: &[f64], linear: f64, alpha: &[f64]) -> f64 {
+        linear
+            + utilities
+                .iter()
+                .zip(alpha)
+                .map(|(&utility, &pacing)| utility * pacing)
+                .sum::<f64>()
+    }
+
+    pub(crate) fn segment_argmax(
+        &self,
+        utilities: &[f64],
+        delta_utilities: &[f64],
+        delta_linear: f64,
+        max_step: f64,
+        line_search_steps: usize,
+    ) -> f64 {
+        let derivative = |gamma: f64| {
+            delta_linear
+                + utilities
+                    .iter()
+                    .zip(delta_utilities)
+                    .enumerate()
+                    .map(|(k, (&utility, &delta))| {
+                        self.pacing_factor(k, utility + gamma * delta) * delta
+                    })
+                    .sum::<f64>()
+        };
+
+        if max_step <= 0.0 || derivative(0.0) <= 0.0 {
+            return 0.0;
+        }
+        if derivative(max_step) >= 0.0 {
+            return max_step;
+        }
+
+        let mut low = 0.0;
+        let mut high = max_step;
+        for _ in 0..line_search_steps {
+            let mid = (low + high) / 2.0;
+            if derivative(mid) > 0.0 {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        (low + high) / 2.0
     }
 
     fn minting_cost(&self, q: &[f64]) -> f64 {
@@ -519,28 +616,45 @@ impl<'a> ObjectiveModel<'a> {
         }
 
         let mut mint_quantity = 0.0;
-        let mut group_diff_sum = vec![0.0; self.ctx.num_groups];
-        let mut group_market_count = vec![0usize; self.ctx.num_groups];
+        let mut group_max_diff = vec![0.0_f64; self.ctx.num_groups];
         for (index, market) in self.ctx.markets.iter().enumerate() {
             if let Some(&group) = self.ctx.market_to_group.get(market) {
                 mint_quantity += no[index];
-                group_diff_sum[group] += yes[index] - no[index];
-                group_market_count[group] += 1;
+                group_max_diff[group] = group_max_diff[group].max(yes[index] - no[index]);
             } else {
-                // Both balance rows equal the same signed mint variable. Their
-                // average suppresses harmless HiGHS feasibility noise.
-                mint_quantity += (yes[index] + no[index]) / 2.0;
+                mint_quantity += yes[index].max(no[index]);
             }
         }
-        for group in 0..self.ctx.num_groups {
-            if group_market_count[group] > 0 {
-                mint_quantity +=
-                    (group_diff_sum[group] / group_market_count[group] as f64).max(0.0);
-            }
+        for max_diff in group_max_diff {
+            mint_quantity += max_diff;
         }
 
         mint_quantity * NANOS_PER_DOLLAR as f64 / SHARE_SCALE as f64
     }
+}
+
+/// Evaluate the LP's zero-temperature complete-set cost on landed quantities.
+///
+/// Comparing this quantity with settlement-derived cash cost tests whether the
+/// landed prices still support the allocation. A large discrepancy catches a
+/// particularly dangerous class of post-price fill mutation that ordinary
+/// feasibility and limit checks do not expose.
+pub fn zero_temperature_minting_cost_for_fills(
+    problem: &Problem,
+    fills: &[matching_engine::Fill],
+) -> f64 {
+    let ctx = build_solver_context(problem);
+    let model = ObjectiveModel::new(problem, &ctx);
+    let fill_map: HashMap<_, _> = fills
+        .iter()
+        .map(|fill| (fill.order_id, fill.fill_qty.0))
+        .collect();
+    let q: Vec<_> = problem
+        .orders
+        .iter()
+        .map(|order| fill_map.get(&order.id).copied().unwrap_or(0) as f64)
+        .collect();
+    model.minting_cost(&q)
 }
 
 #[cfg(test)]
@@ -637,6 +751,10 @@ mod tests {
 
         assert_eq!(retained.diagnostics.status, TerminationStatus::Converged);
         assert_eq!(retained.result.total_welfare(), lp.result.total_welfare());
+        assert_eq!(
+            retained_cash_objective_for_fills(&problem, &retained.result.fills).round() as i64,
+            retained.result.total_welfare()
+        );
     }
 
     #[test]

@@ -20,8 +20,12 @@ use clarabel::solver::*;
 
 use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
-use crate::lp_solver::{build_solver_context, project_and_finalize, welfare_weights};
+use crate::lp_solver::{
+    build_solver_context, project_and_finalize, project_and_finalize_with_objective,
+    welfare_weights,
+};
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
+use crate::retained_cash_solver::ObjectiveModel;
 
 /// Objective mode for the conic solver.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -178,14 +182,14 @@ impl ConicSolver {
         // Variable layout (parameterized by mode)
         // ================================================================
         //
-        // QuasiFisher: x = [q, s, t, gmint]  (s_k = retained cash)
-        // Fisher:      x = [q, t, gmint]     (no cash variable)
+        // QuasiFisher: x = [q, s, t, mint, gmint]
+        // Fisher:      x = [q, t, mint, gmint]
         //
-        // Per-market mint is eliminated exactly: the NO balance gives
-        // `mint_m = sum_i payoff_no_i q_i`. Substitution puts that expression
-        // in the objective and leaves one YES-minus-NO balance row per market.
-        // This removes a free variable and one equality row per market from
-        // the conic KKT system; the final LP still recovers both price duals.
+        // Independent binary markets retain one free minting-epigraph
+        // variable M_m with M_m >= D_yes and M_m >= D_no. For a mutually
+        // exclusive group, translation equivariance gives the smaller exact
+        // form sum_m D_no_m + max(0, max_m(D_yes_m-D_no_m)), represented by
+        // one nonnegative gmint variable and one inequality per member.
 
         // Filter out MMs with no positive-weight orders (they get no exp cone)
         let cone_mms: Vec<usize> = (0..num_active_mm)
@@ -194,10 +198,22 @@ impl ConicSolver {
         let k = cone_mms.len(); // number of MMs that actually get exp cone constraints
         let m = num_markets;
         let g = ctx.num_groups;
+        let independent_markets: Vec<_> = ctx
+            .markets
+            .iter()
+            .copied()
+            .filter(|market| !ctx.market_to_group.contains_key(market))
+            .collect();
+        let u = independent_markets.len();
+        let independent_mint_index: HashMap<_, _> = independent_markets
+            .iter()
+            .enumerate()
+            .map(|(index, &market)| (market, index))
+            .collect();
 
         let has_cash = matches!(self.config.mode, ObjectiveMode::QuasiFisher);
         let num_cash_vars = if has_cash { k } else { 0 };
-        let d = n + num_cash_vars + k + g;
+        let d = n + num_cash_vars + k + u + g;
 
         if k == 0 {
             let mut result = crate::lp_solver::LpSolver::new().solve(problem);
@@ -215,7 +231,8 @@ impl ConicSolver {
         let q_offset = 0;
         let s_offset = n; // only meaningful if has_cash
         let t_offset = n + num_cash_vars;
-        let gmint_offset = n + num_cash_vars + k;
+        let mint_offset = n + num_cash_vars + k;
+        let gmint_offset = mint_offset + u;
 
         // ================================================================
         // Scaling
@@ -228,8 +245,8 @@ impl ConicSolver {
         // The variable s_k (retained cash) is also rescaled: s_k' = s_k/NANOS,
         // and the exp cone V_k row is scaled by 1/NANOS so L_i → L_i/NANOS.
         //
-        // After solving, we multiply ZeroCone duals by NANOS to recover
-        // clearing prices in nanos.
+        // The final supporting LP, rather than Clarabel's approximate duals,
+        // recovers protocol clearing prices in nanos.
 
         let nanos_f = NANOS_PER_DOLLAR as f64;
         let share_scale_f = SHARE_SCALE as f64;
@@ -249,8 +266,10 @@ impl ConicSolver {
         // `t_k / B_k` in the matrix is equivalent mathematically but becomes
         // ill-conditioned when budgets span several orders of magnitude.
         //
-        // min: -Σ t_k + Σ s_k' - Σ (w_j/NANOS) q_j
-        //      + Σ_m Σ_i payoff_no_mi q_i + Σ gmint_g
+        // min: -Σ t_k + Σ s_k' - Σ (w_j/NANOS) q_j + C_0(D)
+        //
+        // Independent markets use explicit mint epigraphs. Grouped markets
+        // contribute Σ D_no in q coefficients plus one group epigraph.
 
         // α_k = B_k / NANOS (budget in dollars) for each exp-cone MM
         let alpha_k: Vec<f64> = cone_mm_budgets.iter().map(|&b| b / nanos_f).collect();
@@ -273,14 +292,18 @@ impl ConicSolver {
                 // Non-MM orders retain ordinary linear welfare.
                 obj[q_offset + i] = -welfare_weights[i] / nanos_f;
             }
-            // Exact substitution for the eliminated per-market mint variable.
-            obj[q_offset + i] += orders[i].payoffs[1] as f64;
+            if ctx.market_to_group.contains_key(&orders[i].markets[0]) {
+                obj[q_offset + i] += orders[i].payoffs[1] as f64;
+            }
         }
         for kk in 0..k {
             if has_cash {
                 obj[s_offset + kk] = 1.0; // s_k' in dollars
             }
             obj[t_offset + kk] = -1.0;
+        }
+        for mm in 0..u {
+            obj[mint_offset + mm] = 1.0; // dollars per complete set
         }
         for gg in 0..g {
             obj[gmint_offset + gg] = 1.0; // $1 per full-share mint
@@ -294,9 +317,10 @@ impl ConicSolver {
         // ================================================================
 
         let num_exp_rows = 3 * k;
-        let num_balance_rows = m;
+        let num_mint_rows = 2 * u + (m - u);
         let num_bound_rows = 2 * n + num_cash_vars + g;
-        let total_rows = num_exp_rows + num_balance_rows + num_bound_rows;
+        let num_nonnegative_rows = num_mint_rows + num_bound_rows;
+        let total_rows = num_exp_rows + num_nonnegative_rows;
 
         // Build A in COO (triplet) format
         let mut tri_row: Vec<usize> = Vec::new();
@@ -344,13 +368,11 @@ impl ConicSolver {
             }
         }
 
-        // --- Block 2: reduced position balance (ZeroCone, 1 row per market) ---
-        //
-        // Eliminating `mint_m` from the YES and NO equations leaves
-        // `sum_i (payoff_yes_i - payoff_no_i) q_i = gmint_g` for grouped
-        // markets, and the same equation with a zero RHS otherwise.
+        // --- Block 2: zero-temperature minting epigraph inequalities ---
+        // Ax + slack = 0, slack >= 0, hence Ax <= 0.
 
-        let balance_base = num_exp_rows;
+        let mint_base = num_exp_rows;
+        let mut mint_row = mint_base;
         let mut orders_by_market: HashMap<_, Vec<usize>> = HashMap::new();
         for (index, order) in orders.iter().enumerate() {
             orders_by_market
@@ -358,32 +380,48 @@ impl ConicSolver {
                 .or_default()
                 .push(index);
         }
-        for (m_idx, &market) in ctx.markets.iter().enumerate() {
-            let balance_row = balance_base + m_idx;
-            for &i in orders_by_market
+        for &market in &ctx.markets {
+            let market_orders = orders_by_market
                 .get(&market)
                 .map(Vec::as_slice)
-                .unwrap_or(&[])
-            {
-                let difference = (orders[i].payoffs[0] - orders[i].payoffs[1]) as f64;
-                if difference.abs() > 1e-12 {
-                    tri_row.push(balance_row);
-                    tri_col.push(q_offset + i);
-                    tri_val.push(difference);
+                .unwrap_or(&[]);
+            if let Some(&mint_index) = independent_mint_index.get(&market) {
+                for outcome in 0..2 {
+                    for &i in market_orders {
+                        let payoff = orders[i].payoffs[outcome] as f64;
+                        if payoff.abs() > 1e-12 {
+                            tri_row.push(mint_row);
+                            tri_col.push(q_offset + i);
+                            tri_val.push(payoff);
+                        }
+                    }
+                    tri_row.push(mint_row);
+                    tri_col.push(mint_offset + mint_index);
+                    tri_val.push(-1.0);
+                    mint_row += 1;
                 }
-            }
-            if let Some(&g_idx) = ctx.market_to_group.get(&market) {
-                tri_row.push(balance_row);
+            } else if let Some(&g_idx) = ctx.market_to_group.get(&market) {
+                for &i in market_orders {
+                    let difference = (orders[i].payoffs[0] - orders[i].payoffs[1]) as f64;
+                    if difference.abs() > 1e-12 {
+                        tri_row.push(mint_row);
+                        tri_col.push(q_offset + i);
+                        tri_val.push(difference);
+                    }
+                }
+                tri_row.push(mint_row);
                 tri_col.push(gmint_offset + g_idx);
                 tri_val.push(-1.0);
+                mint_row += 1;
             }
         }
+        debug_assert_eq!(mint_row, mint_base + num_mint_rows);
 
         // --- Block 3: Variable bounds (NonnegativeCone) ---
         //
         // q_i ≤ max_fill, q_i ≥ 0, s_k' ≥ 0, gmint_g ≥ 0
 
-        let bound_base = num_exp_rows + num_balance_rows;
+        let bound_base = num_exp_rows + num_mint_rows;
         let mut bound_row = bound_base;
 
         // q_i ≤ max_fill (in whole shares) → slack = max_fill - q_i ≥ 0
@@ -391,7 +429,14 @@ impl ConicSolver {
             tri_row.push(bound_row);
             tri_col.push(q_offset + i);
             tri_val.push(1.0);
-            b_vec[bound_row] = order.max_fill.0 as f64 / share_scale_f;
+            let zero_budget_mm = mm_order_map
+                .get(&i)
+                .is_some_and(|(mm_index, _)| problem.mm_constraints[*mm_index].max_capital.0 == 0);
+            b_vec[bound_row] = if zero_budget_mm {
+                0.0
+            } else {
+                order.max_fill.0 as f64 / share_scale_f
+            };
             bound_row += 1;
         }
 
@@ -429,11 +474,8 @@ impl ConicSolver {
         for _ in 0..k {
             cones.push(ExponentialConeT());
         }
-        if num_balance_rows > 0 {
-            cones.push(ZeroConeT(num_balance_rows));
-        }
-        if num_bound_rows > 0 {
-            cones.push(NonnegativeConeT(num_bound_rows));
+        if num_nonnegative_rows > 0 {
+            cones.push(NonnegativeConeT(num_nonnegative_rows));
         }
 
         // Build sparse A matrix from triplets
@@ -514,14 +556,28 @@ impl ConicSolver {
         // The conic solver gives optimal fills but approximate duals.
         // Solve a final LP with max_fill capped at the conic allocation.
         // The LP's duals give exact clearing prices where complementary
-        // slackness guarantees UCP. Position balance holds from the LP
+        // slackness guarantees UCP. The minting epigraph holds in the LP
         // constraints. Budget absorption holds from the EG structure.
 
         let q_values: Vec<f64> = (0..n)
             .map(|i| x[q_offset + i].max(0.0) * share_scale_f)
             .collect();
 
-        let mut result = project_and_finalize(&q_values, problem, &ctx, start);
+        let mut result = if self.config.mode == ObjectiveMode::QuasiFisher {
+            let model = ObjectiveModel::new(problem, &ctx);
+            let final_utilities = model.utilities(&q_values);
+            let final_alpha = model.pacing_factors(&final_utilities);
+            let projection_objective = model.oracle_coefficients_from_alpha(&final_alpha);
+            project_and_finalize_with_objective(
+                &q_values,
+                problem,
+                &ctx,
+                &projection_objective,
+                start,
+            )
+        } else {
+            project_and_finalize(&q_values, problem, &ctx, start)
+        };
         if result.diagnostics.status != TerminationStatus::PostProcessingFailure {
             result.diagnostics = SolverDiagnostics {
                 algorithm: match self.config.mode {

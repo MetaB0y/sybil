@@ -3,6 +3,7 @@
 //! Solves the welfare-maximizing order matching problem via convex programs:
 //! - **LP** (`lp_solver`): Linear program via HiGHS with MM budget shading
 //! - **Retained cash** (`retained_cash_solver`): certified generalized Frank--Wolfe
+//! - **Pacing bundle** (`pacing_bundle_solver`): fully corrective research solver
 //! - **Conic** (`conic_solver`): Conic EG via Clarabel
 //! - **MILP** (`milp`): Mixed-integer via SCIP (exact with timeout)
 
@@ -22,6 +23,9 @@ pub mod conic_solver;
 
 #[cfg(feature = "lp")]
 pub mod retained_cash_solver;
+
+#[cfg(feature = "lp")]
+pub mod pacing_bundle_solver;
 
 #[cfg(feature = "lp")]
 pub mod decomposed;
@@ -51,8 +55,11 @@ pub use lp_solver::{LpConfig, LpSolver};
 #[cfg(feature = "lp")]
 pub use retained_cash_solver::{
     RetainedCashConfig, RetainedCashSolver, retained_cash_objective_for_fills,
-    retained_cash_welfare_gap_bound_for_fills,
+    retained_cash_welfare_gap_bound_for_fills, zero_temperature_minting_cost_for_fills,
 };
+
+#[cfg(feature = "lp")]
+pub use pacing_bundle_solver::{PacingBundleConfig, PacingBundleSolver};
 
 #[cfg(feature = "conic")]
 pub use conic_solver::{ConicConfig, ConicSolver, ObjectiveMode};

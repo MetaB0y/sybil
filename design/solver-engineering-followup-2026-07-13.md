@@ -6,6 +6,14 @@ last_verified: 2026-07-13
 
 # Solver engineering follow-up: oracle reuse and conic robustness
 
+> **Subsequent model correction:** the pacing-bundle work found that the
+> “reduced mint equations” below imposed equality of outcome demands. The paper
+> requires the epigraph `M >= D_omega`. Current Clarabel code restores that
+> epigraph (with the exact grouped-market reduction). Therefore the historical
+> 97/100 development count below describes the superseded balanced-demand cone
+> model and must not be cited as availability evidence for the corrected
+> same-objective reference. The oracle-reuse measurements are unaffected.
+
 ## Decision
 
 Keep `RetainedCashSolver` as the production algorithm. Reuse its fixed HiGHS

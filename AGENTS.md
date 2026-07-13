@@ -145,6 +145,7 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 | Solver | File | Feature | Description |
 |--------|------|---------|-------------|
 | **RetainedCashSolver** | `retained_cash_solver.rs` | `lp` | Certified generalized Frank--Wolfe on the affine-to-log retained-cash objective. **Production default.** |
+| **PacingBundleSolver** | `pacing_bundle_solver.rs` | `lp` | Experimental fully corrective pacing bundle with a certified retained-cash gap. |
 | **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + single-pass SLP MM budget shading; low-latency baseline. |
 | **ConicSolver** | `conic_solver.rs` | `conic` | Independent exponential-cone retained-cash reference via Clarabel. |
 | **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |

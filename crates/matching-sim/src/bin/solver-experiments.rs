@@ -22,9 +22,10 @@ use matching_scenarios::{
 };
 use matching_solver::{
     ConicConfig, ConicSolver, DecomposedSolver, LpConfig, LpSolver, MilpConfig, MilpSolver,
-    MmBudgetMode, ObjectiveMode, PipelineResult, RetainedCashConfig, RetainedCashSolver,
-    SolveStatus, TerminationStatus, retained_cash_objective_for_fills,
-    retained_cash_welfare_gap_bound_for_fills,
+    MmBudgetMode, ObjectiveMode, PacingBundleConfig, PacingBundleSolver, PipelineResult,
+    RetainedCashConfig, RetainedCashSolver, SolveStatus, TerminationStatus,
+    retained_cash_objective_for_fills, retained_cash_welfare_gap_bound_for_fills,
+    zero_temperature_minting_cost_for_fills,
 };
 use serde::{Deserialize, Serialize};
 use sybil_verifier::verify_match;
@@ -79,6 +80,7 @@ struct SolverSpec {
     kind: String,
     label: String,
     max_iterations: Option<usize>,
+    max_master_iterations: Option<usize>,
     inner_max_iterations: Option<usize>,
     tolerance: Option<f64>,
     inner_tolerance: Option<f64>,
@@ -86,6 +88,8 @@ struct SolverSpec {
     time_limit_seconds: Option<f64>,
     gap_tolerance: Option<f64>,
     absolute_tolerance: Option<f64>,
+    master_tolerance: Option<f64>,
+    master_absolute_tolerance: Option<f64>,
     fallback_to_lp: bool,
 }
 
@@ -133,6 +137,7 @@ struct ExperimentSpec {
 #[derive(Clone, Debug, Serialize)]
 struct ProblemMetrics {
     markets: usize,
+    market_makers: usize,
     orders: usize,
     declared_retail_orders: usize,
     buy_orders: usize,
@@ -198,6 +203,10 @@ struct RunRecord {
     objective_value: Option<f64>,
     optimality_gap: Option<f64>,
     oracle_calls: Option<usize>,
+    master_iterations: Option<usize>,
+    active_atoms: Option<usize>,
+    oracle_time_seconds: Option<f64>,
+    master_time_seconds: Option<f64>,
     integer_landing_loss: Option<f64>,
     primal_residual: Option<f64>,
     dual_residual: Option<f64>,
@@ -214,6 +223,8 @@ struct RunRecord {
     verifier_computed_welfare_nanos: Option<i64>,
     gross_welfare_nanos: Option<i64>,
     signed_minting_cost_nanos: Option<i64>,
+    zero_temperature_minting_cost_nanos: Option<f64>,
+    minting_duality_gap_nanos: Option<f64>,
     net_welfare_nanos: Option<i64>,
     retained_cash_objective_nanos: Option<f64>,
     retail_gross_welfare_nanos: Option<i64>,
@@ -243,6 +254,10 @@ struct SolveOutput {
     objective_value: Option<f64>,
     optimality_gap: Option<f64>,
     oracle_calls: Option<usize>,
+    master_iterations: Option<usize>,
+    active_atoms: Option<usize>,
+    oracle_time_seconds: Option<f64>,
+    master_time_seconds: Option<f64>,
     integer_landing_loss: Option<f64>,
     primal_residual: Option<f64>,
     dual_residual: Option<f64>,
@@ -621,6 +636,10 @@ fn run_one(
                 objective_value: None,
                 optimality_gap: None,
                 oracle_calls: None,
+                master_iterations: None,
+                active_atoms: None,
+                oracle_time_seconds: None,
+                master_time_seconds: None,
                 integer_landing_loss: None,
                 primal_residual: None,
                 dual_residual: None,
@@ -637,6 +656,8 @@ fn run_one(
                 verifier_computed_welfare_nanos: None,
                 gross_welfare_nanos: None,
                 signed_minting_cost_nanos: None,
+                zero_temperature_minting_cost_nanos: None,
+                minting_duality_gap_nanos: None,
                 net_welfare_nanos: None,
                 retained_cash_objective_nanos: None,
                 retail_gross_welfare_nanos: None,
@@ -713,6 +734,10 @@ fn record_solve(
     }
 
     let allocation = aggregate_allocation(&output.result.fills);
+    let zero_temperature_minting_cost =
+        zero_temperature_minting_cost_for_fills(problem, &output.result.fills);
+    let minting_duality_gap =
+        (zero_temperature_minting_cost - output.result.minting_cost as f64).abs();
     let violation_kinds = verification
         .violations
         .iter()
@@ -747,6 +772,10 @@ fn record_solve(
             objective_value: output.objective_value,
             optimality_gap: output.optimality_gap,
             oracle_calls: output.oracle_calls,
+            master_iterations: output.master_iterations,
+            active_atoms: output.active_atoms,
+            oracle_time_seconds: output.oracle_time_seconds,
+            master_time_seconds: output.master_time_seconds,
             integer_landing_loss: output.integer_landing_loss,
             primal_residual: output.primal_residual,
             dual_residual: output.dual_residual,
@@ -763,6 +792,8 @@ fn record_solve(
             verifier_computed_welfare_nanos: Some(verification.stats.computed_welfare),
             gross_welfare_nanos: Some(output.result.gross_welfare),
             signed_minting_cost_nanos: Some(output.result.minting_cost),
+            zero_temperature_minting_cost_nanos: Some(zero_temperature_minting_cost),
+            minting_duality_gap_nanos: Some(minting_duality_gap),
             net_welfare_nanos: Some(output.result.total_welfare()),
             retained_cash_objective_nanos: Some(retained_cash_objective_for_fills(
                 problem,
@@ -801,6 +832,19 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
                 max_iterations: required_usize(solver, "max_iterations"),
                 gap_rel: required_f64(solver, "tolerance"),
                 gap_abs_nanos: required_f64(solver, "absolute_tolerance"),
+                line_search_steps: required_usize(solver, "line_search_steps"),
+            })
+            .solve(problem),
+            problem,
+        ),
+        "pacing-bundle" => pipeline_output(
+            PacingBundleSolver::with_config(PacingBundleConfig {
+                max_iterations: required_usize(solver, "max_iterations"),
+                max_master_iterations: required_usize(solver, "max_master_iterations"),
+                gap_rel: required_f64(solver, "tolerance"),
+                gap_abs_nanos: required_f64(solver, "absolute_tolerance"),
+                master_gap_rel: required_f64(solver, "master_tolerance"),
+                master_gap_abs_nanos: required_f64(solver, "master_absolute_tolerance"),
                 line_search_steps: required_usize(solver, "line_search_steps"),
             })
             .solve(problem),
@@ -869,6 +913,10 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
                 objective_value: Some(result.objective_welfare as f64),
                 optimality_gap: None,
                 oracle_calls: None,
+                master_iterations: None,
+                active_atoms: None,
+                oracle_time_seconds: None,
+                master_time_seconds: None,
                 integer_landing_loss: None,
                 primal_residual: None,
                 dual_residual: None,
@@ -912,6 +960,10 @@ fn pipeline_output(pipeline: PipelineResult, problem: &Problem) -> SolveOutput {
         objective_value: pipeline.diagnostics.objective_value,
         optimality_gap: pipeline.diagnostics.optimality_gap,
         oracle_calls: pipeline.diagnostics.oracle_calls,
+        master_iterations: pipeline.diagnostics.master_iterations,
+        active_atoms: pipeline.diagnostics.active_atoms,
+        oracle_time_seconds: pipeline.diagnostics.oracle_time_secs,
+        master_time_seconds: pipeline.diagnostics.master_time_secs,
         integer_landing_loss: pipeline.diagnostics.integer_landing_loss,
         primal_residual: pipeline.diagnostics.primal_residual,
         dual_residual: pipeline.diagnostics.dual_residual,
@@ -1074,6 +1126,7 @@ fn problem_metrics(problem: &Problem, declared_retail_orders: usize) -> ProblemM
         .collect();
     ProblemMetrics {
         markets: problem.markets.len(),
+        market_makers: problem.mm_constraints.len(),
         orders: problem.orders.len(),
         declared_retail_orders,
         buy_orders: problem
@@ -1176,6 +1229,7 @@ fn problem_fingerprint(problem: &Problem) -> Result<String, serde_json::Error> {
 fn required_usize(spec: &SolverSpec, field: &str) -> usize {
     match field {
         "max_iterations" => spec.max_iterations,
+        "max_master_iterations" => spec.max_master_iterations,
         "inner_max_iterations" => spec.inner_max_iterations,
         "line_search_steps" => spec.line_search_steps,
         _ => None,
@@ -1190,6 +1244,8 @@ fn required_f64(spec: &SolverSpec, field: &str) -> f64 {
         "time_limit_seconds" => spec.time_limit_seconds,
         "gap_tolerance" => spec.gap_tolerance,
         "absolute_tolerance" => spec.absolute_tolerance,
+        "master_tolerance" => spec.master_tolerance,
+        "master_absolute_tolerance" => spec.master_absolute_tolerance,
         _ => None,
     }
     .unwrap_or_else(|| panic!("{} missing {field}", spec.kind))

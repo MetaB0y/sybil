@@ -9,7 +9,7 @@ last_verified: 2026-07-13
 # Retained cash solver
 
 > [!summary] In one paragraph
-> `RetainedCashSolver` is the production default for shared-capital market makers. It maximizes the paper's exact affine-to-log retained-cash objective with generalized Frank--Wolfe, using the [[The LP Core|HiGHS matching LP]] as its linear oracle. It reports a continuous objective and a certified Frank--Wolfe upper gap on suboptimality, then lands the allocation into integer protocol quantities and obtains verifier-supported uniform prices with a capped welfare LP.
+> `RetainedCashSolver` is the production default for shared-capital market makers. It maximizes the paper's exact affine-to-log retained-cash objective with generalized Frank--Wolfe, using the [[The LP Core|HiGHS matching LP]] as its linear oracle. It reports a continuous objective and a certified upper gap, then lands through a pacing-supported projection that must reach a hard-budget fixed point before finalization.
 
 For MM `k`, let `U_k` be its non-negative weighted fill after the
 buy/sell reduction and `B_k` its budget. Ignoring an allocation-independent
@@ -50,10 +50,13 @@ to consume shared capital should not be enrolled in an MM constraint.
 ## Landing and trust boundary
 
 The continuous iterate is not protocol state. Landing caps each order at the
-ceiling of its continuous fill and solves an ordinary welfare LP inside those
-caps. That epilogue chooses integer-grid fills and uniform prices supported by
-the original limits; it is not a fallback core solver. Any rounding-induced MM
-overflow is trimmed, welfare is recomputed with signed mint/burn cost, and
+ceiling of its continuous fill and solves an LP with the final pacing-weighted
+objective. If rounded quantities exceed an MM budget at the resulting prices,
+the projection adds
+those price-linearized budget rows and resolves. It finalizes only after the
+prices and quantities form a budget-consistent fixed point; exhaustion is an
+explicit post-processing failure, not silent trimming or a cross-solver
+fallback. Welfare is recomputed with signed mint/burn cost, and
 [[Four-Layer Verification|`sybil-verifier`]] remains authoritative.
 
 `Converged` means the configured certified-gap tolerance was met. An
@@ -71,5 +74,6 @@ optimal. Backend and landing failures are surfaced directly.
 
 - [[Solver Landscape]]
 - [[Conic Solver]]
+- [[Pacing Bundle Solver]]
 - [[MM Budget Constraint]]
 - [[Welfare Maximization]]

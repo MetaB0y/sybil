@@ -17,6 +17,7 @@ model harder variants.
 | Type | Backend / role |
 |---|---|
 | `RetainedCashSolver` | Production default; certified generalized Frank–Wolfe with a HiGHS oracle |
+| `PacingBundleSolver` | Experimental fully corrective pacing bundle with a HiGHS oracle |
 | `LpSolver` | Low-latency risk-neutral baseline plus budget-linearized re-solve |
 | `ConicSolver` | Independent Clarabel Linear/Fisher/QuasiFisher reference |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |

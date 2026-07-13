@@ -26,10 +26,12 @@ independent reference for [[Retained Cash Solver]]. Quantities are normalized
 to whole shares and money to dollars. Each MM uses the canonical perspective
 cone `(t_k, B_k, U_k + s_k) in K_exp`, which represents
 `t_k <= B_k ln((U_k+s_k)/B_k)` without a numerically harmful `1/B_k`
-coefficient. Per-market mint variables are eliminated algebraically, leaving
-one reduced balance row per market; the projection LP still recovers both
-clearing-price duals. MM asks use the same sell-to-complementary-buy reduction
-as production.
+coefficient. The zero-temperature supply term uses the same minting epigraph as
+the paper and LP oracle: independent binaries retain `M_m >= D_yes,D_no`, while
+a mutually exclusive group uses
+`sum_m D_no,m + max(0,max_m(D_yes,m-D_no,m))`. The earlier equality reduction
+was valid only on balanced-demand faces and has been removed. MM asks use the
+same sell-to-complementary-buy reduction as production.
 
 Clarabel uses a conservative `0.8` maximum interior-point step. This improved
 development-sweep availability, but it does not turn every ill-scaled generated
@@ -42,7 +44,7 @@ allocation.
 - Three modes: Linear, Fisher, QuasiFisher
 - QuasiFisher = `B_k * ln(U_k + s_k) - s_k` (Theorem 5)
 - Cash variable `s_k` buffers the log argument away from zero when cash remains
-- Perspective exponential-cone scaling and reduced balance equations
+- Perspective exponential-cone scaling and exact minting-epigraph inequalities
 - Non-solved Clarabel statuses are surfaced as numerical failures; they are not
   silently replaced by LP allocations
 

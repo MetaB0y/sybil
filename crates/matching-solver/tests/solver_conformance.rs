@@ -964,6 +964,18 @@ mod conformance {
 
     #[cfg(feature = "lp")]
     #[test]
+    fn pacing_bundle_solver_conformance() {
+        let solver =
+            matching_solver::PacingBundleSolver::with_config(matching_solver::PacingBundleConfig {
+                gap_abs_nanos: 0.0,
+                gap_rel: 0.0,
+                ..Default::default()
+            });
+        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
+    }
+
+    #[cfg(feature = "lp")]
+    #[test]
     fn decomposed_lp_solver_conformance() {
         // DecomposedSolver is an exported Solver implementation under `lp`.
         // The shared generator intentionally includes multi-market batches and

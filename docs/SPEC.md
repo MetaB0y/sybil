@@ -70,17 +70,24 @@ One batch is a `Problem`: markets, supported orders, MM constraints, and market 
 
 Clearing prices are dual variables of the balance constraints. Complementary slackness gives limit compliance; minting stationarity gives YES/NO and group price coherence. The verifier checks the landed integer result rather than trusting dual theory or floating output.
 
-Five solver types share the `Solver` interface:
+The solver implementations share the `Solver` interface:
 
 | Solver | Role |
 |---|---|
 | `RetainedCashSolver` | Production default; certified generalized Frank--Wolfe on the retained-cash objective |
+| `PacingBundleSolver` | Experimental fully corrective pacing bundle for the same retained-cash objective |
 | `LpSolver` | Low-latency risk-neutral baseline; HiGHS plus budget-linearized re-solve |
 | `ConicSolver` | Independent Clarabel retained-cash reference and no-cash ablation |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |
 
-All solvers land integer fills/prices, trim rounding-induced MM overflow, and report one net-of-minting welfare convention. The retained-cash paths pace MM bids and the complementary-buy value of MM asks under one shared budget. `sybil-verifier` is the single trusted correctness verifier.
+All solvers report one net-of-minting welfare convention and cross an integer
+fill/price boundary before settlement. Retained-cash projections must reach a
+budget-consistent price/quantity fixed point or fail explicitly; the LP-SLP
+baseline retains its separately diagnosed cap-and-trim behavior. The
+retained-cash paths pace MM bids and the complementary-buy value of MM asks
+under one shared budget. `sybil-verifier` is the single trusted correctness
+verifier.
 
 ## 4. Admission and block production
 
