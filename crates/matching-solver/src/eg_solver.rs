@@ -154,7 +154,11 @@ impl EgSolver {
             );
         };
 
-        // Initialize q from warm start
+        // Initialize q from warm start. If the linear warm start contains a
+        // profitable allocation but the EG projection later returns no fills,
+        // that is an algorithm/post-processing failure rather than convergence
+        // to a valid empty optimum.
+        let warm_start_has_fill = warm_sol.q_values.iter().any(|&fill| fill > 1e-9);
         let mut q: Vec<f64> = warm_sol.q_values.clone();
         drop(warm_sol);
 
@@ -362,7 +366,23 @@ impl EgSolver {
         // allocation and re-solves the standard welfare LP for proper duals
         // where complementary slackness guarantees UCP.
         let mut result = project_and_finalize(&q, problem, &ctx, start);
-        if result.diagnostics.status != TerminationStatus::PostProcessingFailure {
+        if result.diagnostics.status != TerminationStatus::PostProcessingFailure
+            && result.result.fills.is_empty()
+            && warm_start_has_fill
+        {
+            result.diagnostics = SolverDiagnostics {
+                algorithm: "eg-frank-wolfe".to_string(),
+                status: TerminationStatus::PostProcessingFailure,
+                iterations: Some(iterations_run),
+                convergence_metric: last_rel_change,
+                message: Some(format!(
+                    "projection returned no fills despite a positive LP warm start; last max allocation change: {}",
+                    last_q_change
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "not available".to_string())
+                )),
+            };
+        } else if result.diagnostics.status != TerminationStatus::PostProcessingFailure {
             result.diagnostics = SolverDiagnostics {
                 algorithm: "eg-frank-wolfe".to_string(),
                 status: if oracle_failed {

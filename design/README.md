@@ -2,7 +2,7 @@
 tags: [moc, guide]
 layer: core
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 # Design workspace
@@ -33,7 +33,8 @@ archive.
 | [`problem-statement.md`](problem-statement.md) | reference | Self-contained mathematical matching problem |
 | [`math-papers.md`](math-papers.md) | current index | Canonical external proof-repository map |
 | [`welfare-vs-volume.md`](welfare-vs-volume.md) | reference | Objective trade-off analysis |
-| [`solver-benchmarks.md`](solver-benchmarks.md) | dated reference | Methodology and historical results; rerun before quoting |
+| [`solver-benchmark-report-2026-07-13.md`](solver-benchmark-report-2026-07-13.md) | dated reference | Preregistered 675-run solver evaluation and operational recommendations |
+| [`solver-benchmarks.md`](solver-benchmarks.md) | superseded dated reference | Earlier single-book results; retained to show research lineage, not for quotation |
 | [`eg-conic.typ`](eg-conic.typ) | draft research | Quasi-linear EG conic reformulation |
 | [`mint-pnl.typ`](mint-pnl.typ) | draft research | MINT-account accounting analysis |
 

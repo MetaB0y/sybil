@@ -1,0 +1,314 @@
+{
+  "schema_version": 1,
+  "protocol_id": "solver-evaluation-v1",
+  "title": "Sybil solver quality, robustness, and scaling evaluation",
+  "analysis_policy": {
+    "primary_unit": "one generated order book identified by experiment, budget scale, and seed",
+    "primary_welfare": "integer verifier-recomputed net welfare after signed complete-set mint/burn cost",
+    "runtime_statistic": "median wall time across books; no failed or invalid run is included as a timing success",
+    "quality_reference": "production LP on the identical order book, reported as a reference rather than a proof of global optimality",
+    "failure_policy": "retain and count every panic, empty result, solver error, timeout, and verifier-invalid result",
+    "exclusion_policy": "no post-hoc run exclusion; the analysis consumes every JSONL record",
+    "multiplicity_policy": "seed-level intervals describe variation across generated books, not repeated-measure timing noise",
+    "interval_policy": "distribution summaries use medians and interquartile ranges; paired mean welfare-gap intervals use 10000 deterministic seed-level bootstrap resamples with RNG seed 20260713",
+    "missing_policy": "failed and invalid runs are counted but are not assigned invented welfare or runtime-quality values; every table reports its denominator and success count"
+  },
+  "warmup": {
+    "profile": "balanced",
+    "scale": "reference",
+    "seed": 7,
+    "budget_scale": 1.0
+  },
+  "solvers": {
+    "lp": {
+      "kind": "lp",
+      "label": "LP (production)",
+      "max_iterations": 1,
+      "fallback_to_lp": false
+    },
+    "iter-lp": {
+      "kind": "iter-lp",
+      "label": "IterLP fixed point",
+      "max_iterations": 15,
+      "tolerance": 0.0001,
+      "damping": 0.6,
+      "fallback_to_lp": false
+    },
+    "eg": {
+      "kind": "eg",
+      "label": "EG Frank-Wolfe",
+      "max_iterations": 25,
+      "tolerance": 0.000001,
+      "q_tolerance": 1.0,
+      "line_search_steps": 15,
+      "fallback_to_lp": false
+    },
+    "conic-quasi": {
+      "kind": "conic-quasi",
+      "label": "Conic quasi-Fisher",
+      "max_iterations": 200,
+      "tolerance": 0.00000001,
+      "time_limit_seconds": 30.0,
+      "fallback_to_lp": false
+    },
+    "conic-fisher": {
+      "kind": "conic-fisher",
+      "label": "Conic Fisher (no retained cash)",
+      "max_iterations": 200,
+      "tolerance": 0.00000001,
+      "time_limit_seconds": 30.0,
+      "fallback_to_lp": false
+    },
+    "decomposed-lp": {
+      "kind": "decomposed-lp",
+      "label": "Decomposed LP",
+      "max_iterations": 20,
+      "tolerance": 0.0001,
+      "fallback_to_lp": false
+    },
+    "decomposed-quasi": {
+      "kind": "decomposed-quasi",
+      "label": "Decomposed conic quasi-Fisher",
+      "max_iterations": 20,
+      "tolerance": 0.0001,
+      "inner_max_iterations": 200,
+      "inner_tolerance": 0.00000001,
+      "time_limit_seconds": 30.0,
+      "fallback_to_lp": false
+    },
+    "milp-exact": {
+      "kind": "milp-exact",
+      "label": "MILP exact-budget reference",
+      "time_limit_seconds": 3.0,
+      "gap_tolerance": 0.0,
+      "fallback_to_lp": false
+    }
+  },
+  "scales": {
+    "reference": {
+      "num_markets": 4,
+      "num_orders": 60,
+      "num_mms": 1,
+      "order_size_min": 5,
+      "order_size_max": 100,
+      "mm_budget_min_dollars": 250,
+      "mm_budget_max_dollars": 1000
+    },
+    "small": {
+      "num_markets": 10,
+      "num_orders": 300,
+      "num_mms": 1,
+      "order_size_min": 10,
+      "order_size_max": 200,
+      "mm_budget_min_dollars": 1250,
+      "mm_budget_max_dollars": 5000
+    },
+    "medium": {
+      "num_markets": 30,
+      "num_orders": 3000,
+      "num_mms": 2,
+      "order_size_min": 10,
+      "order_size_max": 300,
+      "mm_budget_min_dollars": 2500,
+      "mm_budget_max_dollars": 12500
+    },
+    "large": {
+      "num_markets": 50,
+      "num_orders": 10000,
+      "num_mms": 3,
+      "order_size_min": 10,
+      "order_size_max": 500,
+      "mm_budget_min_dollars": 5000,
+      "mm_budget_max_dollars": 25000
+    },
+    "xlarge": {
+      "num_markets": 100,
+      "num_orders": 30000,
+      "num_mms": 5,
+      "order_size_min": 10,
+      "order_size_max": 750,
+      "mm_budget_min_dollars": 7500,
+      "mm_budget_max_dollars": 40000
+    }
+  },
+  "profiles": {
+    "balanced": {
+      "market_group_probability": 0.6,
+      "order_size_power": 2.0,
+      "retail_buy_probability": 0.6,
+      "liquidity_scarcity": 0.5,
+      "hot_market_fraction": 0.0,
+      "hot_order_probability": 0.6,
+      "liquidity_depth_levels": 5,
+      "liquidity_dispersion": 0.35,
+      "mm_spread_bps": 50,
+      "mm_capacity_multiplier": 10,
+      "mm_market_coverage_fraction": 0.75,
+      "mm_market_coverage_max": 30
+    },
+    "concentrated": {
+      "market_group_probability": 0.6,
+      "order_size_power": 2.2,
+      "retail_buy_probability": 0.65,
+      "liquidity_scarcity": 0.35,
+      "hot_market_fraction": 0.15,
+      "hot_order_probability": 0.8,
+      "liquidity_depth_levels": 5,
+      "liquidity_dispersion": 0.5,
+      "mm_spread_bps": 75,
+      "mm_capacity_multiplier": 12,
+      "mm_market_coverage_fraction": 0.7,
+      "mm_market_coverage_max": 30
+    },
+    "asymmetric": {
+      "market_group_probability": 0.75,
+      "order_size_power": 2.5,
+      "retail_buy_probability": 0.58,
+      "liquidity_scarcity": 0.45,
+      "hot_market_fraction": 0.1,
+      "hot_order_probability": 0.7,
+      "liquidity_depth_levels": 4,
+      "liquidity_dispersion": 1.0,
+      "mm_spread_bps": 100,
+      "mm_capacity_multiplier": 15,
+      "mm_market_coverage_fraction": 0.5,
+      "mm_market_coverage_max": 20
+    },
+    "buy-heavy-stress": {
+      "market_group_probability": 0.5,
+      "order_size_power": 2.0,
+      "retail_buy_probability": 0.82,
+      "liquidity_scarcity": 0.25,
+      "hot_market_fraction": 0.2,
+      "hot_order_probability": 0.75,
+      "liquidity_depth_levels": 4,
+      "liquidity_dispersion": 0.6,
+      "mm_spread_bps": 125,
+      "mm_capacity_multiplier": 20,
+      "mm_market_coverage_fraction": 0.8,
+      "mm_market_coverage_max": 30
+    }
+  },
+  "experiments": [
+    {
+      "id": "quality-balanced",
+      "suite": "quality",
+      "profile": "balanced",
+      "scale": "medium",
+      "seed_start": 1000,
+      "seed_count": 12,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi", "conic-fisher"]
+    },
+    {
+      "id": "quality-concentrated",
+      "suite": "quality",
+      "profile": "concentrated",
+      "scale": "medium",
+      "seed_start": 1100,
+      "seed_count": 12,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi", "conic-fisher"]
+    },
+    {
+      "id": "quality-asymmetric",
+      "suite": "quality",
+      "profile": "asymmetric",
+      "scale": "medium",
+      "seed_start": 1200,
+      "seed_count": 12,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi", "conic-fisher"]
+    },
+    {
+      "id": "quality-buy-heavy",
+      "suite": "quality",
+      "profile": "buy-heavy-stress",
+      "scale": "medium",
+      "seed_start": 1300,
+      "seed_count": 12,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi", "conic-fisher"]
+    },
+    {
+      "id": "scaling-small",
+      "suite": "scaling",
+      "profile": "balanced",
+      "scale": "small",
+      "seed_start": 2000,
+      "seed_count": 8,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi"]
+    },
+    {
+      "id": "scaling-medium",
+      "suite": "scaling",
+      "profile": "balanced",
+      "scale": "medium",
+      "seed_start": 2100,
+      "seed_count": 8,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi"]
+    },
+    {
+      "id": "scaling-large",
+      "suite": "scaling",
+      "profile": "balanced",
+      "scale": "large",
+      "seed_start": 2200,
+      "seed_count": 8,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi"]
+    },
+    {
+      "id": "scaling-xlarge",
+      "suite": "scaling",
+      "profile": "balanced",
+      "scale": "xlarge",
+      "seed_start": 2300,
+      "seed_count": 5,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi"]
+    },
+    {
+      "id": "budget-sweep",
+      "suite": "budget",
+      "profile": "balanced",
+      "scale": "medium",
+      "seed_start": 3000,
+      "seed_count": 10,
+      "budget_scales": [0.1, 0.3, 0.5, 1.0, 1.5, 3.0],
+      "solvers": ["lp", "iter-lp", "eg", "conic-quasi"]
+    },
+    {
+      "id": "decomposition-balanced",
+      "suite": "decomposition",
+      "profile": "balanced",
+      "scale": "medium",
+      "seed_start": 4000,
+      "seed_count": 8,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "conic-quasi", "decomposed-lp", "decomposed-quasi"]
+    },
+    {
+      "id": "decomposition-asymmetric",
+      "suite": "decomposition",
+      "profile": "asymmetric",
+      "scale": "medium",
+      "seed_start": 4100,
+      "seed_count": 8,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "conic-quasi", "decomposed-lp", "decomposed-quasi"]
+    },
+    {
+      "id": "milp-reference",
+      "suite": "reference",
+      "profile": "balanced",
+      "scale": "reference",
+      "seed_start": 5000,
+      "seed_count": 5,
+      "budget_scales": [1.0],
+      "solvers": ["lp", "conic-quasi", "milp-exact"]
+    }
+  ]
+}

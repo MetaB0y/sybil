@@ -30,6 +30,9 @@ model harder variants.
 - All implementations return `PipelineResult`, but `sybil-verifier` owns
   correctness and the net-of-minting welfare definition.
 - Distinguish a MILP incumbent/timeout from a proven optimum.
+- Research-solver availability is separate from candidate conformance: a
+  numerical failure must be explicit, while every returned best iterate must
+  pass the same integer/verifier checks as production.
 - Unsupported multi-market shapes must not become production-executable merely
   because a solver can represent them.
 - Preserve uniform-price, quantity/limit, group, MM-budget, rounding, and

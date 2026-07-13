@@ -1,11 +1,18 @@
 ---
 tags: [solver, benchmark, reference]
 status: dated-reference
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 # Solver Benchmarks
 
+> **Superseded:** use
+> [`solver-benchmark-report-2026-07-13.md`](solver-benchmark-report-2026-07-13.md)
+> for the preregistered, failure-preserving evaluation. This page is retained
+> as research history. Its single-seed headline numbers, including the
+> “gap < 0.7%” statement, are not representative of the broader suite, and
+> some older solver paths could silently substitute LP after a failure.
+>
 > These results are historical and workload-specific. Rerun the benchmark on
 > the revision and hardware you intend to quote.
 

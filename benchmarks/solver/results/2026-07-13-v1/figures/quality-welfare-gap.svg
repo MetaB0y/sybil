@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Inter,Arial,sans-serif;fill:#111827}.axis{stroke:#9ca3af;stroke-width:1}.grid{stroke:#e5e7eb;stroke-width:1}.small{font-size:11px}.tiny{font-size:9px}</style>
+<text x="450.0" y="24.0" font-size="17" text-anchor="middle" font-weight="bold">Welfare shortfall relative to production LP</text>
+<text x="70.0" y="43.0" font-size="13" text-anchor="start" font-weight="bold">asymmetric</text>
+<line class="axis" x1="70" y1="55" x2="70" y2="220"/>
+<line class="axis" x1="70" y1="220" x2="430" y2="220"/>
+<line class="grid" x1="70" y1="220.0" x2="430" y2="220.0"/>
+<text x="63.0" y="224.0" font-size="9" text-anchor="end" font-weight="normal">0.00</text>
+<line class="grid" x1="70" y1="178.75" x2="430" y2="178.75"/>
+<text x="63.0" y="182.8" font-size="9" text-anchor="end" font-weight="normal">1.47</text>
+<line class="grid" x1="70" y1="137.5" x2="430" y2="137.5"/>
+<text x="63.0" y="141.5" font-size="9" text-anchor="end" font-weight="normal">2.95</text>
+<line class="grid" x1="70" y1="96.25" x2="430" y2="96.25"/>
+<text x="63.0" y="100.2" font-size="9" text-anchor="end" font-weight="normal">4.42</text>
+<line class="grid" x1="70" y1="55.0" x2="430" y2="55.0"/>
+<text x="63.0" y="59.0" font-size="9" text-anchor="end" font-weight="normal">5.89</text>
+<text x="106.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">LP</text>
+<line x1="106.0" y1="220.0" x2="106.0" y2="220.0" stroke="#111827" stroke-width="3"/>
+<circle cx="106.0" cy="220.0" r="4" fill="#111827"/>
+<text x="178.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">IterLP</text>
+<line x1="178.0" y1="202.07425368121133" x2="178.0" y2="209.8727507077776" stroke="#d97706" stroke-width="3"/>
+<circle cx="178.0" cy="206.25715865185657" r="4" fill="#d97706"/>
+<text x="250.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">EG-FW</text>
+<line x1="250.0" y1="205.30091674800215" x2="250.0" y2="215.62927957835706" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="250.0" cy="211.3494836151356" r="4" fill="#7c3aed"/>
+<text x="322.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">Quasi</text>
+<line x1="322.0" y1="219.99988212398495" x2="322.0" y2="219.99999981876977" stroke="#1d4ed8" stroke-width="3"/>
+<circle cx="322.0" cy="219.9999992341475" r="4" fill="#1d4ed8"/>
+<text x="329.0" y="65.0" font-size="9" text-anchor="start" font-weight="normal">×1</text>
+<text x="394.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">Fisher</text>
+<line x1="394.0" y1="218.56976582233818" x2="394.0" y2="219.69528562559918" stroke="#0891b2" stroke-width="3"/>
+<circle cx="394.0" cy="219.1079805316424" r="4" fill="#0891b2"/>
+<text x="401.0" y="65.0" font-size="9" text-anchor="start" font-weight="normal">×1</text>
+<text x="510.0" y="43.0" font-size="13" text-anchor="start" font-weight="bold">balanced</text>
+<line class="axis" x1="510" y1="55" x2="510" y2="220"/>
+<line class="axis" x1="510" y1="220" x2="870" y2="220"/>
+<line class="grid" x1="510" y1="220.0" x2="870" y2="220.0"/>
+<text x="503.0" y="224.0" font-size="9" text-anchor="end" font-weight="normal">0.00</text>
+<line class="grid" x1="510" y1="178.75" x2="870" y2="178.75"/>
+<text x="503.0" y="182.8" font-size="9" text-anchor="end" font-weight="normal">1.47</text>
+<line class="grid" x1="510" y1="137.5" x2="870" y2="137.5"/>
+<text x="503.0" y="141.5" font-size="9" text-anchor="end" font-weight="normal">2.95</text>
+<line class="grid" x1="510" y1="96.25" x2="870" y2="96.25"/>
+<text x="503.0" y="100.2" font-size="9" text-anchor="end" font-weight="normal">4.42</text>
+<line class="grid" x1="510" y1="55.0" x2="870" y2="55.0"/>
+<text x="503.0" y="59.0" font-size="9" text-anchor="end" font-weight="normal">5.89</text>
+<text x="546.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">LP</text>
+<line x1="546.0" y1="220.0" x2="546.0" y2="220.0" stroke="#111827" stroke-width="3"/>
+<circle cx="546.0" cy="220.0" r="4" fill="#111827"/>
+<text x="618.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">IterLP</text>
+<line x1="618.0" y1="210.77946172114162" x2="618.0" y2="216.55775724794938" stroke="#d97706" stroke-width="3"/>
+<circle cx="618.0" cy="213.86896151080998" r="4" fill="#d97706"/>
+<text x="690.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">EG-FW</text>
+<line x1="690.0" y1="179.20454599292714" x2="690.0" y2="212.42515605819662" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="690.0" cy="207.49846796520202" r="4" fill="#7c3aed"/>
+<text x="762.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">Quasi</text>
+<line x1="762.0" y1="202.6066781865556" x2="762.0" y2="218.78882059379342" stroke="#1d4ed8" stroke-width="3"/>
+<circle cx="762.0" cy="206.92367677696438" r="4" fill="#1d4ed8"/>
+<text x="769.0" y="65.0" font-size="9" text-anchor="start" font-weight="normal">×2</text>
+<text x="834.0" y="237.0" font-size="9" text-anchor="middle" font-weight="normal">Fisher</text>
+<line x1="834.0" y1="200.21178341429965" x2="834.0" y2="219.16195039141928" stroke="#0891b2" stroke-width="3"/>
+<circle cx="834.0" cy="206.9178106594519" r="4" fill="#0891b2"/>
+<text x="70.0" y="268.0" font-size="13" text-anchor="start" font-weight="bold">buy-heavy-stress</text>
+<line class="axis" x1="70" y1="280" x2="70" y2="445"/>
+<line class="axis" x1="70" y1="445" x2="430" y2="445"/>
+<line class="grid" x1="70" y1="445.0" x2="430" y2="445.0"/>
+<text x="63.0" y="449.0" font-size="9" text-anchor="end" font-weight="normal">0.00</text>
+<line class="grid" x1="70" y1="403.75" x2="430" y2="403.75"/>
+<text x="63.0" y="407.8" font-size="9" text-anchor="end" font-weight="normal">1.47</text>
+<line class="grid" x1="70" y1="362.5" x2="430" y2="362.5"/>
+<text x="63.0" y="366.5" font-size="9" text-anchor="end" font-weight="normal">2.95</text>
+<line class="grid" x1="70" y1="321.25" x2="430" y2="321.25"/>
+<text x="63.0" y="325.2" font-size="9" text-anchor="end" font-weight="normal">4.42</text>
+<line class="grid" x1="70" y1="280.0" x2="430" y2="280.0"/>
+<text x="63.0" y="284.0" font-size="9" text-anchor="end" font-weight="normal">5.89</text>
+<text x="106.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">LP</text>
+<line x1="106.0" y1="445.0" x2="106.0" y2="445.0" stroke="#111827" stroke-width="3"/>
+<circle cx="106.0" cy="445.0" r="4" fill="#111827"/>
+<text x="178.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">IterLP</text>
+<line x1="178.0" y1="421.874609478861" x2="178.0" y2="428.3869431765126" stroke="#d97706" stroke-width="3"/>
+<circle cx="178.0" cy="426.55492943517265" r="4" fill="#d97706"/>
+<text x="250.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">EG-FW</text>
+<line x1="250.0" y1="301.52173913043475" x2="250.0" y2="431.58773366489527" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="250.0" cy="413.4864640586257" r="4" fill="#7c3aed"/>
+<text x="322.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">Quasi</text>
+<line x1="322.0" y1="421.93824477175167" x2="322.0" y2="444.9999830921498" stroke="#1d4ed8" stroke-width="3"/>
+<circle cx="322.0" cy="444.9970926528311" r="4" fill="#1d4ed8"/>
+<text x="329.0" y="290.0" font-size="9" text-anchor="start" font-weight="normal">×3</text>
+<text x="394.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">Fisher</text>
+<line x1="394.0" y1="420.8889461926577" x2="394.0" y2="443.92480130089035" stroke="#0891b2" stroke-width="3"/>
+<circle cx="394.0" cy="443.1676144182403" r="4" fill="#0891b2"/>
+<text x="510.0" y="268.0" font-size="13" text-anchor="start" font-weight="bold">concentrated</text>
+<line class="axis" x1="510" y1="280" x2="510" y2="445"/>
+<line class="axis" x1="510" y1="445" x2="870" y2="445"/>
+<line class="grid" x1="510" y1="445.0" x2="870" y2="445.0"/>
+<text x="503.0" y="449.0" font-size="9" text-anchor="end" font-weight="normal">0.00</text>
+<line class="grid" x1="510" y1="403.75" x2="870" y2="403.75"/>
+<text x="503.0" y="407.8" font-size="9" text-anchor="end" font-weight="normal">1.47</text>
+<line class="grid" x1="510" y1="362.5" x2="870" y2="362.5"/>
+<text x="503.0" y="366.5" font-size="9" text-anchor="end" font-weight="normal">2.95</text>
+<line class="grid" x1="510" y1="321.25" x2="870" y2="321.25"/>
+<text x="503.0" y="325.2" font-size="9" text-anchor="end" font-weight="normal">4.42</text>
+<line class="grid" x1="510" y1="280.0" x2="870" y2="280.0"/>
+<text x="503.0" y="284.0" font-size="9" text-anchor="end" font-weight="normal">5.89</text>
+<text x="546.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">LP</text>
+<line x1="546.0" y1="445.0" x2="546.0" y2="445.0" stroke="#111827" stroke-width="3"/>
+<circle cx="546.0" cy="445.0" r="4" fill="#111827"/>
+<text x="618.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">IterLP</text>
+<line x1="618.0" y1="435.04633139694613" x2="618.0" y2="438.88768842082703" stroke="#d97706" stroke-width="3"/>
+<circle cx="618.0" cy="436.8763432388885" r="4" fill="#d97706"/>
+<text x="690.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">EG-FW</text>
+<line x1="690.0" y1="335.2413560921944" x2="690.0" y2="430.5622502798062" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="690.0" cy="418.20324632843256" r="4" fill="#7c3aed"/>
+<text x="762.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">Quasi</text>
+<line x1="762.0" y1="432.1955130330955" x2="762.0" y2="444.9999922029442" stroke="#1d4ed8" stroke-width="3"/>
+<circle cx="762.0" cy="444.0358418249565" r="4" fill="#1d4ed8"/>
+<text x="769.0" y="290.0" font-size="9" text-anchor="start" font-weight="normal">×3</text>
+<text x="834.0" y="462.0" font-size="9" text-anchor="middle" font-weight="normal">Fisher</text>
+<line x1="834.0" y1="435.15721674799875" x2="834.0" y2="444.74907584571224" stroke="#0891b2" stroke-width="3"/>
+<circle cx="834.0" cy="443.74548821258367" r="4" fill="#0891b2"/>
+<text x="841.0" y="290.0" font-size="9" text-anchor="start" font-weight="normal">×1</text>
+<text x="8.0" y="39.0" font-size="11" text-anchor="start" font-weight="normal">LP gap (%)</text>
+</svg>

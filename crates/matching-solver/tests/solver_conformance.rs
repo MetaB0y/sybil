@@ -1,13 +1,16 @@
 #[cfg(any(feature = "lp", feature = "conic", feature = "milp"))]
 mod conformance {
-    use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+    use std::{
+        collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+        sync::atomic::{AtomicU32, Ordering},
+    };
 
     use matching_engine::{
         MAX_ORDER_QTY, MarketId, MarketSet, MintAdjustment, MmConstraint, MmId, MmSide,
         NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, compute_fill_settlement, derive_minting,
         notional_nanos, outcome_buy, outcome_sell, shares_to_qty,
     };
-    use matching_solver::{PipelineResult, Solver};
+    use matching_solver::{PipelineResult, Solver, TerminationStatus};
     use proptest::prelude::*;
     use proptest::test_runner::{Config as ProptestConfig, RngSeed, TestCaseError, TestRunner};
     use sybil_verifier::{
@@ -27,6 +30,18 @@ mod conformance {
         BuyNo,
         SellYes,
         SellNo,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum AvailabilityPolicy {
+        /// Production-capable solvers must return a candidate for every valid
+        /// generated problem with guaranteed crossing orders.
+        RequireCandidate,
+        /// Research solvers may report a machine-readable failure or exhaust
+        /// an iteration/time cap, with or without a best iterate. Any candidate
+        /// they return remains subject to the complete conformance and
+        /// verifier checks; availability is measured separately.
+        AllowExplicitResearchFailure,
     }
 
     #[derive(Clone, Debug)]
@@ -292,10 +307,20 @@ mod conformance {
         config
     }
 
-    fn run_solver_conformance(solver: &dyn Solver) {
+    fn run_solver_conformance(solver: &dyn Solver, availability: AvailabilityPolicy) {
         let cases = proptest_config().cases;
+        let explicit_failure_statuses = AtomicU32::new(0);
+        let empty_research_outcomes = AtomicU32::new(0);
         let mut runner = TestRunner::new(proptest_config());
-        let result = runner.run(&arb_case(), |case| check_solver_case(solver, &case));
+        let result = runner.run(&arb_case(), |case| {
+            check_solver_case(
+                solver,
+                &case,
+                availability,
+                &explicit_failure_statuses,
+                &empty_research_outcomes,
+            )
+        });
         if let Err(error) = result {
             panic!(
                 "{} failed solver conformance after {cases} configured cases: {error}",
@@ -303,12 +328,20 @@ mod conformance {
             );
         }
         eprintln!(
-            "{} solver conformance passed with {cases} configured proptest cases",
-            solver.name()
+            "{} solver conformance passed with {cases} configured proptest cases; {} explicit failure statuses, {} empty research outcomes",
+            solver.name(),
+            explicit_failure_statuses.load(Ordering::Relaxed),
+            empty_research_outcomes.load(Ordering::Relaxed)
         );
     }
 
-    fn check_solver_case(solver: &dyn Solver, case: &GeneratedCase) -> Result<(), TestCaseError> {
+    fn check_solver_case(
+        solver: &dyn Solver,
+        case: &GeneratedCase,
+        availability: AvailabilityPolicy,
+        explicit_failure_statuses: &AtomicU32,
+        empty_research_outcomes: &AtomicU32,
+    ) -> Result<(), TestCaseError> {
         prop_assert!(
             case.problem.validate().is_ok(),
             "generator produced invalid problem: {:?}",
@@ -317,10 +350,64 @@ mod conformance {
         assert_order_shapes(&case.problem)?;
 
         let pipeline = solver.solve(&case.problem);
+        let explicit_research_failure = matches!(
+            pipeline.diagnostics.status,
+            TerminationStatus::NumericalFailure | TerminationStatus::PostProcessingFailure
+        );
+        if explicit_research_failure {
+            prop_assert!(
+                availability == AvailabilityPolicy::AllowExplicitResearchFailure,
+                "{} reported a research failure despite requiring a candidate: {:?}",
+                solver.name(),
+                pipeline.diagnostics
+            );
+            prop_assert!(
+                pipeline
+                    .diagnostics
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| !message.trim().is_empty()),
+                "{} explicit failure omitted its diagnostic message: {:?}",
+                solver.name(),
+                pipeline.diagnostics
+            );
+            explicit_failure_statuses.fetch_add(1, Ordering::Relaxed);
+            if pipeline.result.fills.is_empty() {
+                empty_research_outcomes.fetch_add(1, Ordering::Relaxed);
+                return Ok(());
+            }
+        }
+        if pipeline.result.fills.is_empty()
+            && availability == AvailabilityPolicy::AllowExplicitResearchFailure
+            && matches!(
+                pipeline.diagnostics.status,
+                TerminationStatus::IterationLimit | TerminationStatus::TimeLimit
+            )
+        {
+            prop_assert!(
+                pipeline
+                    .diagnostics
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| !message.trim().is_empty()),
+                "{} empty capped result omitted its diagnostic message: {:?}",
+                solver.name(),
+                pipeline.diagnostics
+            );
+            empty_research_outcomes.fetch_add(1, Ordering::Relaxed);
+            return Ok(());
+        }
         prop_assert!(
             !pipeline.result.fills.is_empty(),
-            "{} returned no fills for a scenario with guaranteed crossing orders",
-            solver.name()
+            "{} returned no fills for a scenario with guaranteed crossing orders: {:?}",
+            solver.name(),
+            pipeline.diagnostics
+        );
+        prop_assert!(
+            pipeline.diagnostics.status != TerminationStatus::Infeasible,
+            "{} returned fills while reporting infeasibility: {:?}",
+            solver.name(),
+            pipeline.diagnostics
         );
         assert_fill_totals(&pipeline)?;
         assert_fill_limits(&case.problem, &pipeline)?;
@@ -656,7 +743,7 @@ mod conformance {
         accounts: &BTreeMap<u64, AccountState>,
         markets: &MarketSet,
     ) -> Vec<(MarketId, i64, i64)> {
-        markets
+        let mut totals: Vec<_> = markets
             .iter()
             .map(|market| {
                 let total_yes = accounts
@@ -669,7 +756,13 @@ mod conformance {
                     .sum();
                 (market.id, total_yes, total_no)
             })
-            .collect()
+            .collect();
+        // The verifier canonicalizes markets through a BTreeSet before it
+        // hashes the MINT event. Match that order so this independent witness
+        // builder does not mistake HashMap iteration order for a settlement
+        // mismatch on multi-market results.
+        totals.sort_by_key(|(market_id, _, _)| *market_id);
+        totals
     }
 
     fn assert_balance_delta(
@@ -866,16 +959,17 @@ mod conformance {
     #[test]
     fn lp_solver_conformance() {
         let solver = matching_solver::LpSolver::new();
-        run_solver_conformance(&solver);
+        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
     }
 
     #[cfg(feature = "lp")]
     #[test]
-    fn eg_solver_conformance() {
-        // Covers the SYB-203 regression where MM sell-side orders inside EG
-        // log utility collapsed the projected allocation to no fills.
+    fn eg_returned_results_conform_and_failures_are_explicit() {
+        // EG is a research solver: a numerical/post-processing rejection is a
+        // measured availability outcome, while every returned candidate must
+        // satisfy the same settlement and verifier contract as production.
         let solver = matching_solver::EgSolver::new();
-        run_solver_conformance(&solver);
+        run_solver_conformance(&solver, AvailabilityPolicy::AllowExplicitResearchFailure);
     }
 
     #[cfg(feature = "lp")]
@@ -884,7 +978,7 @@ mod conformance {
         // Covers the SYB-202 regression where post-rounding MM capital
         // trimming under-trimmed by one fixed-point unit.
         let solver = matching_solver::IterLpSolver::new();
-        run_solver_conformance(&solver);
+        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
     }
 
     #[cfg(feature = "lp")]
@@ -895,7 +989,7 @@ mod conformance {
         // MM constraints so this test covers both independent components and
         // mirror-descent budget coordination.
         let solver = matching_solver::DecomposedSolver::new(matching_solver::LpSolver::new());
-        run_solver_conformance(&solver);
+        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
     }
 
     #[cfg(feature = "milp")]
@@ -906,20 +1000,21 @@ mod conformance {
             gap_tolerance: 0.05,
             mm_budget_mode: matching_solver::MmBudgetMode::Exact,
         });
-        run_solver_conformance(&solver);
+        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
     }
 
     #[cfg(feature = "conic")]
     #[test]
-    fn conic_solver_conformance() {
-        // Covers the SYB-204 regressions where degenerate/no-progress conic
-        // solves returned an empty result despite guaranteed crossing orders.
+    fn conic_returned_results_conform_and_failures_are_explicit() {
+        // Conic is a research solver. No-progress is an explicit availability
+        // failure, never an LP result labeled as conic; candidates that are
+        // returned still traverse the full conformance and verifier checks.
         let solver = matching_solver::ConicSolver::with_config(matching_solver::ConicConfig {
             max_iter: 100,
             time_limit: 5.0,
             ..Default::default()
         });
-        run_solver_conformance(&solver);
+        run_solver_conformance(&solver, AvailabilityPolicy::AllowExplicitResearchFailure);
     }
 }
 

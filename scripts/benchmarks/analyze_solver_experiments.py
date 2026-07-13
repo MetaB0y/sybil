@@ -215,6 +215,7 @@ def make_summary(
         "schema_version": 1,
         "protocol_id": protocol["protocol_id"],
         "source_revision": metadata["source_revision"],
+        "analysis_script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "integrity": integrity,
         "overall": aggregate(records, ("solver_id",)),
         "quality": aggregate(quality, ("profile", "solver_id")),
@@ -411,7 +412,7 @@ def write_quality_figure(summary: dict[str, Any], output: Path) -> None:
             body.append(f'<circle cx="{x}" cy="{middle}" r="4" fill="{color}"/>')
             if item["failed"]:
                 body.append(text(x + 7, y0 + 10, f"×{item['failed']}", 9, "start"))
-    body.append(text(16, 270, "LP gap (%)", 11, "middle", "normal"))
+    body.append(text(8, 39, "LP gap (%)", 11, "start", "normal"))
     output.write_text(svg_document(width, height, body))
 
 
@@ -427,7 +428,7 @@ def write_scaling_figure(summary: dict[str, Any], records: list[dict[str, Any]],
     successful = [row for row in rows if row["runtime_median_seconds"] and row["runtime_median_seconds"] > 0]
     y_values = [row["runtime_median_seconds"] for row in successful]
     y_min, y_max = min(y_values) / 1.5, max(y_values) * 1.5
-    width, height = 760, 430
+    width, height = 760, 460
     x0, y0, plot_w, plot_h = 85, 50, 620, 300
     body = [text(width / 2, 25, "Solver wall time scaling", 17, "middle", "bold")]
     body += [
@@ -460,10 +461,10 @@ def write_scaling_figure(summary: dict[str, Any], records: list[dict[str, Any]],
             body.extend(f'<circle cx="{x}" cy="{y}" r="4" fill="{color}"/>' for x, y in points)
     legend_x = x0
     for solver in solvers:
-        body.append(f'<rect x="{legend_x}" y="{height - 40}" width="12" height="3" fill="{COLORS[solver]}"/>')
-        body.append(text(legend_x + 18, height - 35, SHORT_LABELS[solver], 10))
+        body.append(f'<rect x="{legend_x}" y="{height - 30}" width="12" height="3" fill="{COLORS[solver]}"/>')
+        body.append(text(legend_x + 18, height - 25, SHORT_LABELS[solver], 10))
         legend_x += 125
-    body.append(text(x0 + plot_w / 2, height - 57, "Declared retail orders (log-time axis)", 11, "middle"))
+    body.append(text(x0 + plot_w / 2, height - 58, "Declared retail orders (log-time axis)", 11, "middle"))
     output.write_text(svg_document(width, height, body))
 
 
@@ -476,7 +477,7 @@ def write_budget_figure(summary: dict[str, Any], output: Path) -> None:
     y_min, y_max = min(all_bounds + [0.0]), max(all_bounds + [0.1])
     padding = max(0.05, (y_max - y_min) * 0.12)
     y_min, y_max = y_min - padding, y_max + padding
-    width, height = 760, 430
+    width, height = 760, 460
     x0, y0, plot_w, plot_h = 80, 50, 620, 300
     body = [text(width / 2, 25, "Mean welfare shortfall across the budget sweep", 17, "middle", "bold")]
     body += [
@@ -510,10 +511,10 @@ def write_budget_figure(summary: dict[str, Any], output: Path) -> None:
             body.extend(f'<circle cx="{x}" cy="{y}" r="4" fill="{color}"/>' for x, y in points)
     legend_x = x0
     for solver in solvers:
-        body.append(f'<rect x="{legend_x}" y="{height - 40}" width="12" height="3" fill="{COLORS[solver]}"/>')
-        body.append(text(legend_x + 18, height - 35, SHORT_LABELS[solver], 10))
+        body.append(f'<rect x="{legend_x}" y="{height - 30}" width="12" height="3" fill="{COLORS[solver]}"/>')
+        body.append(text(legend_x + 18, height - 25, SHORT_LABELS[solver], 10))
         legend_x += 150
-    body.append(text(x0 + plot_w / 2, height - 57, "MM budget multiplier; bars are paired bootstrap 95% intervals", 11, "middle"))
+    body.append(text(x0 + plot_w / 2, height - 58, "MM budget multiplier; bars are paired bootstrap 95% intervals", 11, "middle"))
     output.write_text(svg_document(width, height, body))
 
 
