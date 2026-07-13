@@ -22,17 +22,27 @@ every generated book. The `-s_k` term is the cash opportunity cost that yields
 the affine-to-log reduced form when `s_k` is optimized out.
 
 QuasiFisher corresponds to the theoretical cash-variable formulation and is an
-independent reference for [[Retained Cash Solver]]. Quantities and minting are
-normalized to whole shares, money to dollars, and the exponential-cone log
-variable is scaled by its MM budget before Clarabel sees the problem. MM asks
-use the same sell-to-complementary-buy reduction as the production solver.
-Non-solved statuses remain visible in reproducible benchmark output.
+independent reference for [[Retained Cash Solver]]. Quantities are normalized
+to whole shares and money to dollars. Each MM uses the canonical perspective
+cone `(t_k, B_k, U_k + s_k) in K_exp`, which represents
+`t_k <= B_k ln((U_k+s_k)/B_k)` without a numerically harmful `1/B_k`
+coefficient. Per-market mint variables are eliminated algebraically, leaving
+one reduced balance row per market; the projection LP still recovers both
+clearing-price duals. MM asks use the same sell-to-complementary-buy reduction
+as production.
+
+Clarabel uses a conservative `0.8` maximum interior-point step. This improved
+development-sweep availability, but it does not turn every ill-scaled generated
+book into a solved instance. Non-solved statuses remain visible with iteration,
+objective-gap, and residual diagnostics; they are never replaced by an LP
+allocation.
 
 ## Key Properties
 - Clarabel interior-point solver (Rust-native, conic)
 - Three modes: Linear, Fisher, QuasiFisher
 - QuasiFisher = `B_k * ln(U_k + s_k) - s_k` (Theorem 5)
 - Cash variable `s_k` buffers the log argument away from zero when cash remains
+- Perspective exponential-cone scaling and reduced balance equations
 - Non-solved Clarabel statuses are surfaced as numerical failures; they are not
   silently replaced by LP allocations
 

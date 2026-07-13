@@ -72,29 +72,29 @@ mod lp {
 }
 
 // ============================================================================
-// EG Solver Benchmarks
+// Retained-cash Solver Benchmarks
 // ============================================================================
 
 #[cfg(feature = "lp")]
-mod eg {
+mod retained_cash {
     use matching_engine::Problem;
     use matching_scenarios::{ScenarioConfig, generate_scenario};
-    use matching_solver::EgSolver;
+    use matching_solver::RetainedCashSolver;
     use std::sync::OnceLock;
 
     #[divan::bench]
-    fn bench_eg_small() {
+    fn bench_retained_cash_small() {
         static PROBLEM: OnceLock<Problem> = OnceLock::new();
         let problem = PROBLEM.get_or_init(|| generate_scenario(ScenarioConfig::small()));
-        let solver = EgSolver::new();
+        let solver = RetainedCashSolver::new();
         let _ = solver.solve(problem);
     }
 
     #[divan::bench]
-    fn bench_eg_medium() {
+    fn bench_retained_cash_medium() {
         static PROBLEM: OnceLock<Problem> = OnceLock::new();
         let problem = PROBLEM.get_or_init(|| generate_scenario(ScenarioConfig::medium()));
-        let solver = EgSolver::new();
+        let solver = RetainedCashSolver::new();
         let _ = solver.solve(problem);
     }
 }

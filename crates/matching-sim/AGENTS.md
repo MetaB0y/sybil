@@ -28,8 +28,6 @@ Run `--help` for the current preset and flag list; do not duplicate clap's compl
 |---|---|
 | `retained-cash` / `rfw` | Certified retained-cash generalized Frank–Wolfe; default |
 | `lp` | HiGHS LP plus budget-linearized re-solve; risk-neutral baseline |
-| `iter-lp` | Legacy alias to retained-cash FW |
-| `eg` | Legacy alias to retained-cash FW |
 | `conic` | Clarabel conic modes |
 | `milp` | Feature-gated SCIP reference |
 | `decomposed` | Per-group coordination experiment |

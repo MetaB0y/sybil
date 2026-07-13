@@ -218,21 +218,13 @@ pub enum SolverChoice {
     #[cfg(feature = "lp")]
     #[value(alias = "rfw")]
     RetainedCash,
-    #[cfg(feature = "lp")]
-    Eg,
     #[cfg(feature = "conic")]
     Conic,
     #[cfg(feature = "lp")]
     #[value(alias = "decomposed")]
     DecomposedLp,
-    #[cfg(feature = "lp")]
-    DecomposedEg,
     #[cfg(feature = "conic")]
     DecomposedConic,
-    #[cfg(feature = "lp")]
-    IterLp,
-    #[cfg(feature = "lp")]
-    DecomposedIterLp,
     All,
 }
 
@@ -268,13 +260,7 @@ impl fmt::Display for SolverChoice {
 pub fn supports_detailed_pipeline(choice: &SolverChoice) -> bool {
     match choice {
         #[cfg(feature = "lp")]
-        SolverChoice::Lp
-        | SolverChoice::RetainedCash
-        | SolverChoice::Eg
-        | SolverChoice::DecomposedLp
-        | SolverChoice::DecomposedEg
-        | SolverChoice::IterLp
-        | SolverChoice::DecomposedIterLp => true,
+        SolverChoice::Lp | SolverChoice::RetainedCash | SolverChoice::DecomposedLp => true,
         #[cfg(feature = "conic")]
         SolverChoice::Conic | SolverChoice::DecomposedConic => true,
         #[cfg(feature = "milp")]
@@ -311,8 +297,6 @@ pub fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
             choices.push(SolverChoice::Conic);
             #[cfg(feature = "lp")]
             choices.push(SolverChoice::DecomposedLp);
-            #[cfg(feature = "lp")]
-            choices.push(SolverChoice::DecomposedEg);
             #[cfg(feature = "conic")]
             choices.push(SolverChoice::DecomposedConic);
             choices
@@ -337,20 +321,12 @@ pub fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> 
         SolverChoice::Lp => "LP".to_string(),
         #[cfg(feature = "lp")]
         SolverChoice::RetainedCash => "Retained-cash FW".to_string(),
-        #[cfg(feature = "lp")]
-        SolverChoice::Eg => "Retained-cash FW (legacy EG alias)".to_string(),
         #[cfg(feature = "conic")]
         SolverChoice::Conic => "Conic (EG)".to_string(),
         #[cfg(feature = "lp")]
         SolverChoice::DecomposedLp => "Decomposed(LP)".to_string(),
-        #[cfg(feature = "lp")]
-        SolverChoice::DecomposedEg => "Decomposed(EG)".to_string(),
         #[cfg(feature = "conic")]
         SolverChoice::DecomposedConic => "Decomposed(Conic)".to_string(),
-        #[cfg(feature = "lp")]
-        SolverChoice::IterLp => "Retained-cash FW (legacy IterLP alias)".to_string(),
-        #[cfg(feature = "lp")]
-        SolverChoice::DecomposedIterLp => "Decomposed(IterLP)".to_string(),
         SolverChoice::All => "All".to_string(),
     }
 }

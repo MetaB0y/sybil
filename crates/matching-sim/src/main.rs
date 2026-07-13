@@ -195,11 +195,6 @@ fn run_detailed_pipeline(
                 let solver = matching_solver::RetainedCashSolver::new();
                 solver.solve(&problem)
             }
-            #[cfg(feature = "lp")]
-            SolverChoice::Eg => {
-                let solver = matching_solver::EgSolver::new();
-                solver.solve(&problem)
-            }
             #[cfg(feature = "conic")]
             SolverChoice::Conic => {
                 let solver = matching_solver::ConicSolver::with_config(conic_config.clone());
@@ -211,12 +206,6 @@ fn run_detailed_pipeline(
                     matching_solver::DecomposedSolver::new(matching_solver::LpSolver::new());
                 solver.solve(&problem)
             }
-            #[cfg(feature = "lp")]
-            SolverChoice::DecomposedEg => {
-                let solver =
-                    matching_solver::DecomposedSolver::new(matching_solver::EgSolver::new());
-                solver.solve(&problem)
-            }
             #[cfg(feature = "conic")]
             SolverChoice::DecomposedConic => {
                 let solver = matching_solver::DecomposedSolver::new(
@@ -224,18 +213,7 @@ fn run_detailed_pipeline(
                 );
                 solver.solve(&problem)
             }
-            #[cfg(feature = "lp")]
-            SolverChoice::IterLp => {
-                let solver = matching_solver::IterLpSolver::new();
-                solver.solve(&problem)
-            }
-            #[cfg(feature = "lp")]
-            SolverChoice::DecomposedIterLp => {
-                let solver =
-                    matching_solver::DecomposedSolver::new(matching_solver::IterLpSolver::new());
-                solver.solve(&problem)
-            }
-            _ => unreachable!("only LP/EG/Conic/IterLP/Decomposed reach run_detailed_pipeline"),
+            _ => unreachable!("only LP/retained-cash/conic/decomposed reach run_detailed_pipeline"),
         };
 
         if verbose {
@@ -244,19 +222,11 @@ fn run_detailed_pipeline(
                     #[cfg(feature = "lp")]
                     SolverChoice::RetainedCash => "Retained-cash FW Solver",
                     #[cfg(feature = "lp")]
-                    SolverChoice::Eg => "EG (Fisher) Solver",
-                    #[cfg(feature = "lp")]
                     SolverChoice::DecomposedLp => "Decomposed(LP) Solver",
-                    #[cfg(feature = "lp")]
-                    SolverChoice::DecomposedEg => "Decomposed(EG) Solver",
                     #[cfg(feature = "conic")]
                     SolverChoice::DecomposedConic => "Decomposed(Conic) Solver",
                     #[cfg(feature = "conic")]
                     SolverChoice::Conic => "Conic (EG) Solver",
-                    #[cfg(feature = "lp")]
-                    SolverChoice::IterLp => "IterLP Solver",
-                    #[cfg(feature = "lp")]
-                    SolverChoice::DecomposedIterLp => "Decomposed(IterLP) Solver",
                     _ => "LP Solver",
                 };
                 println!("{}:", solver_label);
@@ -422,13 +392,6 @@ fn run_solver_with_witness(
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
         }
-        #[cfg(feature = "lp")]
-        SolverChoice::Eg => {
-            let solver = matching_solver::EgSolver::new();
-            let pipeline_result = solver.solve(problem);
-            let witness = witness_from_pipeline(problem, &pipeline_result);
-            (pipeline_result.result, witness)
-        }
         #[cfg(feature = "conic")]
         SolverChoice::Conic => {
             let solver = matching_solver::ConicSolver::with_config(conic_config.clone());
@@ -443,33 +406,11 @@ fn run_solver_with_witness(
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
         }
-        #[cfg(feature = "lp")]
-        SolverChoice::DecomposedEg => {
-            let solver = matching_solver::DecomposedSolver::new(matching_solver::EgSolver::new());
-            let pipeline_result = solver.solve(problem);
-            let witness = witness_from_pipeline(problem, &pipeline_result);
-            (pipeline_result.result, witness)
-        }
         #[cfg(feature = "conic")]
         SolverChoice::DecomposedConic => {
             let solver = matching_solver::DecomposedSolver::new(
                 matching_solver::ConicSolver::with_config(conic_config.clone()),
             );
-            let pipeline_result = solver.solve(problem);
-            let witness = witness_from_pipeline(problem, &pipeline_result);
-            (pipeline_result.result, witness)
-        }
-        #[cfg(feature = "lp")]
-        SolverChoice::IterLp => {
-            let solver = matching_solver::IterLpSolver::new();
-            let pipeline_result = solver.solve(problem);
-            let witness = witness_from_pipeline(problem, &pipeline_result);
-            (pipeline_result.result, witness)
-        }
-        #[cfg(feature = "lp")]
-        SolverChoice::DecomposedIterLp => {
-            let solver =
-                matching_solver::DecomposedSolver::new(matching_solver::IterLpSolver::new());
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)

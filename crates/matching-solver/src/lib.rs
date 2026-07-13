@@ -2,7 +2,7 @@
 //!
 //! Solves the welfare-maximizing order matching problem via convex programs:
 //! - **LP** (`lp_solver`): Linear program via HiGHS with MM budget shading
-//! - **EG** (`eg_solver`): Eisenberg-Gale / Fisher market formulation
+//! - **Retained cash** (`retained_cash_solver`): certified generalized Frank--Wolfe
 //! - **Conic** (`conic_solver`): Conic EG via Clarabel
 //! - **MILP** (`milp`): Mixed-integer via SCIP (exact with timeout)
 
@@ -17,14 +17,8 @@ pub mod milp;
 #[cfg(feature = "lp")]
 pub mod lp_solver;
 
-#[cfg(feature = "lp")]
-pub mod eg_solver;
-
 #[cfg(feature = "conic")]
 pub mod conic_solver;
-
-#[cfg(feature = "lp")]
-pub mod iterative_lp_solver;
 
 #[cfg(feature = "lp")]
 pub mod retained_cash_solver;
@@ -53,12 +47,6 @@ pub use milp::{MilpConfig, MilpResult, MilpSolver, MmBudgetMode, SolveStatus};
 
 #[cfg(feature = "lp")]
 pub use lp_solver::{LpConfig, LpSolver};
-
-#[cfg(feature = "lp")]
-pub use eg_solver::{EgConfig, EgSolver};
-
-#[cfg(feature = "lp")]
-pub use iterative_lp_solver::{IterLpConfig, IterLpSolver};
 
 #[cfg(feature = "lp")]
 pub use retained_cash_solver::{

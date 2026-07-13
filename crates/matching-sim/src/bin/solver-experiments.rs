@@ -21,10 +21,10 @@ use matching_scenarios::{
     FlashLiquidityConfig, ScenarioConfig, generate_flash_liquidity_scenario, generate_scenario,
 };
 use matching_solver::{
-    ConicConfig, ConicSolver, DecomposedSolver, EgConfig, EgSolver, IterLpConfig, IterLpSolver,
-    LpConfig, LpSolver, MilpConfig, MilpSolver, MmBudgetMode, ObjectiveMode, PipelineResult,
-    RetainedCashConfig, RetainedCashSolver, SolveStatus, TerminationStatus,
-    retained_cash_objective_for_fills, retained_cash_welfare_gap_bound_for_fills,
+    ConicConfig, ConicSolver, DecomposedSolver, LpConfig, LpSolver, MilpConfig, MilpSolver,
+    MmBudgetMode, ObjectiveMode, PipelineResult, RetainedCashConfig, RetainedCashSolver,
+    SolveStatus, TerminationStatus, retained_cash_objective_for_fills,
+    retained_cash_welfare_gap_bound_for_fills,
 };
 use serde::{Deserialize, Serialize};
 use sybil_verifier::verify_match;
@@ -34,7 +34,7 @@ use witness::{witness_from_milp, witness_from_pipeline};
 #[derive(Parser, Debug)]
 #[command(about = "Run the preregistered solver benchmark protocol without hidden fallbacks")]
 struct Args {
-    #[arg(long, default_value = "benchmarks/solver/protocol-v1.json")]
+    #[arg(long, default_value = "benchmarks/solver/protocol-v2.json")]
     protocol: PathBuf,
 
     #[arg(long)]
@@ -82,8 +82,6 @@ struct SolverSpec {
     inner_max_iterations: Option<usize>,
     tolerance: Option<f64>,
     inner_tolerance: Option<f64>,
-    q_tolerance: Option<f64>,
-    damping: Option<f64>,
     line_search_steps: Option<usize>,
     time_limit_seconds: Option<f64>,
     gap_tolerance: Option<f64>,
@@ -808,26 +806,6 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
             .solve(problem),
             problem,
         ),
-        "iter-lp" => pipeline_output(
-            IterLpSolver::with_config(IterLpConfig {
-                max_iterations: required_usize(solver, "max_iterations"),
-                mu_tol: required_f64(solver, "tolerance"),
-                damping: required_f64(solver, "damping"),
-            })
-            .solve(problem),
-            problem,
-        ),
-        "eg" => pipeline_output(
-            EgSolver::with_config(EgConfig {
-                max_fw_iterations: required_usize(solver, "max_iterations"),
-                convergence_tol: required_f64(solver, "tolerance"),
-                q_stability_tol: required_f64(solver, "q_tolerance"),
-                line_search_steps: required_usize(solver, "line_search_steps"),
-                max_mm_slp_iterations: 1,
-            })
-            .solve(problem),
-            problem,
-        ),
         "conic-quasi" => pipeline_output(
             conic_solver(solver, ObjectiveMode::QuasiFisher).solve(problem),
             problem,
@@ -1209,8 +1187,6 @@ fn required_f64(spec: &SolverSpec, field: &str) -> f64 {
     match field {
         "tolerance" => spec.tolerance,
         "inner_tolerance" => spec.inner_tolerance,
-        "q_tolerance" => spec.q_tolerance,
-        "damping" => spec.damping,
         "time_limit_seconds" => spec.time_limit_seconds,
         "gap_tolerance" => spec.gap_tolerance,
         "absolute_tolerance" => spec.absolute_tolerance,

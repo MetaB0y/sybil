@@ -29,7 +29,9 @@ empirical claims, not for criterion-style microbenchmarks or a single ad-hoc
 
 ## Run
 
-Protocol v1 is the retained historical evaluation. Protocol v2 is the current
+Protocol v1 is the retained historical evaluation and must be reproduced from
+the frozen source revision recorded beside its results; its removed legacy
+solver names are intentionally unavailable on current `main`. Protocol v2 is the current
 two-sided flash-liquidity evaluation; its full-run seeds start at 50000 and are
 kept separate from development seeds below 30000.
 

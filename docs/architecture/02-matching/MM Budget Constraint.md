@@ -35,5 +35,5 @@ oracle. [[LP Solver|LP-SLP]] remains a one-pass budget-linearization baseline;
 - [[The LP Core]] — the easy problem without budget constraints
 - [[LP Solver]] — iterative SLP shading approach
 - [[Retained Cash Solver]] — production reduced-form algorithm and certificate
-- [[EG Solver]] — compatibility status of the historical EG entry point
+- [[EG Solver]] — removal status of the historical EG entry point
 - [[Solver Landscape]] — how each solver handles budgets differently

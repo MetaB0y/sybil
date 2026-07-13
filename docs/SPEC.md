@@ -70,15 +70,12 @@ One batch is a `Problem`: markets, supported orders, MM constraints, and market 
 
 Clearing prices are dual variables of the balance constraints. Complementary slackness gives limit compliance; minting stationarity gives YES/NO and group price coherence. The verifier checks the landed integer result rather than trusting dual theory or floating output.
 
-Seven solver types share the `Solver` interface; two old names are explicit
-compatibility aliases:
+Five solver types share the `Solver` interface:
 
 | Solver | Role |
 |---|---|
 | `RetainedCashSolver` | Production default; certified generalized Frank--Wolfe on the retained-cash objective |
 | `LpSolver` | Low-latency risk-neutral baseline; HiGHS plus budget-linearized re-solve |
-| `IterLpSolver` | Compatibility alias to `RetainedCashSolver` |
-| `EgSolver` | Compatibility alias to `RetainedCashSolver` |
 | `ConicSolver` | Independent Clarabel retained-cash reference and no-cash ablation |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |

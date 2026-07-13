@@ -33,7 +33,7 @@ update Linear issues.
 sybil/
 ├── crates/                        # Rust workspace
 │   ├── matching-engine/           # Core types: orders, fills, markets, payoff vectors, MM constraints
-│   ├── matching-solver/           # Solver implementations (LP, EG, Conic, MILP, Decomposed)
+│   ├── matching-solver/           # Solver implementations (retained-cash, LP, Conic, MILP, Decomposed)
 │   ├── matching-scenarios/        # Test scenario generators (order mixes, spreads)
 │   ├── matching-sim/              # CLI simulation tool with presets and solver comparison
 │   ├── matching-sequencer/        # Multi-batch block sequencer (production lib; linked by sybil-api)
@@ -146,8 +146,6 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 |--------|------|---------|-------------|
 | **RetainedCashSolver** | `retained_cash_solver.rs` | `lp` | Certified generalized Frank--Wolfe on the affine-to-log retained-cash objective. **Production default.** |
 | **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + single-pass SLP MM budget shading; low-latency baseline. |
-| **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Explicit compatibility alias to RetainedCashSolver. |
-| **EgSolver** | `eg_solver.rs` | `lp` | Explicit compatibility alias to RetainedCashSolver; no-cash ablation lives in Conic Fisher mode. |
 | **ConicSolver** | `conic_solver.rs` | `conic` | Independent exponential-cone retained-cash reference via Clarabel. |
 | **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |
 | **DecomposedSolver** | `decomposed.rs` | `lp` | Per-market-group decomposition with mirror descent budget coordination. |
@@ -177,7 +175,7 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. I
 | Topic | Notes |
 |-------|-------|
 | Core model | Payoff Vectors, Binary Markets and Market Groups, Nanos and Integer Arithmetic, Order Types |
-| Solvers | Solver Landscape, Retained Cash Solver, LP Solver, EG Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
+| Solvers | Solver Landscape, Retained Cash Solver, LP Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
 | Sequencer | Block Lifecycle, Order Admission, Settlement, Pending Orders and TTL |
 | API | REST API, SSE Block Stream, P256 Authentication |
 | Oracle | Market Resolution |

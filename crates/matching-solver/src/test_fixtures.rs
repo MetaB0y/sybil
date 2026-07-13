@@ -1,11 +1,11 @@
 //! Shared `Problem` builders and assertion helpers for solver unit tests.
 //!
-//! The LP-family solvers (LP, EG, IterLP, Conic) each exercised the same core
+//! The LP-family solvers (LP, retained-cash, and Conic) exercise the same core
 //! scenarios — single-market crossing, minting, group minting, unprofitable
 //! trades, MM budgets — with byte-identical `Problem` builders. Those builders
 //! live here so every solver's `#[cfg(test)]` module can reuse them. Genuinely
-//! unique scenarios (Conic fisher-mode, IterLP tight-budget/price-shift, budget
-//! sweeps) stay next to the solver they characterize.
+//! unique scenarios (Conic Fisher mode and retained-cash budget sweeps) stay
+//! next to the solver they characterize.
 //!
 //! Gated on `feature = "lp"` because every LP-family solver requires it.
 

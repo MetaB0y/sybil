@@ -16,7 +16,7 @@ use std::time::Instant;
 use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{
-    SolverContext, build_and_solve_lp, build_solver_context, project_and_finalize, welfare_weights,
+    ReusableLpOracle, SolverContext, build_solver_context, project_and_finalize, welfare_weights,
 };
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
@@ -102,25 +102,33 @@ impl RetainedCashSolver {
         let mut converged = false;
         let mut oracle_failed = false;
 
+        let Some(mut oracle) = ReusableLpOracle::new(
+            &problem.orders,
+            &ctx.markets,
+            &ctx.market_to_group,
+            ctx.num_groups,
+            &[],
+        ) else {
+            return PipelineResult::failure(
+                "retained-cash-fw",
+                TerminationStatus::NumericalFailure,
+                "failed to construct the HiGHS oracle",
+                start.elapsed().as_secs_f64(),
+            );
+        };
+
         for iteration in 0..=self.config.max_iterations {
             let u_q = model.utilities(&q);
             let alpha_q = model.pacing_factors(&u_q);
             let oracle_objective = model.oracle_coefficients_from_alpha(&alpha_q);
 
-            let Some(oracle) = build_and_solve_lp(
-                &problem.orders,
-                &ctx.markets,
-                &ctx.market_to_group,
-                ctx.num_groups,
-                &oracle_objective,
-                &[],
-            ) else {
+            let Some(oracle_solution) = oracle.solve(&oracle_objective) else {
                 oracle_failed = true;
                 break;
             };
             oracle_calls += 1;
 
-            let s = &oracle.q_values;
+            let s = &oracle_solution.q_values;
             let g_q = model.linear_component(&q);
             let g_s = model.linear_component(s);
             let gradient_direction = model.mm_gradient_direction(&q, s, &alpha_q);

@@ -71,8 +71,8 @@ pub(crate) fn filter_supported_problem<'a>(
     }
 }
 
-/// Unified solver trait. All solvers (retained-cash FW, LP, EG/IterLP aliases,
-/// Conic, MILP, and Decomposed)
+/// Unified solver trait. All solvers (retained-cash FW, LP, Conic, MILP, and
+/// Decomposed)
 /// implement this trait, making them injectable and interchangeable.
 ///
 /// For solvers with richer return types (e.g., `MilpSolver::solve_with_status`),

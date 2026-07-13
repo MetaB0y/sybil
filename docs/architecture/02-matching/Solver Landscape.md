@@ -9,25 +9,22 @@ last_verified: 2026-07-13
 # Solver landscape
 
 > [!summary] In one paragraph
-> Seven solver types implement the same search interface. The supported matching core is a fast LP; MM capital introduces price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] is the production default and directly optimizes the paper's convex retained-cash objective with a certified generalized Frank--Wolfe gap. Every solver lands integers and relies on the same external verifier and welfare definition.
+> Five solver types implement the same search interface. The supported matching core is a fast LP; MM capital introduces price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] is the production default and directly optimizes the paper's convex retained-cash objective with a certified generalized Frank--Wolfe gap. Every solver lands integers and relies on the same external verifier and welfare definition.
 
 | Solver | Feature | MM-budget approach | Role |
 |---|---|---|---|
 | [[Retained Cash Solver|`RetainedCashSolver`]] | `lp` | Generalized Frank--Wolfe on affine-to-log MM utility | Production default |
 | [[LP Solver|`LpSolver`]] | `lp` | Solve, linearize budgets at discovered prices, re-solve once by default | Low-latency baseline |
-| `IterLpSolver` | `lp` | Explicit alias to `RetainedCashSolver` | Compatibility only |
-| [[EG Solver|`EgSolver`]] | `lp` | Explicit alias to `RetainedCashSolver` | Compatibility only |
 | [[Conic Solver|`ConicSolver`]] | `conic` | Clarabel exponential-cone formulation, then projection LP | Interior-point reference |
 | [[MILP Solver|`MilpSolver`]] | `milp` | SCIP MIQCQP or McCormick mode with timeout | Exact/reference route when optimal |
 | [[Decomposed Solver|`DecomposedSolver<S>`]] | `lp` | Component solves with proportional-response MM budget coordination | Scaling experiment |
 
-The removed IterLP damped fixed point and the old forced-step EG implementation
-did not have the claimed convergence semantics. Their public names now preserve
-source compatibility while routing explicitly to `RetainedCashSolver`; their
-diagnostics retain the actual `retained-cash-fw` algorithm name. `ConicSolver`
-in QuasiFisher mode is an independent exponential-cone formulation of the same
-objective. Its backend failures remain failures rather than being replaced by
-another solver.
+The removed IterLP damped fixed point and forced-step EG implementation did not
+have the claimed convergence semantics. Their public types and CLI variants
+have been removed; historical protocol v1 remains reproducible at its frozen
+source revision. `ConicSolver` in QuasiFisher mode is an independent
+exponential-cone formulation of the same objective. Its backend failures remain
+failures rather than being replaced by another solver.
 
 ```mermaid
 flowchart LR

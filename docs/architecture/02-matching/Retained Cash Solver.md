@@ -27,6 +27,12 @@ complete-set mint/burn cost stay inside the oracle. Exact concave line search
 updates the allocation, and the generalized Frank--Wolfe gap supplies the
 stopping certificate.
 
+The feasible LP matrix is built once per batch. Objective costs change as the
+pacing factors move, while HiGHS re-optimizes from the previous basis. This is
+an implementation optimization only: it leaves the oracle problem and
+Frank--Wolfe certificate unchanged, while avoiding repeated sparse-model setup
+and cold simplex starts in the latency tail.
+
 ## MM buys and sells
 
 The paper reduces an MM sell of YES at `L` to a buy of NO at `1-L`. The solver

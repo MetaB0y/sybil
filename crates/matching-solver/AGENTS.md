@@ -18,8 +18,6 @@ model harder variants.
 |---|---|
 | `RetainedCashSolver` | Production default; certified generalized Frank–Wolfe with a HiGHS oracle |
 | `LpSolver` | Low-latency risk-neutral baseline plus budget-linearized re-solve |
-| `IterLpSolver` | Compatibility alias to `RetainedCashSolver` |
-| `EgSolver` | Compatibility alias to `RetainedCashSolver` |
 | `ConicSolver` | Independent Clarabel Linear/Fisher/QuasiFisher reference |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |

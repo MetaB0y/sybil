@@ -2,11 +2,14 @@
 tags: [solver, crate]
 layer: solver
 crate: matching-solver
-status: current
+status: deprecated
 last_verified: 2026-07-13
 ---
 
-`EgSolver` is now an explicit compatibility alias to [[Retained Cash Solver|`RetainedCashSolver`]]. The previous implementation used a forced-step, no-cash Frank--Wolfe variant and did not provide the convergence semantics its name suggested.
+`EgSolver` has been removed. The previous implementation used a forced-step,
+no-cash Frank--Wolfe variant and did not provide the convergence semantics its
+name suggested; a temporary compatibility alias was also removed once current
+callers migrated to [[Retained Cash Solver|`RetainedCashSolver`]].
 
 The retained-cash solver implements the quasilinear Fisher interpretation used
 by the paper: MM utility is affine while its budget is slack and logarithmic
@@ -14,16 +17,17 @@ after capital binds. The no-cash `B_k ln U_k` objective remains available only
 as `ConicSolver`'s `Fisher` ablation, where forced spending is intentional and
 visible.
 
-Calls through the old type report `retained-cash-fw` in diagnostics and state
-that the legacy name is an alias. There is no silent cross-solver fallback.
+Historical experiments that name the old type remain reproducible from their
+recorded frozen source revisions. Current code has no silent alias or
+cross-solver fallback.
 
 ## Key Properties
-- Compatibility surface only
+- Removed historical surface
 - Actual implementation and certificate live in [[Retained Cash Solver]]
 - No-cash Fisher ablation lives in [[Conic Solver]]
 
 ## Where This Lives
-> `crates/matching-solver/src/eg_solver.rs` — explicit compatibility wrapper
+> `benchmarks/solver/protocol-v1.json` — frozen historical experiment contract
 
 ## See Also
 - [[Solver Landscape]] — comparison with other solvers

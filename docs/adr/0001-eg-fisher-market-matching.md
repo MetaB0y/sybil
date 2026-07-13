@@ -34,7 +34,9 @@ solving one joint program. The production clearer is `RetainedCashSolver`
 (`matching-solver`, `features=["lp"]`), a generalized Frank--Wolfe solve of the
 quasilinear retained-cash program with a certified continuous gap. LP-SLP is the
 low-latency risk-neutral baseline, Conic QuasiFisher is the independent convex
-reference, and the EG/IterLP type names are compatibility aliases.
+reference. The former `EgSolver` and `IterLpSolver` names were removed because
+they selected the same retained-cash implementation and obscured which
+algorithm actually ran.
 
 Rationale and the LMSR-equivalence proof: the canonical math papers in
 `~/github/prediction-markets-are-fisher-markets/` — `paper.typ`

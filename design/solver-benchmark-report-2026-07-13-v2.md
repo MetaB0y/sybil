@@ -6,6 +6,12 @@ last_verified: 2026-07-13
 
 # Retained-cash solver evaluation: 2026-07-13 v2
 
+> **Post-report engineering note:** current `main` reuses the HiGHS oracle
+> model/basis, improves the Clarabel formulation, and removes the temporary
+> `EgSolver`/`IterLpSolver` aliases. These changes do not rewrite this frozen
+> run. See
+> [`solver-engineering-followup-2026-07-13.md`](solver-engineering-followup-2026-07-13.md).
+
 ## Decision
 
 Use `RetainedCashSolver` as the production default for batches containing

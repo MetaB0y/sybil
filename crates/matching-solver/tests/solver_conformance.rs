@@ -964,25 +964,6 @@ mod conformance {
 
     #[cfg(feature = "lp")]
     #[test]
-    fn eg_returned_results_conform_and_failures_are_explicit() {
-        // EG is a research solver: a numerical/post-processing rejection is a
-        // measured availability outcome, while every returned candidate must
-        // satisfy the same settlement and verifier contract as production.
-        let solver = matching_solver::EgSolver::new();
-        run_solver_conformance(&solver, AvailabilityPolicy::AllowExplicitResearchFailure);
-    }
-
-    #[cfg(feature = "lp")]
-    #[test]
-    fn iter_lp_solver_conformance() {
-        // Covers the SYB-202 regression where post-rounding MM capital
-        // trimming under-trimmed by one fixed-point unit.
-        let solver = matching_solver::IterLpSolver::new();
-        run_solver_conformance(&solver, AvailabilityPolicy::RequireCandidate);
-    }
-
-    #[cfg(feature = "lp")]
-    #[test]
     fn decomposed_lp_solver_conformance() {
         // DecomposedSolver is an exported Solver implementation under `lp`.
         // The shared generator intentionally includes multi-market batches and

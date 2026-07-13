@@ -58,8 +58,6 @@ impl BlockSequencer {
     /// - `LpSolver` remains the low-latency risk-neutral baseline. Its SLP MM
     ///   budget rows are a capped fixed-point heuristic, so it is no longer the
     ///   default when shared capital can bind after prices move.
-    /// - `IterLpSolver` and `EgSolver` remain explicit compatibility aliases to
-    ///   this implementation; they do not preserve the old heuristic behavior.
     /// - `ConicSolver` in QuasiFisher mode solves the same convex objective by
     ///   exponential cones and is retained as an independent reference.
     /// - A configured Frank--Wolfe cap can return a valid landed allocation
