@@ -9,6 +9,8 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 use utoipa::OpenApi;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes as openapi_routes;
 
 use crate::arena;
 use crate::routes;
@@ -20,83 +22,6 @@ use crate::util::now_ms;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(
-        routes::system::health,
-        routes::system::state_root,
-        routes::system::attestation,
-        routes::system::pause,
-        routes::system::resume,
-        routes::proofs::get_state_proof,
-        routes::da::get_da_manifest,
-        routes::da::get_da_payload,
-        routes::accounts::create_account,
-        routes::accounts::fund_account,
-        routes::accounts::get_account,
-        routes::accounts::get_keyop_state,
-        routes::accounts::register_key,
-        routes::accounts::register_signed_key,
-        routes::accounts::set_profile,
-        routes::accounts::list_account_keys,
-        routes::accounts::revoke_key,
-        routes::accounts::list_api_keys,
-        routes::accounts::create_api_key,
-        routes::accounts::revoke_api_key,
-        routes::accounts::get_private_summary,
-        routes::accounts::get_portfolio,
-        routes::accounts::get_account_fills,
-        routes::accounts::get_equity,
-        routes::accounts::get_account_history,
-        routes::bridge::status,
-        routes::bridge::account_key,
-        routes::bridge::list_account_withdrawals,
-        routes::bridge::account_by_key,
-        routes::bridge::submit_l1_deposit,
-        routes::bridge::create_withdrawal,
-        routes::bridge::create_signed_withdrawal,
-        routes::bridge::submit_l1_withdrawal_event,
-        routes::bridge::observe_l1_height,
-        routes::markets::list_markets,
-        routes::markets::list_markets_summary,
-        routes::markets::get_market,
-        routes::markets::create_market,
-        routes::markets::list_market_groups,
-        routes::markets::create_market_group,
-        routes::markets::extend_market_group,
-        routes::markets::get_prices,
-        routes::markets::resolve_market,
-        routes::markets::get_resolution,
-        routes::markets::get_price_history,
-        routes::markets::get_price_candles,
-        routes::markets::search_markets,
-        routes::markets::set_reference_prices,
-        routes::markets::set_market_metadata,
-        routes::feeds::register_feed,
-        routes::feeds::list_feeds,
-        routes::orders::submit_orders,
-        routes::orders::submit_signed_order,
-        routes::orders::cancel_signed_order,
-        routes::orders::get_account_orders,
-        routes::orders::get_market_orderbook,
-        routes::orders::get_all_pending_orders,
-        routes::blocks::get_recent_blocks,
-        routes::blocks::get_latest_block,
-        routes::blocks::get_block_by_height,
-        routes::blocks::stream_blocks,
-        routes::blocks::ws_blocks,
-        routes::blocks::ws_service_blocks,
-        routes::aggregates::get_activity_overview,
-        routes::aggregates::get_open_batch,
-        routes::aggregates::get_event_traders,
-        routes::events::get_event_raw,
-        routes::events::put_event_raw,
-        routes::bots::get_bot_decisions,
-        routes::bots::get_bot_equity_series,
-        routes::leaderboard::get_leaderboard,
-        routes::auto_resolution::submit_auto_resolution,
-        routes::auto_resolution::list_auto_resolutions,
-        routes::auto_resolution::approve_auto_resolution,
-        routes::auto_resolution::reject_auto_resolution,
-    ),
     components(schemas(
         CreateAccountRequest,
         FundAccountRequest,
@@ -242,10 +167,6 @@ impl utoipa::Modify for BearerReadAddon {
             ),
         );
     }
-}
-
-async fn openapi_json() -> impl IntoResponse {
-    Json(ApiDoc::openapi())
 }
 
 async fn prometheus_metrics(State(state): State<AppState>) -> impl IntoResponse {
@@ -838,323 +759,117 @@ pub const DEV_ROUTE_TABLE: &[RouteMount] = &[
     },
 ];
 
-fn public_routes(state: &AppState) -> Router<AppState> {
-    Router::new()
-        // OpenAPI spec
-        .route("/openapi.json", axum::routing::get(openapi_json))
-        // Metrics (outside http_metrics middleware to avoid self-scraping noise)
+fn public_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::default()
         .route("/metrics", axum::routing::get(prometheus_metrics))
-        // Native arena / bot analytics
-        .route(
-            "/v1/bots/decisions",
-            axum::routing::get(routes::bots::get_bot_decisions),
-        )
-        .route(
-            "/v1/bots/equity-series",
-            axum::routing::get(routes::bots::get_bot_equity_series),
-        )
-        // Trader leaderboard (SYB-59)
-        .route(
-            "/v1/leaderboard",
-            axum::routing::get(routes::leaderboard::get_leaderboard),
-        )
-        // System
-        .route("/v1/health", axum::routing::get(routes::system::health))
-        .route(
-            "/v1/state-root",
-            axum::routing::get(routes::system::state_root),
-        )
-        .route(
-            "/v1/da/{height}/manifest",
-            axum::routing::get(routes::da::get_da_manifest),
-        )
-        // Accounts
-        // Self-service onboarding is PUBLIC only in its atomic form: a fresh
-        // browser creates a demo-capped account with `initial_key` in the same
-        // request. The deprecated bare body and unsigned first-key endpoint
-        // enforce service auth inside their handlers.
-        .route(
-            "/v1/accounts",
-            axum::routing::post(routes::accounts::create_account),
-        )
-        .route(
-            "/v1/accounts/{id}",
-            axum::routing::get(routes::accounts::get_account),
-        )
-        .route(
-            "/v1/accounts/{id}/keyop-state",
-            axum::routing::get(routes::accounts::get_keyop_state),
-        )
-        .route(
-            "/v1/accounts/{id}/keys",
-            axum::routing::get(routes::accounts::list_account_keys).merge(
-                axum::routing::post(routes::accounts::register_key)
-                    .route_layer(middleware::from_fn_with_state(state.clone(), service_auth)),
-            ),
-        )
-        .route(
-            "/v1/accounts/{id}/keys/register",
-            axum::routing::post(routes::accounts::register_signed_key),
-        )
-        .route(
-            "/v1/accounts/{id}/keys/revoke",
-            axum::routing::post(routes::accounts::revoke_key),
-        )
-        .route(
-            "/v1/accounts/{id}/profile",
-            axum::routing::post(routes::accounts::set_profile),
-        )
-        .route(
-            "/v1/accounts/{id}/api-keys",
-            axum::routing::get(routes::accounts::list_api_keys)
-                .post(routes::accounts::create_api_key),
-        )
-        .route(
-            "/v1/accounts/{id}/api-keys/revoke",
-            axum::routing::post(routes::accounts::revoke_api_key),
-        )
-        .route(
-            "/v1/accounts/{id}/private-summary",
-            axum::routing::get(routes::accounts::get_private_summary),
-        )
-        .route(
-            "/v1/accounts/{id}/portfolio",
-            axum::routing::get(routes::accounts::get_portfolio),
-        )
-        .route(
-            "/v1/accounts/{id}/fills",
-            axum::routing::get(routes::accounts::get_account_fills),
-        )
-        .route(
-            "/v1/accounts/{id}/equity",
-            axum::routing::get(routes::accounts::get_equity),
-        )
-        .route(
-            "/v1/accounts/{id}/events",
-            axum::routing::get(routes::accounts::get_account_history),
-        )
-        .route(
-            "/v1/accounts/{id}/bridge-key",
-            axum::routing::get(routes::bridge::account_key),
-        )
-        .route(
-            "/v1/accounts/{id}/withdrawals",
-            axum::routing::get(routes::bridge::list_account_withdrawals),
-        )
-        .route(
-            "/v1/accounts/{id}/orders",
-            axum::routing::get(routes::orders::get_account_orders),
-        )
-        // Bridge sidecar
-        .route(
-            "/v1/bridge/status",
-            axum::routing::get(routes::bridge::status),
-        )
-        // Markets — search & summary MUST come before {id} to avoid path param capture
-        .route(
-            "/v1/markets/search",
-            axum::routing::get(routes::markets::search_markets),
-        )
-        .route(
-            "/v1/markets/summary",
-            axum::routing::get(routes::markets::list_markets_summary),
-        )
-        .route(
-            "/v1/markets",
-            axum::routing::get(routes::markets::list_markets),
-        )
-        .route(
-            "/v1/markets/groups",
-            axum::routing::get(routes::markets::list_market_groups),
-        )
-        .route(
-            "/v1/markets/prices",
-            axum::routing::get(routes::markets::get_prices),
-        )
-        .route(
-            "/v1/markets/{id}",
-            axum::routing::get(routes::markets::get_market),
-        )
-        .route(
-            "/v1/markets/{id}/resolution",
-            axum::routing::get(routes::markets::get_resolution),
-        )
-        .route(
-            "/v1/markets/{id}/prices/history",
-            axum::routing::get(routes::markets::get_price_history),
-        )
-        .route(
-            "/v1/markets/{id}/prices/candles",
-            axum::routing::get(routes::markets::get_price_candles),
-        )
-        .route(
-            "/v1/markets/{id}/open-batch",
-            axum::routing::get(routes::aggregates::get_open_batch),
-        )
-        .route(
-            "/v1/activity/overview",
-            axum::routing::get(routes::aggregates::get_activity_overview),
-        )
-        .route(
-            "/v1/events/{event_id}/traders",
-            axum::routing::get(routes::aggregates::get_event_traders),
-        )
-        .route(
-            "/v1/events/{event_id}/raw",
-            axum::routing::get(routes::events::get_event_raw),
-        )
-        // Feeds
-        .route("/v1/feeds", axum::routing::get(routes::feeds::list_feeds))
-        // Signed trader orders remain public; authorization is carried by the
-        // P256/WebAuthn payload rather than the service bearer token.
-        .route(
-            "/v1/orders/signed",
-            axum::routing::post(routes::orders::submit_signed_order),
-        )
-        .route(
-            "/v1/orders/cancel/signed",
-            axum::routing::post(routes::orders::cancel_signed_order),
-        )
-        // Blocks
-        .route(
-            "/v1/blocks",
-            axum::routing::get(routes::blocks::get_recent_blocks),
-        )
-        .route(
-            "/v1/blocks/latest",
-            axum::routing::get(routes::blocks::get_latest_block),
-        )
-        .route(
-            "/v1/blocks/stream",
-            axum::routing::get(routes::blocks::stream_blocks),
-        )
-        .route(
-            "/v2/blocks/ws",
-            axum::routing::get(routes::blocks::ws_blocks),
-        )
-        .route(
-            "/v1/blocks/{height}",
-            axum::routing::get(routes::blocks::get_block_by_height),
-        )
+        .routes(openapi_routes!(routes::bots::get_bot_decisions))
+        .routes(openapi_routes!(routes::bots::get_bot_equity_series))
+        .routes(openapi_routes!(routes::leaderboard::get_leaderboard))
+        .routes(openapi_routes!(routes::system::health))
+        .routes(openapi_routes!(routes::system::state_root))
+        .routes(openapi_routes!(routes::da::get_da_manifest))
+        // Self-service onboarding is public only in its atomic form. The
+        // deprecated unsigned forms enforce service auth in their handlers.
+        .routes(openapi_routes!(routes::accounts::create_account))
+        .routes(openapi_routes!(routes::accounts::get_account))
+        .routes(openapi_routes!(routes::accounts::get_keyop_state))
+        .routes(openapi_routes!(routes::accounts::list_account_keys))
+        .routes(openapi_routes!(routes::accounts::register_signed_key))
+        .routes(openapi_routes!(routes::accounts::revoke_key))
+        .routes(openapi_routes!(routes::accounts::set_profile))
+        .routes(openapi_routes!(
+            routes::accounts::list_api_keys,
+            routes::accounts::create_api_key,
+        ))
+        .routes(openapi_routes!(routes::accounts::revoke_api_key))
+        .routes(openapi_routes!(routes::accounts::get_private_summary))
+        .routes(openapi_routes!(routes::accounts::get_portfolio))
+        .routes(openapi_routes!(routes::accounts::get_account_fills))
+        .routes(openapi_routes!(routes::accounts::get_equity))
+        .routes(openapi_routes!(routes::accounts::get_account_history))
+        .routes(openapi_routes!(routes::bridge::account_key))
+        .routes(openapi_routes!(routes::bridge::list_account_withdrawals))
+        .routes(openapi_routes!(routes::orders::get_account_orders))
+        .routes(openapi_routes!(routes::bridge::status))
+        .routes(openapi_routes!(routes::markets::search_markets))
+        .routes(openapi_routes!(routes::markets::list_markets_summary))
+        .routes(openapi_routes!(routes::markets::list_markets))
+        .routes(openapi_routes!(routes::markets::list_market_groups))
+        .routes(openapi_routes!(routes::markets::get_prices))
+        .routes(openapi_routes!(routes::markets::get_market))
+        .routes(openapi_routes!(routes::markets::get_resolution))
+        .routes(openapi_routes!(routes::markets::get_price_history))
+        .routes(openapi_routes!(routes::markets::get_price_candles))
+        .routes(openapi_routes!(routes::aggregates::get_open_batch))
+        .routes(openapi_routes!(routes::aggregates::get_activity_overview))
+        .routes(openapi_routes!(routes::aggregates::get_event_traders))
+        .routes(openapi_routes!(routes::events::get_event_raw))
+        .routes(openapi_routes!(routes::feeds::list_feeds))
+        // Signed trader orders carry their own P256/WebAuthn authorization.
+        .routes(openapi_routes!(routes::orders::submit_signed_order))
+        .routes(openapi_routes!(routes::orders::cancel_signed_order))
+        .routes(openapi_routes!(routes::blocks::get_recent_blocks))
+        .routes(openapi_routes!(routes::blocks::get_latest_block))
+        .routes(openapi_routes!(routes::blocks::stream_blocks))
+        .routes(openapi_routes!(routes::blocks::ws_blocks))
+        .routes(openapi_routes!(routes::blocks::get_block_by_height))
 }
 
-fn service_routes() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/v1/blocks/ws",
-            axum::routing::get(routes::blocks::ws_service_blocks),
-        )
-        // Unsigned orders can name arbitrary accounts (and MM budgets), so
-        // production admission is restricted to trusted service clients.
-        .route(
-            "/v1/orders",
-            axum::routing::post(routes::orders::submit_orders),
-        )
-        .route(
-            "/v1/proofs/state/{leaf_key_hex}",
-            axum::routing::get(routes::proofs::get_state_proof),
-        )
-        .route(
-            "/v1/da/{height}/payload",
-            axum::routing::get(routes::da::get_da_payload),
-        )
-        .route(
-            "/v1/accounts/{id}/fund",
-            axum::routing::post(routes::accounts::fund_account),
-        )
-        .route(
-            "/v1/bridge/accounts/by-key/{key_hex}",
-            axum::routing::get(routes::bridge::account_by_key),
-        )
-        .route(
-            "/v1/bridge/deposits",
-            axum::routing::post(routes::bridge::submit_l1_deposit),
-        )
-        .route(
-            "/v1/bridge/withdrawals",
-            axum::routing::post(routes::bridge::create_withdrawal),
-        )
-        .route(
-            "/v1/bridge/withdrawals/signed",
-            axum::routing::post(routes::bridge::create_signed_withdrawal),
-        )
-        .route(
-            "/v1/bridge/withdrawals/l1-events",
-            axum::routing::post(routes::bridge::submit_l1_withdrawal_event),
-        )
-        .route(
-            "/v1/bridge/l1-height",
-            axum::routing::post(routes::bridge::observe_l1_height),
-        )
-        .route(
-            "/v1/markets",
-            axum::routing::post(routes::markets::create_market),
-        )
-        .route(
-            "/v1/markets/groups",
-            axum::routing::post(routes::markets::create_market_group),
-        )
-        .route(
-            "/v1/markets/groups/{group_id}/members",
-            axum::routing::post(routes::markets::extend_market_group),
-        )
-        .route(
-            "/v1/markets/{id}/resolve",
-            axum::routing::post(routes::markets::resolve_market),
-        )
-        .route(
-            "/v1/events/{event_id}/raw",
-            axum::routing::put(routes::events::put_event_raw),
-        )
-        .route(
-            "/v1/feeds",
-            axum::routing::post(routes::feeds::register_feed),
-        )
-        .route(
-            "/v1/markets/prices/reference",
-            axum::routing::post(routes::markets::set_reference_prices),
-        )
-        .route(
-            "/v1/markets/{id}/metadata",
-            axum::routing::post(routes::markets::set_market_metadata),
-        )
-        .route(
-            "/v1/admin/auto-resolutions",
-            axum::routing::post(routes::auto_resolution::submit_auto_resolution)
-                .get(routes::auto_resolution::list_auto_resolutions),
-        )
-        .route(
-            "/v1/admin/auto-resolutions/{id}/approve",
-            axum::routing::post(routes::auto_resolution::approve_auto_resolution),
-        )
-        .route(
-            "/v1/admin/auto-resolutions/{id}/reject",
-            axum::routing::post(routes::auto_resolution::reject_auto_resolution),
-        )
+fn service_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::default()
+        .routes(openapi_routes!(routes::blocks::ws_service_blocks))
+        // Unsigned orders can name arbitrary accounts and MM budgets.
+        .routes(openapi_routes!(routes::orders::submit_orders))
+        .routes(openapi_routes!(routes::proofs::get_state_proof))
+        .routes(openapi_routes!(routes::da::get_da_payload))
+        .routes(openapi_routes!(routes::accounts::fund_account))
+        .routes(openapi_routes!(routes::accounts::register_key))
+        .routes(openapi_routes!(routes::bridge::account_by_key))
+        .routes(openapi_routes!(routes::bridge::submit_l1_deposit))
+        .routes(openapi_routes!(routes::bridge::create_withdrawal))
+        .routes(openapi_routes!(routes::bridge::create_signed_withdrawal))
+        .routes(openapi_routes!(routes::bridge::submit_l1_withdrawal_event))
+        .routes(openapi_routes!(routes::bridge::observe_l1_height))
+        .routes(openapi_routes!(routes::markets::create_market))
+        .routes(openapi_routes!(routes::markets::create_market_group))
+        .routes(openapi_routes!(routes::markets::extend_market_group))
+        .routes(openapi_routes!(routes::markets::resolve_market))
+        .routes(openapi_routes!(routes::events::put_event_raw))
+        .routes(openapi_routes!(routes::feeds::register_feed))
+        .routes(openapi_routes!(routes::markets::set_reference_prices))
+        .routes(openapi_routes!(routes::markets::set_market_metadata))
+        .routes(openapi_routes!(
+            routes::auto_resolution::submit_auto_resolution,
+            routes::auto_resolution::list_auto_resolutions,
+        ))
+        .routes(openapi_routes!(
+            routes::auto_resolution::approve_auto_resolution
+        ))
+        .routes(openapi_routes!(
+            routes::auto_resolution::reject_auto_resolution
+        ))
 }
 
-fn dev_routes() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/v1/attestation",
-            axum::routing::get(routes::system::attestation),
-        )
-        .route(
-            "/v1/simulation/pause",
-            axum::routing::post(routes::system::pause),
-        )
-        .route(
-            "/v1/simulation/resume",
-            axum::routing::post(routes::system::resume),
-        )
-        .route(
-            "/v1/orders/pending",
-            axum::routing::get(routes::orders::get_all_pending_orders),
-        )
-        .route(
-            "/v1/markets/{id}/orderbook",
-            axum::routing::get(routes::orders::get_market_orderbook),
-        )
+fn dev_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::default()
+        .routes(openapi_routes!(routes::system::attestation))
+        .routes(openapi_routes!(routes::system::pause))
+        .routes(openapi_routes!(routes::system::resume))
+        .routes(openapi_routes!(routes::orders::get_all_pending_orders))
+        .routes(openapi_routes!(routes::orders::get_market_orderbook))
+}
+
+/// Generate the same OpenAPI document that the runtime router serves. Route
+/// annotations are collected from the actual handler registrations, so adding
+/// a route no longer requires editing a second `ApiDoc::paths` list.
+pub fn openapi_document(include_dev_routes: bool) -> utoipa::openapi::OpenApi {
+    let mut routes = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .merge(public_routes())
+        .merge(service_routes());
+    if include_dev_routes {
+        routes = routes.merge(dev_routes());
+    }
+    routes.split_for_parts().1
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -1258,12 +973,23 @@ fn cors_layer(state: &AppState) -> CorsLayer {
 }
 
 pub fn create_router(state: AppState) -> Router {
-    let mut app = public_routes(&state).merge(
-        service_routes().route_layer(middleware::from_fn_with_state(state.clone(), service_auth)),
-    );
+    let mut app = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .merge(public_routes())
+        .merge(
+            service_routes()
+                .route_layer(middleware::from_fn_with_state(state.clone(), service_auth)),
+        );
     if state.dev_mode {
         app = app.merge(dev_routes());
     }
+    let (app, openapi) = app.split_for_parts();
+    let app = app.route(
+        "/openapi.json",
+        axum::routing::get(move || {
+            let openapi = openapi.clone();
+            async move { Json(openapi) }
+        }),
+    );
     let cors = cors_layer(&state);
 
     app.layer(middleware::from_fn_with_state(

@@ -1,4 +1,3 @@
-use std::fmt::{Display, Formatter};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -12,6 +11,7 @@ use serde_json::Value;
 use sybil_api_types::request::{CreateMarketRequest, ResolveMarketRequest};
 use sybil_api_types::response::{CreateMarketResponse, ResolveMarketResponse};
 use sybil_client::SybilClient;
+use thiserror::Error;
 
 #[derive(Parser, Debug)]
 #[command(name = "sybil-admin", about = "Admin CLI for Sybil market curation")]
@@ -82,55 +82,22 @@ enum AuditCommand {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 enum CliError {
-    Io(std::io::Error),
-    Http(reqwest::Error),
-    Json(serde_json::Error),
-    Yaml(serde_yaml::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Yaml(#[from] serde_yaml::Error),
+    #[error("API {status}: {message}")]
     Api { status: StatusCode, message: String },
+    #[error("{0}")]
     Client(String),
+    #[error("{0}")]
     InvalidArgs(String),
-}
-
-impl Display for CliError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(err) => write!(f, "{err}"),
-            Self::Http(err) => write!(f, "{err}"),
-            Self::Json(err) => write!(f, "{err}"),
-            Self::Yaml(err) => write!(f, "{err}"),
-            Self::Api { status, message } => write!(f, "API {status}: {message}"),
-            Self::Client(message) => write!(f, "{message}"),
-            Self::InvalidArgs(message) => write!(f, "{message}"),
-        }
-    }
-}
-
-impl std::error::Error for CliError {}
-
-impl From<std::io::Error> for CliError {
-    fn from(value: std::io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-impl From<reqwest::Error> for CliError {
-    fn from(value: reqwest::Error) -> Self {
-        Self::Http(value)
-    }
-}
-
-impl From<serde_json::Error> for CliError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::Json(value)
-    }
-}
-
-impl From<serde_yaml::Error> for CliError {
-    fn from(value: serde_yaml::Error) -> Self {
-        Self::Yaml(value)
-    }
 }
 
 #[derive(Debug, Deserialize)]

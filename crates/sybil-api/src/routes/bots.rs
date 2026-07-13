@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Query, State};
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{Connection, OpenFlags, params_from_iter};
+use rusqlite::{Connection, params_from_iter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::arena::{count_rows, table_exists};
+use crate::arena::{count_rows, open_read_only, table_exists};
 use crate::state::AppState;
 use crate::types::error::AppError;
 
@@ -226,19 +225,12 @@ fn load_bot_decisions(
         return unavailable(Some(path.to_string()), "arena decision database not found");
     }
 
-    let conn = match Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
-        Ok(conn) => conn,
-        Err(e) => {
-            return unavailable(
-                Some(path.to_string()),
-                format!("failed to open arena decision database: {e}"),
-            );
-        }
+    let Some(conn) = open_read_only(path) else {
+        return unavailable(
+            Some(path.to_string()),
+            "failed to open arena decision database",
+        );
     };
-    let _ = conn.busy_timeout(Duration::from_millis(750));
 
     if !table_exists(&conn, "decisions") {
         return unavailable(Some(path.to_string()), "decisions table is missing");
@@ -312,22 +304,15 @@ fn load_bot_equity_series(
         );
     }
 
-    let conn = match Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
-        Ok(conn) => conn,
-        Err(e) => {
-            return unavailable_equity(
-                Some(path.to_string()),
-                trader,
-                since,
-                limit,
-                format!("failed to open arena decision database: {e}"),
-            );
-        }
+    let Some(conn) = open_read_only(path) else {
+        return unavailable_equity(
+            Some(path.to_string()),
+            trader,
+            since,
+            limit,
+            "failed to open arena decision database",
+        );
     };
-    let _ = conn.busy_timeout(Duration::from_millis(750));
 
     if !table_exists(&conn, "portfolio_snapshots") {
         return unavailable_equity(

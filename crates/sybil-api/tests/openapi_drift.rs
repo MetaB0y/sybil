@@ -1,8 +1,7 @@
-//! OpenAPI drift pin. The `ApiDoc` derive in `app.rs` is hand-maintained, so it
-//! silently rots as routes come and go. This test enumerates every mounted route
-//! template across the three declarative mount tables (the same tables pinned by
-//! `route_policy.rs`) and asserts each one is documented in the generated OpenAPI
-//! spec — and, in reverse, that the spec documents nothing that is not mounted.
+//! OpenAPI drift pin. This test enumerates every mounted route template across
+//! the three declarative mount tables and asserts each one is documented by the
+//! OpenAPI-aware runtime registrations — and, in reverse, that the spec
+//! documents nothing that is not mounted.
 //!
 //! Styled after the route_policy pin tests: the mount tables are the source of
 //! truth, so any new route forces a matching OpenAPI annotation (or an explicit
@@ -11,9 +10,8 @@
 use std::collections::BTreeSet;
 
 use sybil_api::app::{
-    ApiDoc, DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE,
+    DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE, openapi_document,
 };
-use utoipa::OpenApi;
 
 /// Mounted route templates that are deliberately absent from the OpenAPI spec.
 /// Each entry is a non-API surface: it does not speak the JSON request/response
@@ -45,11 +43,11 @@ fn documented_route_templates() -> BTreeSet<String> {
 
 /// Path templates present in the generated OpenAPI document.
 fn openapi_paths() -> BTreeSet<String> {
-    ApiDoc::openapi().paths.paths.keys().cloned().collect()
+    openapi_document(true).paths.paths.keys().cloned().collect()
 }
 
 fn openapi_json() -> serde_json::Value {
-    serde_json::to_value(ApiDoc::openapi()).expect("serialize OpenAPI document")
+    serde_json::to_value(openapi_document(true)).expect("serialize OpenAPI document")
 }
 
 fn expected_unit_phrase(field: &str) -> Option<&'static str> {
@@ -170,9 +168,9 @@ fn openapi_documents_every_mounted_route() {
     assert!(
         missing_from_spec.is_empty() && extra_in_spec.is_empty(),
         "OpenAPI spec drifted from the mounted route tables.\n  \
-         mounted but undocumented (add a #[utoipa::path] + ApiDoc paths entry, \
+         mounted but undocumented (add a #[utoipa::path] + OpenApiRouter registration, \
          or allowlist as non-API): {missing_from_spec:?}\n  \
-         documented but not mounted (remove the stale ApiDoc paths entry): {extra_in_spec:?}"
+         documented but not mounted (remove the stale registration): {extra_in_spec:?}"
     );
 }
 

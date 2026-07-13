@@ -64,14 +64,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9677ab3454c237abe6307805bea17a7912b3a516b606c7b4d3d948b9fede137"
 dependencies = [
  "alloy-consensus",
+ "alloy-contract",
  "alloy-core",
  "alloy-eips",
+ "alloy-ens",
  "alloy-genesis",
  "alloy-network",
  "alloy-provider",
  "alloy-rpc-client",
  "alloy-rpc-types",
  "alloy-serde",
+ "alloy-signer",
+ "alloy-signer-local",
  "alloy-transport",
  "alloy-transport-http",
  "alloy-trie",
@@ -127,6 +131,29 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "serde",
+]
+
+[[package]]
+name = "alloy-contract"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee5c8b5baa015ef1d07a33983794e1539cce36954846a9bc6e1050d8a1ebf9b7"
+dependencies = [
+ "alloy-consensus",
+ "alloy-dyn-abi",
+ "alloy-json-abi",
+ "alloy-network",
+ "alloy-network-primitives",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-eth",
+ "alloy-sol-types",
+ "alloy-transport",
+ "futures",
+ "futures-util",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -231,6 +258,20 @@ dependencies = [
  "serde",
  "serde_with",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "alloy-ens"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "709ddd5c63a05ac3274143ed0589e129119206f65cf094d2e727499da23efae8"
+dependencies = [
+ "alloy-contract",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-sol-types",
+ "async-trait",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -501,6 +542,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-signer-local"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c880813cd26bd1ddf8c2236e31295896efd1fcc5cc761d8894ae894503aeea53"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-signer",
+ "async-trait",
+ "k256",
+ "rand 0.8.7",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "alloy-sol-macro"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -520,6 +577,7 @@ version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63ec265e5d65d725175f6ca7711c970824c90ef9c0d1f1973711d4150ee612dd"
 dependencies = [
+ "alloy-json-abi",
  "alloy-sol-macro-input",
  "const-hex",
  "heck",
@@ -538,12 +596,14 @@ version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89bf01077f18650876cfa682eb1f949967b5cde03f1a51c955c469d2c9b4aa67"
 dependencies = [
+ "alloy-json-abi",
  "const-hex",
  "dunce",
  "heck",
  "macro-string",
  "proc-macro2",
  "quote",
+ "serde_json",
  "syn 2.0.118",
  "syn-solidity",
 ]
@@ -6806,6 +6866,7 @@ dependencies = [
  "tracing-opentelemetry 0.33.0",
  "tracing-subscriber 0.3.23",
  "utoipa",
+ "utoipa-axum",
 ]
 
 [[package]]
@@ -6853,7 +6914,6 @@ dependencies = [
  "sybil-api-types",
  "sybil-escape-claim",
  "sybil-l1-abi",
- "sybil-l1-protocol",
  "sybil-verifier",
  "sybil-zk",
  "tempfile",
@@ -6908,7 +6968,6 @@ dependencies = [
  "redb",
  "rmp-serde",
  "serde",
- "serde_json",
  "sybil-history-types",
  "tempfile",
  "thiserror 2.0.18",
@@ -6924,7 +6983,6 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "borsh",
- "rmp-serde",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -7030,7 +7088,6 @@ dependencies = [
  "sybil-api-types",
  "sybil-escape-claim",
  "sybil-l1-abi",
- "sybil-l1-protocol",
  "sybil-oracle",
  "sybil-verifier",
  "sybil-zk",
@@ -7974,6 +8031,19 @@ dependencies = [
  "serde",
  "serde_json",
  "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-axum"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c25bae5bccc842449ec0c5ddc5cbb6a3a1eaeac4503895dc105a1138f8234a0"
+dependencies = [
+ "axum",
+ "paste",
+ "tower-layer",
+ "tower-service",
+ "utoipa",
 ]
 
 [[package]]

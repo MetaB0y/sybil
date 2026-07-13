@@ -68,7 +68,7 @@ pub fn escape_claim_calldata(inputs: &EscapeClaimPublicInputs, proof: &[u8]) -> 
     .abi_encode()
 }
 
-fn abi_escape_inputs(inputs: &EscapeClaimPublicInputs) -> AbiEscapeClaimPublicInputs {
+pub(crate) fn abi_escape_inputs(inputs: &EscapeClaimPublicInputs) -> AbiEscapeClaimPublicInputs {
     AbiEscapeClaimPublicInputs {
         stateRoot: inputs.state_root.into(),
         height: inputs.height,

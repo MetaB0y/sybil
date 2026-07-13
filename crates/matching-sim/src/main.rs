@@ -33,6 +33,7 @@ mod witness;
 use std::collections::HashMap;
 use std::time::Instant;
 
+use clap::Parser;
 use matching_engine::{Nanos, Problem};
 use matching_scenarios::{ScenarioConfig, generate_scenario};
 use matching_solver::MmBudgetMode;
@@ -45,28 +46,28 @@ use json_export::build_comparison_json;
 use report::*;
 use witness::*;
 
+#[cfg(feature = "conic")]
+type CliConicConfig = matching_solver::ConicConfig;
+#[cfg(not(feature = "conic"))]
+type CliConicConfig = ();
+
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        print_help();
-        return;
-    }
-
-    let config = parse_scenario_config(&args);
-    let solver_choice = parse_solver_choice(&args);
-    let milp_timeout = parse_milp_timeout(&args);
-    let mm_mode = parse_mm_mode(&args);
-    let num_batches = parse_batches(&args);
-    let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
-    let export_json = get_arg_value(&args, "--export-json");
-    let export_comparison = get_arg_value(&args, "--export-comparison");
-    let show_charts = args.iter().any(|a| a == "--show-charts");
-    let mm_budget_scale: Option<f64> =
-        get_arg_value(&args, "--mm-budget-scale").and_then(|v| v.parse().ok());
+    let cli = Cli::parse();
+    let config = cli.scenario_config();
+    let solver_choice = cli.solver.clone();
+    let milp_timeout = cli.milp_timeout;
+    let mm_mode = cli.mm_budget_mode();
+    let num_batches = cli.batches;
+    let verbose = cli.verbose;
+    let export_json = cli.export_json.as_deref();
+    let export_comparison = cli.export_comparison.as_deref();
+    let show_charts = cli.show_charts;
+    let mm_budget_scale = cli.mm_budget_scale;
 
     #[cfg(feature = "conic")]
-    let conic_config = build_conic_config(&args);
+    let conic_config = cli.conic_config();
+    #[cfg(not(feature = "conic"))]
+    let conic_config = ();
 
     println!("========================================");
     println!("       MATCHING SIMULATION              ");
@@ -102,12 +103,12 @@ fn main() {
         run_detailed_pipeline(
             &config,
             num_batches,
-            export_json.as_deref(),
+            export_json,
             show_charts,
             verbose,
             &solver_choice,
             mm_budget_scale,
-            &args,
+            &conic_config,
         );
     } else {
         // Standard comparison run
@@ -118,9 +119,9 @@ fn main() {
             mm_mode,
             num_batches,
             verbose,
-            export_comparison.as_deref(),
+            export_comparison,
             mm_budget_scale,
-            &args,
+            &conic_config,
         );
         print_results(&results, &solver_choice);
         if let Some(ref data) = gap_data {
@@ -130,57 +131,6 @@ fn main() {
 
     let elapsed = start.elapsed().as_secs_f64();
     println!("\nTotal time: {:.2}s", elapsed);
-}
-
-fn print_help() {
-    println!("Matching Simulation\n");
-    println!("Usage: matching-sim [OPTIONS]\n");
-    println!("Presets:");
-    println!("  --preset <NAME>      Use a preset configuration:");
-    println!("                         quick      ~50 orders, fast");
-    println!("                         small      ~300 orders");
-    println!("                         medium     ~3000 orders");
-    println!("                         large      ~10000 orders");
-    println!("                         extreme    ~50000 orders");
-    println!("                         milp-killer Forces MILP timeout");
-    println!();
-    println!("Custom configuration:");
-    println!("  --markets <N>        Number of markets");
-    println!("  --orders <N>         Number of orders");
-    println!("  --scarcity <F>       Liquidity scarcity (0.0-1.0, lower=scarcer)");
-    println!("  --mms <N>            Number of market makers");
-    println!();
-    println!("Solver options:");
-    println!("  --solver <S>         Solver to use:");
-    println!(
-        "                         lp (default, LP + entropy smoothing, requires --features lp)"
-    );
-    println!(
-        "                         eg (Eisenberg-Gale / Fisher market, requires --features lp)"
-    );
-    println!("                         conic (Conic EG via Clarabel, requires --features conic)");
-    println!("                         milp (MIQCQP via SCIP)");
-    println!("                         all (compare all)");
-    println!("  --milp-timeout <S>   MILP time limit in seconds");
-    println!("  --mm-mode <M>        MM budget constraint mode:");
-    println!("                         exact (default) - bilinear MIQCQP");
-    println!("                         mccormick       - linear relaxation");
-    println!("                         ignore          - skip MM constraints");
-    println!("  --mode <M>           Conic solver objective mode:");
-    println!("                         linear       - LP welfare (delegates to LpSolver)");
-    println!("                         fisher       - B_k ln(U_k), no cash variable");
-    println!("                         quasi-fisher - B_k ln(U_k+s_k)-s_k (default)");
-    println!("  --temperature <F>    LMSR smoothing (default: 0.0, >0 not yet implemented)");
-    println!();
-    println!("Other options:");
-    println!("  --batches <N>        Number of batches to run (default: 1)");
-    println!("  --seed <N>           Random seed (default: 42)");
-    println!("  --verbose, -v        Show detailed step-by-step output");
-    println!("  --help, -h           Show this help message");
-    println!();
-    println!("Visualization options:");
-    println!("  --export-json <PATH> Export pipeline snapshot as JSON");
-    println!("  --show-charts        Show ASCII convergence charts after run");
 }
 
 // ============================================================================
@@ -197,7 +147,7 @@ fn run_detailed_pipeline(
     verbose: bool,
     solver_choice: &SolverChoice,
     mm_budget_scale: Option<f64>,
-    args: &[String],
+    conic_config: &CliConicConfig,
 ) {
     for batch in 0..num_batches {
         let config = ScenarioConfig {
@@ -246,7 +196,7 @@ fn run_detailed_pipeline(
             }
             #[cfg(feature = "conic")]
             SolverChoice::Conic => {
-                let solver = matching_solver::ConicSolver::with_config(build_conic_config(args));
+                let solver = matching_solver::ConicSolver::with_config(conic_config.clone());
                 solver.solve(&problem)
             }
             #[cfg(feature = "lp")]
@@ -264,7 +214,7 @@ fn run_detailed_pipeline(
             #[cfg(feature = "conic")]
             SolverChoice::DecomposedConic => {
                 let solver = matching_solver::DecomposedSolver::new(
-                    matching_solver::ConicSolver::with_config(build_conic_config(args)),
+                    matching_solver::ConicSolver::with_config(conic_config.clone()),
                 );
                 solver.solve(&problem)
             }
@@ -424,7 +374,7 @@ fn run_detailed_pipeline(
     verbose: bool,
     solver_choice: &SolverChoice,
     mm_budget_scale: Option<f64>,
-    args: &[String],
+    _conic_config: &CliConicConfig,
 ) {
     unreachable!("detailed pipeline requires the lp or conic feature")
 }
@@ -440,7 +390,7 @@ fn run_solver_with_witness(
     problem: &Problem,
     milp_timeout: Option<f64>,
     mm_mode: MmBudgetMode,
-    args: &[String],
+    conic_config: &CliConicConfig,
 ) -> (matching_solver::MatchingResult, BlockWitness) {
     match choice {
         SolverChoice::Milp => {
@@ -465,7 +415,7 @@ fn run_solver_with_witness(
         }
         #[cfg(feature = "conic")]
         SolverChoice::Conic => {
-            let solver = matching_solver::ConicSolver::with_config(build_conic_config(args));
+            let solver = matching_solver::ConicSolver::with_config(conic_config.clone());
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)
@@ -487,7 +437,7 @@ fn run_solver_with_witness(
         #[cfg(feature = "conic")]
         SolverChoice::DecomposedConic => {
             let solver = matching_solver::DecomposedSolver::new(
-                matching_solver::ConicSolver::with_config(build_conic_config(args)),
+                matching_solver::ConicSolver::with_config(conic_config.clone()),
             );
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
@@ -522,7 +472,7 @@ fn run_simulation(
     verbose: bool,
     export_comparison: Option<&str>,
     mm_budget_scale: Option<f64>,
-    args: &[String],
+    conic_config: &CliConicConfig,
 ) -> (Vec<SolverResults>, Option<GapAnalysisData>) {
     let choices = expand_solver_choices(solver_choice);
     let collect_gap = *solver_choice == SolverChoice::All && verbose;
@@ -568,7 +518,7 @@ fn run_simulation(
             let start = Instant::now();
 
             let (matching_result, witness) =
-                run_solver_with_witness(choice, &problem, milp_timeout, mm_mode, args);
+                run_solver_with_witness(choice, &problem, milp_timeout, mm_mode, conic_config);
 
             let elapsed = start.elapsed().as_secs_f64();
 

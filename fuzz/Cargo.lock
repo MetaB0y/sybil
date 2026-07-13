@@ -2469,10 +2469,12 @@ dependencies = [
  "metrics",
  "p256 0.14.0",
  "ractor",
+ "ratelimit",
  "redb",
  "rmp-serde",
  "serde",
  "sha3",
+ "sybil-history-types",
  "sybil-l1-protocol",
  "sybil-oracle",
  "sybil-signing",
@@ -3602,6 +3604,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratelimit"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e78b08065c51c82ff8c4a0d88e3dce3edfce39c375e946c3464210fff3433fb8"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "raw-cpuid"
 version = "11.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4400,7 +4411,9 @@ dependencies = [
  "opentelemetry-otlp 0.32.0",
  "opentelemetry_sdk 0.32.1",
  "p256 0.14.0",
+ "ratelimit",
  "reqwest 0.13.4",
+ "rmp-serde",
  "rusqlite",
  "serde",
  "serde_json",
@@ -4408,8 +4421,10 @@ dependencies = [
  "sha2 0.11.0",
  "sybil-api-types",
  "sybil-client",
+ "sybil-history-types",
  "sybil-oracle",
  "sybil-verifier",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tower-http 0.7.0",
@@ -4417,6 +4432,7 @@ dependencies = [
  "tracing-opentelemetry 0.33.0",
  "tracing-subscriber 0.3.23",
  "utoipa",
+ "utoipa-axum",
 ]
 
 [[package]]
@@ -4449,10 +4465,18 @@ dependencies = [
  "libfuzzer-sys",
  "matching-engine",
  "matching-sequencer",
- "p256 0.14.0",
- "serde",
  "serde_json",
  "sybil-api",
+]
+
+[[package]]
+name = "sybil-history-types"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "borsh",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -5184,6 +5208,19 @@ dependencies = [
  "serde",
  "serde_json",
  "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-axum"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c25bae5bccc842449ec0c5ddc5cbb6a3a1eaeac4503895dc105a1138f8234a0"
+dependencies = [
+ "axum",
+ "paste",
+ "tower-layer",
+ "tower-service",
+ "utoipa",
 ]
 
 [[package]]

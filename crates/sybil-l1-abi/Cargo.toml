@@ -6,7 +6,7 @@ rust-version.workspace = true
 description = "Host-side Alloy bindings for Sybil's Solidity contracts"
 
 [dependencies]
-alloy = { workspace = true, features = ["sol-types", "std"] }
+alloy = { workspace = true, features = ["contract", "std"] }
 
 [lints.clippy]
 # Alloy's generated host-side types are outside consensus arithmetic.

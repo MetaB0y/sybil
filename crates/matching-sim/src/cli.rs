@@ -1,70 +1,195 @@
-//! Command-line argument parsing and solver-selection helpers.
+//! Typed command-line arguments and solver-selection helpers.
 
+use std::fmt;
+
+use clap::{Parser, ValueEnum};
 use matching_scenarios::ScenarioConfig;
 use matching_solver::{MilpConfig, MilpSolver, MmBudgetMode};
 
-pub fn parse_scenario_config(args: &[String]) -> ScenarioConfig {
-    if let Some(preset) = get_arg_value(args, "--preset") {
-        let mut config = match preset.as_str() {
-            "quick" => ScenarioConfig::quick(),
-            "small" => ScenarioConfig::small(),
-            "medium" => ScenarioConfig::medium(),
-            "large" => ScenarioConfig::large(),
-            "extreme" => ScenarioConfig::extreme(),
-            "milp-killer" | "milp_killer" => ScenarioConfig::milp_killer(),
-            _ => {
-                eprintln!("Unknown preset: {}, using medium", preset);
-                ScenarioConfig::medium()
-            }
-        };
-
-        if let Some(seed) = get_arg_value(args, "--seed") {
-            config.seed = seed.parse().unwrap_or(42);
-        }
-        if let Some(v) = get_arg_value(args, "--mms") {
-            config.num_mms = v.parse().unwrap_or(config.num_mms);
-        }
-        if let Some(v) = get_arg_value(args, "--mm-capacity-mult") {
-            config.mm_capacity_multiplier = v.parse().unwrap_or(10);
-        }
-        if let Some(v) = get_arg_value(args, "--markets") {
-            config.num_markets = v.parse().unwrap_or(config.num_markets);
-        }
-        if let Some(v) = get_arg_value(args, "--orders") {
-            config.num_orders = v.parse().unwrap_or(config.num_orders);
-        }
-        if let Some(v) = get_arg_value(args, "--scarcity") {
-            config.liquidity_scarcity = v.parse().unwrap_or(config.liquidity_scarcity);
-        }
-
-        return config;
-    }
-
-    let mut config = ScenarioConfig::default();
-
-    if let Some(v) = get_arg_value(args, "--seed") {
-        config.seed = v.parse().unwrap_or(42);
-    }
-    if let Some(v) = get_arg_value(args, "--markets") {
-        config.num_markets = v.parse().unwrap_or(30);
-    }
-    if let Some(v) = get_arg_value(args, "--orders") {
-        config.num_orders = v.parse().unwrap_or(1000);
-    }
-    if let Some(v) = get_arg_value(args, "--scarcity") {
-        config.liquidity_scarcity = v.parse().unwrap_or(0.5);
-    }
-    if let Some(v) = get_arg_value(args, "--mms") {
-        config.num_mms = v.parse().unwrap_or(2);
-    }
-    if let Some(v) = get_arg_value(args, "--mm-capacity-mult") {
-        config.mm_capacity_multiplier = v.parse().unwrap_or(10);
-    }
-
-    config
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Preset {
+    Quick,
+    Small,
+    Medium,
+    Large,
+    Extreme,
+    #[value(alias = "milp_killer")]
+    MilpKiller,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl Preset {
+    fn config(self) -> ScenarioConfig {
+        match self {
+            Self::Quick => ScenarioConfig::quick(),
+            Self::Small => ScenarioConfig::small(),
+            Self::Medium => ScenarioConfig::medium(),
+            Self::Large => ScenarioConfig::large(),
+            Self::Extreme => ScenarioConfig::extreme(),
+            Self::MilpKiller => ScenarioConfig::milp_killer(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum MmMode {
+    #[default]
+    Exact,
+    McCormick,
+    Ignore,
+}
+
+impl From<MmMode> for MmBudgetMode {
+    fn from(value: MmMode) -> Self {
+        match value {
+            MmMode::Exact => Self::Exact,
+            MmMode::McCormick => Self::McCormick,
+            MmMode::Ignore => Self::Ignore,
+        }
+    }
+}
+
+#[cfg(feature = "conic")]
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum ObjectiveMode {
+    Linear,
+    Fisher,
+    #[default]
+    QuasiFisher,
+}
+
+#[cfg(feature = "conic")]
+impl From<ObjectiveMode> for matching_solver::ObjectiveMode {
+    fn from(value: ObjectiveMode) -> Self {
+        match value {
+            ObjectiveMode::Linear => Self::Linear,
+            ObjectiveMode::Fisher => Self::Fisher,
+            ObjectiveMode::QuasiFisher => Self::QuasiFisher,
+        }
+    }
+}
+
+/// Generate synthetic matching scenarios and compare enabled solvers.
+#[derive(Debug, Parser)]
+#[command(version)]
+pub struct Cli {
+    /// Use a preset scenario configuration.
+    #[arg(long, value_enum)]
+    preset: Option<Preset>,
+
+    /// Override the random seed.
+    #[arg(long)]
+    seed: Option<u64>,
+
+    /// Override the number of binary markets.
+    #[arg(long)]
+    markets: Option<usize>,
+
+    /// Override the number of generated orders.
+    #[arg(long)]
+    orders: Option<usize>,
+
+    /// Override liquidity scarcity (0.0-1.0, lower is scarcer).
+    #[arg(long)]
+    scarcity: Option<f64>,
+
+    /// Override the number of market makers.
+    #[arg(long)]
+    mms: Option<usize>,
+
+    /// Override the synthetic MM capacity multiplier.
+    #[arg(long)]
+    mm_capacity_mult: Option<u64>,
+
+    /// Solver to run, or `all` to compare every enabled solver.
+    #[arg(long, value_enum, default_value_t)]
+    pub solver: SolverChoice,
+
+    /// MILP time limit in seconds.
+    #[arg(long)]
+    pub milp_timeout: Option<f64>,
+
+    /// MM budget constraint mode used by the MILP solver.
+    #[arg(long, value_enum, default_value_t)]
+    mm_mode: MmMode,
+
+    /// Conic objective mode.
+    #[cfg(feature = "conic")]
+    #[arg(long, value_enum, default_value_t)]
+    objective_mode: ObjectiveMode,
+
+    /// LMSR smoothing temperature (>0 is not yet implemented).
+    #[cfg(feature = "conic")]
+    #[arg(long, default_value_t = 0.0)]
+    temperature: f64,
+
+    /// Number of batches to run.
+    #[arg(long, default_value_t = 1)]
+    pub batches: usize,
+
+    /// Show detailed step-by-step output.
+    #[arg(short, long)]
+    pub verbose: bool,
+
+    /// Export a detailed pipeline snapshot as JSON.
+    #[arg(long, value_name = "PATH")]
+    pub export_json: Option<String>,
+
+    /// Export solver comparison results as JSON.
+    #[arg(long, value_name = "PATH")]
+    pub export_comparison: Option<String>,
+
+    /// Show ASCII convergence charts after the run.
+    #[arg(long)]
+    pub show_charts: bool,
+
+    /// Scale every generated MM budget before solving.
+    #[arg(long)]
+    pub mm_budget_scale: Option<f64>,
+}
+
+impl Cli {
+    pub fn scenario_config(&self) -> ScenarioConfig {
+        let mut config = self
+            .preset
+            .map_or_else(ScenarioConfig::default, Preset::config);
+
+        if let Some(seed) = self.seed {
+            config.seed = seed;
+        }
+        if let Some(markets) = self.markets {
+            config.num_markets = markets;
+        }
+        if let Some(orders) = self.orders {
+            config.num_orders = orders;
+        }
+        if let Some(scarcity) = self.scarcity {
+            config.liquidity_scarcity = scarcity;
+        }
+        if let Some(mms) = self.mms {
+            config.num_mms = mms;
+        }
+        if let Some(multiplier) = self.mm_capacity_mult {
+            config.mm_capacity_multiplier = multiplier;
+        }
+
+        config
+    }
+
+    pub fn mm_budget_mode(&self) -> MmBudgetMode {
+        self.mm_mode.into()
+    }
+
+    #[cfg(feature = "conic")]
+    pub fn conic_config(&self) -> matching_solver::ConicConfig {
+        matching_solver::ConicConfig {
+            mode: self.objective_mode.into(),
+            temperature: self.temperature,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, ValueEnum)]
 pub enum SolverChoice {
     Milp,
     #[cfg(feature = "lp")]
@@ -74,6 +199,7 @@ pub enum SolverChoice {
     #[cfg(feature = "conic")]
     Conic,
     #[cfg(feature = "lp")]
+    #[value(alias = "decomposed")]
     DecomposedLp,
     #[cfg(feature = "lp")]
     DecomposedEg,
@@ -84,6 +210,31 @@ pub enum SolverChoice {
     #[cfg(feature = "lp")]
     DecomposedIterLp,
     All,
+}
+
+// The default follows the enabled solver features. `derive(Default)` cannot
+// express the `Milp` fallback when this crate is built without `lp`.
+#[allow(clippy::derivable_impls)]
+impl Default for SolverChoice {
+    fn default() -> Self {
+        #[cfg(feature = "lp")]
+        {
+            Self::Lp
+        }
+        #[cfg(not(feature = "lp"))]
+        {
+            Self::Milp
+        }
+    }
+}
+
+impl fmt::Display for SolverChoice {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = self
+            .to_possible_value()
+            .expect("every solver choice has a clap value");
+        formatter.write_str(value.get_name())
+    }
 }
 
 pub fn supports_detailed_pipeline(choice: &SolverChoice) -> bool {
@@ -99,86 +250,6 @@ pub fn supports_detailed_pipeline(choice: &SolverChoice) -> bool {
         SolverChoice::Conic | SolverChoice::DecomposedConic => true,
         SolverChoice::Milp | SolverChoice::All => false,
     }
-}
-
-pub fn parse_solver_choice(args: &[String]) -> SolverChoice {
-    match get_arg_value(args, "--solver").as_deref() {
-        Some("milp") => SolverChoice::Milp,
-        #[cfg(feature = "lp")]
-        Some("lp") => SolverChoice::Lp,
-        #[cfg(feature = "lp")]
-        Some("eg") => SolverChoice::Eg,
-        #[cfg(feature = "conic")]
-        Some("conic") => SolverChoice::Conic,
-        #[cfg(feature = "lp")]
-        #[cfg(feature = "lp")]
-        Some("decomposed-lp") | Some("decomposed") => SolverChoice::DecomposedLp,
-        #[cfg(feature = "lp")]
-        Some("decomposed-eg") => SolverChoice::DecomposedEg,
-        #[cfg(feature = "conic")]
-        Some("decomposed-conic") => SolverChoice::DecomposedConic,
-        #[cfg(feature = "lp")]
-        Some("iter-lp") => SolverChoice::IterLp,
-        #[cfg(feature = "lp")]
-        Some("decomposed-iter-lp") => SolverChoice::DecomposedIterLp,
-        Some("all") => SolverChoice::All,
-        #[cfg(feature = "lp")]
-        _ => SolverChoice::Lp, // Default to LP solver when available.
-        #[cfg(not(feature = "lp"))]
-        _ => SolverChoice::Milp, // No-feature builds only have the always-enabled MILP backend.
-    }
-}
-
-pub fn parse_milp_timeout(args: &[String]) -> Option<f64> {
-    get_arg_value(args, "--milp-timeout").and_then(|v| v.parse().ok())
-}
-
-pub fn parse_mm_mode(args: &[String]) -> MmBudgetMode {
-    match get_arg_value(args, "--mm-mode").as_deref() {
-        Some("exact") => MmBudgetMode::Exact,
-        Some("mccormick") => MmBudgetMode::McCormick,
-        Some("ignore") => MmBudgetMode::Ignore,
-        _ => MmBudgetMode::Exact, // Default: exact bilinear via SCIP MIQCQP
-    }
-}
-
-#[cfg(feature = "conic")]
-fn parse_objective_mode(args: &[String]) -> matching_solver::ObjectiveMode {
-    match get_arg_value(args, "--mode").as_deref() {
-        Some("linear") => matching_solver::ObjectiveMode::Linear,
-        Some("fisher") => matching_solver::ObjectiveMode::Fisher,
-        Some("quasi-fisher") => matching_solver::ObjectiveMode::QuasiFisher,
-        _ => matching_solver::ObjectiveMode::QuasiFisher,
-    }
-}
-
-#[cfg(feature = "conic")]
-fn parse_temperature(args: &[String]) -> f64 {
-    get_arg_value(args, "--temperature")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0.0)
-}
-
-#[cfg(feature = "conic")]
-pub fn build_conic_config(args: &[String]) -> matching_solver::ConicConfig {
-    matching_solver::ConicConfig {
-        mode: parse_objective_mode(args),
-        temperature: parse_temperature(args),
-        ..Default::default()
-    }
-}
-
-pub fn parse_batches(args: &[String]) -> usize {
-    get_arg_value(args, "--batches")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1) // Default to 1 batch
-}
-
-pub fn get_arg_value(args: &[String], flag: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == flag)
-        .and_then(|i| args.get(i + 1))
-        .cloned()
 }
 
 pub fn create_milp_solver(milp_timeout: Option<f64>, mm_mode: MmBudgetMode) -> MilpSolver {
@@ -205,7 +276,6 @@ pub fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
             choices.push(SolverChoice::Eg);
             #[cfg(feature = "conic")]
             choices.push(SolverChoice::Conic);
-            #[cfg(feature = "lp")]
             #[cfg(feature = "lp")]
             choices.push(SolverChoice::DecomposedLp);
             #[cfg(feature = "lp")]
@@ -239,7 +309,6 @@ pub fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> 
         #[cfg(feature = "conic")]
         SolverChoice::Conic => "Conic (EG)".to_string(),
         #[cfg(feature = "lp")]
-        #[cfg(feature = "lp")]
         SolverChoice::DecomposedLp => "Decomposed(LP)".to_string(),
         #[cfg(feature = "lp")]
         SolverChoice::DecomposedEg => "Decomposed(EG)".to_string(),
@@ -250,5 +319,56 @@ pub fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> 
         #[cfg(feature = "lp")]
         SolverChoice::DecomposedIterLp => "Decomposed(IterLP)".to_string(),
         SolverChoice::All => "All".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn preset_values_can_be_overridden() {
+        let cli = Cli::try_parse_from([
+            "matching-sim",
+            "--preset",
+            "quick",
+            "--orders",
+            "17",
+            "--seed",
+            "9",
+        ])
+        .unwrap();
+
+        let config = cli.scenario_config();
+        assert_eq!(config.num_orders, 17);
+        assert_eq!(config.seed, 9);
+        assert_eq!(config.num_markets, ScenarioConfig::quick().num_markets);
+    }
+
+    #[test]
+    fn legacy_solver_and_preset_aliases_are_retained() {
+        let cli = Cli::try_parse_from([
+            "matching-sim",
+            "--preset",
+            "milp_killer",
+            "--solver",
+            "decomposed",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli.scenario_config().num_orders,
+            ScenarioConfig::milp_killer().num_orders
+        );
+        #[cfg(feature = "lp")]
+        assert_eq!(cli.solver, SolverChoice::DecomposedLp);
+    }
+
+    #[test]
+    fn invalid_numbers_fail_instead_of_silently_using_defaults() {
+        let error = Cli::try_parse_from(["matching-sim", "--orders", "many"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }
 }

@@ -16,10 +16,7 @@ arbitrary = { version = "1", features = ["derive"] }
 matching-engine = { path = "../crates/matching-engine" }
 matching-sequencer = { path = "../crates/matching-sequencer" }
 sybil-api = { path = "../crates/sybil-api" }
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Pin crypto deps to match the main workspace
-p256 = { version = "0.14", features = ["ecdsa"] }
 
 [[bin]]
 name = "fuzz_order_parse"

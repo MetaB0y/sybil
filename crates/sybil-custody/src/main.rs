@@ -6,7 +6,7 @@ use sybil_custody::api::{SnapshotRequest, collect_snapshot, read_json, write_jso
 use sybil_custody::claim::{ClaimRequest, assemble_claim, parse_address};
 use sybil_custody::format::{CUSTODY_SNAPSHOT_VERSION, CustodySnapshot};
 use sybil_custody::reconstruct::{ReconstructRequest, reconstruct};
-use sybil_custody::rpc::send_raw_calldata_with_cast;
+use sybil_custody::rpc::submit_escape_claim;
 
 #[derive(Parser)]
 #[command(name = "sybil-custody")]
@@ -100,7 +100,7 @@ struct EscapeClaimArgs {
     p256_private_key: String,
     #[arg(long, default_value = "target/custody")]
     work_dir: PathBuf,
-    /// Submit through `cast send` after printing calldata.
+    /// Sign and submit through Alloy after printing calldata.
     #[arg(long)]
     submit: bool,
     #[arg(long, env = "PRIVATE_KEY", hide_env_values = true, requires = "submit")]
@@ -241,10 +241,15 @@ async fn escape_claim(args: EscapeClaimArgs) -> Result<()> {
             .eth_private_key
             .as_deref()
             .context("--eth-private-key or PRIVATE_KEY is required with --submit")?;
-        let receipt =
-            send_raw_calldata_with_cast(&args.rpc_url, private_key, vault, &artifacts.calldata)
-                .await?;
-        println!("submission={receipt}");
+        let transaction_hash = submit_escape_claim(
+            &args.rpc_url,
+            private_key,
+            vault,
+            &artifacts.input.public_inputs,
+            &artifacts.adapter_proof,
+        )
+        .await?;
+        println!("transaction_hash={transaction_hash}");
     } else if args.eth_private_key.is_some() {
         bail!("--eth-private-key has no effect without --submit");
     }

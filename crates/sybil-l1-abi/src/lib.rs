@@ -45,6 +45,7 @@ alloy::sol! {
         bytes32 nullifier;
     }
 
+    #[sol(rpc)]
     interface SybilSettlement {
         function submitStateRoot(
             StateTransitionPublicInputs calldata inputs,
@@ -56,6 +57,7 @@ alloy::sol! {
         function rootAt(uint64 height) external view returns (RootRecord memory record);
     }
 
+    #[sol(rpc)]
     interface SybilVault {
         event DepositReceived(
             uint64 indexed depositId,

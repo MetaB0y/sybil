@@ -17,7 +17,6 @@ ractor = { version = "0.15.12", default-features = false, features = ["async-tra
 redb = "4"
 rmp-serde = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
@@ -27,4 +26,3 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 http-body-util = "0.1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
-

@@ -1,11 +1,12 @@
 use alloy::primitives::{Address, Bytes};
 use alloy::providers::{DynProvider, Provider, ProviderBuilder};
-use alloy::rpc::types::TransactionRequest;
-use alloy::sol_types::SolCall;
+use alloy::signers::local::PrivateKeySigner;
 use anyhow::{Context, Result, bail};
 use sybil_api_types::DaManifestResponse;
-use sybil_l1_abi::{RootRecord as AbiRootRecord, SybilSettlement};
+use sybil_escape_claim::EscapeClaimPublicInputs;
+use sybil_l1_abi::{RootRecord as AbiRootRecord, SybilSettlement, SybilVault};
 
+use crate::abi::abi_escape_inputs;
 use crate::format::RootRecord;
 
 pub async fn chain_id(rpc_url: &str) -> Result<u64> {
@@ -16,8 +17,11 @@ pub async fn chain_id(rpc_url: &str) -> Result<u64> {
 }
 
 pub async fn latest_height(rpc_url: &str, settlement: [u8; 20]) -> Result<u64> {
-    let output = contract_call(rpc_url, settlement, SybilSettlement::latestHeightCall {}).await?;
-    Ok(output)
+    SybilSettlement::new(Address::from(settlement), provider(rpc_url)?)
+        .latestHeight()
+        .call()
+        .await
+        .context("RPC SybilSettlement.latestHeight")
 }
 
 pub async fn fetch_root_record(
@@ -25,7 +29,11 @@ pub async fn fetch_root_record(
     settlement: [u8; 20],
     height: u64,
 ) -> Result<RootRecord> {
-    let output = contract_call(rpc_url, settlement, SybilSettlement::rootAtCall { height }).await?;
+    let output = SybilSettlement::new(Address::from(settlement), provider(rpc_url)?)
+        .rootAt(height)
+        .call()
+        .await
+        .context("RPC SybilSettlement.rootAt")?;
     let AbiRootRecord {
         height,
         stateRoot,
@@ -90,51 +98,35 @@ pub fn validate_manifest_root_record(
     Ok(())
 }
 
-pub async fn send_raw_calldata_with_cast(
+/// Sign and submit an escape claim using Alloy. This keeps custody submission
+/// self-contained instead of requiring a Foundry `cast` executable at runtime.
+pub async fn submit_escape_claim(
     rpc_url: &str,
     private_key: &str,
-    to: [u8; 20],
-    calldata: &[u8],
+    vault: [u8; 20],
+    inputs: &EscapeClaimPublicInputs,
+    proof: &[u8],
 ) -> Result<String> {
-    let output = tokio::process::Command::new("cast")
-        .args([
-            "send",
-            &format!("0x{}", hex::encode(to)),
-            "--data",
-            &format!("0x{}", hex::encode(calldata)),
-            "--rpc-url",
-            rpc_url,
-            "--private-key",
-            private_key,
-            "--json",
-        ])
-        .output()
+    let signer: PrivateKeySigner = private_key.parse().context("parse Ethereum private key")?;
+    let url = rpc_url.parse().context("parse Ethereum RPC URL")?;
+    let provider = ProviderBuilder::new().wallet(signer).connect_http(url);
+    let receipt = SybilVault::new(Address::from(vault), provider)
+        .escapeClaim(abi_escape_inputs(inputs), Bytes::copy_from_slice(proof))
+        .send()
         .await
-        .context("run cast send")?;
-    if !output.status.success() {
-        bail!(
-            "cast send failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        .context("submit SybilVault.escapeClaim")?
+        .get_receipt()
+        .await
+        .context("wait for SybilVault.escapeClaim receipt")?;
+    if !receipt.status() {
+        bail!("SybilVault.escapeClaim transaction reverted");
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(format!("{:#x}", receipt.transaction_hash))
 }
 
 fn provider(rpc_url: &str) -> Result<DynProvider> {
     let url = rpc_url.parse().context("parse Ethereum RPC URL")?;
     Ok(ProviderBuilder::new().connect_http(url).erased())
-}
-
-async fn contract_call<C: SolCall>(rpc_url: &str, to: [u8; 20], call: C) -> Result<C::Return> {
-    let request = TransactionRequest::default()
-        .to(Address::from(to))
-        .input(Bytes::from(call.abi_encode()).into());
-    let output = provider(rpc_url)?
-        .call(request)
-        .latest()
-        .await
-        .context("RPC eth_call")?;
-    C::abi_decode_returns_validate(&output).context("decode eth_call ABI result")
 }
 
 pub fn decode20(name: &str, value: &str) -> Result<[u8; 20]> {

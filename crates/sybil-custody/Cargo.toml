@@ -11,7 +11,7 @@ name = "sybil-custody"
 path = "src/main.rs"
 
 [dependencies]
-alloy = { workspace = true, features = ["provider-http", "reqwest-rustls-tls", "rpc-types"] }
+alloy = { workspace = true, features = ["provider-http", "reqwest-rustls-tls", "rpc-types", "signer-local"] }
 anyhow = "1"
 clap = { workspace = true, features = ["derive", "env"] }
 hex = { workspace = true }
@@ -24,10 +24,9 @@ serde_json = { workspace = true }
 sybil-api-types = { path = "../sybil-api-types" }
 sybil-escape-claim = { path = "../sybil-escape-claim" }
 sybil-l1-abi = { path = "../sybil-l1-abi" }
-sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
-tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
 tempfile = "3"

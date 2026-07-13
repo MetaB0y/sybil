@@ -8,6 +8,5 @@ description = "Versioned private history ingestion and query contract for Sybil"
 [dependencies]
 blake3 = { workspace = true }
 borsh = { version = "1.6.1", features = ["derive"] }
-rmp-serde = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }

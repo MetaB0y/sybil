@@ -1,4 +1,3 @@
-use std::fmt;
 use std::io::Cursor;
 
 use base64::Engine as _;
@@ -9,6 +8,7 @@ use p256::ecdsa::{Signature, VerifyingKey};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use sybil_api_types::request::{WebAuthnAssertion, WebAuthnRegistration};
+use thiserror::Error;
 
 use crate::config::ApiConfig;
 
@@ -36,63 +36,40 @@ impl WebAuthnVerifierConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum WebAuthnError {
+    #[error("invalid base64url field {0}")]
     BadBase64(&'static str),
+    #[error("invalid JSON field {0}")]
     BadJson(&'static str),
+    #[error("invalid CBOR field {0}")]
     BadCbor(&'static str),
+    #[error("unexpected WebAuthn clientDataJSON type")]
     UnexpectedClientDataType,
+    #[error("WebAuthn challenge does not match canonical payload hash")]
     ChallengeMismatch,
+    #[error("WebAuthn origin mismatch")]
     OriginMismatch,
+    #[error("cross-origin WebAuthn assertion rejected")]
     CrossOrigin,
+    #[error("authenticatorData is too short")]
     AuthenticatorDataTooShort,
+    #[error("WebAuthn rpIdHash mismatch")]
     RpIdHashMismatch,
+    #[error("WebAuthn user-presence flag is missing")]
     UserPresenceRequired,
+    #[error("WebAuthn user-verification flag is missing")]
     UserVerificationRequired,
+    #[error("WebAuthn attested credential data is missing")]
     AttestedCredentialDataMissing,
+    #[error("unsupported WebAuthn COSE key")]
     UnsupportedCoseKey,
+    #[error("WebAuthn registration public key does not match public_key_hex")]
     PublicKeyMismatch,
+    #[error("invalid WebAuthn signature encoding")]
     BadSignatureEncoding,
+    #[error("invalid WebAuthn signature")]
     SignatureInvalid,
-}
-
-impl fmt::Display for WebAuthnError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            WebAuthnError::BadBase64(field) => write!(f, "invalid base64url field {field}"),
-            WebAuthnError::BadJson(field) => write!(f, "invalid JSON field {field}"),
-            WebAuthnError::BadCbor(field) => write!(f, "invalid CBOR field {field}"),
-            WebAuthnError::UnexpectedClientDataType => {
-                write!(f, "unexpected WebAuthn clientDataJSON type")
-            }
-            WebAuthnError::ChallengeMismatch => write!(
-                f,
-                "WebAuthn challenge does not match canonical payload hash"
-            ),
-            WebAuthnError::OriginMismatch => write!(f, "WebAuthn origin mismatch"),
-            WebAuthnError::CrossOrigin => write!(f, "cross-origin WebAuthn assertion rejected"),
-            WebAuthnError::AuthenticatorDataTooShort => write!(f, "authenticatorData is too short"),
-            WebAuthnError::RpIdHashMismatch => write!(f, "WebAuthn rpIdHash mismatch"),
-            WebAuthnError::UserPresenceRequired => {
-                write!(f, "WebAuthn user-presence flag is missing")
-            }
-            WebAuthnError::UserVerificationRequired => {
-                write!(f, "WebAuthn user-verification flag is missing")
-            }
-            WebAuthnError::AttestedCredentialDataMissing => {
-                write!(f, "WebAuthn attested credential data is missing")
-            }
-            WebAuthnError::UnsupportedCoseKey => write!(f, "unsupported WebAuthn COSE key"),
-            WebAuthnError::PublicKeyMismatch => {
-                write!(
-                    f,
-                    "WebAuthn registration public key does not match public_key_hex"
-                )
-            }
-            WebAuthnError::BadSignatureEncoding => write!(f, "invalid WebAuthn signature encoding"),
-            WebAuthnError::SignatureInvalid => write!(f, "invalid WebAuthn signature"),
-        }
-    }
 }
 
 #[derive(Deserialize)]
