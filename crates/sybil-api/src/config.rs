@@ -43,7 +43,7 @@ pub struct ApiConfig {
     #[arg(long, default_value = "", env = "SYBIL_HISTORY_TOKEN")]
     pub history_token: String,
 
-    /// History outbox delivery polling interval.
+    /// Product-history outbox delivery polling interval.
     #[arg(long, default_value = "250", env = "SYBIL_HISTORY_POLL_MS")]
     pub history_poll_ms: u64,
 
@@ -193,105 +193,64 @@ pub struct ApiConfig {
     #[arg(long, default_value = "true", env = "SYBIL_WEBAUTHN_REQUIRE_UV")]
     pub webauthn_require_uv: bool,
 
-    /// In-memory ring-buffer size for recent blocks served by history endpoints.
-    #[arg(long, default_value = "100", env = "SYBIL_BLOCK_HISTORY_CAPACITY")]
-    pub block_history_capacity: usize,
+    /// In-memory cache size for recent canonical blocks.
+    #[arg(long, default_value = "100", env = "SYBIL_RECENT_BLOCK_CACHE_CAPACITY")]
+    pub recent_block_cache_capacity: usize,
 
-    /// In-memory price-history cache points retained per market.
+    /// Recent price points retained for current rolling analytics.
     #[arg(
         long,
         default_value = "2000",
-        env = "SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET"
+        env = "SYBIL_MAX_RECENT_PRICE_POINTS_PER_MARKET"
     )]
-    pub max_price_history_points_per_market: usize,
+    pub max_recent_price_points_per_market: usize,
 
-    /// Durable full-block history rows retained by bounded pruning. 0 disables
-    /// pruning for full block history.
+    /// Canonical replay heights and paired DA artifacts retained locally.
     #[arg(
         long,
         default_value = "0",
-        env = "SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS"
+        env = "SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS"
     )]
-    pub block_history_retention_blocks: u64,
+    pub canonical_archive_retention_blocks: u64,
 
-    /// Durable raw price-point rows retained by bounded pruning. 0 disables
-    /// pruning for raw price history.
-    #[arg(long, default_value = "0", env = "SYBIL_RAW_PRICE_RETENTION_BLOCKS")]
-    pub raw_price_retention_blocks: u64,
-
-    /// Durable account-history age limits. 0 disables age pruning.
-    #[arg(long, default_value = "0", env = "SYBIL_FILL_HISTORY_RETENTION_SECS")]
-    pub fill_history_retention_secs: u64,
-    #[arg(long, default_value = "0", env = "SYBIL_EQUITY_RETENTION_SECS")]
-    pub equity_retention_secs: u64,
-    #[arg(long, default_value = "0", env = "SYBIL_ACCOUNT_EVENT_RETENTION_SECS")]
-    pub account_event_retention_secs: u64,
-
-    /// Global durable account-history row ceilings. 0 disables the ceiling.
-    #[arg(long, default_value = "0", env = "SYBIL_MAX_DURABLE_FILL_ROWS")]
-    pub max_durable_fill_rows: usize,
-    #[arg(long, default_value = "0", env = "SYBIL_MAX_DURABLE_EQUITY_ROWS")]
-    pub max_durable_equity_rows: usize,
-    #[arg(
-        long,
-        default_value = "0",
-        env = "SYBIL_MAX_DURABLE_ACCOUNT_EVENT_ROWS"
-    )]
-    pub max_durable_account_event_rows: usize,
-
-    /// Block cadence for retention maintenance. 0 disables scheduled pruning.
+    /// Block cadence for canonical archive maintenance.
     #[arg(
         long,
         default_value = "1000",
-        env = "SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS"
+        env = "SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS"
     )]
-    pub history_prune_interval_blocks: u64,
+    pub canonical_archive_maintenance_interval_blocks: u64,
 
-    /// Maximum durable history rows deleted in one maintenance pass.
-    #[arg(long, default_value = "10000", env = "SYBIL_HISTORY_PRUNE_MAX_ROWS")]
-    pub history_prune_max_rows: usize,
-
-    /// Comma-separated candle resolutions, in seconds, maintained from
-    /// committed raw price points.
+    /// Maximum replay-block or DA-artifact rows deleted in one pass.
     #[arg(
         long,
-        env = "SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS",
-        value_delimiter = ',',
-        default_value = "60,300,3600"
+        default_value = "10000",
+        env = "SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS"
     )]
-    pub price_candle_resolutions_secs: Vec<u32>,
+    pub canonical_archive_max_rows_per_pass: usize,
 
-    /// Comma-separated durable candle retention windows, in seconds, aligned
-    /// by index with `SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS`. 0 disables pruning
-    /// for that resolution.
-    #[arg(
-        long,
-        env = "SYBIL_PRICE_CANDLE_RETENTION_SECS",
-        value_delimiter = ',',
-        default_value = "2592000,15552000,0"
-    )]
-    pub price_candle_retention_secs: Vec<u64>,
-
-    /// In-memory fill-history records retained per account for API queries.
+    /// Recent fill records retained for current diagnostics.
     #[arg(
         long,
         default_value = "5000",
-        env = "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT"
+        env = "SYBIL_MAX_RECENT_FILLS_PER_ACCOUNT"
     )]
-    pub max_fill_history_per_account: usize,
+    pub max_recent_fills_per_account: usize,
 
-    /// In-memory equity points retained per account (serving fallback only;
-    /// full series lives in redb). Set to 0 in prod.
-    #[arg(long, default_value = "0", env = "SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT")]
-    pub max_equity_points_per_account: usize,
-    /// In-memory history events retained per account (serving fallback only).
-    /// Set to 0 in prod.
+    /// Recent equity points retained for current diagnostics.
     #[arg(
         long,
         default_value = "0",
-        env = "SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT"
+        env = "SYBIL_MAX_RECENT_EQUITY_POINTS_PER_ACCOUNT"
     )]
-    pub max_history_events_per_account: usize,
+    pub max_recent_equity_points_per_account: usize,
+    /// Recent account events retained for current diagnostics.
+    #[arg(
+        long,
+        default_value = "0",
+        env = "SYBIL_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT"
+    )]
+    pub max_recent_account_events_per_account: usize,
 
     /// Sequencer actor queue depth that logs a warning.
     #[arg(long, default_value = "1000", env = "SYBIL_ACTOR_QUEUE_WARN_DEPTH")]
@@ -402,23 +361,14 @@ impl Default for ApiConfig {
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:3000".to_string(),
             webauthn_require_uv: true,
-            block_history_capacity: 100,
-            max_price_history_points_per_market: 2_000,
-            block_history_retention_blocks: 0,
-            raw_price_retention_blocks: 0,
-            fill_history_retention_secs: 0,
-            equity_retention_secs: 0,
-            account_event_retention_secs: 0,
-            max_durable_fill_rows: 0,
-            max_durable_equity_rows: 0,
-            max_durable_account_event_rows: 0,
-            history_prune_interval_blocks: 1_000,
-            history_prune_max_rows: 10_000,
-            price_candle_resolutions_secs: vec![60, 300, 3_600],
-            price_candle_retention_secs: vec![2_592_000, 15_552_000, 0],
-            max_fill_history_per_account: 5_000,
-            max_equity_points_per_account: 0,
-            max_history_events_per_account: 0,
+            recent_block_cache_capacity: 100,
+            max_recent_price_points_per_market: 2_000,
+            canonical_archive_retention_blocks: 0,
+            canonical_archive_maintenance_interval_blocks: 1_000,
+            canonical_archive_max_rows_per_pass: 10_000,
+            max_recent_fills_per_account: 5_000,
+            max_recent_equity_points_per_account: 0,
+            max_recent_account_events_per_account: 0,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,

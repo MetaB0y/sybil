@@ -41,7 +41,7 @@ pub(super) const BLOCK_WITNESSES: TableDefinition<u64, &[u8]> =
 /// Private, versioned product-history batches awaiting durable ingestion by
 /// `sybil-history`. One compact row is written atomically with the block fence;
 /// per-record indexes and rollups belong to the projector, not this database.
-pub(super) const HISTORY_OUTBOX: TableDefinition<u64, &[u8]> =
+pub(super) const PRODUCT_HISTORY_OUTBOX: TableDefinition<u64, &[u8]> =
     TableDefinition::new("history_outbox_v1");
 
 /// Pubkey registry: compressed_point (33 bytes) → account_id (u64)
@@ -67,11 +67,11 @@ pub(super) const MARKET_VOLUMES: TableDefinition<u32, u64> = TableDefinition::ne
 /// Scalar counters: name → value
 pub(super) const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 
-/// Historical-serving metadata: retained floors and maintenance cursors.
-///
-/// These rows describe durable history that is actually still present. They
-/// are advanced only in the same transaction that deletes old rows.
-pub(super) const HISTORY_META: TableDefinition<&str, u64> = TableDefinition::new("history_meta");
+/// Retention metadata for canonical replay blocks and paired DA serving rows.
+/// The physical name is retained so existing dev stores remain readable;
+/// product/account-history metadata belongs to `sybil-history`.
+pub(super) const CANONICAL_ARCHIVE_META: TableDefinition<&str, u64> =
+    TableDefinition::new("history_meta");
 
 /// Chain-instance metadata. `genesis_hash` is the hash of the height-1 block
 /// header and scopes order/cancel signatures across fresh-genesis redeploys.
@@ -111,41 +111,6 @@ pub(super) const ADMIT_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("
 pub(super) const CONTROL_PLANE_LOG: TableDefinition<u64, &[u8]> =
     TableDefinition::new("control_plane_log");
 
-/// Per-account fill history: account_id || block_height || order_id →
-/// msgpack(AccountFillRecord). The byte key keeps records clustered by
-/// account and ordered by block for efficient restoration and future scans.
-pub(super) const FILL_HISTORY: TableDefinition<&[u8], &[u8]> = TableDefinition::new("fill_history");
-/// Timestamp-first retention index for `FILL_HISTORY`.
-pub(super) const FILL_HISTORY_BY_TIME: TableDefinition<&[u8], u64> =
-    TableDefinition::new("fill_history_by_time");
-
-/// Per-account equity series. Key = account_id(8B BE) ++ height(8B BE); one
-/// point per (account, block). Value = rmp-serde EquityPoint. Off-block.
-pub(super) const EQUITY_POINTS: TableDefinition<&[u8], &[u8]> =
-    TableDefinition::new("equity_points");
-/// Timestamp-first retention index for `EQUITY_POINTS`.
-pub(super) const EQUITY_POINTS_BY_TIME: TableDefinition<&[u8], u64> =
-    TableDefinition::new("equity_points_by_time");
-
-/// Per-account history feed. Key = account_id(8B BE) ++ block_height(8B BE) ++
-/// seq(8B BE). Value = rmp-serde StoredHistoryEvent. Off-block.
-pub(super) const HISTORY_EVENTS: TableDefinition<&[u8], &[u8]> =
-    TableDefinition::new("history_events");
-/// Timestamp-first retention index for `HISTORY_EVENTS`.
-pub(super) const HISTORY_EVENTS_BY_TIME: TableDefinition<&[u8], u64> =
-    TableDefinition::new("history_events_by_time");
-
-/// Per-account retention high-water marks. Their presence means this account
-/// has actually lost rows; unlike global floors they do not mark new accounts.
-pub(super) const FILL_HISTORY_PRUNED_HEIGHT: TableDefinition<u64, u64> =
-    TableDefinition::new("fill_history_pruned_height");
-pub(super) const FILL_HISTORY_PRUNED_TIMESTAMP: TableDefinition<u64, u64> =
-    TableDefinition::new("fill_history_pruned_timestamp");
-pub(super) const EQUITY_HISTORY_PRUNED_TIMESTAMP: TableDefinition<u64, u64> =
-    TableDefinition::new("equity_history_pruned_timestamp");
-pub(super) const ACCOUNT_EVENTS_PRUNED_TIMESTAMP: TableDefinition<u64, u64> =
-    TableDefinition::new("account_events_pruned_timestamp");
-
 /// L1 bridge sidecar state: consumed deposit cursor/root and withdrawal leaves.
 pub(super) const BRIDGE_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("bridge_state");
 pub(super) const KEY_BRIDGE_STATE: &str = "state";
@@ -174,38 +139,19 @@ pub(super) const KEY_TRADER_TRACKER_SNAPSHOT: &str = "snapshot";
 
 /// Off-block price-tracker volume extensions: platform running total +
 /// rolling hourly buckets. Stored as a single blob keyed `"snapshot"`,
-/// matching the pattern set by `TRADER_TRACKER`.
-pub(super) const PRICE_TRACKER_VOLUME: TableDefinition<&str, &[u8]> =
+/// matching the pattern set by `TRADER_TRACKER`. The physical table name is
+/// retained for existing dev stores.
+pub(super) const ROLLING_VOLUME: TableDefinition<&str, &[u8]> =
     TableDefinition::new("price_tracker_volume");
-pub(super) const KEY_PRICE_TRACKER_VOLUME_SNAPSHOT: &str = "snapshot";
+pub(super) const KEY_ROLLING_VOLUME_SNAPSHOT: &str = "snapshot";
 
 /// Off-block price-tracker clearing-price history: per-market hourly
 /// snapshot of the first-of-hour clearing price, used by
 /// `price_n_hours_ago` (24h price-delta surfaces). Separate table from
-/// `PRICE_TRACKER_VOLUME` so reverting B3 drops one table cleanly.
-pub(super) const PRICE_TRACKER_CLEARING_HISTORY: TableDefinition<&str, &[u8]> =
+/// `ROLLING_VOLUME`; the physical table name is retained for existing stores.
+pub(super) const ROLLING_PRICE_ANCHORS: TableDefinition<&str, &[u8]> =
     TableDefinition::new("price_tracker_clearing_history");
-pub(super) const KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT: &str = "snapshot";
-
-/// Durable raw mark-price points. Key =
-/// market_id(4B BE) ++ block_height(8B BE).
-pub(super) const PRICE_POINTS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("price_points");
-
-/// Ordered retention index for raw mark-price points. Key =
-/// block_height(8B BE) ++ market_id(4B BE). Value is unused.
-pub(super) const PRICE_POINTS_BY_HEIGHT: TableDefinition<&[u8], u64> =
-    TableDefinition::new("price_points_by_height");
-
-/// Downsampled committed-batch price candles. Key =
-/// market_id(4B BE) ++ resolution_secs(4B BE) ++ bucket_start_ms(8B BE).
-pub(super) const PRICE_CANDLES: TableDefinition<&[u8], &[u8]> =
-    TableDefinition::new("price_candles");
-
-/// Ordered retention index for price candles. Key =
-/// resolution_secs(4B BE) ++ bucket_start_ms(8B BE) ++ market_id(4B BE).
-/// Value is unused.
-pub(super) const PRICE_CANDLES_BY_RESOLUTION: TableDefinition<&[u8], u64> =
-    TableDefinition::new("price_candles_by_resolution");
+pub(super) const KEY_ROLLING_PRICE_ANCHORS_SNAPSHOT: &str = "snapshot";
 
 /// Off-block liquidity tracker: per-market ±band depth rings used by the
 /// `liquidity_avg10` surface. Same single-blob shape as `TRADER_TRACKER`.
@@ -233,8 +179,8 @@ pub(super) const FIRST_DEPOSIT_MS: TableDefinition<&str, &[u8]> =
     TableDefinition::new("first_deposit_ms");
 pub(super) const KEY_FIRST_DEPOSIT_MS_SNAPSHOT: &str = "snapshot";
 
-/// All-time per-account fill counters (B8). The bounded fill window
-/// lives in FILL_HISTORY; the counter survives trim and restart.
+/// All-time per-account fill counters (B8). The counter is current analytics
+/// state and does not depend on the separate product-history projection.
 pub(super) const FILL_TOTAL_COUNTS: TableDefinition<&str, &[u8]> =
     TableDefinition::new("fill_total_counts");
 pub(super) const KEY_FILL_TOTAL_COUNTS_SNAPSHOT: &str = "snapshot";
@@ -260,34 +206,27 @@ pub(super) const KEY_NEXT_MARKET_ID: &str = "next_market_id";
 pub(super) const KEY_NEXT_ORDER_ID: &str = "next_order_id";
 pub(super) const KEY_ACCOUNT_STATE_HEIGHT: &str = "account_state_height";
 pub(super) const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
-pub(super) const KEY_HISTORY_EVENT_NEXT_SEQ: &str = "history_event_next_seq";
-pub(super) const KEY_BLOCKS_FULL_MIN_HEIGHT: &str = "blocks_full_min_height";
-pub(super) const KEY_PRICE_POINTS_MIN_HEIGHT: &str = "price_points_min_height";
-pub(super) const KEY_FILL_HISTORY_MIN_TIMESTAMP_MS: &str = "fill_history_min_timestamp_ms";
-pub(super) const KEY_FILL_HISTORY_PRUNED_THROUGH_HEIGHT: &str =
-    "fill_history_pruned_through_height";
-pub(super) const KEY_EQUITY_POINTS_MIN_TIMESTAMP_MS: &str = "equity_points_min_timestamp_ms";
-pub(super) const KEY_HISTORY_EVENTS_MIN_TIMESTAMP_MS: &str = "history_events_min_timestamp_ms";
-pub(super) const KEY_LAST_HISTORY_PRUNE_HEIGHT: &str = "last_history_prune_height";
-pub(super) const KEY_PRICE_CANDLES_MIN_BUCKET_MS_PREFIX: &str = "price_candles_min_bucket_ms:";
+// Physical counter key retained so existing dev stores do not reuse event ids.
+pub(super) const KEY_NEXT_PRODUCT_EVENT_SEQ: &str = "history_event_next_seq";
+pub(super) const KEY_CANONICAL_ARCHIVE_OLDEST_HEIGHT: &str = "blocks_full_min_height";
+pub(super) const KEY_LAST_CANONICAL_ARCHIVE_MAINTENANCE_HEIGHT: &str = "last_history_prune_height";
 
 pub(super) const STORE_LAYOUT_VERSION: u64 = 1;
 
 // TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");
 
-/// Full API replay block by height. Unlike `BLOCK_HEADERS`/`BLOCK_WITNESSES`,
-/// this is historical serving data and is not pruned to latest-only.
-pub(super) const BLOCKS_FULL: TableDefinition<u64, &[u8]> = TableDefinition::new("blocks_full");
+/// Full canonical API replay block by height. Unlike the latest-only recovery
+/// header/witness tables, this is a bounded archive. The physical table name
+/// is retained for existing dev stores.
+pub(super) const CANONICAL_BLOCK_ARCHIVE: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("blocks_full");
 
 /// Canonical witness payload bytes plus typed DA manifest by block height.
 ///
 /// This is a serving/availability artifact, not a recovery commit fence. Rows
-/// are best-effort and pruned with the existing `blocks_full` retention floor.
+/// are best-effort and pruned with the canonical replay archive floor.
 pub(super) const DA_ARTIFACTS: TableDefinition<u64, &[u8]> = TableDefinition::new("da_artifacts");
 /// Publish-time DA metadata cached independently from the large payload row so
 /// public manifest reads never deserialize or hash witness bytes.
 pub(super) const DA_MANIFESTS: TableDefinition<u64, &[u8]> = TableDefinition::new("da_manifests");
-
-// TODO: Tier 3 tables (remaining)
-// const PRICE_HISTORY: TableDefinition<u64, &[u8]> = TableDefinition::new("price_history");

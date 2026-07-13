@@ -552,9 +552,9 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
 async fn extracted_history_survives_process_restart_and_canonical_block_pruning() {
     let root = ProcessTestRoot::new("process-restart-history");
     let retention_env = [
-        ("SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS", "2"),
-        ("SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS", "1"),
-        ("SYBIL_HISTORY_PRUNE_MAX_ROWS", "100"),
+        ("SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS", "2"),
+        ("SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS", "1"),
+        ("SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS", "100"),
     ];
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))

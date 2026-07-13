@@ -1,4 +1,4 @@
-//! Dependency-light contract between the sequencer history outbox, the
+//! Dependency-light contract between the sequencer product-history outbox, the
 //! private history projector, and the API proxy.
 //!
 //! These are committed *facts*, not sequencer storage rows and not validity

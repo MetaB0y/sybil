@@ -48,8 +48,7 @@ mod types;
 mod views;
 
 pub use self::config::{
-    AnalyticsMemoryStats, DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS, DEFAULT_ORDER_TTL_BLOCKS,
-    SequencerConfig,
+    DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS, DEFAULT_ORDER_TTL_BLOCKS, SequencerConfig,
 };
 pub use self::types::{
     AdmitOutcome, BatchResult, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,

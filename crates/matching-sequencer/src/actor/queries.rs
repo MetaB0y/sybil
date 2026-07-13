@@ -1,6 +1,6 @@
 use super::*;
 
-pub const MAX_BLOCK_HISTORY_QUERY_BLOCKS: usize = 500;
+pub const MAX_BLOCK_REPLAY_QUERY_BLOCKS: usize = 500;
 pub const DEFAULT_PRICE_HISTORY_QUERY_POINTS: usize = 500;
 pub const MAX_PRICE_HISTORY_QUERY_POINTS: usize = 5_000;
 

@@ -23,9 +23,7 @@ use crate::error::RejectionReason;
 use crate::fill_recorder::FillRecorder;
 use crate::market_info::{AccountFillCursor, AccountFillRecord, PricePoint};
 use crate::order_book::{OrderBook, RestingOrder};
-use crate::price_tracker::{
-    PriceTracker, PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot,
-};
+use crate::price_tracker::{PriceTracker, RollingPriceAnchorsSnapshot, RollingVolumeSnapshot};
 use crate::sequencer::SequencerConfig;
 use crate::store::{AnalyticsRestoredState, AnalyticsSnapshot};
 
@@ -73,17 +71,19 @@ impl OrderHistoryOptions {
 impl AnalyticsState {
     pub fn new(config: &SequencerConfig) -> Self {
         Self {
-            price_tracker: PriceTracker::with_retention(config.max_price_history_points_per_market),
-            fill_recorder: FillRecorder::with_retention(config.max_fill_history_per_account),
+            price_tracker: PriceTracker::with_retention(config.max_recent_price_points_per_market),
+            fill_recorder: FillRecorder::with_retention(config.max_recent_fills_per_account),
             trader_tracker: TraderTracker::new(),
             liquidity_tracker: LiquidityTracker::new(),
             order_stats_tracker: OrderStatsTracker::new(),
             welfare_tracker: WelfareTracker::new(),
             cost_basis_tracker: CostBasisTracker::new(),
             first_deposit_ms: HashMap::new(),
-            equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
+            equity_tracker: EquityTracker::with_retention(
+                config.max_recent_equity_points_per_account,
+            ),
             account_event_log: AccountEventLog::with_retention(
-                config.max_history_events_per_account,
+                config.max_recent_account_events_per_account,
             ),
         }
     }
@@ -92,17 +92,17 @@ impl AnalyticsState {
         let mut price_tracker = PriceTracker::with_state_and_retention(
             input.last_clearing_prices,
             input.market_volumes,
-            config.max_price_history_points_per_market,
+            config.max_recent_price_points_per_market,
         );
-        price_tracker.restore_volume_extensions(input.price_tracker_volume);
-        price_tracker.restore_clearing_history(input.price_tracker_clearing_history);
+        price_tracker.restore_rolling_volume(input.rolling_volume);
+        price_tracker.restore_rolling_price_anchors(input.rolling_price_anchors);
 
         Self {
             price_tracker,
             fill_recorder: FillRecorder::restore_bounded_newest_first_with_counts(
                 input.account_fills,
                 input.fill_total_counts,
-                config.max_fill_history_per_account,
+                config.max_recent_fills_per_account,
             ),
             trader_tracker: TraderTracker::restore(input.trader_tracker),
             liquidity_tracker: LiquidityTracker::restore(input.liquidity_tracker),
@@ -110,10 +110,12 @@ impl AnalyticsState {
             welfare_tracker: WelfareTracker::restore(input.welfare_tracker),
             cost_basis_tracker: CostBasisTracker::restore(input.cost_basis_tracker),
             first_deposit_ms: input.first_deposit_ms,
-            equity_tracker: EquityTracker::with_retention(config.max_equity_points_per_account),
+            equity_tracker: EquityTracker::with_retention(
+                config.max_recent_equity_points_per_account,
+            ),
             account_event_log: AccountEventLog::with_retention_and_next_seq(
-                config.max_history_events_per_account,
-                input.history_event_next_seq,
+                config.max_recent_account_events_per_account,
+                input.next_product_event_seq,
             ),
         }
     }
@@ -124,15 +126,15 @@ impl AnalyticsState {
             market_volumes: self.market_volumes(),
             account_fills: self.fill_snapshot(),
             trader_tracker: self.trader_snapshot(),
-            price_tracker_volume: self.price_volume_snapshot(),
-            price_tracker_clearing_history: self.price_clearing_history_snapshot(),
+            rolling_volume: self.rolling_volume_snapshot(),
+            rolling_price_anchors: self.rolling_price_anchors_snapshot(),
             liquidity_tracker: self.liquidity_snapshot(),
             order_stats_tracker: self.order_stats_snapshot(),
             welfare_tracker: self.welfare_snapshot(),
             first_deposit_ms: self.first_deposit_snapshot(),
             fill_total_counts: self.total_fill_counts(),
             cost_basis_tracker: self.cost_basis_snapshot(),
-            history_event_next_seq: self.account_event_log.next_seq(),
+            next_product_event_seq: self.account_event_log.next_seq(),
             fill_history_delta: self.fill_recorder.pending_delta().to_vec(),
             price_points_delta: self.price_tracker.pending_price_points().to_vec(),
             equity_points_delta: self.equity_tracker.pending().to_vec(),
@@ -706,11 +708,11 @@ impl AnalyticsState {
         self.trader_tracker.snapshot()
     }
 
-    pub fn price_volume_snapshot(&self) -> PriceTrackerVolumeSnapshot {
-        self.price_tracker.volume_extensions_snapshot()
+    pub fn rolling_volume_snapshot(&self) -> RollingVolumeSnapshot {
+        self.price_tracker.rolling_volume_snapshot()
     }
 
-    pub fn price_clearing_history_snapshot(&self) -> PriceTrackerClearingHistorySnapshot {
+    pub fn rolling_price_anchors_snapshot(&self) -> RollingPriceAnchorsSnapshot {
         self.price_tracker.clearing_history_snapshot()
     }
 
@@ -748,20 +750,5 @@ impl AnalyticsState {
 
     pub fn seed_equity_known(&mut self, ids: impl IntoIterator<Item = AccountId>) {
         self.equity_tracker.seed_known(ids);
-    }
-
-    pub fn memory_stats(&self) -> crate::sequencer::AnalyticsMemoryStats {
-        crate::sequencer::AnalyticsMemoryStats {
-            equity_known_accounts: self.equity_tracker.known_account_count(),
-            equity_cached_accounts: self.equity_tracker.retained_account_count(),
-            equity_cached_points: self.equity_tracker.retained_point_count(),
-            equity_pending_points: self.equity_tracker.pending().len(),
-            equity_points_per_account_capacity: self.equity_tracker.retention_per_account(),
-            history_cached_accounts: self.account_event_log.retained_account_count(),
-            history_cached_events: self.account_event_log.retained_event_count(),
-            history_pending_events: self.account_event_log.pending().len(),
-            history_events_per_account_capacity: self.account_event_log.retention_per_account(),
-            history_event_next_seq: self.account_event_log.next_seq(),
-        }
     }
 }

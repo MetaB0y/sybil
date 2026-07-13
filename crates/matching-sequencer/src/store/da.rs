@@ -169,9 +169,9 @@ impl Store {
         self.redb_write(move |db| {
             let txn = db.begin_write()?;
             let retained_floor = {
-                let meta = txn.open_table(HISTORY_META)?;
+                let meta = txn.open_table(CANONICAL_ARCHIVE_META)?;
 
-                meta.get(KEY_BLOCKS_FULL_MIN_HEIGHT)?
+                meta.get(KEY_CANONICAL_ARCHIVE_OLDEST_HEIGHT)?
                     .map(|value| value.value())
             };
             if retained_floor.is_some_and(|floor| artifact.manifest.height < floor) {

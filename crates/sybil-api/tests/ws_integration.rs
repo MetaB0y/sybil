@@ -201,9 +201,9 @@ async fn ws_from_block_replays_history_then_goes_live() {
 }
 
 #[tokio::test]
-async fn ws_from_block_replays_store_history_beyond_hot_ring() {
+async fn ws_from_block_replays_canonical_archive_beyond_recent_cache() {
     let (addr, handle) = spawn_store_server(SequencerConfig {
-        block_history_capacity: 1,
+        recent_block_cache_capacity: 1,
         block_interval: Duration::from_secs(60),
         ..SequencerConfig::default()
     })
@@ -213,7 +213,7 @@ async fn ws_from_block_replays_store_history_beyond_hot_ring() {
     let b1 = handle.produce_block().await.unwrap();
     let b2 = handle.produce_block().await.unwrap();
     let recent = handle.get_recent_blocks(10).await.unwrap();
-    assert_eq!(recent.len(), 1, "hot ring should retain only block 3");
+    assert_eq!(recent.len(), 1, "recent cache should retain only block 3");
     assert_eq!(
         recent[0].canonical.header.height,
         b2.canonical.header.height
@@ -255,10 +255,10 @@ async fn ws_from_block_replays_store_history_beyond_hot_ring() {
 #[tokio::test]
 async fn ws_from_block_older_than_retention_sends_gap_envelope() {
     let (addr, handle) = spawn_store_server(SequencerConfig {
-        block_history_capacity: 1,
-        block_history_retention_blocks: 1,
-        history_prune_interval_blocks: 1,
-        history_prune_max_rows: 10,
+        recent_block_cache_capacity: 1,
+        canonical_archive_retention_blocks: 1,
+        canonical_archive_maintenance_interval_blocks: 1,
+        canonical_archive_max_rows_per_pass: 10,
         block_interval: Duration::from_secs(60),
         ..SequencerConfig::default()
     })

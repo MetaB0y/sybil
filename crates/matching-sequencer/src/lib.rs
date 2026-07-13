@@ -36,7 +36,7 @@ pub use account_storage::{
     QmdbStateOperationProofParts, QmdbStateRangeProofParts, QmdbStateRoot,
 };
 pub use actor::{
-    DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_BLOCK_HISTORY_QUERY_BLOCKS,
+    DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_BLOCK_REPLAY_QUERY_BLOCKS,
     MAX_PRICE_HISTORY_QUERY_POINTS, MarketSearchResult, SequencerHandle, SequencerStateProof,
     SequencerStateProofKind,
 };
@@ -67,9 +67,9 @@ pub use market_info::{
 };
 pub use portfolio::{PortfolioSummary, PositionValue};
 pub use sequencer::{
-    AnalyticsMemoryStats, BatchResult, BatchSequencer, BlockSequencer,
-    DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS, DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase,
-    LeaderboardRow, OrderSubmission, PendingOrderInfo, SequencerConfig,
+    BatchResult, BatchSequencer, BlockSequencer, DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
+    DEFAULT_ORDER_TTL_BLOCKS, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,
+    SequencerConfig,
 };
 pub use store::{
     AutoResolutionAction, AutoResolutionRecord, DA_FILE_PROVIDER_REF_ENCODING,

@@ -40,7 +40,7 @@ flowchart TB
         SOLVE["matching-solver<br/>float search"]
         LAND["Integer landing<br/>verify limits + MM budgets"]
         SETTLE["Settlement<br/>balances · positions · minting · resolution"]
-        STORE["Commit<br/>qMDB state + redb fence/WAL<br/>history outbox"]
+        STORE["Commit<br/>qMDB state + redb fence/WAL<br/>product-history outbox"]
         BLOCK["Sealed block<br/>canonical data + derived sidecar"]
         WIT["BlockWitness v9<br/>private transition package"]
         HIST["sybil-history<br/>private raw batches · indexes · candles"]

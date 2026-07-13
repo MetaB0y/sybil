@@ -44,7 +44,7 @@ merge in-memory sequencer records with remote pages because dual-source cursor
 semantics are unsafe.
 
 Sequencer restart restores canonical counters and aggregate snapshots, not
-fill rows. The hot fill recorder may be empty after restart without affecting
+fill rows. The recent fill recorder may be empty after restart without affecting
 the durable history endpoint or the canonical all-time fill count.
 
 ## Privacy and authority

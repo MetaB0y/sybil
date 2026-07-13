@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
 The SSE (Server-Sent Events) block stream is a third-party convenience endpoint
@@ -19,7 +19,8 @@ First-party clients use the [[WebSocket Block Stream]] at
 `GET /v2/blocks/ws?from_block=N`. The WebSocket transport is versioned, can
 replay retained committed blocks from a requested height, signals lag
 explicitly, and returns a `retention_gap` envelope when `from_block` is below
-the retained `blocks_full` floor. SSE intentionally does not provide those
+the canonical replay archive's retained floor (physical redb table
+`blocks_full`). SSE intentionally does not provide those
 resume guarantees: it is a thin live re-encoding of the same block broadcast.
 
 Anonymous SSE and public WebSocket subscriptions share a configurable hard

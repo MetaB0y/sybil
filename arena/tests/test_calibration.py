@@ -558,9 +558,8 @@ def test_persisted_stage1_report_locks_scope_and_keeps_pnl_without_outcomes(tmp_
     assert comparison["matched_analysis_batch_count"] == 1
     assert comparison["control"]["calls"] == 2
     assert comparison["control"]["usd"] == pytest.approx(0.30)
-    assert comparison["control"]["decision_rows"] == 2
     assert comparison["control"]["analysis_batch_count"] == 1
-    assert comparison["control"]["usd_per_decision"] == pytest.approx(0.15)
+    assert comparison["control"]["usd_per_analysis_batch"] == pytest.approx(0.30)
     assert comparison["stage1"]["calls"] == 1
     assert comparison["stage1"]["pnl"] == 6.0
     assert comparison["stage1_minus_control"]["pnl"] == 3.0

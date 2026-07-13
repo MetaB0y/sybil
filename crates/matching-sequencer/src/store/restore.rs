@@ -7,15 +7,15 @@ pub struct AnalyticsRestoredState {
     pub market_volumes: HashMap<MarketId, u64>,
     pub account_fills: Vec<(AccountId, AccountFillRecord)>,
     pub trader_tracker: TraderTrackerSnapshot,
-    pub price_tracker_volume: PriceTrackerVolumeSnapshot,
-    pub price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot,
+    pub rolling_volume: RollingVolumeSnapshot,
+    pub rolling_price_anchors: RollingPriceAnchorsSnapshot,
     pub liquidity_tracker: LiquidityTrackerSnapshot,
     pub order_stats_tracker: OrderStatsTrackerSnapshot,
     pub welfare_tracker: WelfareTrackerSnapshot,
     pub first_deposit_ms: HashMap<AccountId, u64>,
     pub fill_total_counts: HashMap<AccountId, u64>,
     pub cost_basis_tracker: CostBasisTrackerSnapshot,
-    pub history_event_next_seq: u64,
+    pub next_product_event_seq: u64,
 }
 
 /// State restored from the store on startup.
@@ -62,19 +62,6 @@ pub struct RestoredState {
 impl Store {
     /// Load state from the store. Returns None if the store is empty (fresh start).
     pub async fn load_state(&self) -> Result<Option<RestoredState>, StoreError> {
-        self.load_state_with_fill_history_cap(
-            crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
-        )
-        .await
-    }
-
-    /// Compatibility entry point retained for callers that still pass the old
-    /// hot-history cap. Historical rows now live in `sybil-history`, so startup
-    /// never scans account fill history.
-    pub async fn load_state_with_fill_history_cap(
-        &self,
-        _max_fill_history_per_account: usize,
-    ) -> Result<Option<RestoredState>, StoreError> {
         let txn = self.db.begin_read()?;
         let Some(recovery_metadata) = read_recovery_metadata(&txn)? else {
             return Ok(None);
@@ -368,20 +355,20 @@ impl Store {
         // Price-tracker volume extensions. Same missing-row → default
         // semantics as the trader tracker; cold restarts start with empty
         // hourly buckets and a zero platform total.
-        let price_tracker_volume: PriceTrackerVolumeSnapshot = {
-            let table = txn.open_table(PRICE_TRACKER_VOLUME)?;
-            match table.get(KEY_PRICE_TRACKER_VOLUME_SNAPSHOT)? {
+        let rolling_volume: RollingVolumeSnapshot = {
+            let table = txn.open_table(ROLLING_VOLUME)?;
+            match table.get(KEY_ROLLING_VOLUME_SNAPSHOT)? {
                 Some(value) => rmp_serde::from_slice(value.value())?,
-                None => PriceTrackerVolumeSnapshot::default(),
+                None => RollingVolumeSnapshot::default(),
             }
         };
 
         // Price-tracker clearing-history slice. Missing-row → default.
-        let price_tracker_clearing_history: PriceTrackerClearingHistorySnapshot = {
-            let table = txn.open_table(PRICE_TRACKER_CLEARING_HISTORY)?;
-            match table.get(KEY_PRICE_TRACKER_CLEARING_HISTORY_SNAPSHOT)? {
+        let rolling_price_anchors: RollingPriceAnchorsSnapshot = {
+            let table = txn.open_table(ROLLING_PRICE_ANCHORS)?;
+            match table.get(KEY_ROLLING_PRICE_ANCHORS_SNAPSHOT)? {
                 Some(value) => rmp_serde::from_slice(value.value())?,
-                None => PriceTrackerClearingHistorySnapshot::default(),
+                None => RollingPriceAnchorsSnapshot::default(),
             }
         };
 
@@ -445,16 +432,16 @@ impl Store {
             }
         };
 
-        let history_event_next_seq = {
+        let next_product_event_seq = {
             let counters = txn.open_table(COUNTERS)?;
             counters
-                .get(KEY_HISTORY_EVENT_NEXT_SEQ)?
+                .get(KEY_NEXT_PRODUCT_EVENT_SEQ)?
                 .map(|value| value.value())
         };
         // This counter is canonical sequencer metadata. It is persisted in the
-        // same block fence as the history outbox and must not be recovered by
+        // same block fence as the product-history outbox and must not be recovered by
         // scanning the history projection.
-        let history_event_next_seq = history_event_next_seq.unwrap_or(0);
+        let next_product_event_seq = next_product_event_seq.unwrap_or(0);
 
         info!(
             height = recovery_metadata.height,
@@ -498,15 +485,15 @@ impl Store {
                 market_volumes,
                 account_fills,
                 trader_tracker,
-                price_tracker_volume,
-                price_tracker_clearing_history,
+                rolling_volume,
+                rolling_price_anchors,
                 liquidity_tracker,
                 order_stats_tracker,
                 welfare_tracker,
                 first_deposit_ms,
                 fill_total_counts,
                 cost_basis_tracker,
-                history_event_next_seq,
+                next_product_event_seq,
             },
             bridge_state,
             pending_l1_deposits,

@@ -4,20 +4,6 @@ pub const DEFAULT_ORDER_TTL_BLOCKS: u64 = 63_072_000;
 /// value instead of zero/dust reservation.
 pub const DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS: u64 = 1_000_000;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct AnalyticsMemoryStats {
-    pub equity_known_accounts: usize,
-    pub equity_cached_accounts: usize,
-    pub equity_cached_points: usize,
-    pub equity_pending_points: usize,
-    pub equity_points_per_account_capacity: usize,
-    pub history_cached_accounts: usize,
-    pub history_cached_events: usize,
-    pub history_pending_events: usize,
-    pub history_events_per_account_capacity: usize,
-    pub history_event_next_seq: u64,
-}
-
 /// All tunable parameters for a [`BlockSequencer`] and its surrounding actor.
 ///
 /// Construct via [`SequencerConfig::default()`] for sensible defaults, then
@@ -53,44 +39,26 @@ pub struct SequencerConfig {
     pub min_resting_order_notional_nanos: u64,
     /// Maximum deferred MM / multi-market submissions per account.
     pub max_pending_bundles_per_account: usize,
-    /// In-memory ring buffer size for recent blocks (served by the `/blocks`
-    /// history endpoint). Bounds memory use per sequencer.
-    pub block_history_capacity: usize,
-    /// Maximum in-memory chart points retained per market. This is a serving
-    /// cache, not canonical state.
-    pub max_price_history_points_per_market: usize,
-    /// Durable full-block history rows retained by bounded pruning. 0 means
-    /// do not prune this stream.
-    pub block_history_retention_blocks: u64,
-    /// Durable raw price-point rows retained by bounded pruning. 0 means do
-    /// not prune this stream.
-    pub raw_price_retention_blocks: u64,
-    /// Age limits for durable per-account history. 0 means unbounded.
-    pub fill_history_retention_secs: u64,
-    pub equity_retention_secs: u64,
-    pub account_event_retention_secs: u64,
-    /// Global row ceilings for durable per-account history. 0 means unbounded.
-    pub max_durable_fill_rows: usize,
-    pub max_durable_equity_rows: usize,
-    pub max_durable_account_event_rows: usize,
-    /// Block cadence for retention maintenance. 0 disables scheduled pruning.
-    pub history_prune_interval_blocks: u64,
-    /// Maximum durable history rows deleted in one maintenance pass.
-    pub history_prune_max_rows: usize,
-    /// Candle resolutions maintained from committed raw price points.
-    pub price_candle_resolutions_secs: Vec<u32>,
-    /// Per-resolution durable candle retention, aligned by index with
-    /// `price_candle_resolutions_secs`. 0 means unbounded for that resolution.
-    pub price_candle_retention_secs: Vec<u64>,
-    /// Maximum in-memory fill records retained per account for API queries.
-    /// Persistent storage may retain more rows.
-    pub max_fill_history_per_account: usize,
-    /// In-memory equity points retained per account (serving fallback only;
-    /// full series lives in redb). Set to 0 in prod.
-    pub max_equity_points_per_account: usize,
-    /// In-memory history events retained per account (serving fallback only).
-    /// Set to 0 in prod.
-    pub max_history_events_per_account: usize,
+    /// In-memory cache of recent canonical blocks. This is distinct from both
+    /// the bounded replay archive and the product-history service.
+    pub recent_block_cache_capacity: usize,
+    /// Maximum recent price points retained per market for current rolling
+    /// analytics. Product charts are served by `sybil-history`.
+    pub max_recent_price_points_per_market: usize,
+    /// Canonical replay heights (and paired DA artifacts) retained locally.
+    /// Zero disables archive maintenance.
+    pub canonical_archive_retention_blocks: u64,
+    /// Block cadence for canonical archive maintenance.
+    pub canonical_archive_maintenance_interval_blocks: u64,
+    /// Maximum replay-block or DA-artifact rows deleted in one pass.
+    pub canonical_archive_max_rows_per_pass: usize,
+    /// Recent fill records retained for current diagnostics. Durable product
+    /// history lives only in `sybil-history`.
+    pub max_recent_fills_per_account: usize,
+    /// Recent equity points retained for current diagnostics and tests.
+    pub max_recent_equity_points_per_account: usize,
+    /// Recent account events retained for current diagnostics and tests.
+    pub max_recent_account_events_per_account: usize,
     /// Queue depth where actor mailbox pressure should be logged as a warning.
     /// Set to 0 to disable warning logs.
     pub actor_queue_warn_depth: usize,
@@ -125,25 +93,18 @@ impl Default for SequencerConfig {
             max_open_orders_per_account: 1_000,
             min_resting_order_notional_nanos: DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS,
             max_pending_bundles_per_account: 100,
-            block_history_capacity: 100,
-            max_price_history_points_per_market:
-                crate::price_tracker::DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET,
-            block_history_retention_blocks: 0,
-            raw_price_retention_blocks: 0,
-            fill_history_retention_secs: 0,
-            equity_retention_secs: 0,
-            account_event_retention_secs: 0,
-            max_durable_fill_rows: 0,
-            max_durable_equity_rows: 0,
-            max_durable_account_event_rows: 0,
-            history_prune_interval_blocks: 1_000,
-            history_prune_max_rows: 10_000,
-            price_candle_resolutions_secs: vec![60, 300, 3_600],
-            price_candle_retention_secs: vec![2_592_000, 15_552_000, 0],
-            max_fill_history_per_account:
-                crate::fill_recorder::DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT,
-            max_equity_points_per_account: crate::aggregates::MAX_EQUITY_POINTS,
-            max_history_events_per_account: crate::aggregates::MAX_HISTORY_EVENTS_PER_ACCOUNT,
+            recent_block_cache_capacity: 100,
+            max_recent_price_points_per_market:
+                crate::price_tracker::DEFAULT_MAX_RECENT_PRICE_POINTS_PER_MARKET,
+            canonical_archive_retention_blocks: 0,
+            canonical_archive_maintenance_interval_blocks: 1_000,
+            canonical_archive_max_rows_per_pass: 10_000,
+            max_recent_fills_per_account:
+                crate::fill_recorder::DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT,
+            max_recent_equity_points_per_account:
+                crate::aggregates::DEFAULT_MAX_RECENT_EQUITY_POINTS,
+            max_recent_account_events_per_account:
+                crate::aggregates::DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT,
             actor_queue_warn_depth: 1_000,
             actor_queue_error_depth: 5_000,
             liquidity_band_nanos: 50_000_000,

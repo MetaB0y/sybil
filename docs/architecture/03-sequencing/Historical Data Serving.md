@@ -36,6 +36,11 @@ sequencer actor and the commit path. The publisher deletes a row only after the
 history checkpoint covers its height. A service outage therefore makes history
 lag and grows the durable backlog; it does not stop trading or block production.
 
+The sequencer does not also maintain durable fill, event, equity, price, or
+candle query tables. Those former projections were removed after this boundary
+landed; keeping them would restore the write amplification and ambiguous
+retention ownership that the service extraction was meant to eliminate.
+
 `CommittedHistoryBatchV1` is genesis-bound and contains the block/state hashes,
 commit timestamp, account-attributed fill/event/equity facts, public committed
 price facts, and a canonical payload hash. It contains stable domain facts, not

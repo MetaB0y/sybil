@@ -269,3 +269,39 @@ async def test_rebalance_records_no_order_rejection_reason(
     assert db.log_decision.call_args.kwargs["restate"] == (
         "YES resolves if the fixture event occurs."
     )
+
+
+@pytest.mark.asyncio
+async def test_timer_rebalance_does_not_duplicate_forecast_decision():
+    now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+    monotonic = 1_000.0
+    bus = FairValueBus("test")
+    db = MagicMock()
+    trader = _make_trader(
+        db=db,
+        strategy=FlatStrategy(),
+        fair_value_bus=bus,
+        now_fn=lambda: now,
+        monotonic_fn=lambda: monotonic,
+    )
+    trader._observed_first_block = True
+    trader.balance_history = [500.0]
+    await bus.publish(
+        FairValueUpdate(
+            market_id=7,
+            persona_key="test",
+            fair_value=0.80,
+            motivation="fresh evidence",
+            analysis="one forecast",
+            analysis_batch_id="batch-1",
+            ts=now,
+        )
+    )
+
+    await trader.on_block(_price_block())
+    assert db.log_decision.call_count == 1
+
+    monotonic += trader.strategy.rebalance_interval_s
+    await trader.on_block(_price_block())
+
+    assert db.log_decision.call_count == 1

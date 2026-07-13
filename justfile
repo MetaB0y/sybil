@@ -10,7 +10,7 @@ test:
 
 # Run clippy lints
 lint:
-    RUSTFLAGS="-Dwarnings" cargo clippy --workspace --all-targets --all-features
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Compile every root-workspace target and feature combination.
 workspace-check:
@@ -364,6 +364,7 @@ frontend-check:
     fi
     cd frontend/web
     pnpm install --frozen-lockfile
+    pnpm types:check
     pnpm tsc --noEmit
     pnpm lint
     pnpm test

@@ -42,15 +42,15 @@ services:
       SYBIL_ADMIN_FEED_KEY_PATH: "/data/admin-feed.key"
       # History serving lives in sybil-history; these only bound optional hot
       # analytics caches in the sequencer process.
-      SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT: "0"
-      SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT: "0"
+      SYBIL_MAX_RECENT_EQUITY_POINTS_PER_ACCOUNT: "0"
+      SYBIL_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT: "0"
       # Seven days at the inherited 10-second block cadence: 6 blocks/minute
       # * 60 * 24 * 7 = 60,480 blocks. This applies only to full canonical
       # blocks and paired local DA artifacts, not product history.
-      SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS: "60480"
+      SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS: "60480"
       # Run canonical block/DA maintenance every ten minutes (60 blocks).
-      SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS: "60"
-      SYBIL_HISTORY_PRUNE_MAX_ROWS: "10000"
+      SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS: "60"
+      SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS: "10000"
 
     logging: *default-logging
   sybil-history:

@@ -41,7 +41,7 @@ The intended ownership boundary is:
 ```mermaid
 flowchart LR
     SEQ["Sequencer<br/>current state + committed facts"]
-    OUT["Atomic versioned<br/>history outbox"]
+    OUT["Atomic versioned<br/>product-history outbox"]
     IDX["Private sybil-history<br/>projector + query API"]
     ARC["Immutable object<br/>archive"]
     PG["Partitioned<br/>PostgreSQL"]

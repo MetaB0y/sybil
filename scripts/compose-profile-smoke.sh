@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 
 export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
 export SYBIL_SERVICE_TOKEN="${SYBIL_SERVICE_TOKEN:-compose-smoke-service-token}"
+export SYBIL_HISTORY_TOKEN="${SYBIL_HISTORY_TOKEN:-compose-smoke-history-token}"
 export SYBIL_WEBAUTHN_RP_ID="${SYBIL_WEBAUTHN_RP_ID:-app.example.test}"
 export SYBIL_WEBAUTHN_ORIGIN="${SYBIL_WEBAUTHN_ORIGIN:-https://app.example.test}"
 export GF_SECURITY_ADMIN_PASSWORD="${GF_SECURITY_ADMIN_PASSWORD:-compose-smoke-grafana-password}"
@@ -93,7 +94,7 @@ for compose_file in docker-compose.yml docker-compose.prod.yml; do
 done
 grep -Fq 'targets: ["sybil-arena:9101"]' deploy/prometheus.yml \
     || fail "VictoriaMetrics does not scrape the arena metrics exporter"
-pass "arena desired-state metrics are enabled and scraped in dev/prod compose"
+pass "arena metrics are enabled and scraped in dev/prod compose"
 
 arena_service_block=$(
     awk '
@@ -127,18 +128,9 @@ import sys
 
 keys = (
     "SYBIL_BLOCK_INTERVAL_MS",
-    "SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS",
-    "SYBIL_RAW_PRICE_RETENTION_BLOCKS",
-    "SYBIL_FILL_HISTORY_RETENTION_SECS",
-    "SYBIL_EQUITY_RETENTION_SECS",
-    "SYBIL_ACCOUNT_EVENT_RETENTION_SECS",
-    "SYBIL_MAX_DURABLE_FILL_ROWS",
-    "SYBIL_MAX_DURABLE_EQUITY_ROWS",
-    "SYBIL_MAX_DURABLE_ACCOUNT_EVENT_ROWS",
-    "SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS",
-    "SYBIL_HISTORY_PRUNE_MAX_ROWS",
-    "SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS",
-    "SYBIL_PRICE_CANDLE_RETENTION_SECS",
+    "SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS",
+    "SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS",
+    "SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS",
 )
 environment = {}
 in_api = False
@@ -158,21 +150,12 @@ for key in keys:
 )
 expected_retention_env=$(printf '%s\n' \
     'SYBIL_BLOCK_INTERVAL_MS=10000' \
-    'SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS=60480' \
-    'SYBIL_RAW_PRICE_RETENTION_BLOCKS=60480' \
-    'SYBIL_FILL_HISTORY_RETENTION_SECS=2592000' \
-    'SYBIL_EQUITY_RETENTION_SECS=2678400' \
-    'SYBIL_ACCOUNT_EVENT_RETENTION_SECS=2592000' \
-    'SYBIL_MAX_DURABLE_FILL_ROWS=1000000' \
-    'SYBIL_MAX_DURABLE_EQUITY_ROWS=2000000' \
-    'SYBIL_MAX_DURABLE_ACCOUNT_EVENT_ROWS=1000000' \
-    'SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS=60' \
-    'SYBIL_HISTORY_PRUNE_MAX_ROWS=10000' \
-    'SYBIL_PRICE_CANDLE_RESOLUTIONS_SECS=60,300,3600' \
-    'SYBIL_PRICE_CANDLE_RETENTION_SECS=604800,604800,604800')
+    'SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS=60480' \
+    'SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS=60' \
+    'SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS=10000')
 [[ "$retention_env" == "$expected_retention_env" ]] \
-    || fail "production compose does not pin the durable history retention policy"
-pass "production compose pins market and bounded account-history retention"
+    || fail "production compose does not pin canonical archive retention"
+pass "production compose pins market and canonical archive retention"
 
 durability_contract=$(
     compose config | python3 -c '

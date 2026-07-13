@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use std::collections::VecDeque;
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

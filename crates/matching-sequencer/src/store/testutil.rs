@@ -16,33 +16,6 @@ pub(super) fn temp_db_path(prefix: &str) -> PathBuf {
     ))
 }
 
-impl Store {
-    pub(crate) fn seed_fill_history_for_test(
-        &self,
-        records: &[(AccountId, AccountFillRecord)],
-    ) -> Result<(), StoreError> {
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(FILL_HISTORY)?;
-            let mut by_time = txn.open_table(FILL_HISTORY_BY_TIME)?;
-            for (account_id, record) in records {
-                let key = fill_history_key(*account_id, record);
-                let time_key = fill_history_by_time_key(
-                    record.timestamp_ms,
-                    *account_id,
-                    record.block_height,
-                    record.order_id,
-                );
-                let value = rmp_serde::to_vec(record)?;
-                table.insert(key.as_slice(), value.as_slice())?;
-                by_time.insert(time_key.as_slice(), 0)?;
-            }
-        }
-        txn.commit()?;
-        Ok(())
-    }
-}
-
 pub(super) fn sample_header(height: u64) -> BlockHeader {
     BlockHeader {
         height,
@@ -207,110 +180,22 @@ impl TestEnv {
                 market_volumes: market_volumes.unwrap_or(&self.empty_volumes),
                 account_fills: Vec::new(),
                 trader_tracker: Default::default(),
-                price_tracker_volume: Default::default(),
-                price_tracker_clearing_history: Default::default(),
+                rolling_volume: Default::default(),
+                rolling_price_anchors: Default::default(),
                 liquidity_tracker: Default::default(),
                 order_stats_tracker: Default::default(),
                 welfare_tracker: Default::default(),
                 first_deposit_ms: HashMap::new(),
                 fill_total_counts: HashMap::new(),
                 cost_basis_tracker: Default::default(),
-                history_event_next_seq: 0,
+                next_product_event_seq: 0,
                 fill_history_delta: Vec::new(),
                 equity_points_delta: Vec::new(),
                 price_points_delta: Vec::new(),
                 history_events_delta: Vec::new(),
             },
-            price_candle_resolutions_secs: &[],
-            durable_history_row_caps: Default::default(),
             bridge_state: &self.bridge_state,
             resting_orders,
-        }
-    }
-
-    pub(super) fn snapshot_with_fills<'a>(
-        &'a self,
-        accounts: &'a AccountStore,
-        markets: &'a MarketSet,
-        lifecycle: &'a MarketLifecycle,
-        header: &'a BlockHeader,
-        account_fills: Vec<(AccountId, AccountFillRecord)>,
-    ) -> SequencerSnapshot<'a> {
-        SequencerSnapshot {
-            accounts,
-            markets,
-            market_groups: &[],
-            lifecycle,
-            header,
-            genesis_hash: self.genesis_hash,
-            next_order_id: 1,
-            pubkey_registry: &self.empty_pk,
-            analytics: AnalyticsSnapshot {
-                last_clearing_prices: &self.empty_prices,
-                market_volumes: &self.empty_volumes,
-                account_fills: account_fills.clone(),
-                trader_tracker: Default::default(),
-                price_tracker_volume: Default::default(),
-                price_tracker_clearing_history: Default::default(),
-                liquidity_tracker: Default::default(),
-                order_stats_tracker: Default::default(),
-                welfare_tracker: Default::default(),
-                first_deposit_ms: HashMap::new(),
-                fill_total_counts: HashMap::new(),
-                cost_basis_tracker: Default::default(),
-                history_event_next_seq: 0,
-                fill_history_delta: account_fills,
-                equity_points_delta: Vec::new(),
-                price_points_delta: Vec::new(),
-                history_events_delta: Vec::new(),
-            },
-            price_candle_resolutions_secs: &[],
-            durable_history_row_caps: Default::default(),
-            bridge_state: &self.bridge_state,
-            resting_orders: Vec::new(),
-        }
-    }
-
-    pub(super) fn snapshot_with_price_points<'a>(
-        &'a self,
-        accounts: &'a AccountStore,
-        markets: &'a MarketSet,
-        lifecycle: &'a MarketLifecycle,
-        header: &'a BlockHeader,
-        price_points_delta: Vec<(MarketId, crate::market_info::PricePoint)>,
-    ) -> SequencerSnapshot<'a> {
-        SequencerSnapshot {
-            accounts,
-            markets,
-            market_groups: &[],
-            lifecycle,
-            header,
-            genesis_hash: self.genesis_hash,
-            next_order_id: 1,
-            pubkey_registry: &self.empty_pk,
-            analytics: AnalyticsSnapshot {
-                last_clearing_prices: &self.empty_prices,
-                market_volumes: &self.empty_volumes,
-                account_fills: Vec::new(),
-                trader_tracker: Default::default(),
-                price_tracker_volume: Default::default(),
-                price_tracker_clearing_history: Default::default(),
-                liquidity_tracker: Default::default(),
-                order_stats_tracker: Default::default(),
-                welfare_tracker: Default::default(),
-                first_deposit_ms: HashMap::new(),
-                fill_total_counts: HashMap::new(),
-                cost_basis_tracker: Default::default(),
-                history_event_next_seq: 0,
-                fill_history_delta: Vec::new(),
-                equity_points_delta: Vec::new(),
-                price_points_delta,
-                history_events_delta: Vec::new(),
-            },
-            price_candle_resolutions_secs: &[60, 300, 3_600],
-            durable_history_row_caps: Default::default(),
-            bridge_state: &self.bridge_state,
-            resting_orders: Vec::new(),
         }
     }
 
@@ -320,7 +205,7 @@ impl TestEnv {
         markets: &'a MarketSet,
         lifecycle: &'a MarketLifecycle,
         header: &'a BlockHeader,
-        history_event_next_seq: u64,
+        next_product_event_seq: u64,
         history_events_delta: Vec<crate::aggregates::StoredHistoryEvent>,
     ) -> SequencerSnapshot<'a> {
         SequencerSnapshot {
@@ -337,22 +222,20 @@ impl TestEnv {
                 market_volumes: &self.empty_volumes,
                 account_fills: Vec::new(),
                 trader_tracker: Default::default(),
-                price_tracker_volume: Default::default(),
-                price_tracker_clearing_history: Default::default(),
+                rolling_volume: Default::default(),
+                rolling_price_anchors: Default::default(),
                 liquidity_tracker: Default::default(),
                 order_stats_tracker: Default::default(),
                 welfare_tracker: Default::default(),
                 first_deposit_ms: HashMap::new(),
                 fill_total_counts: HashMap::new(),
                 cost_basis_tracker: Default::default(),
-                history_event_next_seq,
+                next_product_event_seq,
                 fill_history_delta: Vec::new(),
                 equity_points_delta: Vec::new(),
                 price_points_delta: Vec::new(),
                 history_events_delta,
             },
-            price_candle_resolutions_secs: &[],
-            durable_history_row_caps: Default::default(),
             bridge_state: &self.bridge_state,
             resting_orders: Vec::new(),
         }

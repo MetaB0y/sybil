@@ -1550,7 +1550,7 @@ export interface components {
        * @description Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
        *     1_000_000_000 = $1. Multi-market fills credit each active market with their
        *     full welfare; the platform `total_welfare_nanos` counts each fill once.
-       *     Signed — solver rounding can yield small negatives.
+       *     Encoded as signed nanos to match canonical welfare arithmetic.
        */
       welfare_nanos?: string;
     };
@@ -1607,7 +1607,7 @@ export interface components {
       /**
        * Format: int64
        * @description Total solver welfare in the block. Integer nanodollars;
-       *     1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
+       *     1_000_000_000 = $1. Verified block welfare is non-negative.
        */
       total_welfare_nanos: string;
       /**
@@ -2702,7 +2702,7 @@ export interface components {
        * Format: int64
        * @description Cumulative platform welfare for this bucket. Integer nanodollars;
        *     1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
-       *     once). Signed: solver rounding can yield small negatives.
+       *     once). Verified block welfare is non-negative.
        */
       total_welfare_nanos?: string;
       /** Format: int64 */

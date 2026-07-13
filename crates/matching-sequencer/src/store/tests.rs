@@ -1,282 +1,10 @@
 use std::sync::Arc;
 
-use crate::aggregates::{EquityPoint, HistoryEvent, HistoryKind, StoredHistoryEvent};
 use matching_engine::MarketSet;
 use redb::{Database, TableDefinition};
 
 use super::testutil::*;
 use super::*;
-
-#[tokio::test]
-async fn account_fill_history_prunes_by_age_and_global_row_cap() {
-    let path = temp_db_path("account-fill-retention");
-    let store = Store::open(&path).unwrap();
-    let account_id = AccountId(7);
-    let records = [1_000, 2_000, 3_000].map(|timestamp_ms| AccountFillRecord {
-        order_id: timestamp_ms,
-        fill_qty: 1,
-        fill_price: Nanos(500_000_000),
-        block_height: timestamp_ms / 1_000,
-        timestamp_ms,
-        position_deltas: vec![],
-    });
-    store
-        .seed_fill_history_for_test(
-            &records
-                .iter()
-                .cloned()
-                .map(|record| (account_id, record))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-
-    let no_delete = store
-        .prune_history(
-            4,
-            4_000,
-            HistoryRetentionPolicy {
-                fill_history_retention_secs: 10,
-                prune_interval_blocks: 1,
-                prune_max_rows: 10,
-                ..HistoryRetentionPolicy::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(no_delete.fill_history_pruned, 0);
-    assert_eq!(
-        store.account_history_retention(account_id).unwrap(),
-        AccountHistoryRetention::default()
-    );
-
-    let report = store
-        .prune_history(
-            4,
-            4_000,
-            HistoryRetentionPolicy {
-                fill_history_retention_secs: 2,
-                prune_interval_blocks: 1,
-                prune_max_rows: 10,
-                ..HistoryRetentionPolicy::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(report.fill_history_pruned, 1);
-    assert_eq!(report.meta.fill_history_min_timestamp_ms, Some(2_000));
-    assert_eq!(report.meta.fill_history_pruned_through_height, Some(1));
-    assert_eq!(
-        store
-            .account_history_retention(account_id)
-            .unwrap()
-            .fill_pruned_through_height,
-        Some(1)
-    );
-    assert_eq!(
-        store.account_history_retention(AccountId(8)).unwrap(),
-        AccountHistoryRetention::default(),
-        "a new account must not inherit another account's retention gap"
-    );
-    assert_eq!(
-        store
-            .account_fills(account_id, None, 10, 0)
-            .unwrap()
-            .into_iter()
-            .map(|fill| fill.timestamp_ms)
-            .collect::<Vec<_>>(),
-        vec![3_000, 2_000],
-    );
-
-    let report = store
-        .prune_history(
-            4,
-            4_000,
-            HistoryRetentionPolicy {
-                max_durable_fill_rows: 1,
-                prune_interval_blocks: 1,
-                prune_max_rows: 10,
-                ..HistoryRetentionPolicy::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(report.fill_history_pruned, 1);
-    assert_eq!(report.meta.fill_history_min_timestamp_ms, Some(3_000));
-    assert_eq!(report.meta.fill_history_pruned_through_height, Some(2));
-}
-
-#[tokio::test]
-async fn equity_and_account_events_share_honest_age_retention() {
-    let path = temp_db_path("account-derived-retention");
-    let store = Store::open(&path).unwrap();
-    let account_id = AccountId(9);
-    let points = [1_000, 2_000].map(|timestamp_ms| EquityPoint {
-        height: timestamp_ms / 1_000,
-        timestamp_ms,
-        portfolio_value_nanos: timestamp_ms as i64,
-        deposited_nanos: 0,
-    });
-    let mut old = HistoryEvent::new(account_id, HistoryKind::Placed, 1, 1_000);
-    old.seq = 1;
-    let mut boundary = HistoryEvent::new(account_id, HistoryKind::Filled, 2, 2_000);
-    boundary.seq = 2;
-    let events = [
-        StoredHistoryEvent::from_event(&old),
-        StoredHistoryEvent::from_event(&boundary),
-    ];
-    store
-        .append_offblock_rows(
-            &points
-                .iter()
-                .map(|point| (account_id, *point))
-                .collect::<Vec<_>>(),
-            &events,
-        )
-        .unwrap();
-
-    let report = store
-        .prune_history(
-            3,
-            3_000,
-            HistoryRetentionPolicy {
-                equity_retention_secs: 1,
-                account_event_retention_secs: 1,
-                prune_interval_blocks: 1,
-                prune_max_rows: 10,
-                ..HistoryRetentionPolicy::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(report.equity_points_pruned, 1);
-    assert_eq!(report.history_events_pruned, 1);
-    assert_eq!(report.meta.equity_points_min_timestamp_ms, Some(2_000));
-    assert_eq!(report.meta.history_events_min_timestamp_ms, Some(2_000));
-    assert_eq!(store.equity_series(account_id, 0).unwrap(), vec![points[1]]);
-    assert_eq!(
-        store
-            .account_events(account_id, 10, None, None)
-            .unwrap()
-            .len(),
-        1
-    );
-
-    store
-        .prune_history(
-            5,
-            5_000,
-            HistoryRetentionPolicy {
-                equity_retention_secs: 1,
-                account_event_retention_secs: 1,
-                prune_interval_blocks: 1,
-                prune_max_rows: 10,
-                ..HistoryRetentionPolicy::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert!(store.equity_series(account_id, 0).unwrap().is_empty());
-    assert!(
-        store
-            .account_events(account_id, 10, None, None)
-            .unwrap()
-            .is_empty()
-    );
-    let retention = store.account_history_retention(account_id).unwrap();
-    assert_eq!(retention.equity_pruned_through_timestamp_ms, Some(2_000));
-    assert_eq!(retention.events_pruned_through_timestamp_ms, Some(2_000));
-    assert_eq!(
-        store.account_history_retention(AccountId(10)).unwrap(),
-        AccountHistoryRetention::default()
-    );
-}
-
-#[tokio::test]
-#[ignore = "legacy embedded fill projection; sybil-history owns this contract"]
-async fn later_commits_do_not_resurrect_pruned_hot_fill_rows() {
-    let path = temp_db_path("fill-retention-no-resurrection");
-    let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
-    let markets = MarketSet::new();
-    let mut accounts = AccountStore::new();
-    let account_id = accounts.create_account(100);
-    let env = TestEnv::new();
-    let old = AccountFillRecord {
-        order_id: 1,
-        fill_qty: 1,
-        fill_price: Nanos(1),
-        block_height: 1,
-        timestamp_ms: 1_000,
-        position_deltas: vec![],
-    };
-    let new = AccountFillRecord {
-        order_id: 2,
-        block_height: 2,
-        timestamp_ms: 2_000,
-        ..old.clone()
-    };
-    let header2 = sample_header(2);
-    let mut initial = env.snapshot_with_fills(
-        &accounts,
-        &markets,
-        &lifecycle,
-        &header2,
-        vec![(account_id, old.clone()), (account_id, new.clone())],
-    );
-    initial.durable_history_row_caps.fills = 1;
-    store.save_block(initial).await.unwrap();
-    assert_eq!(
-        store
-            .history_retention_meta()
-            .unwrap()
-            .fill_history_pruned_through_height,
-        Some(1)
-    );
-    assert_eq!(
-        store.account_fills(account_id, None, 10, 0).unwrap(),
-        vec![new.clone()]
-    );
-
-    let header3 = sample_header(3);
-    let mut snapshot = env.snapshot(&accounts, &markets, &lifecycle, &header3, 3, None, vec![]);
-    snapshot.analytics.account_fills = vec![(account_id, old)];
-    store.save_block(snapshot).await.unwrap();
-    assert_eq!(
-        store.account_fills(account_id, None, 10, 0).unwrap(),
-        vec![new]
-    );
-}
-
-#[test]
-fn equity_query_is_downsampled_with_first_and_latest_preserved() {
-    let path = temp_db_path("equity-query-bound");
-    let store = Store::open(&path).unwrap();
-    let account_id = AccountId(12);
-    let rows = (1..=6_001)
-        .map(|height| {
-            (
-                account_id,
-                EquityPoint {
-                    height,
-                    timestamp_ms: height,
-                    portfolio_value_nanos: height as i64,
-                    deposited_nanos: 0,
-                },
-            )
-        })
-        .collect::<Vec<_>>();
-    store.append_offblock_rows(&rows, &[]).unwrap();
-
-    let (points, source_points) = store.equity_series_page(account_id, 0).unwrap();
-    assert_eq!(source_points, 6_001);
-    assert_eq!(points.len(), Store::MAX_EQUITY_QUERY_POINTS);
-    assert_eq!(points.first().unwrap().height, 1);
-    assert_eq!(points.last().unwrap().height, 6_001);
-}
-use crate::AdminOracle;
-use crate::account::AccountStore;
-use crate::market_lifecycle::MarketLifecycle;
 
 fn store_test_sequencer_config() -> crate::SequencerConfig {
     crate::SequencerConfig {
@@ -363,36 +91,22 @@ async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
 }
 
 #[tokio::test]
-async fn history_pruning_deletes_canonical_blocks_and_da_with_metadata() {
-    let path = temp_db_path("store-history-retention");
+async fn canonical_archive_pruning_deletes_replay_blocks_and_da_with_metadata() {
+    let path = temp_db_path("store-canonical-archive-retention");
     let store = Store::open(&path).unwrap();
     let oracle = Arc::new(AdminOracle::new());
     let lifecycle = MarketLifecycle::new(oracle);
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("retention");
+    let markets = MarketSet::new();
     let accounts = AccountStore::new();
     let env = TestEnv::new();
 
     for height in 1..=5 {
         let (header, witness) =
             coherent_header_and_witness(height, &accounts, &markets, &lifecycle, &env.bridge_state);
-        let point = crate::market_info::PricePoint {
-            height,
-            timestamp_ms: header.timestamp_ms,
-            yes_price: Nanos(500_000_000 + height),
-            no_price: Nanos(500_000_000 - height),
-            volume_nanos: height * 10,
-        };
         let block = sample_sealed_block(&header);
         store
-            .save_block_with_witness_and_history(
-                env.snapshot_with_price_points(
-                    &accounts,
-                    &markets,
-                    &lifecycle,
-                    &header,
-                    vec![(market_id, point)],
-                ),
+            .save_block_with_witness_and_replay_block(
+                env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
                 &witness,
                 &block,
             )
@@ -405,28 +119,21 @@ async fn history_pruning_deletes_canonical_blocks_and_da_with_metadata() {
     }
 
     let report = store
-        .prune_history(
+        .prune_canonical_archive(
             5,
-            sample_header(5).timestamp_ms,
-            HistoryRetentionPolicy {
-                block_history_retention_blocks: 3,
-                raw_price_retention_blocks: 3,
-                price_candle_resolutions_secs: Vec::new(),
-                price_candle_retention_secs: Vec::new(),
-                prune_interval_blocks: 1,
-                prune_max_rows: 10,
-                ..HistoryRetentionPolicy::default()
+            CanonicalArchiveRetentionPolicy {
+                retention_blocks: 3,
+                maintenance_interval_blocks: 1,
+                max_rows_per_pass: 10,
             },
         )
         .await
         .unwrap();
 
-    assert_eq!(report.blocks_full_pruned, 2);
+    assert_eq!(report.replay_blocks_pruned, 2);
     assert_eq!(report.da_artifacts_pruned, 2);
-    assert_eq!(report.price_points_pruned, 0);
-    assert_eq!(report.meta.blocks_full_min_height, Some(3));
-    assert_eq!(report.meta.price_points_min_height, None);
-    assert_eq!(report.meta.last_history_prune_height, Some(5));
+    assert_eq!(report.meta.oldest_retained_height, Some(3));
+    assert_eq!(report.meta.last_maintenance_height, Some(5));
     assert!(store.load_block(1).await.unwrap().is_none());
     assert!(store.load_block(2).await.unwrap().is_none());
     assert!(store.load_da_artifact(1).await.unwrap().is_none());
@@ -456,40 +163,26 @@ async fn history_pruning_deletes_canonical_blocks_and_da_with_metadata() {
         3
     );
 
-    assert_eq!(store.history_outbox_len().unwrap(), 5);
+    assert_eq!(store.product_history_outbox_len().unwrap(), 5);
 }
 
 #[tokio::test]
-async fn history_pruning_partial_budget_keeps_metadata_at_oldest_remaining_row() {
-    let path = temp_db_path("store-history-retention-budget");
+async fn canonical_archive_partial_budget_reports_oldest_remaining_replay_block() {
+    let path = temp_db_path("store-canonical-archive-budget");
     let store = Store::open(&path).unwrap();
     let oracle = Arc::new(AdminOracle::new());
     let lifecycle = MarketLifecycle::new(oracle);
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("retention budget");
+    let markets = MarketSet::new();
     let accounts = AccountStore::new();
     let env = TestEnv::new();
 
     for height in 1..=5 {
         let (header, witness) =
             coherent_header_and_witness(height, &accounts, &markets, &lifecycle, &env.bridge_state);
-        let point = crate::market_info::PricePoint {
-            height,
-            timestamp_ms: header.timestamp_ms,
-            yes_price: Nanos(500_000_000),
-            no_price: Nanos(500_000_000),
-            volume_nanos: 1,
-        };
         let block = sample_sealed_block(&header);
         store
-            .save_block_with_witness_and_history(
-                env.snapshot_with_price_points(
-                    &accounts,
-                    &markets,
-                    &lifecycle,
-                    &header,
-                    vec![(market_id, point)],
-                ),
+            .save_block_with_witness_and_replay_block(
+                env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
                 &witness,
                 &block,
             )
@@ -498,288 +191,27 @@ async fn history_pruning_partial_budget_keeps_metadata_at_oldest_remaining_row()
     }
 
     let report = store
-        .prune_history(
+        .prune_canonical_archive(
             5,
-            sample_header(5).timestamp_ms,
-            HistoryRetentionPolicy {
-                block_history_retention_blocks: 2,
-                raw_price_retention_blocks: 2,
-                price_candle_resolutions_secs: Vec::new(),
-                price_candle_retention_secs: Vec::new(),
-                prune_interval_blocks: 1,
-                prune_max_rows: 2,
-                ..HistoryRetentionPolicy::default()
+            CanonicalArchiveRetentionPolicy {
+                retention_blocks: 2,
+                maintenance_interval_blocks: 1,
+                max_rows_per_pass: 2,
             },
         )
         .await
         .unwrap();
 
-    assert_eq!(report.blocks_full_pruned, 2);
-    assert_eq!(report.price_points_pruned, 0);
+    assert_eq!(report.replay_blocks_pruned, 2);
     assert_eq!(
-        report.meta.blocks_full_min_height,
+        report.meta.oldest_retained_height,
         Some(3),
         "block floor must not jump to target 4 while block 3 remains"
     );
-    assert_eq!(
-        report.meta.price_points_min_height, None,
-        "product price history is not stored in the sequencer database"
-    );
-    assert_eq!(report.meta.last_history_prune_height, Some(5));
+    assert_eq!(report.meta.last_maintenance_height, Some(5));
     assert!(store.load_block(3).await.unwrap().is_some());
 
-    assert_eq!(store.history_outbox_len().unwrap(), 5);
-}
-
-#[tokio::test]
-#[ignore = "price candle retention moved to sybil-history"]
-async fn price_candle_pruning_deletes_by_resolution_with_metadata() {
-    let path = temp_db_path("store-price-candle-retention");
-    let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("candle retention");
-    let accounts = AccountStore::new();
-    let env = TestEnv::new();
-
-    for (height, timestamp_ms) in [(1, 0), (2, 60_000), (3, 300_000), (4, 600_000)] {
-        let mut header = sample_header(height);
-        header.timestamp_ms = timestamp_ms;
-        let point = crate::market_info::PricePoint {
-            height,
-            timestamp_ms,
-            yes_price: Nanos(500_000_000 + height),
-            no_price: Nanos(500_000_000 - height),
-            volume_nanos: height,
-        };
-        store
-            .save_block(env.snapshot_with_price_points(
-                &accounts,
-                &markets,
-                &lifecycle,
-                &header,
-                vec![(market_id, point)],
-            ))
-            .await
-            .unwrap();
-    }
-
-    let report = store
-        .prune_history(
-            4,
-            600_000,
-            HistoryRetentionPolicy {
-                block_history_retention_blocks: 0,
-                raw_price_retention_blocks: 0,
-                price_candle_resolutions_secs: vec![60, 300],
-                price_candle_retention_secs: vec![300, 600],
-                prune_interval_blocks: 1,
-                prune_max_rows: 100,
-                ..HistoryRetentionPolicy::default()
-            },
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(report.blocks_full_pruned, 0);
-    assert_eq!(report.price_points_pruned, 0);
-    assert_eq!(report.price_candles_pruned, 2);
-    assert_eq!(
-        report.meta.price_candles_min_bucket_ms.get(&60),
-        Some(&300_000)
-    );
-    assert_eq!(report.meta.price_candles_min_bucket_ms.get(&300), Some(&0));
-
-    let one_minute = store
-        .load_price_candles(market_id, 60, None, None, None, 10)
-        .await
-        .unwrap();
-    assert_eq!(one_minute.retention_min_bucket_ms, Some(300_000));
-    assert_eq!(
-        one_minute
-            .candles
-            .iter()
-            .map(|candle| candle.bucket_start_ms)
-            .collect::<Vec<_>>(),
-        vec![300_000, 600_000]
-    );
-
-    let five_minute = store
-        .load_price_candles(market_id, 300, None, None, None, 10)
-        .await
-        .unwrap();
-    assert_eq!(five_minute.retention_min_bucket_ms, Some(0));
-    assert_eq!(
-        five_minute
-            .candles
-            .iter()
-            .map(|candle| candle.bucket_start_ms)
-            .collect::<Vec<_>>(),
-        vec![0, 300_000, 600_000]
-    );
-}
-
-#[tokio::test]
-#[ignore = "price candle retention moved to sybil-history"]
-async fn price_candle_pruning_obeys_batch_limit_and_keeps_floor_actual() {
-    let path = temp_db_path("store-price-candle-retention-budget");
-    let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("candle retention budget");
-    let accounts = AccountStore::new();
-    let env = TestEnv::new();
-
-    for (height, timestamp_ms) in [(1, 0), (2, 60_000), (3, 120_000)] {
-        let mut header = sample_header(height);
-        header.timestamp_ms = timestamp_ms;
-        let point = crate::market_info::PricePoint {
-            height,
-            timestamp_ms,
-            yes_price: Nanos(500_000_000),
-            no_price: Nanos(500_000_000),
-            volume_nanos: 1,
-        };
-        store
-            .save_block(env.snapshot_with_price_points(
-                &accounts,
-                &markets,
-                &lifecycle,
-                &header,
-                vec![(market_id, point)],
-            ))
-            .await
-            .unwrap();
-    }
-
-    let report = store
-        .prune_history(
-            3,
-            180_000,
-            HistoryRetentionPolicy {
-                block_history_retention_blocks: 0,
-                raw_price_retention_blocks: 0,
-                price_candle_resolutions_secs: vec![60],
-                price_candle_retention_secs: vec![60],
-                prune_interval_blocks: 1,
-                prune_max_rows: 1,
-                ..HistoryRetentionPolicy::default()
-            },
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(report.price_candles_pruned, 1);
-    assert_eq!(
-        report.meta.price_candles_min_bucket_ms.get(&60),
-        Some(&60_000),
-        "floor must remain at the oldest actual retained candle while the prune budget is exhausted"
-    );
-
-    let page = store
-        .load_price_candles(market_id, 60, None, None, None, 10)
-        .await
-        .unwrap();
-    assert_eq!(page.retention_min_bucket_ms, Some(60_000));
-    assert_eq!(
-        page.candles
-            .iter()
-            .map(|candle| candle.bucket_start_ms)
-            .collect::<Vec<_>>(),
-        vec![60_000, 120_000]
-    );
-}
-
-#[tokio::test]
-#[ignore = "price candle projection moved to sybil-history"]
-async fn price_candles_merge_committed_points_without_empty_buckets() {
-    let path = temp_db_path("store-price-candles");
-    let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle);
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("candles");
-    let accounts = AccountStore::new();
-    let env = TestEnv::new();
-
-    let samples = [
-        (1, 1_000, 500_000_000, 500_000_000, 10),
-        (2, 20_000, 700_000_000, 300_000_000, 20),
-        (3, 65_000, 600_000_000, 400_000_000, 30),
-    ];
-    for (height, timestamp_ms, yes_price, no_price, volume_nanos) in samples {
-        let mut header = sample_header(height);
-        header.timestamp_ms = timestamp_ms;
-        let point = crate::market_info::PricePoint {
-            height,
-            timestamp_ms,
-            yes_price: Nanos(yes_price),
-            no_price: Nanos(no_price),
-            volume_nanos,
-        };
-        store
-            .save_block(env.snapshot_with_price_points(
-                &accounts,
-                &markets,
-                &lifecycle,
-                &header,
-                vec![(market_id, point)],
-            ))
-            .await
-            .unwrap();
-    }
-
-    let page = store
-        .load_price_candles(market_id, 60, Some(0), Some(180_000), None, 10)
-        .await
-        .unwrap();
-    assert_eq!(page.resolution_secs, 60);
-    assert_eq!(
-        page.candles.len(),
-        2,
-        "no synthetic empty bucket should be stored"
-    );
-
-    let first = &page.candles[0];
-    assert_eq!(first.bucket_start_ms, 0);
-    assert_eq!(first.bucket_end_ms, 60_000);
-    assert_eq!(first.first_height, 1);
-    assert_eq!(first.last_height, 2);
-    assert_eq!(first.open_yes_price, Nanos(500_000_000));
-    assert_eq!(first.high_yes_price, Nanos(700_000_000));
-    assert_eq!(first.low_yes_price, Nanos(500_000_000));
-    assert_eq!(first.close_yes_price, Nanos(700_000_000));
-    assert_eq!(first.open_no_price, Nanos(500_000_000));
-    assert_eq!(first.high_no_price, Nanos(500_000_000));
-    assert_eq!(first.low_no_price, Nanos(300_000_000));
-    assert_eq!(first.close_no_price, Nanos(300_000_000));
-    assert_eq!(first.volume_nanos, 30);
-    assert_eq!(first.point_count, 2);
-
-    let second = &page.candles[1];
-    assert_eq!(second.bucket_start_ms, 60_000);
-    assert_eq!(second.first_height, 3);
-    assert_eq!(second.last_height, 3);
-    assert_eq!(second.open_yes_price, Nanos(600_000_000));
-    assert_eq!(second.close_yes_price, Nanos(600_000_000));
-    assert_eq!(second.volume_nanos, 30);
-    assert_eq!(second.point_count, 1);
-
-    let newest = store
-        .load_price_candles(market_id, 60, None, None, None, 1)
-        .await
-        .unwrap();
-    assert_eq!(newest.next_before_ms, Some(60_000));
-    assert_eq!(newest.candles[0].bucket_start_ms, 60_000);
-
-    let older = store
-        .load_price_candles(market_id, 60, None, None, newest.next_before_ms, 1)
-        .await
-        .unwrap();
-    assert_eq!(older.next_before_ms, None);
-    assert_eq!(older.candles[0].bucket_start_ms, 0);
+    assert_eq!(store.product_history_outbox_len().unwrap(), 5);
 }
 
 #[tokio::test]
@@ -934,7 +366,7 @@ async fn test_store_recovery_treats_redb_fence_as_commit_point() {
 }
 
 #[tokio::test]
-async fn test_store_restores_history_event_next_seq() {
+async fn test_store_restores_product_event_sequence() {
     use crate::aggregates::{HistoryEvent, HistoryKind, StoredHistoryEvent};
 
     let path = temp_db_path("store-history-next-seq");
@@ -979,19 +411,19 @@ async fn test_store_restores_history_event_next_seq() {
         .unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
-    assert_eq!(restored.analytics.history_event_next_seq, 2);
+    assert_eq!(restored.analytics.next_product_event_seq, 2);
 
     // A missing canonical counter never triggers a projection scan. Fresh
     // genesis is required when moving a legacy store across this boundary.
     let txn = store.db.begin_write().unwrap();
     {
         let mut counters = txn.open_table(COUNTERS).unwrap();
-        counters.remove(KEY_HISTORY_EVENT_NEXT_SEQ).unwrap();
+        counters.remove(KEY_NEXT_PRODUCT_EVENT_SEQ).unwrap();
     }
     txn.commit().unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
-    assert_eq!(restored.analytics.history_event_next_seq, 0);
+    assert_eq!(restored.analytics.next_product_event_seq, 0);
 }
 
 #[tokio::test]
@@ -1680,50 +1112,6 @@ async fn test_store_clears_resting_orders_when_snapshot_empty() {
 }
 
 #[tokio::test]
-async fn test_store_does_not_restore_product_fill_history_into_hot_state() {
-    let path = temp_db_path("store-fill-history");
-    let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-    let lifecycle = MarketLifecycle::new(oracle.clone());
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("Test");
-    let mut accounts = AccountStore::new();
-    let account_id = accounts.create_account(100);
-    let env = TestEnv::new();
-
-    let fill = AccountFillRecord {
-        order_id: 42,
-        fill_qty: 7,
-        fill_price: Nanos(600_000_000),
-        block_height: 1,
-        timestamp_ms: 1_000,
-        position_deltas: vec![(market_id, 0, 7)],
-    };
-
-    store
-        .save_block(env.snapshot_with_fills(
-            &accounts,
-            &markets,
-            &lifecycle,
-            &sample_header(1),
-            vec![(account_id, fill.clone())],
-        ))
-        .await
-        .unwrap();
-
-    let restored = store.load_state().await.unwrap().unwrap();
-    assert!(restored.analytics.account_fills.is_empty());
-
-    let seq =
-        crate::sequencer::BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
-    assert!(
-        seq.analytics()
-            .account_fills(account_id, Some(market_id), 10, 0)
-            .is_empty()
-    );
-}
-
-#[tokio::test]
 async fn test_store_restores_fill_totals_without_hydrating_fill_history() {
     use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
@@ -1968,7 +1356,7 @@ async fn import_witness_drill_restores_head_and_produces_children() {
     }));
 
     source_store
-        .save_block_with_witness_and_history(seq.snapshot(), witness, &second.sealed_block())
+        .save_block_with_witness_and_replay_block(seq.snapshot(), witness, &second.sealed_block())
         .await
         .unwrap();
     source_store
@@ -2171,253 +1559,6 @@ async fn import_witness_drill_restores_head_and_produces_children() {
 
 #[tokio::test]
 #[ignore = "fill serving moved to sybil-history"]
-async fn test_store_account_fills_reads_full_persisted_history() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission};
-    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
-
-    let path = temp_db_path("store-account-fills-read");
-    let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("Test");
-    let mut accounts = AccountStore::new();
-    let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    accounts
-        .get_mut(seller)
-        .unwrap()
-        .positions
-        .insert((market_id, 0), 10);
-
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets.clone(),
-        vec![],
-        oracle.clone(),
-        store_test_sequencer_config(),
-    );
-    // Two blocks, each crossing one unit, so two distinct buyer fills persist.
-    for height in 1..=2u64 {
-        seq.produce_block(
-            vec![
-                OrderSubmission {
-                    account_id: buyer,
-                    orders: vec![outcome_buy(&markets, 0, market_id, 0, 700_000_000, 1)],
-                    mm_constraint: None,
-                },
-                OrderSubmission {
-                    account_id: seller,
-                    orders: vec![outcome_sell(&markets, 0, market_id, 0, 300_000_000, 1)],
-                    mm_constraint: None,
-                },
-            ],
-            height * 1_000,
-        );
-        store.save_block(seq.snapshot()).await.unwrap();
-    }
-
-    // Reads straight from the durable store, independent of any in-memory recorder.
-    let fills = store.account_fills(buyer, None, 10, 0).unwrap();
-    assert_eq!(fills.len(), 2, "both persisted fills should be served");
-    assert!(store.account_fills(buyer, None, 0, 0).unwrap().is_empty());
-    // Newest-first: block 2 ahead of block 1.
-    assert_eq!(fills[0].block_height, 2);
-    assert_eq!(fills[1].block_height, 1);
-
-    let forward = store
-        .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
-        .unwrap();
-    assert_eq!(forward.len(), 2);
-    assert!(
-        store
-            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 0)
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(forward[0].block_height, 1);
-    assert_eq!(forward[1].block_height, 2);
-    let cursor = AccountFillCursor::from_record(&forward[0]);
-    let after_first = store
-        .account_fills_after(buyer, None, Some(cursor), 10)
-        .unwrap();
-    assert_eq!(after_first.len(), 1);
-    assert_eq!(after_first[0].block_height, 2);
-
-    // Market filter keeps fills that touch the traded market...
-    assert_eq!(
-        store
-            .account_fills(buyer, Some(market_id), 10, 0)
-            .unwrap()
-            .len(),
-        2
-    );
-    // ...and drops everything for a market the account never traded.
-    let untraded = markets.add_binary("Untraded");
-    assert!(
-        store
-            .account_fills(buyer, Some(untraded), 10, 0)
-            .unwrap()
-            .is_empty()
-    );
-
-    // offset/limit page over the newest-first sequence.
-    let page = store.account_fills(buyer, None, 1, 1).unwrap();
-    assert_eq!(page.len(), 1);
-    assert_eq!(page[0].block_height, 1);
-
-    // Unknown account => empty, no error.
-    assert!(
-        store
-            .account_fills(AccountId(99), None, 10, 0)
-            .unwrap()
-            .is_empty()
-    );
-}
-
-#[tokio::test]
-#[ignore = "fill cursor persistence moved to sybil-history"]
-async fn test_store_fill_cursor_pagination_survives_reopen() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission};
-    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
-
-    let path = temp_db_path("store-account-fills-cursor-reopen");
-    let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("Test");
-    let mut accounts = AccountStore::new();
-    let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    accounts
-        .get_mut(seller)
-        .unwrap()
-        .positions
-        .insert((market_id, 0), 10);
-
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        markets.clone(),
-        vec![],
-        oracle,
-        store_test_sequencer_config(),
-    );
-    for height in 1..=2u64 {
-        let prepared = seq
-            .prepare_block(
-                vec![
-                    OrderSubmission {
-                        account_id: buyer,
-                        orders: vec![outcome_buy(&markets, 0, market_id, 0, 700_000_000, 1)],
-                        mm_constraint: None,
-                    },
-                    OrderSubmission {
-                        account_id: seller,
-                        orders: vec![outcome_sell(&markets, 0, market_id, 0, 300_000_000, 1)],
-                        mm_constraint: None,
-                    },
-                ],
-                height * 1_000,
-            )
-            .unwrap();
-        store
-            .save_block(prepared.next_sequencer().snapshot())
-            .await
-            .unwrap();
-        seq.commit_prepared_block(prepared).unwrap();
-    }
-    drop(store);
-
-    let reopened = Store::open(&path).unwrap();
-    let fills = reopened
-        .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
-        .unwrap();
-    let heights: Vec<u64> = fills.iter().map(|fill| fill.block_height).collect();
-    assert_eq!(heights, vec![1, 2]);
-}
-
-#[tokio::test]
-#[ignore = "fill projection moved to sybil-history; covered by outbox integration"]
-async fn test_store_persists_fill_delta_when_hot_cap_is_zero() {
-    use crate::sequencer::{BlockSequencer, OrderSubmission};
-    use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
-
-    let path = temp_db_path("store-fill-cap-zero");
-    let store = Store::open(&path).unwrap();
-    let oracle = Arc::new(AdminOracle::new());
-
-    let mut markets = MarketSet::new();
-    let market_id = markets.add_binary("Test");
-    let mut accounts = AccountStore::new();
-    let buyer = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    let seller = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
-    accounts
-        .get_mut(seller)
-        .unwrap()
-        .positions
-        .insert((market_id, 0), 10);
-
-    let config = SequencerConfig {
-        max_fill_history_per_account: 0,
-        ..store_test_sequencer_config()
-    };
-    let mut seq =
-        BlockSequencer::with_default_solver(accounts, markets.clone(), vec![], oracle, config);
-
-    let prepared = seq
-        .prepare_block(
-            vec![
-                OrderSubmission {
-                    account_id: buyer,
-                    orders: vec![outcome_buy(&markets, 0, market_id, 0, 700_000_000, 1)],
-                    mm_constraint: None,
-                },
-                OrderSubmission {
-                    account_id: seller,
-                    orders: vec![outcome_sell(&markets, 0, market_id, 0, 300_000_000, 1)],
-                    mm_constraint: None,
-                },
-            ],
-            1_000,
-        )
-        .unwrap();
-
-    assert!(
-        prepared
-            .next_sequencer()
-            .analytics()
-            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
-            .is_empty()
-    );
-
-    store
-        .save_block(prepared.next_sequencer().snapshot())
-        .await
-        .unwrap();
-    seq.commit_prepared_block(prepared).unwrap();
-    assert!(
-        seq.analytics()
-            .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
-            .is_empty()
-    );
-
-    let durable = store
-        .account_fills_after(buyer, None, Some(AccountFillCursor::MIN), 10)
-        .unwrap();
-    assert_eq!(durable.len(), 1);
-    assert_eq!(durable[0].block_height, 1);
-    drop(store);
-
-    let reopened = Store::open(&path).unwrap();
-    let reopened_fills = reopened
-        .account_fills_after(buyer, Some(market_id), Some(AccountFillCursor::MIN), 10)
-        .unwrap();
-    assert_eq!(reopened_fills.len(), 1);
-    assert_eq!(reopened_fills[0].fill_qty, 1);
-}
-
-#[tokio::test]
 async fn test_store_reopens_after_committed_trade_and_restores_qmdb_state() {
     use crate::sequencer::{BlockSequencer, OrderSubmission};
     use matching_engine::{NANOS_PER_DOLLAR, outcome_buy, outcome_sell};
@@ -2734,71 +1875,4 @@ async fn test_store_roundtrips_pending_bundles() {
 
     let restored_after = store.load_state().await.unwrap().unwrap();
     assert!(restored_after.pending_bundles.is_empty());
-}
-
-#[test]
-fn equity_and_history_rows_roundtrip() {
-    use crate::account::AccountId;
-    use crate::aggregates::{EquityPoint, HistoryEvent, HistoryKind, StoredHistoryEvent};
-
-    let path = temp_db_path("equity-history-roundtrip");
-    let store = Store::open(&path).unwrap();
-    let aid = AccountId(7);
-
-    let pts = vec![
-        EquityPoint {
-            height: 1,
-            timestamp_ms: 1_000,
-            portfolio_value_nanos: 100,
-            deposited_nanos: 100,
-        },
-        EquityPoint {
-            height: 2,
-            timestamp_ms: 2_000,
-            portfolio_value_nanos: 150,
-            deposited_nanos: 100,
-        },
-    ];
-    let mut e1 = HistoryEvent::new(aid, HistoryKind::Placed, 1, 1_000);
-    e1.seq = 0;
-    let mut e2 = HistoryEvent::new(aid, HistoryKind::Filled, 2, 2_000);
-    e2.seq = 1;
-    let events: Vec<StoredHistoryEvent> = vec![
-        StoredHistoryEvent::from_event(&e1),
-        StoredHistoryEvent::from_event(&e2),
-    ];
-
-    store
-        .append_offblock_rows(&pts.iter().map(|p| (aid, *p)).collect::<Vec<_>>(), &events)
-        .unwrap();
-
-    // Equity: oldest-first, all points.
-    let got = store.equity_series(aid, 0).unwrap();
-    assert_eq!(got, pts);
-    assert_eq!(store.equity_series(aid, 1_500).unwrap(), pts);
-    assert_eq!(store.equity_series(aid, 2_500).unwrap(), vec![pts[1]]);
-
-    // History: newest-first, filtered + paged like AccountEventLog::query.
-    let all = store.account_events(aid, 10, None, None).unwrap();
-    assert_eq!(all.len(), 2);
-    assert_eq!(all[0].kind, HistoryKind::Filled); // newest first
-    assert!(store.account_events(aid, 0, None, None).unwrap().is_empty());
-
-    let trades = store
-        .account_events(aid, 10, None, Some("trades".into()))
-        .unwrap();
-    assert_eq!(trades.len(), 2);
-
-    // Cursor before (2, 1) excludes the Filled@(2,1) event.
-    let page = store.account_events(aid, 10, Some((2, 1)), None).unwrap();
-    assert!(page.iter().all(|e| !(e.block_height == 2 && e.seq == 1)));
-
-    // Unknown account → empty.
-    assert!(store.equity_series(AccountId(99), 0).unwrap().is_empty());
-    assert!(
-        store
-            .account_events(AccountId(99), 10, None, None)
-            .unwrap()
-            .is_empty()
-    );
 }

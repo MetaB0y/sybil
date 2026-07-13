@@ -26,11 +26,11 @@ pub mod trader_tracker;
 pub mod welfare_tracker;
 
 pub use account_event_log::{
-    AccountEventLog, HistoryEvent, HistoryKind, MAX_HISTORY_EVENTS_PER_ACCOUNT, StoredHistoryEvent,
-    fill_facets, side_outcome_from_order,
+    AccountEventLog, DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT, HistoryEvent, HistoryKind,
+    StoredHistoryEvent, fill_facets, side_outcome_from_order,
 };
 pub use cost_basis_tracker::{CostBasisTracker, CostBasisTrackerSnapshot};
-pub use equity_tracker::{EquityPoint, EquityTracker, MAX_EQUITY_POINTS};
+pub use equity_tracker::{DEFAULT_MAX_RECENT_EQUITY_POINTS, EquityPoint, EquityTracker};
 pub use liquidity_tracker::{LIQUIDITY_RING_CAP, LiquidityTracker, LiquidityTrackerSnapshot};
 pub use order_stats_tracker::{OrderStats, OrderStatsTracker, OrderStatsTrackerSnapshot};
 pub use trader_tracker::{TraderTracker, TraderTrackerSnapshot};

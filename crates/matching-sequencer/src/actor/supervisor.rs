@@ -80,10 +80,7 @@ impl SequencerSupervisorState {
             return;
         };
 
-        let restored = match store
-            .load_state_with_fill_history_cap(self.config.max_fill_history_per_account)
-            .await
-        {
+        let restored = match store.load_state().await {
             Ok(state) => state,
             Err(error) => {
                 tracing::error!(error = %error, "failed to load sequencer snapshot for restart");

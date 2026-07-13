@@ -10,24 +10,24 @@ use crate::market_info::{AccountFillCursor, AccountFillRecord};
 
 /// Bounded in-memory fill history retained per account.
 ///
-/// Persistent deployments can keep full fill history in the store; the actor's
-/// hot state only needs a recent serving window for API queries.
-pub const DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT: usize = 5_000;
+/// Full fill history is exported to `sybil-history`; the actor retains only a
+/// recent diagnostic/current-value window.
+pub const DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT: usize = 5_000;
 
 /// Records fill history per account.
 #[derive(Clone)]
 pub struct FillRecorder {
     account_fills: HashMap<AccountId, Vec<AccountFillRecord>>,
-    max_history_per_account: usize,
+    max_recent_per_account: usize,
     /// Records appended since the last committed block snapshot. This is the
-    /// durable write delta and is intentionally not bounded by
-    /// `max_history_per_account`; the cap only applies to the hot cache.
+    /// product-history export delta and is intentionally not bounded by
+    /// `max_recent_per_account`; the cap only applies to the recent cache.
     pending_delta: Vec<(AccountId, AccountFillRecord)>,
     /// All-time fill count per account, excluding `AccountId::MINT`. One
     /// fill record bumps the per-account counter once regardless of how
     /// many markets the underlying order touches (the fill IS the trade
     /// event — multi-market orders still produce one fill per match).
-    /// Survives the `MAX_FILL_HISTORY_PER_ACCOUNT` trim, which only drops
+    /// Survives the `MAX_RECENT_FILLS_PER_ACCOUNT` trim, which only drops
     /// the bounded `account_fills` records.
     total_count: HashMap<AccountId, u64>,
 }
@@ -40,25 +40,25 @@ impl Default for FillRecorder {
 
 impl FillRecorder {
     pub fn new() -> Self {
-        Self::with_retention(DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT)
+        Self::with_retention(DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT)
     }
 
-    pub fn with_retention(max_history_per_account: usize) -> Self {
+    pub fn with_retention(max_recent_per_account: usize) -> Self {
         Self {
             account_fills: HashMap::new(),
-            max_history_per_account,
+            max_recent_per_account,
             pending_delta: Vec::new(),
             total_count: HashMap::new(),
         }
     }
 
     pub fn restore(records: Vec<(AccountId, AccountFillRecord)>) -> Self {
-        Self::restore_with_retention(records, DEFAULT_MAX_FILL_HISTORY_PER_ACCOUNT)
+        Self::restore_with_retention(records, DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT)
     }
 
     pub fn restore_with_retention(
         records: Vec<(AccountId, AccountFillRecord)>,
-        max_history_per_account: usize,
+        max_recent_per_account: usize,
     ) -> Self {
         let mut account_fills: HashMap<AccountId, Vec<AccountFillRecord>> = HashMap::new();
         for (account_id, record) in records {
@@ -66,11 +66,11 @@ impl FillRecorder {
         }
         for fills in account_fills.values_mut() {
             fills.sort_by_key(|record| (record.block_height, record.order_id));
-            trim_account_fills(fills, max_history_per_account);
+            trim_account_fills(fills, max_recent_per_account);
         }
         Self {
             account_fills,
-            max_history_per_account,
+            max_recent_per_account,
             pending_delta: Vec::new(),
             // Cold-start the total counter from the visible window. After
             // trim this under-reports, which is acceptable until snapshot
@@ -85,9 +85,9 @@ impl FillRecorder {
     pub fn restore_with_counts(
         records: Vec<(AccountId, AccountFillRecord)>,
         total_count: HashMap<AccountId, u64>,
-        max_history_per_account: usize,
+        max_recent_per_account: usize,
     ) -> Self {
-        let mut recorder = Self::restore_with_retention(records, max_history_per_account);
+        let mut recorder = Self::restore_with_retention(records, max_recent_per_account);
         recorder.total_count = total_count;
         recorder
     }
@@ -100,19 +100,19 @@ impl FillRecorder {
     pub fn restore_bounded_newest_first_with_counts(
         records: Vec<(AccountId, AccountFillRecord)>,
         total_count: HashMap<AccountId, u64>,
-        max_history_per_account: usize,
+        max_recent_per_account: usize,
     ) -> Self {
         let mut account_fills: HashMap<AccountId, Vec<AccountFillRecord>> = HashMap::new();
         for (account_id, record) in records {
             account_fills.entry(account_id).or_default().push(record);
         }
         for fills in account_fills.values_mut() {
-            debug_assert!(fills.len() <= max_history_per_account);
+            debug_assert!(fills.len() <= max_recent_per_account);
             fills.reverse();
         }
         Self {
             account_fills,
-            max_history_per_account,
+            max_recent_per_account,
             pending_delta: Vec::new(),
             total_count,
         }
@@ -234,7 +234,7 @@ impl FillRecorder {
 
             let records = self.account_fills.entry(account_id).or_default();
             records.push(record);
-            trim_account_fills(records, self.max_history_per_account);
+            trim_account_fills(records, self.max_recent_per_account);
 
             // All-time counter: skip MINT (system account, not a user trade).
             if account_id != AccountId::MINT {
@@ -304,8 +304,8 @@ impl FillRecorder {
     }
 }
 
-fn trim_account_fills(fills: &mut Vec<AccountFillRecord>, max_history_per_account: usize) {
-    let overflow = fills.len().saturating_sub(max_history_per_account);
+fn trim_account_fills(fills: &mut Vec<AccountFillRecord>, max_recent_per_account: usize) {
+    let overflow = fills.len().saturating_sub(max_recent_per_account);
     if overflow > 0 {
         fills.drain(0..overflow);
     }

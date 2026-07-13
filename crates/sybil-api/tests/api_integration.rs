@@ -1233,11 +1233,11 @@ async fn list_markets_reports_traded_volume() {
 }
 
 #[tokio::test]
-async fn market_price_history_persists_to_store_beyond_hot_cache() {
+async fn market_price_history_is_projected_beyond_recent_cache() {
     let (app, handle) = test_app_with_store_config(
         true,
         SequencerConfig {
-            max_price_history_points_per_market: 1,
+            max_recent_price_points_per_market: 1,
             block_interval: Duration::from_secs(60),
             ..SequencerConfig::default()
         },
@@ -1321,7 +1321,7 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
     assert_eq!(
         points.len(),
         2,
-        "store-backed route should return points older than the one-point hot cache: {response}"
+        "history service should return points older than the one-point recent cache: {response}"
     );
     assert!(
         response.get("next_before_height").is_none(),
@@ -1389,14 +1389,10 @@ async fn market_price_history_persists_to_store_beyond_hot_cache() {
 }
 
 #[tokio::test]
-async fn extracted_candle_history_is_not_pruned_with_sequencer_hot_cache() {
+async fn history_service_candles_are_independent_of_sequencer_recent_cache() {
     let (app, handle) = test_app_with_store_config(
         true,
         SequencerConfig {
-            price_candle_resolutions_secs: vec![1],
-            price_candle_retention_secs: vec![1],
-            history_prune_interval_blocks: 1,
-            history_prune_max_rows: 100,
             block_interval: Duration::from_secs(60),
             ..SequencerConfig::default()
         },
@@ -2163,11 +2159,11 @@ async fn recent_blocks_returns_newest_first() {
 }
 
 #[tokio::test]
-async fn blocks_endpoint_pages_durable_history_beyond_hot_ring() {
+async fn blocks_endpoint_pages_canonical_archive_beyond_recent_cache() {
     let (app, handle) = test_app_with_store_config(
         true,
         SequencerConfig {
-            block_history_capacity: 1,
+            recent_block_cache_capacity: 1,
             block_interval: Duration::from_secs(60),
             ..SequencerConfig::default()
         },
@@ -2191,7 +2187,7 @@ async fn blocks_endpoint_pages_durable_history_beyond_hot_ring() {
             b1.canonical.header.height,
             b0.canonical.header.height
         ],
-        "store-backed page should include blocks evicted from the one-block hot ring"
+        "canonical archive should include blocks evicted from the one-block recent cache"
     );
 
     let (status, body) = get(
@@ -2228,10 +2224,10 @@ async fn pruned_block_returns_410_retention_gone() {
     let (app, handle) = test_app_with_store_config(
         true,
         SequencerConfig {
-            block_history_capacity: 1,
-            block_history_retention_blocks: 1,
-            history_prune_interval_blocks: 1,
-            history_prune_max_rows: 10,
+            recent_block_cache_capacity: 1,
+            canonical_archive_retention_blocks: 1,
+            canonical_archive_maintenance_interval_blocks: 1,
+            canonical_archive_max_rows_per_pass: 10,
             block_interval: Duration::from_secs(60),
             ..SequencerConfig::default()
         },
@@ -2443,9 +2439,9 @@ async fn account_history_shows_placed_then_cancelled() {
 }
 
 #[tokio::test]
-async fn account_equity_series_persists_to_store() {
-    // Zero in-memory caps (the prod config) so the rings stay empty and the
-    // data can only come back from redb.
+async fn account_equity_series_is_served_by_history_service() {
+    // Zero recent-cache caps so the response can only come from the extracted
+    // history service.
     let (app, handle) = test_app_with_store_zero_caps(true).await;
 
     let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "EqDb?" })).await;
@@ -2475,7 +2471,7 @@ async fn account_equity_series_persists_to_store() {
         "orders": [{ "type": "BuyNo", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 10 }]
     })).await;
 
-    // Produce a block — this persists equity to the redb store.
+    // Produce a block — this exports equity through the product-history outbox.
     let block = handle.produce_block().await.unwrap();
     assert!(
         !block.canonical.fills.is_empty(),
@@ -2488,12 +2484,12 @@ async fn account_equity_series_persists_to_store() {
     assert_eq!(v["account_id"].as_u64().unwrap(), account_id);
     assert!(
         !v["points"].as_array().unwrap().is_empty(),
-        "equity must come back from redb: {v}"
+        "equity must come back from the history service: {v}"
     );
 }
 
 #[tokio::test]
-async fn account_fills_persist_to_store_with_zero_hot_cap() {
+async fn account_fills_are_served_by_history_service_with_zero_recent_cap() {
     let (app, handle) = test_app_with_store_zero_caps(true).await;
 
     let (_, body) = post_json(app.clone(), "/v1/markets", json!({ "name": "FillDb?" })).await;
@@ -2548,14 +2544,15 @@ async fn account_fills_persist_to_store_with_zero_hot_cap() {
     let fills = fills["fills"].as_array().unwrap();
     assert!(
         !fills.is_empty(),
-        "fills must come back from redb at hot cap 0"
+        "fills must come back from the history service at recent cap 0"
     );
     assert!(fills[0]["cursor"].as_str().is_some());
 }
 
 #[tokio::test]
-async fn account_history_persists_to_store() {
-    // Zero in-memory caps (the prod config) so events can only come from redb.
+async fn account_events_are_served_by_history_service() {
+    // Zero recent-cache caps so events can only come from the extracted
+    // history service.
     let (app, handle) = test_app_with_store_zero_caps(true).await;
 
     let (_, body) = post_json(
@@ -2573,16 +2570,19 @@ async fn account_history_persists_to_store() {
         "orders": [{ "type": "BuyYes", "market_id": market_id, "limit_price_nanos": 500_000_000u64, "quantity": 5 }]
     })).await;
 
-    // Produce a block — this persists history events to the redb store.
+    // Produce a block — this exports account events through the outbox.
     handle.produce_block().await.unwrap();
 
     let (status, body) = get(app, &format!("/v1/accounts/{account_id}/events?limit=20")).await;
     assert_eq!(status, StatusCode::OK);
     let v = parse_json(&body);
     let arr = v["events"].as_array().unwrap();
-    assert!(!arr.is_empty(), "history must come back from redb: {v}");
+    assert!(
+        !arr.is_empty(),
+        "events must come back from the history service: {v}"
+    );
     assert!(
         arr.iter().any(|e| e["type"] == "placed"),
-        "expected a 'placed' event from redb: {v}"
+        "expected a projected 'placed' event: {v}"
     );
 }

@@ -40,8 +40,8 @@ use crate::sequencer::{
     SequencerConfig,
 };
 use crate::store::{
-    AutoResolutionRecord, ControlPlaneCommand, DaArtifact, DaArtifactLookup, DaManifestLookup,
-    HistoryRetentionPolicy,
+    AutoResolutionRecord, CanonicalArchiveRetentionPolicy, ControlPlaneCommand, DaArtifact,
+    DaArtifactLookup, DaManifestLookup,
 };
 use crate::{
     AccountSnapshotSlot, QMDB_STATE_MAX_KEY_BYTES, QmdbStateExclusionProofParts,
@@ -70,7 +70,7 @@ pub use self::messages::{IndicativeSnapshot, SequencerMsg, SequencerReadQuery};
 #[cfg(test)]
 pub use self::messages::{SequencerTestCrashpoint, SequencerTestTickHold};
 pub use self::queries::{
-    DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_BLOCK_HISTORY_QUERY_BLOCKS,
+    DEFAULT_PRICE_HISTORY_QUERY_POINTS, MAX_BLOCK_REPLAY_QUERY_BLOCKS,
     MAX_PRICE_HISTORY_QUERY_POINTS, MarketSearchResult, SequencerStateProof,
     SequencerStateProofKind,
 };

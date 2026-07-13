@@ -1,7 +1,8 @@
 //! Off-block per-account history feed (the Portfolio "History" tab).
 //!
 //! Append-on-hook log of an account's lifecycle events. The in-memory bounded
-//! ring is a hot cache; block deltas are committed to bounded durable history.
+//! ring is a recent diagnostic cache; committed block deltas are exported
+//! through the product-history outbox.
 //! Never enters state_root/events_root.
 
 use std::collections::{HashMap, VecDeque};
@@ -9,7 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use crate::account::AccountId;
 use matching_engine::{MarketId, Order};
 
-pub const MAX_HISTORY_EVENTS_PER_ACCOUNT: usize = 5_000;
+pub const DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT: usize = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum HistoryKind {
@@ -217,13 +218,13 @@ pub struct AccountEventLog {
 
 impl Default for AccountEventLog {
     fn default() -> Self {
-        Self::with_retention(MAX_HISTORY_EVENTS_PER_ACCOUNT)
+        Self::with_retention(DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT)
     }
 }
 
 impl AccountEventLog {
     pub fn new() -> Self {
-        Self::with_retention(MAX_HISTORY_EVENTS_PER_ACCOUNT)
+        Self::with_retention(DEFAULT_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT)
     }
 
     pub fn with_retention(max_events: usize) -> Self {

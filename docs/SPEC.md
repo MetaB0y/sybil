@@ -212,7 +212,7 @@ Before real value, operators must deploy the pinned real verifier, eliminate moc
 
 The current permissionless API is also not economically resource-bounded:
 unlimited demo accounts, unbounded API-key records, zero-reservation orders,
-and an unbounded history outbox during a prolonged projector outage can grow
+and an unbounded product-history outbox during a prolonged projector outage can grow
 state without deposited capital. These critical availability gaps must be
 closed, monitored, or service-gated
 before real-value deployment; the [dated audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md)
@@ -241,7 +241,7 @@ owns the detailed evidence and remediation order.
 |---|---|
 | Domain and settlement arithmetic | `crates/matching-engine` |
 | Solvers and integer landing | `crates/matching-solver` |
-| Admission, blocks, canonical persistence, history outbox, bridge | `crates/matching-sequencer` |
+| Admission, blocks, canonical persistence, product-history outbox, bridge | `crates/matching-sequencer` |
 | Private history contract, projection, and query serving | `crates/sybil-history-types`, `crates/sybil-history` |
 | Wire types, API, WebAuthn, realtime, operations | `crates/sybil-api-types`, `crates/sybil-api` |
 | Resolution policy | `crates/sybil-oracle` |

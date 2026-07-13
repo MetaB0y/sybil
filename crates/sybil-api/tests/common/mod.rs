@@ -205,10 +205,10 @@ pub async fn test_app_with_store_api_config(
     (create_router(state), handle)
 }
 
-/// Store-backed test app with the in-memory off-block caps set to 0 — the
-/// production config. Equity/history/fills are served ONLY from redb (the
-/// in-memory rings stay empty), so tests using this prove the store read path
-/// rather than the in-memory fallback.
+/// Store-backed test app with recent off-block cache caps set to zero.
+/// Equity/events/fills are served only by the attached history projector, so
+/// tests using this prove the extracted-service path rather than a sequencer
+/// cache fallback.
 #[allow(dead_code)]
 pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, SequencerHandle) {
     let accounts = AccountStore::new();
@@ -216,9 +216,9 @@ pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, Sequencer
     let oracle = Arc::new(AdminOracle::new());
     let config = SequencerConfig {
         block_interval: Duration::from_secs(60 * 60),
-        max_fill_history_per_account: 0,
-        max_equity_points_per_account: 0,
-        max_history_events_per_account: 0,
+        max_recent_fills_per_account: 0,
+        max_recent_equity_points_per_account: 0,
+        max_recent_account_events_per_account: 0,
         ..SequencerConfig::default()
     };
     let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config);

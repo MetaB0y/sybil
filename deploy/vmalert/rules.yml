@@ -374,37 +374,6 @@ groups:
           summary: "sybil-api memory is near its container limit"
           description: "sybil-api RSS is above 800 MiB and close to the 900 MiB container limit (current: {{ $value | humanize1024 }}B)."
 
-      - alert: SybilAnalyticsHotFallbackUnexpected
-        expr: |
-          (
-            sybil_analytics_equity_points_per_account_capacity == 0
-            and sybil_analytics_equity_cached_points > 0
-          )
-          or
-          (
-            sybil_analytics_history_events_per_account_capacity == 0
-            and sybil_analytics_history_cached_events > 0
-          )
-        for: 5m
-        labels:
-          severity: warning
-          component: sequencer
-        annotations:
-          summary: "Analytics hot fallback is retaining rows"
-          description: "The prod analytics serving fallback is configured with zero retention, but cached equity/history rows are present. Account history/equity should normally be served from redb."
-
-      - alert: SybilAnalyticsPendingRowsHigh
-        expr: |
-          sybil_analytics_equity_pending_points > 5000
-          or sybil_analytics_history_pending_events > 5000
-        for: 5m
-        labels:
-          severity: warning
-          component: sequencer
-        annotations:
-          summary: "Analytics pending row buffer is high"
-          description: "The in-memory equity/history delta buffer is unusually large. This can mean persistence is not committing/clearing, or a single block is producing too many derived analytics rows."
-
       - alert: HostMemoryLow
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
         for: 10m
@@ -454,59 +423,15 @@ groups:
           summary: "Host load is very high"
           description: "1m load per CPU is above 4 for 5m. The VM may be approaching the zombie state where TCP accepts but services do not respond."
 
-      - alert: BotDecisionDbUnavailable
+      - alert: ArenaDatabaseUnavailable
         expr: sybil_bot_db_available == 0
         for: 5m
         labels:
           severity: warning
           component: arena
         annotations:
-          summary: "Arena bot decision database is unavailable"
-          description: "sybil-api cannot read the arena decisions database, so bot liveness and PnL dashboards may be stale."
-
-      - alert: BotDecisionsStale
-        expr: |
-          sybil_bot_db_available == 1
-          and
-          sybil_bot_latest_decision_age_seconds > 600
-        for: 5m
-        labels:
-          severity: warning
-          component: arena
-        annotations:
-          summary: "Arena bot decisions are stale"
-          description: "No bot decision has been recorded for more than 10m."
-
-      - alert: BotTraderStale
-        expr: |
-          sybil_bot_latest_decision_age_seconds{trader!=""} > 3600
-          and on (trader)
-          sybil_arena_trader_active{trader!=""} == 1
-        for: 5m
-        labels:
-          severity: warning
-          component: arena
-        annotations:
-          summary: "One arena trader is stale"
-          description: "{{ $labels.trader }} is configured in the current arena runner but has not recorded a decision for more than 1h. Historical retired traders are excluded by desired state."
-
-      - alert: BotTraderMissing
-        expr: |
-          (
-            sybil_arena_trader_active{trader!=""} == 1
-            unless on (trader)
-            sybil_bot_latest_decision_age_seconds{trader!=""}
-          )
-          and on () sybil_bot_db_available == 1
-          and on () sybil_bot_decisions_total{trader=""} > 0
-          and on () sybil_bot_latest_decision_age_seconds{trader=""} < 600
-        for: 15m
-        labels:
-          severity: warning
-          component: arena
-        annotations:
-          summary: "Configured arena trader is missing decisions"
-          description: "{{ $labels.trader }} has no recorded decision while the decision database is available and other arena decisions are recent. Its loop may be unhealthy."
+          summary: "Arena database is unavailable"
+          description: "sybil-api cannot read the Arena portfolio database, so bot order/fill dashboards are unavailable."
 
       - alert: ArenaNoMarketsSelected
         expr: max(sybil_arena_selected_markets) == 0

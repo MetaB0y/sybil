@@ -5,14 +5,14 @@ use axum::response::Response;
 use axum::response::sse::{Event, Sse};
 use tokio::sync::OwnedSemaphorePermit;
 
-use matching_sequencer::MAX_BLOCK_HISTORY_QUERY_BLOCKS;
+use matching_sequencer::MAX_BLOCK_REPLAY_QUERY_BLOCKS;
 
 use crate::convert::public_block_to_response;
 use crate::state::AppState;
 use crate::types::error::AppError;
 use crate::types::response::PublicBlockResponse;
 
-const DEFAULT_BLOCK_HISTORY_QUERY_BLOCKS: usize = 20;
+const DEFAULT_BLOCK_REPLAY_QUERY_BLOCKS: usize = 20;
 
 pub(crate) struct PublicStreamPermit {
     _permit: OwnedSemaphorePermit,
@@ -81,8 +81,8 @@ pub async fn get_recent_blocks(
 ) -> Result<Json<Vec<PublicBlockResponse>>, AppError> {
     let limit = q
         .limit
-        .unwrap_or(DEFAULT_BLOCK_HISTORY_QUERY_BLOCKS)
-        .min(MAX_BLOCK_HISTORY_QUERY_BLOCKS);
+        .unwrap_or(DEFAULT_BLOCK_REPLAY_QUERY_BLOCKS)
+        .min(MAX_BLOCK_REPLAY_QUERY_BLOCKS);
     let blocks = state
         .sequencer
         .get_block_page(q.before_height, limit)

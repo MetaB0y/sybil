@@ -64,22 +64,24 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 
 | Knob | default | current devnet | prod (intended) | Dev-only in prod? |
 | --- | --- | --- | --- | --- |
-| `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` | `5000` | `5000` | `5000` | no (sequencer hot analytics only) |
-| `SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET` | `2000` | `2000` | `2000` | no (sequencer hot analytics only) |
-| `SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT` | `0` | `0` | `0` | no (history served remotely) |
-| `SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT` | `0` | `0` | `0` | no (history served remotely) |
-| `SYBIL_BLOCK_HISTORY_CAPACITY` | `100` | `100` | `100` | no |
-| `SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
-| `SYBIL_HISTORY_PRUNE_INTERVAL_BLOCKS` / `MAX_ROWS` | `1000` / `10000` | same as default | `60` / `10000` | no |
+| `SYBIL_MAX_RECENT_FILLS_PER_ACCOUNT` | `5000` | `5000` | `5000` | no (diagnostic cache only) |
+| `SYBIL_MAX_RECENT_PRICE_POINTS_PER_MARKET` | `2000` | `2000` | `2000` | no (rolling analytics only) |
+| `SYBIL_MAX_RECENT_EQUITY_POINTS_PER_ACCOUNT` | `0` | `0` | `0` | no (history served remotely) |
+| `SYBIL_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT` | `0` | `0` | `0` | no (history served remotely) |
+| `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
+| `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
+| `SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS` / `MAX_ROWS_PER_PASS` | `1000` / `10000` | same as default | `60` / `10000` | no |
 | `SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS` | `1000000` | `1000000` | `1000000` | no |
 | `SYBIL_HTTP_DA_GLOBAL_RPS` / `BURST` | `20` / `40` | `20` / `40` | `20` / `40` | no |
 | `SYBIL_HTTP_DA_CLIENT_RPS` / `BURST` | `10` / `20` | `10` / `20` | `10` / `20` | no |
 | `SYBIL_HTTP_DA_MAX_CONCURRENCY` | `4` | `4` | `4` | no |
 | `SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS` | `256` | `256` | `256` | no |
 
-The per-account values above are hot analytics limits only. Product-history
-stock lives in `sybil-history`; the initial service retains raw batches and
-projections without an age/row cap. Canonical portfolio state is unaffected.
+The per-account values above bound recent in-memory diagnostic/current-value
+caches only. They are neither durable history nor historical query policy.
+Product-history stock lives in `sybil-history`; the initial service retains raw
+batches and projections without an age/row cap. Canonical portfolio state is
+unaffected.
 
 ### Prover
 
@@ -138,8 +140,8 @@ At boot, before opening the store or binding the socket,
   the cached metadata; the service-gated payload endpoint reads and integrity-
   checks the large artifact. Both endpoints have dedicated rate and concurrency
   limits. These rows are retained together with the existing
-  `blocks_full` history policy (`SYBIL_BLOCK_HISTORY_RETENTION_BLOCKS` and
-  `SYBIL_HISTORY_PRUNE_MAX_ROWS`). With `SYBIL_DATA_DIR` unset, no DA artifacts
+  canonical archive policy (`SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` and
+  `SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS`). With `SYBIL_DATA_DIR` unset, no DA artifacts
   are retained. With block-history pruning disabled, rows remain until the
   store is reset. DA writes happen after block commit and log on failure; they
   do not roll back block production.

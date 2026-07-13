@@ -47,7 +47,7 @@ service-only.
 > [!warning] Public onboarding is not production-safe yet
 > The route currently permits unlimited free accounts and caller-selected demo
 > balances. Read-API-key recovery state and durable resting-order admission are
-> now bounded, but free account creation and the history outbox during a
+> now bounded, but free account creation and the product-history outbox during a
 > prolonged projector outage still lack stock or byte budgets. Order token
 > buckets limit flow, not all
 > accumulated state. See the
@@ -146,7 +146,7 @@ do not load or hash the witness payload. Payload reads still recompute
 `payload_root` over the returned bytes and fail closed with `500` on a mismatch.
 Clients must still verify the SYB-80 binding chain themselves:
 `payload_root -> witness_root -> da_commitment -> L1 RootRecord`. Retention is
-the existing block-history retention behavior, not a new DA policy.
+the canonical replay-archive retention behavior, not a new DA policy.
 Both retained DA routes share a dedicated global/per-client token bucket and a
 hard in-flight concurrency cap before dispatching store work.
 

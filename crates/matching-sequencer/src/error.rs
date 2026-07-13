@@ -214,8 +214,8 @@ pub enum SequencerError {
     /// The requested block was not found.
     #[error("block not found")]
     BlockNotFound,
-    /// The requested block is older than retained durable history.
-    #[error("block {requested_height} is older than retained history min {retention_min_height}")]
+    /// The requested block is older than the retained canonical replay archive.
+    #[error("block {requested_height} is older than canonical archive min {retention_min_height}")]
     BlockPruned {
         requested_height: u64,
         retention_min_height: u64,

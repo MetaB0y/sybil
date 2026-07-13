@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use matching_sequencer::store::{HistoryOutboxAck, Store};
+use matching_sequencer::store::{ProductHistoryOutboxAck, Store};
 use reqwest::StatusCode;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -31,7 +31,7 @@ pub enum HistoryClientError {
     Encode(#[from] rmp_serde::encode::Error),
     #[error("history service returned {status}: {body}")]
     Response { status: StatusCode, body: String },
-    #[error("history outbox task failed: {0}")]
+    #[error("product-history outbox task failed: {0}")]
     Outbox(String),
 }
 
@@ -157,27 +157,29 @@ pub fn spawn_outbox_publisher(
         loop {
             let read_store = Arc::clone(&store);
             let read = tokio::task::spawn_blocking(move || {
-                let backlog = read_store.history_outbox_len()?;
-                let batches = read_store.history_outbox_batches(OUTBOX_READ_BATCH_SIZE)?;
+                let backlog = read_store.product_history_outbox_len()?;
+                let batches = read_store.product_history_outbox_batches(OUTBOX_READ_BATCH_SIZE)?;
                 Ok::<_, matching_sequencer::store::StoreError>((backlog, batches))
             })
             .await;
             let (backlog, batches) = match read {
                 Ok(Ok(result)) => result,
                 Ok(Err(error)) => {
-                    metrics::counter!("sybil_history_outbox_read_failures_total").increment(1);
-                    tracing::warn!(%error, "failed to read history outbox");
+                    metrics::counter!("sybil_product_history_outbox_read_failures_total")
+                        .increment(1);
+                    tracing::warn!(%error, "failed to read product-history outbox");
                     tokio::time::sleep(poll_interval).await;
                     continue;
                 }
                 Err(error) => {
-                    metrics::counter!("sybil_history_outbox_read_failures_total").increment(1);
-                    tracing::warn!(%error, "history outbox task failed");
+                    metrics::counter!("sybil_product_history_outbox_read_failures_total")
+                        .increment(1);
+                    tracing::warn!(%error, "product-history outbox task failed");
                     tokio::time::sleep(poll_interval).await;
                     continue;
                 }
             };
-            metrics::gauge!("sybil_history_outbox_backlog_rows").set(backlog as f64);
+            metrics::gauge!("sybil_product_history_outbox_backlog_rows").set(backlog as f64);
             if batches.is_empty() {
                 tokio::time::sleep(poll_interval).await;
                 continue;
@@ -198,7 +200,7 @@ pub fn spawn_outbox_publisher(
                 let started = std::time::Instant::now();
                 match client.apply_batch(&batch).await {
                     Ok(response) if response.indexed_through_height >= batch.height => {
-                        delivered.push(HistoryOutboxAck {
+                        delivered.push(ProductHistoryOutboxAck {
                             height: batch.height,
                             payload_hash: batch.payload_hash,
                         });
@@ -226,7 +228,7 @@ pub fn spawn_outbox_publisher(
                 let ack_store = Arc::clone(&store);
                 let ack_count = delivered.len() as u64;
                 let ack_result = tokio::task::spawn_blocking(move || {
-                    ack_store.acknowledge_history_batches(&delivered)
+                    ack_store.acknowledge_product_history_batches(&delivered)
                 })
                 .await;
                 match ack_result {
@@ -239,11 +241,11 @@ pub fn spawn_outbox_publisher(
                         }
                     }
                     Ok(Err(error)) => {
-                        tracing::warn!(%error, "failed to acknowledge delivered history outbox prefix");
+                        tracing::warn!(%error, "failed to acknowledge delivered product-history outbox prefix");
                         delivery_failed = true;
                     }
                     Err(error) => {
-                        tracing::warn!(%error, "history outbox acknowledgement task failed");
+                        tracing::warn!(%error, "product-history outbox acknowledgement task failed");
                         delivery_failed = true;
                     }
                 }

@@ -197,7 +197,7 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
   higher-variance).
 - **Metrics per window** (calibration.py): per-analyst Brier vs market-price baseline (the
   delta column), reliability curve, rejection accuracy (per reason, Stage 0), Flat-arm PnL vs
-  NativeNoiseTrader baseline, LLM $/decision from `token_usage`. When `--since` is supplied,
+  NativeNoiseTrader baseline, and LLM $/analysis batch from `token_usage`. When `--since` is supplied,
   portfolio PnL is reported as the per-trader delta from the last pre-window snapshot to the
   last snapshot inside the half-open window; without it, the report keeps cumulative PnL.
   Cross-window deltas match the exact intersection of durable trader names per arm and fail if
@@ -209,7 +209,7 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
   requires a new window/id.
 - **Persisted concurrent report**: run `calibration.py --experiment-id <id> --until <exclusive
   ISO-UTC>`. It derives the start/cohort from `live_experiments`, fingerprint-checks an exact
-  analyst/Flat identity allowlist, and reports calls, USD, cost per decision/batch, matched-batch
+  analyst/Flat identity allowlist, and reports calls, USD, cost per analysis batch, matched-batch
   coverage, spend deltas, and Flat PnL. It refuses windows under 24 hours unless
   `--exploratory-short-window` is explicitly supplied; the labeled text/JSON override cannot meet
   the Done criterion. A strict report also requires every exact Flat arm's first/latest portfolio
@@ -220,7 +220,7 @@ exposure caps for the Flat arm, Flat-arm confidence usage.
   filtered to the frozen cohort before source/count reporting, while spend and PnL remain
   meaningful before resolution. The exclusive end may not be in the future; snapshot endpoint
   tolerance never authorizes future evidence.
-- **Guardrail**: any stage that raises analyst spend must show cost per decision; abort a stage
+- **Guardrail**: any stage that raises analyst spend must show cost per analysis batch; abort a stage
   if projected spend exceeds 2× baseline. Configured thresholds are $5–10, not hard ceilings;
   each analyst may overshoot by one completed call.
 

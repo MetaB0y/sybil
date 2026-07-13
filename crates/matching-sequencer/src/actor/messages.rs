@@ -12,7 +12,7 @@ pub(super) struct SequencerActorArgs {
 pub(super) struct SequencerActorState {
     pub(super) sequencer: BlockSequencer,
     pub(super) latest_block: Option<SealedBlock>,
-    pub(super) block_history: VecDeque<SealedBlock>,
+    pub(super) recent_blocks: VecDeque<SealedBlock>,
     pub(super) block_broadcast: broadcast::Sender<SealedBlock>,
     pub(super) pause_count: u32,
     pub(super) halted_error: Option<SequencerError>,

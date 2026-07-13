@@ -770,12 +770,10 @@ def _stage1_experiment_metrics(
     decision_batches: dict[str, set[tuple[int, str]]] = {
         arm["flat_trader_name"]: set() for arm in experiment["arms"]
     }
-    decision_row_counts = {name: 0 for name in decision_batches}
     for row in decision_rows:
         trader_name = str(row["trader_name"] or "")
         if trader_name not in decision_batches:
             continue
-        decision_row_counts[trader_name] += 1
         batch_id = (
             str(row["analysis_batch_id"] or "").strip() if "analysis_batch_id" in row.keys() else ""
         )
@@ -813,16 +811,13 @@ def _stage1_experiment_metrics(
     for arm in experiment["arms"]:
         analyst_stats = token_stats[arm["analyst_name"]]
         flat_name = arm["flat_trader_name"]
-        decision_count = decision_row_counts[flat_name]
         batch_count = len(decision_batches[flat_name])
         spend = analyst_stats["usd"]
         arms.append(
             {
                 **arm,
                 **analyst_stats,
-                "decision_rows": decision_count,
                 "analysis_batch_count": batch_count,
-                "usd_per_decision": spend / decision_count if decision_count else None,
                 "usd_per_analysis_batch": spend / batch_count if batch_count else None,
                 "pnl": pnl_by_trader.get(flat_name),
             }
@@ -856,7 +851,6 @@ def _stage1_experiment_metrics(
                 "stage1_minus_control": {
                     "calls": delta("calls"),
                     "usd": delta("usd"),
-                    "usd_per_decision": delta("usd_per_decision"),
                     "usd_per_analysis_batch": delta("usd_per_analysis_batch"),
                     "pnl": delta("pnl"),
                 },
@@ -1164,17 +1158,15 @@ def format_report(result: dict[str, Any]) -> str:
                 arm = comparison[variant]
                 lines.append(
                     f"    {variant:7s} calls={arm['calls']} usd={_fmt(arm['usd'], 5)} "
-                    f"decisions={arm['decision_rows']} batches={arm['analysis_batch_count']} "
-                    f"usd/decision={_fmt(arm['usd_per_decision'], 5)} "
-                    f"usd/batch={_fmt(arm['usd_per_analysis_batch'], 5)} "
+                    f"batches={arm['analysis_batch_count']} "
+                    f"usd/analysis-batch={_fmt(arm['usd_per_analysis_batch'], 5)} "
                     f"pnl={_fmt(arm['pnl'], 2)}"
                 )
             delta = comparison["stage1_minus_control"]
             lines.append(
                 "    Stage1-control delta: "
                 f"calls={_fmt(delta['calls'])} usd={_fmt(delta['usd'], 5)} "
-                f"usd/decision={_fmt(delta['usd_per_decision'], 5)} "
-                f"usd/batch={_fmt(delta['usd_per_analysis_batch'], 5)} "
+                f"usd/analysis-batch={_fmt(delta['usd_per_analysis_batch'], 5)} "
                 f"pnl={_fmt(delta['pnl'], 2)}"
             )
         coverage = experiment["snapshot_coverage"]

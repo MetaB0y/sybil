@@ -181,12 +181,12 @@ like feeds and market metadata.
 
 The sequencer persists only the export boundary for product history:
 
-- **History outbox**: one immutable `CommittedHistoryBatchV1` row per fenced
+- **Product-history outbox**: one immutable `CommittedHistoryBatchV1` row per fenced
   block commit. It carries fill, account-event, equity, and committed-price
   facts plus genesis/block/state identity. A background publisher acknowledges
   and deletes rows only after the private history projector has durably applied
   their height.
-- **History event sequence counter**: the next event id remains canonical
+- **Product-event sequence counter**: the next event id remains canonical
   sequencer metadata so restart never derives identity by scanning a query
   projection.
 
@@ -197,13 +197,14 @@ tables are not part of sequencer recovery and are not validity inputs. See
 
 Other sequencer-owned durable serving rows are:
 
-- **Full block replay payloads**: `SealedBlock` rows in `blocks_full`, keyed by
+- **Canonical block replay payloads**: `SealedBlock` rows in the
+  `CANONICAL_BLOCK_ARCHIVE` table (physical redb name `blocks_full`), keyed by
   height, used as the exact-height fallback for `GET /v1/blocks/{height}` when
   the hot block ring has evicted the block or after restart.
 - **DA serving artifacts**: canonical witness payloads in `da_artifacts` plus
   small publish-time metadata in `da_manifests`, keyed by height. The paired
   rows are written atomically after block commit and pruned together with the
-  `blocks_full` retention floor. They are availability artifacts, not part of
+  canonical-archive retention floor. They are availability artifacts, not part of
   the redb commit fence.
 
 Recent in-memory fill/price/event/equity caches may still support live
@@ -269,13 +270,15 @@ This is the whole reason the commit fence lives in redb.
 - Resting orders and reservations
 - Direct-admit recovery log and deferred submissions admitted after the last committed block
 - Control-plane recovery log for acknowledged account, market, resolution, cancellation, feed, and template mutations admitted after the last committed block
-- Fill history
-- Account event history, including pending acknowledged account creation and funding replayed before the next block
+- Product-history batches not yet delivered to `sybil-history`
+- Pending acknowledged account creation/funding events, which are replayed and
+  exported only when a later block commits
 
 **Lost on crash:**
 
-- In-memory price-history cache contents. Store-backed raw price rows already
-  committed before the crash are preserved.
+- Recent in-memory fill, price, equity, and account-event cache contents. These
+  caches are diagnostic/current-value aids; historical queries use
+  `sybil-history`.
 - SSE ring buffer contents
 - Transient external feed state such as recently pushed reference prices
 
@@ -284,7 +287,8 @@ This is the whole reason the commit fence lives in redb.
 Persistence needs failure-injection tests at acknowledgement boundaries, not only clean `save_block()` round trips:
 
 - Acknowledge account creation, restart before the next block, and verify the account exists.
-- Acknowledge funding, restart before the next block, and verify balance and deposit history.
+- Acknowledge funding, restart before the next block, commit a block, and verify
+  both the balance and the remotely projected deposit event.
 - Acknowledge pubkey registration, restart before the next block, and verify signed orders can use it.
 - Acknowledge market creation and metadata, restart before the next block, and verify both survive.
 - Acknowledge cancellation, restart before the next block, and verify reservations are released exactly once.

@@ -84,7 +84,7 @@ and `_count` for the average. **There is no `_bucket` series** — use the
   `spawn_blocking`; if that pool backs up (slow disk, fsync contention, large
   analytics deltas) the per-block wall-time — reflected in `sybil_solve_time_seconds`
   — climbs even when the solver itself is fast. Signs: `ActorMailboxQueueHigh`,
-  `SybilAnalyticsPendingRowsHigh`, growing `sequencer` queue depth, high host I/O.
+  growing `sequencer` queue depth, outbox backlog, and high host I/O.
 - **Disk full / near-full.** redb writes stall or fail as the volume fills.
   Check `df -h` on the host and the `sybil-data` / `arena-data` volumes. This has
   taken down block production before; a full disk also blocks logging and metrics.

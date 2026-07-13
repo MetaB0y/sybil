@@ -13,8 +13,6 @@ use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags};
 
-use crate::util::now_secs;
-
 /// Open the arena DB read-only, or `None` when the path is unset, missing, or
 /// cannot be opened. A short busy timeout lets a scrape ride out a concurrent
 /// arena write instead of erroring immediately.
@@ -62,8 +60,6 @@ pub fn count_rows(conn: &Connection, table: &str) -> i64 {
 #[derive(Debug, Default)]
 pub struct BotMetricsSnapshot {
     pub db_available: bool,
-    pub decisions: i64,
-    pub latest_decision_age_seconds: Option<u64>,
     pub traders: Vec<TraderMetricsSnapshot>,
 }
 
@@ -76,8 +72,6 @@ impl BotMetricsSnapshot {
 #[derive(Debug, Default)]
 pub struct TraderMetricsSnapshot {
     pub name: String,
-    pub decisions: i64,
-    pub latest_decision_age_seconds: Option<u64>,
     pub total_fills: Option<i64>,
     pub total_orders: Option<i64>,
 }
@@ -87,67 +81,17 @@ pub fn load_bot_metrics_snapshot(path: &str) -> BotMetricsSnapshot {
     let Some(conn) = open_read_only(path) else {
         return BotMetricsSnapshot::unavailable();
     };
-    if !table_exists(&conn, "decisions") {
+    if !table_exists(&conn, "portfolio_snapshots") {
         return BotMetricsSnapshot::unavailable();
     }
 
-    let now = now_secs();
-    let decisions = count_rows(&conn, "decisions");
-    let latest_decision_age_seconds = latest_timestamp_seconds(
-        &conn,
-        "SELECT MAX(strftime('%s', timestamp)) FROM decisions",
-    )
-    .map(|ts| now.saturating_sub(ts));
-    let mut traders = load_trader_decision_metrics(&conn, now);
-    load_trader_snapshot_metrics(&conn, &mut traders);
-
     BotMetricsSnapshot {
         db_available: true,
-        decisions,
-        latest_decision_age_seconds,
-        traders,
+        traders: load_latest_trader_snapshots(&conn),
     }
 }
 
-fn latest_timestamp_seconds(conn: &Connection, sql: &str) -> Option<u64> {
-    conn.query_row(sql, [], |row| row.get::<_, Option<String>>(0))
-        .ok()
-        .flatten()
-        .and_then(|value| value.parse::<u64>().ok())
-}
-
-fn load_trader_decision_metrics(conn: &Connection, now: u64) -> Vec<TraderMetricsSnapshot> {
-    let mut stmt = match conn.prepare(
-        "SELECT trader_name, COUNT(*), MAX(strftime('%s', timestamp))
-         FROM decisions GROUP BY trader_name",
-    ) {
-        Ok(stmt) => stmt,
-        Err(error) => {
-            tracing::warn!(error = %error, "failed to prepare trader decision metrics query");
-            return Vec::new();
-        }
-    };
-    let Ok(rows) = stmt.query_map([], |row| {
-        let latest: Option<String> = row.get(2)?;
-        Ok(TraderMetricsSnapshot {
-            name: row.get(0)?,
-            decisions: row.get(1)?,
-            latest_decision_age_seconds: latest
-                .and_then(|value| value.parse::<u64>().ok())
-                .map(|ts| now.saturating_sub(ts)),
-            total_fills: None,
-            total_orders: None,
-        })
-    }) else {
-        return Vec::new();
-    };
-    rows.filter_map(Result::ok).collect()
-}
-
-fn load_trader_snapshot_metrics(conn: &Connection, traders: &mut [TraderMetricsSnapshot]) {
-    if !table_exists(conn, "portfolio_snapshots") {
-        return;
-    }
+fn load_latest_trader_snapshots(conn: &Connection) -> Vec<TraderMetricsSnapshot> {
     let mut stmt = match conn.prepare(
         "SELECT p.trader_name, p.total_fills, p.total_orders
          FROM portfolio_snapshots p
@@ -158,26 +102,17 @@ fn load_trader_snapshot_metrics(conn: &Connection, traders: &mut [TraderMetricsS
         Ok(stmt) => stmt,
         Err(error) => {
             tracing::warn!(error = %error, "failed to prepare trader snapshot metrics query");
-            return;
+            return Vec::new();
         }
     };
     let Ok(rows) = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, Option<i64>>(1)?,
-            row.get::<_, Option<i64>>(2)?,
-        ))
+        Ok(TraderMetricsSnapshot {
+            name: row.get(0)?,
+            total_fills: row.get(1)?,
+            total_orders: row.get(2)?,
+        })
     }) else {
-        return;
+        return Vec::new();
     };
-    let snapshots: std::collections::HashMap<_, _> = rows
-        .filter_map(Result::ok)
-        .map(|(name, fills, orders)| (name, (fills, orders)))
-        .collect();
-    for trader in traders {
-        if let Some((fills, orders)) = snapshots.get(&trader.name) {
-            trader.total_fills = *fills;
-            trader.total_orders = *orders;
-        }
-    }
+    rows.filter_map(Result::ok).collect()
 }

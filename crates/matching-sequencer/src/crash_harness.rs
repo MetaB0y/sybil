@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use matching_engine::{MarketId, MarketSet, NANOS_PER_DOLLAR, Nanos, outcome_buy};
+use matching_engine::{MarketId, MarketSet, NANOS_PER_DOLLAR, outcome_buy};
 use p256::ecdsa::SigningKey;
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -19,7 +19,7 @@ use crate::actor::{SequencerHandle, SequencerTestCrashpoint};
 use crate::block::compute_complete_state_root;
 use crate::bridge::{BridgeWithdrawalRequest, L1Deposit, account_key};
 use crate::crypto::{PublicKey, sign_cancel};
-use crate::market_info::{AccountFillRecord, MarketMetadata};
+use crate::market_info::MarketMetadata;
 use crate::order_book::reservation_snapshots_from_resting_orders;
 use crate::sequencer::{BlockSequencer, OrderSubmission, SequencerConfig};
 use crate::store::{RestoredState, Store, StoreFaultPoint};
@@ -268,7 +268,7 @@ impl Harness {
         let genesis = seq.try_produce_block(Vec::new(), 1).unwrap();
         let sealed = genesis.sealed_block();
         store
-            .save_block_with_witness_and_history(seq.snapshot(), &genesis.witness, &sealed)
+            .save_block_with_witness_and_replay_block(seq.snapshot(), &genesis.witness, &sealed)
             .await
             .unwrap();
 
@@ -381,7 +381,7 @@ impl Harness {
         );
         let restored = self
             .store
-            .load_state_with_fill_history_cap(self.config.max_fill_history_per_account)
+            .load_state()
             .await
             .unwrap_or_else(|error| panic!("{context}: load_state failed: {error}"))
             .unwrap_or_else(|| panic!("{context}: store unexpectedly empty after recovery"));
@@ -851,8 +851,10 @@ impl Harness {
     ) -> Vec<crate::aggregates::HistoryEvent> {
         let mut events: Vec<_> = self
             .store
-            .history_outbox_batches(10_000)
-            .unwrap_or_else(|error| panic!("{context}: history outbox read failed: {error}"))
+            .product_history_outbox_batches(10_000)
+            .unwrap_or_else(|error| {
+                panic!("{context}: product-history outbox read failed: {error}")
+            })
             .into_iter()
             .flat_map(|batch| batch.events)
             .filter(|event| event.account_id == account_id.0)
@@ -997,92 +999,6 @@ async fn randomized_persistence_crashpoints_default_profile() {
 }
 
 #[tokio::test]
-async fn cold_restore_does_not_scan_legacy_fill_history() {
-    const ACCOUNT_COUNT: usize = 4;
-    const FILLS_PER_ACCOUNT: usize = 37;
-    const CAP: usize = 5;
-
-    let store_dir = TempStoreDir::new(0x266a);
-    let store = Store::open(&store_dir.store_path()).unwrap();
-    let mut accounts = AccountStore::new();
-    let account_ids: Vec<_> = (0..ACCOUNT_COUNT)
-        .map(|_| accounts.create_account(INITIAL_BALANCE))
-        .collect();
-    let config = SequencerConfig {
-        max_fill_history_per_account: CAP,
-        ..SequencerConfig::default()
-    };
-    let mut seq = BlockSequencer::with_default_solver(
-        accounts,
-        MarketSet::new(),
-        Vec::new(),
-        Arc::new(AdminOracle::new()),
-        config.clone(),
-    );
-    seq.try_produce_block(Vec::new(), 1).unwrap();
-    store.save_block(seq.snapshot()).await.unwrap();
-
-    let all_records: Vec<_> = account_ids
-        .iter()
-        .flat_map(|&account_id| {
-            (1..=FILLS_PER_ACCOUNT as u64).map(move |height| {
-                (
-                    account_id,
-                    AccountFillRecord {
-                        order_id: height,
-                        fill_qty: height,
-                        fill_price: Nanos(NANOS_PER_DOLLAR / 2),
-                        block_height: height,
-                        timestamp_ms: height * 1_000,
-                        position_deltas: Vec::new(),
-                    },
-                )
-            })
-        })
-        .collect();
-    store.seed_fill_history_for_test(&all_records).unwrap();
-
-    let recovered = store.recover_account_fills(&account_ids, CAP).unwrap();
-    assert_eq!(all_records.len(), ACCOUNT_COUNT * FILLS_PER_ACCOUNT);
-    assert_eq!(recovered.len(), ACCOUNT_COUNT * CAP);
-    for &account_id in &account_ids {
-        let heights: Vec<_> = recovered
-            .iter()
-            .filter(|(recovered_id, _)| *recovered_id == account_id)
-            .map(|(_, record)| record.block_height)
-            .collect();
-        assert_eq!(
-            heights,
-            ((FILLS_PER_ACCOUNT - CAP + 1) as u64..=FILLS_PER_ACCOUNT as u64)
-                .rev()
-                .collect::<Vec<_>>()
-        );
-    }
-
-    let restored = store
-        .load_state_with_fill_history_cap(CAP)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        restored.analytics.account_fills.is_empty(),
-        "product history belongs to sybil-history and must not extend sequencer startup"
-    );
-    let restored_seq = BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config);
-    for &account_id in &account_ids {
-        let fills = restored_seq
-            .analytics()
-            .account_fills(account_id, None, usize::MAX, 0)
-            .into_iter();
-        assert_eq!(
-            fills.count(),
-            0,
-            "restart must not hydrate the hot fill recorder from product history"
-        );
-    }
-}
-
-#[tokio::test]
 async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart() {
     const DEPOSIT_COUNT: u64 = 64;
 
@@ -1145,11 +1061,7 @@ async fn bridge_state_size_is_bounded_across_deposits_and_root_survives_restart(
     drop(store);
 
     let reopened = Store::open(&store_dir.store_path()).unwrap();
-    let restored = reopened
-        .load_state_with_fill_history_cap(config.max_fill_history_per_account)
-        .await
-        .unwrap()
-        .unwrap();
+    let restored = reopened.load_state().await.unwrap().unwrap();
     assert_eq!(restored.bridge_state.deposit_cursor, DEPOSIT_COUNT);
     assert!(
         rmp_serde::to_vec(&restored.bridge_state).unwrap().len() <= serialized_size_bound,

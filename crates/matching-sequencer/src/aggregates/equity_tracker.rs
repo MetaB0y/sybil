@@ -2,8 +2,8 @@
 //!
 //! Sampled at block finalize: always for accounts that traded this block,
 //! plus a periodic sweep over known accounts so price-driven equity changes
-//! land between trades. The in-memory ring is a hot cache; block deltas are
-//! committed to bounded durable history.
+//! land between trades. The in-memory ring is a bounded recent-value cache;
+//! committed block deltas are exported through the product-history outbox.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -14,7 +14,7 @@ use crate::account::{AccountId, AccountStore};
 /// Minimum wall-clock gap between periodic full sweeps (ms).
 pub const EQUITY_SAMPLE_INTERVAL_MS: u64 = 60_000;
 /// Max points retained per account (~30 days at one point/minute).
-pub const MAX_EQUITY_POINTS: usize = 43_200;
+pub const DEFAULT_MAX_RECENT_EQUITY_POINTS: usize = 43_200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EquityPoint {
@@ -36,7 +36,7 @@ pub struct EquityTracker {
 
 impl Default for EquityTracker {
     fn default() -> Self {
-        Self::with_retention(MAX_EQUITY_POINTS)
+        Self::with_retention(DEFAULT_MAX_RECENT_EQUITY_POINTS)
     }
 }
 
@@ -64,7 +64,7 @@ fn portfolio_value_nanos(
 
 impl EquityTracker {
     pub fn new() -> Self {
-        Self::with_retention(MAX_EQUITY_POINTS)
+        Self::with_retention(DEFAULT_MAX_RECENT_EQUITY_POINTS)
     }
 
     pub fn with_retention(max_points: usize) -> Self {

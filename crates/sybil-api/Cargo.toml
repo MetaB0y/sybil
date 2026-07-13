@@ -13,6 +13,10 @@ path = "src/main.rs"
 name = "sybil-admin"
 path = "src/bin/sybil_admin.rs"
 
+[[bin]]
+name = "sybil-openapi"
+path = "src/bin/sybil_openapi.rs"
+
 [dependencies]
 matching-engine = { path = "../matching-engine" }
 matching-sequencer = { path = "../matching-sequencer" }

@@ -27,6 +27,9 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Generated API schema drift
+        run: pnpm types:check
+
       - name: Typecheck
         run: pnpm tsc --noEmit
 

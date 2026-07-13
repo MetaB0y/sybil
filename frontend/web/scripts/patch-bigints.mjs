@@ -12,7 +12,9 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const target = resolve(here, "../src/lib/api/schema.d.ts");
+const target = process.argv[2]
+  ? resolve(process.cwd(), process.argv[2])
+  : resolve(here, "../src/lib/api/schema.d.ts");
 
 const lines = readFileSync(target, "utf8").split("\n");
 const out = [];

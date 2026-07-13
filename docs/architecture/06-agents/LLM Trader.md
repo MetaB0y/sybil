@@ -2,7 +2,7 @@
 tags: [arena]
 layer: arena
 status: current
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
 Sybil has two LLM trading paths with deliberately different boundaries.
@@ -29,9 +29,12 @@ LLM calls or divergent news inputs.
 LLM cost and failure are contained at the analyst boundary. Each analyst has a persistent spend
 pause threshold; reaching it blocks the next call without affecting other personas. Because cost
 is known only after a completed call, actual spend may exceed the threshold by that final call.
-Parse fallbacks are
-counted, while every sizer decision records the raw/effective fair value, age, confidence,
-restatement, countercase, rejection reason, article sources, and resulting orders. Offline
+Parse fallbacks are counted. A durable sizer decision is written exactly once,
+when a fresh `FairValueUpdate` is first applied; it records the raw/effective fair value, age,
+confidence, restatement, countercase, rejection reason, article sources, and proposed orders.
+Timer-only position management may still emit replacement orders, but it does not duplicate the
+forecast row. Proposed orders are not evidence of API acceptance; accepted-order and fill totals
+come from portfolio snapshots. Offline
 calibration uses explicit resolution outcomes when available and can pin both time windows and
 market cohorts. This measurement layer is required before adding higher-spend techniques such as
 price-move re-estimation or a second-opinion model.
@@ -136,7 +139,7 @@ uv run python -m scripts.calibration \
 The strict report derives its inclusive start and cohort from `live_experiments`; supplying
 `--since` or `--market-ids` alongside the experiment id is rejected. It fingerprint-checks and
 allowlists the exact experiment analyst/Flat identities, then reports per-arm calls, USD spend,
-cost per decision and analysis batch, matched-batch coverage, Stage1-minus-control spend deltas,
+cost per analysis batch, matched-batch coverage, Stage1-minus-control spend deltas,
 and Flat PnL. Windows shorter than 24 hours are refused unless
 `--exploratory-short-window` is explicitly supplied; that override is recorded in text and JSON
 and is not launch evidence. A non-exploratory report also proves that every exact Flat arm has
@@ -152,7 +155,7 @@ filtered to the frozen cohort before their source/count is reported, so unrelate
 hide that the experiment itself remains unresolved. Starting a different cohort requires a new
 experiment id.
 
-Each fair-value update and decision also persists a deterministic
+Each freshly applied fair-value update also persists a deterministic
 `analysis_batch_id` derived from the market id, snapped reference price, and sorted article URLs.
 The same snapped price is persisted as `analysis_reference_price` and supplies both arms' prompt,
 resolution check, and matched market-price baseline even if the provider moves between drains.
@@ -183,7 +186,8 @@ uv run python -m scripts.calibration_compare \
 - Per-persona `FairValueBus` gives Kelly and Flat sizers identical analyst inputs
 - Live order sizing and freshness handling are deterministic and LLM-free
 - Persistent per-analyst spend thresholds pause only that analyst's later calls
-- Decision and outcome records support windowed, cohort-pinned calibration
+- One decision row per fresh forecast application, plus outcome records, supports
+  windowed, cohort-pinned calibration
 - Opt-in Stage 1 A/B uses paired evidence batches, isolated Flat arms, and single-run ids
 - Persisted Stage 1 reports lock scope to immutable metadata and fail closed on identity drift
 - Strict Stage 1 evidence requires uninterrupted durable snapshot coverage for every Flat arm

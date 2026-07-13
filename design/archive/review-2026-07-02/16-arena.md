@@ -34,7 +34,7 @@ Three generations coexist; only the newest is deployed:
 | AR-2 | bug | high | Title-date expiry heuristic overrides authoritative API expiry and assumes the current year → excludes live markets; a date-dependent test is **currently failing** (`test_selection_skips_expired_markets`) |
 | AR-3 | design | high | Restart abandons portfolios: accounts are re-created every process start (no persisted ids), and any transient SSE drop (no reconnect) triggers a full restart → orphaned accounts + reset leaderboards + re-minted cash |
 | AR-4 | bug | high | `FlatStrategy` "hard exit" keys on absolute price level, not adverse movement, with no cost basis → perpetual buy/sell churn on any market priced <0.30 or >0.70 |
-| AR-5 | ops | medium | Deployed stack disables fill history (`SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT=0`) → `on_fill`/`total_fills` permanently dead; offset pagination breaks under trimming anyway |
+| AR-5 | ops | medium | Deployed stack disables fill history (`SYBIL_MAX_RECENT_FILLS_PER_ACCOUNT=0`) → `on_fill`/`total_fills` permanently dead; offset pagination breaks under trimming anyway |
 | AR-6 | bug | medium | `min_llm_interval` gates loop entry, not calls → one block can fire an unbounded burst of sequential LLM calls per trader |
 | AR-7 | bug | medium | Global URL dedup assigns a multi-market article to only the first market's feed (`matched_market_ids` is always a singleton) |
 | AR-8 | bug | medium | `IMPORTANT_NEWS_TERMS` matched by substring, not word boundary ("war" matches "warriors", "ban" matches "Taliban") |

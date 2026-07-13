@@ -383,16 +383,9 @@ async fn record_bot_metrics(state: &AppState) {
         };
 
     metrics::gauge!("sybil_bot_db_available").set(if snapshot.db_available { 1.0 } else { 0.0 });
-    metrics::gauge!("sybil_bot_decisions_total").set(snapshot.decisions as f64);
     metrics::gauge!("sybil_bot_traders_total").set(snapshot.traders.len() as f64);
-    metrics::gauge!("sybil_bot_latest_decision_age_seconds")
-        .set(snapshot.latest_decision_age_seconds.unwrap_or(0) as f64);
 
     for trader in snapshot.traders {
-        metrics::gauge!("sybil_bot_latest_decision_age_seconds", "trader" => trader.name.clone())
-            .set(trader.latest_decision_age_seconds.unwrap_or(0) as f64);
-        metrics::gauge!("sybil_bot_decisions_total", "trader" => trader.name.clone())
-            .set(trader.decisions as f64);
         metrics::gauge!("sybil_bot_total_fills", "trader" => trader.name.clone())
             .set(trader.total_fills.unwrap_or(0) as f64);
         metrics::gauge!("sybil_bot_total_orders", "trader" => trader.name)

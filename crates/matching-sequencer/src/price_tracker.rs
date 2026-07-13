@@ -11,11 +11,10 @@ use crate::market_info::PricePoint;
 
 /// Bounded in-memory price history retained per market.
 ///
-/// This is a hot cache for no-store/dev runs and recent in-process reads. When
-/// a durable store is configured, `price_points` is the serving source of truth
-/// for historical ranges; keeping this bounded prevents long-running live
-/// deployments from retaining every fill forever in RAM.
-pub const DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET: usize = 2_000;
+/// This cache supports recent in-process diagnostics and rolling values.
+/// Historical price ranges are served by `sybil-history`, so the sequencer
+/// never needs to retain every committed point in RAM or in query tables.
+pub const DEFAULT_MAX_RECENT_PRICE_POINTS_PER_MARKET: usize = 2_000;
 
 /// Milliseconds in one hour — bucket granularity for the 24h volume window.
 const HOUR_MS: u64 = 3_600_000;
@@ -33,7 +32,7 @@ const HOURLY_CLEARING_HISTORY_CAP: usize = 25;
 /// blob in redb (see `store.rs`) so the missing-table → default path remains
 /// trivial.
 #[derive(Clone, Default, Serialize, Deserialize)]
-pub struct PriceTrackerVolumeSnapshot {
+pub struct RollingVolumeSnapshot {
     pub platform_volume: u64,
     pub hourly_per_market: VecDeque<(u64, HashMap<MarketId, u64>)>,
     pub hourly_platform: VecDeque<(u64, u64)>,
@@ -42,9 +41,9 @@ pub struct PriceTrackerVolumeSnapshot {
 /// Persisted slice of [`PriceTracker`] covering the clearing-price history
 /// extension introduced in B3: per-market rolling buckets of the first
 /// clearing price seen in each hour. Stored as its own redb blob — separate
-/// from `PriceTrackerVolumeSnapshot` so reverting B3 drops one table cleanly.
+/// from `RollingVolumeSnapshot` so reverting B3 drops one table cleanly.
 #[derive(Clone, Default, Serialize, Deserialize)]
-pub struct PriceTrackerClearingHistorySnapshot {
+pub struct RollingPriceAnchorsSnapshot {
     /// Per-market `(hour_start_ms, clearing prices at first observation)`
     /// buckets, cap `HOURLY_CLEARING_HISTORY_CAP` per market.
     pub hourly_clearing_prices: HashMap<MarketId, VecDeque<(u64, Vec<Nanos>)>>,
@@ -94,7 +93,7 @@ impl Default for PriceTracker {
 
 impl PriceTracker {
     pub fn new() -> Self {
-        Self::with_retention(DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET)
+        Self::with_retention(DEFAULT_MAX_RECENT_PRICE_POINTS_PER_MARKET)
     }
 
     pub fn with_retention(max_history_points_per_market: usize) -> Self {
@@ -121,7 +120,7 @@ impl PriceTracker {
         Self::with_state_and_retention(
             last_clearing_prices,
             market_volumes,
-            DEFAULT_MAX_PRICE_HISTORY_POINTS_PER_MARKET,
+            DEFAULT_MAX_RECENT_PRICE_POINTS_PER_MARKET,
         )
     }
 
@@ -148,15 +147,15 @@ impl PriceTracker {
     /// Replace the volume-extension state with a persisted snapshot. Called
     /// once during restore after `with_state`; on cold start the snapshot is
     /// `Default::default()` and this is a no-op.
-    pub fn restore_volume_extensions(&mut self, snapshot: PriceTrackerVolumeSnapshot) {
+    pub fn restore_rolling_volume(&mut self, snapshot: RollingVolumeSnapshot) {
         self.platform_volume = snapshot.platform_volume;
         self.hourly_per_market = snapshot.hourly_per_market;
         self.hourly_platform = snapshot.hourly_platform;
     }
 
     /// Owned snapshot of the volume-extension state for persistence.
-    pub fn volume_extensions_snapshot(&self) -> PriceTrackerVolumeSnapshot {
-        PriceTrackerVolumeSnapshot {
+    pub fn rolling_volume_snapshot(&self) -> RollingVolumeSnapshot {
+        RollingVolumeSnapshot {
             platform_volume: self.platform_volume,
             hourly_per_market: self.hourly_per_market.clone(),
             hourly_platform: self.hourly_platform.clone(),
@@ -165,13 +164,13 @@ impl PriceTracker {
 
     /// Replace the clearing-price-history state with a persisted snapshot.
     /// Cold-start hits the `Default::default()` path and this becomes a no-op.
-    pub fn restore_clearing_history(&mut self, snapshot: PriceTrackerClearingHistorySnapshot) {
+    pub fn restore_rolling_price_anchors(&mut self, snapshot: RollingPriceAnchorsSnapshot) {
         self.hourly_clearing_prices = snapshot.hourly_clearing_prices;
     }
 
     /// Owned snapshot of the clearing-price-history state for persistence.
-    pub fn clearing_history_snapshot(&self) -> PriceTrackerClearingHistorySnapshot {
-        PriceTrackerClearingHistorySnapshot {
+    pub fn clearing_history_snapshot(&self) -> RollingPriceAnchorsSnapshot {
+        RollingPriceAnchorsSnapshot {
             hourly_clearing_prices: self.hourly_clearing_prices.clone(),
         }
     }
@@ -818,7 +817,7 @@ mod tests {
 
         let snapshot = tracker.clearing_history_snapshot();
         let mut restored = PriceTracker::new();
-        restored.restore_clearing_history(snapshot);
+        restored.restore_rolling_price_anchors(snapshot);
 
         let now_ms = 3 * HOUR_MS + 100;
         let (yes, no) = restored
@@ -852,9 +851,9 @@ mod tests {
             );
         }
 
-        let snapshot = tracker.volume_extensions_snapshot();
+        let snapshot = tracker.rolling_volume_snapshot();
         let mut restored = PriceTracker::new();
-        restored.restore_volume_extensions(snapshot);
+        restored.restore_rolling_volume(snapshot);
 
         let now = 2 * HOUR_MS + 5_000;
         assert_eq!(restored.platform_volume_total(), per_block * 3);

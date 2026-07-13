@@ -106,24 +106,15 @@ fn is_set(value: &str) -> bool {
 ///   authenticated; fail closed (mirrors [`crate::app`] request-time posture,
 ///   promoted to startup).
 /// - `SYBIL_DATA_DIR` unset — in-memory only; the whole store (state, equity,
-///   canonical state and the history outbox are lost on restart.
+///   canonical state and the product-history outbox are lost on restart.
 /// - `SYBIL_HISTORY_URL` unset — product-history reads and outbox delivery are
 ///   disabled.
 /// - `SYBIL_HISTORY_TOKEN` unset — the private history boundary is unauthenticated.
 /// - `SYBIL_ADMIN_FEED_KEY_PATH` unset — the admin resolution feed identity is
 ///   regenerated on every restart, so the configured signer is not durable.
 ///
-/// Informational-only deviations (logged, never block): a durable store backs
-/// these when `SYBIL_DATA_DIR` is set, so the reduced RAM cache does not lose
-/// data on its own.
-/// - `SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT` — account fills are served
-///   store-first from durable `FILL_HISTORY`; the cap only bounds the hot ring.
-/// - `SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET` — raw price history is served
-///   store-first from durable `price_points`.
-/// - `SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT` / `SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT`
-///   — prod-intended value is already `0` (served store-first from redb), so a
-///   nonzero RAM fallback is the only thing that could differ.
-/// - `SYBIL_BLOCK_HISTORY_CAPACITY` — recent-block ring size.
+/// Informational-only deviations (logged, never block):
+/// - `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` — recent canonical-block cache size.
 /// - `SYBIL_MARKET_REF_DATA_PATH` — unset means volatile mirror metadata.
 ///   Degraded but not data loss for trading; flagged for operator attention.
 pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
@@ -169,44 +160,10 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
             dev_only: true,
         });
     }
-    if config.max_fill_history_per_account == 0 {
+    if config.recent_block_cache_capacity != 100 {
         out.push(Deviation {
-            knob: "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT",
-            value: "0".to_string(),
-            prod_intended: "5000 (hot cache only; durable FILL_HISTORY backs serving)",
-            dev_only: false,
-        });
-    }
-
-    // ── Informational-only: durable store (SYBIL_DATA_DIR) backs these ──────
-    if config.max_price_history_points_per_market != 2_000 {
-        out.push(Deviation {
-            knob: "SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET",
-            value: config.max_price_history_points_per_market.to_string(),
-            prod_intended: "2000",
-            dev_only: false,
-        });
-    }
-    if config.max_equity_points_per_account != 0 {
-        out.push(Deviation {
-            knob: "SYBIL_MAX_EQUITY_POINTS_PER_ACCOUNT",
-            value: config.max_equity_points_per_account.to_string(),
-            prod_intended: "0 (served store-first from redb)",
-            dev_only: false,
-        });
-    }
-    if config.max_history_events_per_account != 0 {
-        out.push(Deviation {
-            knob: "SYBIL_MAX_HISTORY_EVENTS_PER_ACCOUNT",
-            value: config.max_history_events_per_account.to_string(),
-            prod_intended: "0 (served store-first from redb)",
-            dev_only: false,
-        });
-    }
-    if config.block_history_capacity != 100 {
-        out.push(Deviation {
-            knob: "SYBIL_BLOCK_HISTORY_CAPACITY",
-            value: config.block_history_capacity.to_string(),
+            knob: "SYBIL_RECENT_BLOCK_CACHE_CAPACITY",
+            value: config.recent_block_cache_capacity.to_string(),
             prod_intended: "100",
             dev_only: false,
         });
@@ -325,11 +282,11 @@ mod tests {
             data_dir: "/data".to_string(),
             market_ref_data_path: "/data/ref.json".to_string(),
             admin_feed_key_path: "/data/admin.key".to_string(),
-            max_fill_history_per_account: 5_000,
-            max_price_history_points_per_market: 2_000,
-            max_equity_points_per_account: 0,
-            max_history_events_per_account: 0,
-            block_history_capacity: 100,
+            max_recent_fills_per_account: 5_000,
+            max_recent_price_points_per_market: 2_000,
+            max_recent_equity_points_per_account: 0,
+            max_recent_account_events_per_account: 0,
+            recent_block_cache_capacity: 100,
             ..ApiConfig::default()
         }
     }
@@ -425,44 +382,6 @@ mod tests {
         );
         assert!(report.blocks_prod_start(false));
         assert!(run_preflight(&config).is_err());
-    }
-
-    #[test]
-    fn zero_fill_history_is_informational_not_blocking() {
-        let config = ApiConfig {
-            max_fill_history_per_account: 0,
-            ..prod_ready_config()
-        };
-        let report = build_report(&config).unwrap();
-        assert!(
-            report
-                .deviations
-                .iter()
-                .any(|d| d.knob == "SYBIL_MAX_FILL_HISTORY_PER_ACCOUNT" && !d.dev_only)
-        );
-        assert!(report.violations().is_empty());
-        assert!(!report.blocks_prod_start(false));
-        assert!(run_preflight(&config).is_ok());
-    }
-
-    #[test]
-    fn zero_price_cache_is_informational_not_blocking() {
-        // Durable price_points back the endpoint when a store is configured,
-        // so a 0 RAM cache is logged but does not block prod.
-        let config = ApiConfig {
-            max_price_history_points_per_market: 0,
-            ..prod_ready_config()
-        };
-        let report = build_report(&config).unwrap();
-        assert!(
-            report
-                .deviations
-                .iter()
-                .any(|d| d.knob == "SYBIL_MAX_PRICE_HISTORY_POINTS_PER_MARKET" && !d.dev_only)
-        );
-        assert!(report.violations().is_empty());
-        assert!(!report.blocks_prod_start(false));
-        assert!(run_preflight(&config).is_ok());
     }
 
     #[test]

@@ -41,12 +41,13 @@
 //! - Mempool: intentionally not persisted (short-lived by design; clients resubmit).
 //! - MM inventory / variance: TODO.
 //!
-//! **Tier 3 (partial)**: Derived views.
-//! - Fill history: implemented (see `FILL_HISTORY` table).
-//! - Price history: implemented for raw mark points (see `PRICE_POINTS` table).
-//! - Block ring buffer: exact-height fallback implemented, list/replay policy TODO.
+//! **Tier 3**: Serving artifacts.
+//! - Product history leaves the commit fence through `PRODUCT_HISTORY_OUTBOX` and is
+//!   projected by `sybil-history`; there are no query projections here.
+//! - Canonical replay blocks and paired DA artifacts form a separate bounded
+//!   local archive.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(test)]
@@ -78,16 +79,13 @@ use crate::bridge::{
     BridgeL1Input, BridgeState, BridgeWithdrawalRequest, L1Deposit, L1WithdrawalStatus,
     WithdrawalLeaf,
 };
-use crate::market_info::{
-    AccountFillCursor, AccountFillRecord, MarketMetadata, PriceCandle, PriceCandlePage,
-    ResolutionConfig,
-};
+use crate::market_info::{AccountFillRecord, MarketMetadata, ResolutionConfig};
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::{
     OrderBook, RestingOrder, reservation_snapshots_from_resting_orders,
     validate_restored_account_reservations, validate_restored_reservations,
 };
-use crate::price_tracker::{PriceTrackerClearingHistorySnapshot, PriceTrackerVolumeSnapshot};
+use crate::price_tracker::{RollingPriceAnchorsSnapshot, RollingVolumeSnapshot};
 use crate::sequencer::{BlockSequencer, SequencerConfig};
 
 mod auto_resolution;
@@ -118,9 +116,7 @@ use self::retention::prune_historical_block_rows;
 use self::tables::*;
 
 pub use self::auto_resolution::{AutoResolutionAction, AutoResolutionRecord};
-pub use self::commit::{
-    AnalyticsSnapshot, DurableHistoryRowCaps, SequencerSnapshot, Store, StoreError,
-};
+pub use self::commit::{AnalyticsSnapshot, SequencerSnapshot, Store, StoreError};
 pub use self::da::{
     DA_FILE_PROVIDER_REF_ENCODING, DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
     DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact, DaArtifactIntegrityError, DaArtifactLookup,
@@ -128,10 +124,10 @@ pub use self::da::{
 };
 #[cfg(test)]
 pub(crate) use self::fault::StoreFaultPoint;
-pub use self::history_outbox::HistoryOutboxAck;
+pub use self::history_outbox::ProductHistoryOutboxAck;
 pub use self::import::WitnessImportSummary;
 pub use self::restore::{AnalyticsRestoredState, RestoredState};
 pub use self::retention::{
-    AccountHistoryRetention, HistoryPruneReport, HistoryRetentionMeta, HistoryRetentionPolicy,
+    CanonicalArchiveMeta, CanonicalArchivePruneReport, CanonicalArchiveRetentionPolicy,
 };
 pub use self::wal::ControlPlaneCommand;

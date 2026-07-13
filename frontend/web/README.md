@@ -39,7 +39,11 @@ pnpm e2e                 # requires the configured app/API environment
 - Canonical signing and WebAuthn helpers live under `src/lib/auth/`.
 - The browser stores account-session material; server state remains authoritative.
 - `src/lib/api/schema.d.ts` is generated from `sybil-api`'s OpenAPI document.
-  Regenerate it with `pnpm types:generate` against the intended API revision.
+  It stays committed so frontend builds do not need a running Rust server.
+  `pnpm types:generate` exports `ApiDoc` directly from the local Rust revision,
+  applies the bigint declaration workaround, and formats the result
+  deterministically; it never depends on a deployed API. `pnpm types:check`
+  fails when the committed declaration has drifted.
 - Read API keys are read-only. Orders, cancels, key changes, and withdrawals
   require a registered signing key.
 

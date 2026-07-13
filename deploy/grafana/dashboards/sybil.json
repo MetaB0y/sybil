@@ -461,26 +461,9 @@
       }
     },
     {
-      "title": "Bot Decision Freshness",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 80 },
-      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
-      "targets": [
-        { "expr": "sybil_bot_latest_decision_age_seconds", "legendFormat": "{{trader}}", "refId": "A" }
-      ],
-      "fieldConfig": {
-        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 10 }, "thresholds": { "mode": "absolute", "steps": [
-          { "color": "green", "value": null },
-          { "color": "orange", "value": 600 },
-          { "color": "red", "value": 3600 }
-        ] } },
-        "overrides": []
-      }
-    },
-    {
       "title": "Bot Orders and Fills",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 80 },
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 80 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sybil_bot_total_orders", "legendFormat": "orders {{trader}}", "refId": "A" },

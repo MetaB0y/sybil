@@ -285,12 +285,11 @@ impl SequencerActorState {
         if let Some(ref store) = self.store {
             let sealed = prepared.production().sealed_block();
             let height = sealed.canonical.header.height;
-            let timestamp_ms = sealed.canonical.header.timestamp_ms;
             // Commit clears pending off-block read-model rows after this returns.
             // Persist every prepared block so empty-fill batches can still durably
             // carry direct-admit history and equity deltas.
             store
-                .save_block_with_witness_and_history(
+                .save_block_with_witness_and_replay_block(
                     prepared.next_sequencer().snapshot(),
                     &prepared.production().witness,
                     &sealed,
@@ -330,112 +329,44 @@ impl SequencerActorState {
                 da_writes_in_flight.decrement(1.0);
             });
 
-            let policy = HistoryRetentionPolicy {
-                block_history_retention_blocks: self
+            let policy = CanonicalArchiveRetentionPolicy {
+                retention_blocks: self.sequencer.config.canonical_archive_retention_blocks,
+                maintenance_interval_blocks: self
                     .sequencer
                     .config
-                    .block_history_retention_blocks,
-                // The sequencer retains canonical blocks/DA only. Public
-                // price, fill, equity, event, and candle history is projected
-                // and maintained by sybil-history.
-                raw_price_retention_blocks: 0,
-                fill_history_retention_secs: 0,
-                equity_retention_secs: 0,
-                account_event_retention_secs: 0,
-                max_durable_fill_rows: 0,
-                max_durable_equity_rows: 0,
-                max_durable_account_event_rows: 0,
-                price_candle_resolutions_secs: Vec::new(),
-                price_candle_retention_secs: Vec::new(),
-                prune_interval_blocks: self.sequencer.config.history_prune_interval_blocks,
-                prune_max_rows: self.sequencer.config.history_prune_max_rows,
+                    .canonical_archive_maintenance_interval_blocks,
+                max_rows_per_pass: self.sequencer.config.canonical_archive_max_rows_per_pass,
             };
-            if policy.should_prune_at(height) {
-                // Canonical block/DA retention is maintenance, not part of the
+            if policy.should_maintain_at(height) {
+                // Canonical replay/DA retention is maintenance, not part of the
                 // commit fence. Never hold the single-writer actor while it
-                // scans/deletes historical rows.
+                // scans or deletes archive rows.
                 let retention_store = Arc::clone(store);
                 tokio::spawn(async move {
                     match retention_store
-                        .prune_history(height, timestamp_ms, policy)
+                        .prune_canonical_archive(height, policy)
                         .await
                     {
                         Ok(report) => {
                             metrics::counter!(
-                                "sybil_history_pruned_rows_total",
-                                "stream" => "blocks_full"
+                                "sybil_canonical_archive_pruned_rows_total",
+                                "stream" => "replay_blocks"
                             )
-                            .increment(report.blocks_full_pruned as u64);
+                            .increment(report.replay_blocks_pruned as u64);
                             metrics::counter!(
-                                "sybil_history_pruned_rows_total",
+                                "sybil_canonical_archive_pruned_rows_total",
                                 "stream" => "da_artifacts"
                             )
                             .increment(report.da_artifacts_pruned as u64);
-                            metrics::counter!(
-                                "sybil_history_pruned_rows_total",
-                                "stream" => "price_points"
-                            )
-                            .increment(report.price_points_pruned as u64);
-                            metrics::counter!(
-                                "sybil_history_pruned_rows_total",
-                                "stream" => "price_candles"
-                            )
-                            .increment(report.price_candles_pruned as u64);
-                            for (stream, count) in [
-                                ("account_fills", report.fill_history_pruned),
-                                ("equity_points", report.equity_points_pruned),
-                                ("account_events", report.history_events_pruned),
-                            ] {
-                                metrics::counter!(
-                                    "sybil_history_pruned_rows_total",
-                                    "stream" => stream
-                                )
-                                .increment(count as u64);
-                            }
-                            if let Some(min_height) = report.meta.blocks_full_min_height {
-                                metrics::gauge!(
-                                    "sybil_history_retention_min_height",
-                                    "stream" => "blocks_full"
-                                )
-                                .set(min_height as f64);
-                            }
-                            if let Some(min_height) = report.meta.price_points_min_height {
-                                metrics::gauge!(
-                                    "sybil_history_retention_min_height",
-                                    "stream" => "price_points"
-                                )
-                                .set(min_height as f64);
-                            }
-                            for (resolution_secs, min_bucket_ms) in
-                                &report.meta.price_candles_min_bucket_ms
-                            {
-                                metrics::gauge!(
-                                    "sybil_history_retention_min_bucket_ms",
-                                    "stream" => "price_candles",
-                                    "resolution_secs" => resolution_secs.to_string()
-                                )
-                                .set(*min_bucket_ms as f64);
-                            }
-                            for (stream, floor) in [
-                                ("account_fills", report.meta.fill_history_min_timestamp_ms),
-                                ("equity_points", report.meta.equity_points_min_timestamp_ms),
-                                (
-                                    "account_events",
-                                    report.meta.history_events_min_timestamp_ms,
-                                ),
-                            ] {
-                                if let Some(floor) = floor {
-                                    metrics::gauge!(
-                                        "sybil_history_retention_min_timestamp_ms",
-                                        "stream" => stream
-                                    )
-                                    .set(floor as f64);
-                                }
+                            if let Some(min_height) = report.meta.oldest_retained_height {
+                                metrics::gauge!("sybil_canonical_archive_oldest_height")
+                                    .set(min_height as f64);
                             }
                         }
                         Err(error) => {
-                            metrics::counter!("sybil_history_prune_failures_total").increment(1);
-                            tracing::warn!(height, %error, "history pruning failed after block save");
+                            metrics::counter!("sybil_canonical_archive_maintenance_failures_total")
+                                .increment(1);
+                            tracing::warn!(height, %error, "canonical archive maintenance failed");
                         }
                     }
                 });
@@ -467,29 +398,7 @@ impl SequencerActorState {
         metrics::gauge!("sybil_pending_orders").set(bp.flow_metrics.pending_orders_after as f64);
         metrics::gauge!("sybil_state_accounts_total").set(bp.witness.post_state.len() as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
-        metrics::gauge!("sybil_recent_block_history_len").set(self.block_history.len() as f64);
-
-        let analytics = self.sequencer.analytics().memory_stats();
-        metrics::gauge!("sybil_analytics_equity_known_accounts")
-            .set(analytics.equity_known_accounts as f64);
-        metrics::gauge!("sybil_analytics_equity_cached_accounts")
-            .set(analytics.equity_cached_accounts as f64);
-        metrics::gauge!("sybil_analytics_equity_cached_points")
-            .set(analytics.equity_cached_points as f64);
-        metrics::gauge!("sybil_analytics_equity_pending_points")
-            .set(analytics.equity_pending_points as f64);
-        metrics::gauge!("sybil_analytics_equity_points_per_account_capacity")
-            .set(analytics.equity_points_per_account_capacity as f64);
-        metrics::gauge!("sybil_analytics_history_cached_accounts")
-            .set(analytics.history_cached_accounts as f64);
-        metrics::gauge!("sybil_analytics_history_cached_events")
-            .set(analytics.history_cached_events as f64);
-        metrics::gauge!("sybil_analytics_history_pending_events")
-            .set(analytics.history_pending_events as f64);
-        metrics::gauge!("sybil_analytics_history_events_per_account_capacity")
-            .set(analytics.history_events_per_account_capacity as f64);
-        metrics::gauge!("sybil_analytics_history_event_next_seq")
-            .set(analytics.history_event_next_seq as f64);
+        metrics::gauge!("sybil_recent_block_cache_len").set(self.recent_blocks.len() as f64);
 
         self.record_per_market_metrics(bp);
     }
@@ -543,10 +452,10 @@ impl SequencerActorState {
     }
 
     fn push_to_history(&mut self, block: SealedBlock) {
-        if self.block_history.len() >= self.sequencer.config.block_history_capacity {
-            self.block_history.pop_front();
+        if self.recent_blocks.len() >= self.sequencer.config.recent_block_cache_capacity {
+            self.recent_blocks.pop_front();
         }
-        self.block_history.push_back(block);
+        self.recent_blocks.push_back(block);
     }
 }
 

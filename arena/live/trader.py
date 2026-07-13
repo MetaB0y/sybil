@@ -4,9 +4,10 @@ Architecture (post analysis/sizing split):
 - A per-persona ``PersonaAnalyst`` (live/analyst.py) runs the analysis LLM and
   publishes ``FairValueUpdate``s onto a ``FairValueBus``.
 - This trader is now a pure *sizer*: it drains fair-value updates, records the
-  decision, and runs mechanical sizing/rebalance (``_rebalance_all``, position
-  orders). Both the Kelly and Flat arms of one persona subscribe to the same
-  persona stream, so their fair-value inputs are provably identical.
+  first sizing application of each update, and runs mechanical position
+  management between updates. Both the Kelly and Flat arms of one persona
+  subscribe to the same persona stream, so their fair-value inputs are
+  provably identical.
 
 The class name ``LiveLlmTrader`` is retained (it is the DB ``trader_name`` and
 the sybil-api reader / runner wiring depend on it); it no longer calls an LLM.
@@ -478,6 +479,7 @@ class LiveLlmTrader(BaseAgent):
 
     async def on_block(self, block: Block) -> list[OrderSpec]:
         all_orders: list[OrderSpec] = []
+        fresh_updates: dict[int, FairValueUpdate] = {}
         prices = self._observed_market_prices(block)
         now = self._now()
 
@@ -509,6 +511,7 @@ class LiveLlmTrader(BaseAgent):
                 old_fv = self.fair_values.get(market_id)
                 self._store_fair_value_update(update, now)
                 self._latest_updates[market_id] = update
+                fresh_updates[market_id] = update
                 update_ts = update.ts or now
                 if update_ts.tzinfo is None:
                     update_ts = update_ts.replace(tzinfo=timezone.utc)
@@ -526,7 +529,11 @@ class LiveLlmTrader(BaseAgent):
                 )
         # Position management via strategy
         elapsed_rebal = self._monotonic() - self._last_rebalance
-        if elapsed_rebal >= self.strategy.rebalance_interval_s or self._last_rebalance == 0:
+        if (
+            fresh_updates
+            or elapsed_rebal >= self.strategy.rebalance_interval_s
+            or self._last_rebalance == 0
+        ):
             rebalance_orders = self._rebalance_all(block, now)
             if rebalance_orders:
                 order_desc = ", ".join(_describe_order(o) for o in rebalance_orders)
@@ -535,6 +542,12 @@ class LiveLlmTrader(BaseAgent):
             for order in rebalance_orders:
                 orders_by_market.setdefault(order.market_id, []).append(order)
             for market_id, context in self._latest_rebalance_context.items():
+                # A durable decision is one application of fresh analyst
+                # evidence. Timer-only position management is operational
+                # behavior, not another forecast observation.
+                update = fresh_updates.get(market_id)
+                if update is None:
+                    continue
                 market_orders = orders_by_market.get(market_id, [])
                 market = self.markets_info.get(market_id)
                 market_name = market.name if market else str(market_id)
@@ -543,7 +556,6 @@ class LiveLlmTrader(BaseAgent):
                 raw_fv = context.raw_fair_value
                 fair_value = effective_fv if effective_fv is not None else raw_fv
                 fair_value = fair_value if fair_value is not None else current_price
-                update = self._latest_updates.get(market_id)
                 if market_orders:
                     motivation = f"{self.strategy.name} rebalance to target position"
                 else:
@@ -563,16 +575,14 @@ class LiveLlmTrader(BaseAgent):
                     "countercase": context.countercase if context else "",
                     "orders": market_orders,
                     "motivation": motivation,
-                    "analysis": update.analysis if update else "",
-                    "articles": update.articles if update else [],
+                    "analysis": update.analysis,
+                    "articles": update.articles,
                     "market_price": current_price,
                     "block_height": block.height,
                     "timestamp": now,
                     "rejection_reason": self._latest_rejection_reasons[market_id],
-                    "analysis_batch_id": update.analysis_batch_id if update else "",
-                    "analysis_reference_price": (
-                        update.analysis_reference_price if update else None
-                    ),
+                    "analysis_batch_id": update.analysis_batch_id,
+                    "analysis_reference_price": update.analysis_reference_price,
                 }
                 self._record_trade(
                     market_id=entry["market_id"],

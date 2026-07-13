@@ -71,7 +71,7 @@ impl SequencerHandle {
     }
 
     /// Spawn while allowing an out-of-actor delivery worker to retain a clone
-    /// of the store. The shared handle may read/ack the history outbox directly;
+    /// of the store. The shared handle may read/ack the product-history outbox directly;
     /// it must never mutate canonical exchange state outside the actor.
     pub fn spawn_with_shared_store(
         sequencer: BlockSequencer,
@@ -825,10 +825,10 @@ impl SequencerHandle {
 
     pub async fn get_recent_blocks(&self, n: usize) -> Result<Vec<SealedBlock>, SequencerError> {
         self.read_query(move |state| {
-            let cap = state.sequencer.config.block_history_capacity;
+            let cap = state.sequencer.config.recent_block_cache_capacity;
             let take = n.min(cap);
             state
-                .block_history
+                .recent_blocks
                 .iter()
                 .rev()
                 .take(take)
@@ -3207,11 +3207,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn store_backed_get_block_survives_ring_eviction_and_restart() {
-        let path = temp_store_path("block-history");
+    async fn canonical_archive_survives_recent_cache_eviction_and_restart() {
+        let path = temp_store_path("canonical-archive");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
-            block_history_capacity: 1,
+            recent_block_cache_capacity: 1,
             block_interval: Duration::from_secs(60),
             ..SequencerConfig::default()
         };
@@ -3224,7 +3224,7 @@ mod tests {
         assert_eq!(block2.canonical.header.height, 2);
 
         let recent = handle.get_recent_blocks(10).await.unwrap();
-        assert_eq!(recent.len(), 1, "hot ring should evict block 1");
+        assert_eq!(recent.len(), 1, "recent cache should evict block 1");
         assert_eq!(recent[0].canonical.header.height, 2);
 
         let block_page = handle.get_block_page(None, 10).await.unwrap();
@@ -3234,7 +3234,7 @@ mod tests {
                 .map(|block| block.canonical.header.height)
                 .collect::<Vec<_>>(),
             vec![2, 1],
-            "store-backed page should include blocks outside the hot ring"
+            "canonical archive should include blocks outside the recent cache"
         );
         let older_page = handle.get_block_page(Some(2), 10).await.unwrap();
         assert_eq!(older_page.len(), 1);
@@ -3285,14 +3285,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn store_backed_history_pruning_runs_after_block_commit() {
-        let path = temp_store_path("block-history-retention");
+    async fn canonical_archive_maintenance_runs_after_block_commit() {
+        let path = temp_store_path("canonical-archive-retention");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
-            block_history_capacity: 1,
-            block_history_retention_blocks: 1,
-            history_prune_interval_blocks: 1,
-            history_prune_max_rows: 10,
+            recent_block_cache_capacity: 1,
+            canonical_archive_retention_blocks: 1,
+            canonical_archive_maintenance_interval_blocks: 1,
+            canonical_archive_max_rows_per_pass: 10,
             block_interval: Duration::from_secs(60 * 60),
             ..SequencerConfig::default()
         };
@@ -3306,8 +3306,8 @@ mod tests {
 
         let meta = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                let meta = store.history_retention_meta().unwrap();
-                if meta.last_history_prune_height == Some(3) {
+                let meta = store.canonical_archive_meta().unwrap();
+                if meta.last_maintenance_height == Some(3) {
                     break meta;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -3315,8 +3315,8 @@ mod tests {
         })
         .await
         .expect("post-commit block/DA pruning should finish");
-        assert_eq!(meta.blocks_full_min_height, Some(3));
-        assert_eq!(meta.last_history_prune_height, Some(3));
+        assert_eq!(meta.oldest_retained_height, Some(3));
+        assert_eq!(meta.last_maintenance_height, Some(3));
         assert!(store.load_block(1).await.unwrap().is_none());
         assert!(store.load_block(2).await.unwrap().is_none());
         assert_eq!(
@@ -3356,7 +3356,7 @@ mod tests {
         let path = temp_store_path("price-history");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
-            max_price_history_points_per_market: 1,
+            max_recent_price_points_per_market: 1,
             block_interval: Duration::from_secs(60),
             min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
@@ -3432,7 +3432,7 @@ mod tests {
             .unwrap();
         let block2 = handle.produce_block().await.unwrap();
 
-        let batches = store.history_outbox_batches(10).unwrap();
+        let batches = store.product_history_outbox_batches(10).unwrap();
         let heights: Vec<_> = batches.iter().map(|batch| batch.height).collect();
         assert_eq!(
             heights,
@@ -3451,37 +3451,41 @@ mod tests {
         drop(handle);
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        assert_eq!(store.history_outbox_batches(10).unwrap(), batches);
+        assert_eq!(store.product_history_outbox_batches(10).unwrap(), batches);
 
         let mut bad_second = batches[1].payload_hash;
         bad_second[0] ^= 1;
         let bad_acks = [
-            crate::store::HistoryOutboxAck {
+            crate::store::ProductHistoryOutboxAck {
                 height: batches[0].height,
                 payload_hash: batches[0].payload_hash,
             },
-            crate::store::HistoryOutboxAck {
+            crate::store::ProductHistoryOutboxAck {
                 height: batches[1].height,
                 payload_hash: bad_second,
             },
         ];
-        assert!(store.acknowledge_history_batches(&bad_acks).is_err());
+        assert!(
+            store
+                .acknowledge_product_history_batches(&bad_acks)
+                .is_err()
+        );
         assert_eq!(
-            store.history_outbox_batches(10).unwrap(),
+            store.product_history_outbox_batches(10).unwrap(),
             batches,
             "a bad hash must roll back the complete acknowledgement transaction"
         );
 
         let acks: Vec<_> = batches
             .iter()
-            .map(|batch| crate::store::HistoryOutboxAck {
+            .map(|batch| crate::store::ProductHistoryOutboxAck {
                 height: batch.height,
                 payload_hash: batch.payload_hash,
             })
             .collect();
-        assert_eq!(store.acknowledge_history_batches(&acks).unwrap(), 2);
-        assert_eq!(store.history_outbox_len().unwrap(), 0);
-        assert_eq!(store.acknowledge_history_batches(&acks).unwrap(), 0);
+        assert_eq!(store.acknowledge_product_history_batches(&acks).unwrap(), 2);
+        assert_eq!(store.product_history_outbox_len().unwrap(), 0);
+        assert_eq!(store.acknowledge_product_history_batches(&acks).unwrap(), 0);
     }
 
     #[tokio::test]
@@ -3490,8 +3494,8 @@ mod tests {
         let store = Arc::new(crate::store::Store::open(&path).unwrap());
         let config = SequencerConfig {
             block_interval: Duration::from_secs(60),
-            max_equity_points_per_account: 0,
-            max_history_events_per_account: 0,
+            max_recent_equity_points_per_account: 0,
+            max_recent_account_events_per_account: 0,
             min_resting_order_notional_nanos: 0,
             ..SequencerConfig::default()
         };
@@ -3526,11 +3530,11 @@ mod tests {
             "the regression targets empty non-system blocks"
         );
 
-        let batches = store.history_outbox_batches(10).unwrap();
+        let batches = store.product_history_outbox_batches(10).unwrap();
         let committed = batches
             .iter()
             .find(|batch| batch.height == block.canonical.header.height)
-            .expect("empty block history batch");
+            .expect("missing product-history batch for empty block");
         let placed_count = committed
             .events
             .iter()
@@ -3555,7 +3559,7 @@ mod tests {
 
         handle.produce_block().await.unwrap();
         let placed_count_after_next_block = store
-            .history_outbox_batches(10)
+            .product_history_outbox_batches(10)
             .unwrap()
             .iter()
             .flat_map(|batch| &batch.events)
