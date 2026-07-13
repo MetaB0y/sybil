@@ -19,7 +19,7 @@ use matching_engine::Problem;
 use crate::lp_solver::{
     build_and_solve_lp, build_solver_context, project_and_finalize, welfare_weights,
 };
-use crate::result::PipelineResult;
+use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
 /// Configuration for the iterative LP solver.
 #[derive(Clone, Debug)]
@@ -67,10 +67,15 @@ impl IterLpSolver {
         }
 
         let supported = crate::solver::filter_supported_problem(problem, "IterLP");
-        let _rejected_orders = supported.rejected_orders;
+        let rejected_orders = supported.rejected_orders;
         let problem = supported.problem.as_ref();
         if problem.orders.is_empty() {
-            return PipelineResult::empty();
+            return PipelineResult::failure(
+                "iter-lp",
+                TerminationStatus::UnsupportedInput,
+                format!("rejected {rejected_orders} unsupported orders"),
+                start.elapsed().as_secs_f64(),
+            );
         }
 
         let orders = &problem.orders;
@@ -78,7 +83,11 @@ impl IterLpSolver {
 
         // No MMs → delegate to plain LP (fast path)
         if problem.mm_constraints.is_empty() {
-            return crate::lp_solver::LpSolver::new().solve(problem);
+            let mut result = crate::lp_solver::LpSolver::new().solve(problem);
+            result.diagnostics.algorithm = "iter-lp".to_string();
+            result.diagnostics.status = TerminationStatus::Delegated;
+            result.diagnostics.message = Some("no MM constraints; objective reduces to LP".into());
+            return result;
         }
 
         let ctx = build_solver_context(problem);
@@ -118,8 +127,13 @@ impl IterLpSolver {
         // Track best solution by EG objective
         let mut best_q: Option<Vec<f64>> = None;
         let mut best_eg_obj = f64::NEG_INFINITY;
+        let mut iterations_run = 0usize;
+        let mut last_max_delta = None;
+        let mut converged = false;
+        let mut oracle_failed = false;
 
         for iter in 0..self.config.max_iterations {
+            iterations_run = iter + 1;
             // Build objective: w_j(1 + μ_k) for positive-welfare MM orders, w_j for rest
             let objective_coeffs: Vec<f64> = (0..n)
                 .map(|i| {
@@ -144,6 +158,7 @@ impl IterLpSolver {
                 &objective_coeffs,
                 &[],
             ) else {
+                oracle_failed = true;
                 break;
             };
 
@@ -196,22 +211,46 @@ impl IterLpSolver {
                 max_delta = max_delta.max((mu_updated - mu[k]).abs());
                 mu[k] = mu_updated;
             }
+            last_max_delta = Some(max_delta);
 
             // Check convergence
             if iter > 0 && max_delta < self.config.mu_tol {
+                converged = true;
                 break;
             }
         }
 
         let Some(converged_q) = best_q else {
-            return PipelineResult::empty();
+            return PipelineResult::failure(
+                "iter-lp",
+                TerminationStatus::NumericalFailure,
+                "LP oracle failed before producing an iterate",
+                start.elapsed().as_secs_f64(),
+            );
         };
 
         // ================================================================
         // Projection LP: cap max_fill at converged allocation, solve
         // standard welfare LP for exact prices
         // ================================================================
-        project_and_finalize(&converged_q, problem, &ctx, start)
+        let mut result = project_and_finalize(&converged_q, problem, &ctx, start);
+        if result.diagnostics.status != TerminationStatus::PostProcessingFailure {
+            result.diagnostics = SolverDiagnostics {
+                algorithm: "iter-lp".to_string(),
+                status: if oracle_failed {
+                    TerminationStatus::NumericalFailure
+                } else if converged {
+                    TerminationStatus::Converged
+                } else {
+                    TerminationStatus::IterationLimit
+                },
+                iterations: Some(iterations_run),
+                convergence_metric: last_max_delta,
+                message: oracle_failed
+                    .then(|| "LP oracle failed after at least one iterate".to_string()),
+            };
+        }
+        result
     }
 }
 

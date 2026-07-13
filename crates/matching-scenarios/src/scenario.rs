@@ -22,6 +22,8 @@ pub struct ScenarioConfig {
     // Market configuration
     /// Number of binary markets
     pub num_markets: usize,
+    /// Probability that an eligible market starts a mutually exclusive group.
+    pub market_group_probability: f64,
 
     // Order configuration
     /// Total number of orders to generate
@@ -29,12 +31,25 @@ pub struct ScenarioConfig {
     /// Order size range
     pub order_size_min: u64,
     pub order_size_max: u64,
+    /// Shape applied to a uniform draw before mapping it to the size range.
+    /// `1.0` is uniform; values above `1.0` create many small orders and a
+    /// progressively thinner large-order tail.
+    pub order_size_power: f64,
+    /// Probability that a retail order is a buy rather than a sell.
+    pub retail_buy_probability: f64,
 
     // Liquidity configuration
     /// Liquidity scarcity (0.0-1.0, lower = more scarcity, more competition)
     pub liquidity_scarcity: f64,
     /// Fraction of markets that are "hot" (get extra demand)
     pub hot_market_fraction: f64,
+    /// Probability that a retail order selects from the hot-market set.
+    pub hot_order_probability: f64,
+    /// Number of price levels on each side of each synthetic background book.
+    pub liquidity_depth_levels: usize,
+    /// Log-normal cross-market dispersion of background depth. `0.0` gives
+    /// identical depth before the hot-market adjustment.
+    pub liquidity_dispersion: f64,
 
     // Market maker configuration
     /// Number of market makers (0 = no MMs)
@@ -47,6 +62,10 @@ pub struct ScenarioConfig {
     /// Capacity multiplier: total notional of MM orders = budget × this.
     /// Higher = more orders relative to budget = tighter budget constraint.
     pub mm_capacity_multiplier: u64,
+    /// Fraction of markets each MM attempts to cover, capped by
+    /// `mm_market_coverage_max`.
+    pub mm_market_coverage_fraction: f64,
+    pub mm_market_coverage_max: usize,
 }
 
 impl Default for ScenarioConfig {
@@ -54,16 +73,24 @@ impl Default for ScenarioConfig {
         Self {
             seed: 42,
             num_markets: 30,
+            market_group_probability: 0.6,
             num_orders: 1000,
             order_size_min: 10,
             order_size_max: 200,
+            order_size_power: 1.0,
+            retail_buy_probability: 0.6,
             liquidity_scarcity: 0.5,
             hot_market_fraction: 0.0,
+            hot_order_probability: 0.6,
+            liquidity_depth_levels: 3,
+            liquidity_dispersion: 0.0,
             num_mms: 2,
             mm_budget_min: 2_500,
             mm_budget_max: 12_500,
             mm_spread_bps: 50, // 0.5% spread
             mm_capacity_multiplier: 10,
+            mm_market_coverage_fraction: 1.0,
+            mm_market_coverage_max: 20,
         }
     }
 }
@@ -174,7 +201,8 @@ pub fn generate_scenario(config: ScenarioConfig) -> Problem {
     while market_idx < config.num_markets {
         // Decide if this should be a group or standalone market
         let remaining = config.num_markets - market_idx;
-        let make_group = remaining >= 3 && rng.random_bool(0.6);
+        let make_group =
+            remaining >= 3 && rng.random_bool(config.market_group_probability.clamp(0.0, 1.0));
 
         if make_group {
             // Create a group of 3-4 mutually exclusive markets
@@ -262,7 +290,7 @@ fn add_liquidity(
     market_info: &[(MarketId, f64)],
     hot_markets: &[MarketId],
     config: &ScenarioConfig,
-    _rng: &mut ChaCha8Rng,
+    rng: &mut ChaCha8Rng,
 ) {
     let avg_order_qty = (config.order_size_min + config.order_size_max) / 2;
     let total_demand_estimate = config.num_orders as u64 * avg_order_qty;
@@ -274,16 +302,27 @@ fn add_liquidity(
 
     for (market_id, fair_price) in market_info {
         let is_hot = hot_markets.contains(market_id);
-        let market_supply = if is_hot {
-            supply_per_market / 3 // Hot markets get less supply
+        let sigma = config.liquidity_dispersion.max(0.0);
+        let depth_multiplier = if sigma > 0.0 {
+            let u1: f64 = rng.random_range(0.0001..1.0);
+            let u2: f64 = rng.random();
+            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            (sigma * z - sigma * sigma / 2.0).exp().clamp(0.15, 6.0)
         } else {
-            supply_per_market
+            1.0
         };
+        let dispersed_supply = (supply_per_market as f64 * depth_multiplier) as u64;
+        let market_supply = if is_hot {
+            dispersed_supply / 3 // Hot markets get less supply
+        } else {
+            dispersed_supply
+        };
+        let depth_levels = config.liquidity_depth_levels.max(1);
 
         // YES outcome — sell orders provide supply (asks)
-        for level in 0..3 {
-            let offset = 0.05 * (level as f64 + 1.0);
-            let level_supply = market_supply / 6;
+        for level in 0..depth_levels {
+            let offset = 0.15 * (level as f64 + 1.0) / depth_levels as f64;
+            let level_supply = market_supply / (2 * depth_levels) as u64;
 
             let ask_price = (*fair_price + offset).min(0.98);
             problem.orders.push(outcome_sell(
@@ -311,9 +350,9 @@ fn add_liquidity(
 
         // NO outcome
         let no_price = 1.0 - fair_price;
-        for level in 0..3 {
-            let offset = 0.05 * (level as f64 + 1.0);
-            let level_supply = market_supply / 6;
+        for level in 0..depth_levels {
+            let offset = 0.15 * (level as f64 + 1.0) / depth_levels as f64;
+            let level_supply = market_supply / (2 * depth_levels) as u64;
 
             let ask_price = (no_price + offset).min(0.98);
             problem.orders.push(outcome_sell(
@@ -353,7 +392,9 @@ fn generate_simple_order(
     *order_id += 1;
 
     // Bias towards hot markets if any
-    let market_idx = if !hot_markets.is_empty() && rng.random_bool(0.6) {
+    let market_idx = if !hot_markets.is_empty()
+        && rng.random_bool(config.hot_order_probability.clamp(0.0, 1.0))
+    {
         let hot_id = hot_markets[rng.random_range(0..hot_markets.len())];
         market_info
             .iter()
@@ -372,7 +413,7 @@ fn generate_simple_order(
         1.0 - fair_price
     };
 
-    let is_sell = rng.random_bool(0.4); // 40% sells, 60% buys
+    let is_sell = !rng.random_bool(config.retail_buy_probability.clamp(0.0, 1.0));
     let aggressiveness = rng.random_range(-0.05..0.15);
     let limit = if is_sell {
         // Sellers want price >= limit (lower limit = more aggressive)
@@ -382,7 +423,13 @@ fn generate_simple_order(
         (base_price + aggressiveness).clamp(0.05, 0.95)
     };
 
-    let qty = rng.random_range(config.order_size_min..config.order_size_max);
+    let qty = if config.order_size_max <= config.order_size_min {
+        config.order_size_min
+    } else {
+        let span = config.order_size_max - config.order_size_min;
+        let shaped = rng.random::<f64>().powf(config.order_size_power.max(0.01));
+        config.order_size_min + ((span as f64 * shaped) as u64).min(span - 1)
+    };
 
     if is_sell {
         outcome_sell(markets, id, market, outcome, price_to_nanos(limit).0, qty)
@@ -407,7 +454,12 @@ fn generate_mm_constraints(
         let mut constraint = MmConstraint::new(MmId::new(mm_idx as u64 + 1), budget_nanos);
 
         // MM covers a subset of markets
-        let markets_to_cover = market_info.len().min(20);
+        let markets_to_cover = ((market_info.len() as f64
+            * config.mm_market_coverage_fraction.clamp(0.0, 1.0))
+        .ceil() as usize)
+            .max(1)
+            .min(market_info.len())
+            .min(config.mm_market_coverage_max.max(1));
         let mut selected_markets: Vec<MarketId> = market_info.iter().map(|(id, _)| *id).collect();
         selected_markets.shuffle(rng);
         selected_markets.truncate(markets_to_cover);
@@ -495,8 +547,58 @@ mod tests {
         let config = ScenarioConfig::small().with_seed(123);
         let p1 = generate_scenario(config.clone());
         let p2 = generate_scenario(config);
-        assert_eq!(p1.num_orders(), p2.num_orders());
-        assert_eq!(p1.orders[0].id, p2.orders[0].id);
+        assert_eq!(p1.orders.len(), p2.orders.len());
+        for (left, right) in p1.orders.iter().zip(&p2.orders) {
+            assert_eq!(left.id, right.id);
+            assert_eq!(left.markets, right.markets);
+            assert_eq!(left.num_markets, right.num_markets);
+            assert_eq!(left.payoffs, right.payoffs);
+            assert_eq!(left.num_states, right.num_states);
+            assert_eq!(left.limit_price, right.limit_price);
+            assert_eq!(left.max_fill, right.max_fill);
+            assert_eq!(left.condition, right.condition);
+            assert_eq!(left.expires_at_block, right.expires_at_block);
+        }
+        assert_eq!(p1.mm_constraints.len(), p2.mm_constraints.len());
+        for (left, right) in p1.mm_constraints.iter().zip(&p2.mm_constraints) {
+            assert_eq!(left.mm_id, right.mm_id);
+            assert_eq!(left.max_capital, right.max_capital);
+            assert_eq!(left.order_ids, right.order_ids);
+            assert_eq!(left.order_sides, right.order_sides);
+        }
+        assert_eq!(p1.market_groups.len(), p2.market_groups.len());
+        for (left, right) in p1.market_groups.iter().zip(&p2.market_groups) {
+            assert_eq!(left.name, right.name);
+            assert_eq!(left.markets, right.markets);
+        }
+    }
+
+    #[test]
+    fn order_size_power_creates_a_small_order_heavy_tail() {
+        let uniform = generate_scenario(ScenarioConfig {
+            seed: 991,
+            num_orders: 2_000,
+            num_mms: 0,
+            order_size_power: 1.0,
+            ..ScenarioConfig::small()
+        });
+        let small_heavy = generate_scenario(ScenarioConfig {
+            seed: 991,
+            num_orders: 2_000,
+            num_mms: 0,
+            order_size_power: 3.0,
+            ..ScenarioConfig::small()
+        });
+        let retail_mean = |problem: &Problem| {
+            problem
+                .orders
+                .iter()
+                .filter(|order| order.id < 5_000_000)
+                .map(|order| order.max_fill.0 as f64)
+                .sum::<f64>()
+                / 2_000.0
+        };
+        assert!(retail_mean(&small_heavy) < retail_mean(&uniform) * 0.8);
     }
 
     #[test]

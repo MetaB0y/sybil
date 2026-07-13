@@ -22,7 +22,7 @@ use matching_engine::{Order, Problem};
 use crate::lp_solver::{
     build_and_solve_lp, build_solver_context, project_and_finalize, welfare_weights,
 };
-use crate::result::PipelineResult;
+use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
 /// Configuration for the Eisenberg-Gale solver.
 #[derive(Clone, Debug)]
@@ -76,10 +76,15 @@ impl EgSolver {
         }
 
         let supported = crate::solver::filter_supported_problem(problem, "EG");
-        let _rejected_orders = supported.rejected_orders;
+        let rejected_orders = supported.rejected_orders;
         let problem = supported.problem.as_ref();
         if problem.orders.is_empty() {
-            return PipelineResult::empty();
+            return PipelineResult::failure(
+                "eg-frank-wolfe",
+                TerminationStatus::UnsupportedInput,
+                format!("rejected {rejected_orders} unsupported orders"),
+                start.elapsed().as_secs_f64(),
+            );
         }
 
         let orders = &problem.orders;
@@ -141,7 +146,12 @@ impl EgSolver {
         );
 
         let Some(warm_sol) = warm_solution else {
-            return PipelineResult::empty();
+            return PipelineResult::failure(
+                "eg-frank-wolfe",
+                TerminationStatus::NumericalFailure,
+                "LP warm start did not return a solution",
+                start.elapsed().as_secs_f64(),
+            );
         };
 
         // Initialize q from warm start
@@ -168,11 +178,17 @@ impl EgSolver {
         }
 
         let mut prev_obj = f64::NEG_INFINITY;
+        let mut iterations_run = 0usize;
+        let mut last_rel_change = None;
+        let mut last_q_change = None;
+        let mut converged = false;
+        let mut oracle_failed = false;
 
         // ================================================================
         // Step 2: Frank-Wolfe loop with exact line search
         // ================================================================
         for _t in 0..self.config.max_fw_iterations {
+            iterations_run = _t + 1;
             // Compute U_k = Σ_{i ∈ MM_k} w_i * q_i for each MM group
             let u_k: Vec<f64> = mm_pos_groups
                 .iter()
@@ -205,6 +221,7 @@ impl EgSolver {
                 &grad,
                 &[],
             ) else {
+                oracle_failed = true;
                 break;
             };
 
@@ -312,18 +329,25 @@ impl EgSolver {
             }
 
             // Check convergence: objective stability AND q-stability
-            let obj_converged = if prev_obj > f64::NEG_INFINITY {
-                let rel_change = (eg_obj - prev_obj).abs() / prev_obj.abs().max(1.0);
+            let rel_change = if prev_obj > f64::NEG_INFINITY {
+                Some((eg_obj - prev_obj).abs() / prev_obj.abs().max(1.0))
+            } else {
+                None
+            };
+            let obj_converged = if let Some(rel_change) = rel_change {
                 rel_change < self.config.convergence_tol
             } else {
                 false
             };
 
             let q_converged = max_q_change < self.config.q_stability_tol;
+            last_rel_change = rel_change;
+            last_q_change = Some(max_q_change);
 
             prev_obj = eg_obj;
 
             if obj_converged && q_converged {
+                converged = true;
                 break;
             }
         }
@@ -337,12 +361,28 @@ impl EgSolver {
         // objective). The shared epilogue caps upper bounds at the FW
         // allocation and re-solves the standard welfare LP for proper duals
         // where complementary slackness guarantees UCP.
-        let result = project_and_finalize(&q, problem, &ctx, start);
-        if result.result.fills.is_empty() {
-            crate::lp_solver::LpSolver::new().solve(problem)
-        } else {
-            result
+        let mut result = project_and_finalize(&q, problem, &ctx, start);
+        if result.diagnostics.status != TerminationStatus::PostProcessingFailure {
+            result.diagnostics = SolverDiagnostics {
+                algorithm: "eg-frank-wolfe".to_string(),
+                status: if oracle_failed {
+                    TerminationStatus::NumericalFailure
+                } else if converged {
+                    TerminationStatus::Converged
+                } else {
+                    TerminationStatus::IterationLimit
+                },
+                iterations: Some(iterations_run),
+                convergence_metric: last_rel_change,
+                message: Some(format!(
+                    "last max allocation change: {}",
+                    last_q_change
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "not available".to_string())
+                )),
+            };
         }
+        result
     }
 
     /// Fast path: no MM orders → single LP solve (identical to LpSolver).
@@ -363,10 +403,23 @@ impl EgSolver {
             &objective_coeffs,
             &[],
         ) else {
-            return PipelineResult::empty();
+            return PipelineResult::failure(
+                "eg-frank-wolfe",
+                TerminationStatus::NumericalFailure,
+                "LP fast path did not return a solution",
+                start.elapsed().as_secs_f64(),
+            );
         };
 
-        crate::lp_solver::finalize_result(&sol, problem, ctx, start)
+        let mut result = crate::lp_solver::finalize_result(&sol, problem, ctx, start);
+        result.diagnostics = SolverDiagnostics {
+            algorithm: "eg-frank-wolfe".to_string(),
+            status: TerminationStatus::Delegated,
+            iterations: Some(1),
+            message: Some("no MM constraints; objective reduces to LP".to_string()),
+            ..Default::default()
+        };
+        result
     }
 }
 

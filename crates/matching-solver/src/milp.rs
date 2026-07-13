@@ -895,6 +895,17 @@ impl crate::Solver for MilpSolver {
             total_welfare: pr.result.total_welfare(),
         });
         pr.total_time_secs = milp_result.solve_time_secs;
+        pr.diagnostics = crate::SolverDiagnostics {
+            algorithm: "milp".to_string(),
+            status: match &milp_result.status {
+                SolveStatus::Optimal => crate::TerminationStatus::Converged,
+                SolveStatus::TimeLimitReached { .. } => crate::TerminationStatus::TimeLimit,
+                SolveStatus::Infeasible => crate::TerminationStatus::Infeasible,
+                SolveStatus::Error(_) => crate::TerminationStatus::NumericalFailure,
+            },
+            message: Some(format!("{:?}", milp_result.status)),
+            ..Default::default()
+        };
 
         if pr.result.total_welfare() < 0 {
             pr.result = crate::MatchingResult::new();

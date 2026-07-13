@@ -9,13 +9,20 @@ description = "CLI simulation harness for prediction market matching"
 name = "matching-sim"
 path = "src/main.rs"
 
+[[bin]]
+name = "solver-experiments"
+path = "src/bin/solver-experiments.rs"
+required-features = ["lp", "conic"]
+
 [dependencies]
+blake3 = { workspace = true }
 matching-engine = { path = "../matching-engine" }
 matching-solver = { path = "../matching-solver", features = ["milp"] }
 matching-scenarios = { path = "../matching-scenarios" }
 sybil-verifier = { path = "../sybil-verifier" }
 clap = { workspace = true, features = ["derive"] }
 comfy-table = "7"
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 [features]

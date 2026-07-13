@@ -30,7 +30,9 @@ use rayon::prelude::*;
 use matching_engine::{MarketGroup, MarketId, MarketSet, MmConstraint, Nanos, Order, Problem};
 
 use crate::MatchingResult;
-use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
+use crate::result::{
+    PipelineResult, PipelineTimings, PriceDiscoveryResult, SolverDiagnostics, TerminationStatus,
+};
 
 // ============================================================================
 // DecomposedSolver
@@ -41,6 +43,14 @@ pub struct DecomposedSolver<S: crate::Solver> {
     inner: S,
     max_budget_iters: usize,
     convergence_eps: f64,
+}
+
+struct ComponentSolveOutcome {
+    results: Vec<PipelineResult>,
+    iterations: usize,
+    converged: bool,
+    convergence_metric: Option<f64>,
+    component_failures: usize,
 }
 
 impl<S: crate::Solver> DecomposedSolver<S> {
@@ -101,16 +111,23 @@ impl<S: crate::Solver> DecomposedSolver<S> {
         );
 
         // Step 5-7: Solve
-        let component_results = if spanning_mms.is_empty() {
+        let outcome = if spanning_mms.is_empty() {
             // No spanning MMs → independent solves
-            self.solve_independent(
+            let results = self.solve_independent(
                 problem,
                 &market_to_component,
                 num_components,
                 &order_components,
                 &mm_components,
                 &local_mms,
-            )
+            );
+            ComponentSolveOutcome {
+                component_failures: count_component_failures(&results),
+                results,
+                iterations: 1,
+                converged: true,
+                convergence_metric: Some(0.0),
+            }
         } else {
             // Proportional-response budget coordination for spanning MMs
             self.solve_with_proportional_response(
@@ -125,8 +142,28 @@ impl<S: crate::Solver> DecomposedSolver<S> {
         };
 
         // Step 8: Aggregate + post-process (global budget enforcement, welfare recompute).
-        let mut result = assemble_final(problem, component_results);
+        let mut result = assemble_final(problem, outcome.results);
         result.total_time_secs = start.elapsed().as_secs_f64();
+        result.diagnostics = SolverDiagnostics {
+            algorithm: format!("decomposed-{}", self.inner.name().to_lowercase()),
+            status: if outcome.component_failures > 0 {
+                TerminationStatus::NumericalFailure
+            } else if outcome.converged {
+                TerminationStatus::Converged
+            } else {
+                TerminationStatus::IterationLimit
+            },
+            iterations: Some(outcome.iterations),
+            convergence_metric: outcome.convergence_metric,
+            message: match (dropped, outcome.component_failures) {
+                (0, 0) => None,
+                (dropped, 0) => Some(format!("dropped {dropped} cross-component orders")),
+                (0, failures) => Some(format!("{failures} component solves failed")),
+                (dropped, failures) => Some(format!(
+                    "{failures} component solves failed; dropped {dropped} cross-component orders"
+                )),
+            },
+        };
         result
     }
 
@@ -211,7 +248,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
         _mm_components: &[(HashSet<usize>, HashSet<usize>)],
         local_mms: &[(usize, usize)],
         spanning_mms: &[(usize, Vec<usize>)], // (mm_idx, positive-weight components)
-    ) -> Vec<PipelineResult> {
+    ) -> ComponentSolveOutcome {
         // Initialize budgets
         // Local MMs: full budget to their component
         // Spanning MMs: proportional split across ALL active components (including
@@ -277,8 +314,12 @@ impl<S: crate::Solver> DecomposedSolver<S> {
 
         let mut best_results: Vec<PipelineResult> = Vec::new();
         let mut best_welfare = i64::MIN;
+        let mut iterations_run = 0usize;
+        let mut did_converge = false;
+        let mut last_max_gap = None;
 
         for iter in 0..self.max_budget_iters {
+            iterations_run = iter + 1;
             let iter_start = Instant::now();
 
             // Solve each component with current budget allocation
@@ -321,6 +362,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
 
             // Log convergence progress
             let max_gap = compute_max_log_gap(&deployed, &mm_budgets, spanning_mms);
+            last_max_gap = Some(max_gap);
             tracing::debug!(
                 iter,
                 solve_secs = format!("{:.3}", solve_secs),
@@ -332,6 +374,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             );
 
             if converged {
+                did_converge = true;
                 break;
             }
 
@@ -364,8 +407,29 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             }
         }
 
-        best_results
+        ComponentSolveOutcome {
+            component_failures: count_component_failures(&best_results),
+            results: best_results,
+            iterations: iterations_run,
+            converged: did_converge,
+            convergence_metric: last_max_gap,
+        }
     }
+}
+
+fn count_component_failures(results: &[PipelineResult]) -> usize {
+    results
+        .iter()
+        .filter(|result| {
+            matches!(
+                result.diagnostics.status,
+                TerminationStatus::UnsupportedInput
+                    | TerminationStatus::NumericalFailure
+                    | TerminationStatus::PostProcessingFailure
+                    | TerminationStatus::Infeasible
+            )
+        })
+        .count()
 }
 
 // ============================================================================

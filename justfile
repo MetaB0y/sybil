@@ -64,6 +64,20 @@ sim-extreme:
 compare preset="medium":
     cargo run --bin matching-sim --release -- --preset {{preset}} --solver all
 
+# Exercise one declared point from every preregistered solver experiment.
+solver-bench-smoke output="/tmp/sybil-solver-smoke":
+    cargo run --release -p matching-sim --bin solver-experiments -- --output-dir {{output}} --smoke --overwrite
+    python3 scripts/benchmarks/analyze_solver_experiments.py {{output}} --allow-incomplete
+
+# Run the complete frozen protocol against an immutable implementation commit.
+solver-bench-run revision output:
+    cargo run --release -p matching-sim --bin solver-experiments -- --source-revision {{revision}} --output-dir {{output}}
+    python3 scripts/benchmarks/analyze_solver_experiments.py {{output}}
+
+# Revalidate and regenerate tables/figures from a complete retained run.
+solver-bench-analyze output:
+    python3 scripts/benchmarks/analyze_solver_experiments.py {{output}}
+
 # MILP-killer test (forces MILP timeout)
 milp-killer:
     cargo run --bin matching-sim --release -- --preset milp-killer --solver all --milp-timeout 5.0

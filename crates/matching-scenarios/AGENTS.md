@@ -37,29 +37,36 @@ Preset sizes below are defaults from `scenario.rs`; the source is authoritative.
 
 **Market Configuration:**
 - `num_markets` — number of binary markets
-- Markets are grouped into 3-4 mutually exclusive sets ~60% of the time
+- `market_group_probability` — rate of 3-4 market mutually exclusive groups
 
 **Order Configuration:**
 - `num_orders` — total orders to generate (all single-market)
 - `order_size_min/max` — quantity range
+- `order_size_power` — uniform (`1`) or small-order-heavy (`>1`) size shape
+- `retail_buy_probability` — global buy/sell-side imbalance
 - `seed` — ChaCha8 seed for reproducibility
 
 **Liquidity Configuration:**
 - `liquidity_scarcity` (0.0-1.0) — lower = scarcer = tighter matching
 - `hot_market_fraction` — markets receiving extra demand
+- `hot_order_probability` — concentration of flow in hot markets
+- `liquidity_depth_levels` — background-book levels per outcome and side
+- `liquidity_dispersion` — log-normal cross-market depth heterogeneity
 
 **Market Maker Configuration:**
 - `num_mms` — number of MM constraints
 - `mm_budget_min/max` — budget range in dollars
 - `mm_spread_bps` — spread in basis points
+- `mm_capacity_multiplier` — quote capacity relative to budget
+- `mm_market_coverage_fraction/max` — breadth of each MM's quote set
 
 ## Generation Process
 
-1. Create N binary markets with fair prices (normal distribution around $0.50)
-2. Group ~60% into mutually exclusive sets (multi-outcome events)
-3. Add liquidity depth (3 price levels × 2 outcomes × 2 sides per market)
+1. Create N binary markets with latent fair prices
+2. Group a configurable share into mutually exclusive sets
+3. Add configurable, optionally heterogeneous background-book depth
 4. Generate single-market orders (buy/sell YES/NO)
-5. Add MM constraints with aggressive quotes
+5. Add partially overlapping MM quote ladders and capital constraints
 6. Shuffle orders to avoid order-dependent solver behavior
 
 ## Reproducibility
@@ -79,3 +86,7 @@ assert_eq!(p1.orders.len(), p2.orders.len()); // Deterministic
 |--------|---------|
 | `scenario.rs` | Primary generator with `ScenarioConfig` |
 | `random.rs` | Simpler `RandomConfig` for basic testing |
+
+The paper/solver benchmark profiles live in
+`benchmarks/solver/protocol-v1.json`. They are stylized structural stress tests,
+not a substitute for a calibrated real-order replay dataset.

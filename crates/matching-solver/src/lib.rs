@@ -35,7 +35,9 @@ pub(crate) mod test_fixtures;
 // === Public API ===
 
 // Result types
-pub use result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
+pub use result::{
+    PipelineResult, PipelineTimings, PriceDiscoveryResult, SolverDiagnostics, TerminationStatus,
+};
 
 // Solver trait
 pub use solver::Solver;

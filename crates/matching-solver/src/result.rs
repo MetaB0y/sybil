@@ -51,6 +51,48 @@ pub struct PipelineResult {
 
     /// Time breakdown by phase.
     pub phase_times: PipelineTimings,
+
+    /// Machine-readable solver termination information. This is intentionally
+    /// separate from verifier validity: a numerically failed solver can return
+    /// an empty result that is vacuously feasible, while a completed solver can
+    /// still fail integer verification.
+    pub diagnostics: SolverDiagnostics,
+}
+
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminationStatus {
+    /// No optimization was needed because the input was empty.
+    EmptyInput,
+    /// The solver rejected all supported input shapes.
+    UnsupportedInput,
+    /// The configured algorithm completed its convergence/optimality test.
+    Converged,
+    /// The algorithm returned its best iterate at its configured cap.
+    IterationLimit,
+    /// A solver-specific time limit was reached.
+    TimeLimit,
+    /// The backend reported infeasibility.
+    Infeasible,
+    /// Backend construction or numerical progress failed.
+    NumericalFailure,
+    /// Post-processing or projection failed after the core solve.
+    PostProcessingFailure,
+    /// The requested mode is mathematically identical to and delegated to a
+    /// different implementation (for example, conic Linear mode to LP).
+    Delegated,
+    /// Older/auxiliary code did not report a termination state.
+    #[default]
+    NotReported,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct SolverDiagnostics {
+    pub algorithm: String,
+    pub status: TerminationStatus,
+    pub iterations: Option<usize>,
+    pub convergence_metric: Option<f64>,
+    pub message: Option<String>,
 }
 
 /// Timing breakdown for solver phases.
@@ -70,6 +112,28 @@ impl PipelineResult {
             price_discovery: None,
             total_time_secs: 0.0,
             phase_times: PipelineTimings::default(),
+            diagnostics: SolverDiagnostics {
+                status: TerminationStatus::EmptyInput,
+                ..Default::default()
+            },
+        }
+    }
+
+    pub fn failure(
+        algorithm: impl Into<String>,
+        status: TerminationStatus,
+        message: impl Into<String>,
+        total_time_secs: f64,
+    ) -> Self {
+        Self {
+            total_time_secs,
+            diagnostics: SolverDiagnostics {
+                algorithm: algorithm.into(),
+                status,
+                message: Some(message.into()),
+                ..Default::default()
+            },
+            ..Self::empty()
         }
     }
 }

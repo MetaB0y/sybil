@@ -35,20 +35,26 @@ flowchart LR
     INT --> VERIFY["sybil-verifier"]
 ```
 
-Shared machinery includes the HiGHS LP oracle, price normalization from duals, projection LPs, integer rounding, and MM-overflow trimming. `matching-sim` compares results; `sybil-verifier` decides validity.
+Shared machinery includes the HiGHS LP oracle, price normalization from duals, projection LPs, integer rounding, and MM-overflow trimming. `PipelineResult::diagnostics` reports algorithm termination separately from integer validity: convergence, a configured iteration cap, backend failure, and projection failure are not interchangeable. `matching-sim` compares results; `sybil-verifier` decides validity.
 
 ## Important boundaries
 
 - The payoff-vector domain model is more expressive than current production clearing. Unsupported multi-market/custom shapes are rejected at every boundary.
 - Solver libraries may use `f64`; protocol state never trusts those raw values.
 - A MILP timeout incumbent is not a proven global optimum.
-- Benchmark rankings belong in reproducible `just compare` output, not timeless architecture claims.
+- Research solvers do not silently return an LP result after numerical failure.
+  Explicit delegation exists only where the mathematical objective reduces to
+  LP (for example no active log-utility MMs or Conic Linear mode).
+- Benchmark rankings belong in the complete preregistered artifacts under
+  `benchmarks/solver/results/`, not timeless architecture claims or a selected
+  `just compare` run.
 
 ## Where this lives
 
 > `crates/matching-solver/src/solver.rs` — shared interface and supported-shape filtering  
 > `crates/matching-solver/src/` — implementations  
 > `crates/matching-sim/` — comparison harness
+> `benchmarks/solver/` — preregistered empirical protocol and retained results
 
 ## See also
 

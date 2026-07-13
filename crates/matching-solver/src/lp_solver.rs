@@ -23,7 +23,9 @@ use matching_engine::{
 };
 
 use crate::MatchingResult;
-use crate::result::{PipelineResult, PipelineTimings, PriceDiscoveryResult};
+use crate::result::{
+    PipelineResult, PipelineTimings, PriceDiscoveryResult, SolverDiagnostics, TerminationStatus,
+};
 use crate::solver::order_sign;
 
 /// Configuration for the LP solver.
@@ -67,10 +69,15 @@ impl LpSolver {
         }
 
         let supported = crate::solver::filter_supported_problem(problem, "LP");
-        let _rejected_orders = supported.rejected_orders;
+        let rejected_orders = supported.rejected_orders;
         let problem = supported.problem.as_ref();
         if problem.orders.is_empty() {
-            return PipelineResult::empty();
+            return PipelineResult::failure(
+                "lp",
+                TerminationStatus::UnsupportedInput,
+                format!("rejected {rejected_orders} unsupported orders"),
+                start.elapsed().as_secs_f64(),
+            );
         }
 
         let ctx = build_solver_context(problem);
@@ -90,8 +97,11 @@ impl LpSolver {
         // constraints and re-solve until budgets are satisfied.
         let mut budget_rows: Vec<(Vec<(usize, f64)>, f64)> = Vec::new();
         let mut best_solution: Option<LpSolution> = None;
+        let mut lp_solves = 0usize;
+        let mut budget_converged = problem.mm_constraints.is_empty();
 
         for slp_iter in 0..=self.config.max_mm_iterations {
+            lp_solves += 1;
             let solution = self.solve_lp(
                 &problem.orders,
                 &ctx.markets,
@@ -103,8 +113,7 @@ impl LpSolver {
             let Some(sol) = solution else {
                 break;
             };
-            // No MM constraints or final iteration → keep solution and stop
-            if problem.mm_constraints.is_empty() || slp_iter == self.config.max_mm_iterations {
+            if problem.mm_constraints.is_empty() {
                 best_solution = Some(sol);
                 break;
             }
@@ -120,6 +129,15 @@ impl LpSolver {
             );
 
             if !violated {
+                budget_converged = true;
+                best_solution = Some(sol);
+                break;
+            }
+
+            // Keep the final capped iterate. Integer post-processing still
+            // trims it to a verifier-valid budget, but the diagnostic must not
+            // call the SLP fixed point converged.
+            if slp_iter == self.config.max_mm_iterations {
                 best_solution = Some(sol);
                 break;
             }
@@ -137,10 +155,29 @@ impl LpSolver {
         }
 
         let Some(solution) = best_solution else {
-            return PipelineResult::empty();
+            return PipelineResult::failure(
+                "lp",
+                TerminationStatus::NumericalFailure,
+                "HiGHS did not return an LP solution",
+                start.elapsed().as_secs_f64(),
+            );
         };
 
-        finalize_result(&solution, problem, &ctx, start)
+        let mut result = finalize_result(&solution, problem, &ctx, start);
+        result.diagnostics = SolverDiagnostics {
+            algorithm: "lp".to_string(),
+            status: if budget_converged {
+                TerminationStatus::Converged
+            } else {
+                TerminationStatus::IterationLimit
+            },
+            iterations: Some(lp_solves),
+            message: (!budget_converged).then(|| {
+                "MM-budget SLP reached its configured cap; integer trimming was applied".to_string()
+            }),
+            ..Default::default()
+        };
+        result
     }
 
     /// Build and solve the core LP using HiGHS.
@@ -816,6 +853,12 @@ pub(crate) fn finalize_result(
         price_discovery_secs: start.elapsed().as_secs_f64(),
         ..Default::default()
     };
+    pipeline_result.diagnostics = SolverDiagnostics {
+        algorithm: "lp-core".to_string(),
+        status: TerminationStatus::Converged,
+        iterations: Some(1),
+        ..Default::default()
+    };
 
     pipeline_result
 }
@@ -858,7 +901,12 @@ pub(crate) fn project_and_finalize(
         &projection_obj,
         &[],
     ) else {
-        return PipelineResult::empty();
+        return PipelineResult::failure(
+            "projection-lp",
+            TerminationStatus::PostProcessingFailure,
+            "projection LP did not return a solution",
+            start.elapsed().as_secs_f64(),
+        );
     };
 
     finalize_result(&final_sol, problem, ctx, start)

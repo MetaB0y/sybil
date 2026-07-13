@@ -4032,11 +4032,13 @@ dependencies = [
 name = "matching-sim"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "clap",
  "comfy-table",
  "matching-engine",
  "matching-scenarios",
  "matching-solver",
+ "serde",
  "serde_json",
  "sybil-verifier",
 ]

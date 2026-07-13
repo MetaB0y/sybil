@@ -3,7 +3,7 @@ tags: [solver, crate]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 The EG (Eisenberg-Gale) Solver reformulates the matching problem as a Fisher market. Instead of treating [[MM Budget Constraint|MM budgets]] as explicit constraints, it absorbs them into the objective function via logarithmic utility. This is theoretically elegant — the budget constraint disappears entirely, replaced by a term `B_k * ln(U_k)` in the objective, where `B_k` is the MM's budget and `U_k` is their total utility from fills.
@@ -11,6 +11,12 @@ The EG (Eisenberg-Gale) Solver reformulates the matching problem as a Fisher mar
 The Fisher market interpretation is: each market maker is a "buyer" with budget `B_k`, and the orders are "goods" being allocated. The Eisenberg-Gale program maximizes the Nash social welfare — `sum(B_k * ln(U_k))` — which is known to produce competitive equilibrium allocations. At equilibrium, each MM's spending on orders exactly equals their budget, and prices clear all markets. The Frank-Wolfe (conditional gradient) method is used to solve this convex program.
 
 The tradeoff is a different objective and iterative Frank–Wolfe search. Unlike QuasiFisher, the formulation has no explicit cash/slack variable. It is a reference implementation rather than the production default; current performance belongs in `just compare` output. The theory pointer is `design/math-papers.md`.
+
+The implementation reports whether its objective/allocation tests converged or
+the configured Frank–Wolfe cap was reached. A capped allocation is projected
+and may still pass integer verification, but it must not be described as a
+converged EG solve. Projection failure is surfaced directly rather than being
+silently replaced by an LP result.
 
 ## Key Properties
 - Eisenberg-Gale / Fisher market formulation

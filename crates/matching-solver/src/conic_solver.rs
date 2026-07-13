@@ -20,7 +20,7 @@ use clarabel::solver::*;
 use matching_engine::{NANOS_PER_DOLLAR, Problem};
 
 use crate::lp_solver::{build_solver_context, project_and_finalize, welfare_weights};
-use crate::result::PipelineResult;
+use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
 /// Objective mode for the conic solver.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -92,7 +92,11 @@ impl ConicSolver {
         // Linear mode: delegate to LpSolver
         #[cfg(feature = "lp")]
         if self.config.mode == ObjectiveMode::Linear {
-            return crate::lp_solver::LpSolver::new().solve(problem);
+            let mut result = crate::lp_solver::LpSolver::new().solve(problem);
+            result.diagnostics.algorithm = "conic-linear".to_string();
+            result.diagnostics.status = TerminationStatus::Delegated;
+            result.diagnostics.message = Some("linear mode is implemented by LpSolver".into());
+            return result;
         }
         #[cfg(not(feature = "lp"))]
         if self.config.mode == ObjectiveMode::Linear {
@@ -106,10 +110,15 @@ impl ConicSolver {
         }
 
         let supported = crate::solver::filter_supported_problem(problem, "Conic");
-        let _rejected_orders = supported.rejected_orders;
+        let rejected_orders = supported.rejected_orders;
         let problem = supported.problem.as_ref();
         if problem.orders.is_empty() {
-            return PipelineResult::empty();
+            return PipelineResult::failure(
+                "conic",
+                TerminationStatus::UnsupportedInput,
+                format!("rejected {rejected_orders} unsupported orders"),
+                start.elapsed().as_secs_f64(),
+            );
         }
 
         let orders = &problem.orders;
@@ -177,7 +186,12 @@ impl ConicSolver {
         let d = n + num_cash_vars + k + m + g;
 
         if k == 0 {
-            return crate::lp_solver::LpSolver::new().solve(problem);
+            let mut result = crate::lp_solver::LpSolver::new().solve(problem);
+            result.diagnostics.algorithm = "conic".to_string();
+            result.diagnostics.status = TerminationStatus::Delegated;
+            result.diagnostics.message =
+                Some("no active log-utility MMs; objective reduces to LP".into());
+            return result;
         }
 
         // Remap cone_mms index to get budgets/groups for exp-cone MMs only
@@ -428,16 +442,32 @@ impl ConicSolver {
             ..DefaultSettings::default()
         };
 
-        let Ok(mut solver) = DefaultSolver::new(&p_mat, &obj, &a_mat, &b_vec, &cones, settings)
-        else {
-            return crate::lp_solver::LpSolver::new().solve(problem);
+        let mut solver = match DefaultSolver::new(&p_mat, &obj, &a_mat, &b_vec, &cones, settings) {
+            Ok(solver) => solver,
+            Err(error) => {
+                return PipelineResult::failure(
+                    "conic",
+                    TerminationStatus::NumericalFailure,
+                    format!("Clarabel setup failed: {error:?}"),
+                    start.elapsed().as_secs_f64(),
+                );
+            }
         };
 
         solver.solve();
 
-        match solver.solution.status {
+        let solver_status = solver.solution.status;
+        let iterations = solver.solution.iterations as usize;
+        match solver_status {
             SolverStatus::Solved | SolverStatus::AlmostSolved => {}
-            _ => return crate::lp_solver::LpSolver::new().solve(problem),
+            _ => {
+                return PipelineResult::failure(
+                    "conic",
+                    TerminationStatus::NumericalFailure,
+                    format!("Clarabel terminated with {solver_status:?}"),
+                    start.elapsed().as_secs_f64(),
+                );
+            }
         }
 
         // ================================================================
@@ -458,7 +488,22 @@ impl ConicSolver {
 
         let q_values: Vec<f64> = (0..n).map(|i| x[q_offset + i].max(0.0)).collect();
 
-        project_and_finalize(&q_values, problem, &ctx, start)
+        let mut result = project_and_finalize(&q_values, problem, &ctx, start);
+        if result.diagnostics.status != TerminationStatus::PostProcessingFailure {
+            result.diagnostics = SolverDiagnostics {
+                algorithm: match self.config.mode {
+                    ObjectiveMode::Linear => "conic-linear",
+                    ObjectiveMode::Fisher => "conic-fisher",
+                    ObjectiveMode::QuasiFisher => "conic-quasi-fisher",
+                }
+                .to_string(),
+                status: TerminationStatus::Converged,
+                iterations: Some(iterations),
+                message: Some(format!("Clarabel status: {solver_status:?}")),
+                ..Default::default()
+            };
+        }
+        result
     }
 }
 
@@ -532,6 +577,29 @@ mod tests {
         let solver = ConicSolver::new();
         let result = solver.solve(&problem);
         assert_eq!(result.result.orders_filled, 0);
+    }
+
+    #[test]
+    fn test_conic_failure_is_not_silently_replaced_by_lp() {
+        let problem = mm_budget_problem();
+        let solver = ConicSolver::with_config(ConicConfig {
+            max_iter: 0,
+            ..Default::default()
+        });
+        let result = solver.solve(&problem);
+
+        assert_eq!(
+            result.diagnostics.status,
+            TerminationStatus::NumericalFailure
+        );
+        assert!(result.result.fills.is_empty());
+        assert!(
+            !crate::LpSolver::new()
+                .solve(&problem)
+                .result
+                .fills
+                .is_empty()
+        );
     }
 
     #[test]
