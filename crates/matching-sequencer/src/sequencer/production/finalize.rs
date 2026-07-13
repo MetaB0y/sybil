@@ -148,10 +148,6 @@ impl BlockSequencer {
     ) -> FinalizedBlockState {
         let mut pre_aggregates = AccountAggregates::from_accounts(&self.accounts);
         let pre_total_balance = pre_aggregates.total_balance;
-        let pre_market_totals = pre_aggregates.minting_inputs();
-        let pre_mint_adjustments =
-            matching_engine::derive_minting(&pre_market_totals, clearing_prices);
-
         let (settle_failures, fill_position_deltas) = settlement::settle_batch_with_position_deltas(
             &mut self.accounts,
             fills,
@@ -164,11 +160,8 @@ impl BlockSequencer {
         let mint_adjustments = matching_engine::derive_minting(&market_totals, clearing_prices);
         let fill_balance_delta =
             matching_engine::fill_balance_delta_from_fills(problem.orders.iter(), fills);
-        let minting_cost = matching_engine::minting_cost_from_incremental_adjustments(
-            fill_balance_delta,
-            &pre_mint_adjustments,
-            &mint_adjustments,
-        );
+        let minting_cost =
+            matching_engine::minting_cost_from_fill_balance_delta(fill_balance_delta);
         if !mint_adjustments.is_empty() {
             let mint = self
                 .accounts

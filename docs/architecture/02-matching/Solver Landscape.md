@@ -3,7 +3,7 @@ tags: [solver, overview]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 # Solver landscape
@@ -19,6 +19,12 @@ last_verified: 2026-07-11
 | [[Conic Solver|`ConicSolver`]] | `conic` | Clarabel exponential-cone formulation, then projection LP | Interior-point reference |
 | [[MILP Solver|`MilpSolver`]] | `milp` | SCIP MIQCQP or McCormick mode with timeout | Exact/reference route when optimal |
 | [[Decomposed Solver|`DecomposedSolver<S>`]] | `lp` | Component solves with proportional-response MM budget coordination | Scaling experiment |
+
+`IterLpSolver` does not directly optimize the logarithmic Fisher objective. It
+iterates a damped multiplier fixed point, stops after a configured cap, and has
+no general convergence guarantee. `ConicSolver` in QuasiFisher mode is the
+single-convex-program implementation corresponding most directly to the
+paper's retained-cash formulation; it is not currently the production default.
 
 ```mermaid
 flowchart LR
@@ -49,4 +55,3 @@ Shared machinery includes the HiGHS LP oracle, price normalization from duals, p
 - [[The LP Core]]
 - [[MM Budget Constraint]]
 - [[Four-Layer Verification]]
-

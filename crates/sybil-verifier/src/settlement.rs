@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use matching_engine::{
     Fill, MarketId, MintAdjustment, NANOS_PER_DOLLAR, Nanos, compute_fill_settlement_checked,
-    derive_minting_checked, minting_cost_from_incremental_adjustments_checked,
+    derive_minting_checked, minting_cost_from_fill_balance_delta_checked,
 };
 
 use crate::types::{AccountSnapshot, BlockWitness, WitnessOrder};
@@ -60,24 +60,6 @@ fn derive_post_state(
         );
         result.accounts_checked += 1;
     }
-
-    let pre_market_totals = match market_totals_from_accounts(&result.accounts) {
-        Ok(totals) => totals,
-        Err(details) => {
-            push_overflow(&mut result.violations, details);
-            Vec::new()
-        }
-    };
-    let pre_adjustments = match derive_minting_checked(&pre_market_totals, clearing_prices) {
-        Ok(adjustments) => adjustments,
-        Err(error) => {
-            push_overflow(
-                &mut result.violations,
-                format!("Pre-fill minting arithmetic overflow: {error:?}"),
-            );
-            Vec::new()
-        }
-    };
 
     // Apply each fill using the shared settlement function
     for fill in fills {
@@ -231,20 +213,17 @@ fn derive_post_state(
                 Vec::new()
             }
         };
-        result.minting_cost = match minting_cost_from_incremental_adjustments_checked(
-            result.fill_balance_delta,
-            &pre_adjustments,
-            &adjustments,
-        ) {
-            Ok(cost) => cost,
-            Err(error) => {
-                push_overflow(
-                    &mut result.violations,
-                    format!("Minting cost arithmetic overflow: {error:?}"),
-                );
-                0
-            }
-        };
+        result.minting_cost =
+            match minting_cost_from_fill_balance_delta_checked(result.fill_balance_delta) {
+                Ok(cost) => cost,
+                Err(error) => {
+                    push_overflow(
+                        &mut result.violations,
+                        format!("Minting cost arithmetic overflow: {error:?}"),
+                    );
+                    0
+                }
+            };
 
         if !adjustments.is_empty() {
             let mint = result.accounts.entry(MINT_ID).or_default();
@@ -300,20 +279,6 @@ fn derive_post_state(
     }
 
     result
-}
-
-fn market_totals_from_accounts(
-    accounts: &HashMap<u64, DerivedAccountState>,
-) -> Result<Vec<(MarketId, i64, i64)>, String> {
-    let all_markets: std::collections::BTreeSet<MarketId> = accounts
-        .values()
-        .flat_map(|account| account.positions.keys().map(|(m, _)| *m))
-        .collect();
-
-    all_markets
-        .iter()
-        .map(|&market_id| market_total_for_accounts(accounts, market_id))
-        .collect()
 }
 
 fn market_total_for_accounts(
@@ -981,7 +946,7 @@ mod tests {
             fills: vec![fill],
             clearing_prices,
             total_welfare: 0,
-            minting_cost: 0,
+            minting_cost: -expected_revenue,
             mm_constraints: vec![],
             market_groups: vec![],
             pre_state: pre_state.clone(),

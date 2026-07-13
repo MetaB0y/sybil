@@ -234,7 +234,7 @@ impl MilpSolver {
 
                 let mm_order_info = build_mm_order_info(problem);
                 trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &mm_order_info);
-                recompute_result_from_fills(&mut result, &active_orders, &clearing_prices);
+                recompute_result_from_fills(&mut result, &active_orders);
                 let objective_welfare = result.total_welfare();
 
                 MilpResult {
@@ -366,32 +366,15 @@ impl MilpSolver {
             })
             .collect();
 
-        // mint_m (continuous, free): net minting for market m.
-        // mint_cost_m charges only positive minting; burn never inflates welfare.
+        // mint_m (continuous, free): net minting for market m. Its objective
+        // coefficient is signed: creation costs $1, burning releases $1.
         let mint_vars: HashMap<MarketId, Variable> = markets
             .iter()
             .map(|&m| {
-                let v = model.add(var().cont(-1e15..=1e15).obj(0.0));
+                let v = model.add(var().cont(-1e15..=1e15).obj(-nanos_f));
                 (m, v)
             })
             .collect();
-        let mint_cost_vars: HashMap<MarketId, Variable> = markets
-            .iter()
-            .map(|&m| {
-                let v = model.add(var().cont(0.0..=1e15).obj(-nanos_f));
-                (m, v)
-            })
-            .collect();
-
-        for &market in &markets {
-            let Some(mint_var) = mint_vars.get(&market) else {
-                continue;
-            };
-            let Some(cost_var) = mint_cost_vars.get(&market) else {
-                continue;
-            };
-            model.add(cons().coef(cost_var, 1.0).coef(mint_var, -1.0).ge(0.0));
-        }
 
         // group_mint_g (continuous, free): group-level minting per market group.
         //
@@ -402,7 +385,7 @@ impl MilpSolver {
         // Positive group_mint = arbitrage (buy YES in all markets)
         // Negative group_mint = reverse arbitrage (sell YES in all markets)
         //
-        // group_mint_cost_g charges only positive group minting.
+        // Group minting uses the same signed collateral-flow convention.
         let market_to_group: HashMap<MarketId, usize> = problem
             .market_groups
             .iter()
@@ -411,15 +394,8 @@ impl MilpSolver {
             .collect();
 
         let group_mint_vars: Vec<Variable> = (0..problem.market_groups.len())
-            .map(|_| model.add(var().cont(-1e15..=1e15).obj(0.0)))
+            .map(|_| model.add(var().cont(-1e15..=1e15).obj(-nanos_f)))
             .collect();
-        let group_mint_cost_vars: Vec<Variable> = (0..problem.market_groups.len())
-            .map(|_| model.add(var().cont(0.0..=1e15).obj(-nanos_f)))
-            .collect();
-
-        for (group_mint, group_cost) in group_mint_vars.iter().zip(&group_mint_cost_vars) {
-            model.add(cons().coef(group_cost, 1.0).coef(group_mint, -1.0).ge(0.0));
-        }
 
         // ================================================================
         // Per-order constraints: z/q linking
@@ -871,11 +847,7 @@ fn trim_mm_budget_overflows(
     result.fills.retain(|fill| fill.fill_qty.0 > 0);
 }
 
-fn recompute_result_from_fills(
-    result: &mut MatchingResult,
-    active_orders: &[&Order],
-    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-) {
+fn recompute_result_from_fills(result: &mut MatchingResult, active_orders: &[&Order]) {
     let order_map: HashMap<u64, &Order> = active_orders
         .iter()
         .copied()
@@ -892,11 +864,7 @@ fn recompute_result_from_fills(
         result.orders_filled += 1;
         result.total_quantity_filled += fill.fill_qty.0;
     }
-    result.minting_cost = minting_cost_from_fills(
-        active_orders.iter().copied(),
-        &result.fills,
-        clearing_prices,
-    );
+    result.minting_cost = minting_cost_from_fills(active_orders.iter().copied(), &result.fills);
 }
 
 /// Internal solution representation
@@ -1079,6 +1047,38 @@ mod tests {
             result.result.total_welfare() > 0,
             "minting should produce positive welfare"
         );
+    }
+
+    #[test]
+    fn test_milp_complete_set_burning_credits_released_collateral() {
+        let mut problem = Problem::new("burning_test");
+        let market = problem.markets.add_binary("market");
+
+        // The two sellers accept 99c in total for a complete set. Burning it
+        // releases $1, so filling both creates 1c/share of welfare.
+        problem.orders.push(matching_engine::outcome_sell(
+            &problem.markets,
+            1,
+            market,
+            0,
+            40_000_000,
+            1000,
+        ));
+        problem.orders.push(matching_engine::outcome_sell(
+            &problem.markets,
+            2,
+            market,
+            1,
+            950_000_000,
+            1000,
+        ));
+
+        let result = MilpSolver::new().solve_with_status(&problem);
+
+        assert!(result.status.is_optimal());
+        assert_eq!(result.result.orders_filled, 2);
+        assert_eq!(result.result.minting_cost, -1_000_000_000);
+        assert_eq!(result.result.total_welfare(), 10_000_000);
     }
 
     // =====================================================================

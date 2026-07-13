@@ -3,12 +3,12 @@ tags: [concept, solver]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-01
+last_verified: 2026-07-13
 ---
 
 Without market maker budget constraints, the welfare-maximizing matching problem is a plain Linear Program. This is the structural insight that makes Sybil tractable: the core problem is trivially solvable, and all computational difficulty comes from a small number of [[MM Budget Constraint|bilinear side constraints]].
 
-The LP has three kinds of decision variables: fill quantities `q_i` in fixed-point share-units (how much of each order to fill, bounded by `[0, max_fill]`), per-market minting `mint_m`, and group minting `gmint_g`. The objective is [[Welfare Maximization|total welfare]]: `sum(L_i * q_i / SHARE_SCALE)` for buyers minus `sum(L_j * q_j / SHARE_SCALE)` for sellers minus minting costs. The constraints are position balance (for each market and outcome, total demand cannot exceed total supply plus minting), quantity bounds, and non-negativity of minting variables. That's it — a textbook LP.
+The LP has three kinds of decision variables: fill quantities `q_i` in fixed-point share-units (how much of each order to fill, bounded by `[0, max_fill]`), signed per-market minting `mint_m`, and nonnegative group creation `gmint_g`. The objective is [[Welfare Maximization|total welfare]]: signed limit-value of fills minus signed complete-set cost. The constraints are equality balance for each market and outcome plus quantity and variable bounds. That's it — a textbook LP.
 
 ```mermaid
 flowchart LR
@@ -29,7 +29,7 @@ The whole difficulty gradient lives in that one arrow: everything on the left is
 The problem size scales linearly in orders, markets, and groups. HiGHS (used by [[LP Solver]]) solves the core efficiently. Balance-constraint duals become [[LP Duality and Clearing Prices|clearing prices]] and minting stationarity produces price coherence; the verifier still checks the landed integer result.
 
 ## Key Properties
-- Variables: `q_i` (fills), `mint_m` (per-market), `gmint_g` (group) — all continuous, bounded
+- Variables: `q_i` (fills), free signed `mint_m` (per-market creation/burning), nonnegative `gmint_g` (group creation) — all continuous, bounded
 - Constraints: position balance per market per outcome + quantity bounds
 - O(N + M + G) size — trivially solvable by simplex or interior-point methods
 - Clearing prices = [[LP Duality and Clearing Prices|dual variables]] of balance constraints

@@ -802,7 +802,7 @@ pub(crate) fn finalize_result(
 
     trim_mm_budget_overflows(&mut result, &problem.mm_constraints, &ctx.mm_order_info);
     trim_zero_price_minting(&mut result, &order_map, &prices);
-    recompute_welfare(&mut result, &order_map, &prices);
+    recompute_welfare(&mut result, &order_map);
 
     let mut pipeline_result = PipelineResult::empty();
     pipeline_result.result = result;
@@ -865,11 +865,7 @@ pub(crate) fn project_and_finalize(
 }
 
 /// Recompute welfare, volume, and fill count from scratch.
-pub(crate) fn recompute_welfare(
-    result: &mut MatchingResult,
-    order_map: &HashMap<u64, &Order>,
-    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-) {
+pub(crate) fn recompute_welfare(result: &mut MatchingResult, order_map: &HashMap<u64, &Order>) {
     result.gross_welfare = 0;
     result.total_quantity_filled = 0;
     result.orders_filled = 0;
@@ -880,8 +876,7 @@ pub(crate) fn recompute_welfare(
         result.total_quantity_filled += fill.fill_qty.0;
         result.orders_filled += 1;
     }
-    result.minting_cost =
-        minting_cost_from_fills(order_map.values().copied(), &result.fills, clearing_prices);
+    result.minting_cost = minting_cost_from_fills(order_map.values().copied(), &result.fills);
 }
 
 #[cfg(test)]

@@ -2501,6 +2501,62 @@ fn platform_welfare_accumulates_across_blocks() {
     assert_eq!(seq.analytics().platform_welfare(2_000), (w1 + w2, w1 + w2));
 }
 
+#[test]
+fn complete_set_burning_reports_positive_welfare() {
+    let (markets, market) = setup();
+    let qty = shares_to_qty(5);
+
+    let mut accounts = AccountStore::new();
+    let yes_seller = accounts.create_account(0);
+    let no_seller = accounts.create_account(0);
+    accounts
+        .get_mut(yes_seller)
+        .unwrap()
+        .positions
+        .insert((market, 0), qty.0 as i64);
+    accounts
+        .get_mut(no_seller)
+        .unwrap()
+        .positions
+        .insert((market, 1), qty.0 as i64);
+
+    let mut seq = BlockSequencer::with_default_solver(
+        accounts,
+        markets.clone(),
+        vec![],
+        Arc::new(AdminOracle::new()),
+        SequencerConfig::default(),
+    );
+    let production = seq.produce_block(
+        vec![
+            OrderSubmission {
+                account_id: yes_seller,
+                orders: vec![outcome_sell(&markets, 0, market, 0, 40_000_000, qty.0)],
+                mm_constraint: None,
+            },
+            OrderSubmission {
+                account_id: no_seller,
+                orders: vec![outcome_sell(&markets, 0, market, 1, 950_000_000, qty.0)],
+                mm_constraint: None,
+            },
+        ],
+        1_000,
+    );
+
+    assert_eq!(production.analytics.total_welfare, 50_000_000);
+    assert_eq!(
+        production.analytics.welfare_by_market.get(&market),
+        Some(&50_000_000)
+    );
+    assert_eq!(production.witness.minting_cost, -5_000_000_000);
+    assert_eq!(production.witness.total_welfare, 50_000_000);
+    assert_eq!(
+        seq.analytics().platform_welfare(1_000),
+        (50_000_000, 50_000_000)
+    );
+    assert!(sybil_verifier::verify_full(&production.witness, false).valid);
+}
+
 // --- Block height counter ---
 
 #[test]

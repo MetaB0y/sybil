@@ -3,12 +3,12 @@ tags: [zk]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-07
+last_verified: 2026-07-13
 ---
 
 The verifier validates every aspect of a block across four independent layers, each checking a different class of invariant. The input is a [[Block Witness]] — a self-contained audit trail — and the output is a `VerificationResult` with a pass/fail verdict and a list of specific violations. A fifth pass, **sidecar transition verification**, checks derivable non-account facts (reservations, resting orders, withdrawals, deposit cursor, market status/groups). A system-transition replay checks account-value effects from `pre_state` to `post_system_state`. A key-transition pass welds the full post key universe to `keys_digest`, reverse-folds witnessed key ops to authenticated pre-state digests, and forward-replays them with global pubkey uniqueness, last-key lockout, and in-guest RawP256/WebAuthn signature verification. These passes are merged into `verify_full` alongside the four core layers. Every failure mode is a variant of the `ViolationKind` enum — the single source of truth for what can go wrong; consult `crates/sybil-verifier/src/violations.rs` for the current enumeration rather than a hardcoded count here.
 
-**Layer 1: Match Verification** checks that the solver's output is economically valid. Per-fill checks confirm that each filled order exists, the fill quantity doesn't exceed the order's maximum, and the fill price respects the order's limit. System-wide checks enforce the Uniform Clearing Price (UCP), price complementarity (YES + NO = $1 for binary markets), [[Binary Markets and Market Groups|market group]] price constraints (YES prices sum to at most $1), [[MM Budget Constraint|MM budget]] compliance, and welfare consistency (reported welfare matches recomputed welfare).
+**Layer 1: Match Verification** checks that the solver's output is economically valid. Per-fill checks confirm that each filled order exists, the fill quantity doesn't exceed the order's maximum, and the fill price respects the order's limit. System-wide checks enforce the Uniform Clearing Price (UCP), price complementarity (YES + NO = $1 for binary markets), [[Binary Markets and Market Groups|market group]] price constraints (YES prices sum to at most $1), [[MM Budget Constraint|MM budget]] compliance, and welfare consistency. The verifier recomputes signed complete-set cost from fill cash flow (positive for creation, negative for burning), requires reported welfare to match, and rejects negative total welfare.
 
 **Layer 2: Settlement Verification** re-derives the post-state from the post-system state and fills. It independently runs [[Settlement]] arithmetic with checked integers, folds fill and MINT `events_digest` entries, carries `total_deposited` unchanged, and compares those fields plus every account's balance and positions against the witness's reported post-state. Any mismatch is a violation.
 

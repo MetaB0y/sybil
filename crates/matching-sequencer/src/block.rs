@@ -132,7 +132,7 @@ pub struct BlockAnalytics {
     /// (B7). Multi-market fills credit every active market with their full
     /// welfare; the platform `total_welfare` counts each fill once, so
     /// sum-of-per-market over-counts for spreads/bundles. Signed because
-    /// solver rounding can yield small negatives.
+    /// stored as `i64` to match the canonical signed welfare arithmetic.
     pub welfare_by_market: HashMap<MarketId, i64>,
 }
 

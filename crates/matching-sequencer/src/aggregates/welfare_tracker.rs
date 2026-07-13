@@ -7,10 +7,12 @@
 //! hourly buckets for the 24h window, mirroring `PriceTracker`'s platform-volume
 //! extensions and `OrderStatsTracker`'s hourly machinery.
 //!
-//! Welfare is signed (`i64`): solver rounding can yield small negatives, so the
-//! accumulators use `saturating_add` on `i64`. Per-market welfare is NOT tracked
-//! here — that ships separately via `BlockAnalytics.welfare_by_market` →
-//! `BlockMarketStats.welfare_nanos`.
+//! The canonical field remains `i64` because gross value and signed mint/burn
+//! cost use signed arithmetic, but newly verified total welfare is non-negative.
+//! The tracker continues to tolerate legacy negative values during restore and
+//! migration. Accumulators use `saturating_add` on `i64`. Per-market welfare is
+//! NOT tracked here — that ships separately via `BlockAnalytics.welfare_by_market`
+//! → `BlockMarketStats.welfare_nanos`.
 //!
 //! Snapshots round-trip through `AnalyticsSnapshot` / `AnalyticsRestoredState`.
 //! Missing redb table on load yields `Default::default()` (cold start).
@@ -120,7 +122,7 @@ mod tests {
     }
 
     #[test]
-    fn negative_welfare_folds_into_sum() {
+    fn legacy_negative_welfare_folds_into_sum() {
         let mut t = WelfareTracker::new();
         t.record(-10, 0);
         t.record(-5, 1_000); // same hour-0 bucket

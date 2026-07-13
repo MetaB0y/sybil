@@ -508,7 +508,7 @@ pub struct BlockMarketStats {
     /// Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
     /// 1_000_000_000 = $1. Multi-market fills credit each active market with their
     /// full welfare; the platform `total_welfare_nanos` counts each fill once.
-    /// Signed — solver rounding can yield small negatives.
+    /// Encoded as signed nanos to match canonical welfare arithmetic.
     #[serde(default)]
     pub welfare_nanos: i64,
 }
@@ -671,7 +671,7 @@ pub struct BlockResponse {
     #[serde(default)]
     pub bridge: BridgeBlockResponse,
     /// Total solver welfare in the block. Integer nanodollars;
-    /// 1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
+    /// 1_000_000_000 = $1. Verified block welfare is non-negative.
     pub total_welfare_nanos: i64,
     /// Total traded notional in the block. Integer nanodollars;
     /// 1_000_000_000 = $1.
@@ -1316,7 +1316,7 @@ pub struct OverviewBucketResponse {
     pub total_volume_nanos: u64,
     /// Cumulative platform welfare for this bucket. Integer nanodollars;
     /// 1_000_000_000 = $1. Sum of per-block `total_welfare` (each fill counted
-    /// once). Signed: solver rounding can yield small negatives.
+    /// once). Verified block welfare is non-negative.
     #[serde(default)]
     pub total_welfare_nanos: i64,
     #[serde(default)]

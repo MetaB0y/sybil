@@ -73,7 +73,7 @@ pub struct MatchingResult {
     pub fills: Vec<Fill>,
     /// Gross order-value objective before protocol minting cost.
     pub gross_welfare: i64,
-    /// Cost of share creation (minting) not captured in fill-level welfare.
+    /// Signed complete-set cost: positive for minting, negative for burning.
     pub minting_cost: i64,
     /// Number of orders filled (at least partially)
     pub orders_filled: usize,
@@ -96,7 +96,7 @@ impl MatchingResult {
     }
 
     /// Total welfare under the protocol convention: gross order value net of
-    /// settlement-derived minting cost.
+    /// the signed settlement-derived mint/burn cost.
     pub fn total_welfare(&self) -> i64 {
         net_welfare(self.gross_welfare, self.minting_cost)
     }

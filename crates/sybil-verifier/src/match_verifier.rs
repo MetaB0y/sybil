@@ -261,13 +261,14 @@ fn verify_fills(
     };
     stats.computed_welfare = expected_welfare;
 
-    // 7a. Minting cost must be non-negative (can only reduce welfare, never inflate it)
-    if minting_cost < 0 {
+    // 7a. Total welfare is the sum of non-negative per-fill surplus. The
+    // signed mint/burn term must reconcile the gross objective to that value.
+    if expected_welfare < 0 {
         violations.push(Violation {
-            kind: ViolationKind::WelfareMismatch,
+            kind: ViolationKind::NegativeWelfare,
             details: format!(
-                "Minting cost {} is negative — cannot inflate welfare beyond fill-level",
-                minting_cost
+                "Total welfare {} is negative (gross={}, signed mint/burn cost={})",
+                expected_welfare, computed_gross_welfare, minting_cost
             ),
         });
     }
@@ -634,11 +635,7 @@ mod tests {
     fn refresh_welfare(witness: &mut BlockWitness) {
         let orders: Vec<&Order> = witness.orders.iter().map(|wo| &wo.order).collect();
         let gross_welfare = gross_welfare_from_fills(orders.iter().copied(), &witness.fills);
-        let minting_cost = minting_cost_from_fills(
-            orders.iter().copied(),
-            &witness.fills,
-            &witness.clearing_prices,
-        );
+        let minting_cost = minting_cost_from_fills(orders.iter().copied(), &witness.fills);
         witness.minting_cost = minting_cost;
         witness.total_welfare = net_welfare(gross_welfare, minting_cost);
     }

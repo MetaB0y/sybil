@@ -5,7 +5,10 @@
 //! positive-welfare MM orders, `w_j` otherwise. Since μ_k depends on the
 //! solution, we iterate: solve LP → compute μ → re-solve.
 //!
-//! Same welfare quality as the conic solver, LP-level robustness.
+//! This is a capped, damped fixed-point heuristic, not a direct solve of the
+//! paper's logarithmic convex program. It has no general convergence guarantee;
+//! `ConicSolver` in QuasiFisher mode is the corresponding
+//! single convex-program reference implementation.
 //! Note: this is NOT the "Augmented LP" from `eg-conic.typ` (which is a
 //! custom interior-point solver with Woodbury rank-K correction).
 

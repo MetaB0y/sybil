@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-01
+last_verified: 2026-07-13
 ---
 
 Settlement is the step in the [[Block Lifecycle]] where fills become real: balances are debited, positions are credited, and account state is updated. It runs after the solver returns fills and clearing prices but before the block is sealed. The system uses i128/u128 intermediates for all arithmetic to prevent overflow — a price times fixed-point quantity units can exceed u64 range, and settlement involves both debits (negative) and credits (positive).
@@ -19,6 +19,12 @@ those adjustments to `AccountId::MINT`. The verifier repeats the same derivation
 from the witness. Synthetic orders/fills are not part of canonical block output:
 they would not correspond to a submitted order, an account signature, or an
 event-root leaf.
+
+The witness's `minting_cost` is a signed collateral-flow term derived from the
+real fills' aggregate balance delta, not from the MINT inventory adjustment.
+Complete-set creation debits participant cash and records a positive cost;
+complete-set burning credits participant cash and records a negative cost.
+Subtracting that signed term makes block welfare equal the sum of fill surplus.
 
 Market resolution is also handled through settlement. When a market resolves via the [[Market Resolution|oracle]] (see [[Market Resolution]]), YES shares pay out `yes_payout_nanos` per share and NO shares pay out `NANOS_PER_DOLLAR - yes_payout_nanos`. Fractional resolution is supported — a market can resolve 70/30 instead of binary 100/0 — which allows for nuanced outcomes. Resolution is irreversible: once settled, positions are converted to balance and the market is marked as resolved. Resolutions are also emitted as `system_events` in the next block so the witness explains why pre-state changed between blocks. The [[Four-Layer Verification|settlement verification layer]] independently re-derives the post-state from pre-state plus fills to confirm correctness.
 
@@ -40,6 +46,7 @@ flowchart TB
 - Generic path: bundles/spreads via [[Payoff Vectors|payoff vector]] marginals
 - `settle_batch()` uses `fill.account_id`, not a separate order→account lookup
 - MINT account records protocol counterparty positions from complete-set creation/burning
+- `minting_cost` is signed: positive for collateral consumed by creation, negative for collateral released by burning
 - Canonical fills are real participant fills only; no synthetic minting fills
 - Settlement updates `events_digest` for touched accounts
 - Market resolution: YES → `payout_nanos`, NO → `NANOS_PER_DOLLAR - payout_nanos`

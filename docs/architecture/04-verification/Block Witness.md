@@ -3,7 +3,7 @@ tags: [zk, serialization, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 # Block Witness Format
@@ -90,6 +90,11 @@ canonical_witness_bytes =
  || pre_state_sidecar                          // pre non-account state
  || resolved_markets_section
 ```
+
+`minting_cost` is a signed collateral-flow value: positive for complete-set
+creation and negative for complete-set burning. `total_welfare` is the signed
+gross limit-value of fills minus that cost; match verification requires the
+recomputed result to be nonnegative and equal the reported value.
 
 `header` and `previous_header` have the same 120-byte layout:
 

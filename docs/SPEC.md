@@ -47,7 +47,7 @@ Notional conversion is `price_nanos × qty_units / SHARE_SCALE`. Settlement and 
 
 ### Markets, groups, and minting
 
-Every market is binary. Mutually exclusive outcomes are represented as a `MarketGroup` of binary markets. Per-market minting creates one YES plus one NO for $1. Group minting creates one YES in each surviving mutually exclusive market for $1. Minting variables enter the welfare objective as costs and induce price-normalization constraints through LP duality.
+Every market is binary. Mutually exclusive outcomes are represented as a `MarketGroup` of binary markets. Per-market minting creates one YES plus one NO for $1. Group minting creates one YES in each surviving mutually exclusive market for $1. The complete-set term in welfare is signed: creation consumes collateral and has positive cost, while burning releases collateral and has negative cost. These variables induce price-normalization constraints through LP duality.
 
 When one member resolves, the group retains its unresolved members while at least two remain; a singleton group dissolves. This preserves group constraints for the surviving outcomes.
 
@@ -66,7 +66,7 @@ One batch is a `Problem`: markets, supported orders, MM constraints, and market 
 - Fill variables `q_i ∈ [0, max_fill_i]`.
 - Per-market and group mint variables.
 - Per-outcome position-balance constraints.
-- Objective: signed limit-value of fills minus mint costs.
+- Objective: signed limit-value of fills minus signed complete-set cost.
 
 Clearing prices are dual variables of the balance constraints. Complementary slackness gives limit compliance; minting stationarity gives YES/NO and group price coherence. The verifier checks the landed integer result rather than trusting dual theory or floating output.
 

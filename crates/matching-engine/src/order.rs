@@ -144,11 +144,11 @@ impl Order {
         signed_price_delta_notional(surplus_per_unit, fill_qty)
     }
 
-    /// Gross objective contribution before protocol minting cost.
+    /// Gross objective contribution before protocol mint/burn cost.
     ///
     /// Buyers contribute `+limit_price * qty`; sellers contribute
-    /// `-limit_price * qty`. Subtracting the settlement-derived minting cost
-    /// from the sum of these terms gives the protocol welfare scalar.
+    /// `-limit_price * qty`. Subtracting the signed settlement-derived
+    /// mint/burn cost from the sum of these terms gives protocol welfare.
     pub fn gross_welfare_contribution(&self, fill_qty: Qty) -> i64 {
         let value = notional_nanos(self.limit_price, fill_qty).0 as i64;
         if self.is_seller() { -value } else { value }

@@ -62,13 +62,15 @@ impl BlockSequencer {
     ///   `iterative_lp_solver::tests::test_auglp_vs_lp_tight_budget_price_shift`,
     ///   which asserts IterLP reaches >10× the welfare of the single-pass LP on a
     ///   tight-budget, price-shifting instance.
-    /// - We still ship `LpSolver` because it is the conformance- and
-    ///   verifier-clean solver on the settlement path: `lp_solver_conformance`
-    ///   passes, whereas `iter_lp_solver_conformance` is currently `#[ignore]`d
-    ///   (SYB-197: IterLP can exceed an MM budget after integer rounding). Until
-    ///   that is resolved, the higher-welfare solver is not safe to commit blocks
-    ///   with. The non-LP solvers are otherwise exercised only by `matching-sim`
-    ///   and benches.
+    /// - We still ship `LpSolver` because it is the simplest low-latency,
+    ///   conformance- and verifier-clean settlement path. IterLP now shares the
+    ///   same integer projection/trim boundary and passes conformance, but its
+    ///   damped multiplier update is a capped fixed-point heuristic without a
+    ///   general convergence guarantee. The paper's log-welfare program is
+    ///   represented directly by `ConicSolver` in QuasiFisher mode; that remains
+    ///   a research/reference path pending a broader empirical and operational
+    ///   evaluation. The non-LP solvers are otherwise exercised by
+    ///   `matching-sim` and benches.
     ///
     /// Inject a different `Arc<dyn Solver>` via [`BlockSequencer::new`] to
     /// experiment without touching this default.

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:cf3b8d5616c0ec30c77e9b21ad1a1aa1a1369e9b2d70f5d7b666ddbb25c9f7e3",
+  "fingerprint": "sha256:d1993fb6c49de9f5d539e3ab1d003f2dd17697c202583a1ddfe3ddc44e263596",
   "inputs": {
     "commonware_packages": [
       {
@@ -74,31 +74,31 @@
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "13a343967c44d03ab830af9b8471100fb7e0d9b0aec170def63b64e726a76697",
-        "app_exe_commit": "0x004f2f9b1f6115f4befa7127ded102fd26b1a62c66e21868f2f1e50c5f4f09b5",
+        "source_sha256": "f2ff66653bff273500e289f66fa52e94609ff6179830fddd8adc2b34be35b2d3",
+        "app_exe_commit": "0x0018b4390609b3e57883160fbec353413cda5982cef98b32d340820e8bdeb30d",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "5072500d5c0767628abbcb62e9a58581016b97ea3e4a38534e4c844c6ae56bf5",
-        "app_exe_commit": "0x0013128cbb4f1579cc3cd3df99bfe0293684a703d78d6c359c1480642a5c08f0",
+        "source_sha256": "03c528405fd00de51dc96fee09ca04c3a6d3f4da361566251d4c56aaf16ca432",
+        "app_exe_commit": "0x006af4f629b4e749ee6b2a0f717dadbf651f6639b305b1482b8ea5f98ef539c5",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x004f2f9b1f6115f4befa7127ded102fd26b1a62c66e21868f2f1e50c5f4f09b5",
+        "app_exe_commit": "0x0018b4390609b3e57883160fbec353413cda5982cef98b32d340820e8bdeb30d",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
-        "app_exe_commit": "0x0013128cbb4f1579cc3cd3df99bfe0293684a703d78d6c359c1480642a5c08f0",
+        "app_exe_commit": "0x006af4f629b4e749ee6b2a0f717dadbf651f6639b305b1482b8ea5f98ef539c5",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     }
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Baseline validity artifacts belong to the fresh devnet genesis deployed on 2026-07-11.",
+    "reason": "Signed complete-set welfare semantics changed; old devnet blocks are incompatible with the new verifier.",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

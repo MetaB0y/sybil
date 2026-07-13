@@ -304,89 +304,31 @@ pub fn derive_minting_checked(
     Ok(adjustments)
 }
 
-/// Sum the welfare adjustment implied by MINT account settlement.
+/// Derive the signed complete-set mint/burn cost from real-account cash flow.
 ///
-/// This is a reporting helper only. The authoritative settlement semantics
-/// remain [`derive_minting`]; the cost is the MINT balance delta produced by
-/// those same adjustments.
-pub fn minting_cost_from_adjustments(adjustments: &[MintAdjustment]) -> i64 {
-    minting_cost_from_adjustments_checked(adjustments).unwrap_or_default()
-}
-
-/// Checked version of [`minting_cost_from_adjustments`].
-pub fn minting_cost_from_adjustments_checked(
-    adjustments: &[MintAdjustment],
-) -> Result<i64, SettlementArithmeticError> {
-    adjustments.iter().try_fold(0i64, |sum, adjustment| {
-        sum.checked_add(adjustment.balance_delta)
-            .ok_or(SettlementArithmeticError::BalanceOverflow)
-    })
-}
-
-/// Derive the reporting minting cost from real-fill cash flow and MINT
-/// adjustments.
+/// Creation removes collateral from real accounts, so a negative fill balance
+/// delta becomes a positive cost. Burning releases collateral to real
+/// accounts, so a positive fill balance delta becomes a negative cost. The
+/// sign is economically load-bearing: for net demand `D`, the zero-temperature
+/// minting cost is `max(D)`, which is negative when a complete set is burned.
 ///
-/// Complete-set creation is visible as cash leaving real accounts with no
-/// MINT balance delta. One-sided protocol inventory can be visible as both
-/// real-account cash outflow and a MINT balance delta; in that case the two
-/// views describe the same cost, so the cash outflow is authoritative. MINT
-/// adjustment cost is the fallback for cases with no real-account outflow.
-pub fn minting_cost_from_balance_deltas(
-    fill_balance_delta: i64,
-    adjustments: &[MintAdjustment],
-) -> i64 {
-    minting_cost_from_incremental_adjustments(fill_balance_delta, &[], adjustments)
+/// MINT-account adjustments balance outcome inventory after settlement; they
+/// are not the complete-set cost and must not be used to clamp burn proceeds
+/// to zero.
+pub fn minting_cost_from_fill_balance_delta(fill_balance_delta: i64) -> i64 {
+    minting_cost_from_fill_balance_delta_checked(fill_balance_delta).unwrap_or_default()
 }
 
-/// Derive reporting minting cost from the incremental MINT adjustment across
-/// a block boundary.
-pub fn minting_cost_from_incremental_adjustments(
+/// Checked version of [`minting_cost_from_fill_balance_delta`].
+pub fn minting_cost_from_fill_balance_delta_checked(
     fill_balance_delta: i64,
-    pre_adjustments: &[MintAdjustment],
-    post_adjustments: &[MintAdjustment],
-) -> i64 {
-    minting_cost_from_incremental_adjustments_checked(
-        fill_balance_delta,
-        pre_adjustments,
-        post_adjustments,
-    )
-    .unwrap_or_default()
-}
-
-/// Checked version of [`minting_cost_from_incremental_adjustments`].
-pub fn minting_cost_from_incremental_adjustments_checked(
-    fill_balance_delta: i64,
-    pre_adjustments: &[MintAdjustment],
-    post_adjustments: &[MintAdjustment],
 ) -> Result<i64, SettlementArithmeticError> {
-    let fill_cash_outflow = if fill_balance_delta < 0 {
-        fill_balance_delta
-            .checked_neg()
-            .ok_or(SettlementArithmeticError::BalanceOverflow)?
-    } else {
-        0
-    };
-    if fill_cash_outflow > 0 {
-        Ok(fill_cash_outflow)
-    } else {
-        let pre_cost = minting_cost_from_adjustments_checked(pre_adjustments)?;
-        let post_cost = minting_cost_from_adjustments_checked(post_adjustments)?;
-        Ok(post_cost
-            .checked_sub(pre_cost)
-            .ok_or(SettlementArithmeticError::BalanceOverflow)?
-            .max(0))
-    }
+    fill_balance_delta
+        .checked_neg()
+        .ok_or(SettlementArithmeticError::BalanceOverflow)
 }
 
-/// Derive the settlement-consistent minting cost for a set of market totals.
-pub fn derive_minting_cost(
-    market_totals: &[(MarketId, i64, i64)],
-    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
-) -> i64 {
-    minting_cost_from_adjustments(&derive_minting(market_totals, clearing_prices))
-}
-
-/// Protocol welfare convention: gross order value net of minting cost.
+/// Protocol welfare convention: gross order value net of signed mint/burn cost.
 pub fn net_welfare(gross_welfare: i64, minting_cost: i64) -> i64 {
     gross_welfare - minting_cost
 }
@@ -430,13 +372,9 @@ pub fn fill_balance_delta_from_fills<'a>(
 pub fn minting_cost_from_fills<'a>(
     orders: impl IntoIterator<Item = &'a Order>,
     fills: &[Fill],
-    clearing_prices: &HashMap<MarketId, Vec<Nanos>>,
 ) -> i64 {
-    let orders: Vec<&Order> = orders.into_iter().collect();
-    let market_totals = market_totals_from_fills(orders.iter().copied(), fills);
-    let adjustments = derive_minting(&market_totals, clearing_prices);
-    let fill_balance_delta = fill_balance_delta_from_fills(orders.iter().copied(), fills);
-    minting_cost_from_balance_deltas(fill_balance_delta, &adjustments)
+    let fill_balance_delta = fill_balance_delta_from_fills(orders, fills);
+    minting_cost_from_fill_balance_delta(fill_balance_delta)
 }
 
 /// Compute per-market position totals implied by fills alone.
@@ -711,6 +649,64 @@ mod tests {
         assert_eq!(adj.len(), 1);
         assert_eq!(adj[0].position_delta, -50);
         assert_eq!(adj[0].balance_delta, 0); // no price → zero revenue
+    }
+
+    #[test]
+    fn signed_minting_cost_matches_complete_set_creation_and_burning() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("complete set");
+        let qty = shares_to_qty(5);
+
+        let buy_yes = outcome_buy(&markets, 1, market, 0, 60_000_000, qty.0);
+        let buy_no = outcome_buy(&markets, 2, market, 1, 950_000_000, qty.0);
+        let buy_fills = vec![
+            Fill::new(buy_yes.id, qty, Nanos(55_000_000)),
+            Fill::new(buy_no.id, qty, Nanos(945_000_000)),
+        ];
+        let buys = [buy_yes, buy_no];
+        assert_eq!(
+            minting_cost_from_fills(buys.iter(), &buy_fills),
+            5 * NANOS_PER_DOLLAR as i64
+        );
+
+        let sell_yes = outcome_sell(&markets, 3, market, 0, 40_000_000, qty.0);
+        let sell_no = outcome_sell(&markets, 4, market, 1, 950_000_000, qty.0);
+        let sell_fills = vec![
+            Fill::new(sell_yes.id, qty, Nanos(45_000_000)),
+            Fill::new(sell_no.id, qty, Nanos(955_000_000)),
+        ];
+        let sells = [sell_yes, sell_no];
+        assert_eq!(
+            minting_cost_from_fills(sells.iter(), &sell_fills),
+            -(5 * NANOS_PER_DOLLAR as i64)
+        );
+    }
+
+    #[test]
+    fn complete_set_burning_welfare_equals_non_negative_fill_surplus() {
+        let mut markets = MarketSet::new();
+        let market = markets.add_binary("complete set");
+        let qty = shares_to_qty(5);
+        let sell_yes = outcome_sell(&markets, 1, market, 0, 40_000_000, qty.0);
+        let sell_no = outcome_sell(&markets, 2, market, 1, 950_000_000, qty.0);
+        let fills = vec![
+            Fill::new(sell_yes.id, qty, Nanos(45_000_000)),
+            Fill::new(sell_no.id, qty, Nanos(955_000_000)),
+        ];
+        let orders = [sell_yes, sell_no];
+
+        let gross = gross_welfare_from_fills(orders.iter(), &fills);
+        let minting_cost = minting_cost_from_fills(orders.iter(), &fills);
+        let expected_fill_surplus: i64 = fills
+            .iter()
+            .zip(&orders)
+            .map(|(fill, order)| order.welfare_contribution(fill.fill_price, fill.fill_qty))
+            .sum();
+
+        assert_eq!(gross, -4_950_000_000);
+        assert_eq!(minting_cost, -5_000_000_000);
+        assert_eq!(net_welfare(gross, minting_cost), 50_000_000);
+        assert_eq!(net_welfare(gross, minting_cost), expected_fill_surplus);
     }
 
     proptest! {

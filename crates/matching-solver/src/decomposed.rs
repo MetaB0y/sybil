@@ -851,7 +851,7 @@ fn assemble_final(problem: &Problem, component_results: Vec<PipelineResult>) -> 
     }
 
     crate::lp_solver::trim_zero_price_minting(&mut result.result, &order_map_full, clearing_prices);
-    crate::lp_solver::recompute_welfare(&mut result.result, &order_map_full, clearing_prices);
+    crate::lp_solver::recompute_welfare(&mut result.result, &order_map_full);
     if let Some(price_discovery) = result.price_discovery.as_mut() {
         price_discovery.total_fills = result.result.fills.len();
         price_discovery.total_welfare = result.result.total_welfare();
