@@ -189,17 +189,16 @@ impl SequencerActorState {
     }
 
     pub(super) fn check_global_submission_rate(&mut self) -> Result<(), SequencerError> {
-        let now = Instant::now();
-        self.global_submission_bucket
-            .allow(now)
-            .map_err(|retry_after_secs| {
-                metrics::counter!(
-                    "sybil_admission_limit_rejections_total",
-                    "limit" => "global_rate"
-                )
-                .increment(1);
-                SequencerError::RateLimited { retry_after_secs }
-            })
+        self.global_submission_limiter.try_wait().map_err(|_| {
+            metrics::counter!(
+                "sybil_admission_limit_rejections_total",
+                "limit" => "global_rate"
+            )
+            .increment(1);
+            SequencerError::RateLimited {
+                retry_after_secs: 1,
+            }
+        })
     }
 
     pub(super) fn check_account_submission_limits(
@@ -228,24 +227,24 @@ impl SequencerActorState {
             });
         }
 
-        let now = Instant::now();
-        let bucket = self
-            .account_submission_buckets
+        let limiter = self
+            .account_submission_limiters
             .entry(submission.account_id)
             .or_insert_with(|| {
-                TokenBucket::new(
+                rate_limiter(
                     config.max_submissions_per_account_per_second,
                     config.submission_burst_per_account,
-                    now,
                 )
             });
-        bucket.allow(now).map_err(|retry_after_secs| {
+        limiter.try_wait().map_err(|_| {
             metrics::counter!(
                 "sybil_admission_limit_rejections_total",
                 "limit" => "account_rate"
             )
             .increment(1);
-            SequencerError::RateLimited { retry_after_secs }
+            SequencerError::RateLimited {
+                retry_after_secs: 1,
+            }
         })?;
 
         if submission.mm_constraint.is_none() {

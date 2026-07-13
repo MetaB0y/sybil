@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use axum::http::HeaderValue;
 use matching_sequencer::{AccountId, LeaderboardBase, SequencerHandle};
 use metrics_exporter_prometheus::PrometheusHandle;
+use ratelimit::Ratelimiter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex as AsyncMutex, RwLock, Semaphore};
 
@@ -111,114 +111,48 @@ pub fn save_market_ref_data(data: &HashMap<u32, MarketRefData>, path: Option<&Pa
 }
 
 #[derive(Debug)]
-struct TokenBucket {
-    tokens: f64,
-    capacity: f64,
-    refill_per_second: f64,
-    last_refill: Instant,
-}
-
-impl TokenBucket {
-    fn new(refill_per_second: u32, capacity: u32) -> Self {
-        Self {
-            tokens: capacity as f64,
-            capacity: capacity as f64,
-            refill_per_second: refill_per_second as f64,
-            last_refill: Instant::now(),
-        }
-    }
-
-    fn allow(&mut self) -> Result<(), u64> {
-        let now = Instant::now();
-        let elapsed = now.saturating_duration_since(self.last_refill);
-        self.last_refill = now;
-        self.tokens =
-            (self.tokens + elapsed.as_secs_f64() * self.refill_per_second).min(self.capacity);
-
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
-            Ok(())
-        } else {
-            Err(self.retry_after_secs())
-        }
-    }
-
-    fn retry_after_secs(&self) -> u64 {
-        if self.refill_per_second <= 0.0 {
-            return 1;
-        }
-        ((1.0 - self.tokens).max(0.0) / self.refill_per_second)
-            .ceil()
-            .max(1.0) as u64
-    }
-}
-
-#[derive(Debug)]
-pub struct HttpOrderRateLimiter {
-    global: TokenBucket,
-    clients: HashMap<String, TokenBucket>,
-    client_refill_per_second: u32,
+pub struct HttpRateLimiter {
+    global: Ratelimiter,
+    clients: Mutex<HashMap<String, Ratelimiter>>,
+    client_rate: u32,
     client_burst: u32,
 }
 
-impl HttpOrderRateLimiter {
-    fn new(config: &ApiConfig) -> Self {
+impl HttpRateLimiter {
+    fn new(global_rate: u32, global_burst: u32, client_rate: u32, client_burst: u32) -> Self {
         Self {
-            global: TokenBucket::new(config.http_order_global_rps, config.http_order_global_burst),
-            clients: HashMap::new(),
-            client_refill_per_second: config.http_order_client_rps,
-            client_burst: config.http_order_client_burst,
+            global: rate_limiter(global_rate, global_burst),
+            clients: Mutex::new(HashMap::new()),
+            client_rate,
+            client_burst,
         }
     }
 
-    pub fn allow(&mut self, client_key: &str) -> Result<(), u64> {
-        self.global.allow()?;
-        let client_key = if self.clients.contains_key(client_key)
-            || self.clients.len() < MAX_HTTP_RATE_LIMIT_CLIENTS
-        {
-            client_key
-        } else {
-            OVERFLOW_CLIENT_KEY
-        };
-        self.clients
+    pub fn allow(&self, client_key: &str) -> Result<(), u64> {
+        self.global.try_wait().map_err(|_| 1_u64)?;
+        let mut clients = self.clients.lock().map_err(|_| 1_u64)?;
+        let client_key =
+            if clients.contains_key(client_key) || clients.len() < MAX_HTTP_RATE_LIMIT_CLIENTS {
+                client_key
+            } else {
+                OVERFLOW_CLIENT_KEY
+            };
+        clients
             .entry(client_key.to_string())
-            .or_insert_with(|| TokenBucket::new(self.client_refill_per_second, self.client_burst))
-            .allow()
+            .or_insert_with(|| rate_limiter(self.client_rate, self.client_burst))
+            .try_wait()
+            .map_err(|_| 1_u64)
     }
 }
 
-#[derive(Debug)]
-pub struct HttpDaRateLimiter {
-    global: TokenBucket,
-    clients: HashMap<String, TokenBucket>,
-    client_refill_per_second: u32,
-    client_burst: u32,
-}
-
-impl HttpDaRateLimiter {
-    fn new(config: &ApiConfig) -> Self {
-        Self {
-            global: TokenBucket::new(config.http_da_global_rps, config.http_da_global_burst),
-            clients: HashMap::new(),
-            client_refill_per_second: config.http_da_client_rps,
-            client_burst: config.http_da_client_burst,
-        }
-    }
-
-    pub fn allow(&mut self, client_key: &str) -> Result<(), u64> {
-        self.global.allow()?;
-        let client_key = if self.clients.contains_key(client_key)
-            || self.clients.len() < MAX_HTTP_RATE_LIMIT_CLIENTS
-        {
-            client_key
-        } else {
-            OVERFLOW_CLIENT_KEY
-        };
-        self.clients
-            .entry(client_key.to_string())
-            .or_insert_with(|| TokenBucket::new(self.client_refill_per_second, self.client_burst))
-            .allow()
-    }
+fn rate_limiter(rate: u32, burst: u32) -> Ratelimiter {
+    assert!(rate > 0, "rate limits must have a positive refill rate");
+    assert!(burst > 0, "rate limits must have positive burst capacity");
+    Ratelimiter::builder(u64::from(rate))
+        .max_tokens(u64::from(burst))
+        .initial_available(u64::from(burst))
+        .build()
+        .expect("validated rate limit")
 }
 
 /// Shared application state, available to all route handlers.
@@ -265,10 +199,10 @@ pub struct AppState {
     pub arena_db_path: String,
     /// Cheap pre-handler limiter for order endpoints. Sequencer admission has
     /// authoritative account/global limits; this bounds parsing/signature work.
-    pub http_order_limiter: Arc<Mutex<HttpOrderRateLimiter>>,
+    pub http_order_limiter: Arc<HttpRateLimiter>,
     /// Public DA reads have their own low-rate bucket and a hard in-flight cap
     /// so retained-history serving cannot monopolize the sequencer/store.
-    pub http_da_limiter: Arc<Mutex<HttpDaRateLimiter>>,
+    pub http_da_limiter: Arc<HttpRateLimiter>,
     pub http_da_concurrency: Arc<Semaphore>,
     /// Hard lifetime cap for anonymous SSE and public WebSocket block streams.
     /// A permit is held until the response stream/upgrade task is dropped.
@@ -350,8 +284,18 @@ impl AppState {
             market_ref_data_path,
             event_snapshot_dir,
             arena_db_path: config.arena_db_path.clone(),
-            http_order_limiter: Arc::new(Mutex::new(HttpOrderRateLimiter::new(config))),
-            http_da_limiter: Arc::new(Mutex::new(HttpDaRateLimiter::new(config))),
+            http_order_limiter: Arc::new(HttpRateLimiter::new(
+                config.http_order_global_rps,
+                config.http_order_global_burst,
+                config.http_order_client_rps,
+                config.http_order_client_burst,
+            )),
+            http_da_limiter: Arc::new(HttpRateLimiter::new(
+                config.http_da_global_rps,
+                config.http_da_global_burst,
+                config.http_da_client_rps,
+                config.http_da_client_burst,
+            )),
             http_da_concurrency: Arc::new(Semaphore::new(config.http_da_max_concurrency.max(1))),
             http_public_stream_concurrency: Arc::new(Semaphore::new(
                 config.http_public_stream_max_connections.max(1),

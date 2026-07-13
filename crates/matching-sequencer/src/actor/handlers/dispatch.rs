@@ -11,11 +11,9 @@ impl Actor for SequencerActor {
         _myself: ActorRef<Self::Msg>,
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
-        let now = Instant::now();
-        let global_submission_bucket = TokenBucket::new(
+        let global_submission_limiter = rate_limiter(
             args.sequencer.config.max_global_submissions_per_second,
             args.sequencer.config.global_submission_burst,
-            now,
         );
         Ok(SequencerActorState {
             sequencer: args.sequencer,
@@ -25,8 +23,8 @@ impl Actor for SequencerActor {
             pause_count: 0,
             halted_error: None,
             store: args.store,
-            global_submission_bucket,
-            account_submission_buckets: HashMap::new(),
+            global_submission_limiter,
+            account_submission_limiters: HashMap::new(),
             mailbox_monitor: args.mailbox_monitor,
             indicative_cache: HashMap::new(),
             indicative_solve_gate: IndicativeSolveGate::default(),

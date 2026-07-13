@@ -17,8 +17,8 @@ pub(super) struct SequencerActorState {
     pub(super) pause_count: u32,
     pub(super) halted_error: Option<SequencerError>,
     pub(super) store: Option<Arc<crate::store::Store>>,
-    pub(super) global_submission_bucket: TokenBucket,
-    pub(super) account_submission_buckets: HashMap<AccountId, TokenBucket>,
+    pub(super) global_submission_limiter: Ratelimiter,
+    pub(super) account_submission_limiters: HashMap<AccountId, Ratelimiter>,
     pub(super) mailbox_monitor: MailboxMonitor,
     /// Per-market indicative snapshots from the C2 shadow-solver. Cache
     /// lives on the actor (not `BlockSequencer`) so pure-core stays pure.

@@ -29,6 +29,7 @@ futures = "0.3"
 getrandom = { workspace = true }
 p256 = { workspace = true, features = ["ecdsa"] }
 ractor = { version = "0.15.12", default-features = false, features = ["async-trait", "tokio_runtime"] }
+ratelimit = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 tracing = { workspace = true }

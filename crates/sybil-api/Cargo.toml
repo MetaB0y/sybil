@@ -38,6 +38,7 @@ metrics-exporter-prometheus = "0.18"
 utoipa = { version = "5", features = ["axum_extras"] }
 hex = { workspace = true }
 p256 = { workspace = true, features = ["ecdsa"] }
+ratelimit = { workspace = true }
 getrandom = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 tokio-stream = { version = "0.1", features = ["sync"] }

@@ -1,7 +1,6 @@
 // Exempt from the f64 ban (SYB-196): this module is off the consensus/state-root
-// path. Its floats are the token-bucket admission rate limiter and Prometheus
-// metric gauges/histograms — both explicitly exempt (admission heuristic +
-// observability). No value here is committed into a block's state root.
+// path. Its floats are Prometheus metric gauges/histograms; no value here is
+// committed into a block's state root.
 #![allow(clippy::disallowed_types)]
 
 use std::collections::{HashMap, VecDeque};
@@ -9,6 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
+use ratelimit::Ratelimiter;
 use tokio::sync::broadcast;
 use tokio::time::{Instant, interval_at};
 
@@ -56,7 +56,7 @@ mod production;
 mod queries;
 mod supervisor;
 
-use self::infra::{IndicativeSolveGate, MailboxMonitor, TokenBucket};
+use self::infra::{IndicativeSolveGate, MailboxMonitor, rate_limiter};
 #[cfg(not(test))]
 use self::messages::SequencerTestCrashpoint;
 use self::messages::{SequencerActor, SequencerActorArgs, SequencerActorState};
