@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="460" viewBox="0 0 780 460">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Inter,Arial,sans-serif;fill:#111827}.axis{stroke:#9ca3af;stroke-width:1}.grid{stroke:#e5e7eb;stroke-width:1}.small{font-size:11px}.tiny{font-size:9px}</style>
+<text x="390.0" y="25.0" font-size="17" text-anchor="middle" font-weight="bold">Retained-cash objective gap under flash-liquidity budgets</text>
+<line class="axis" x1="80" y1="50" x2="80" y2="350"/>
+<line class="axis" x1="80" y1="350" x2="720" y2="350"/>
+<line class="grid" x1="80" y1="350.0" x2="720" y2="350.0"/>
+<text x="72.0" y="354.0" font-size="10" text-anchor="end" font-weight="normal">0.00%</text>
+<line class="grid" x1="80" y1="290.0" x2="720" y2="290.0"/>
+<text x="72.0" y="294.0" font-size="10" text-anchor="end" font-weight="normal">0.46%</text>
+<line class="grid" x1="80" y1="230.0" x2="720" y2="230.0"/>
+<text x="72.0" y="234.0" font-size="10" text-anchor="end" font-weight="normal">0.92%</text>
+<line class="grid" x1="80" y1="170.0" x2="720" y2="170.0"/>
+<text x="72.0" y="174.0" font-size="10" text-anchor="end" font-weight="normal">1.38%</text>
+<line class="grid" x1="80" y1="110.0" x2="720" y2="110.0"/>
+<text x="72.0" y="114.0" font-size="10" text-anchor="end" font-weight="normal">1.83%</text>
+<line class="grid" x1="80" y1="50.0" x2="720" y2="50.0"/>
+<text x="72.0" y="54.0" font-size="10" text-anchor="end" font-weight="normal">2.29%</text>
+<text x="80.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">0.1×</text>
+<text x="208.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">0.25×</text>
+<text x="336.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">0.5×</text>
+<text x="464.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">1×</text>
+<text x="592.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">2×</text>
+<text x="720.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">10×</text>
+<line x1="80.0" y1="307.5230630597892" x2="80.0" y2="347.8440858342502" stroke="#111827" stroke-width="2"/>
+<line x1="208.0" y1="308.4771430544543" x2="208.0" y2="319.6710343046146" stroke="#111827" stroke-width="2"/>
+<line x1="336.0" y1="82.14285714285717" x2="336.0" y2="99.16424467987349" stroke="#111827" stroke-width="2"/>
+<line x1="464.0" y1="350.0" x2="464.0" y2="350.0" stroke="#111827" stroke-width="2"/>
+<line x1="592.0" y1="350.0" x2="592.0" y2="350.0" stroke="#111827" stroke-width="2"/>
+<line x1="720.0" y1="350.0" x2="720.0" y2="350.0" stroke="#111827" stroke-width="2"/>
+<polyline fill="none" stroke="#111827" stroke-width="2.5" points="80.0,333.2 208.0,313.6 336.0,90.0 464.0,350.0 592.0,350.0 720.0,350.0"/>
+<circle cx="80.0" cy="333.1933880803566" r="4" fill="#111827"/>
+<circle cx="208.0" cy="313.57735221486377" r="4" fill="#111827"/>
+<circle cx="336.0" cy="90.02239076796786" r="4" fill="#111827"/>
+<circle cx="464.0" cy="350.0" r="4" fill="#111827"/>
+<circle cx="592.0" cy="350.0" r="4" fill="#111827"/>
+<circle cx="720.0" cy="350.0" r="4" fill="#111827"/>
+<line x1="80.0" y1="347.83881705838843" x2="80.0" y2="349.6559942500414" stroke="#7c3aed" stroke-width="2"/>
+<line x1="208.0" y1="350.0" x2="208.0" y2="350.0" stroke="#7c3aed" stroke-width="2"/>
+<line x1="336.0" y1="349.95203585789204" x2="336.0" y2="349.9823054728525" stroke="#7c3aed" stroke-width="2"/>
+<line x1="464.0" y1="350.0" x2="464.0" y2="350.0" stroke="#7c3aed" stroke-width="2"/>
+<line x1="592.0" y1="350.0" x2="592.0" y2="350.0" stroke="#7c3aed" stroke-width="2"/>
+<line x1="720.0" y1="350.0" x2="720.0" y2="350.0" stroke="#7c3aed" stroke-width="2"/>
+<polyline fill="none" stroke="#7c3aed" stroke-width="2.5" points="80.0,348.8 208.0,350.0 336.0,350.0 464.0,350.0 592.0,350.0 720.0,350.0"/>
+<circle cx="80.0" cy="348.81300047642236" r="4" fill="#7c3aed"/>
+<circle cx="208.0" cy="350.0" r="4" fill="#7c3aed"/>
+<circle cx="336.0" cy="349.96708357986284" r="4" fill="#7c3aed"/>
+<circle cx="464.0" cy="350.0" r="4" fill="#7c3aed"/>
+<circle cx="592.0" cy="350.0" r="4" fill="#7c3aed"/>
+<circle cx="720.0" cy="350.0" r="4" fill="#7c3aed"/>
+<line x1="80.0" y1="342.5740474603687" x2="80.0" y2="349.1442730034321" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="208.0" y1="349.91355925068325" x2="208.0" y2="349.9725873578875" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="336.0" y1="349.9893324798433" x2="336.0" y2="350.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="464.0" y1="349.9999444074703" x2="464.0" y2="349.9999762684819" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="592.0" y1="349.9983847444532" x2="592.0" y2="349.99939140316224" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="720.0" y1="346.0439734337346" x2="720.0" y2="348.4143008179625" stroke="#1d4ed8" stroke-width="2"/>
+<polyline fill="none" stroke="#1d4ed8" stroke-width="2.5" points="80.0,346.2 208.0,349.9 336.0,350.0 464.0,350.0 592.0,350.0 720.0,347.3"/>
+<circle cx="80.0" cy="346.21086503710694" r="4" fill="#1d4ed8"/>
+<circle cx="208.0" cy="349.94717913482856" r="4" fill="#1d4ed8"/>
+<circle cx="336.0" cy="349.9956032741877" r="4" fill="#1d4ed8"/>
+<circle cx="464.0" cy="349.9999596301952" r="4" fill="#1d4ed8"/>
+<circle cx="592.0" cy="349.99893795605465" r="4" fill="#1d4ed8"/>
+<circle cx="720.0" cy="347.32196658660314" r="4" fill="#1d4ed8"/>
+<rect x="80" y="430" width="12" height="3" fill="#111827"/>
+<text x="98.0" y="435.0" font-size="10" text-anchor="start" font-weight="normal">LP</text>
+<rect x="260" y="430" width="12" height="3" fill="#7c3aed"/>
+<text x="278.0" y="435.0" font-size="10" text-anchor="start" font-weight="normal">RC-FW</text>
+<rect x="440" y="430" width="12" height="3" fill="#1d4ed8"/>
+<text x="458.0" y="435.0" font-size="10" text-anchor="start" font-weight="normal">Quasi</text>
+<text x="400.0" y="402.0" font-size="11" text-anchor="middle" font-weight="normal">Budget / unconstrained MM limit-value; paired bootstrap 95% intervals</text>
+</svg>

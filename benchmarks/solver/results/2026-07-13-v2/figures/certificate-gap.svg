@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="458" viewBox="0 0 900 458">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Inter,Arial,sans-serif;fill:#111827}.axis{stroke:#9ca3af;stroke-width:1}.grid{stroke:#e5e7eb;stroke-width:1}.small{font-size:11px}.tiny{font-size:9px}</style>
+<text x="450.0" y="24.0" font-size="17" text-anchor="middle" font-weight="bold">RC-FW continuous optimality certificate by experiment (P95)</text>
+<line class="grid" x1="250.0" y1="45" x2="250.0" y2="413"/>
+<text x="250.0" y="433.0" font-size="9" text-anchor="middle" font-weight="normal">10^-4%</text>
+<line class="grid" x1="446.66666666666663" y1="45" x2="446.66666666666663" y2="413"/>
+<text x="446.7" y="433.0" font-size="9" text-anchor="middle" font-weight="normal">10^-3%</text>
+<line class="grid" x1="643.3333333333333" y1="45" x2="643.3333333333333" y2="413"/>
+<text x="643.3" y="433.0" font-size="9" text-anchor="middle" font-weight="normal">10^-2%</text>
+<line class="grid" x1="840.0" y1="45" x2="840.0" y2="413"/>
+<text x="840.0" y="433.0" font-size="9" text-anchor="middle" font-weight="normal">10^-1%</text>
+<text x="240.0" y="50.0" font-size="10" text-anchor="end" font-weight="normal">concentrated-tight</text>
+<line x1="250" y1="45" x2="798.1824450018969" y2="45" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="798.1824450018969" cy="45" r="5" fill="#7c3aed"/>
+<text x="806.2" y="49.0" font-size="9" text-anchor="start" font-weight="normal">0.0613%</text>
+<text x="240.0" y="92.0" font-size="10" text-anchor="end" font-weight="normal">flash-budget-sweep</text>
+<line x1="250" y1="87" x2="532.2886890219602" y2="87" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="532.2886890219602" cy="87" r="5" fill="#7c3aed"/>
+<text x="540.3" y="91.0" font-size="9" text-anchor="start" font-weight="normal">0.00272%</text>
+<text x="240.0" y="134.0" font-size="10" text-anchor="end" font-weight="normal">flash-exact-reference</text>
+<line x1="250" y1="129" x2="467.3484200477135" y2="129" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="467.3484200477135" cy="129" r="5" fill="#7c3aed"/>
+<text x="475.3" y="133.0" font-size="9" text-anchor="start" font-weight="normal">0.00127%</text>
+<text x="240.0" y="176.0" font-size="10" text-anchor="end" font-weight="normal">flash-scaling-large</text>
+<line x1="250" y1="171" x2="446.00661668831174" y2="171" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="446.00661668831174" cy="171" r="5" fill="#7c3aed"/>
+<text x="454.0" y="175.0" font-size="9" text-anchor="start" font-weight="normal">0.000992%</text>
+<text x="240.0" y="218.0" font-size="10" text-anchor="end" font-weight="normal">flash-scaling-medium</text>
+<line x1="250" y1="213" x2="445.261382622243" y2="213" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="445.261382622243" cy="213" r="5" fill="#7c3aed"/>
+<text x="453.3" y="217.0" font-size="9" text-anchor="start" font-weight="normal">0.000984%</text>
+<text x="240.0" y="260.0" font-size="10" text-anchor="end" font-weight="normal">flash-scaling-small</text>
+<line x1="250" y1="255" x2="713.4686127832799" y2="255" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="713.4686127832799" cy="255" r="5" fill="#7c3aed"/>
+<text x="721.5" y="259.0" font-size="9" text-anchor="start" font-weight="normal">0.0227%</text>
+<text x="240.0" y="302.0" font-size="10" text-anchor="end" font-weight="normal">neutral-budget-controls</text>
+<line x1="250" y1="297" x2="770.0274655282983" y2="297" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="770.0274655282983" cy="297" r="5" fill="#7c3aed"/>
+<text x="778.0" y="301.0" font-size="9" text-anchor="start" font-weight="normal">0.0441%</text>
+<text x="240.0" y="344.0" font-size="10" text-anchor="end" font-weight="normal">no-cash-ablation</text>
+<line x1="250" y1="339" x2="625.4137749819945" y2="339" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="625.4137749819945" cy="339" r="5" fill="#7c3aed"/>
+<text x="633.4" y="343.0" font-size="9" text-anchor="start" font-weight="normal">0.00811%</text>
+<text x="240.0" y="386.0" font-size="10" text-anchor="end" font-weight="normal">numerical-range-stress</text>
+<line x1="250" y1="381" x2="839.1654127872513" y2="381" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="839.1654127872513" cy="381" r="5" fill="#7c3aed"/>
+<text x="847.2" y="385.0" font-size="9" text-anchor="start" font-weight="normal">0.099%</text>
+</svg>

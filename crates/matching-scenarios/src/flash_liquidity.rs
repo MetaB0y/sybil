@@ -94,7 +94,7 @@ pub fn generate_flash_liquidity_scenario(config: FlashLiquidityConfig) -> Proble
 
             let mm_order_id = order_id;
             let mm_index = market_index % config.num_mms;
-            if rank % 2 == 0 {
+            if rank.is_multiple_of(2) {
                 problem.orders.push(outcome_buy(
                     &problem.markets,
                     mm_order_id,
@@ -121,7 +121,7 @@ pub fn generate_flash_liquidity_scenario(config: FlashLiquidityConfig) -> Proble
                 &problem.markets,
                 order_id,
                 market,
-                if rank % 2 == 0 { 1 } else { 0 },
+                if rank.is_multiple_of(2) { 1 } else { 0 },
                 price_to_nanos(retail_limit).0,
                 quantity,
             ));

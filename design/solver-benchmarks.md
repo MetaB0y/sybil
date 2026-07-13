@@ -7,8 +7,9 @@ last_verified: 2026-07-13
 # Solver Benchmarks
 
 > **Superseded:** use
-> [`solver-benchmark-report-2026-07-13.md`](solver-benchmark-report-2026-07-13.md)
-> for the preregistered, failure-preserving evaluation. This page is retained
+> [`solver-benchmark-report-2026-07-13-v2.md`](solver-benchmark-report-2026-07-13-v2.md)
+> for the current preregistered, failure-preserving retained-cash evaluation.
+> The v1 report remains dated negative evidence. This page is retained
 > as research history. Its single-seed headline numbers, including the
 > “gap < 0.7%” statement, are not representative of the broader suite, and
 > some older solver paths could silently substitute LP after a failure.

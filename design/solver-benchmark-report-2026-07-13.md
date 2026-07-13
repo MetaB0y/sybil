@@ -6,6 +6,14 @@ last_verified: 2026-07-13
 
 # Solver evaluation: 2026-07-13
 
+> **Superseded by v2.** This report correctly describes the historical v1
+> implementations and is retained as negative evidence. Its recommendation to
+> keep LP-SLP as the production default no longer applies after the old IterLP
+> and EG algorithms were replaced by certified retained-cash generalized
+> Frank--Wolfe. Use
+> [`solver-benchmark-report-2026-07-13-v2.md`](solver-benchmark-report-2026-07-13-v2.md)
+> and the frozen v2 artifacts for the current decision.
+
 ## Decision summary
 
 Keep the monolithic LP solver as the production default.

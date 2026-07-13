@@ -1,0 +1,4629 @@
+{
+  "ablation": [
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 0.25,
+      "certificate_gap_median_dollars": 2.496464958312572e-06,
+      "certificate_gap_p95_dollars": 4.915699673802009e-06,
+      "certificate_relative_gap_median_percent": 4.2946716266303195e-07,
+      "certificate_relative_gap_p95_percent": 8.450018228512264e-07,
+      "declared": 5,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.9999959846879194,
+      "max_mm_utilization_median": 0.9462923419587893,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.00023500805717577728,
+        0.010749973545842676
+      ],
+      "retained_gap_mean_percent": 0.004208094369170267,
+      "retained_gap_median_percent": 0.000784990957499389,
+      "retained_gap_p25_percent": 0.00019502466418974866,
+      "retained_gap_p75_percent": 0.00321575047163661,
+      "runtime_median_seconds": 0.00166029,
+      "runtime_p25_seconds": 0.00161312,
+      "runtime_p75_seconds": 0.001703551,
+      "solver_id": "conic-fisher",
+      "status_counts": {
+        "completed": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 0.25,
+      "certificate_gap_median_dollars": 2.2113631530373823e-06,
+      "certificate_gap_p95_dollars": 2.6939668941849957e-06,
+      "certificate_relative_gap_median_percent": 3.6164307432585626e-07,
+      "certificate_relative_gap_p95_percent": 4.7230994942324156e-07,
+      "declared": 5,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.9999959846879194,
+      "max_mm_utilization_median": 0.9462764690798456,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.00023499850484868818,
+        0.010749998413035726
+      ],
+      "retained_gap_mean_percent": 0.004208089168933726,
+      "retained_gap_median_percent": 0.0007848569969654849,
+      "retained_gap_p25_percent": 0.00019500828757569523,
+      "retained_gap_p75_percent": 0.003215815331538581,
+      "runtime_median_seconds": 0.001562238,
+      "runtime_p25_seconds": 0.001548418,
+      "runtime_p75_seconds": 0.001732672,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 0.25,
+      "certificate_gap_median_dollars": 0.002737849201950073,
+      "certificate_gap_p95_dollars": 0.01090609582284851,
+      "certificate_relative_gap_median_percent": 0.0029531766431129367,
+      "certificate_relative_gap_p95_percent": 0.00998895185887087,
+      "declared": 5,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.9999984825227578,
+      "max_mm_utilization_median": 0.9996803184799955,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0012721757306017058
+      ],
+      "retained_gap_mean_percent": 0.0004240585768672353,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.081837673,
+      "runtime_p25_seconds": 0.080544169,
+      "runtime_p75_seconds": 0.082858811,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "iteration_limit": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 4.0,
+      "certificate_gap_median_dollars": 6.085751192586031e-05,
+      "certificate_gap_p95_dollars": 9.709469704830554e-05,
+      "certificate_relative_gap_median_percent": 4.977437492637588e-07,
+      "certificate_relative_gap_p95_percent": 7.752557304851443e-07,
+      "declared": 5,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.1881488414768635,
+      "max_mm_utilization_median": 0.18193118514263204,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.001822163,
+      "runtime_p25_seconds": 0.001524188,
+      "runtime_p75_seconds": 0.001861323,
+      "solver_id": "conic-fisher",
+      "status_counts": {
+        "completed": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 4.0,
+      "certificate_gap_median_dollars": 8.2194874266861e-05,
+      "certificate_gap_p95_dollars": 9.419115194759797e-05,
+      "certificate_relative_gap_median_percent": 5.729773174851693e-07,
+      "certificate_relative_gap_p95_percent": 6.898580420118178e-07,
+      "declared": 5,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.1881478241419771,
+      "max_mm_utilization_median": 0.18193068911566107,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        1.3940254195892161e-05,
+        4.0795162752838765e-05
+      ],
+      "retained_gap_mean_percent": 2.53471281781493e-05,
+      "retained_gap_median_percent": 1.980724393148382e-05,
+      "retained_gap_p25_percent": 1.6056759769031472e-05,
+      "retained_gap_p75_percent": 2.719427480153214e-05,
+      "runtime_median_seconds": 0.00171627,
+      "runtime_p25_seconds": 0.0016302,
+      "runtime_p75_seconds": 0.002039277,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 4.0,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 0.0,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.0,
+      "declared": 5,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.1881488414768635,
+      "max_mm_utilization_median": 0.18193118514263204,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.003264108,
+      "runtime_p25_seconds": 0.002663539,
+      "runtime_p75_seconds": 0.00326968,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 5
+      },
+      "verifier_invalid": 0
+    }
+  ],
+  "analysis_script_sha256": "ab19d98c885e96323fd593fbff5c24b63f3c349ad44e79ae1ae0ce3299f71b9b",
+  "budget": [
+    {
+      "allocation_l1_median": 0.00268809751790821,
+      "budget_scale": 0.1,
+      "certificate_gap_median_dollars": 2.6290635105397087e-05,
+      "certificate_gap_p95_dollars": 4.059053080709418e-05,
+      "certificate_relative_gap_median_percent": 5.539977956308502e-07,
+      "certificate_relative_gap_p95_percent": 8.546047152847645e-07,
+      "declared": 10,
+      "failed": 1,
+      "hard_budget_welfare_gap_median_percent": 58.85390492154078,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 1.233161010405847,
+      "lp_gap_mean_ci95_percent": [
+        0.05112894438993365,
+        0.7747290987706614
+      ],
+      "lp_gap_mean_percent": 0.4510715939589468,
+      "lp_gap_median_percent": 0.5407990681632432,
+      "lp_gap_min_percent": -0.8379896538813579,
+      "lp_gap_p25_percent": 0.5112171403519841,
+      "lp_gap_p75_percent": 0.7363338172866293,
+      "max_mm_utilization_max": 0.9892243747002879,
+      "max_mm_utilization_median": 0.9749928696326368,
+      "paper_bound_ratio_max": 0.3253770269404212,
+      "paper_bound_ratio_median": 0.3199122680584513,
+      "retained_gap_mean_ci95_percent": [
+        0.0065377404480082175,
+        0.05673415759705352
+      ],
+      "retained_gap_mean_percent": 0.02894892998494096,
+      "retained_gap_median_percent": 0.0031419910642976486,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0536090122862265,
+      "runtime_median_seconds": 0.005799466,
+      "runtime_p25_seconds": 0.005612862,
+      "runtime_p75_seconds": 0.00607182,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 9,
+        "solver_failure": 1
+      },
+      "successful": 9,
+      "termination_counts": {
+        "converged": 9,
+        "numerical_failure": 1
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 0.1,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 58.87226718408775,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999999142308276,
+      "max_mm_utilization_median": 0.9999989986185329,
+      "paper_bound_ratio_max": 0.32422345934852326,
+      "paper_bound_ratio_median": 0.31939981113597316,
+      "retained_gap_mean_ci95_percent": [
+        0.016471149444141464,
+        0.3245231129265588
+      ],
+      "retained_gap_mean_percent": 0.12840224391858435,
+      "retained_gap_median_percent": 0.025407941404802445,
+      "retained_gap_p25_percent": 0.008801238126927794,
+      "retained_gap_p75_percent": 0.06687401736089497,
+      "runtime_median_seconds": 0.0101869405,
+      "runtime_p25_seconds": 0.0075977232500000005,
+      "runtime_p75_seconds": 0.01048440075,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 3,
+        "iteration_limit": 7
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 0.1,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 10,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 7.44798816227851,
+      "max_mm_utilization_median": 7.34949274493041,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 10
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 10
+    },
+    {
+      "allocation_l1_median": 0.005086408461009209,
+      "budget_scale": 0.1,
+      "certificate_gap_median_dollars": 0.009840397155830384,
+      "certificate_gap_p95_dollars": 0.16776123638205553,
+      "certificate_relative_gap_median_percent": 0.0009812002605032785,
+      "certificate_relative_gap_p95_percent": 0.01712401553307008,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 59.21935045681442,
+      "integer_landing_loss_median_dollars": 3.3209027832031256e-05,
+      "lp_gap_max_percent": 1.517011867772731,
+      "lp_gap_mean_ci95_percent": [
+        0.6919160397565141,
+        1.1962323086449933
+      ],
+      "lp_gap_mean_percent": 0.9474695990112545,
+      "lp_gap_median_percent": 0.9634379756880616,
+      "lp_gap_min_percent": 0.25211589646961835,
+      "lp_gap_p25_percent": 0.6412987675614255,
+      "lp_gap_p75_percent": 1.313525509599466,
+      "max_mm_utilization_max": 0.9999998301408818,
+      "max_mm_utilization_median": 0.9999992633821723,
+      "paper_bound_ratio_max": 0.3260053597929704,
+      "paper_bound_ratio_median": 0.3213709408499882,
+      "retained_gap_mean_ci95_percent": [
+        0.002628198379707757,
+        0.016511402806722558
+      ],
+      "retained_gap_mean_percent": 0.009068657209816354,
+      "retained_gap_median_percent": 0.0035686718713548535,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.016391937051597673,
+      "runtime_median_seconds": 0.1297955555,
+      "runtime_p25_seconds": 0.062965702,
+      "runtime_p75_seconds": 0.14866576675,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 6,
+        "iteration_limit": 4
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.022506602125120873,
+      "budget_scale": 0.25,
+      "certificate_gap_median_dollars": 9.131863771472126e-05,
+      "certificate_gap_p95_dollars": 0.00023134984730859275,
+      "certificate_relative_gap_median_percent": 6.784272283481955e-07,
+      "certificate_relative_gap_p95_percent": 1.8894496987374133e-06,
+      "declared": 10,
+      "failed": 3,
+      "hard_budget_welfare_gap_median_percent": 36.51399623378666,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 3.621237087626273,
+      "lp_gap_mean_ci95_percent": [
+        2.7467177115033783,
+        3.4186905580640716
+      ],
+      "lp_gap_mean_percent": 3.093712934101589,
+      "lp_gap_median_percent": 3.2792920227849267,
+      "lp_gap_min_percent": 2.345438601578955,
+      "lp_gap_p25_percent": 2.7834663348664206,
+      "lp_gap_p75_percent": 3.4215450784940638,
+      "max_mm_utilization_max": 0.9534336973580612,
+      "max_mm_utilization_median": 0.9453516851685486,
+      "paper_bound_ratio_max": 0.3333235115709471,
+      "paper_bound_ratio_median": 0.3307704129656321,
+      "retained_gap_mean_ci95_percent": [
+        0.00020943214348076027,
+        0.0006604059301981982
+      ],
+      "retained_gap_mean_percent": 0.000403550557730598,
+      "retained_gap_median_percent": 0.00017255011024215405,
+      "retained_gap_p25_percent": 0.00012377458534738688,
+      "retained_gap_p75_percent": 0.0007454530440159931,
+      "runtime_median_seconds": 0.005820715,
+      "runtime_p25_seconds": 0.0056347624999999995,
+      "runtime_p75_seconds": 0.0060312405,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 7,
+        "solver_failure": 3
+      },
+      "successful": 7,
+      "termination_counts": {
+        "converged": 7,
+        "numerical_failure": 3
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 0.25,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 34.34009912174327,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999996978433677,
+      "max_mm_utilization_median": 0.9991141415282063,
+      "paper_bound_ratio_max": 0.3177494007551354,
+      "paper_bound_ratio_median": 0.30965018761148044,
+      "retained_gap_mean_ci95_percent": [
+        0.2317128086039542,
+        0.3172339571598547
+      ],
+      "retained_gap_mean_percent": 0.27826844145794927,
+      "retained_gap_median_percent": 0.2903594437750551,
+      "retained_gap_p25_percent": 0.270075294974766,
+      "retained_gap_p75_percent": 0.3096041650147277,
+      "runtime_median_seconds": 0.0076600695,
+      "runtime_p25_seconds": 0.004302865750000001,
+      "runtime_p75_seconds": 0.010216233250000002,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 6,
+        "iteration_limit": 4
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 0.25,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 10,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.979195264911404,
+      "max_mm_utilization_median": 2.939797097972031,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 10
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 10
+    },
+    {
+      "allocation_l1_median": 0.019197331756743933,
+      "budget_scale": 0.25,
+      "certificate_gap_median_dollars": 0.009580422529174805,
+      "certificate_gap_p95_dollars": 0.015535768792980954,
+      "certificate_relative_gap_median_percent": 0.0006213886337408461,
+      "certificate_relative_gap_p95_percent": 0.0009872843214189576,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 36.42240179973497,
+      "integer_landing_loss_median_dollars": 2.4284365234374997e-06,
+      "lp_gap_max_percent": 3.617349760071447,
+      "lp_gap_mean_ci95_percent": [
+        2.8048625413476342,
+        3.2924347764797894
+      ],
+      "lp_gap_mean_percent": 3.0564217380995755,
+      "lp_gap_median_percent": 3.1170942177348895,
+      "lp_gap_min_percent": 2.3386605273812706,
+      "lp_gap_p25_percent": 2.8034053186892445,
+      "lp_gap_p75_percent": 3.28714717436585,
+      "max_mm_utilization_max": 0.9613523042459394,
+      "max_mm_utilization_median": 0.9513857005642741,
+      "paper_bound_ratio_max": 0.3333580543160516,
+      "paper_bound_ratio_median": 0.328198742210152,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0221825995,
+      "runtime_p25_seconds": 0.01767753475,
+      "runtime_p75_seconds": 0.04417809225,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.05925615047878856,
+      "budget_scale": 0.5,
+      "certificate_gap_median_dollars": 0.0001666817242949037,
+      "certificate_gap_p95_dollars": 0.0028175445662782274,
+      "certificate_relative_gap_median_percent": 6.080831676362712e-07,
+      "certificate_relative_gap_p95_percent": 1.0139101353227925e-05,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 13.129390975505537,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 6.2004309918381555,
+      "lp_gap_mean_ci95_percent": [
+        5.4083206257037135,
+        5.771301204033663
+      ],
+      "lp_gap_mean_percent": 5.580461270649296,
+      "lp_gap_median_percent": 5.506498242648042,
+      "lp_gap_min_percent": 5.1581517664397065,
+      "lp_gap_p25_percent": 5.364387615726433,
+      "lp_gap_p75_percent": 5.77211557077429,
+      "max_mm_utilization_max": 0.8838462760059503,
+      "max_mm_utilization_median": 0.8704161835731927,
+      "paper_bound_ratio_max": 0.32178773612767264,
+      "paper_bound_ratio_median": 0.3119128661558124,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        8.149968189393131e-05
+      ],
+      "retained_gap_mean_percent": 3.3590914271972226e-05,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0060399245,
+      "runtime_p25_seconds": 0.005816568,
+      "runtime_p75_seconds": 0.006213763749999999,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 0.5,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 7.975382934858927,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999999982544205,
+      "max_mm_utilization_median": 0.99954330721278,
+      "paper_bound_ratio_max": 0.20102291559436858,
+      "paper_bound_ratio_median": 0.18876722707946011,
+      "retained_gap_mean_ci95_percent": [
+        1.9163811238166963,
+        2.046424249986953
+      ],
+      "retained_gap_mean_percent": 1.9862247402146338,
+      "retained_gap_median_percent": 1.9933453594787696,
+      "retained_gap_p25_percent": 1.9542230796233202,
+      "retained_gap_p75_percent": 2.023145093198765,
+      "runtime_median_seconds": 0.004218016999999999,
+      "runtime_p25_seconds": 0.0038851432500000005,
+      "runtime_p75_seconds": 0.009902072999999999,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 6,
+        "iteration_limit": 4
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "budget_scale": 0.5,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 10,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 1.4895976324549263,
+      "max_mm_utilization_median": 1.4698985489860155,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 10
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 10
+    },
+    {
+      "allocation_l1_median": 0.05930752504385337,
+      "budget_scale": 0.5,
+      "certificate_gap_median_dollars": 0.01843362718310547,
+      "certificate_gap_p95_dollars": 0.02221100026657715,
+      "certificate_relative_gap_median_percent": 0.0008520304775701995,
+      "certificate_relative_gap_p95_percent": 0.0009629081798662286,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 13.120365415997265,
+      "integer_landing_loss_median_dollars": 5.259209887695312e-05,
+      "lp_gap_max_percent": 6.21511705720714,
+      "lp_gap_mean_ci95_percent": [
+        5.408301972701069,
+        5.77304397261916
+      ],
+      "lp_gap_mean_percent": 5.582695997696611,
+      "lp_gap_median_percent": 5.505835433222256,
+      "lp_gap_min_percent": 5.162681293948736,
+      "lp_gap_p25_percent": 5.378618783240616,
+      "lp_gap_p75_percent": 5.7683736692973815,
+      "max_mm_utilization_max": 0.8846632565747429,
+      "max_mm_utilization_median": 0.8738862924164191,
+      "paper_bound_ratio_max": 0.3221072925651961,
+      "paper_bound_ratio_median": 0.3116049498529846,
+      "retained_gap_mean_ci95_percent": [
+        0.00013518590193438751,
+        0.00036644527188094963
+      ],
+      "retained_gap_mean_percent": 0.0002514809187947764,
+      "retained_gap_median_percent": 0.000285208692285738,
+      "retained_gap_p25_percent": 5.306634467018986e-05,
+      "retained_gap_p75_percent": 0.00039247809437873126,
+      "runtime_median_seconds": 0.0339863795,
+      "runtime_p25_seconds": 0.02983841025,
+      "runtime_p75_seconds": 0.03881954725,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 2.711006687149828e-07,
+      "budget_scale": 1.0,
+      "certificate_gap_median_dollars": 0.0004438031173776835,
+      "certificate_gap_p95_dollars": 0.0005410024423326831,
+      "certificate_relative_gap_median_percent": 7.614428112278256e-07,
+      "certificate_relative_gap_p95_percent": 9.466711254546505e-07,
+      "declared": 10,
+      "failed": 3,
+      "hard_budget_welfare_gap_median_percent": 3.4285564085087054e-07,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 4.949096428657054e-07,
+      "lp_gap_mean_ci95_percent": [
+        1.8013161876307735e-07,
+        4.20655098299922e-07
+      ],
+      "lp_gap_mean_percent": 3.084089079791785e-07,
+      "lp_gap_median_percent": 3.4285564085087054e-07,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 2.1157802381248279e-07,
+      "lp_gap_p75_percent": 4.489705122563539e-07,
+      "max_mm_utilization_max": 0.74043416896592,
+      "max_mm_utilization_median": 0.7269808073416573,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        1.8130841547304698e-07,
+        4.2472602982814937e-07
+      ],
+      "retained_gap_mean_percent": 3.0842465756089496e-07,
+      "retained_gap_median_percent": 3.4288215429918907e-07,
+      "retained_gap_p25_percent": 2.116017944524191e-07,
+      "retained_gap_p75_percent": 4.489731501677773e-07,
+      "runtime_median_seconds": 0.005605281,
+      "runtime_p25_seconds": 0.005418134,
+      "runtime_p75_seconds": 0.0058191965,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 7,
+        "solver_failure": 3
+      },
+      "successful": 7,
+      "termination_counts": {
+        "converged": 7,
+        "numerical_failure": 3
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 1.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.7447988162276571,
+      "max_mm_utilization_median": 0.7349492744932036,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.002247541,
+      "runtime_p25_seconds": 0.0021922417499999998,
+      "runtime_p75_seconds": 0.002421102,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 1.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.7447988162276571,
+      "max_mm_utilization_median": 0.7349492744932036,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0022370059999999997,
+      "runtime_p25_seconds": 0.00216369675,
+      "runtime_p75_seconds": 0.00241405925,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 1.0,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 0.0,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.0,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.7447988162276571,
+      "max_mm_utilization_median": 0.7349492744932036,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.005112618500000001,
+      "runtime_p25_seconds": 0.00502454125,
+      "runtime_p75_seconds": 0.00526701525,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 1.8385992255058041e-06,
+      "budget_scale": 2.0,
+      "certificate_gap_median_dollars": 0.0005156876723049209,
+      "certificate_gap_p95_dollars": 0.001056297932518646,
+      "certificate_relative_gap_median_percent": 4.430243576516891e-07,
+      "certificate_relative_gap_p95_percent": 8.790929308910557e-07,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 5.880207579211923e-06,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 2.297930714290735e-05,
+      "lp_gap_mean_ci95_percent": [
+        4.649650913346026e-06,
+        1.244491505129572e-05
+      ],
+      "lp_gap_mean_percent": 8.113976836018178e-06,
+      "lp_gap_median_percent": 5.880207579211923e-06,
+      "lp_gap_min_percent": 2.5606945438764073e-06,
+      "lp_gap_p25_percent": 3.2148702888849785e-06,
+      "lp_gap_p75_percent": 1.1056095983071106e-05,
+      "max_mm_utilization_max": 0.3723956322931878,
+      "max_mm_utilization_median": 0.3674721668036801,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        4.649670021948678e-06,
+        1.2340526318289816e-05
+      ],
+      "retained_gap_mean_percent": 8.113998608062247e-06,
+      "retained_gap_median_percent": 5.880243835283394e-06,
+      "retained_gap_p25_percent": 3.21486676330801e-06,
+      "retained_gap_p75_percent": 1.1056112433501229e-05,
+      "runtime_median_seconds": 0.005950258,
+      "runtime_p25_seconds": 0.0056972707499999995,
+      "runtime_p75_seconds": 0.00605655325,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 2.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.37239940811382855,
+      "max_mm_utilization_median": 0.3674746372466018,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0022537315,
+      "runtime_p25_seconds": 0.00221841775,
+      "runtime_p75_seconds": 0.00233849675,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 2.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.37239940811382855,
+      "max_mm_utilization_median": 0.3674746372466018,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0021981855,
+      "runtime_p25_seconds": 0.002125538,
+      "runtime_p75_seconds": 0.0022504335,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 2.0,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 0.0,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.0,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.37239940811382855,
+      "max_mm_utilization_median": 0.3674746372466018,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0050915679999999994,
+      "runtime_p25_seconds": 0.00505645475,
+      "runtime_p75_seconds": 0.0055934092500000004,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0004652873976319407,
+      "budget_scale": 10.0,
+      "certificate_gap_median_dollars": 0.002483558957464993,
+      "certificate_gap_p95_dollars": 0.005707767175044863,
+      "certificate_relative_gap_median_percent": 3.6127785659252625e-07,
+      "certificate_relative_gap_p95_percent": 7.498643235489296e-07,
+      "declared": 10,
+      "failed": 2,
+      "hard_budget_welfare_gap_median_percent": 0.017828538852614186,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.04857599950406091,
+      "lp_gap_mean_ci95_percent": [
+        0.012219507940503315,
+        0.03035849024107683
+      ],
+      "lp_gap_mean_percent": 0.02046013202886909,
+      "lp_gap_median_percent": 0.017828538852614186,
+      "lp_gap_min_percent": 0.0055634555135745355,
+      "lp_gap_p25_percent": 0.010193147711171023,
+      "lp_gap_p75_percent": 0.026607988253390388,
+      "max_mm_utilization_max": 0.07432167444547494,
+      "max_mm_utilization_median": 0.0729544354018975,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.012114716168075598,
+        0.03022397914217949
+      ],
+      "retained_gap_mean_percent": 0.020460132072615836,
+      "retained_gap_median_percent": 0.017828539049949313,
+      "retained_gap_p25_percent": 0.010193147968857348,
+      "retained_gap_p75_percent": 0.026607987881442585,
+      "runtime_median_seconds": 0.006121866,
+      "runtime_p25_seconds": 0.00591465475,
+      "runtime_p75_seconds": 0.006227733249999999,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 8,
+        "solver_failure": 2
+      },
+      "successful": 8,
+      "termination_counts": {
+        "converged": 8,
+        "numerical_failure": 2
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 10.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.07447988162276571,
+      "max_mm_utilization_median": 0.07349492744932037,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0021723195,
+      "runtime_p25_seconds": 0.0021553665000000003,
+      "runtime_p75_seconds": 0.00231355425,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 10.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.07447988162276571,
+      "max_mm_utilization_median": 0.07349492744932037,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0022446865,
+      "runtime_p25_seconds": 0.00222052025,
+      "runtime_p75_seconds": 0.00231356025,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "budget_scale": 10.0,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 0.0,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.0,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.07447988162276571,
+      "max_mm_utilization_median": 0.07349492744932037,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0051450395,
+      "runtime_p25_seconds": 0.0049233665,
+      "runtime_p75_seconds": 0.00541645825,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    }
+  ],
+  "decomposition": [],
+  "experiments": [
+    {
+      "allocation_l1_median": 0.02062851220180484,
+      "certificate_gap_median_dollars": 0.001583736146130832,
+      "certificate_gap_p95_dollars": 0.021900015914434325,
+      "certificate_relative_gap_median_percent": 1.5872627183863022e-06,
+      "certificate_relative_gap_p95_percent": 1.9248051211298334e-05,
+      "declared": 6,
+      "experiment_id": "concentrated-tight",
+      "failed": 2,
+      "hard_budget_welfare_gap_median_percent": 0.6631947304834398,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0802254625956671,
+      "lp_gap_mean_ci95_percent": [
+        0.007194603112581651,
+        0.06892956059549535
+      ],
+      "lp_gap_mean_percent": 0.0380620818540385,
+      "lp_gap_median_percent": 0.036944204796554345,
+      "lp_gap_min_percent": -0.0018655447726217975,
+      "lp_gap_p25_percent": 0.011724677055183375,
+      "lp_gap_p75_percent": 0.06328160959540946,
+      "max_mm_utilization_max": 0.9999999791585691,
+      "max_mm_utilization_median": 0.9950139210170619,
+      "paper_bound_ratio_max": 0.0753577710626087,
+      "paper_bound_ratio_median": 0.035265180726364635,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.04443242877529112
+      ],
+      "retained_gap_mean_percent": 0.021270016215381028,
+      "retained_gap_median_percent": 0.012918413247234639,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.03418842946261567,
+      "runtime_median_seconds": 0.080513766,
+      "runtime_p25_seconds": 0.079244966,
+      "runtime_p75_seconds": 0.0835570265,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 4,
+        "solver_failure": 2
+      },
+      "successful": 4,
+      "termination_counts": {
+        "converged": 4,
+        "numerical_failure": 2
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "experiment_id": "concentrated-tight",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.8821457204907067,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999990557992265,
+      "max_mm_utilization_median": 0.9985361534711961,
+      "paper_bound_ratio_max": 0.07274826293996735,
+      "paper_bound_ratio_median": 0.04588350178208339,
+      "retained_gap_mean_ci95_percent": [
+        0.0027512902740090086,
+        0.025336822945108264
+      ],
+      "retained_gap_mean_percent": 0.01234542544752823,
+      "retained_gap_median_percent": 0.008253870822027026,
+      "retained_gap_p25_percent": 0.00200395076999916,
+      "retained_gap_p75_percent": 0.013422244685201125,
+      "runtime_median_seconds": 0.046978066,
+      "runtime_p25_seconds": 0.04675877125,
+      "runtime_p75_seconds": 0.09311803375,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "experiment_id": "concentrated-tight",
+      "failed": 6,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.0,
+      "max_mm_utilization_median": 1.9664872160780011,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 6
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 6
+    },
+    {
+      "allocation_l1_median": 0.023094775121387315,
+      "certificate_gap_median_dollars": 5.054875446873047,
+      "certificate_gap_p95_dollars": 10.223711919760255,
+      "certificate_relative_gap_median_percent": 0.030053351179092566,
+      "certificate_relative_gap_p95_percent": 0.06128700017900598,
+      "declared": 6,
+      "experiment_id": "concentrated-tight",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.936014830701129,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.08177520133733758,
+      "lp_gap_mean_ci95_percent": [
+        0.03277974162668828,
+        0.07012250572224163
+      ],
+      "lp_gap_mean_percent": 0.05118296387867024,
+      "lp_gap_median_percent": 0.05066738868829744,
+      "lp_gap_min_percent": 0.022777493588793916,
+      "lp_gap_p25_percent": 0.029017558950888193,
+      "lp_gap_p75_percent": 0.07222386862023181,
+      "max_mm_utilization_max": 0.9999999754463942,
+      "max_mm_utilization_median": 0.9921664903862866,
+      "paper_bound_ratio_max": 0.07575007607385706,
+      "paper_bound_ratio_median": 0.04850480063569835,
+      "retained_gap_mean_ci95_percent": [
+        0.0008676344142657649,
+        0.017115250325214795
+      ],
+      "retained_gap_mean_percent": 0.008825647708551711,
+      "retained_gap_median_percent": 0.0026029032427972946,
+      "retained_gap_p25_percent": 0.00017089046469113652,
+      "retained_gap_p75_percent": 0.018342661006174883,
+      "runtime_median_seconds": 2.0846783415,
+      "runtime_p25_seconds": 2.03331631275,
+      "runtime_p75_seconds": 2.1340959539999997,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 1,
+        "iteration_limit": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0016097575421688787,
+      "certificate_gap_median_dollars": 0.0003220146827516146,
+      "certificate_gap_p95_dollars": 0.003587580928069656,
+      "certificate_relative_gap_median_percent": 5.5973352594123e-07,
+      "certificate_relative_gap_p95_percent": 2.232329585367401e-06,
+      "declared": 60,
+      "experiment_id": "flash-budget-sweep",
+      "failed": 9,
+      "hard_budget_welfare_gap_median_percent": 12.422232620495134,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 6.2004309918381555,
+      "lp_gap_mean_ci95_percent": [
+        1.0056023529044333,
+        2.2324341225647584
+      ],
+      "lp_gap_mean_percent": 1.601647293052868,
+      "lp_gap_median_percent": 0.02895464899563609,
+      "lp_gap_min_percent": -0.8379896538813579,
+      "lp_gap_p25_percent": 4.17128542793043e-06,
+      "lp_gap_p75_percent": 3.28298877571145,
+      "max_mm_utilization_max": 0.9892243747002879,
+      "max_mm_utilization_median": 0.73250685758578,
+      "paper_bound_ratio_max": 0.3333235115709471,
+      "paper_bound_ratio_median": 0.319284380910905,
+      "retained_gap_mean_ci95_percent": [
+        0.0034851232935913783,
+        0.014544374362959425
+      ],
+      "retained_gap_mean_percent": 0.008381676244135544,
+      "retained_gap_median_percent": 1.2426990398930447e-05,
+      "retained_gap_p25_percent": 2.116017944524191e-07,
+      "retained_gap_p75_percent": 0.002093160702536274,
+      "runtime_median_seconds": 0.005904148,
+      "runtime_p25_seconds": 0.005681353,
+      "runtime_p75_seconds": 0.0061605865,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 51,
+        "solver_failure": 9
+      },
+      "successful": 51,
+      "termination_counts": {
+        "converged": 51,
+        "numerical_failure": 9
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 60,
+      "experiment_id": "flash-budget-sweep",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 3.7755490227863233,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999999982544205,
+      "max_mm_utilization_median": 0.8678325240534792,
+      "paper_bound_ratio_max": 0.32422345934852326,
+      "paper_bound_ratio_median": 0.3090648336817544,
+      "retained_gap_mean_ci95_percent": [
+        0.22359629304379558,
+        0.588372197601155
+      ],
+      "retained_gap_mean_percent": 0.39881590426519453,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.2973163777065297,
+      "runtime_median_seconds": 0.003165587,
+      "runtime_p25_seconds": 0.002242971,
+      "runtime_p75_seconds": 0.00980155575,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 60
+      },
+      "successful": 60,
+      "termination_counts": {
+        "converged": 45,
+        "iteration_limit": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 60,
+      "experiment_id": "flash-budget-sweep",
+      "failed": 30,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 7.44798816227851,
+      "max_mm_utilization_median": 1.0970372065186518,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.002231536,
+      "runtime_p25_seconds": 0.00214978575,
+      "runtime_p75_seconds": 0.00231759275,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 30,
+        "verifier_invalid": 30
+      },
+      "successful": 30,
+      "termination_counts": {
+        "converged": 60
+      },
+      "verifier_invalid": 30
+    },
+    {
+      "allocation_l1_median": 0.0008537681254964229,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 0.02684127676404017,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.002724998172559879,
+      "declared": 60,
+      "experiment_id": "flash-budget-sweep",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 6.2139995817871245,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 6.21511705720714,
+      "lp_gap_mean_ci95_percent": [
+        1.0787461210812166,
+        2.138489450897105
+      ],
+      "lp_gap_mean_percent": 1.5977645558012403,
+      "lp_gap_median_percent": 0.12605794823480918,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 3.0699512193550356,
+      "max_mm_utilization_max": 0.9999998301408818,
+      "max_mm_utilization_median": 0.8033945463511976,
+      "paper_bound_ratio_max": 0.3333580543160516,
+      "paper_bound_ratio_median": 0.32062824233005194,
+      "retained_gap_mean_ci95_percent": [
+        0.0003065305507850109,
+        0.0032009681351474013
+      ],
+      "retained_gap_mean_percent": 0.0015533563547685217,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.010568403,
+      "runtime_p25_seconds": 0.0051084735,
+      "runtime_p75_seconds": 0.03958549125,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 60
+      },
+      "successful": 60,
+      "termination_counts": {
+        "converged": 56,
+        "iteration_limit": 4
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.03000174597939744,
+      "certificate_gap_median_dollars": 7.844709557502938e-07,
+      "certificate_gap_p95_dollars": 3.1928554392379733e-06,
+      "certificate_relative_gap_median_percent": 4.93881783428811e-07,
+      "certificate_relative_gap_p95_percent": 7.406699763701476e-07,
+      "declared": 15,
+      "experiment_id": "flash-exact-reference",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 13.765410175098339,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 7.750554740190887,
+      "lp_gap_mean_ci95_percent": [
+        1.555049943052042,
+        4.7953011930337786
+      ],
+      "lp_gap_mean_percent": 3.1930638522519863,
+      "lp_gap_median_percent": 4.720154299112258,
+      "lp_gap_min_percent": -2.5457920491021184,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 5.760230247494734,
+      "max_mm_utilization_max": 0.9897286503067589,
+      "max_mm_utilization_median": 0.8232211808130543,
+      "paper_bound_ratio_max": 0.3556586672497774,
+      "paper_bound_ratio_median": 0.33780179948833583,
+      "retained_gap_mean_ci95_percent": [
+        0.000183572732237102,
+        0.0009553684656954186
+      ],
+      "retained_gap_mean_percent": 0.0005339390129891805,
+      "retained_gap_median_percent": 0.00020208282790618035,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0007384336625060724,
+      "runtime_median_seconds": 0.00108259,
+      "runtime_p25_seconds": 0.0010542995,
+      "runtime_p75_seconds": 0.001219527,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 15,
+      "experiment_id": "flash-exact-reference",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 7.396009924376227,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999917033907605,
+      "max_mm_utilization_median": 0.9920002108940199,
+      "paper_bound_ratio_max": 0.32616436990942166,
+      "paper_bound_ratio_median": 0.2547311148625625,
+      "retained_gap_mean_ci95_percent": [
+        0.5452381890439575,
+        1.7939270413256603
+      ],
+      "retained_gap_mean_percent": 1.1544049469148034,
+      "retained_gap_median_percent": 0.7543397982856161,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 2.4778766009965256,
+      "runtime_median_seconds": 0.001941946,
+      "runtime_p25_seconds": 0.001273773,
+      "runtime_p75_seconds": 0.0022454759999999997,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 15,
+      "experiment_id": "flash-exact-reference",
+      "failed": 10,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 2.8988980237584134,
+      "max_mm_utilization_median": 1.4325564702587892,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.001185202,
+      "runtime_p25_seconds": 0.001179412,
+      "runtime_p75_seconds": 0.001216603,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 5,
+        "verifier_invalid": 10
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 10
+    },
+    {
+      "allocation_l1_median": 0.002380537653138245,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 15,
+      "experiment_id": "flash-exact-reference",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 6.951759579459451,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        -1.086759284616795,
+        -0.20787736711515017
+      ],
+      "lp_gap_mean_percent": -0.5797718989220068,
+      "lp_gap_median_percent": -0.2604134287190572,
+      "lp_gap_min_percent": -3.3149532707173575,
+      "lp_gap_p25_percent": -0.6771602553338044,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999994346077032,
+      "max_mm_utilization_median": 0.9999909050659931,
+      "paper_bound_ratio_max": 0.319723761191159,
+      "paper_bound_ratio_median": 0.24159192225505338,
+      "retained_gap_mean_ci95_percent": [
+        0.6277744596027253,
+        2.0884714522705585
+      ],
+      "retained_gap_mean_percent": 1.3233318564946892,
+      "retained_gap_median_percent": 0.8077913838932089,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 3.166109057543355,
+      "runtime_median_seconds": 0.043892011,
+      "runtime_p25_seconds": 0.008042307,
+      "runtime_p75_seconds": 0.37719617250000004,
+      "solver_id": "milp-exact",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.029992627943972373,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 0.0002968803357250203,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.001273976619891883,
+      "declared": 15,
+      "experiment_id": "flash-exact-reference",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 13.765932983946355,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 7.7512992866503865,
+      "lp_gap_mean_ci95_percent": [
+        1.5494433869396234,
+        4.810625549029271
+      ],
+      "lp_gap_mean_percent": 3.1944786015053395,
+      "lp_gap_median_percent": 4.720524745803596,
+      "lp_gap_min_percent": -2.536849707101031,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 5.761025388088854,
+      "max_mm_utilization_max": 0.9896214841225689,
+      "max_mm_utilization_median": 0.8232024530883011,
+      "paper_bound_ratio_max": 0.35567549383597546,
+      "paper_bound_ratio_median": 0.33781866104047475,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.00013390345461359918
+      ],
+      "retained_gap_mean_percent": 4.463448487119972e-05,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.002871872,
+      "runtime_p25_seconds": 0.002562572,
+      "runtime_p75_seconds": 0.00469342,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.020454268539729592,
+      "certificate_gap_median_dollars": 0.061280403344426304,
+      "certificate_gap_p95_dollars": 0.11364197819202672,
+      "certificate_relative_gap_median_percent": 3.205469983401284e-05,
+      "certificate_relative_gap_p95_percent": 5.9447274455652834e-05,
+      "declared": 4,
+      "experiment_id": "flash-scaling-large",
+      "failed": 2,
+      "hard_budget_welfare_gap_median_percent": 36.36416477158306,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 3.7481981219174365,
+      "lp_gap_mean_ci95_percent": [
+        3.4347899414521885,
+        3.7481981219174365
+      ],
+      "lp_gap_mean_percent": 3.5914940316848125,
+      "lp_gap_median_percent": 3.5914940316848125,
+      "lp_gap_min_percent": 3.4347899414521885,
+      "lp_gap_p25_percent": 3.5131419865685007,
+      "lp_gap_p75_percent": 3.6698460768011243,
+      "max_mm_utilization_max": 0.9490303335344124,
+      "max_mm_utilization_median": 0.47321820624251104,
+      "paper_bound_ratio_max": 0.32691583507536076,
+      "paper_bound_ratio_median": 0.3265200223047454,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.000963165937253387
+      ],
+      "retained_gap_mean_percent": 0.0004815829686266935,
+      "retained_gap_median_percent": 0.0004815829686266935,
+      "retained_gap_p25_percent": 0.00024079148431334674,
+      "retained_gap_p75_percent": 0.0007223744529400402,
+      "runtime_median_seconds": 0.034179838000000004,
+      "runtime_p25_seconds": 0.033652511,
+      "runtime_p75_seconds": 0.034707165,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 2,
+        "solver_failure": 2
+      },
+      "successful": 2,
+      "termination_counts": {
+        "converged": 2,
+        "numerical_failure": 2
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 4,
+      "experiment_id": "flash-scaling-large",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 33.99357960182449,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.999999993104651,
+      "max_mm_utilization_median": 0.9999999837434277,
+      "paper_bound_ratio_max": 0.30659626254997135,
+      "paper_bound_ratio_median": 0.30523597569218763,
+      "retained_gap_mean_ci95_percent": [
+        0.271380735260918,
+        0.32326764979654193
+      ],
+      "retained_gap_mean_percent": 0.2962470061639015,
+      "retained_gap_median_percent": 0.29070295691063375,
+      "retained_gap_p25_percent": 0.27451645241154154,
+      "retained_gap_p75_percent": 0.31243351066299374,
+      "runtime_median_seconds": 0.038462995,
+      "runtime_p25_seconds": 0.0350210955,
+      "runtime_p75_seconds": 0.03972398,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 4
+      },
+      "successful": 4,
+      "termination_counts": {
+        "converged": 1,
+        "iteration_limit": 3
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 4,
+      "experiment_id": "flash-scaling-large",
+      "failed": 4,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.9266819468661343,
+      "max_mm_utilization_median": 2.9169048799694908,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 4
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 4
+      },
+      "verifier_invalid": 4
+    },
+    {
+      "allocation_l1_median": 0.019754091594343506,
+      "certificate_gap_median_dollars": 0.17197840676269532,
+      "certificate_gap_p95_dollars": 0.17774960819482422,
+      "certificate_relative_gap_median_percent": 0.0009639671045338616,
+      "certificate_relative_gap_p95_percent": 0.0009923018788699804,
+      "declared": 4,
+      "experiment_id": "flash-scaling-large",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 36.36258740075522,
+      "integer_landing_loss_median_dollars": 0.000231854375,
+      "lp_gap_max_percent": 3.7553990587463044,
+      "lp_gap_mean_ci95_percent": [
+        3.21926303112072,
+        3.6733686135776478
+      ],
+      "lp_gap_mean_percent": 3.466197651587305,
+      "lp_gap_median_percent": 3.507076781122476,
+      "lp_gap_min_percent": 3.0952379853579632,
+      "lp_gap_p25_percent": 3.3409210417164616,
+      "lp_gap_p75_percent": 3.632353390993319,
+      "max_mm_utilization_max": 0.960670504561479,
+      "max_mm_utilization_median": 0.9563160794598966,
+      "paper_bound_ratio_max": 0.32773906362064154,
+      "paper_bound_ratio_median": 0.32650573569592456,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.00023841283530512966
+      ],
+      "retained_gap_mean_percent": 7.947094510170989e-05,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 7.947094510170989e-05,
+      "runtime_median_seconds": 0.22494150400000001,
+      "runtime_p25_seconds": 0.20257196600000002,
+      "runtime_p75_seconds": 0.23737193374999999,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 4
+      },
+      "successful": 4,
+      "termination_counts": {
+        "converged": 4
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.019748519383224007,
+      "certificate_gap_median_dollars": 6.48965860818862e-05,
+      "certificate_gap_p95_dollars": 0.00011721257924364181,
+      "certificate_relative_gap_median_percent": 5.232414197786153e-07,
+      "certificate_relative_gap_p95_percent": 9.317169545172868e-07,
+      "declared": 6,
+      "experiment_id": "flash-scaling-medium",
+      "failed": 2,
+      "hard_budget_welfare_gap_median_percent": 36.115997340332335,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 3.377420277067977,
+      "lp_gap_mean_ci95_percent": [
+        2.757544242877,
+        3.2832030996647568
+      ],
+      "lp_gap_mean_percent": 3.0361126746021823,
+      "lp_gap_median_percent": 3.0675906812647895,
+      "lp_gap_min_percent": 2.6318490588111727,
+      "lp_gap_p25_percent": 2.908375940294116,
+      "lp_gap_p75_percent": 3.195327415572856,
+      "max_mm_utilization_max": 0.9511106932702889,
+      "max_mm_utilization_median": 0.9383296114778656,
+      "paper_bound_ratio_max": 0.32934529637257004,
+      "paper_bound_ratio_median": 0.3253940120554819,
+      "retained_gap_mean_ci95_percent": [
+        5.828695006755867e-05,
+        0.00027964840657980744
+      ],
+      "retained_gap_mean_percent": 0.00016896767832368304,
+      "retained_gap_median_percent": 0.00016829465397918836,
+      "retained_gap_p25_percent": 7.803736077014424e-05,
+      "retained_gap_p75_percent": 0.00025922497153272716,
+      "runtime_median_seconds": 0.005731979,
+      "runtime_p25_seconds": 0.00566463,
+      "runtime_p75_seconds": 0.00580356075,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 4,
+        "solver_failure": 2
+      },
+      "successful": 4,
+      "termination_counts": {
+        "converged": 4,
+        "numerical_failure": 2
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "experiment_id": "flash-scaling-medium",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 34.114738251307635,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999997912677927,
+      "max_mm_utilization_median": 0.9980795715036932,
+      "paper_bound_ratio_max": 0.31404689222617604,
+      "paper_bound_ratio_median": 0.30601598140345676,
+      "retained_gap_mean_ci95_percent": [
+        0.3022778462232712,
+        0.5243755355464782
+      ],
+      "retained_gap_mean_percent": 0.3953761161235863,
+      "retained_gap_median_percent": 0.3611085840401265,
+      "retained_gap_p25_percent": 0.30628082644309385,
+      "retained_gap_p75_percent": 0.405104553869866,
+      "runtime_median_seconds": 0.004630815,
+      "runtime_p25_seconds": 0.00370589225,
+      "runtime_p75_seconds": 0.007971103,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 5,
+        "iteration_limit": 1
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "experiment_id": "flash-scaling-medium",
+      "failed": 6,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.976385469945541,
+      "max_mm_utilization_median": 2.941751421163974,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 6
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 6
+    },
+    {
+      "allocation_l1_median": 0.026129356759814523,
+      "certificate_gap_median_dollars": 0.014131743095214843,
+      "certificate_gap_p95_dollars": 0.014976760320739748,
+      "certificate_relative_gap_median_percent": 0.0009107350320881288,
+      "certificate_relative_gap_p95_percent": 0.0009836814641606192,
+      "declared": 6,
+      "experiment_id": "flash-scaling-medium",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 36.4487711217025,
+      "integer_landing_loss_median_dollars": 4.209825366210937e-05,
+      "lp_gap_max_percent": 3.894440668113668,
+      "lp_gap_mean_ci95_percent": [
+        2.8670736361607454,
+        3.4989856452611363
+      ],
+      "lp_gap_mean_percent": 3.157203341226607,
+      "lp_gap_median_percent": 3.0649281256229735,
+      "lp_gap_min_percent": 2.636727181688896,
+      "lp_gap_p25_percent": 2.9428528887099636,
+      "lp_gap_p75_percent": 3.3012581338348705,
+      "max_mm_utilization_max": 0.9605596231656337,
+      "max_mm_utilization_median": 0.9563083947327158,
+      "paper_bound_ratio_max": 0.33011551230130975,
+      "paper_bound_ratio_median": 0.32675943489589343,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.048345225500000005,
+      "runtime_p25_seconds": 0.02462989175,
+      "runtime_p75_seconds": 0.055830715249999996,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.027143343125477087,
+      "certificate_gap_median_dollars": 3.7590301644740975e-06,
+      "certificate_gap_p95_dollars": 5.090274058261457e-06,
+      "certificate_relative_gap_median_percent": 6.635062155454739e-07,
+      "certificate_relative_gap_p95_percent": 8.482781646808012e-07,
+      "declared": 6,
+      "experiment_id": "flash-scaling-small",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 38.74271506347711,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 4.603562928176719,
+      "lp_gap_mean_ci95_percent": [
+        -0.061051868634102974,
+        2.567427942657384
+      ],
+      "lp_gap_mean_percent": 1.0286009105659633,
+      "lp_gap_median_percent": 0.33131012333049054,
+      "lp_gap_min_percent": -0.5646148020432841,
+      "lp_gap_p25_percent": 0.06857224981105901,
+      "lp_gap_p75_percent": 1.1996106298052094,
+      "max_mm_utilization_max": 0.999997903649879,
+      "max_mm_utilization_median": 0.9758380917713045,
+      "paper_bound_ratio_max": 0.39883361651358007,
+      "paper_bound_ratio_median": 0.35291024958976625,
+      "retained_gap_mean_ci95_percent": [
+        0.00013085445994165244,
+        0.021695905224457395
+      ],
+      "retained_gap_mean_percent": 0.007419894844386329,
+      "retained_gap_median_percent": 0.0003925633798249573,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0008759400647536239,
+      "runtime_median_seconds": 0.0015360880000000001,
+      "runtime_p25_seconds": 0.0014962880000000001,
+      "runtime_p75_seconds": 0.00156004125,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "experiment_id": "flash-scaling-small",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 38.45390586393983,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9994464367155897,
+      "max_mm_utilization_median": 0.977519435929376,
+      "paper_bound_ratio_max": 0.3907872197424327,
+      "paper_bound_ratio_median": 0.3436752925811423,
+      "retained_gap_mean_ci95_percent": [
+        0.2011731759968497,
+        0.941188220922991
+      ],
+      "retained_gap_mean_percent": 0.5447714283023078,
+      "retained_gap_median_percent": 0.370118361346298,
+      "retained_gap_p25_percent": 0.12586991354615826,
+      "retained_gap_p75_percent": 0.8823601810654471,
+      "runtime_median_seconds": 0.0016506354999999999,
+      "runtime_p25_seconds": 0.0016223625,
+      "runtime_p75_seconds": 0.0016761934999999998,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "experiment_id": "flash-scaling-small",
+      "failed": 6,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.9364512266679004,
+      "max_mm_utilization_median": 2.8843469455456665,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 6
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 6
+    },
+    {
+      "allocation_l1_median": 0.026752886047650658,
+      "certificate_gap_median_dollars": 0.0006932673695602417,
+      "certificate_gap_p95_dollars": 0.02570418059713745,
+      "certificate_relative_gap_median_percent": 0.0006902514345103829,
+      "certificate_relative_gap_p95_percent": 0.022731079715657406,
+      "declared": 6,
+      "experiment_id": "flash-scaling-small",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 39.12159982023093,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 4.605942680431312,
+      "lp_gap_mean_ci95_percent": [
+        0.5112773364310171,
+        3.2157270724537614
+      ],
+      "lp_gap_mean_percent": 1.792047450388061,
+      "lp_gap_median_percent": 1.2959412898302478,
+      "lp_gap_min_percent": 0.11652366810476526,
+      "lp_gap_p25_percent": 0.22813543279612453,
+      "lp_gap_p75_percent": 2.998287042717844,
+      "max_mm_utilization_max": 0.9999985936399095,
+      "max_mm_utilization_median": 0.9961448489525545,
+      "paper_bound_ratio_max": 0.40236724924146866,
+      "paper_bound_ratio_median": 0.3529437182873961,
+      "retained_gap_mean_ci95_percent": [
+        2.8796278111077818e-05,
+        0.24920815138533794
+      ],
+      "retained_gap_mean_percent": 0.084084843363801,
+      "retained_gap_median_percent": 8.638883433323346e-05,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.006767963254312986,
+      "runtime_median_seconds": 0.027693909500000002,
+      "runtime_p25_seconds": 0.0057541662500000005,
+      "runtime_p75_seconds": 0.051500569999999996,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 5,
+        "iteration_limit": 1
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.02101615463596258,
+      "certificate_gap_median_dollars": 0.0022210562601685524,
+      "certificate_gap_p95_dollars": 0.16327503939392,
+      "certificate_relative_gap_median_percent": 6.81040837721029e-07,
+      "certificate_relative_gap_p95_percent": 3.746915600848788e-05,
+      "declared": 18,
+      "experiment_id": "neutral-budget-controls",
+      "failed": 1,
+      "hard_budget_welfare_gap_median_percent": 1.1619692076654598e-05,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.1985157929528626,
+      "lp_gap_mean_ci95_percent": [
+        0.0039542203279438765,
+        0.05220715433864387
+      ],
+      "lp_gap_mean_percent": 0.02439743076144811,
+      "lp_gap_median_percent": 5.817489205469155e-06,
+      "lp_gap_min_percent": -0.009288175551012055,
+      "lp_gap_p25_percent": 9.995103429954874e-08,
+      "lp_gap_p75_percent": 0.029532808198575924,
+      "max_mm_utilization_max": 0.9999999665622573,
+      "max_mm_utilization_median": 0.9593577646151011,
+      "paper_bound_ratio_max": 0.11152802441986127,
+      "paper_bound_ratio_median": 0.04772924628864714,
+      "retained_gap_mean_ci95_percent": [
+        1.7839149266798813e-06,
+        0.007030566593035543
+      ],
+      "retained_gap_mean_percent": 0.0025163841471618105,
+      "retained_gap_median_percent": 9.995868276120191e-08,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 5.817532543817644e-06,
+      "runtime_median_seconds": 0.073383915,
+      "runtime_p25_seconds": 0.069601607,
+      "runtime_p75_seconds": 0.077229826,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 17,
+        "solver_failure": 1
+      },
+      "successful": 17,
+      "termination_counts": {
+        "converged": 17,
+        "numerical_failure": 1
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 18,
+      "experiment_id": "neutral-budget-controls",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.999999943308073,
+      "max_mm_utilization_median": 0.9669908838780776,
+      "paper_bound_ratio_max": 0.11002147356205735,
+      "paper_bound_ratio_median": 0.04404093346939539,
+      "retained_gap_mean_ci95_percent": [
+        0.0009950608532918112,
+        0.024456991976861193
+      ],
+      "retained_gap_mean_percent": 0.011428883198505914,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0012729535857058194,
+      "runtime_median_seconds": 0.0224081285,
+      "runtime_p25_seconds": 0.022052488500000002,
+      "runtime_p75_seconds": 0.04022436725,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 18
+      },
+      "successful": 18,
+      "termination_counts": {
+        "converged": 18
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 18,
+      "experiment_id": "neutral-budget-controls",
+      "failed": 6,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 1.9798066312737537,
+      "max_mm_utilization_median": 0.9669908838780776,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.022293082,
+      "runtime_p25_seconds": 0.021823725,
+      "runtime_p75_seconds": 0.022639451249999998,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 12,
+        "verifier_invalid": 6
+      },
+      "successful": 12,
+      "termination_counts": {
+        "converged": 18
+      },
+      "verifier_invalid": 6
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 7.3952373762767065,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.044076535604590676,
+      "declared": 18,
+      "experiment_id": "neutral-budget-controls",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.20192274952531647,
+      "lp_gap_mean_ci95_percent": [
+        0.0062644035848906385,
+        0.05385293343391117
+      ],
+      "lp_gap_mean_percent": 0.026816016919790985,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.034407107770293655,
+      "max_mm_utilization_max": 0.999999995649856,
+      "max_mm_utilization_median": 0.9596699983449413,
+      "paper_bound_ratio_max": 0.11220849531984421,
+      "paper_bound_ratio_median": 0.048618567937815556,
+      "retained_gap_mean_ci95_percent": [
+        0.0007575784434759758,
+        0.008463634977948097
+      ],
+      "retained_gap_mean_percent": 0.003898569064259307,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.001819009569913146,
+      "runtime_median_seconds": 0.0541622655,
+      "runtime_p25_seconds": 0.052446690000000004,
+      "runtime_p75_seconds": 1.4844761414999998,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 18
+      },
+      "successful": 18,
+      "termination_counts": {
+        "converged": 13,
+        "iteration_limit": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": 7.5912253691967635e-06,
+      "certificate_gap_p95_dollars": 9.634467587602557e-05,
+      "certificate_relative_gap_median_percent": 4.6360545596339535e-07,
+      "certificate_relative_gap_p95_percent": 8.648872745193348e-07,
+      "declared": 10,
+      "experiment_id": "no-cash-ablation",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.9999959846879194,
+      "max_mm_utilization_median": 0.5571078881385803,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        3.900493283794973e-05,
+        0.00565047634708189
+      ],
+      "retained_gap_mean_percent": 0.0021040471845851336,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0006374993841719789,
+      "runtime_median_seconds": 0.0016819205000000001,
+      "runtime_p25_seconds": 0.001546421,
+      "runtime_p75_seconds": 0.001851533,
+      "solver_id": "conic-fisher",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": 2.6805653419614828e-05,
+      "certificate_gap_p95_dollars": 9.135204691119723e-05,
+      "certificate_relative_gap_median_percent": 4.415133647472912e-07,
+      "certificate_relative_gap_p95_percent": 6.644101683623401e-07,
+      "declared": 10,
+      "experiment_id": "no-cash-ablation",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.9999959846879194,
+      "max_mm_utilization_median": 0.5571113277317566,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        8.657822566929956e-05,
+        0.005633655914174419
+      ],
+      "retained_gap_mean_percent": 0.0021167181485559376,
+      "retained_gap_median_percent": 4.09906917176371e-05,
+      "retained_gap_p25_percent": 1.699438080964456e-05,
+      "retained_gap_p75_percent": 0.0006373948196180374,
+      "runtime_median_seconds": 0.001673235,
+      "runtime_p25_seconds": 0.001551873,
+      "runtime_p75_seconds": 0.0018778742500000002,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": 0.0005144995863647461,
+      "certificate_gap_p95_dollars": 0.008708991317637624,
+      "certificate_relative_gap_median_percent": 0.0005249245874516714,
+      "certificate_relative_gap_p95_percent": 0.008107437354556796,
+      "declared": 10,
+      "experiment_id": "no-cash-ablation",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.9999984825227578,
+      "max_mm_utilization_median": 0.557132161744802,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0006360878653008529
+      ],
+      "retained_gap_mean_percent": 0.00021202928843361765,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.041707331,
+      "runtime_p25_seconds": 0.003265501,
+      "runtime_p75_seconds": 0.081514297,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 5,
+        "iteration_limit": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.022444627334168125,
+      "certificate_gap_median_dollars": 0.2530464082956314,
+      "certificate_gap_p95_dollars": 0.8571546375751494,
+      "certificate_relative_gap_median_percent": 2.742998563043605e-07,
+      "certificate_relative_gap_p95_percent": 8.397430482195002e-07,
+      "declared": 10,
+      "experiment_id": "numerical-range-stress",
+      "failed": 5,
+      "hard_budget_welfare_gap_median_percent": 0.008009735681424367,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.038142526412285466,
+      "lp_gap_mean_ci95_percent": [
+        0.003358862271501091,
+        0.02724225594182971
+      ],
+      "lp_gap_mean_percent": 0.013680901600336262,
+      "lp_gap_median_percent": 0.008009735681424367,
+      "lp_gap_min_percent": 0.0004685454356793254,
+      "lp_gap_p25_percent": 0.003923742402361219,
+      "lp_gap_p75_percent": 0.017859958069930938,
+      "max_mm_utilization_max": 0.990727865328396,
+      "max_mm_utilization_median": 0.04884227415562654,
+      "paper_bound_ratio_max": 0.05303748105656569,
+      "paper_bound_ratio_median": 0.05303748105656569,
+      "retained_gap_mean_ci95_percent": [
+        0.0009721666631409582,
+        0.012317921986810962
+      ],
+      "retained_gap_mean_percent": 0.006052396326829475,
+      "retained_gap_median_percent": 0.003923742416078143,
+      "retained_gap_p25_percent": 0.0004685454498133238,
+      "retained_gap_p75_percent": 0.008009735685356453,
+      "runtime_median_seconds": 0.095733405,
+      "runtime_p25_seconds": 0.095027224,
+      "runtime_p75_seconds": 0.096957078,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 5,
+        "solver_failure": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 5,
+        "numerical_failure": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "experiment_id": "numerical-range-stress",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.8638096490101076,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999977854846545,
+      "max_mm_utilization_median": 0.5417070386155599,
+      "paper_bound_ratio_max": 0.11307807187500302,
+      "paper_bound_ratio_median": 0.04844434905430213,
+      "retained_gap_mean_ci95_percent": [
+        1.464761427040966e-14,
+        0.006849130356195022
+      ],
+      "retained_gap_mean_percent": 0.0025993715142822718,
+      "retained_gap_median_percent": 1.424669854624731e-14,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0017439417954648415,
+      "runtime_median_seconds": 0.048582815,
+      "runtime_p25_seconds": 0.03402345825,
+      "runtime_p75_seconds": 0.08675302125,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "experiment_id": "numerical-range-stress",
+      "failed": 5,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 3.912108864548924,
+      "max_mm_utilization_median": 1.8926911531654667,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        3.294638312314145e-15,
+        4.1703441525101936e-14
+      ],
+      "retained_gap_mean_percent": 2.220336216342039e-14,
+      "retained_gap_median_percent": 1.6473191561570724e-14,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 3.7556825070541984e-14,
+      "runtime_median_seconds": 0.032568313,
+      "runtime_p25_seconds": 0.032456392,
+      "runtime_p75_seconds": 0.034371417,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 5,
+        "verifier_invalid": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 5
+    },
+    {
+      "allocation_l1_median": 0.0050566331705775265,
+      "certificate_gap_median_dollars": 15.219451416171875,
+      "certificate_gap_p95_dollars": 361.3917453780092,
+      "certificate_relative_gap_median_percent": 0.004227739614114254,
+      "certificate_relative_gap_p95_percent": 0.09902761879919586,
+      "declared": 10,
+      "experiment_id": "numerical-range-stress",
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.8991963899436658,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.08731980991064466,
+      "lp_gap_mean_ci95_percent": [
+        0.012097817125988841,
+        0.056514029177182526
+      ],
+      "lp_gap_mean_percent": 0.033540816310319625,
+      "lp_gap_median_percent": 0.018244330637278455,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.06778638202582755,
+      "max_mm_utilization_max": 0.9991927382094921,
+      "max_mm_utilization_median": 0.5188539310496212,
+      "paper_bound_ratio_max": 0.11458373402841061,
+      "paper_bound_ratio_median": 0.05042891548238494,
+      "retained_gap_mean_ci95_percent": [
+        1.8443409371604087e-14,
+        0.029503981575160064
+      ],
+      "retained_gap_mean_percent": 0.012607221846489774,
+      "retained_gap_median_percent": 1.710339671693646e-14,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.004040726198145124,
+      "runtime_median_seconds": 1.1592764465,
+      "runtime_p25_seconds": 0.08300270125,
+      "runtime_p75_seconds": 2.81242889425,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 5,
+        "iteration_limit": 5
+      },
+      "verifier_invalid": 0
+    }
+  ],
+  "integrity": {
+    "complete": true,
+    "declared_records": 545,
+    "duplicate_records": 0,
+    "missing_records": 0,
+    "observed_records": 545,
+    "scenario_fingerprint_mismatches": 0,
+    "scenario_groups": 135,
+    "unexpected_records": 0
+  },
+  "numerical": [
+    {
+      "allocation_l1_median": 0.022444627334168125,
+      "certificate_gap_median_dollars": 0.2530464082956314,
+      "certificate_gap_p95_dollars": 0.8571546375751494,
+      "certificate_relative_gap_median_percent": 2.742998563043605e-07,
+      "certificate_relative_gap_p95_percent": 8.397430482195002e-07,
+      "declared": 10,
+      "failed": 5,
+      "hard_budget_welfare_gap_median_percent": 0.008009735681424367,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.038142526412285466,
+      "lp_gap_mean_ci95_percent": [
+        0.003358862271501091,
+        0.026551216548493333
+      ],
+      "lp_gap_mean_percent": 0.013680901600336262,
+      "lp_gap_median_percent": 0.008009735681424367,
+      "lp_gap_min_percent": 0.0004685454356793254,
+      "lp_gap_p25_percent": 0.003923742402361219,
+      "lp_gap_p75_percent": 0.017859958069930938,
+      "max_mm_utilization_max": 0.990727865328396,
+      "max_mm_utilization_median": 0.04884227415562654,
+      "paper_bound_ratio_max": 0.05303748105656569,
+      "paper_bound_ratio_median": 0.05303748105656569,
+      "retained_gap_mean_ci95_percent": [
+        0.0009721666631409582,
+        0.012317921986810962
+      ],
+      "retained_gap_mean_percent": 0.006052396326829475,
+      "retained_gap_median_percent": 0.003923742416078143,
+      "retained_gap_p25_percent": 0.0004685454498133238,
+      "retained_gap_p75_percent": 0.008009735685356453,
+      "runtime_median_seconds": 0.095733405,
+      "runtime_p25_seconds": 0.095027224,
+      "runtime_p75_seconds": 0.096957078,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 5,
+        "solver_failure": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 5,
+        "numerical_failure": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.8638096490101076,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999977854846545,
+      "max_mm_utilization_median": 0.5417070386155599,
+      "paper_bound_ratio_max": 0.11307807187500302,
+      "paper_bound_ratio_median": 0.04844434905430213,
+      "retained_gap_mean_ci95_percent": [
+        0.00023252557273041146,
+        0.006849130356198272
+      ],
+      "retained_gap_mean_percent": 0.0025993715142822718,
+      "retained_gap_median_percent": 1.424669854624731e-14,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0017439417954648415,
+      "runtime_median_seconds": 0.048582815,
+      "runtime_p25_seconds": 0.03402345825,
+      "runtime_p75_seconds": 0.08675302125,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 10,
+      "failed": 5,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 3.912108864548924,
+      "max_mm_utilization_median": 1.8926911531654667,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        3.294638312314145e-15,
+        4.1703441525101936e-14
+      ],
+      "retained_gap_mean_percent": 2.220336216342039e-14,
+      "retained_gap_median_percent": 1.6473191561570724e-14,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 3.7556825070541984e-14,
+      "runtime_median_seconds": 0.032568313,
+      "runtime_p25_seconds": 0.032456392,
+      "runtime_p75_seconds": 0.034371417,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 5,
+        "verifier_invalid": 5
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 5
+    },
+    {
+      "allocation_l1_median": 0.0050566331705775265,
+      "certificate_gap_median_dollars": 15.219451416171875,
+      "certificate_gap_p95_dollars": 361.3917453780092,
+      "certificate_relative_gap_median_percent": 0.004227739614114254,
+      "certificate_relative_gap_p95_percent": 0.09902761879919586,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.8991963899436658,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.08731980991064466,
+      "lp_gap_mean_ci95_percent": [
+        0.012380847118520156,
+        0.05639561904948112
+      ],
+      "lp_gap_mean_percent": 0.033540816310319625,
+      "lp_gap_median_percent": 0.018244330637278455,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.06778638202582755,
+      "max_mm_utilization_max": 0.9991927382094921,
+      "max_mm_utilization_median": 0.5188539310496212,
+      "paper_bound_ratio_max": 0.11458373402841061,
+      "paper_bound_ratio_median": 0.05042891548238494,
+      "retained_gap_mean_ci95_percent": [
+        2.1529085551324472e-14,
+        0.02896521808207913
+      ],
+      "retained_gap_mean_percent": 0.012607221846489774,
+      "retained_gap_median_percent": 1.710339671693646e-14,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.004040726198145124,
+      "runtime_median_seconds": 1.1592764465,
+      "runtime_p25_seconds": 0.08300270125,
+      "runtime_p75_seconds": 2.81242889425,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 5,
+        "iteration_limit": 5
+      },
+      "verifier_invalid": 0
+    }
+  ],
+  "overall": [
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": 7.5912253691967635e-06,
+      "certificate_gap_p95_dollars": 9.634467587602557e-05,
+      "certificate_relative_gap_median_percent": 4.6360545596339535e-07,
+      "certificate_relative_gap_p95_percent": 8.648872745193348e-07,
+      "declared": 10,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 0.9999959846879194,
+      "max_mm_utilization_median": 0.5571078881385803,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        5.8507399256924594e-05,
+        0.00555148743084019
+      ],
+      "retained_gap_mean_percent": 0.0021040471845851336,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0006374993841719789,
+      "runtime_median_seconds": 0.0016819205000000001,
+      "runtime_p25_seconds": 0.001546421,
+      "runtime_p75_seconds": 0.001851533,
+      "solver_id": "conic-fisher",
+      "status_counts": {
+        "completed": 10
+      },
+      "successful": 10,
+      "termination_counts": {
+        "converged": 10
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0198218495645809,
+      "certificate_gap_median_dollars": 0.0001843491136241937,
+      "certificate_gap_p95_dollars": 0.045941513981233334,
+      "certificate_relative_gap_median_percent": 5.659061782431276e-07,
+      "certificate_relative_gap_p95_percent": 8.890105002245573e-06,
+      "declared": 135,
+      "failed": 21,
+      "hard_budget_welfare_gap_median_percent": 1.380602048064131,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 7.750554740190887,
+      "lp_gap_mean_ci95_percent": [
+        1.068366255468039,
+        1.9488729031292211
+      ],
+      "lp_gap_mean_percent": 1.4972540683943525,
+      "lp_gap_median_percent": 0.03356895253067264,
+      "lp_gap_min_percent": -2.5457920491021184,
+      "lp_gap_p25_percent": 3.196310907748713e-06,
+      "lp_gap_p75_percent": 3.1707953520020933,
+      "max_mm_utilization_max": 0.9999999791585691,
+      "max_mm_utilization_median": 0.8186107122715515,
+      "paper_bound_ratio_max": 0.39883361651358007,
+      "paper_bound_ratio_median": 0.3199122680584513,
+      "retained_gap_mean_ci95_percent": [
+        0.003100753635010132,
+        0.009011818021941898
+      ],
+      "retained_gap_mean_percent": 0.005797550331978932,
+      "retained_gap_median_percent": 1.7421444215709502e-05,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0009489272445537553,
+      "runtime_median_seconds": 0.005879477,
+      "runtime_p25_seconds": 0.0019545255,
+      "runtime_p75_seconds": 0.006569984250000001,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 114,
+        "solver_failure": 21
+      },
+      "successful": 114,
+      "termination_counts": {
+        "converged": 114,
+        "numerical_failure": 21
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 125,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 1.7276192980202152,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999999982544205,
+      "max_mm_utilization_median": 0.9920002108940199,
+      "paper_bound_ratio_max": 0.3907872197424327,
+      "paper_bound_ratio_median": 0.3027451587154194,
+      "retained_gap_mean_ci95_percent": [
+        0.262342699526816,
+        0.5197151024946607
+      ],
+      "retained_gap_mean_percent": 0.3870135033299664,
+      "retained_gap_median_percent": 0.00801580307999664,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.3037537442591025,
+      "runtime_median_seconds": 0.004006573,
+      "runtime_p25_seconds": 0.002230941,
+      "runtime_p75_seconds": 0.022225645,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 125
+      },
+      "successful": 125,
+      "termination_counts": {
+        "converged": 106,
+        "iteration_limit": 19
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 125,
+      "failed": 73,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 7.44798816227851,
+      "max_mm_utilization_median": 1.4761515658863054,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        5.080786320233585e-15
+      ],
+      "retained_gap_mean_percent": 2.134938669559653e-15,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.0023016670000000003,
+      "runtime_p25_seconds": 0.00215100125,
+      "runtime_p75_seconds": 0.021853021,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 52,
+        "verifier_invalid": 73
+      },
+      "successful": 52,
+      "termination_counts": {
+        "converged": 125
+      },
+      "verifier_invalid": 73
+    },
+    {
+      "allocation_l1_median": 0.002380537653138245,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 15,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 6.951759579459451,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        -1.0833407446702659,
+        -0.20358128108184106
+      ],
+      "lp_gap_mean_percent": -0.5797718989220068,
+      "lp_gap_median_percent": -0.2604134287190572,
+      "lp_gap_min_percent": -3.3149532707173575,
+      "lp_gap_p25_percent": -0.6771602553338044,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999994346077032,
+      "max_mm_utilization_median": 0.9999909050659931,
+      "paper_bound_ratio_max": 0.319723761191159,
+      "paper_bound_ratio_median": 0.24159192225505338,
+      "retained_gap_mean_ci95_percent": [
+        0.6259420069462636,
+        2.0791342572680978
+      ],
+      "retained_gap_mean_percent": 1.3233318564946892,
+      "retained_gap_median_percent": 0.8077913838932089,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 3.166109057543355,
+      "runtime_median_seconds": 0.043892011,
+      "runtime_p25_seconds": 0.008042307,
+      "runtime_p75_seconds": 0.37719617250000004,
+      "solver_id": "milp-exact",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.010113266341155053,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 9.25064735329033,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.03742588530712974,
+      "declared": 135,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 1.7983927798873316,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 7.7512992866503865,
+      "lp_gap_mean_ci95_percent": [
+        1.1319785541367329,
+        1.9072124524919978
+      ],
+      "lp_gap_mean_percent": 1.5077483358209856,
+      "lp_gap_median_percent": 0.07201767308532352,
+      "lp_gap_min_percent": -2.536849707101031,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 3.0952379853579632,
+      "max_mm_utilization_max": 0.999999995649856,
+      "max_mm_utilization_median": 0.8846632565747429,
+      "paper_bound_ratio_max": 0.40236724924146866,
+      "paper_bound_ratio_median": 0.3207259121586885,
+      "retained_gap_mean_ci95_percent": [
+        0.0015109277113580586,
+        0.01465232773926818
+      ],
+      "retained_gap_mean_percent": 0.006296433209478546,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 1.710339671693646e-14,
+      "runtime_median_seconds": 0.037522984,
+      "runtime_p25_seconds": 0.00513165,
+      "runtime_p75_seconds": 0.08313664600000001,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 135
+      },
+      "successful": 135,
+      "termination_counts": {
+        "converged": 110,
+        "iteration_limit": 25
+      },
+      "verifier_invalid": 0
+    }
+  ],
+  "protocol_id": "solver-evaluation-v2-retained-cash",
+  "quality": [
+    {
+      "allocation_l1_median": 0.02062851220180484,
+      "certificate_gap_median_dollars": 0.001583736146130832,
+      "certificate_gap_p95_dollars": 0.021900015914434325,
+      "certificate_relative_gap_median_percent": 1.5872627183863022e-06,
+      "certificate_relative_gap_p95_percent": 1.9248051211298334e-05,
+      "declared": 6,
+      "failed": 2,
+      "hard_budget_welfare_gap_median_percent": 0.6631947304834398,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0802254625956671,
+      "lp_gap_mean_ci95_percent": [
+        0.007194603112581651,
+        0.06892956059549535
+      ],
+      "lp_gap_mean_percent": 0.0380620818540385,
+      "lp_gap_median_percent": 0.036944204796554345,
+      "lp_gap_min_percent": -0.0018655447726217975,
+      "lp_gap_p25_percent": 0.011724677055183375,
+      "lp_gap_p75_percent": 0.06328160959540946,
+      "max_mm_utilization_max": 0.9999999791585691,
+      "max_mm_utilization_median": 0.9950139210170619,
+      "paper_bound_ratio_max": 0.0753577710626087,
+      "paper_bound_ratio_median": 0.035265180726364635,
+      "profile": "concentrated",
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.04443242877529112
+      ],
+      "retained_gap_mean_percent": 0.021270016215381028,
+      "retained_gap_median_percent": 0.012918413247234639,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.03418842946261567,
+      "runtime_median_seconds": 0.080513766,
+      "runtime_p25_seconds": 0.079244966,
+      "runtime_p75_seconds": 0.0835570265,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 4,
+        "solver_failure": 2
+      },
+      "successful": 4,
+      "termination_counts": {
+        "converged": 4,
+        "numerical_failure": 2
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.8821457204907067,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999990557992265,
+      "max_mm_utilization_median": 0.9985361534711961,
+      "paper_bound_ratio_max": 0.07274826293996735,
+      "paper_bound_ratio_median": 0.04588350178208339,
+      "profile": "concentrated",
+      "retained_gap_mean_ci95_percent": [
+        0.0027512902740090086,
+        0.025175835261595333
+      ],
+      "retained_gap_mean_percent": 0.01234542544752823,
+      "retained_gap_median_percent": 0.008253870822027026,
+      "retained_gap_p25_percent": 0.00200395076999916,
+      "retained_gap_p75_percent": 0.013422244685201125,
+      "runtime_median_seconds": 0.046978066,
+      "runtime_p25_seconds": 0.04675877125,
+      "runtime_p75_seconds": 0.09311803375,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "failed": 6,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.0,
+      "max_mm_utilization_median": 1.9664872160780011,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "profile": "concentrated",
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 6
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 6
+    },
+    {
+      "allocation_l1_median": 0.023094775121387315,
+      "certificate_gap_median_dollars": 5.054875446873047,
+      "certificate_gap_p95_dollars": 10.223711919760255,
+      "certificate_relative_gap_median_percent": 0.030053351179092566,
+      "certificate_relative_gap_p95_percent": 0.06128700017900598,
+      "declared": 6,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.936014830701129,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.08177520133733758,
+      "lp_gap_mean_ci95_percent": [
+        0.03277974162668828,
+        0.06941688938418177
+      ],
+      "lp_gap_mean_percent": 0.05118296387867024,
+      "lp_gap_median_percent": 0.05066738868829744,
+      "lp_gap_min_percent": 0.022777493588793916,
+      "lp_gap_p25_percent": 0.029017558950888193,
+      "lp_gap_p75_percent": 0.07222386862023181,
+      "max_mm_utilization_max": 0.9999999754463942,
+      "max_mm_utilization_median": 0.9921664903862866,
+      "paper_bound_ratio_max": 0.07575007607385706,
+      "paper_bound_ratio_median": 0.04850480063569835,
+      "profile": "concentrated",
+      "retained_gap_mean_ci95_percent": [
+        0.0008676344142657649,
+        0.017115250325214795
+      ],
+      "retained_gap_mean_percent": 0.008825647708551711,
+      "retained_gap_median_percent": 0.0026029032427972946,
+      "retained_gap_p25_percent": 0.00017089046469113652,
+      "retained_gap_p75_percent": 0.018342661006174883,
+      "runtime_median_seconds": 2.0846783415,
+      "runtime_p25_seconds": 2.03331631275,
+      "runtime_p75_seconds": 2.1340959539999997,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 1,
+        "iteration_limit": 5
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.02101615463596258,
+      "certificate_gap_median_dollars": 0.0022210562601685524,
+      "certificate_gap_p95_dollars": 0.16327503939392,
+      "certificate_relative_gap_median_percent": 6.81040837721029e-07,
+      "certificate_relative_gap_p95_percent": 3.746915600848788e-05,
+      "declared": 18,
+      "failed": 1,
+      "hard_budget_welfare_gap_median_percent": 1.1619692076654598e-05,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.1985157929528626,
+      "lp_gap_mean_ci95_percent": [
+        0.004465304389091149,
+        0.05218220176278745
+      ],
+      "lp_gap_mean_percent": 0.02439743076144811,
+      "lp_gap_median_percent": 5.817489205469155e-06,
+      "lp_gap_min_percent": -0.009288175551012055,
+      "lp_gap_p25_percent": 9.995103429954874e-08,
+      "lp_gap_p75_percent": 0.029532808198575924,
+      "max_mm_utilization_max": 0.9999999665622573,
+      "max_mm_utilization_median": 0.9593577646151011,
+      "paper_bound_ratio_max": 0.11152802441986127,
+      "paper_bound_ratio_median": 0.04772924628864714,
+      "profile": "neutral",
+      "retained_gap_mean_ci95_percent": [
+        2.054709299131349e-06,
+        0.0070306907222107105
+      ],
+      "retained_gap_mean_percent": 0.0025163841471618105,
+      "retained_gap_median_percent": 9.995868276120191e-08,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 5.817532543817644e-06,
+      "runtime_median_seconds": 0.073383915,
+      "runtime_p25_seconds": 0.069601607,
+      "runtime_p75_seconds": 0.077229826,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 17,
+        "solver_failure": 1
+      },
+      "successful": 17,
+      "termination_counts": {
+        "converged": 17,
+        "numerical_failure": 1
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 18,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.999999943308073,
+      "max_mm_utilization_median": 0.9669908838780776,
+      "paper_bound_ratio_max": 0.11002147356205735,
+      "paper_bound_ratio_median": 0.04404093346939539,
+      "profile": "neutral",
+      "retained_gap_mean_ci95_percent": [
+        0.001424364557381036,
+        0.024456740513562135
+      ],
+      "retained_gap_mean_percent": 0.011428883198505914,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0012729535857058194,
+      "runtime_median_seconds": 0.0224081285,
+      "runtime_p25_seconds": 0.022052488500000002,
+      "runtime_p75_seconds": 0.04022436725,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 18
+      },
+      "successful": 18,
+      "termination_counts": {
+        "converged": 18
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 18,
+      "failed": 6,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 1.9798066312737537,
+      "max_mm_utilization_median": 0.9669908838780776,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "profile": "neutral",
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.022293082,
+      "runtime_p25_seconds": 0.021823725,
+      "runtime_p75_seconds": 0.022639451249999998,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 12,
+        "verifier_invalid": 6
+      },
+      "successful": 12,
+      "termination_counts": {
+        "converged": 18
+      },
+      "verifier_invalid": 6
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 7.3952373762767065,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.044076535604590676,
+      "declared": 18,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 0.20192274952531647,
+      "lp_gap_mean_ci95_percent": [
+        0.006212171538346533,
+        0.05374243723314899
+      ],
+      "lp_gap_mean_percent": 0.026816016919790985,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.034407107770293655,
+      "max_mm_utilization_max": 0.999999995649856,
+      "max_mm_utilization_median": 0.9596699983449413,
+      "paper_bound_ratio_max": 0.11220849531984421,
+      "paper_bound_ratio_median": 0.048618567937815556,
+      "profile": "neutral",
+      "retained_gap_mean_ci95_percent": [
+        0.0007348823128759246,
+        0.008256779692698241
+      ],
+      "retained_gap_mean_percent": 0.003898569064259307,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.001819009569913146,
+      "runtime_median_seconds": 0.0541622655,
+      "runtime_p25_seconds": 0.052446690000000004,
+      "runtime_p75_seconds": 1.4844761414999998,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 18
+      },
+      "successful": 18,
+      "termination_counts": {
+        "converged": 13,
+        "iteration_limit": 5
+      },
+      "verifier_invalid": 0
+    }
+  ],
+  "reference": [
+    {
+      "allocation_l1_median": 0.03000174597939744,
+      "certificate_gap_median_dollars": 7.844709557502938e-07,
+      "certificate_gap_p95_dollars": 3.1928554392379733e-06,
+      "certificate_relative_gap_median_percent": 4.93881783428811e-07,
+      "certificate_relative_gap_p95_percent": 7.406699763701476e-07,
+      "declared": 15,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 13.765410175098339,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 7.750554740190887,
+      "lp_gap_mean_ci95_percent": [
+        1.573991404904307,
+        4.78374274426768
+      ],
+      "lp_gap_mean_percent": 3.1930638522519863,
+      "lp_gap_median_percent": 4.720154299112258,
+      "lp_gap_min_percent": -2.5457920491021184,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 5.760230247494734,
+      "max_mm_utilization_max": 0.9897286503067589,
+      "max_mm_utilization_median": 0.8232211808130543,
+      "paper_bound_ratio_max": 0.3556586672497774,
+      "paper_bound_ratio_median": 0.33780179948833583,
+      "retained_gap_mean_ci95_percent": [
+        0.0001875784366257559,
+        0.0009427709599353288
+      ],
+      "retained_gap_mean_percent": 0.0005339390129891805,
+      "retained_gap_median_percent": 0.00020208282790618035,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0007384336625060724,
+      "runtime_median_seconds": 0.00108259,
+      "runtime_p25_seconds": 0.0010542995,
+      "runtime_p75_seconds": 0.001219527,
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 15,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 7.396009924376227,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999917033907605,
+      "max_mm_utilization_median": 0.9920002108940199,
+      "paper_bound_ratio_max": 0.32616436990942166,
+      "paper_bound_ratio_median": 0.2547311148625625,
+      "retained_gap_mean_ci95_percent": [
+        0.5469969788875073,
+        1.7843280445344791
+      ],
+      "retained_gap_mean_percent": 1.1544049469148034,
+      "retained_gap_median_percent": 0.7543397982856161,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 2.4778766009965256,
+      "runtime_median_seconds": 0.001941946,
+      "runtime_p25_seconds": 0.001273773,
+      "runtime_p75_seconds": 0.0022454759999999997,
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 15,
+      "failed": 10,
+      "hard_budget_welfare_gap_median_percent": 0.0,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 2.8988980237584134,
+      "max_mm_utilization_median": 1.4325564702587892,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.001185202,
+      "runtime_p25_seconds": 0.001179412,
+      "runtime_p75_seconds": 0.001216603,
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "completed": 5,
+        "verifier_invalid": 10
+      },
+      "successful": 5,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 10
+    },
+    {
+      "allocation_l1_median": 0.002380537653138245,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 15,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 6.951759579459451,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        -1.0833407446702659,
+        -0.20358128108184106
+      ],
+      "lp_gap_mean_percent": -0.5797718989220068,
+      "lp_gap_median_percent": -0.2604134287190572,
+      "lp_gap_min_percent": -3.3149532707173575,
+      "lp_gap_p25_percent": -0.6771602553338044,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999994346077032,
+      "max_mm_utilization_median": 0.9999909050659931,
+      "paper_bound_ratio_max": 0.319723761191159,
+      "paper_bound_ratio_median": 0.24159192225505338,
+      "retained_gap_mean_ci95_percent": [
+        0.6259420069462636,
+        2.0791342572680978
+      ],
+      "retained_gap_mean_percent": 1.3233318564946892,
+      "retained_gap_median_percent": 0.8077913838932089,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 3.166109057543355,
+      "runtime_median_seconds": 0.043892011,
+      "runtime_p25_seconds": 0.008042307,
+      "runtime_p75_seconds": 0.37719617250000004,
+      "solver_id": "milp-exact",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.029992627943972373,
+      "certificate_gap_median_dollars": 0.0,
+      "certificate_gap_p95_dollars": 0.0002968803357250203,
+      "certificate_relative_gap_median_percent": 0.0,
+      "certificate_relative_gap_p95_percent": 0.001273976619891883,
+      "declared": 15,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 13.765932983946355,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 7.7512992866503865,
+      "lp_gap_mean_ci95_percent": [
+        1.5605614639391625,
+        4.828590926288355
+      ],
+      "lp_gap_mean_percent": 3.1944786015053395,
+      "lp_gap_median_percent": 4.720524745803596,
+      "lp_gap_min_percent": -2.536849707101031,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 5.761025388088854,
+      "max_mm_utilization_max": 0.9896214841225689,
+      "max_mm_utilization_median": 0.8232024530883011,
+      "paper_bound_ratio_max": 0.35567549383597546,
+      "paper_bound_ratio_median": 0.33781866104047475,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.00013390345461359918
+      ],
+      "retained_gap_mean_percent": 4.463448487119972e-05,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.002871872,
+      "runtime_p25_seconds": 0.002562572,
+      "runtime_p75_seconds": 0.00469342,
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 15
+      },
+      "successful": 15,
+      "termination_counts": {
+        "converged": 15
+      },
+      "verifier_invalid": 0
+    }
+  ],
+  "scaling": [
+    {
+      "allocation_l1_median": 0.020454268539729592,
+      "certificate_gap_median_dollars": 0.061280403344426304,
+      "certificate_gap_p95_dollars": 0.11364197819202672,
+      "certificate_relative_gap_median_percent": 3.205469983401284e-05,
+      "certificate_relative_gap_p95_percent": 5.9447274455652834e-05,
+      "declared": 4,
+      "failed": 2,
+      "hard_budget_welfare_gap_median_percent": 36.36416477158306,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 3.7481981219174365,
+      "lp_gap_mean_ci95_percent": [
+        3.4347899414521885,
+        3.7481981219174365
+      ],
+      "lp_gap_mean_percent": 3.5914940316848125,
+      "lp_gap_median_percent": 3.5914940316848125,
+      "lp_gap_min_percent": 3.4347899414521885,
+      "lp_gap_p25_percent": 3.5131419865685007,
+      "lp_gap_p75_percent": 3.6698460768011243,
+      "max_mm_utilization_max": 0.9490303335344124,
+      "max_mm_utilization_median": 0.47321820624251104,
+      "paper_bound_ratio_max": 0.32691583507536076,
+      "paper_bound_ratio_median": 0.3265200223047454,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.000963165937253387
+      ],
+      "retained_gap_mean_percent": 0.0004815829686266935,
+      "retained_gap_median_percent": 0.0004815829686266935,
+      "retained_gap_p25_percent": 0.00024079148431334674,
+      "retained_gap_p75_percent": 0.0007223744529400402,
+      "runtime_median_seconds": 0.034179838000000004,
+      "runtime_p25_seconds": 0.033652511,
+      "runtime_p75_seconds": 0.034707165,
+      "scale": "flash-large",
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 2,
+        "solver_failure": 2
+      },
+      "successful": 2,
+      "termination_counts": {
+        "converged": 2,
+        "numerical_failure": 2
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 4,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 33.99357960182449,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.999999993104651,
+      "max_mm_utilization_median": 0.9999999837434277,
+      "paper_bound_ratio_max": 0.30659626254997135,
+      "paper_bound_ratio_median": 0.30523597569218763,
+      "retained_gap_mean_ci95_percent": [
+        0.271380735260918,
+        0.32326764979654193
+      ],
+      "retained_gap_mean_percent": 0.2962470061639015,
+      "retained_gap_median_percent": 0.29070295691063375,
+      "retained_gap_p25_percent": 0.27451645241154154,
+      "retained_gap_p75_percent": 0.31243351066299374,
+      "runtime_median_seconds": 0.038462995,
+      "runtime_p25_seconds": 0.0350210955,
+      "runtime_p75_seconds": 0.03972398,
+      "scale": "flash-large",
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 4
+      },
+      "successful": 4,
+      "termination_counts": {
+        "converged": 1,
+        "iteration_limit": 3
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 4,
+      "failed": 4,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.9266819468661343,
+      "max_mm_utilization_median": 2.9169048799694908,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "scale": "flash-large",
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 4
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 4
+      },
+      "verifier_invalid": 4
+    },
+    {
+      "allocation_l1_median": 0.019754091594343506,
+      "certificate_gap_median_dollars": 0.17197840676269532,
+      "certificate_gap_p95_dollars": 0.17774960819482422,
+      "certificate_relative_gap_median_percent": 0.0009639671045338616,
+      "certificate_relative_gap_p95_percent": 0.0009923018788699804,
+      "declared": 4,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 36.36258740075522,
+      "integer_landing_loss_median_dollars": 0.000231854375,
+      "lp_gap_max_percent": 3.7553990587463044,
+      "lp_gap_mean_ci95_percent": [
+        3.21926303112072,
+        3.6733686135776478
+      ],
+      "lp_gap_mean_percent": 3.466197651587305,
+      "lp_gap_median_percent": 3.507076781122476,
+      "lp_gap_min_percent": 3.0952379853579632,
+      "lp_gap_p25_percent": 3.3409210417164616,
+      "lp_gap_p75_percent": 3.632353390993319,
+      "max_mm_utilization_max": 0.960670504561479,
+      "max_mm_utilization_median": 0.9563160794598966,
+      "paper_bound_ratio_max": 0.32773906362064154,
+      "paper_bound_ratio_median": 0.32650573569592456,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.00023841283530512966
+      ],
+      "retained_gap_mean_percent": 7.947094510170989e-05,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 7.947094510170989e-05,
+      "runtime_median_seconds": 0.22494150400000001,
+      "runtime_p25_seconds": 0.20257196600000002,
+      "runtime_p75_seconds": 0.23737193374999999,
+      "scale": "flash-large",
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 4
+      },
+      "successful": 4,
+      "termination_counts": {
+        "converged": 4
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.019748519383224007,
+      "certificate_gap_median_dollars": 6.48965860818862e-05,
+      "certificate_gap_p95_dollars": 0.00011721257924364181,
+      "certificate_relative_gap_median_percent": 5.232414197786153e-07,
+      "certificate_relative_gap_p95_percent": 9.317169545172868e-07,
+      "declared": 6,
+      "failed": 2,
+      "hard_budget_welfare_gap_median_percent": 36.115997340332335,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 3.377420277067977,
+      "lp_gap_mean_ci95_percent": [
+        2.757544242877,
+        3.2832030996647568
+      ],
+      "lp_gap_mean_percent": 3.0361126746021823,
+      "lp_gap_median_percent": 3.0675906812647895,
+      "lp_gap_min_percent": 2.6318490588111727,
+      "lp_gap_p25_percent": 2.908375940294116,
+      "lp_gap_p75_percent": 3.195327415572856,
+      "max_mm_utilization_max": 0.9511106932702889,
+      "max_mm_utilization_median": 0.9383296114778656,
+      "paper_bound_ratio_max": 0.32934529637257004,
+      "paper_bound_ratio_median": 0.3253940120554819,
+      "retained_gap_mean_ci95_percent": [
+        5.828695006755867e-05,
+        0.00027964840657980744
+      ],
+      "retained_gap_mean_percent": 0.00016896767832368304,
+      "retained_gap_median_percent": 0.00016829465397918836,
+      "retained_gap_p25_percent": 7.803736077014424e-05,
+      "retained_gap_p75_percent": 0.00025922497153272716,
+      "runtime_median_seconds": 0.005731979,
+      "runtime_p25_seconds": 0.00566463,
+      "runtime_p75_seconds": 0.00580356075,
+      "scale": "flash-medium",
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 4,
+        "solver_failure": 2
+      },
+      "successful": 4,
+      "termination_counts": {
+        "converged": 4,
+        "numerical_failure": 2
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 34.114738251307635,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9999997912677927,
+      "max_mm_utilization_median": 0.9980795715036932,
+      "paper_bound_ratio_max": 0.31404689222617604,
+      "paper_bound_ratio_median": 0.30601598140345676,
+      "retained_gap_mean_ci95_percent": [
+        0.3024458882964724,
+        0.5243755355464782
+      ],
+      "retained_gap_mean_percent": 0.3953761161235863,
+      "retained_gap_median_percent": 0.3611085840401265,
+      "retained_gap_p25_percent": 0.30628082644309385,
+      "retained_gap_p75_percent": 0.405104553869866,
+      "runtime_median_seconds": 0.004630815,
+      "runtime_p25_seconds": 0.00370589225,
+      "runtime_p75_seconds": 0.007971103,
+      "scale": "flash-medium",
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 5,
+        "iteration_limit": 1
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "failed": 6,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.976385469945541,
+      "max_mm_utilization_median": 2.941751421163974,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "scale": "flash-medium",
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 6
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 6
+    },
+    {
+      "allocation_l1_median": 0.026129356759814523,
+      "certificate_gap_median_dollars": 0.014131743095214843,
+      "certificate_gap_p95_dollars": 0.014976760320739748,
+      "certificate_relative_gap_median_percent": 0.0009107350320881288,
+      "certificate_relative_gap_p95_percent": 0.0009836814641606192,
+      "declared": 6,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 36.4487711217025,
+      "integer_landing_loss_median_dollars": 4.209825366210937e-05,
+      "lp_gap_max_percent": 3.894440668113668,
+      "lp_gap_mean_ci95_percent": [
+        2.8670736361607454,
+        3.4959303793731316
+      ],
+      "lp_gap_mean_percent": 3.157203341226607,
+      "lp_gap_median_percent": 3.0649281256229735,
+      "lp_gap_min_percent": 2.636727181688896,
+      "lp_gap_p25_percent": 2.9428528887099636,
+      "lp_gap_p75_percent": 3.3012581338348705,
+      "max_mm_utilization_max": 0.9605596231656337,
+      "max_mm_utilization_median": 0.9563083947327158,
+      "paper_bound_ratio_max": 0.33011551230130975,
+      "paper_bound_ratio_median": 0.32675943489589343,
+      "retained_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "retained_gap_mean_percent": 0.0,
+      "retained_gap_median_percent": 0.0,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0,
+      "runtime_median_seconds": 0.048345225500000005,
+      "runtime_p25_seconds": 0.02462989175,
+      "runtime_p75_seconds": 0.055830715249999996,
+      "scale": "flash-medium",
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.027143343125477087,
+      "certificate_gap_median_dollars": 3.7590301644740975e-06,
+      "certificate_gap_p95_dollars": 5.090274058261457e-06,
+      "certificate_relative_gap_median_percent": 6.635062155454739e-07,
+      "certificate_relative_gap_p95_percent": 8.482781646808012e-07,
+      "declared": 6,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 38.74271506347711,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 4.603562928176719,
+      "lp_gap_mean_ci95_percent": [
+        -0.061051868634102974,
+        2.567427942657384
+      ],
+      "lp_gap_mean_percent": 1.0286009105659633,
+      "lp_gap_median_percent": 0.33131012333049054,
+      "lp_gap_min_percent": -0.5646148020432841,
+      "lp_gap_p25_percent": 0.06857224981105901,
+      "lp_gap_p75_percent": 1.1996106298052094,
+      "max_mm_utilization_max": 0.999997903649879,
+      "max_mm_utilization_median": 0.9758380917713045,
+      "paper_bound_ratio_max": 0.39883361651358007,
+      "paper_bound_ratio_median": 0.35291024958976625,
+      "retained_gap_mean_ci95_percent": [
+        0.00013085445994165244,
+        0.021675724489989903
+      ],
+      "retained_gap_mean_percent": 0.007419894844386329,
+      "retained_gap_median_percent": 0.0003925633798249573,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.0008759400647536239,
+      "runtime_median_seconds": 0.0015360880000000001,
+      "runtime_p25_seconds": 0.0014962880000000001,
+      "runtime_p75_seconds": 0.00156004125,
+      "scale": "flash-small",
+      "solver_id": "conic-quasi",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": 0.0,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 38.45390586393983,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": 0.0,
+      "lp_gap_mean_ci95_percent": [
+        0.0,
+        0.0
+      ],
+      "lp_gap_mean_percent": 0.0,
+      "lp_gap_median_percent": 0.0,
+      "lp_gap_min_percent": 0.0,
+      "lp_gap_p25_percent": 0.0,
+      "lp_gap_p75_percent": 0.0,
+      "max_mm_utilization_max": 0.9994464367155897,
+      "max_mm_utilization_median": 0.977519435929376,
+      "paper_bound_ratio_max": 0.3907872197424327,
+      "paper_bound_ratio_median": 0.3436752925811423,
+      "retained_gap_mean_ci95_percent": [
+        0.2011731759968497,
+        0.9400593790987997
+      ],
+      "retained_gap_mean_percent": 0.5447714283023078,
+      "retained_gap_median_percent": 0.370118361346298,
+      "retained_gap_p25_percent": 0.12586991354615826,
+      "retained_gap_p75_percent": 0.8823601810654471,
+      "runtime_median_seconds": 0.0016506354999999999,
+      "runtime_p25_seconds": 0.0016223625,
+      "runtime_p75_seconds": 0.0016761934999999998,
+      "scale": "flash-small",
+      "solver_id": "lp",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 0
+    },
+    {
+      "allocation_l1_median": null,
+      "certificate_gap_median_dollars": null,
+      "certificate_gap_p95_dollars": null,
+      "certificate_relative_gap_median_percent": null,
+      "certificate_relative_gap_p95_percent": null,
+      "declared": 6,
+      "failed": 6,
+      "hard_budget_welfare_gap_median_percent": null,
+      "integer_landing_loss_median_dollars": null,
+      "lp_gap_max_percent": null,
+      "lp_gap_mean_ci95_percent": null,
+      "lp_gap_mean_percent": null,
+      "lp_gap_median_percent": null,
+      "lp_gap_min_percent": null,
+      "lp_gap_p25_percent": null,
+      "lp_gap_p75_percent": null,
+      "max_mm_utilization_max": 2.9364512266679004,
+      "max_mm_utilization_median": 2.8843469455456665,
+      "paper_bound_ratio_max": null,
+      "paper_bound_ratio_median": null,
+      "retained_gap_mean_ci95_percent": null,
+      "retained_gap_mean_percent": null,
+      "retained_gap_median_percent": null,
+      "retained_gap_p25_percent": null,
+      "retained_gap_p75_percent": null,
+      "runtime_median_seconds": null,
+      "runtime_p25_seconds": null,
+      "runtime_p75_seconds": null,
+      "scale": "flash-small",
+      "solver_id": "lp-unconstrained",
+      "status_counts": {
+        "verifier_invalid": 6
+      },
+      "successful": 0,
+      "termination_counts": {
+        "converged": 6
+      },
+      "verifier_invalid": 6
+    },
+    {
+      "allocation_l1_median": 0.026752886047650658,
+      "certificate_gap_median_dollars": 0.0006932673695602417,
+      "certificate_gap_p95_dollars": 0.02570418059713745,
+      "certificate_relative_gap_median_percent": 0.0006902514345103829,
+      "certificate_relative_gap_p95_percent": 0.022731079715657406,
+      "declared": 6,
+      "failed": 0,
+      "hard_budget_welfare_gap_median_percent": 39.12159982023093,
+      "integer_landing_loss_median_dollars": 0.0,
+      "lp_gap_max_percent": 4.605942680431312,
+      "lp_gap_mean_ci95_percent": [
+        0.5112773364310171,
+        3.216534302995974
+      ],
+      "lp_gap_mean_percent": 1.792047450388061,
+      "lp_gap_median_percent": 1.2959412898302478,
+      "lp_gap_min_percent": 0.11652366810476526,
+      "lp_gap_p25_percent": 0.22813543279612453,
+      "lp_gap_p75_percent": 2.998287042717844,
+      "max_mm_utilization_max": 0.9999985936399095,
+      "max_mm_utilization_median": 0.9961448489525545,
+      "paper_bound_ratio_max": 0.40236724924146866,
+      "paper_bound_ratio_median": 0.3529437182873961,
+      "retained_gap_mean_ci95_percent": [
+        2.8796278111077818e-05,
+        0.24917935510722689
+      ],
+      "retained_gap_mean_percent": 0.084084843363801,
+      "retained_gap_median_percent": 8.638883433323346e-05,
+      "retained_gap_p25_percent": 0.0,
+      "retained_gap_p75_percent": 0.006767963254312986,
+      "runtime_median_seconds": 0.027693909500000002,
+      "runtime_p25_seconds": 0.0057541662500000005,
+      "runtime_p75_seconds": 0.051500569999999996,
+      "scale": "flash-small",
+      "solver_id": "retained-cash-fw",
+      "status_counts": {
+        "completed": 6
+      },
+      "successful": 6,
+      "termination_counts": {
+        "converged": 5,
+        "iteration_limit": 1
+      },
+      "verifier_invalid": 0
+    }
+  ],
+  "schema_version": 2,
+  "source_revision": "0f0824ac892d1b9268fa45fded2004f7f9777ff7"
+}
