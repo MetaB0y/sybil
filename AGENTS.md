@@ -12,6 +12,21 @@ This project uses **jj (Jujutsu)** for version control, NOT git.
 - `jj new` to create new changes
 - `jj describe` to set commit messages
 
+## Issue Tracking
+
+GitHub Issues in `MetaB0y/sybil` are the source of truth. Do not create or
+update Linear issues.
+
+- Set `GH_REPO=MetaB0y/sybil` (or pass `--repo MetaB0y/sybil`) because a pure
+  `jj` workspace has no `.git` directory for GitHub CLI repository discovery.
+- Active work belongs in the private [Sybil GitHub Project](https://github.com/users/MetaB0y/projects/1).
+- Add new issues to Project 1 and set its `Stage` and `Priority` fields; use
+  repository labels for area and type.
+- Keep durable architecture decisions in `docs/`/ADRs rather than relying on
+  issue comments alone.
+- Close completed issues with a concise implementation and verification
+  summary. Migrated `[SYB-*]` titles preserve their former Linear identifiers.
+
 ## Repo Map
 
 ```
