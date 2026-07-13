@@ -128,6 +128,10 @@ reconstructable or supply an escape witness.
 - Outbox catch-up delivers and acknowledges bounded prefixes; one local redb
   commit removes the whole delivered prefix to limit contention with future
   block fences.
+- `sybil-history-load` drives authenticated historical reads through the public
+  API while measuring sequencer health against both a pre-load baseline and an
+  absolute p95 ceiling. Run it off-host before capacity claims; see the
+  [historical-read isolation runbook](../../runbooks/history-read-load.md).
 
 ## Invariants and checks
 
@@ -148,6 +152,7 @@ reconstructable or supply an escape witness.
 | Delivery and private client | `sybil-api/src/history.rs` |
 | Projector/store/private HTTP | `crates/sybil-history` |
 | Public history handlers | `sybil-api/src/routes/accounts.rs`, `markets.rs`, `leaderboard.rs` |
+| Black-box isolation load test | `crates/sybil-loadtest`, `just history-load` |
 
 ## See also
 

@@ -2,7 +2,7 @@
 tags: [testing, infrastructure]
 layer: sequencer
 status: current
-last_verified: 2026-07-10
+last_verified: 2026-07-13
 ---
 
 # Testing Strategy
@@ -28,9 +28,9 @@ restart tests, then a tiny Docker smoke layer.
   useful at pure boundaries such as order generation, settlement arithmetic,
   solver output validation, lifecycle state transitions, and serialization.
   Full async API/process tests should use named scenarios with explicit seeds.
-- **Bound resource use.** Tests should run with tiny block-history, fill-history,
-  and price-history caps so they prove durable fallback paths without allocating
-  production-sized windows.
+- **Bound resource use.** Deterministic tests should use tiny block-history and
+  projection fixtures plus bounded response pages. Capacity tests are a
+  separate, explicitly invoked layer.
 
 ## Test Ladder
 
@@ -89,8 +89,8 @@ Required scenarios:
   restart, and verify each survives exactly once
 - commit a trade block, restart repeatedly, and verify balances, positions,
   fills, equity, raw price history, candles, and exact-height block reads
-- run with history caps of 1 or 2, overflow the RAM ring, restart, and verify
-  durable fallback or explicit pruned errors
+- restart the API and history projector independently, redeliver the outbox,
+  and verify remote projection completeness plus explicit 503 behavior
 - verify quiet-market chart behavior: if we promise midpoint marks for inactive
   markets, they must survive restart too
 
@@ -126,16 +126,30 @@ matched volume is exactly 1000 share-units. Run id 0 is single-use on fresh
 state. Persistent devnet smoke callers choose a new numeric `--run-id`, which
 deterministically derives disjoint P256 seeds and replay nonces.
 
+### 5. Explicit Load and Isolation Tests
+
+Load tests are not part of the default CI ladder. They target an already
+running release stack through public HTTP and answer resource/coupling
+questions that deterministic correctness tests cannot.
+
+`crates/sybil-loadtest` uses Goose. Its first suite takes an unloaded health
+baseline, saturates owner-authenticated historical account/market reads, and
+continues named sequencer-health probes during load. A run fails on request
+errors, insufficient samples, an absolute health p95 ceiling, or excessive p95
+growth from baseline. This catches accidental sequencer actor/database work in
+history handlers as well as API-runtime and same-host resource coupling.
+
+Run the generator off-host for capacity conclusions and preserve the Goose
+report with its target/profile. The exact setup and threshold variables are in
+the [historical-read isolation runbook](../../runbooks/history-read-load.md).
+
 ## Next Implementation Slice
 
-1. Add store-backed latest/list/WS replay restart tests when the historical
-   block-serving adapter is implemented.
-2. Rename and organize the current restart tests around public contracts:
-   acknowledged writes, committed block history, price history/candles, and
-   retention.
-3. Add focused properties for sell-side position reservations and cancellation /
+1. Add a disposable, seeded API/history process fixture for a short automated
+   load-test smoke; keep capacity thresholds outside ordinary CI.
+2. Add focused properties for sell-side position reservations and cancellation /
    expiry release invariants.
-4. Move helpers into a separate test-support crate only if multiple crates begin
+3. Move helpers into a separate test-support crate only if multiple crates begin
    sharing the same public fixtures.
 
 This gives us better coverage without creating a new testing platform.

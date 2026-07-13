@@ -27,6 +27,7 @@ sybil/
 │   ├── sybil-api-types/           # Shared REST/WebSocket DTOs and OpenAPI schema
 │   ├── sybil-history/             # Private durable history projector and query service
 │   ├── sybil-history-types/       # Neutral sequencer-to-history facts and query DTOs
+│   ├── sybil-loadtest/            # Goose HTTP load and architectural-isolation checks
 │   ├── sybil-client/              # Shared Rust HTTP/SSE client
 │   ├── sybil-signing/             # Canonical client-action signing bytes
 │   ├── sybil-oracle/              # Oracle/resolution service

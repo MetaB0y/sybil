@@ -15,6 +15,7 @@ use crate::webauthn::WebAuthnVerifierConfig;
 
 const MAX_HTTP_RATE_LIMIT_CLIENTS: usize = 10_000;
 const OVERFLOW_CLIENT_KEY: &str = "__overflow__";
+type ReadApiKeyOwners = HashMap<[u8; 32], AccountId>;
 
 /// Reference market data mirrored from external systems (e.g., Polymarket).
 ///
@@ -230,7 +231,7 @@ pub struct AppState {
     /// API-owned immutable authorization view. `None` means it has not yet
     /// been initialized; the first read performs one snapshot RPC. Normal
     /// history reads never enter the sequencer mailbox.
-    read_api_key_owners: Arc<RwLock<Option<HashMap<[u8; 32], AccountId>>>>,
+    read_api_key_owners: Arc<RwLock<Option<ReadApiKeyOwners>>>,
     /// Published current-state inputs for leaderboard ranking. Refreshed once
     /// per committed block, never recomputed by each HTTP request.
     leaderboard_bases: Arc<RwLock<Option<Vec<LeaderboardBase>>>>,

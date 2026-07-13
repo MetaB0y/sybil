@@ -13,6 +13,7 @@ members = [
     "crates/sybil-api-types",
     "crates/sybil-history-types",
     "crates/sybil-history",
+    "crates/sybil-loadtest",
     "crates/sybil-client",
     "crates/sybil-l1-abi",
     "crates/sybil-l1-indexer",

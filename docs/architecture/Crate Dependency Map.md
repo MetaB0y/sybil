@@ -76,6 +76,7 @@ graph TB
     API -.->|"private HTTP"| HIST
     SEQ --> SEQSIM["sequencer-sim<br/>dev-only · sybil-sim bin"]
     API -.->|"HTTP"| ARENA["arena/ · Python"]
+    LOADTEST["sybil-loadtest<br/>Goose · read-only"] -.->|"public HTTP"| API
 
     SCENARIOS --> SIM["matching-sim"]
     VERIFIER --> ZK["sybil-zk"]
@@ -131,6 +132,8 @@ graph TB
 - Arena connects via HTTP only — no Rust compilation required
 - `matching-sim` is a dev tool that cross-cuts multiple crates for benchmarking
 - `sequencer-sim` is a dev-only crate: it depends on `matching-sequencer` so the sequencer library stays free of simulation/agent code (nothing `sybil-api` links pulls it in)
+- `sybil-loadtest` has no in-process exchange dependency; it tests deployed
+  boundaries through read-only public HTTP
 
 ## Where This Lives
 > `Cargo.toml` — workspace member list and dependency declarations

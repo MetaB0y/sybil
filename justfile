@@ -382,6 +382,11 @@ check-all: check-fast test standalone-check check-consensus docs-check store-too
 bench:
     cargo bench --workspace
 
+# Saturate read-only historical API routes while asserting sequencer health
+# latency remains within its absolute and pre-load-relative budgets.
+history-load *args:
+    cargo run --release -p sybil-loadtest --bin sybil-history-load -- {{args}}
+
 # Watch for changes and run tests
 watch:
     cargo watch -x "test --workspace"
