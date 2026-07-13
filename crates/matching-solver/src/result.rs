@@ -91,7 +91,22 @@ pub struct SolverDiagnostics {
     pub algorithm: String,
     pub status: TerminationStatus,
     pub iterations: Option<usize>,
+    /// Legacy solver-specific convergence number. New solvers should prefer
+    /// `optimality_gap` when they have a certified objective bound.
     pub convergence_metric: Option<f64>,
+    /// Continuous backend objective, in solver-documented units.
+    pub objective_value: Option<f64>,
+    /// Certified upper bound on objective suboptimality, in the same units as
+    /// `objective_value`. `None` means the solver has no such certificate.
+    pub optimality_gap: Option<f64>,
+    /// Number of optimization-oracle calls made by an iterative method.
+    pub oracle_calls: Option<usize>,
+    /// Objective lost when the continuous allocation is landed into integer
+    /// protocol quantities. Negative numerical noise is reported as zero.
+    pub integer_landing_loss: Option<f64>,
+    /// Backend-reported residuals when available.
+    pub primal_residual: Option<f64>,
+    pub dual_residual: Option<f64>,
     pub message: Option<String>,
 }
 

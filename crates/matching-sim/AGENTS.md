@@ -26,9 +26,10 @@ Run `--help` for the current preset and flag list; do not duplicate clap's compl
 
 | Name | Implementation |
 |---|---|
-| `lp` | HiGHS LP plus budget-linearized re-solve; production default |
-| `iter-lp` | Damped fixed-point LP |
-| `eg` | Eisenberg–Gale / Frank–Wolfe |
+| `retained-cash` / `rfw` | Certified retained-cash generalized Frank–Wolfe; default |
+| `lp` | HiGHS LP plus budget-linearized re-solve; risk-neutral baseline |
+| `iter-lp` | Legacy alias to retained-cash FW |
+| `eg` | Legacy alias to retained-cash FW |
 | `conic` | Clarabel conic modes |
 | `milp` | Feature-gated SCIP reference |
 | `decomposed` | Per-group coordination experiment |
@@ -37,6 +38,8 @@ Run `--help` for the current preset and flag list; do not duplicate clap's compl
 ## Invariants
 
 - Compare integer landed outputs and recomputed welfare, not raw floating objectives.
+- Compare the retained-cash objective on every allocation when evaluating the
+  paper algorithm; do not rank it only by linear welfare.
 - Treat a timeout/incumbent separately from a proven MILP optimum.
 - Keep algorithm termination separate from verifier validity: a capped iterate
   may verify, and an empty numerical failure may be vacuously verifier-valid.

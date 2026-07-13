@@ -163,6 +163,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
                     "{failures} component solves failed; dropped {dropped} cross-component orders"
                 )),
             },
+            ..Default::default()
         };
         result
     }

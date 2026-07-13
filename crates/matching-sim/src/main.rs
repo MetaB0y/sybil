@@ -3,7 +3,7 @@
 //! # Usage
 //!
 //! ```bash
-//! # Run quick test with LP solver (default)
+//! # Run a quick test with the retained-cash solver (default)
 //! matching-sim --preset quick
 //!
 //! # Run with verbose step-by-step output
@@ -190,6 +190,11 @@ fn run_detailed_pipeline(
                 solver.solve(&problem)
             }
             #[cfg(feature = "lp")]
+            SolverChoice::RetainedCash => {
+                let solver = matching_solver::RetainedCashSolver::new();
+                solver.solve(&problem)
+            }
+            #[cfg(feature = "lp")]
             SolverChoice::Eg => {
                 let solver = matching_solver::EgSolver::new();
                 solver.solve(&problem)
@@ -235,6 +240,8 @@ fn run_detailed_pipeline(
         if verbose {
             {
                 let solver_label = match solver_choice {
+                    #[cfg(feature = "lp")]
+                    SolverChoice::RetainedCash => "Retained-cash FW Solver",
                     #[cfg(feature = "lp")]
                     SolverChoice::Eg => "EG (Fisher) Solver",
                     #[cfg(feature = "lp")]
@@ -402,6 +409,13 @@ fn run_solver_with_witness(
         #[cfg(feature = "lp")]
         SolverChoice::Lp => {
             let solver = matching_solver::LpSolver::new();
+            let pipeline_result = solver.solve(problem);
+            let witness = witness_from_pipeline(problem, &pipeline_result);
+            (pipeline_result.result, witness)
+        }
+        #[cfg(feature = "lp")]
+        SolverChoice::RetainedCash => {
+            let solver = matching_solver::RetainedCashSolver::new();
             let pipeline_result = solver.solve(problem);
             let witness = witness_from_pipeline(problem, &pipeline_result);
             (pipeline_result.result, witness)

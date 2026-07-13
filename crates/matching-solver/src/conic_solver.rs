@@ -17,7 +17,7 @@ use std::time::Instant;
 use clarabel::algebra::*;
 use clarabel::solver::*;
 
-use matching_engine::{NANOS_PER_DOLLAR, Problem};
+use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{build_solver_context, project_and_finalize, welfare_weights};
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
@@ -146,19 +146,26 @@ impl ConicSolver {
             .map(|(local, &global)| (global, local))
             .collect();
 
-        // Group MM orders by active MM local index.
-        // Only orders with POSITIVE welfare weights participate in V_k (exp cone).
-        // Negative-weight orders (sellers) are treated as retail (linear welfare).
-        // This ensures V_k > 0, which the exp cone requires.
+        // Group MM orders by active MM local index. MM sells use the paper's
+        // buy/sell reduction: sell an outcome at L == buy its complement at
+        // 1-L, plus a linear complete-set correction in the original
+        // coordinates. Thus every MM valuation entering V_k is non-negative.
         let mut mm_groups: Vec<Vec<usize>> = vec![Vec::new(); num_active_mm];
         for (&order_idx, &(mm_idx, _)) in &mm_order_map {
-            if let Some(&local) = active_mm_to_local.get(&mm_idx)
-                && welfare_weights[order_idx] > 0.0
-            {
+            if let Some(&local) = active_mm_to_local.get(&mm_idx) {
                 mm_groups[local].push(order_idx);
             }
-            // Negative-weight orders treated as retail (linear welfare in objective)
         }
+        let mm_values: Vec<f64> = welfare_weights
+            .iter()
+            .map(|&weight| {
+                if weight >= 0.0 {
+                    weight
+                } else {
+                    NANOS_PER_DOLLAR as f64 + weight
+                }
+            })
+            .collect();
 
         // MM budgets for active MMs
         let mm_budgets: Vec<f64> = active_mms
@@ -219,20 +226,26 @@ impl ConicSolver {
         // clearing prices in nanos.
 
         let nanos_f = NANOS_PER_DOLLAR as f64;
+        let share_scale_f = SHARE_SCALE as f64;
 
         // ================================================================
         // Objective (Clarabel minimizes, scaled by 1/NANOS)
         // ================================================================
         //
-        // Variable substitution: t_k' = α_k · t_k where α_k = B_k/NANOS.
-        // This makes the objective coefficient on t_k' equal to -1 instead
-        // of -α_k, eliminating the ~1e4 ratio between budget and welfare
-        // coefficients that kills interior-point conditioning.
+        // q, mint, and group-mint variables are measured in whole shares,
+        // not protocol quantity ticks. This keeps their typical magnitude
+        // three orders smaller while preserving the exact model under a
+        // linear change of variables.
         //
-        // min: -Σ t_k' + Σ s_k' - Σ (w_j/S) q_j + Σ mint_m + Σ gmint_g
+        // The log epigraph variable is scaled as t'_k = B_k t_k, keeping its
+        // objective coefficient at unit scale.
+        //
+        // min: -Σ t'_k + Σ s_k' - Σ (w_j/NANOS) q_j
+        //      + Σ mint_m + Σ gmint_g
 
         // α_k = B_k / NANOS (budget in dollars) for each exp-cone MM
         let alpha_k: Vec<f64> = cone_mm_budgets.iter().map(|&b| b / nanos_f).collect();
+        let t_scale = alpha_k.clone();
 
         // Set of orders that participate in exp cone (positive-weight MM orders)
         let mm_cone_orders: std::collections::HashSet<usize> = cone_mm_groups
@@ -244,10 +257,13 @@ impl ConicSolver {
 
         for i in 0..n {
             if mm_cone_orders.contains(&i) {
-                // Positive-weight MM orders: welfare captured via B_k * ln(V_k)
-                obj[q_offset + i] = 0.0;
+                // MM buys are captured entirely by B_k ln(V_k). In original
+                // coordinates an MM sell additionally contributes -$1 per
+                // share; together with value 1-L inside V_k this recovers -L
+                // exactly on the slack-budget branch.
+                obj[q_offset + i] = if welfare_weights[i] < 0.0 { 1.0 } else { 0.0 };
             } else {
-                // Retail orders AND negative-weight MM orders: linear welfare
+                // Non-MM orders retain ordinary linear welfare.
                 obj[q_offset + i] = -welfare_weights[i] / nanos_f;
             }
         }
@@ -255,13 +271,13 @@ impl ConicSolver {
             if has_cash {
                 obj[s_offset + kk] = 1.0; // s_k' in dollars
             }
-            obj[t_offset + kk] = -1.0; // t_k' = α_k · t_k, so coeff is -1
+            obj[t_offset + kk] = -alpha_k[kk] / t_scale[kk];
         }
         for mm in 0..m {
-            obj[mint_offset + mm] = 1.0; // $1 per mint
+            obj[mint_offset + mm] = 1.0; // $1 per full-share mint
         }
         for gg in 0..g {
-            obj[gmint_offset + gg] = 1.0; // $1 per group mint
+            obj[gmint_offset + gg] = 1.0; // $1 per full-share mint
         }
 
         // P: all zeros (no quadratic term)
@@ -284,21 +300,20 @@ impl ConicSolver {
 
         // --- Block 1: Exponential cones (3 rows per active MM) ---
         //
-        // After substitution t_k' = α_k · t_k, the exp cone models:
-        //   exp(t_k'/α_k) ≤ V_k/NANOS  ⟺  t_k'/α_k ≤ ln(V_k/NANOS)
+        // The exp cone models exp(t'_k / B_k) ≤ V_k/NANOS.
         //
         // Slack variables: (s₁, s₂, s₃) ∈ K_exp with s₂·exp(s₁/s₂) ≤ s₃
-        //   Row 0: s₁ = t_k'/α_k       (A has -1/α_k at t_k', b = 0)
+        //   Row 0: s₁ = t'_k/B_k
         //   Row 1: s₂ = 1              (A all zeros, b = 1)
         //   Row 2: s₃ = V_k/NANOS      (same as before)
 
         for kk in 0..k {
             let row_base = 3 * kk;
 
-            // Row 0: slack = t_k'/α_k
+            // Row 0: slack = t'_k/B_k
             tri_row.push(row_base);
             tri_col.push(t_offset + kk);
-            tri_val.push(-1.0 / alpha_k[kk]);
+            tri_val.push(-1.0 / t_scale[kk]);
 
             // Row 1: slack = 1
             b_vec[row_base + 1] = 1.0;
@@ -309,7 +324,7 @@ impl ConicSolver {
             for &order_idx in cone_mm_groups[kk] {
                 tri_row.push(row_base + 2);
                 tri_col.push(q_offset + order_idx);
-                tri_val.push(-welfare_weights[order_idx] / nanos_f);
+                tri_val.push(-mm_values[order_idx] / nanos_f);
             }
             if has_cash {
                 tri_row.push(row_base + 2);
@@ -371,12 +386,12 @@ impl ConicSolver {
         let bound_base = num_exp_rows + num_balance_rows;
         let mut bound_row = bound_base;
 
-        // q_i ≤ max_fill → slack = max_fill - q_i ≥ 0
+        // q_i ≤ max_fill (in whole shares) → slack = max_fill - q_i ≥ 0
         for (i, order) in orders.iter().enumerate() {
             tri_row.push(bound_row);
             tri_col.push(q_offset + i);
             tri_val.push(1.0);
-            b_vec[bound_row] = order.max_fill.0 as f64;
+            b_vec[bound_row] = order.max_fill.0 as f64 / share_scale_f;
             bound_row += 1;
         }
 
@@ -432,13 +447,9 @@ impl ConicSolver {
             verbose: self.config.verbose,
             max_iter: self.config.max_iter,
             time_limit: self.config.time_limit,
-            tol_gap_abs: 1e-6,
-            tol_gap_rel: 1e-6,
-            tol_feas: 1e-6,
-            static_regularization_constant: 1e-6,
-            dynamic_regularization_delta: 2e-5,
-            equilibrate_max_scaling: 1e6,
-            equilibrate_max_iter: 20,
+            tol_gap_abs: self.config.tol,
+            tol_gap_rel: self.config.tol,
+            tol_feas: self.config.tol,
             ..DefaultSettings::default()
         };
 
@@ -458,6 +469,11 @@ impl ConicSolver {
 
         let solver_status = solver.solution.status;
         let iterations = solver.solution.iterations as usize;
+        let conic_objective_nanos = -solver.solution.obj_val * nanos_f;
+        let conic_gap_nanos =
+            (solver.solution.obj_val - solver.solution.obj_val_dual).abs() * nanos_f;
+        let primal_residual = solver.solution.r_prim;
+        let dual_residual = solver.solution.r_dual;
         match solver_status {
             SolverStatus::Solved | SolverStatus::AlmostSolved => {}
             _ => {
@@ -486,7 +502,9 @@ impl ConicSolver {
         // slackness guarantees UCP. Position balance holds from the LP
         // constraints. Budget absorption holds from the EG structure.
 
-        let q_values: Vec<f64> = (0..n).map(|i| x[q_offset + i].max(0.0)).collect();
+        let q_values: Vec<f64> = (0..n)
+            .map(|i| x[q_offset + i].max(0.0) * share_scale_f)
+            .collect();
 
         let mut result = project_and_finalize(&q_values, problem, &ctx, start);
         if result.diagnostics.status != TerminationStatus::PostProcessingFailure {
@@ -499,6 +517,12 @@ impl ConicSolver {
                 .to_string(),
                 status: TerminationStatus::Converged,
                 iterations: Some(iterations),
+                objective_value: conic_objective_nanos
+                    .is_finite()
+                    .then_some(conic_objective_nanos),
+                optimality_gap: conic_gap_nanos.is_finite().then_some(conic_gap_nanos),
+                primal_residual: primal_residual.is_finite().then_some(primal_residual),
+                dual_residual: dual_residual.is_finite().then_some(dual_residual),
                 message: Some(format!("Clarabel status: {solver_status:?}")),
                 ..Default::default()
             };

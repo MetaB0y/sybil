@@ -86,7 +86,10 @@ assert_eq!(p1.orders.len(), p2.orders.len()); // Deterministic
 |--------|---------|
 | `scenario.rs` | Primary generator with `ScenarioConfig` |
 | `random.rs` | Simpler `RandomConfig` for basic testing |
+| `flash_liquidity.rs` | Two-sided MM bid/ask ladders under one shared budget |
 
 The paper/solver benchmark profiles live in
-`benchmarks/solver/protocol-v1.json`. They are stylized structural stress tests,
-not a substitute for a calibrated real-order replay dataset.
+`benchmarks/solver/protocol-v2.json`; v1 is retained as dated evidence. Scenario
+size fields are whole shares and are converted to protocol quantity units at
+generation time. These are stylized structural stress tests, not a substitute
+for a calibrated real-order replay dataset.

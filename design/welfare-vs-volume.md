@@ -50,7 +50,7 @@ The question is: **would we ever sacrifice $10 of volume for $0.10 of welfare?**
 
 ## How the Solver Enforces Welfare-First
 
-The LP solver (production default, `lp_solver.rs`) maximizes `Σ (limit_price - clearing_price) × fill_qty` directly as its LP objective. This means:
+The LP baseline (`lp_solver.rs`) maximizes `Σ (limit_price - clearing_price) × fill_qty` directly as its LP objective. This means:
 
 - Orders with higher surplus are naturally preferred by the optimizer
 - Zero-surplus orders (limit = clearing price) may not fill if they compete with higher-surplus orders for liquidity
@@ -74,7 +74,12 @@ Total: 100 shares, $15 welfare
 
 Order C could trade at the clearing price but doesn't get filled because higher-welfare orders consume all liquidity. **This sacrifices 50 shares of potential volume to maximize welfare.**
 
-The Fisher market formulation (EgSolver, ConicSolver with QuasiFisher mode) has the same welfare-first bias but handles MM budget constraints more elegantly — budgets are absorbed into the log-utility objective rather than handled as explicit constraints. See `paper.typ` in `~/github/prediction-markets-are-fisher-markets/` (pointer `design/math-papers.md`) for the theoretical foundation.
+The production `RetainedCashSolver` and `ConicSolver` in QuasiFisher mode use
+the paper's affine-to-log MM objective. This intentionally differs from pure
+risk-neutral welfare only when shared MM capital binds; the paper supplies the
+corresponding welfare bound. See `paper.typ` in
+`~/github/prediction-markets-are-fisher-markets/` (pointer
+`design/math-papers.md`) for the theoretical foundation.
 
 ---
 

@@ -6,12 +6,12 @@
 //! **Variables:**
 //! - `z_i ∈ {0,1}`: whether order i is filled
 //! - `q_i ∈ [0, max_fill_i]`: fill quantity for order i
-//! - `p_m ∈ [0, NANOS_PER_DOLLAR]`: YES clearing price for market m
+//! - `p_m ∈ [0, 1]`: YES clearing price in dollars for market m
 //! - `mint_m ∈ ℝ`: net minting for market m (positive = mint, negative = burn)
 //! - `mint_cost_m ≥ max(mint_m, 0)`: nonnegative reporting cost
 //!
 //! **Objective (maximize):**
-//! `Σ sign_i × L_i × q_i - Σ_m NANOS_PER_DOLLAR × mint_cost_m`
+//! `Σ sign_i × (L_i / NANOS_PER_DOLLAR) × q_i - Σ_m mint_cost_m`
 //!
 //! **Constraints:**
 //! - z/q linking: AON, min/max fill
@@ -21,7 +21,8 @@
 //! - Market groups: `Σ p_m ≤ NANOS_PER_DOLLAR` per group
 
 use matching_engine::{
-    Fill, MarketId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, minting_cost_from_fills,
+    Fill, MarketId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, SHARE_SCALE,
+    minting_cost_from_fills,
 };
 
 use crate::MatchingResult;
@@ -192,11 +193,26 @@ impl MilpSolver {
 
         match solve_result {
             Ok((solution, status, solve_time, _scip_objective)) => {
+                let landed_yes_prices = match land_scip_prices(&solution, &active_orders, problem) {
+                    Ok(prices) => prices,
+                    Err(message) => {
+                        for _order in &active_orders {
+                            result.orders_unfilled_liquidity += 1;
+                        }
+                        return MilpResult {
+                            result,
+                            status: SolveStatus::Error(message),
+                            solve_time_secs: solve_time,
+                            clearing_prices: HashMap::new(),
+                            objective_welfare: 0,
+                        };
+                    }
+                };
                 let mut clearing_prices: HashMap<MarketId, Vec<Nanos>> = HashMap::new();
 
                 // Build clearing prices from price variables
-                for (&market, &p_yes_f64) in &solution.p_values {
-                    let p_yes = Nanos(p_yes_f64.round().max(0.0) as u64);
+                for (&market, &p_yes_raw) in &landed_yes_prices {
+                    let p_yes = Nanos(p_yes_raw);
                     let p_no = Nanos(NANOS_PER_DOLLAR.saturating_sub(p_yes.0));
                     clearing_prices.insert(market, vec![p_yes, p_no]);
                 }
@@ -211,13 +227,7 @@ impl MilpSolver {
 
                         // Fill price from clearing price for single-market binary orders
                         let market = order.markets[0];
-                        let p_yes = solution
-                            .p_values
-                            .get(&market)
-                            .copied()
-                            .unwrap_or(0.0)
-                            .round()
-                            .max(0.0) as u64;
+                        let p_yes = landed_yes_prices.get(&market).copied().unwrap_or(0);
                         let p_yes = Nanos(p_yes);
                         let fill_price = if order.payoffs[0] != 0 {
                             p_yes
@@ -352,16 +362,17 @@ impl MilpSolver {
             .map(|i| {
                 let order = active_orders[i];
                 let sign = order_sign(order);
-                let obj = sign * order.limit_price.0 as f64;
+                let obj = sign * order.limit_price.0 as f64 / nanos_f;
                 model.add(var().cont(0.0..=(order.max_fill.0 as f64)).obj(obj))
             })
             .collect();
 
-        // p_m (continuous): YES clearing price for market m
+        // p_m (continuous): YES clearing price in dollars for market m. Keeping
+        // prices O(1) is essential for SCIP's nonlinear feasibility tests.
         let p_vars: HashMap<MarketId, Variable> = markets
             .iter()
             .map(|&m| {
-                let v = model.add(var().cont(0.0..=nanos_f).obj(0.0));
+                let v = model.add(var().cont(0.0..=1.0).obj(0.0));
                 (m, v)
             })
             .collect();
@@ -371,7 +382,7 @@ impl MilpSolver {
         let mint_vars: HashMap<MarketId, Variable> = markets
             .iter()
             .map(|&m| {
-                let v = model.add(var().cont(-1e15..=1e15).obj(-nanos_f));
+                let v = model.add(var().cont(-1e15..=1e15).obj(-1.0));
                 (m, v)
             })
             .collect();
@@ -394,7 +405,7 @@ impl MilpSolver {
             .collect();
 
         let group_mint_vars: Vec<Variable> = (0..problem.market_groups.len())
-            .map(|_| model.add(var().cont(-1e15..=1e15).obj(-nanos_f)))
+            .map(|_| model.add(var().cont(-1e15..=1e15).obj(-1.0)))
             .collect();
 
         // ================================================================
@@ -417,18 +428,18 @@ impl MilpSolver {
         //
         // For single-market order on market m:
         //   alpha = payoffs[0] - payoffs[1]  (YES coefficient - NO coefficient)
-        //   beta  = payoffs[1] * NANOS       (NO coefficient * price scale)
+        //   beta  = payoffs[1]               (NO coefficient * $1)
         //   eff_price = alpha * p_m + beta
         //
         // Big-M relaxation: alpha*p + M*z <= sign*L + M - beta
 
-        let big_m = nanos_f;
+        let big_m = 1.0;
 
         for (i, order) in active_orders.iter().enumerate() {
             let sign = order_sign(order);
-            let limit = order.limit_price.0 as f64;
+            let limit = order.limit_price.0 as f64 / nanos_f;
             let alpha = (order.payoffs[0] - order.payoffs[1]) as f64;
-            let beta = order.payoffs[1] as f64 * nanos_f;
+            let beta = order.payoffs[1] as f64;
 
             let market = order.markets[0];
             let mut c = cons().coef(&z_vars[i], big_m);
@@ -534,7 +545,7 @@ impl MilpSolver {
                                 }
                                 MmSide::SellYes | MmSide::BuyNo => {
                                     lin_vars_vec.push(&q_vars[idx]);
-                                    lin_coefs_vec.push(nanos_f);
+                                    lin_coefs_vec.push(1.0);
                                     quad_vars1.push(p_var);
                                     quad_vars2.push(&q_vars[idx]);
                                     quad_coefs_vec.push(-1.0);
@@ -551,7 +562,7 @@ impl MilpSolver {
                                 quad_vars2,
                                 &mut quad_coefs_vec,
                                 f64::NEG_INFINITY,
-                                mm.max_capital.0 as f64,
+                                mm.max_capital.0 as f64 / nanos_f * SHARE_SCALE as f64,
                                 &format!("mm_budget_{}", mm.mm_id.0),
                             );
                         }
@@ -598,7 +609,7 @@ impl MilpSolver {
                             };
 
                             let q_ub = order.max_fill.0 as f64;
-                            let p_ub = nanos_f;
+                            let p_ub = 1.0;
 
                             // Create auxiliary variable w_i ∈ [0, P*Q]
                             let w = model.add(var().cont(0.0..=(p_ub * q_ub)).obj(0.0));
@@ -648,10 +659,13 @@ impl MilpSolver {
                                 budget_cons =
                                     budget_cons.coef(&w_aux_vars[term.w_idx], term.w_sign);
                                 if let Some(q_idx) = term.q_idx {
-                                    budget_cons = budget_cons.coef(&q_vars[q_idx], nanos_f);
+                                    budget_cons = budget_cons.coef(&q_vars[q_idx], 1.0);
                                 }
                             }
-                            model.add(budget_cons.le(mm.max_capital.0 as f64));
+                            model.add(
+                                budget_cons
+                                    .le(mm.max_capital.0 as f64 / nanos_f * SHARE_SCALE as f64),
+                            );
                         }
                     }
                     MmBudgetMode::Ignore => unreachable!(),
@@ -678,7 +692,7 @@ impl MilpSolver {
                 // Σp = $1: mutually exclusive markets must have prices summing
                 // to exactly $1. This ensures group minting is always zero-cost
                 // (sound) — no protocol subsidy needed.
-                model.add(c.eq(nanos_f));
+                model.add(c.eq(1.0));
             }
         }
 
@@ -872,6 +886,102 @@ struct ScipSolution {
     z_values: Vec<f64>,
     q_values: Vec<f64>,
     p_values: HashMap<MarketId, f64>,
+}
+
+/// Land SCIP's O(1)-scaled floating prices to protocol nanos without crossing
+/// any filled order's limit. For mutually exclusive groups, distribute any
+/// rounding remainder inside the same admissible intervals so the integer
+/// prices still sum to exactly $1.
+fn land_scip_prices(
+    solution: &ScipSolution,
+    active_orders: &[&Order],
+    problem: &Problem,
+) -> Result<HashMap<MarketId, u64>, String> {
+    let mut intervals: HashMap<MarketId, (u64, u64)> = solution
+        .p_values
+        .keys()
+        .map(|&market| (market, (0, NANOS_PER_DOLLAR)))
+        .collect();
+
+    for (index, order) in active_orders.iter().enumerate() {
+        if solution.z_values.get(index).copied().unwrap_or(0.0) <= 0.5
+            || solution.q_values.get(index).copied().unwrap_or(0.0) <= 0.5
+        {
+            continue;
+        }
+        let market = order.markets[0];
+        let Some((lower, upper)) = intervals.get_mut(&market) else {
+            continue;
+        };
+        let targets_yes = order.payoffs[0] != 0;
+        match (targets_yes, order.is_seller()) {
+            (true, false) => *upper = (*upper).min(order.limit_price.0),
+            (true, true) => *lower = (*lower).max(order.limit_price.0),
+            (false, false) => {
+                *lower = (*lower).max(NANOS_PER_DOLLAR.saturating_sub(order.limit_price.0));
+            }
+            (false, true) => {
+                *upper = (*upper).min(NANOS_PER_DOLLAR.saturating_sub(order.limit_price.0));
+            }
+        }
+    }
+
+    if let Some((&market, &(lower, upper))) =
+        intervals.iter().find(|(_, (lower, upper))| lower > upper)
+    {
+        return Err(format!(
+            "SCIP price landing has an empty interval for market {market:?}: [{lower}, {upper}]"
+        ));
+    }
+
+    let mut prices: HashMap<MarketId, u64> = solution
+        .p_values
+        .iter()
+        .map(|(&market, &price)| {
+            let (lower, upper) = intervals[&market];
+            let rounded = (price * NANOS_PER_DOLLAR as f64)
+                .round()
+                .clamp(0.0, NANOS_PER_DOLLAR as f64) as u64;
+            (market, rounded.clamp(lower, upper))
+        })
+        .collect();
+
+    for group in &problem.market_groups {
+        let markets: Vec<_> = group
+            .markets
+            .iter()
+            .copied()
+            .filter(|market| prices.contains_key(market))
+            .collect();
+        if markets.is_empty() {
+            continue;
+        }
+        let current: i128 = markets.iter().map(|market| prices[market] as i128).sum();
+        let mut delta = NANOS_PER_DOLLAR as i128 - current;
+        for market in markets {
+            if delta == 0 {
+                break;
+            }
+            let (lower, upper) = intervals[&market];
+            let price = prices.get_mut(&market).expect("filtered active market");
+            if delta > 0 {
+                let adjustment = (upper - *price).min(delta as u64);
+                *price += adjustment;
+                delta -= adjustment as i128;
+            } else {
+                let adjustment = (*price - lower).min((-delta) as u64);
+                *price -= adjustment;
+                delta += adjustment as i128;
+            }
+        }
+        if delta != 0 {
+            return Err(format!(
+                "SCIP group price landing cannot absorb {delta} nanos inside filled-order limits"
+            ));
+        }
+    }
+
+    Ok(prices)
 }
 
 impl Default for MilpSolver {

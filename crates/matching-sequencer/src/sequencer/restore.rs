@@ -46,31 +46,25 @@ impl BlockSequencer {
         }
     }
 
-    /// Create with the production default solver: [`matching_solver::LpSolver`].
+    /// Create with the production default solver:
+    /// [`matching_solver::RetainedCashSolver`].
     ///
     /// This is the solver that actually settles blocks in production (reached
     /// via `sybil-api`'s startup and [`BlockSequencer::restore`]). It runs a
-    /// plain single-pass LP: the HiGHS welfare LP plus one SLP re-solve to shade
-    /// MM budgets (`LpConfig::default().max_mm_iterations == 1`). The choice is
-    /// deliberate, and its known tradeoff is recorded here so it doesn't get
-    /// "fixed" by accident:
+    /// generalized Frank--Wolfe on the paper's exact retained-cash objective.
+    /// Each iteration calls the HiGHS matching oracle; termination uses a
+    /// certified continuous objective gap rather than iterate stability.
     ///
-    /// - A single SLP pass linearizes MM budget constraints at the *unbudgeted*
-    ///   clearing prices, so it mis-sizes budgets that only bind after prices
-    ///   move. `matching_solver::IterLpSolver` (EG μ-boosted fixed point) exists
-    ///   precisely to close that gap — see
-    ///   `iterative_lp_solver::tests::test_auglp_vs_lp_tight_budget_price_shift`,
-    ///   which asserts IterLP reaches >10× the welfare of the single-pass LP on a
-    ///   tight-budget, price-shifting instance.
-    /// - We still ship `LpSolver` because it is the simplest low-latency,
-    ///   conformance- and verifier-clean settlement path. IterLP now shares the
-    ///   same integer projection/trim boundary and passes conformance, but its
-    ///   damped multiplier update is a capped fixed-point heuristic without a
-    ///   general convergence guarantee. The paper's log-welfare program is
-    ///   represented directly by `ConicSolver` in QuasiFisher mode; that remains
-    ///   a research/reference path pending a broader empirical and operational
-    ///   evaluation. The non-LP solvers are otherwise exercised by
-    ///   `matching-sim` and benches.
+    /// - `LpSolver` remains the low-latency risk-neutral baseline. Its SLP MM
+    ///   budget rows are a capped fixed-point heuristic, so it is no longer the
+    ///   default when shared capital can bind after prices move.
+    /// - `IterLpSolver` and `EgSolver` remain explicit compatibility aliases to
+    ///   this implementation; they do not preserve the old heuristic behavior.
+    /// - `ConicSolver` in QuasiFisher mode solves the same convex objective by
+    ///   exponential cones and is retained as an independent reference.
+    /// - A configured Frank--Wolfe cap can return a valid landed allocation
+    ///   before meeting the requested certificate. Diagnostics preserve that
+    ///   distinction; the verifier remains the settlement authority.
     ///
     /// Inject a different `Arc<dyn Solver>` via [`BlockSequencer::new`] to
     /// experiment without touching this default.
@@ -86,14 +80,14 @@ impl BlockSequencer {
             markets,
             market_groups,
             oracle,
-            Arc::new(matching_solver::LpSolver::new()),
+            Arc::new(matching_solver::RetainedCashSolver::new()),
             config,
         )
     }
 
     /// Restore from persisted state.
     pub fn restore(state: RestoredState, oracle: Arc<dyn Oracle>, config: SequencerConfig) -> Self {
-        let solver: Arc<dyn Solver> = Arc::new(matching_solver::LpSolver::new());
+        let solver: Arc<dyn Solver> = Arc::new(matching_solver::RetainedCashSolver::new());
         let control_plane_log = state.control_plane_log.clone();
         let mut lifecycle = MarketLifecycle::new(oracle);
         for (market_id, status) in state.market_statuses {

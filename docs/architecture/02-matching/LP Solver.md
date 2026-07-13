@@ -3,13 +3,13 @@ tags: [solver, crate]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-13
 ---
 
 # LP solver
 
 > [!summary] In one paragraph
-> `LpSolver` is the production default. It asks HiGHS for the welfare-maximizing supported allocation, reads clearing prices from balance-constraint duals, linearizes MM capital usage at those prices, and re-solves with budget rows. The default permits one budget-aware re-solve. The floating solution is rounded, trimmed for integer MM compliance, and judged by `sybil-verifier`.
+> `LpSolver` is the low-latency risk-neutral baseline. It asks HiGHS for the welfare-maximizing supported allocation, reads clearing prices from balance-constraint duals, linearizes MM capital usage at those prices, and re-solves with budget rows. The default permits one budget-aware re-solve. The floating solution is rounded, trimmed for integer MM compliance, and judged by `sybil-verifier`. [[Retained Cash Solver]] is the production default when shared MM capital is present.
 
 ```mermaid
 flowchart LR
@@ -29,6 +29,8 @@ The LP has fill, per-market mint, and group-mint variables with outcome-balance 
 ## Properties and limits
 
 - No entropy objective or entropy tie-breaker exists in the implementation.
+- The capped SLP iteration has no general convergence certificate; diagnostics
+  distinguish a solved fixed point from an iteration cap.
 - The supported execution path is single-market binary; unsupported shapes are filtered/rejected before value execution.
 - HiGHS output is an untrusted floating candidate. Final fills, prices, welfare, and MM checks are integer.
 - `matching-engine` owns floor/ceil money helpers; `sybil-verifier` owns trusted correctness and net-of-minting welfare.
@@ -43,4 +45,3 @@ The LP has fill, per-market mint, and group-mint variables with outcome-balance 
 - [[The LP Core]]
 - [[MM Budget Constraint]]
 - [[LP Duality and Clearing Prices]]
-

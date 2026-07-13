@@ -8,9 +8,10 @@
 //! extensions and `OrderStatsTracker`'s hourly machinery.
 //!
 //! The canonical field remains `i64` because gross value and signed mint/burn
-//! cost use signed arithmetic, but newly verified total welfare is non-negative.
-//! The tracker continues to tolerate legacy negative values during restore and
-//! migration. Accumulators use `saturating_add` on `i64`. Per-market welfare is
+//! cost use signed arithmetic, but verified total welfare is non-negative.
+//! Restore clamps legacy negative aggregates produced before the signed-burn
+//! fix; recording also fails closed at zero if that invariant is violated.
+//! Accumulators use `saturating_add` on `i64`. Per-market welfare is
 //! NOT tracked here — that ships separately via `BlockAnalytics.welfare_by_market`
 //! → `BlockMarketStats.welfare_nanos`.
 //!
@@ -43,8 +44,12 @@ impl WelfareTracker {
 
     pub fn restore(snapshot: WelfareTrackerSnapshot) -> Self {
         Self {
-            platform: snapshot.platform,
-            hourly_platform: snapshot.hourly_platform.into_iter().collect(),
+            platform: snapshot.platform.max(0),
+            hourly_platform: snapshot
+                .hourly_platform
+                .into_iter()
+                .map(|(timestamp, welfare)| (timestamp, welfare.max(0)))
+                .collect(),
         }
     }
 
@@ -58,6 +63,11 @@ impl WelfareTracker {
     /// Accumulate one finalized block's authoritative `total_welfare` scalar.
     /// Platform running total += welfare; current hourly bucket += welfare.
     pub fn record(&mut self, welfare: i64, ts_ms: u64) {
+        debug_assert!(
+            welfare >= 0,
+            "verified platform welfare must be non-negative"
+        );
+        let welfare = welfare.max(0);
         self.platform = self.platform.saturating_add(welfare);
         let bucket = self.hourly_entry_mut(ts_ms);
         *bucket = bucket.saturating_add(welfare);
@@ -117,17 +127,18 @@ mod tests {
         let mut t = WelfareTracker::new();
         t.record(100, 0);
         t.record(250, 0);
-        t.record(-50, 0);
-        assert_eq!(t.platform_total(), 300);
+        t.record(50, 0);
+        assert_eq!(t.platform_total(), 400);
     }
 
     #[test]
-    fn legacy_negative_welfare_folds_into_sum() {
-        let mut t = WelfareTracker::new();
-        t.record(-10, 0);
-        t.record(-5, 1_000); // same hour-0 bucket
-        assert_eq!(t.platform_total(), -15);
-        assert_eq!(t.platform_24h(2_000), -15);
+    fn legacy_negative_welfare_is_clamped_on_restore() {
+        let t = WelfareTracker::restore(WelfareTrackerSnapshot {
+            platform: -15,
+            hourly_platform: vec![(0, -15)],
+        });
+        assert_eq!(t.platform_total(), 0);
+        assert_eq!(t.platform_24h(2_000), 0);
     }
 
     #[test]
@@ -170,7 +181,7 @@ mod tests {
     fn snapshot_roundtrip() {
         let mut t = WelfareTracker::new();
         t.record(500, 0);
-        t.record(-25, H + 1_000);
+        t.record(25, H + 1_000);
         let restored = WelfareTracker::restore(t.snapshot());
         assert_eq!(restored.platform_total(), t.platform_total());
         let now = H + 5_000;

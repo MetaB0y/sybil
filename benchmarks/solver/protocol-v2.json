@@ -1,0 +1,307 @@
+{
+  "schema_version": 2,
+  "protocol_id": "solver-evaluation-v2-retained-cash",
+  "title": "Certified retained-cash clearing under genuine shared-capital stress",
+  "analysis_policy": {
+    "freeze_policy": "protocol and implementation are committed before the full run; results are committed separately",
+    "primary_unit": "one declared order book, budget ratio, and solver",
+    "budget_definition": "for lp_limit_value experiments, B_k is the declared multiplier times MM k's correctly scaled buy/sell-reduced limit-value in the unconstrained LP allocation",
+    "primary_objective": "shifted retained-cash objective in nanodollars, evaluated on every landed allocation",
+    "primary_certificate": "generalized Frank-Wolfe gap for the continuous retained-cash allocation",
+    "protocol_welfare": "integer verifier-recomputed net welfare with signed complete-set mint/burn cost",
+    "failure_policy": "retain every panic, empty result, backend error, timeout, iteration cap, and verifier-invalid allocation",
+    "baseline_policy": "lp-unconstrained is intentionally allowed to violate MM budgets and is never relabelled protocol-feasible",
+    "negative_control": "budgets at and above unconstrained LP limit-value test exact LP recovery",
+    "selection_policy": "all seed ranges, budget ratios, solvers, metrics, and plots are declared before the full run; no post-hoc seed filtering",
+    "tuning_policy": "development used seeds below 30000; untouched evaluation seeds begin at 50000 and are not used for algorithm tuning",
+    "missing_policy": "no invented quality or runtime values for failed runs; denominators remain declared counts"
+  },
+  "warmup": {
+    "profile": "flash-ladder",
+    "scale": "flash-reference",
+    "seed": 17,
+    "budget_scale": 1.0
+  },
+  "solvers": {
+    "lp-unconstrained": {
+      "kind": "lp-unconstrained",
+      "label": "LP without MM budgets (infeasible baseline)",
+      "fallback_to_lp": false
+    },
+    "lp": {
+      "kind": "lp",
+      "label": "Production LP-SLP plus visible landing trim",
+      "max_iterations": 5,
+      "fallback_to_lp": false
+    },
+    "retained-cash-fw": {
+      "kind": "retained-cash-fw",
+      "label": "Certified retained-cash generalized Frank-Wolfe",
+      "max_iterations": 100,
+      "tolerance": 0.00001,
+      "absolute_tolerance": 1000000.0,
+      "line_search_steps": 48,
+      "fallback_to_lp": false
+    },
+    "conic-quasi": {
+      "kind": "conic-quasi",
+      "label": "Normalized Clarabel retained-cash reference",
+      "max_iterations": 200,
+      "tolerance": 0.00000001,
+      "time_limit_seconds": 20.0,
+      "fallback_to_lp": false
+    },
+    "conic-fisher": {
+      "kind": "conic-fisher",
+      "label": "Normalized no-cash Fisher ablation",
+      "max_iterations": 200,
+      "tolerance": 0.00000001,
+      "time_limit_seconds": 20.0,
+      "fallback_to_lp": false
+    },
+    "milp-exact": {
+      "kind": "milp-exact",
+      "label": "Correctly scaled exact hard-budget MIQCQP",
+      "time_limit_seconds": 10.0,
+      "gap_tolerance": 0.0,
+      "fallback_to_lp": false
+    }
+  },
+  "scales": {
+    "reference": {
+      "num_markets": 4,
+      "num_orders": 60,
+      "num_mms": 1,
+      "order_size_min": 5,
+      "order_size_max": 100,
+      "mm_budget_min_dollars": 250,
+      "mm_budget_max_dollars": 1000
+    },
+    "medium": {
+      "num_markets": 30,
+      "num_orders": 3000,
+      "num_mms": 2,
+      "order_size_min": 10,
+      "order_size_max": 300,
+      "mm_budget_min_dollars": 2500,
+      "mm_budget_max_dollars": 12500
+    },
+    "large": {
+      "num_markets": 50,
+      "num_orders": 10000,
+      "num_mms": 3,
+      "order_size_min": 10,
+      "order_size_max": 500,
+      "mm_budget_min_dollars": 5000,
+      "mm_budget_max_dollars": 25000
+    },
+    "numerical": {
+      "num_markets": 30,
+      "num_orders": 3000,
+      "num_mms": 2,
+      "order_size_min": 1,
+      "order_size_max": 10000,
+      "mm_budget_min_dollars": 100,
+      "mm_budget_max_dollars": 100000
+    },
+    "flash-reference": {
+      "num_markets": 4,
+      "num_orders": 16,
+      "num_mms": 1,
+      "order_size_min": 10,
+      "order_size_max": 30,
+      "mm_budget_min_dollars": 1,
+      "mm_budget_max_dollars": 1000
+    },
+    "flash-small": {
+      "num_markets": 8,
+      "num_orders": 48,
+      "num_mms": 1,
+      "order_size_min": 10,
+      "order_size_max": 50,
+      "mm_budget_min_dollars": 1,
+      "mm_budget_max_dollars": 1000
+    },
+    "flash-medium": {
+      "num_markets": 20,
+      "num_orders": 400,
+      "num_mms": 2,
+      "order_size_min": 10,
+      "order_size_max": 100,
+      "mm_budget_min_dollars": 1,
+      "mm_budget_max_dollars": 5000
+    },
+    "flash-large": {
+      "num_markets": 50,
+      "num_orders": 2000,
+      "num_mms": 3,
+      "order_size_min": 5,
+      "order_size_max": 250,
+      "mm_budget_min_dollars": 1,
+      "mm_budget_max_dollars": 25000
+    }
+  },
+  "profiles": {
+    "neutral": {
+      "generator": "random",
+      "market_group_probability": 0.6,
+      "order_size_power": 2.0,
+      "retail_buy_probability": 0.6,
+      "liquidity_scarcity": 0.5,
+      "hot_market_fraction": 0.0,
+      "hot_order_probability": 0.6,
+      "liquidity_depth_levels": 5,
+      "liquidity_dispersion": 0.35,
+      "mm_spread_bps": 50,
+      "mm_capacity_multiplier": 10,
+      "mm_market_coverage_fraction": 0.75,
+      "mm_market_coverage_max": 30
+    },
+    "concentrated": {
+      "generator": "random",
+      "market_group_probability": 0.6,
+      "order_size_power": 2.2,
+      "retail_buy_probability": 0.72,
+      "liquidity_scarcity": 0.3,
+      "hot_market_fraction": 0.2,
+      "hot_order_probability": 0.82,
+      "liquidity_depth_levels": 5,
+      "liquidity_dispersion": 0.8,
+      "mm_spread_bps": 90,
+      "mm_capacity_multiplier": 20,
+      "mm_market_coverage_fraction": 0.8,
+      "mm_market_coverage_max": 30
+    },
+    "numerical-range": {
+      "generator": "random",
+      "market_group_probability": 0.65,
+      "order_size_power": 3.5,
+      "retail_buy_probability": 0.65,
+      "liquidity_scarcity": 0.4,
+      "hot_market_fraction": 0.1,
+      "hot_order_probability": 0.75,
+      "liquidity_depth_levels": 6,
+      "liquidity_dispersion": 1.5,
+      "mm_spread_bps": 75,
+      "mm_capacity_multiplier": 50,
+      "mm_market_coverage_fraction": 1.0,
+      "mm_market_coverage_max": 30
+    },
+    "flash-ladder": {
+      "generator": "flash_ladder",
+      "market_group_probability": 0.0,
+      "order_size_power": 1.0,
+      "retail_buy_probability": 1.0,
+      "liquidity_scarcity": 1.0,
+      "hot_market_fraction": 0.0,
+      "hot_order_probability": 0.0,
+      "liquidity_depth_levels": 1,
+      "liquidity_dispersion": 0.0,
+      "mm_spread_bps": 0,
+      "mm_capacity_multiplier": 1,
+      "mm_market_coverage_fraction": 1.0,
+      "mm_market_coverage_max": 100
+    }
+  },
+  "experiments": [
+    {
+      "id": "neutral-budget-controls",
+      "suite": "quality",
+      "profile": "neutral",
+      "scale": "medium",
+      "seed_start": 50000,
+      "seed_count": 6,
+      "budget_scales": [0.5, 1.0, 4.0],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "conic-quasi"]
+    },
+    {
+      "id": "concentrated-tight",
+      "suite": "quality",
+      "profile": "concentrated",
+      "scale": "medium",
+      "seed_start": 50100,
+      "seed_count": 6,
+      "budget_scales": [0.5],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "conic-quasi"]
+    },
+    {
+      "id": "flash-budget-sweep",
+      "suite": "budget",
+      "profile": "flash-ladder",
+      "scale": "flash-medium",
+      "seed_start": 51000,
+      "seed_count": 10,
+      "budget_scales": [0.1, 0.25, 0.5, 1.0, 2.0, 10.0],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "conic-quasi"]
+    },
+    {
+      "id": "flash-scaling-small",
+      "suite": "scaling",
+      "profile": "flash-ladder",
+      "scale": "flash-small",
+      "seed_start": 52000,
+      "seed_count": 6,
+      "budget_scales": [0.25],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "conic-quasi"]
+    },
+    {
+      "id": "flash-scaling-medium",
+      "suite": "scaling",
+      "profile": "flash-ladder",
+      "scale": "flash-medium",
+      "seed_start": 52100,
+      "seed_count": 6,
+      "budget_scales": [0.25],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "conic-quasi"]
+    },
+    {
+      "id": "flash-scaling-large",
+      "suite": "scaling",
+      "profile": "flash-ladder",
+      "scale": "flash-large",
+      "seed_start": 52200,
+      "seed_count": 4,
+      "budget_scales": [0.25],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "conic-quasi"]
+    },
+    {
+      "id": "numerical-range-stress",
+      "suite": "numerical",
+      "profile": "numerical-range",
+      "scale": "numerical",
+      "seed_start": 53000,
+      "seed_count": 5,
+      "budget_scales": [0.25, 10.0],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "conic-quasi"]
+    },
+    {
+      "id": "flash-exact-reference",
+      "suite": "reference",
+      "profile": "flash-ladder",
+      "scale": "flash-reference",
+      "seed_start": 54000,
+      "seed_count": 5,
+      "budget_scales": [0.25, 0.5, 1.0],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "conic-quasi", "milp-exact"]
+    },
+    {
+      "id": "no-cash-ablation",
+      "suite": "ablation",
+      "profile": "flash-ladder",
+      "scale": "flash-small",
+      "seed_start": 55000,
+      "seed_count": 5,
+      "budget_scales": [0.25, 4.0],
+      "budget_basis": "lp_limit_value",
+      "solvers": ["retained-cash-fw", "conic-quasi", "conic-fisher"]
+    }
+  ]
+}

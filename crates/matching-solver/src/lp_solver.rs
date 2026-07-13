@@ -261,12 +261,13 @@ pub(crate) fn build_and_solve_lp(
     let q_cols: Vec<_> = (0..n)
         .map(|i| {
             let ub = orders[i].max_fill.0 as f64;
-            pb.add_column(objective_coeffs[i], 0.0..=ub)
+            pb.add_column(objective_coeffs[i] / nanos_f, 0.0..=ub)
         })
         .collect();
 
     // mint_m: per-market minting (free variable, can be negative for burning)
-    // Objective: -NANOS_PER_DOLLAR (minting costs $1 per unit)
+    // Objective: -1 after scaling all monetary objective coefficients from
+    // nanos to dollars (minting costs $1 per full-share-equivalent raw unit).
     //
     // YES balance: Σ c_yes_i * q_i = mint_m + gmint_g
     // NO balance:  Σ c_no_i * q_i = mint_m
@@ -276,7 +277,7 @@ pub(crate) fn build_and_solve_lp(
     let mint_cols: HashMap<MarketId, _> = markets
         .iter()
         .map(|&m| {
-            let col = pb.add_column(-nanos_f, -big..=big);
+            let col = pb.add_column(-1.0, -big..=big);
             (m, col)
         })
         .collect();
@@ -285,7 +286,7 @@ pub(crate) fn build_and_solve_lp(
     // Objective: -NANOS_PER_DOLLAR per unit
     // gmint_g >= 0 (group minting only, no group burning)
     let gmint_cols: Vec<_> = (0..num_groups)
-        .map(|_| pb.add_column(-nanos_f, 0.0..))
+        .map(|_| pb.add_column(-1.0, 0.0..))
         .collect();
 
     // ================================================================
@@ -382,10 +383,10 @@ pub(crate) fn build_and_solve_lp(
 
     for &market in markets {
         if let Some(&row_idx) = yes_row_indices.get(&market) {
-            dual_yes.insert(market, dual_rows[row_idx]);
+            dual_yes.insert(market, dual_rows[row_idx] * nanos_f);
         }
         if let Some(&row_idx) = no_row_indices.get(&market) {
-            dual_no.insert(market, dual_rows[row_idx]);
+            dual_no.insert(market, dual_rows[row_idx] * nanos_f);
         }
     }
 
@@ -880,6 +881,21 @@ pub(crate) fn project_and_finalize(
     ctx: &SolverContext,
     start: Instant,
 ) -> PipelineResult {
+    let projection_obj = welfare_weights(&problem.orders);
+    project_and_finalize_with_objective(allocation, problem, ctx, &projection_obj, start)
+}
+
+/// Project a continuous allocation using a caller-supplied supporting LP
+/// objective. Retained-cash clearing uses its final pacing-weighted objective
+/// so the projection prices support the same first-order system as the core
+/// solve; legacy solvers use [`project_and_finalize`] and linear welfare.
+pub(crate) fn project_and_finalize_with_objective(
+    allocation: &[f64],
+    problem: &Problem,
+    ctx: &SolverContext,
+    projection_obj: &[f64],
+    start: Instant,
+) -> PipelineResult {
     let orders = &problem.orders;
 
     let mut projected_orders: Vec<Order> = orders.to_vec();
@@ -892,13 +908,12 @@ pub(crate) fn project_and_finalize(
         order.max_fill = Qty(core_fill.min(orders[i].max_fill.0));
     }
 
-    let projection_obj = welfare_weights(orders);
     let Some(final_sol) = build_and_solve_lp(
         &projected_orders,
         &ctx.markets,
         &ctx.market_to_group,
         ctx.num_groups,
-        &projection_obj,
+        projection_obj,
         &[],
     ) else {
         return PipelineResult::failure(

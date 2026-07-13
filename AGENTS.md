@@ -128,10 +128,11 @@ All solvers take a `Problem` and return a `PipelineResult` (fills, clearing pric
 
 | Solver | File | Feature | Description |
 |--------|------|---------|-------------|
-| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + single-pass SLP MM budget shading. **Production default.** |
-| **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Damped fixed-point on the EG budget multiplier; better under tight MM budgets. |
-| **EgSolver** | `eg_solver.rs` | `lp` | Eisenberg-Gale / Fisher market formulation (Frank-Wolfe). |
-| **ConicSolver** | `conic_solver.rs` | `conic` | Interior-point via Clarabel. Configurable objective (Linear, Fisher, QuasiFisher). |
+| **RetainedCashSolver** | `retained_cash_solver.rs` | `lp` | Certified generalized Frank--Wolfe on the affine-to-log retained-cash objective. **Production default.** |
+| **LpSolver** | `lp_solver.rs` | `lp` | LP via HiGHS + single-pass SLP MM budget shading; low-latency baseline. |
+| **IterLpSolver** | `iterative_lp_solver.rs` | `lp` | Explicit compatibility alias to RetainedCashSolver. |
+| **EgSolver** | `eg_solver.rs` | `lp` | Explicit compatibility alias to RetainedCashSolver; no-cash ablation lives in Conic Fisher mode. |
+| **ConicSolver** | `conic_solver.rs` | `conic` | Independent exponential-cone retained-cash reference via Clarabel. |
 | **MilpSolver** | `milp.rs` | `milp` | SCIP MIQCQP. Exact optimal with timeout. |
 | **DecomposedSolver** | `decomposed.rs` | `lp` | Per-market-group decomposition with mirror descent budget coordination. |
 
@@ -160,7 +161,7 @@ An Obsidian vault at `docs/architecture/` is the canonical architectural spec. I
 | Topic | Notes |
 |-------|-------|
 | Core model | Payoff Vectors, Binary Markets and Market Groups, Nanos and Integer Arithmetic, Order Types |
-| Solvers | Solver Landscape, LP Solver, EG Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
+| Solvers | Solver Landscape, Retained Cash Solver, LP Solver, EG Solver, Conic Solver, MILP Solver, Decomposed Solver, The LP Core |
 | Sequencer | Block Lifecycle, Order Admission, Settlement, Pending Orders and TTL |
 | API | REST API, SSE Block Stream, P256 Authentication |
 | Oracle | Market Resolution |

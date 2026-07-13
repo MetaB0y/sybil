@@ -27,6 +27,9 @@ pub mod conic_solver;
 pub mod iterative_lp_solver;
 
 #[cfg(feature = "lp")]
+pub mod retained_cash_solver;
+
+#[cfg(feature = "lp")]
 pub mod decomposed;
 
 #[cfg(all(test, feature = "lp"))]
@@ -56,6 +59,12 @@ pub use eg_solver::{EgConfig, EgSolver};
 
 #[cfg(feature = "lp")]
 pub use iterative_lp_solver::{IterLpConfig, IterLpSolver};
+
+#[cfg(feature = "lp")]
+pub use retained_cash_solver::{
+    RetainedCashConfig, RetainedCashSolver, retained_cash_objective_for_fills,
+    retained_cash_welfare_gap_bound_for_fills,
+};
 
 #[cfg(feature = "conic")]
 pub use conic_solver::{ConicConfig, ConicSolver, ObjectiveMode};

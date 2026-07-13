@@ -15,6 +15,7 @@
 //!
 //! The [`random`] module provides simpler random scenarios for basic testing.
 
+pub mod flash_liquidity;
 pub mod random;
 pub mod scenario;
 
@@ -23,6 +24,8 @@ pub use matching_engine::{Problem, ProblemSummary};
 
 // Re-export unified scenario generator (primary API)
 pub use scenario::{ScenarioConfig, generate_scenario};
+
+pub use flash_liquidity::{FlashLiquidityConfig, generate_flash_liquidity_scenario};
 
 // Re-export simple random generator
 pub use random::{RandomConfig, generate_random_scenario};

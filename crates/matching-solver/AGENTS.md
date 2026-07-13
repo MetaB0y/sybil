@@ -16,10 +16,11 @@ model harder variants.
 
 | Type | Backend / role |
 |---|---|
-| `LpSolver` | HiGHS; production default plus budget-linearized re-solve |
-| `IterLpSolver` | Damped fixed-point LP |
-| `EgSolver` | Eisenberg–Gale / Frank–Wolfe reference |
-| `ConicSolver` | Clarabel Linear/Fisher/QuasiFisher reference |
+| `RetainedCashSolver` | Production default; certified generalized Frank–Wolfe with a HiGHS oracle |
+| `LpSolver` | Low-latency risk-neutral baseline plus budget-linearized re-solve |
+| `IterLpSolver` | Compatibility alias to `RetainedCashSolver` |
+| `EgSolver` | Compatibility alias to `RetainedCashSolver` |
+| `ConicSolver` | Independent Clarabel Linear/Fisher/QuasiFisher reference |
 | `MilpSolver` | Feature-gated SCIP exact/reference route with timeout |
 | `DecomposedSolver<S>` | Per-group mirror-descent coordination experiment |
 
@@ -30,6 +31,8 @@ model harder variants.
 - All implementations return `PipelineResult`, but `sybil-verifier` owns
   correctness and the net-of-minting welfare definition.
 - Distinguish a MILP incumbent/timeout from a proven optimum.
+- Distinguish an RC-FW iteration cap from convergence; only its reported
+  generalized Frank–Wolfe gap is a continuous-objective certificate.
 - Research-solver availability is separate from candidate conformance: a
   numerical failure must be explicit, while every returned best iterate must
   pass the same integer/verifier checks as production.

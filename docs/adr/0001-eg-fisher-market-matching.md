@@ -26,13 +26,15 @@ the guest, so the clearing semantics are baked into the state-transition proof.
 ## Decision
 
 Clear each batch as an **Eisenberg–Gale convex program** — i.e. compute a
-**Fisher-market competitive equilibrium**. Traders are buyers with budgets;
-outcome shares are the goods; the EG program maximizes the budget-weighted sum
-of log-utilities, and its **dual variables are the clearing prices**. Coherence
+**Fisher-market competitive equilibrium**. Retail orders retain linear welfare;
+budgeted MMs use affine-to-log retained-cash utility; outcome shares are the
+goods; and the program's **dual variables are the clearing prices**. Coherence
 across composed markets is not imposed by side-constraints — it *emerges* from
-solving one joint program. The production clearer is the **LP solver**
-(`matching-solver`, `features=["lp"]`); EG/IterLP/Conic exist as
-differential-testing oracles.
+solving one joint program. The production clearer is `RetainedCashSolver`
+(`matching-solver`, `features=["lp"]`), a generalized Frank--Wolfe solve of the
+quasilinear retained-cash program with a certified continuous gap. LP-SLP is the
+low-latency risk-neutral baseline, Conic QuasiFisher is the independent convex
+reference, and the EG/IterLP type names are compatibility aliases.
 
 Rationale and the LMSR-equivalence proof: the canonical math papers in
 `~/github/prediction-markets-are-fisher-markets/` — `paper.typ`

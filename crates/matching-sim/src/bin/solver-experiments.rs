@@ -16,12 +16,15 @@ use std::process::Command;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
-use matching_engine::{Fill, MarketId, Nanos, Problem, Qty};
-use matching_scenarios::{ScenarioConfig, generate_scenario};
+use matching_engine::{Fill, MarketId, NANOS_PER_DOLLAR, Nanos, Problem, Qty, notional_nanos};
+use matching_scenarios::{
+    FlashLiquidityConfig, ScenarioConfig, generate_flash_liquidity_scenario, generate_scenario,
+};
 use matching_solver::{
     ConicConfig, ConicSolver, DecomposedSolver, EgConfig, EgSolver, IterLpConfig, IterLpSolver,
     LpConfig, LpSolver, MilpConfig, MilpSolver, MmBudgetMode, ObjectiveMode, PipelineResult,
-    SolveStatus, TerminationStatus,
+    RetainedCashConfig, RetainedCashSolver, SolveStatus, TerminationStatus,
+    retained_cash_objective_for_fills, retained_cash_welfare_gap_bound_for_fills,
 };
 use serde::{Deserialize, Serialize};
 use sybil_verifier::verify_match;
@@ -84,6 +87,7 @@ struct SolverSpec {
     line_search_steps: Option<usize>,
     time_limit_seconds: Option<f64>,
     gap_tolerance: Option<f64>,
+    absolute_tolerance: Option<f64>,
     fallback_to_lp: bool,
 }
 
@@ -100,6 +104,7 @@ struct ScaleSpec {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct ProfileSpec {
+    generator: Option<String>,
     market_group_probability: f64,
     order_size_power: f64,
     retail_buy_probability: f64,
@@ -123,6 +128,7 @@ struct ExperimentSpec {
     seed_start: u64,
     seed_count: usize,
     budget_scales: Vec<f64>,
+    budget_basis: Option<String>,
     solvers: Vec<String>,
 }
 
@@ -154,6 +160,8 @@ struct MmUtilization {
     budget_nanos: u64,
     capital_used_nanos: Option<u64>,
     utilization: Option<f64>,
+    limit_value_nanos: u64,
+    limit_value_to_budget: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -162,6 +170,11 @@ struct ComparisonMetrics {
     lp_allocation_l1_ratio: Option<f64>,
     lp_price_mae_nanos: Option<f64>,
     observed_best_welfare_gap_bps: Option<f64>,
+    unconstrained_lp_welfare_gap_bps: Option<f64>,
+    observed_best_retained_cash_objective_gap_bps: Option<f64>,
+    milp_welfare_gap_bps: Option<f64>,
+    paper_welfare_bound_nanos: Option<f64>,
+    paper_bound_ratio: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -184,6 +197,12 @@ struct RunRecord {
     termination: String,
     iterations: Option<usize>,
     convergence_metric: Option<f64>,
+    objective_value: Option<f64>,
+    optimality_gap: Option<f64>,
+    oracle_calls: Option<usize>,
+    integer_landing_loss: Option<f64>,
+    primal_residual: Option<f64>,
+    dual_residual: Option<f64>,
     solver_message: Option<String>,
     panic_message: Option<String>,
     milp_gap_percent: Option<f64>,
@@ -198,6 +217,7 @@ struct RunRecord {
     gross_welfare_nanos: Option<i64>,
     signed_minting_cost_nanos: Option<i64>,
     net_welfare_nanos: Option<i64>,
+    retained_cash_objective_nanos: Option<f64>,
     retail_gross_welfare_nanos: Option<i64>,
     mm_gross_welfare_nanos: Option<i64>,
     fills: Option<usize>,
@@ -222,6 +242,12 @@ struct SolveOutput {
     termination: String,
     iterations: Option<usize>,
     convergence_metric: Option<f64>,
+    objective_value: Option<f64>,
+    optimality_gap: Option<f64>,
+    oracle_calls: Option<usize>,
+    integer_landing_loss: Option<f64>,
+    primal_residual: Option<f64>,
+    dual_residual: Option<f64>,
     message: Option<String>,
     milp_gap_percent: Option<f64>,
     witness: sybil_verifier::BlockWitness,
@@ -273,11 +299,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         for seed_offset in 0..experiment.seed_count {
             let seed = experiment.seed_start + seed_offset as u64;
-            let base_problem = generate_scenario(build_scenario(seed, scale, profile));
+            let base_problem = generate_problem(seed, scale, profile);
+            let calibrated_budgets = match experiment.budget_basis.as_deref() {
+                Some("lp_limit_value") => Some(unconstrained_lp_limit_values(&base_problem)),
+                None | Some("generated") => None,
+                Some(other) => panic!("unknown budget basis {other}"),
+            };
 
             for (budget_index, &budget_scale) in experiment.budget_scales.iter().enumerate() {
                 let mut problem = base_problem.clone();
-                scale_mm_budgets(&mut problem, budget_scale);
+                apply_mm_budgets(&mut problem, budget_scale, calibrated_budgets.as_deref());
                 let fingerprint = problem_fingerprint(&problem)?;
 
                 let mut solver_ids = experiment.solvers.clone();
@@ -315,7 +346,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ));
                 }
 
-                add_comparisons(&mut group_runs);
+                add_comparisons(&mut group_runs, &problem);
                 for run in group_runs {
                     serde_json::to_writer(&mut output, &run.record)?;
                     output.write_all(b"\n")?;
@@ -358,7 +389,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn validate_protocol(protocol: &Protocol) -> Result<(), Box<dyn std::error::Error>> {
-    if protocol.schema_version != 1 {
+    if !matches!(protocol.schema_version, 1 | 2) {
         return Err(format!("unsupported protocol schema {}", protocol.schema_version).into());
     }
     if protocol.experiments.is_empty() {
@@ -386,6 +417,12 @@ fn validate_protocol(protocol: &Protocol) -> Result<(), Box<dyn std::error::Erro
                 );
             }
         }
+        if !matches!(
+            experiment.budget_basis.as_deref(),
+            None | Some("generated") | Some("lp_limit_value")
+        ) {
+            return Err(format!("experiment {} has unknown budget basis", experiment.id).into());
+        }
     }
     Ok(())
 }
@@ -399,6 +436,12 @@ fn selected_experiments(protocol: &Protocol, smoke: bool) -> Vec<ExperimentSpec>
             if smoke {
                 experiment.seed_count = 1;
                 experiment.budget_scales.truncate(1);
+                if protocol.schema_version >= 2 {
+                    // V2 keeps preregistered evaluation seeds untouched. Smoke
+                    // mode maps 50000+ evaluation ranges onto the disjoint
+                    // 20000+ development ranges used while tuning plumbing.
+                    experiment.seed_start = experiment.seed_start.saturating_sub(30_000);
+                }
             }
             experiment
         })
@@ -443,10 +486,55 @@ fn build_scenario(seed: u64, scale: &ScaleSpec, profile: &ProfileSpec) -> Scenar
     }
 }
 
-fn scale_mm_budgets(problem: &mut Problem, scale: f64) {
-    for mm in &mut problem.mm_constraints {
-        mm.max_capital = Nanos((mm.max_capital.0 as f64 * scale).round() as u64);
+fn generate_problem(seed: u64, scale: &ScaleSpec, profile: &ProfileSpec) -> Problem {
+    match profile.generator.as_deref().unwrap_or("random") {
+        "random" => generate_scenario(build_scenario(seed, scale, profile)),
+        "flash_ladder" => generate_flash_liquidity_scenario(FlashLiquidityConfig {
+            seed,
+            num_markets: scale.num_markets,
+            opportunities_per_market: (scale.num_orders / (2 * scale.num_markets)).max(1),
+            num_mms: scale.num_mms.max(1),
+            quantity_min_shares: scale.order_size_min,
+            quantity_max_shares: scale.order_size_max,
+            initial_budget_dollars: scale.mm_budget_max_dollars.max(1),
+        }),
+        other => panic!("unknown scenario generator {other}"),
     }
+}
+
+fn apply_mm_budgets(problem: &mut Problem, scale: f64, calibrated: Option<&[u64]>) {
+    for (index, mm) in problem.mm_constraints.iter_mut().enumerate() {
+        let base = calibrated
+            .map(|values| values[index])
+            .unwrap_or(mm.max_capital.0);
+        mm.max_capital = Nanos((base as f64 * scale).round() as u64);
+    }
+}
+
+fn unconstrained_lp_limit_values(problem: &Problem) -> Vec<u64> {
+    let mut unconstrained = problem.clone();
+    unconstrained.mm_constraints.clear();
+    let result = LpSolver::new().solve(&unconstrained);
+    let fill_quantities = aggregate_allocation(&result.result.fills);
+    let order_map: HashMap<_, _> = problem
+        .orders
+        .iter()
+        .map(|order| (order.id, order))
+        .collect();
+    problem
+        .mm_constraints
+        .iter()
+        .map(|mm| {
+            mm.order_ids
+                .iter()
+                .filter_map(|order_id| {
+                    let order = order_map.get(order_id)?;
+                    let quantity = Qty(fill_quantities.get(order_id).copied().unwrap_or(0));
+                    Some(notional_nanos(mm_reduced_value(order), quantity).0)
+                })
+                .fold(0u64, u64::saturating_add)
+        })
+        .collect()
 }
 
 fn run_warmups(
@@ -461,8 +549,8 @@ fn run_warmups(
         .scales
         .get(&protocol.warmup.scale)
         .ok_or("warmup scale missing")?;
-    let mut problem = generate_scenario(build_scenario(protocol.warmup.seed, scale, profile));
-    scale_mm_budgets(&mut problem, protocol.warmup.budget_scale);
+    let mut problem = generate_problem(protocol.warmup.seed, scale, profile);
+    apply_mm_budgets(&mut problem, protocol.warmup.budget_scale, None);
 
     let solver_ids: BTreeSet<_> = experiments
         .iter()
@@ -514,7 +602,7 @@ fn run_one(
         ),
         Err(payload) => InternalRun {
             record: RunRecord {
-                schema_version: 1,
+                schema_version: protocol.schema_version,
                 protocol_id: protocol.protocol_id.clone(),
                 experiment_id: experiment.id.clone(),
                 suite: experiment.suite.clone(),
@@ -532,6 +620,12 @@ fn run_one(
                 termination: "panic".to_string(),
                 iterations: None,
                 convergence_metric: None,
+                objective_value: None,
+                optimality_gap: None,
+                oracle_calls: None,
+                integer_landing_loss: None,
+                primal_residual: None,
+                dual_residual: None,
                 solver_message: None,
                 panic_message: Some(panic_payload(payload)),
                 milp_gap_percent: None,
@@ -546,6 +640,7 @@ fn run_one(
                 gross_welfare_nanos: None,
                 signed_minting_cost_nanos: None,
                 net_welfare_nanos: None,
+                retained_cash_objective_nanos: None,
                 retail_gross_welfare_nanos: None,
                 mm_gross_welfare_nanos: None,
                 fills: None,
@@ -633,7 +728,7 @@ fn record_solve(
 
     InternalRun {
         record: RunRecord {
-            schema_version: 1,
+            schema_version: protocol.schema_version,
             protocol_id: protocol.protocol_id.clone(),
             experiment_id: experiment.id.clone(),
             suite: experiment.suite.clone(),
@@ -651,6 +746,12 @@ fn record_solve(
             termination: output.termination,
             iterations: output.iterations,
             convergence_metric: output.convergence_metric,
+            objective_value: output.objective_value,
+            optimality_gap: output.optimality_gap,
+            oracle_calls: output.oracle_calls,
+            integer_landing_loss: output.integer_landing_loss,
+            primal_residual: output.primal_residual,
+            dual_residual: output.dual_residual,
             solver_message: output.message,
             panic_message: None,
             milp_gap_percent: output.milp_gap_percent,
@@ -665,6 +766,10 @@ fn record_solve(
             gross_welfare_nanos: Some(output.result.gross_welfare),
             signed_minting_cost_nanos: Some(output.result.minting_cost),
             net_welfare_nanos: Some(output.result.total_welfare()),
+            retained_cash_objective_nanos: Some(retained_cash_objective_for_fills(
+                problem,
+                &output.result.fills,
+            )),
             retail_gross_welfare_nanos: Some(retail_gross),
             mm_gross_welfare_nanos: Some(mm_gross),
             fills: Some(output.result.fills.len()),
@@ -681,9 +786,24 @@ fn record_solve(
 
 fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
     match solver.kind.as_str() {
+        "lp-unconstrained" => {
+            let mut unconstrained = problem.clone();
+            unconstrained.mm_constraints.clear();
+            pipeline_output(LpSolver::new().solve(&unconstrained), problem)
+        }
         "lp" => pipeline_output(
             LpSolver::with_config(LpConfig {
                 max_mm_iterations: required_usize(solver, "max_iterations"),
+            })
+            .solve(problem),
+            problem,
+        ),
+        "retained-cash-fw" => pipeline_output(
+            RetainedCashSolver::with_config(RetainedCashConfig {
+                max_iterations: required_usize(solver, "max_iterations"),
+                gap_rel: required_f64(solver, "tolerance"),
+                gap_abs_nanos: required_f64(solver, "absolute_tolerance"),
+                line_search_steps: required_usize(solver, "line_search_steps"),
             })
             .solve(problem),
             problem,
@@ -768,6 +888,12 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
                 termination,
                 iterations: None,
                 convergence_metric: None,
+                objective_value: Some(result.objective_welfare as f64),
+                optimality_gap: None,
+                oracle_calls: None,
+                integer_landing_loss: None,
+                primal_residual: None,
+                dual_residual: None,
                 message,
                 milp_gap_percent: gap,
                 witness,
@@ -805,6 +931,12 @@ fn pipeline_output(pipeline: PipelineResult, problem: &Problem) -> SolveOutput {
         termination: termination_name(&pipeline.diagnostics.status).to_string(),
         iterations: pipeline.diagnostics.iterations,
         convergence_metric: pipeline.diagnostics.convergence_metric,
+        objective_value: pipeline.diagnostics.objective_value,
+        optimality_gap: pipeline.diagnostics.optimality_gap,
+        oracle_calls: pipeline.diagnostics.oracle_calls,
+        integer_landing_loss: pipeline.diagnostics.integer_landing_loss,
+        primal_residual: pipeline.diagnostics.primal_residual,
+        dual_residual: pipeline.diagnostics.dual_residual,
         message: pipeline.diagnostics.message,
         milp_gap_percent: None,
         witness,
@@ -826,7 +958,7 @@ fn termination_name(status: &TerminationStatus) -> &'static str {
     }
 }
 
-fn add_comparisons(runs: &mut [InternalRun]) {
+fn add_comparisons(runs: &mut [InternalRun], problem: &Problem) {
     let lp_index = runs
         .iter()
         .position(|run| run.record.solver_id == "lp" && run.record.benchmark_success);
@@ -835,6 +967,19 @@ fn add_comparisons(runs: &mut [InternalRun]) {
         .filter(|run| run.record.benchmark_success)
         .filter_map(|run| run.record.net_welfare_nanos)
         .max();
+    let unconstrained_index = runs
+        .iter()
+        .position(|run| run.record.solver_id == "lp-unconstrained");
+    let best_retained_objective = runs
+        .iter()
+        .filter(|run| run.record.benchmark_success)
+        .filter_map(|run| run.record.retained_cash_objective_nanos)
+        .reduce(f64::max);
+    let milp_index = runs.iter().position(|run| {
+        run.record.solver_id == "milp-exact"
+            && run.record.benchmark_success
+            && run.record.termination == "converged"
+    });
 
     let lp_snapshot = lp_index.map(|index| {
         (
@@ -843,6 +988,18 @@ fn add_comparisons(runs: &mut [InternalRun]) {
             runs[index].prices.clone(),
         )
     });
+    let unconstrained_snapshot = unconstrained_index.map(|index| {
+        let fills: Vec<_> = runs[index]
+            .allocation
+            .iter()
+            .map(|(&order_id, &quantity)| Fill::new(order_id, Qty(quantity), Nanos::ZERO))
+            .collect();
+        (
+            runs[index].record.net_welfare_nanos.unwrap_or(0),
+            retained_cash_welfare_gap_bound_for_fills(problem, &fills),
+        )
+    });
+    let milp_welfare = milp_index.and_then(|index| runs[index].record.net_welfare_nanos);
 
     for run in runs {
         if let Some(best) = best_welfare
@@ -858,12 +1015,40 @@ fn add_comparisons(runs: &mut [InternalRun]) {
                 allocation_l1_ratio(lp_allocation, &run.allocation);
             run.record.comparisons.lp_price_mae_nanos = price_mae(lp_prices, &run.prices);
         }
+        if let Some((unconstrained_welfare, bound)) = unconstrained_snapshot
+            && let Some(welfare) = run.record.net_welfare_nanos
+        {
+            run.record.comparisons.unconstrained_lp_welfare_gap_bps =
+                relative_gap_bps(unconstrained_welfare, welfare);
+            run.record.comparisons.paper_welfare_bound_nanos = Some(bound);
+            if bound > 0.0 {
+                run.record.comparisons.paper_bound_ratio =
+                    Some((unconstrained_welfare - welfare) as f64 / bound);
+            }
+        }
+        if let Some(reference) = best_retained_objective
+            && let Some(observed) = run.record.retained_cash_objective_nanos
+        {
+            run.record
+                .comparisons
+                .observed_best_retained_cash_objective_gap_bps =
+                relative_gap_bps_f64(reference, observed);
+        }
+        if let Some(reference) = milp_welfare
+            && let Some(observed) = run.record.net_welfare_nanos
+        {
+            run.record.comparisons.milp_welfare_gap_bps = relative_gap_bps(reference, observed);
+        }
     }
 }
 
 fn relative_gap_bps(reference: i64, observed: i64) -> Option<f64> {
     (reference != 0)
         .then(|| (reference - observed) as f64 / (reference.unsigned_abs() as f64) * 10_000.0)
+}
+
+fn relative_gap_bps_f64(reference: f64, observed: f64) -> Option<f64> {
+    (reference != 0.0).then(|| (reference - observed) / reference.abs() * 10_000.0)
 }
 
 fn allocation_l1_ratio(a: &BTreeMap<u64, u64>, b: &BTreeMap<u64, u64>) -> Option<f64> {
@@ -947,11 +1132,28 @@ fn mm_utilization(problem: &Problem, fills: &[Fill]) -> Vec<MmUtilization> {
             .and_modify(|(_, qty)| qty.0 = qty.0.saturating_add(fill.fill_qty.0))
             .or_insert((fill.fill_price, fill.fill_qty));
     }
+    let order_map: HashMap<_, _> = problem
+        .orders
+        .iter()
+        .map(|order| (order.id, order))
+        .collect();
     problem
         .mm_constraints
         .iter()
         .map(|mm| {
             let used = mm.checked_capital_used(&fill_map).map(|capital| capital.0);
+            let limit_value_nanos = mm
+                .order_ids
+                .iter()
+                .filter_map(|order_id| {
+                    let order = order_map.get(order_id)?;
+                    let quantity = fill_map
+                        .get(order_id)
+                        .map(|(_, quantity)| *quantity)
+                        .unwrap_or(Qty::ZERO);
+                    Some(notional_nanos(mm_reduced_value(order), quantity).0)
+                })
+                .fold(0u64, u64::saturating_add);
             MmUtilization {
                 mm_id: mm.mm_id.0,
                 budget_nanos: mm.max_capital.0,
@@ -959,9 +1161,20 @@ fn mm_utilization(problem: &Problem, fills: &[Fill]) -> Vec<MmUtilization> {
                 utilization: used.and_then(|used| {
                     (mm.max_capital.0 > 0).then(|| used as f64 / mm.max_capital.0 as f64)
                 }),
+                limit_value_nanos,
+                limit_value_to_budget: (mm.max_capital.0 > 0)
+                    .then(|| limit_value_nanos as f64 / mm.max_capital.0 as f64),
             }
         })
         .collect()
+}
+
+fn mm_reduced_value(order: &matching_engine::Order) -> Nanos {
+    if order.is_seller() {
+        Nanos(NANOS_PER_DOLLAR.saturating_sub(order.limit_price.0))
+    } else {
+        order.limit_price
+    }
 }
 
 fn aggregate_allocation(fills: &[Fill]) -> BTreeMap<u64, u64> {
@@ -1000,6 +1213,7 @@ fn required_f64(spec: &SolverSpec, field: &str) -> f64 {
         "damping" => spec.damping,
         "time_limit_seconds" => spec.time_limit_seconds,
         "gap_tolerance" => spec.gap_tolerance,
+        "absolute_tolerance" => spec.absolute_tolerance,
         _ => None,
     }
     .unwrap_or_else(|| panic!("{} missing {field}", spec.kind))
@@ -1053,6 +1267,13 @@ mod tests {
     #[test]
     fn checked_in_protocol_is_valid() {
         let bytes = include_bytes!("../../../../benchmarks/solver/protocol-v1.json");
+        let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
+        validate_protocol(&protocol).expect("valid protocol");
+    }
+
+    #[test]
+    fn checked_in_v2_protocol_is_valid() {
+        let bytes = include_bytes!("../../../../benchmarks/solver/protocol-v2.json");
         let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
         validate_protocol(&protocol).expect("valid protocol");
     }

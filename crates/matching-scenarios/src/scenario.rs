@@ -10,7 +10,7 @@ use rand_chacha::ChaCha8Rng;
 
 use matching_engine::{
     MarketGroup, MarketId, MmConstraint, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem,
-    outcome_buy, outcome_sell, price_to_nanos,
+    outcome_buy, outcome_sell, price_to_nanos, shares_to_qty,
 };
 
 /// Unified configuration for scenario generation.
@@ -28,7 +28,7 @@ pub struct ScenarioConfig {
     // Order configuration
     /// Total number of orders to generate
     pub num_orders: usize,
-    /// Order size range
+    /// Order size range in whole shares.
     pub order_size_min: u64,
     pub order_size_max: u64,
     /// Shape applied to a uniform draw before mapping it to the size range.
@@ -331,7 +331,7 @@ fn add_liquidity(
                 *market_id,
                 0,
                 price_to_nanos(ask_price).0,
-                level_supply.max(10),
+                shares_to_qty(level_supply.max(10)).0,
             ));
             sell_order_id += 1;
 
@@ -343,7 +343,7 @@ fn add_liquidity(
                 *market_id,
                 0,
                 price_to_nanos(bid_price).0,
-                level_supply.max(10),
+                shares_to_qty(level_supply.max(10)).0,
             ));
             sell_order_id += 1;
         }
@@ -361,7 +361,7 @@ fn add_liquidity(
                 *market_id,
                 1,
                 price_to_nanos(ask_price).0,
-                level_supply.max(10),
+                shares_to_qty(level_supply.max(10)).0,
             ));
             sell_order_id += 1;
 
@@ -373,7 +373,7 @@ fn add_liquidity(
                 *market_id,
                 1,
                 price_to_nanos(bid_price).0,
-                level_supply.max(10),
+                shares_to_qty(level_supply.max(10)).0,
             ));
             sell_order_id += 1;
         }
@@ -432,9 +432,23 @@ fn generate_simple_order(
     };
 
     if is_sell {
-        outcome_sell(markets, id, market, outcome, price_to_nanos(limit).0, qty)
+        outcome_sell(
+            markets,
+            id,
+            market,
+            outcome,
+            price_to_nanos(limit).0,
+            shares_to_qty(qty).0,
+        )
     } else {
-        outcome_buy(markets, id, market, outcome, price_to_nanos(limit).0, qty)
+        outcome_buy(
+            markets,
+            id,
+            market,
+            outcome,
+            price_to_nanos(limit).0,
+            shares_to_qty(qty).0,
+        )
     }
 }
 
@@ -491,7 +505,7 @@ fn generate_mm_constraints(
                     market_id,
                     0,
                     price_to_nanos(ask_price).0,
-                    level_qty.max(10),
+                    shares_to_qty(level_qty.max(10)).0,
                 );
                 constraint.add_order(*order_id, MmSide::SellYes);
                 problem.orders.push(sell_order);
@@ -504,7 +518,7 @@ fn generate_mm_constraints(
                     market_id,
                     0,
                     price_to_nanos(bid_price).0,
-                    level_qty.max(10),
+                    shares_to_qty(level_qty.max(10)).0,
                 );
                 constraint.add_order(*order_id, MmSide::BuyYes);
                 problem.orders.push(buy_order);
@@ -607,5 +621,23 @@ mod tests {
         for market in problem.markets.iter() {
             assert!(market.is_binary());
         }
+    }
+
+    #[test]
+    fn configured_sizes_are_whole_shares_not_raw_milli_shares() {
+        let problem = generate_scenario(ScenarioConfig {
+            seed: 73,
+            num_orders: 20,
+            num_mms: 1,
+            order_size_min: 10,
+            order_size_max: 11,
+            ..ScenarioConfig::small()
+        });
+        assert!(
+            problem
+                .orders
+                .iter()
+                .all(|order| order.max_fill.0 % matching_engine::SHARE_SCALE == 0)
+        );
     }
 }

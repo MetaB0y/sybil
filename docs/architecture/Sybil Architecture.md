@@ -138,7 +138,8 @@ The vault frontmatter is authoritative about document status: `current` means im
 
 ### Current foundations
 
-- Single-market binary clearing, six solver implementations, one trusted verifier, and one net-of-minting welfare definition.
+- Single-market binary clearing, seven solver entry types (including two legacy
+  aliases), one trusted verifier, and one net-of-minting welfare definition.
 - Direct admission plus deferred atomic submissions, resting reservations, deterministic settlement, and group-preserving resolution.
 - redb/qMDB fence-based persistence, acknowledged-write replay, a private
   history projector behind a transactional outbox, backup/restore, witness
@@ -162,7 +163,9 @@ Start here for the economic and numeric model: [[Frequent Batch Auctions]], [[Bi
 
 ### 02 — Matching
 
-Read [[Solver Landscape]] first, then [[The LP Core]], [[MM Budget Constraint]], [[LP Duality and Clearing Prices]], [[EG Solver]], [[Conic Solver]], and [[MILP Solver]].
+Read [[Solver Landscape]] first, then [[The LP Core]], [[MM Budget Constraint]],
+[[Retained Cash Solver]], [[LP Duality and Clearing Prices]], [[EG Solver]],
+[[Conic Solver]], and [[MILP Solver]].
 
 ### 03 — Sequencing and persistence
 

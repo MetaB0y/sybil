@@ -67,18 +67,19 @@ and `_count` for the average. **There is no `_bucket` series** — use the
    `ActorMailboxQueueHigh` / `ActorMailboxQueueCritical` (`sybil_actor_queue_depth`,
    sequencer backlog), `SybilApiMemoryHigh`, `HostCpuHigh`, `HostLoadVeryHigh`,
    `HostMemoryLow`, `HostSwapHigh`.
-4. **Logs:** `docker compose logs sybil-api` — look for solver fallback/timeout
-   lines, redb commit warnings, and per-block timing.
+4. **Logs:** `docker compose logs sybil-api` — look for retained-cash iteration
+   caps or solver failures, redb commit warnings, and per-block timing.
 
 ---
 
 ## Likely causes
 
 - **Solver degradation.** The matching solver (`crates/matching-solver/`) can get
-  slow or fall back between IterLP / EG / conic modes on pathological instances
-  (dense cross-market orders, many groups). If `avg5m` and p99 rise *together*
+  slow or reach its certified-gap iteration cap on pathological instances
+  (dense books, many groups). Production does not switch algorithms silently.
+  If `avg5m` and p99 rise *together*
   with order volume (`sequencer:orders_per_block:p99`), this is load- or
-  conformance-driven. Cross-check solver mode/fallback logs; a single degenerate
+  conformance-driven. Cross-check termination diagnostics; a single degenerate
   block can dominate p99 while the mean stays low.
 - **redb / persistence stalls (SYB-169).** Block commit runs storage work on
   `spawn_blocking`; if that pool backs up (slow disk, fsync contention, large

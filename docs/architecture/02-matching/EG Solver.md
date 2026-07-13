@@ -6,29 +6,26 @@ status: current
 last_verified: 2026-07-13
 ---
 
-The EG (Eisenberg-Gale) Solver reformulates the matching problem as a Fisher market. Instead of treating [[MM Budget Constraint|MM budgets]] as explicit constraints, it absorbs them into the objective function via logarithmic utility. This is theoretically elegant — the budget constraint disappears entirely, replaced by a term `B_k * ln(U_k)` in the objective, where `B_k` is the MM's budget and `U_k` is their total utility from fills.
+`EgSolver` is now an explicit compatibility alias to [[Retained Cash Solver|`RetainedCashSolver`]]. The previous implementation used a forced-step, no-cash Frank--Wolfe variant and did not provide the convergence semantics its name suggested.
 
-The Fisher market interpretation is: each market maker is a "buyer" with budget `B_k`, and the orders are "goods" being allocated. The Eisenberg-Gale program maximizes the Nash social welfare — `sum(B_k * ln(U_k))` — which is known to produce competitive equilibrium allocations. At equilibrium, each MM's spending on orders exactly equals their budget, and prices clear all markets. The Frank-Wolfe (conditional gradient) method is used to solve this convex program.
+The retained-cash solver implements the quasilinear Fisher interpretation used
+by the paper: MM utility is affine while its budget is slack and logarithmic
+after capital binds. The no-cash `B_k ln U_k` objective remains available only
+as `ConicSolver`'s `Fisher` ablation, where forced spending is intentional and
+visible.
 
-The tradeoff is a different objective and iterative Frank–Wolfe search. Unlike QuasiFisher, the formulation has no explicit cash/slack variable. It is a reference implementation rather than the production default; current performance belongs in `just compare` output. The theory pointer is `design/math-papers.md`.
-
-The implementation reports whether its objective/allocation tests converged or
-the configured Frank–Wolfe cap was reached. A capped allocation is projected
-and may still pass integer verification, but it must not be described as a
-converged EG solve. Projection failure is surfaced directly rather than being
-silently replaced by an LP result.
+Calls through the old type report `retained-cash-fw` in diagnostics and state
+that the legacy name is an alias. There is no silent cross-solver fallback.
 
 ## Key Properties
-- Eisenberg-Gale / Fisher market formulation
-- MM budgets absorbed into `B_k * ln(U_k)` objective — no explicit budget constraints
-- Solved via Frank-Wolfe (conditional gradient) method
-- Produces competitive equilibrium allocations (Nash social welfare)
-- No cash variable → MMs can't efficiently throttle capital
+- Compatibility surface only
+- Actual implementation and certificate live in [[Retained Cash Solver]]
+- No-cash Fisher ablation lives in [[Conic Solver]]
 
 ## Where This Lives
-> `crates/matching-solver/src/eg_solver.rs` — Fisher market formulation and Frank-Wolfe solver
+> `crates/matching-solver/src/eg_solver.rs` — explicit compatibility wrapper
 
 ## See Also
 - [[Solver Landscape]] — comparison with other solvers
-- [[MM Budget Constraint]] — the constraint this solver absorbs into the objective
-- [[Conic Solver]] — adds a cash variable to fix the budget allocation issue
+- [[MM Budget Constraint]] — the constraint absorbed by retained-cash utility
+- [[Conic Solver]] — independent conic formulation and no-cash ablation

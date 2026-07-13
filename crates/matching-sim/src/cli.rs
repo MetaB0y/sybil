@@ -195,6 +195,9 @@ pub enum SolverChoice {
     #[cfg(feature = "lp")]
     Lp,
     #[cfg(feature = "lp")]
+    #[value(alias = "rfw")]
+    RetainedCash,
+    #[cfg(feature = "lp")]
     Eg,
     #[cfg(feature = "conic")]
     Conic,
@@ -219,7 +222,7 @@ impl Default for SolverChoice {
     fn default() -> Self {
         #[cfg(feature = "lp")]
         {
-            Self::Lp
+            Self::RetainedCash
         }
         #[cfg(not(feature = "lp"))]
         {
@@ -241,6 +244,7 @@ pub fn supports_detailed_pipeline(choice: &SolverChoice) -> bool {
     match choice {
         #[cfg(feature = "lp")]
         SolverChoice::Lp
+        | SolverChoice::RetainedCash
         | SolverChoice::Eg
         | SolverChoice::DecomposedLp
         | SolverChoice::DecomposedEg
@@ -273,7 +277,7 @@ pub fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
             #[cfg(feature = "lp")]
             choices.push(SolverChoice::Lp);
             #[cfg(feature = "lp")]
-            choices.push(SolverChoice::Eg);
+            choices.push(SolverChoice::RetainedCash);
             #[cfg(feature = "conic")]
             choices.push(SolverChoice::Conic);
             #[cfg(feature = "lp")]
@@ -282,10 +286,6 @@ pub fn expand_solver_choices(choice: &SolverChoice) -> Vec<SolverChoice> {
             choices.push(SolverChoice::DecomposedEg);
             #[cfg(feature = "conic")]
             choices.push(SolverChoice::DecomposedConic);
-            #[cfg(feature = "lp")]
-            choices.push(SolverChoice::IterLp);
-            #[cfg(feature = "lp")]
-            choices.push(SolverChoice::DecomposedIterLp);
             choices
         }
         other => vec![other.clone()],
@@ -305,7 +305,9 @@ pub fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> 
         #[cfg(feature = "lp")]
         SolverChoice::Lp => "LP".to_string(),
         #[cfg(feature = "lp")]
-        SolverChoice::Eg => "EG (Fisher)".to_string(),
+        SolverChoice::RetainedCash => "Retained-cash FW".to_string(),
+        #[cfg(feature = "lp")]
+        SolverChoice::Eg => "Retained-cash FW (legacy EG alias)".to_string(),
         #[cfg(feature = "conic")]
         SolverChoice::Conic => "Conic (EG)".to_string(),
         #[cfg(feature = "lp")]
@@ -315,7 +317,7 @@ pub fn solver_display_name(choice: &SolverChoice, milp_timeout: Option<f64>) -> 
         #[cfg(feature = "conic")]
         SolverChoice::DecomposedConic => "Decomposed(Conic)".to_string(),
         #[cfg(feature = "lp")]
-        SolverChoice::IterLp => "IterLP".to_string(),
+        SolverChoice::IterLp => "Retained-cash FW (legacy IterLP alias)".to_string(),
         #[cfg(feature = "lp")]
         SolverChoice::DecomposedIterLp => "Decomposed(IterLP)".to_string(),
         SolverChoice::All => "All".to_string(),

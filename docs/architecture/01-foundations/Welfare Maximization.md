@@ -9,6 +9,11 @@ The solver maximizes total welfare — the sum of consumer surplus across all fi
 
 The signed complete-set term follows the zero-temperature Fisher-market formulation: `V(D) = max_state D_state`. Creating a complete set has `V(D) > 0` and consumes collateral; burning a complete set has `V(D) < 0` and releases collateral. Therefore burning must be credited by subtracting a negative cost. In landed settlement this term is exactly the negation of the real participants' aggregate fill balance delta. Clamping it to zero for burns understates welfare by the released collateral and can produce impossible negative totals. For verifier-clean uniform-price fills, net welfare equals the sum of nonnegative per-fill consumer surplus.
 
+The off-block all-time/24h tracker records only verified non-negative block
+totals. On restore, negative legacy aggregates created before the signed-burn
+fix are clamped to zero; they are not protocol state and cannot be repaired
+exactly from an already-aggregated historical scalar.
+
 This is a deliberate design choice with real consequences. A zero-surplus order — someone willing to buy at exactly the clearing price — may not fill if higher-surplus orders consume all available liquidity. The solver is not trying to maximize the number of trades; it's trying to maximize the total value created. See [[Welfare vs Volume]] for the full analysis of welfare vs volume tradeoffs, including allocative efficiency arguments, the impact on price discovery, and when volume maximization might be preferable.
 
 ## Key Properties

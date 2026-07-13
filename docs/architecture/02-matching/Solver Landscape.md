@@ -9,22 +9,25 @@ last_verified: 2026-07-13
 # Solver landscape
 
 > [!summary] In one paragraph
-> Six solvers implement the same search interface. The supported matching core is a fast LP; MM capital introduces price×quantity coupling. `LpSolver` is the production default. The others explore tighter-budget fixed points, Fisher/conic objectives, exact SCIP solving, or per-group coordination. Every solver lands integers and relies on the same external verifier and welfare definition.
+> Seven solver types implement the same search interface. The supported matching core is a fast LP; MM capital introduces price×quantity coupling. [[Retained Cash Solver|`RetainedCashSolver`]] is the production default and directly optimizes the paper's convex retained-cash objective with a certified generalized Frank--Wolfe gap. Every solver lands integers and relies on the same external verifier and welfare definition.
 
 | Solver | Feature | MM-budget approach | Role |
 |---|---|---|---|
-| [[LP Solver|`LpSolver`]] | `lp` | Solve, linearize budgets at discovered prices, re-solve once by default | Production default |
-| `IterLpSolver` | `lp` | Damped fixed point on EG/KKT multipliers, then projection LP | Tight-budget experiment |
-| [[EG Solver|`EgSolver`]] | `lp` | Frank–Wolfe on Eisenberg–Gale utility, then projection LP | Fisher-market reference |
+| [[Retained Cash Solver|`RetainedCashSolver`]] | `lp` | Generalized Frank--Wolfe on affine-to-log MM utility | Production default |
+| [[LP Solver|`LpSolver`]] | `lp` | Solve, linearize budgets at discovered prices, re-solve once by default | Low-latency baseline |
+| `IterLpSolver` | `lp` | Explicit alias to `RetainedCashSolver` | Compatibility only |
+| [[EG Solver|`EgSolver`]] | `lp` | Explicit alias to `RetainedCashSolver` | Compatibility only |
 | [[Conic Solver|`ConicSolver`]] | `conic` | Clarabel exponential-cone formulation, then projection LP | Interior-point reference |
 | [[MILP Solver|`MilpSolver`]] | `milp` | SCIP MIQCQP or McCormick mode with timeout | Exact/reference route when optimal |
 | [[Decomposed Solver|`DecomposedSolver<S>`]] | `lp` | Component solves with proportional-response MM budget coordination | Scaling experiment |
 
-`IterLpSolver` does not directly optimize the logarithmic Fisher objective. It
-iterates a damped multiplier fixed point, stops after a configured cap, and has
-no general convergence guarantee. `ConicSolver` in QuasiFisher mode is the
-single-convex-program implementation corresponding most directly to the
-paper's retained-cash formulation; it is not currently the production default.
+The removed IterLP damped fixed point and the old forced-step EG implementation
+did not have the claimed convergence semantics. Their public names now preserve
+source compatibility while routing explicitly to `RetainedCashSolver`; their
+diagnostics retain the actual `retained-cash-fw` algorithm name. `ConicSolver`
+in QuasiFisher mode is an independent exponential-cone formulation of the same
+objective. Its backend failures remain failures rather than being replaced by
+another solver.
 
 ```mermaid
 flowchart LR
@@ -35,7 +38,7 @@ flowchart LR
     INT --> VERIFY["sybil-verifier"]
 ```
 
-Shared machinery includes the HiGHS LP oracle, price normalization from duals, projection LPs, integer rounding, and MM-overflow trimming. `PipelineResult::diagnostics` reports algorithm termination separately from integer validity: convergence, a configured iteration cap, backend failure, and projection failure are not interchangeable. `matching-sim` compares results; `sybil-verifier` decides validity.
+Shared machinery includes the HiGHS LP oracle, price normalization from duals, projection LPs, integer rounding, and MM-overflow trimming. MM sells are paced through the paper's sell-to-complementary-buy reduction, including its exact linear complete-set correction. `PipelineResult::diagnostics` reports algorithm termination separately from integer validity: convergence, a configured iteration cap, backend failure, and projection failure are not interchangeable. `matching-sim` compares results; `sybil-verifier` decides validity.
 
 ## Important boundaries
 
