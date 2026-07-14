@@ -314,6 +314,14 @@ prover-worker jobs_dir="target/sybil-prover-jobs" artifacts_dir="target/sybil-pr
 prover-serve artifacts_dir="target/sybil-prover-artifacts" jobs_dir="target/sybil-prover-jobs" bind="127.0.0.1:3002":
     cargo run -p sybil-prover -- serve --artifacts-dir {{artifacts_dir}} --jobs-dir {{jobs_dir}} --bind {{bind}}
 
+# Run the durable daemon with the deterministic mock backend for local e2e tests
+prover-daemon-mock token source_url="http://127.0.0.1:3000" db="target/sybil-prover/prover.redb" artifacts_dir="target/sybil-prover/artifacts" bind="127.0.0.1:3002" epoch_blocks="4":
+    cargo run -p sybil-prover -- daemon --db {{db}} --artifacts-dir {{artifacts_dir}} --bind {{bind}} --auth-token {{token}} --source-url {{source_url}} --source-token {{token}} --proof-kind mock --epoch-blocks {{epoch_blocks}}
+
+# Run the durable daemon with locally verified OpenVM app/STARK proofs
+prover-daemon-stark token source_url="http://127.0.0.1:3000" db="target/sybil-prover/prover.redb" artifacts_dir="target/sybil-prover/artifacts" bind="127.0.0.1:3002" epoch_blocks="4":
+    cargo run --release -p sybil-prover -- daemon --db {{db}} --artifacts-dir {{artifacts_dir}} --bind {{bind}} --auth-token {{token}} --source-url {{source_url}} --source-token {{token}} --proof-kind stark --epoch-blocks {{epoch_blocks}}
+
 # Write the canonical witness payload and provider-neutral DA manifest from prepared guest input
 prover-publish-da guest_input="target/sybil-guest-input.msgpack" payload="target/sybil-da-witness.bin" manifest="target/sybil-da-manifest.json":
     cargo run -p sybil-prover -- publish-da --guest-input {{guest_input}} --payload {{payload}} --manifest {{manifest}}
@@ -661,16 +669,17 @@ deploy-prod-env-check:
 deploy-openrouter-env-check:
     ssh {{SERVER}} 'cd /opt/sybil && test -f arena.env && grep -q "^OPENROUTER_API_KEY=." arena.env'
 
-# Build and deploy sybil-api, polymarket mirror, and prover status/mock API.
-# The real filesystem prover worker is profile-gated until proof-job export is live.
+# Build and deploy sybil-api, polymarket mirror, and the durable prover daemon.
+# Base Compose selects the typed mock backend on the small devnet host.
 deploy-api: deploy-sync deploy-prod-env-check && deploy-verify
     DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_DEFAULT_PLATFORM={{DEPLOY_PLATFORM}} {{LOCAL_COMPOSE}} build sybil-api
     docker save sybil-api:latest | ssh {{SERVER}} docker load
-    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover sybil-prover-mock'
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-api sybil-polymarket sybil-prover'
 
-# Start the real filesystem prover worker when proof-job export is enabled.
-deploy-prover-worker: deploy-sync deploy-prod-env-check
-    ssh {{SERVER}} 'cd /opt/sybil && COMPOSE_PROFILES=prover-worker {{COMPOSE_PROD}} up -d sybil-prover-worker'
+# Restart the durable daemon. Real STARK mode is run on measured prover
+# hardware with `just prover-daemon-stark`, not the current 2 GB web host.
+deploy-prover-daemon: deploy-sync deploy-prod-env-check
+    ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-prover'
 
 # Destructively reset production app state, then restart services.
 # This removes old markets, mirror mappings, arena bot DB, prover artifacts,
@@ -678,7 +687,7 @@ deploy-prover-worker: deploy-sync deploy-prod-env-check
 deploy-reset-state confirm: deploy-prod-env-check
     @test "{{confirm}}" = "CONFIRM" || (echo 'Refusing to reset production state. Run: just deploy-reset-state CONFIRM' >&2; exit 2)
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} down; else {{COMPOSE_PROD}} down; fi'
-    ssh {{SERVER}} 'docker volume rm sybil-data polymarket-data arena-data prover-jobs prover-artifacts sybil_prover-jobs sybil_prover-artifacts vmdata || true'
+    ssh {{SERVER}} 'docker volume rm sybil-data polymarket-data arena-data prover-data prover-artifacts prover-jobs sybil_prover-jobs sybil_prover-artifacts vmdata || true'
     ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans; else {{COMPOSE_PROD}} up -d --remove-orphans; fi'
 
 # Build and deploy arena bots + dashboard. Requires OPENROUTER_API_KEY in /opt/sybil/arena.env.

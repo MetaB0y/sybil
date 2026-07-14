@@ -9,7 +9,7 @@ default-run = "sybil-prover"
 [features]
 default = []
 sequencer-store = ["dep:matching-engine", "dep:matching-sequencer", "dep:p256", "dep:sybil-oracle"]
-mock-live = ["dep:reqwest", "dep:sybil-api-types"]
+mock-live = ["dep:sybil-api-types"]
 
 [[bin]]
 name = "sybil-prover"
@@ -24,13 +24,15 @@ required-features = ["mock-live"]
 alloy = { workspace = true, features = ["sol-types", "std"] }
 axum = { version = "0.8", features = ["json"] }
 blake3 = { workspace = true }
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
+getrandom = { workspace = true }
 hex = { workspace = true }
 matching-engine = { path = "../matching-engine", optional = true }
 matching-sequencer = { path = "../matching-sequencer", optional = true }
 p256 = { workspace = true, features = ["ecdsa"], optional = true }
 rmp-serde = { workspace = true }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
+redb = "4"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha3 = { workspace = true }
@@ -42,9 +44,11 @@ sybil-zk = { path = "../sybil-zk" }
 sybil-escape-claim = { path = "../sybil-escape-claim" }
 sybil-l1-abi = { path = "../sybil-l1-abi" }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
+tempfile = "3"
 
 [lints.clippy]
 # f64 ban is scoped to the consensus crates (matching-engine, matching-sequencer);

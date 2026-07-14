@@ -1,6 +1,37 @@
 use super::*;
 
 impl Store {
+    /// Oldest proof job whose exact transport bytes are not durably acknowledged.
+    ///
+    /// This is the source side of the standalone prover's at-least-once
+    /// transport. A failed HTTP acknowledgement makes the same row appear
+    /// again; the prover's exact-byte ingest is idempotent.
+    pub fn oldest_unacknowledged_proof_job(
+        &self,
+    ) -> Result<Option<ProofJobOutboxEntry>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let jobs = txn.open_table(PROOF_JOB_OUTBOX)?;
+        let acks = txn.open_table(PROOF_JOB_ACKS)?;
+        for row in jobs.iter()? {
+            let (height, value) = row?;
+            let height = height.value();
+            let bytes = value.value().to_vec();
+            let digest = sybil_proof_protocol::proof_job_transport_digest(&bytes);
+            let acknowledged = acks
+                .get(height)?
+                .is_some_and(|stored| stored.value() == digest);
+            if !acknowledged {
+                return Ok(Some(ProofJobOutboxEntry {
+                    height,
+                    digest,
+                    bytes,
+                    acknowledged: false,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn latest_proof_job_outbox_entry(&self) -> Result<Option<ProofJobOutboxEntry>, StoreError> {
         let txn = self.db.begin_read()?;
         let jobs = txn.open_table(PROOF_JOB_OUTBOX)?;

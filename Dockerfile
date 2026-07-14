@@ -70,6 +70,7 @@ COPY --from=builder /app/bin/sybil-history /usr/local/bin/sybil-history
 COPY --from=builder /app/bin/sybil-polymarket /usr/local/bin/sybil-polymarket
 COPY --from=builder /app/bin/sybil-prover /usr/local/bin/sybil-prover
 COPY --from=builder /app/bin/sybil-prover-mock /usr/local/bin/sybil-prover-mock
+COPY --from=builder /app/zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json /etc/sybil/sybil-openvm-guest.commit.json
 
 EXPOSE 3000 3002 3003
 

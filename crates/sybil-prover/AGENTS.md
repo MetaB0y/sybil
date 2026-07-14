@@ -16,9 +16,15 @@ transition and escape guests.
   before serving, publishing DA, or encoding L1 calldata.
 - Mock-live output and unsafe adapters are development-only and must remain
   unmistakable in type/config/log surfaces.
+- The daemon's redb state is authority. Publish proof payloads through an
+  attempt directory, fsync, validate/hash, atomically rename, then commit the
+  matching state transition. Recovery may repeat work but never skip an epoch.
+- Mock and root-STARK envelopes are never L1-submittable. EVM proving remains
+  an explicit disabled backend until its verifier/submission preflight lands.
 - Provider references and payload bytes must reproduce the witness root and DA
   commitment; L1 submission must use the same public inputs the guest reveals.
 - Never regenerate or silently repin guest commitments during an ordinary test.
 
 Run `cargo test -p sybil-prover --all-features`; use the explicit OpenVM smoke
-and commitment workflows for real guest changes.
+and commitment workflows for real guest changes. Operational details live in
+`docs/runbooks/prover-daemon.md`.

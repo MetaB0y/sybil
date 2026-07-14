@@ -866,6 +866,8 @@ fn service_routes() -> OpenApiRouter<AppState> {
         .routes(openapi_routes!(routes::orders::submit_orders))
         .routes(openapi_routes!(routes::proofs::get_state_proof))
         .routes(openapi_routes!(routes::da::get_da_payload))
+        .routes(openapi_routes!(routes::prover::get_next_proof_job))
+        .routes(openapi_routes!(routes::prover::acknowledge_proof_job))
         .routes(openapi_routes!(routes::accounts::fund_account))
         .routes(openapi_routes!(routes::accounts::register_key))
         .routes(openapi_routes!(routes::bridge::account_by_key))

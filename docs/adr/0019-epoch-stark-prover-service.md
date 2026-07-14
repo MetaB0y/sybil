@@ -91,6 +91,11 @@ guest commitment, and genesis; the acknowledged-write log must be unified before
 authorization order becomes validity-sensitive; L1 cannot accept STARK or mock
 envelopes, so testnet root submission still waits for the EVM backend switch.
 
-**Follow-ups:** implement the phases in the linked plan; repin the guest once
-epoch verification and ordinary authorization land together; run the STARK
-service through a sustained crash/restart soak before enabling the EVM backend.
+**Implementation:** #76, #73, and #15 landed the ordered WAL, authorization,
+epoch guest, and coordinated repin. #77 adds authenticated outbox delivery and
+the durable daemon with leases, retries, reconciliation, typed mock/STARK
+backends, local STARK verification, immutable artifacts, and operations API.
+
+**Follow-ups:** run the STARK service through a sustained crash/restart and
+capacity soak on dedicated hardware before enabling the EVM backend; #13 owns
+the later EVM/Halo2 path and #25 owns Sepolia/DA activation.

@@ -7,6 +7,7 @@
 pub mod abi;
 pub mod artifacts;
 pub mod da;
+pub mod daemon;
 pub mod error;
 pub mod mock_backend;
 pub mod serve;

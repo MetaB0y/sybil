@@ -533,6 +533,45 @@ impl SequencerHandle {
             .await?
     }
 
+    /// Read the oldest unacknowledged portable proof job without blocking the
+    /// actor on redb I/O. Returns `ProofUnavailable` for in-memory sequencers.
+    pub async fn oldest_unacknowledged_proof_job(
+        &self,
+    ) -> Result<Option<crate::store::ProofJobOutboxEntry>, SequencerError> {
+        let store = self
+            .read_query(|state| state.store.clone())
+            .await?
+            .ok_or_else(|| {
+                SequencerError::ProofUnavailable(
+                    "proof-job outbox requires a persistent sequencer store".to_string(),
+                )
+            })?;
+        tokio::task::spawn_blocking(move || store.oldest_unacknowledged_proof_job())
+            .await
+            .map_err(|error| SequencerError::Persistence(error.to_string()))?
+            .map_err(|error| SequencerError::Persistence(error.to_string()))
+    }
+
+    /// Acknowledge only the exact proof-job bytes made durable by the prover.
+    pub async fn acknowledge_proof_job(
+        &self,
+        height: u64,
+        digest: [u8; 32],
+    ) -> Result<(), SequencerError> {
+        let store = self
+            .read_query(|state| state.store.clone())
+            .await?
+            .ok_or_else(|| {
+                SequencerError::ProofUnavailable(
+                    "proof-job outbox requires a persistent sequencer store".to_string(),
+                )
+            })?;
+        store
+            .acknowledge_proof_job(height, digest)
+            .await
+            .map_err(|error| SequencerError::Persistence(error.to_string()))
+    }
+
     pub async fn get_recent_blocks(&self, n: usize) -> Result<Vec<SealedBlock>, SequencerError> {
         self.read_query(move |state| {
             let cap = state.sequencer.config.recent_block_cache_capacity;

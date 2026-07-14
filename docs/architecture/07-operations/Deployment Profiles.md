@@ -86,14 +86,14 @@ unaffected.
 
 ### Prover
 
-There is **no** `sybil-api` env knob for the prover. Which prover runs is a
-Compose-topology choice: `sybil-prover` (real, `serve`), the optional
-`sybil-prover-worker` (behind the `prover-worker` Compose profile), and
-`sybil-prover-mock`. Base `docker-compose.yml` wires `sybil-prover-mock`, and
-`docker-compose.prod.yml` does **not** remove it — so **prod currently runs the
-mock prover.** The preflight guardrail cannot see this (it is not a sybil-api
-env var). Tracking a real-prover cutover is out of scope here; flagged for a
-follow-up ticket.
+Compose now runs one restart-safe `sybil-prover daemon`, with separate redb and
+artifact volumes and authenticated pull/ack against the API outbox. Base
+Compose explicitly selects its typed mock backend for cheap integration; the
+repository daemon default is STARK. The current 2 GB host/runtime image is not
+a STARK prover, so production-capable STARK mode runs from a pinned repository
+checkout on measured prover hardware. Mock and STARK envelopes are both
+ineligible for L1 submission; EVM/Halo2 remains disabled under GitHub #13. See
+the [prover runbook](../../runbooks/prover-daemon.md).
 
 ## Startup preflight guardrail (SYB-133)
 
@@ -136,10 +136,9 @@ At boot, before opening the store or binding the socket,
   in `proof_job_acks`; a wrong digest fails closed. Jobs are not pruned yet, so
   independent proving survives witness pruning and prolonged prover downtime.
 - `GET /v1/blocks/{height}` replay remains backed by the bounded canonical
-  block archive. The proof outbox is currently a store boundary, not yet a
-  public endpoint; authenticated pull/ack and retention-after-ack are part of
-  the standalone-prover rollout in
-  [ADR-0019](../../adr/0019-epoch-stark-prover-service.md).
+  block archive. The proof outbox is exposed only through
+  service-authenticated oldest-unacknowledged pull and exact-digest ack routes.
+  Retention-after-ack remains a separate bounded-storage policy task.
 - A witness imported into an empty store is an explicit recovery checkpoint,
   not a claim that the fresh node can prove the incoming historical transition.
   It has no outbox row; its first locally produced child resumes mandatory job

@@ -652,11 +652,13 @@ two.
 ### Phase E — durable prover daemon
 
 - Add prover redb schema, reconciliation, leases, retry policy, and immutable
-  artifact transactions.
-- Add deterministic assembler and small configurable epochs.
+  artifact transactions. **Implemented in #77.**
+- Add deterministic assembler and small configurable epochs. **Implemented in
+  #77; default 4 until measured.**
 - Implement mock backend/envelope, then the OpenVM STARK subprocess adapter and
-  local verification.
+  local verification. **Implemented in #77; sustained hardware soak remains.**
 - Merge scheduler and HTTP server into the daemon; retain debug CLIs.
+  **Implemented in #77, including authenticated source pull/ack.**
 
 **Gate:** a fault-injection matrix kills the daemon during every state/artifact
 transition and converges to one valid proof envelope without gaps or duplicates.
@@ -664,7 +666,9 @@ transition and converges to one valid proof envelope without gaps or duplicates.
 ### Phase F — Compose soak and EVM switch preparation
 
 - Wire the separate daemon container, persistent DB/artifact volumes, service
-  auth, dashboards, alerts, backups, and restore drill.
+  auth, dashboards, alerts, backups, and restore drill. **Compose, metrics,
+  compatibility monitoring, and runbook landed in #77; a timed restore drill
+  on deployment hardware remains.**
 - Run sustained mock soak, then real STARK epochs starting small and increasing
   only from measured capacity.
 - Add but do not enable EVM backend preflight, proof verification, and

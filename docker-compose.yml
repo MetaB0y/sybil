@@ -125,56 +125,31 @@ services:
     memswap_limit: "256m"
     entrypoint: ["sybil-prover"]
     command:
-      - "serve"
+      - "daemon"
+      - "--db=/data/prover.redb"
       - "--artifacts-dir=/artifacts"
-      - "--jobs-dir=/jobs"
       - "--bind=0.0.0.0:3002"
+      - "--guest-pins=/etc/sybil/sybil-openvm-guest.commit.json"
+    environment:
+      # Base Compose is a cheap integration soak. Real STARK proving runs on a
+      # prover host with the pinned OpenVM toolchain; see the prover runbook.
+      SYBIL_PROVER_PROOF_KIND: "${SYBIL_PROVER_PROOF_KIND:-mock}"
+      SYBIL_PROVER_EPOCH_BLOCKS: "${SYBIL_PROVER_EPOCH_BLOCKS:-4}"
+      SYBIL_PROVER_AUTH_TOKEN: "${SYBIL_PROVER_AUTH_TOKEN:-sybil-local-prover}"
+      SYBIL_PROVER_SOURCE_URL: "http://sybil-api:3000"
+      SYBIL_PROVER_SOURCE_TOKEN: "${SYBIL_SERVICE_TOKEN:-sybil-local-service}"
     volumes:
-      - prover-jobs:/jobs
-      - prover-artifacts:/artifacts
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3002/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-    logging: *default-logging
-  sybil-prover-worker:
-    image: sybil-api:latest
-    profiles: ["prover-worker"]
-    mem_limit: "256m"
-    memswap_limit: "256m"
-    entrypoint: ["sybil-prover"]
-    command:
-      - "worker"
-      - "--jobs-dir=/jobs"
-      - "--artifacts-dir=/artifacts"
-      - "--poll-ms=1000"
-    volumes:
-      - prover-jobs:/jobs
-      - prover-artifacts:/artifacts
-    restart: unless-stopped
-
-    logging: *default-logging
-  sybil-prover-mock:
-    image: sybil-api:latest
-    mem_limit: "128m"
-    memswap_limit: "128m"
-    entrypoint: ["sybil-prover-mock"]
-    command:
-      - "--sybil-url=http://sybil-api:3000"
-      - "--artifacts-dir=/artifacts"
-      - "--poll-ms=2000"
-      - "--max-artifacts=1000"
-    volumes:
+      - prover-data:/data
       - prover-artifacts:/artifacts
     depends_on:
       sybil-api:
         condition: service_healthy
-      sybil-prover:
-        condition: service_started
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
     logging: *default-logging
   sybil-arena:
@@ -319,8 +294,8 @@ volumes:
     name: polymarket-data
   arena-data:
     name: arena-data
-  prover-jobs:
-    name: prover-jobs
+  prover-data:
+    name: prover-data
   prover-artifacts:
     name: prover-artifacts
   history-data:

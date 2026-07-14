@@ -11,4 +11,5 @@ pub mod leaderboard;
 pub mod markets;
 pub mod orders;
 pub mod proofs;
+pub mod prover;
 pub mod system;

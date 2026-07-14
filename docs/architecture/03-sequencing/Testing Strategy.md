@@ -102,7 +102,7 @@ The process harness should expose `start`, `wait_health`, `kill`, `restart`,
 Docker tests are for packaging and service wiring only:
 
 - compose config parses
-- the default profile starts core services without the optional prover worker
+- the default profile starts the durable prover daemon in typed mock mode
 - health endpoint returns OK
 - Prometheus scrape target for `sybil-api` is up
 
@@ -110,8 +110,8 @@ Keep most exchange semantics below this layer because container failures are
 slower to diagnose. Two deliberately small Compose gates cover packaging and
 the highest-value deployment contract:
 
-- `just compose-smoke` parses the production Compose profiles and checks the
-  prover-worker boundary plus durable API/admin-feed-key wiring without
+- `just compose-smoke` parses the production Compose topology and checks the
+  prover daemon/redb/source boundary plus durable API/admin-feed-key wiring without
   starting containers.
 - `just itest-compose` uses an isolated project and throwaway volumes, starts
   only `sybil-api`, runs the shared `sybil-client` `seed_book` fixture over real

@@ -158,6 +158,13 @@ the canonical replay-archive retention behavior, not a new DA policy.
 Both retained DA routes share a dedicated global/per-client token bucket and a
 hard in-flight concurrency cap before dispatching store work.
 
+The standalone prover consumes two service-token routes backed by the
+transactional proof-job outbox. `GET /v1/prover/jobs/next` returns the oldest
+unacknowledged job as raw MessagePack with exact height/digest response headers;
+`POST /v1/prover/jobs/{height}/ack` records that digest only after the prover
+made the bytes durable. Failed acknowledgements deliberately repeat the same
+row. In-memory API instances return 503 because they have no durable outbox.
+
 ## Key Properties
 - Axum-based, async, with OpenAPI auto-generation
 - Actor model for current state/mutation; private HTTP projection for history

@@ -100,6 +100,7 @@ fn fixture(
         positions: vec![(MarketId(3), 0, qty)],
         events_digest: [0x13; 32],
         keys_digest: sybil_verifier::account_keys_digest(ACCOUNT_ID, [record]),
+        last_trading_nonce: 0,
     };
     let market = market(prices);
     let mut leaves = vec![
@@ -217,6 +218,7 @@ fn fixture_with_reservation(reserved_balance: i64) -> EscapeClaimGuestInput {
         positions: vec![(MarketId(3), 0, 1_000)],
         events_digest: [0x13; 32],
         keys_digest: sybil_verifier::account_keys_digest(ACCOUNT_ID, [record]),
+        last_trading_nonce: 0,
     };
     let market = market(vec![Nanos(500_000_000), Nanos(500_000_000)]);
     let mut leaves = vec![

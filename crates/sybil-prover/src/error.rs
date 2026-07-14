@@ -93,6 +93,8 @@ pub enum ProverCliError {
     },
     #[error(transparent)]
     ProofJob(#[from] crate::ProofJobError),
+    #[error(transparent)]
+    Daemon(#[from] crate::daemon::DaemonError),
     #[cfg(feature = "sequencer-store")]
     #[error(transparent)]
     Witgen(#[from] crate::witgen_cli::WitgenCliError),

@@ -55,38 +55,31 @@ contains_service() {
 
 default_services=$(compose config --services)
 
-for service in sybil-api sybil-polymarket sybil-prover sybil-prover-mock; do
+for service in sybil-api sybil-polymarket sybil-prover; do
     contains_service "$default_services" "$service" \
         || fail "default compose config is missing $service"
 done
 pass "default compose config includes core devnet services"
 
-# Compose v2 filters `config --services` by active profiles; legacy
-# docker-compose 1.29 lists every declared service even when its profile is
-# inactive. Prefer the stronger runtime-config assertion when available, and
-# fall back to checking the parsed source boundary on v1.
-if contains_service "$default_services" sybil-prover-worker; then
-    worker_block=$(
-        awk '
-            /^  sybil-prover-worker:/ { in_service = 1; next }
-            in_service && /^  [[:alnum:]_-]+:/ { exit }
-            in_service { print }
-        ' docker-compose.yml
-    )
-    grep -Eq 'profiles:[[:space:]]*\["prover-worker"\]' <<<"$worker_block" \
-        || fail "sybil-prover-worker is not gated by the prover-worker profile"
-    pass "prover-worker is profile-gated (legacy Compose static check)"
-else
-    pass "default compose config excludes sybil-prover-worker"
-    profile_services=$(COMPOSE_PROFILES=prover-worker compose config --services)
-    contains_service "$profile_services" sybil-prover-worker \
-        || fail "prover-worker profile does not include sybil-prover-worker"
-    pass "prover-worker profile includes sybil-prover-worker"
-fi
-
 compose config --quiet
-COMPOSE_PROFILES=prover-worker compose config --quiet
-pass "compose config parses with and without prover-worker profile"
+pass "compose config parses"
+
+prover_service_block=$(
+    awk '
+        /^  sybil-prover:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.yml
+)
+grep -Fq '"daemon"' <<<"$prover_service_block" \
+    || fail "sybil-prover does not run the durable daemon"
+grep -Fq 'prover-data:/data' <<<"$prover_service_block" \
+    || fail "sybil-prover does not mount its durable redb volume"
+grep -Fq 'SYBIL_PROVER_SOURCE_URL' <<<"$prover_service_block" \
+    || fail "sybil-prover is not wired to the authenticated source outbox"
+grep -Fq 'SYBIL_PROVER_PROOF_KIND' <<<"$prover_service_block" \
+    || fail "sybil-prover has no explicit typed backend"
+pass "durable prover daemon, source, backend, and volumes are explicit"
 
 for compose_file in docker-compose.yml docker-compose.prod.yml; do
     grep -Fq -- '"--metrics-port=9101"' "$compose_file" \

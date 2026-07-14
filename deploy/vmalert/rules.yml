@@ -524,7 +524,7 @@ groups:
           component: prover
         annotations:
           summary: "Prover has not prepared any artifacts"
-          description: "Blocks are being produced, but the prover artifact store is still empty. The prover service is up, but live proof-job export/worker integration is not active."
+          description: "Blocks are being produced, but the durable prover has no proven epoch. Check source pull/ack, epoch assembly, and backend state."
 
       - alert: ProverArtifactStoreUnreadable
         expr: sybil_prover_artifact_store_ready == 0
@@ -575,7 +575,7 @@ groups:
           component: prover
         annotations:
           summary: "Prover job queue is high"
-          description: "More than 20 proof jobs are waiting in the prover inbox (current queue depth: {{ $value }})."
+          description: "More than 20 ingested blocks are beyond the proven frontier (current queue depth: {{ $value }})."
 
       - alert: ProverProofFailed
         expr: sybil_prover_artifacts_total{proof_status=~"failed|error"} > 0

@@ -597,6 +597,14 @@ async fn save_block_with_witness_prunes_historical_witnesses() {
         vec![header1.height, header2.height]
     );
     assert!(outbox.iter().all(|entry| !entry.acknowledged));
+    assert_eq!(
+        store
+            .oldest_unacknowledged_proof_job()
+            .unwrap()
+            .expect("oldest unacknowledged job")
+            .height,
+        header1.height
+    );
     for entry in &outbox {
         let job: sybil_proof_protocol::StateTransitionProofJob =
             rmp_serde::from_slice(&entry.bytes).unwrap();
@@ -625,6 +633,14 @@ async fn save_block_with_witness_prunes_historical_witnesses() {
     let outbox = store.proof_job_outbox_page(None, 10).unwrap();
     assert!(outbox[0].acknowledged);
     assert!(!outbox[1].acknowledged);
+    assert_eq!(
+        store
+            .oldest_unacknowledged_proof_job()
+            .unwrap()
+            .expect("second job remains unacknowledged")
+            .height,
+        header2.height
+    );
 }
 
 #[tokio::test]

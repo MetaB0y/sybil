@@ -142,7 +142,8 @@ production provider/decryption/disclosure policy is still required. See
 | Guest qMDB, transition, DA, public inputs | `crates/sybil-zk` |
 | Portable jobs/envelopes | `crates/sybil-proof-protocol` |
 | Job capture | `matching-sequencer` store/outbox |
-| Epoch assembly, artifacts, submission | `crates/sybil-prover` |
+| Authenticated outbox transport | `sybil-api` service routes, `sybil-prover` source client |
+| Durable epoch assembly, leases, STARK verification, artifacts | `crates/sybil-prover` daemon |
 | Escape-specific claim | `crates/sybil-escape-claim`, `crates/sybil-custody` |
 | L1 accepted roots and adapters | `contracts/src/` |
 | Current hashes/commitments | [Generated protocol pins](../../protocol-pins.md) |
@@ -154,3 +155,4 @@ production provider/decryption/disclosure policy is still required. See
 - [[Four-Layer Verification]]
 - [[ZK Integration Path]]
 - [[L1 Settlement and Vault]]
+- [Prover daemon runbook](../../runbooks/prover-daemon.md)

@@ -827,6 +827,7 @@ mod conformance {
                     .collect(),
                 events_digest: [0; 32],
                 keys_digest: empty_account_keys_digest(id),
+                last_trading_nonce: 0,
             })
             .collect()
     }

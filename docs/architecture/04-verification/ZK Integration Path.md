@@ -107,15 +107,22 @@ Exact-byte digests make ingest acknowledgements idempotent and conflict-safe.
 The default `sybil-prover` path has no sequencer dependency; direct store access
 remains debug-only behind the `sequencer-store` feature.
 
-The current compatibility worker uses a file inbox and per-block artifact directories.
-It validates a job, prepares guest input, writes the DA payload and manifest,
-records the public-input hash, and exposes artifact status over HTTP. This is a
-service boundary, not yet the redb-backed production scheduler: prepared jobs
-start with `proof_status: "not_started"`. The streamed epoch guest, native
-fold, OpenVM serializer, typed envelopes, and transactional source outbox are
-implemented. Durable scheduling, authenticated pull/ack, and the continuously
-running OpenVM STARK subprocess backend remain the next stage. See
-[ADR-0019](../../adr/0019-epoch-stark-prover-service.md).
+The standalone `sybil-prover daemon` pulls the oldest unacknowledged job through
+the API's service-authenticated binary endpoint, commits exact bytes to its own
+redb, then acknowledges the matching transport digest. It assembles fixed
+contiguous epochs, leases one attempt at a time, retries resource failures, and
+publishes fsynced content-addressed envelope/payload directories. Startup
+reconciliation validates database references, quarantines interrupted output,
+and adopts an exact artifact left by a crash after rename but before the redb
+commit.
+
+Mock mode runs the same native epoch verification and envelope lifecycle. STARK
+mode invokes the pinned OpenVM encoder and `prove app`, then requires local
+`verify app` before `Proven`. Both kinds remain structurally ineligible for L1;
+the disabled EVM backend and submission queue are tracked separately. The older
+file worker/serve commands remain diagnostics without these scheduler
+guarantees. See [ADR-0019](../../adr/0019-epoch-stark-prover-service.md) and the
+[prover runbook](../../runbooks/prover-daemon.md).
 
 `da_commitment` binds the canonical witness payload, height, state root,
 witness root, payload length, and provider-reference hash. The file provider is
@@ -168,9 +175,9 @@ adapter. Never silently regenerate pins during an ordinary test.
 
 ## Current Limits
 
-- Real OpenVM execution and proof drills exist, but the normal local worker
-  prepares per-block artifacts rather than continuously assembling, scheduling,
-  and publishing epoch proofs.
+- The daemon continuously assembles and schedules real root-STARK proofs, but
+  sustained capacity/RSS measurements on dedicated prover hardware and the
+  multi-restart STARK soak remain rollout gates.
 - The file-backed DA path does not provide the availability, encryption, or
   recovery guarantees required for production.
 - Escape proving/submission is implemented; the dedicated proof generator for

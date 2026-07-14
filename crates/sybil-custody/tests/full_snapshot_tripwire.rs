@@ -20,6 +20,7 @@ fn canonical_da_payload_is_a_self_contained_full_state_snapshot() {
         positions: vec![(MarketId(3), 0, 1_000)],
         events_digest: [7; 32],
         keys_digest: sybil_verifier::empty_account_keys_digest(7),
+        last_trading_nonce: 0,
     };
     let market = MarketSnapshot {
         market_id: MarketId(3),

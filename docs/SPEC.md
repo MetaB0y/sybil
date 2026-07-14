@@ -4,7 +4,7 @@
 
 This is the connected implementation guide. Start with the [Architecture Guide](README.md) for intuition and [Sybil Architecture](architecture/Sybil%20Architecture.md) for the full map and reading paths. Per-concept notes and ADRs own detailed rationale. Code, canonical schemas, and tests are the final source of truth.
 
-Status snapshot: **2026-07-14**, through witness v10 client-action authorization, the streamed epoch guest, and the durable proof-job foundation.
+Status snapshot: **2026-07-14**, through witness v10 client-action authorization, the streamed epoch guest, transactional proof-job delivery, and the durable STARK-first prover daemon.
 
 ---
 
@@ -180,15 +180,16 @@ The host/guest boundary has two main Rust homes:
 - `sybil-zk`: guest-safe per-block verification, streamed epoch chaining/folds,
   and public-input binding.
 - `sybil-proof-protocol`: portable proof jobs, epoch identities, typed proof kinds/envelopes, and exact-byte transport digests.
-- `sybil-prover`: proof preparation/backends, optional sequencer-store debug export, artifacts/API, DA publication, and L1 calldata/submission support.
+- `sybil-prover`: authenticated proof-job ingest, durable epoch scheduling/recovery, mock and locally verified OpenVM STARK backends, immutable artifacts/API, optional sequencer-store debug export, DA publication, and L1 calldata support.
 - `sybil-custody`: user-side own-leaf snapshots, full-payload reconstruction,
   Form-L proving, adapter wrapping, and optional `escapeClaim` submission.
 
 OpenVM guest/tool workspaces remain separately pinned. The main guest reads a
 bounded epoch header followed by one independently encoded block at a time and
 reveals the ordered epoch hash. Local guest execution, proof smoke paths,
-canonical inputs, contracts, and calldata exist. Production scheduling/STARK
-operation and real verifier deployment are operational requirements;
+canonical inputs, contracts, and calldata exist. The redb-backed daemon now
+assembles and schedules epochs continuously; sustained STARK capacity/restart
+soak and real EVM verifier deployment remain operational requirements;
 unsafe/mock adapters are development-only.
 
 `SybilVault` custodies collateral and builds the deposit tree. `SybilSettlement` accepts consecutive proven roots bound to the vault checkpoint and pinned guest commitments. Normal withdrawals use typed leaves, proofs, nullifiers, and a queue.

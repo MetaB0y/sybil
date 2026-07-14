@@ -246,6 +246,14 @@ fn exact_service_routes() -> &'static [RouteMount] {
             path: "/v1/da/{height}/payload",
         },
         RouteMount {
+            method: "GET",
+            path: "/v1/prover/jobs/next",
+        },
+        RouteMount {
+            method: "POST",
+            path: "/v1/prover/jobs/{height}/ack",
+        },
+        RouteMount {
             method: "POST",
             path: "/v1/accounts/{id}/fund",
         },
@@ -488,6 +496,12 @@ fn service_probe_requests() -> Vec<(Method, &'static str, Value)> {
             json!({}),
         ),
         (Method::GET, "/v1/da/1/payload", json!({})),
+        (Method::GET, "/v1/prover/jobs/next", json!({})),
+        (
+            Method::POST,
+            "/v1/prover/jobs/1/ack",
+            json!({"transport_digest": format!("0x{}", "00".repeat(32))}),
+        ),
         (
             Method::POST,
             "/v1/accounts/1/fund",

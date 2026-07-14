@@ -3,6 +3,7 @@ use sybil_prover::ProverCliError;
 use sybil_prover::abi;
 use sybil_prover::artifacts;
 use sybil_prover::da;
+use sybil_prover::daemon;
 use sybil_prover::serve;
 
 #[derive(Parser)]
@@ -25,6 +26,8 @@ enum Command {
     PublishDa(da::PublishDaArgs),
     /// Run a local filesystem prover worker over exported proof jobs.
     Worker(artifacts::WorkerArgs),
+    /// Run the durable epoch prover service.
+    Daemon(daemon::DaemonArgs),
     /// Serve prepared prover artifacts over a small read API.
     Serve(serve::ServeArgs),
     /// Encode a state-root submission for SybilSettlement.
@@ -49,6 +52,7 @@ async fn run(cli: Cli) -> Result<(), ProverCliError> {
         Command::PrepareFileDa(args) => da::prepare_file_da(args),
         Command::PublishDa(args) => da::publish_da(args),
         Command::Worker(args) => artifacts::run_worker(args),
+        Command::Daemon(args) => daemon::run(args).await.map_err(ProverCliError::from),
         Command::Serve(args) => serve::serve(args).await,
         Command::SubmitStateRoot(args) => abi::submit_state_root(args),
         #[cfg(feature = "sequencer-store")]

@@ -129,7 +129,7 @@ How the probe reads the proof-status head, in order:
    (`https://user:pass@prover.<host>`). This exercises the full external path.
 2. Otherwise `docker exec` into the compose `sybil-prover` container (local
    docker, or over `SYBIL_SMOKE_DOCKER_SSH`), reading
-   `http://127.0.0.1:3002/proofs/latest`. This is what the on-box timer uses:
+   `http://127.0.0.1:3002/proofs/latest`. This compatibility projection is what the on-box timer uses:
    no secrets needed, same privilege the probe already uses to push metrics.
 3. If docker is unavailable and no URL is set, the check SKIPs with one loud
    line — an off-box run without credentials cannot see the prover, and must
@@ -140,15 +140,15 @@ Modes (`SYBIL_SMOKE_PROOF_LAG` / `--proof-lag`):
 - `fail` (default): lag above the threshold, a missing prover container, or an
   unusable `/proofs/latest` fails the probe and pages via
   `SyntheticProbeFailed`. This is correct for what the devnet runs today: the
-  compose stack always includes `sybil-prover` (status API) and
-  `sybil-prover-mock`, which follows `/v1/blocks/latest` every 2s and keeps the
-  proof-status head within ~1 block of the chain head.
+  compose stack includes the durable `sybil-prover` daemon in typed mock mode.
+  It pulls the transactional proof-job outbox, assembles epochs, and advances
+  the proof-status head after native epoch verification.
 - `warn`: violations print one `WARN:` line and the probe stays green; the
   `sybil_synthetic_proof_lag_blocks` sample is still pushed, so
   `SyntheticProofLagHigh` still pages if the lag persists. Flip to this mode
   (systemd drop-in setting `Environment=SYBIL_SMOKE_PROOF_LAG=warn`, or edit
-  the unit's `ExecStart` flags) while bringing up the REAL prover worker
-  (`just deploy-prover-worker`), whose proving latency profile is not yet
+  the unit's `ExecStart` flags) while bringing up the daemon in real STARK mode
+  (`just prover-daemon-stark ...`), whose proving latency profile is not yet
   established; return to `fail` — with `SYBIL_SMOKE_PROOF_LAG_MAX` raised to
   match observed real-prover cadence — once it holds a steady lag.
 - `off`: skip entirely (deployments with no prover at all).
@@ -161,9 +161,8 @@ First response for `SyntheticProofLagHigh` or a proof-lag probe failure:
 
 1. Read the journal line: `journalctl -u sybil-synthetic-probe.service -n 50
    --no-pager`. It names the proof height, chain height, and lag.
-2. Check the pipeline containers: `docker compose ps sybil-prover
-   sybil-prover-mock` (and `sybil-prover-worker` if the real profile is on),
-   then `docker compose logs --tail 100 sybil-prover-mock` (or the worker).
+2. Check the pipeline container with `docker compose ps sybil-prover`, then
+   `docker compose logs --tail 100 sybil-prover`.
    Cross-check the internal alerts (`ProverLagHigh`, `ProverArtifactStale`,
    `ProverProofFailed`) in vmalert/Grafana — they read the same artifact store
    from inside and localize the wedge.
@@ -172,12 +171,12 @@ First response for `SyntheticProofLagHigh` or a proof-lag probe failure:
    log for `bitcode` / proving-key errors, verify the guest fingerprint with
    `scripts/zk-guest-fingerprint.sh` against the canonical pin, and rebuild
    the proving key if they disagree.
-4. `/proofs/latest` 404 ("proof status store is empty") on a mature chain
-   means the artifact store was wiped or the volume was swapped — check for a
-   recent `deploy-reset-state` and that `prover-artifacts` is mounted by both
-   the serve API and the mock/worker.
-5. A restart of the wedged container is safe (artifacts are idempotent,
-   keyed by block height). After remediation run the probe once and finish
+4. `/proofs/latest` 404 ("no proven epoch") on a mature persistent chain means
+   the daemon has not completed an epoch or its redb/artifact volume was
+   swapped. Inspect `/v1/status`, source-failure metrics, and the `prover-data`
+   plus `prover-artifacts` mounts.
+5. A restart of the wedged container is safe: leases expire, exact source jobs
+   are idempotent, and published orphan artifacts are reconciled. After remediation run the probe once and finish
    with `just deploy-verify` to confirm the full post-deploy gate is green.
 
 ## What a failed probe means
