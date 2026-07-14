@@ -886,7 +886,7 @@ async def run_live(config: LiveConfig):
         # 1. Discover markets. When reference prices are required, arena may
         # start before the Polymarket mirror has published any; retry instead of
         # exiting so a cold start self-heals once the mirror catches up.
-        all_markets, active = await _discover_markets_until_ready(
+        _all_markets, active = await _discover_markets_until_ready(
             client,
             config,
             experiment_id,
@@ -911,12 +911,11 @@ async def run_live(config: LiveConfig):
 
         markets_info = {m.id: m for m in active}
         market_ids = [m.id for m in active]
-        synthetic_markets = [
-            m for m in all_markets if str(getattr(m, "status", "")).lower() == "active"
-        ]
-        if config.market_ids:
-            allowed = set(config.market_ids)
-            synthetic_markets = [m for m in synthetic_markets if m.id in allowed]
+        # Fast/noise flow belongs to the same explicit selection boundary as
+        # the analysts and sizers. Native-market liquidity is supplied by the
+        # Rust mirror process; feeding every server market to Arena made a
+        # focused profile cosmetic and revived stale pre-reset mirror rows.
+        synthetic_markets = list(active)
         synthetic_markets_info = {m.id: m for m in synthetic_markets}
         synthetic_market_ids = [m.id for m in synthetic_markets]
 
@@ -1010,9 +1009,9 @@ async def run_live(config: LiveConfig):
             fast.time_in_force = config.order_time_in_force
             fast_traders.append(fast)
 
-        # Noise traders. When crossing is enabled (default), they cover ALL
-        # active markets (mirror AND native — the same markets the LLM bots
-        # trade) and post aggressive two-sided crossing orders on a durable
+        # Noise traders. When crossing is enabled (default), they cover the
+        # same selected markets the LLM bots trade and post aggressive
+        # two-sided crossing orders on a durable
         # (GTC) book, which is the reliable path to fills. When disabled they
         # fall back to the legacy inventory-aware native-only noise flow.
         crossing = config.synthetic_strategy.crossing_enabled
@@ -1044,7 +1043,7 @@ async def run_live(config: LiveConfig):
                 noise.time_in_force = config.order_time_in_force
             noise_traders.append(noise)
         log.info(
-            "Created %d fast traders and %d %s noise traders (TIF=%s) over %d active markets",
+            "Created %d fast traders and %d %s noise traders (TIF=%s) over %d selected markets",
             len(fast_traders),
             len(noise_traders),
             "crossing" if crossing else "native",

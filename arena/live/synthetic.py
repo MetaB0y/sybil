@@ -331,8 +331,8 @@ class CrossingNoiseStrategy:
     The zero-fills problem is order-flow density: LLM bots + MM post one-sided,
     non-crossing IOC quotes, so nothing crosses in-batch and no durable book
     forms. This strategy fixes that directly. Each block it picks up to
-    ``crossing_markets_per_block`` active markets (mirror OR native — full
-    coverage) and, on each, submits BOTH a BuyYes and a BuyNo at prices whose
+    ``crossing_markets_per_block`` markets from the runner's selected cohort
+    and, on each, submits BOTH a BuyYes and a BuyNo at prices whose
     sum exceeds $1. Because BuyYes@p + BuyNo@q with p+q>=1 mints a complete set,
     these orders cross — against the resting book, against the opposite side of
     other well-funded noise accounts, or (under GTC) accumulated over time.
