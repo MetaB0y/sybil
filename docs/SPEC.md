@@ -1,10 +1,10 @@
 # Sybil system specification
 
-> **Executive summary:** Sybil is an off-chain prediction-market exchange built around frequent batch auctions, deterministic integer settlement, authenticated state, and validity proofs. A single-writer sequencer admits orders, clears each eligible batch with a welfare solver, commits the next state behind a redb/qMDB fence, and emits a canonical block plus `BlockWitness` v9. Native and OpenVM verification re-derive the transition. Ethereum holds collateral and accepted roots; canonical witness publication supports audit and recovery.
+> **Executive summary:** Sybil is an off-chain prediction-market exchange built around frequent batch auctions, deterministic integer settlement, authenticated state, and validity proofs. A single-writer sequencer admits orders, clears each eligible batch with a welfare solver, commits the next state behind a redb/qMDB fence, and emits a canonical block plus `BlockWitness` v10. Native and OpenVM verification re-derive the transition. Ethereum holds collateral and accepted roots; canonical witness publication supports audit and recovery.
 
 This is the connected implementation guide. Start with the [Architecture Guide](README.md) for intuition and [Sybil Architecture](architecture/Sybil%20Architecture.md) for the full map and reading paths. Per-concept notes and ADRs own detailed rationale. Code, canonical schemas, and tests are the final source of truth.
 
-Status snapshot: **2026-07-11**, based on `main` through witness v9 and the user-side custody CLI.
+Status snapshot: **2026-07-14**, through witness v10 client-action authorization and the epoch-prover foundation.
 
 ---
 
@@ -15,7 +15,7 @@ Sybil rests on five commitments:
 1. **Frequent batch auctions.** Eligible orders clear together at one uniform price per market; arrival nanoseconds do not create queue priority.
 2. **Welfare maximization.** The allocation maximizes trader surplus net of minting, rather than maximizing raw volume.
 3. **Float search, integer truth.** Numerical solvers may search in `f64`; protocol fills, prices, settlement, commitments, and verification use deterministic integers.
-4. **Authenticated keys, with a split intent boundary.** Key mutations and active-key digests are validity-checked; ordinary signed actions use genesis-bound canonical bytes and durable admission nonces that are not yet re-proved by the guest.
+4. **Authenticated trading intent.** Key mutations and ordinary signed orders/cancels retain their RawP256/WebAuthn envelopes; verification replays the active key set, exact action, genesis domain, and committed trading nonce.
 5. **Validity plus availability.** OpenVM proves correctness; L1 anchors collateral and accepted roots; witness/DA publication supplies the data required for audit and recovery.
 
 ```mermaid
@@ -26,7 +26,7 @@ flowchart LR
     SOLVE --> SETTLE["Integer settlement"]
     SETTLE --> STORE["qMDB + redb fence"]
     STORE --> BLOCK["SealedBlock"]
-    STORE --> WIT["BlockWitness v9"]
+    STORE --> WIT["BlockWitness v10"]
     WIT --> VERIFY["Native + OpenVM verification"]
     VERIFY --> PROVER["Proof / DA artifacts"]
     PROVER --> L1["SybilSettlement + SybilVault"]
@@ -148,13 +148,13 @@ projections are validity inputs or recovery DA.
 
 Canonical witness import can initialize a fresh store at a verified height. This is the implemented disaster-recovery basis for operator replacement.
 
-## 6. Blocks, state, and witness v9
+## 6. Blocks, state, and witness v10
 
 `BlockHeader` commits height, parent hash, typed `state_root`, `events_root`, counts, and timestamp. Public transition inputs additionally bind witness/DA and bridge fields.
 
-`state_root` covers the committed state required to continue safely: accounts, balances, positions, deposited totals, event/key digests, markets and last clearing prices, groups, resting orders/reservations, system counters, bridge deposit frontier/quarantine, and withdrawal/claim state. Per-account ordinary-action replay nonces are durable sequencer state but are not validity leaves. Analytics and display metadata are excluded.
+`state_root` covers the committed state required to continue safely: accounts, balances, positions, deposited totals, event/key digests, per-account trading nonces, markets and last clearing prices, groups, resting orders/reservations, system counters, bridge deposit frontier/quarantine, and withdrawal/claim state. Analytics and display metadata are excluded.
 
-`BlockWitness` v9 contains the accepted/rejected instructions, system events, fills/prices/constraints, authenticated pre/post account state, pre/post sidecars, account-key universe and key operations, deposit dispositions, bridge state, and the signature-bound `genesis_hash`. Canonical witness bytes—not MessagePack/serde transport bytes—determine `witness_root` and DA binding.
+`BlockWitness` v10 contains the accepted/rejected instructions, system events, fills/prices/constraints, authenticated pre/post account state, pre/post sidecars, account-key universe, key operations, exact order/cancel authorization envelopes, deposit dispositions, bridge state, and the signature-bound `genesis_hash`. Canonical witness bytes—not MessagePack/serde transport bytes—determine `witness_root` and DA binding.
 
 Canonical encoding is owned by `sybil-verifier`; signing bytes are owned by `sybil-signing`. Native and guest implementations are pinned by golden vectors.
 
@@ -171,7 +171,7 @@ Canonical encoding is owned by `sybil-verifier`; signing bytes are owned by `syb
 | System/sidecar | Deposits, withdrawals, resolution, order book/reservations, market/bridge transition |
 | Keys/intent | Key universe/digests, register/revoke, uniqueness/last-key rules, RawP256/WebAuthn signatures |
 
-Authorization has two boundaries. Key operations bind current `keys_digest` and `events_digest`; their RawP256/WebAuthn envelopes are carried in the witness and re-proved by the guest. Ordinary signed orders/cancels use a strictly increasing per-account nonce and genesis-bound canonical bytes checked at API/sequencer admission. Their signature envelopes and previous cross-block nonce are not currently guest inputs. WebAuthn uses the same canonical action bytes as raw P256 while additionally checking RP/origin/challenge and user-presence/verification requirements.
+Key operations bind current `keys_digest` and `events_digest`. Ordinary signed orders/cancels use genesis-bound canonical bytes and a strictly increasing committed `last_trading_nonce`. Witness v10 carries both envelope classes in actor acknowledgement order, and shared native/guest verification checks scheme-matching active-key membership, exact RawP256/WebAuthn signatures, action/effect binding, and nonce replay. WebAuthn additionally pins RP/origin/challenge, rejects cross-origin assertions, and requires user presence/verification.
 
 ## 8. ZK, DA, L1, and escape
 
@@ -237,7 +237,7 @@ owns the detailed evidence and remediation order.
 4. Landed fills respect quantity, limits, uniform prices, groups, and MM budgets.
 5. Welfare is net of minting and has one verifier-owned definition.
 6. `post_state` and sidecar equal exact replay of authenticated pre-state, system events, key operations, fills, and minting.
-7. Key-operation P256/WebAuthn signatures and state bindings are checked at admission and in the guest; ordinary signed-action replay protection remains an admission/WAL guarantee.
+7. Key-operation and ordinary order/cancel P256/WebAuthn signatures, active-key ordering, action bindings, and trading nonces are checked at admission and by shared native/guest verification.
 8. The header roots equal canonical typed state/events; public inputs bind witness, DA, bridge, height, and parent transition.
 9. Acknowledged writes survive restart; no block is published before the redb fence commits it.
 10. Recovery reads only the fenced qMDB slot and replays the complete global

@@ -1576,7 +1576,11 @@ async fn import_witness_drill_restores_head_and_produces_children() {
         "first block leaves one order resting"
     );
     source_store
-        .save_block_with_witness_and_history(seq.snapshot(), &first.witness, &first.sealed_block())
+        .save_block_with_witness_and_replay_block(
+            seq.snapshot(),
+            &first.witness,
+            &first.sealed_block(),
+        )
         .await
         .unwrap();
 

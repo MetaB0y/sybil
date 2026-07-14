@@ -12,9 +12,8 @@ use p256::ecdsa::signature::{Signer, Verifier};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use sybil_oracle::{ResolutionAttestation, SignedAttestation};
 use sybil_signing::{
-    BridgeWithdrawalRequest as CanonicalBridgeWithdrawalRequest,
-    ConditionDir as CanonicalConditionDir, MarketId as CanonicalMarketId, Order as CanonicalOrder,
-    PriceCondition as CanonicalPriceCondition, ResolutionAttestation as CanonicalAttestation,
+    BridgeWithdrawalRequest as CanonicalBridgeWithdrawalRequest, MarketId as CanonicalMarketId,
+    ResolutionAttestation as CanonicalAttestation,
 };
 
 /// Registered authentication scheme for an account public key.
@@ -278,19 +277,36 @@ pub struct SignedBridgeWithdrawal {
     pub signature: Signature,
 }
 
-/// An order whose account signature was verified before entering the sequencer.
+/// An order whose exact account authorization envelope was verified before
+/// entering the sequencer and must be retained for guest replay.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AuthenticatedOrder {
     pub order: Order,
     pub nonce: u64,
-    pub signer: PublicKey,
+    pub authorization: sybil_verifier::ClientActionAuth,
 }
 
-/// A cancellation whose account signature was verified before entering the sequencer.
+/// A cancellation whose exact account authorization envelope was verified
+/// before entering the sequencer and must be retained for guest replay.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AuthenticatedCancel {
     pub account_id: crate::account::AccountId,
     pub order_id: u64,
     pub nonce: u64,
-    pub signer: PublicKey,
+    pub authorization: sybil_verifier::ClientActionAuth,
+}
+
+pub fn raw_client_action_authorization(
+    signer: &PublicKey,
+    signature: &Signature,
+) -> sybil_verifier::ClientActionAuth {
+    let signer_bytes = signer.compressed_bytes();
+    let mut signer_pubkey = [0u8; 33];
+    signer_pubkey.copy_from_slice(&signer_bytes);
+    sybil_verifier::ClientActionAuth::RawP256 {
+        signer_pubkey,
+        signature: signature.to_bytes().into(),
+    }
 }
 
 /// A bridge withdrawal whose account signature was verified before entering the sequencer.
@@ -300,42 +316,11 @@ pub struct AuthenticatedBridgeWithdrawal {
     pub signer: PublicKey,
 }
 
-fn to_canonical_order(order: &Order, nonce: u64) -> CanonicalOrder {
-    let mut markets = [CanonicalMarketId::NONE; sybil_signing::MAX_MARKETS_PER_ORDER];
-    for (dst, src) in markets.iter_mut().zip(order.markets.iter()) {
-        *dst = CanonicalMarketId(src.0);
-    }
-
-    let condition = order
-        .condition
-        .as_ref()
-        .map(|condition| CanonicalPriceCondition {
-            market: CanonicalMarketId(condition.market.0),
-            threshold: condition.threshold.0,
-            direction: match condition.direction {
-                matching_engine::ConditionDir::Above => CanonicalConditionDir::Above,
-                matching_engine::ConditionDir::Below => CanonicalConditionDir::Below,
-            },
-        });
-
-    CanonicalOrder {
-        markets,
-        num_markets: order.num_markets,
-        payoffs: order.payoffs,
-        num_states: order.num_states,
-        limit_price: order.limit_price.0,
-        max_fill: order.max_fill.0,
-        condition,
-        expires_at_block: order.expires_at_block,
-        nonce,
-    }
-}
-
 /// Deterministic canonical byte encoding of an Order for signing.
 ///
 /// NOTE: `id` is excluded because the sequencer assigns IDs after submission.
 pub fn canonical_order_bytes(order: &Order, nonce: u64, genesis_hash: [u8; 32]) -> Vec<u8> {
-    sybil_signing::canonical_order_bytes(&to_canonical_order(order, nonce), genesis_hash)
+    sybil_verifier::client_action::canonical_order_bytes(order, nonce, genesis_hash)
 }
 
 /// Deterministic canonical byte encoding of a cancel request for signing.
@@ -351,7 +336,12 @@ pub fn canonical_cancel_bytes(
     nonce: u64,
     genesis_hash: [u8; 32],
 ) -> Vec<u8> {
-    sybil_signing::canonical_cancel_bytes(account_id.0, order_id, nonce, genesis_hash)
+    sybil_verifier::client_action::canonical_cancel_bytes(
+        account_id.0,
+        order_id,
+        nonce,
+        genesis_hash,
+    )
 }
 
 fn to_canonical_bridge_withdrawal(

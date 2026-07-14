@@ -18,14 +18,14 @@ use crate::snapshot_schema::{
 };
 use crate::types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,
-    MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
-    RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
-    StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness, WithdrawalSnapshot,
-    WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    ChallengeSnapshot, ClientActionWitness, DepositAccumulatorWitness, KeyOpAuth, KeyRecord,
+    L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
+    OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
+    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness,
+    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 
-pub const WITNESS_FORMAT_VERSION: u8 = 9;
+pub const WITNESS_FORMAT_VERSION: u8 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WitnessDecodeError {
@@ -585,6 +585,31 @@ impl<'a> WitnessReader<'a> {
                 amount: self.read_i64()?,
                 sybil_account_key: self.read_hash32()?,
             }),
+            14 => {
+                let action_offset = self.offset;
+                let action = match self.read_tag("client_action")? {
+                    0 => ClientActionWitness::Order {
+                        account_id: self.read_u64()?,
+                        order: self.read_order()?,
+                        nonce: self.read_u64()?,
+                        authorization: self.read_key_op_auth()?,
+                    },
+                    1 => ClientActionWitness::Cancel {
+                        account_id: self.read_u64()?,
+                        order_id: self.read_u64()?,
+                        nonce: self.read_u64()?,
+                        authorization: self.read_key_op_auth()?,
+                    },
+                    tag => {
+                        return Err(WitnessDecodeError::InvalidTag {
+                            field: "client_action",
+                            tag,
+                            offset: action_offset,
+                        });
+                    }
+                };
+                Ok(SystemEventWitness::ClientActionAuthorized(action))
+            }
             tag => Err(WitnessDecodeError::InvalidTag {
                 field: "system_event",
                 tag,
@@ -764,6 +789,7 @@ impl<'a> WitnessReader<'a> {
             positions: self.read_positions("account.positions")?,
             events_digest: self.read_hash32()?,
             keys_digest: self.read_hash32()?,
+            last_trading_nonce: self.read_u64()?,
         })
     }
 
@@ -1557,6 +1583,7 @@ mod tests {
             positions: vec![(MarketId::new(3), 0, 25), (MarketId::new(9), 0, -7)],
             events_digest: [id as u8; 32],
             keys_digest: crate::empty_account_keys_digest(id),
+            last_trading_nonce: 0,
         }
     }
 

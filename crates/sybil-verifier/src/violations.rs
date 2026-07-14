@@ -68,6 +68,8 @@ pub enum ViolationKind {
     SystemStateMismatch,
     /// Witnessed key operations do not reproduce the committed signing-key set.
     KeyTransitionMismatch,
+    /// An authorized order/cancel is not bound to its corresponding state effect.
+    ClientActionMismatch,
     /// Position imbalance exists but no clearing price for the market.
     /// MINT cannot be priced without clearing prices.
     MintingWithoutClearingPrice,

@@ -2,13 +2,19 @@
 tags: [security, threat-model, core]
 layer: core
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-14
 ---
 
 # Threat model
 
 > [!summary] In one paragraph
-> Sybil minimizes trust in transition correctness, but authorization is split. Witness v9 and the OpenVM guest check state transitions plus key-operation P256/WebAuthn authorization. Ordinary order/cancel signatures and cross-block replay nonces are enforced at admission and are not yet re-proved by the guest. The current permissionless API also has critical resource-bound gaps, so production security requires closing those—not merely deploying the real verifier and keeping DA available.
+> Sybil minimizes trust in transition correctness. Witness v10 and shared
+> native/guest verification check state transitions, key mutations, ordinary
+> RawP256/WebAuthn order/cancel intent, and committed cross-block trading
+> nonces. The deployed guest commitment still requires the coordinated epoch
+> repin. The current permissionless API also has critical resource-bound gaps,
+> so production security requires closing those—not merely deploying the real
+> verifier and keeping DA available.
 
 This note distinguishes **implemented cryptographic controls** from **controls that only exist when the production deployment actually enables them**.
 
@@ -17,8 +23,8 @@ This note distinguishes **implemented cryptographic controls** from **controls t
 ```mermaid
 flowchart TB
     subgraph crypto["🟢 Implemented controls"]
-        INTENT["Key mutation intent<br/>state-bound keys · P256/WebAuthn · guest verification"]
-        TRANS["State transition<br/>witness v9 · settlement · sidecar · exact qMDB proofs"]
+        INTENT["Trading and key intent<br/>state-bound keys/nonces · P256/WebAuthn"]
+        TRANS["State transition<br/>witness v10 · settlement · sidecar · exact qMDB proofs"]
         BRIDGE["Bridge accounting<br/>deposit inclusion · checkpoint · quarantine · withdrawal nullifiers"]
         SHAPES["Value safety<br/>unsupported order shapes rejected at every boundary"]
     end
@@ -50,19 +56,19 @@ flowchart TB
 
 | Attack | Status | Control / residual trust |
 |---|---|---|
-| Forge a key registration/revocation | 🟢 | Witness v9 binds `genesis_hash`, the active key universe, state digests, key operation, and RawP256/WebAuthn envelope; the guest re-verifies authorization. |
-| Forge an ordinary order/cancellation at admission | 🟡 | API/sequencer verify the active key, genesis-bound signature, and monotonic nonce before durable admission. The guest verifies the resulting order/state transition but not the ordinary signature envelope or prior cross-block nonce. |
+| Forge a key registration/revocation | 🟢 | Witness v10 binds `genesis_hash`, the active key universe, state digests, key operation, and RawP256/WebAuthn envelope; shared native/guest verification replays authorization. |
+| Forge an ordinary order/cancellation | 🟢 | Witness v10 retains the exact action envelope in actor order. Verification checks the active scheme-matching key, genesis/action binding, RawP256/WebAuthn policy and signature, committed trading nonce, and corresponding order/cancel effect. |
 | Insert an unsupported multi-market/custom value path | 🟢 | Unsupported shapes are rejected at API, admission, solver, and verification boundaries. The expressive payoff-vector type is not treated as execution support. |
 | Forge balances, positions, reservations, or market/bridge sidecar | 🟢 / 🟡 | Native and guest transition checks cover the witness and exact post-state keyspace. This becomes a production guarantee only when the real pinned verifier—not `UnsafeAcceptAllVerifierAdapter` or a mock prover—is deployed. |
 | Credit an unbacked or misdirected deposit | 🟢 | Guest-verified deposit inclusion, vault checkpoint binding, ordered cursor, and witnessed credit-or-quarantine disposition. |
-| Replay or equivocate transitions | 🟢 / 🟡 | Consecutive height/parent binding and L1 root rules cover transitions. Genesis-domain separation limits captured ordinary signatures to one chain, while cross-block nonce enforcement remains admission-layer trust. |
+| Replay or equivocate transitions | 🟢 | Consecutive height/parent binding and L1 root rules cover transitions. Genesis-domain separation limits signatures to one chain, while `last_trading_nonce` in authenticated account leaves rejects same- or cross-block ordinary-action replay. |
 | Withhold witness data | 🟠 / 🔴 | Per-height DA manifest/payload endpoints and recovery import exist. Continued positions require retained payloads; hostile-operator replacement still needs provider policy and governance. See [[Data Availability]] and [[Operator Replacement]]. |
 
 ## Malicious user or client
 
 | Attack | Status | Control |
 |---|---|---|
-| Replay an ordinary signed write | 🟡 | Strictly increasing admission nonce plus action/genesis domain separation; nonce durability is tested but not guest-proven ([ADR-0007](../../adr/0007-canonical-bytes-domain-separation.md)). |
+| Replay an ordinary signed write | 🟢 | Strictly increasing committed `last_trading_nonce`, exact action/genesis domain separation, and actor-order active-key replay ([ADR-0007](../../adr/0007-canonical-bytes-domain-separation.md)). |
 | Register/revoke a key for another account | 🟢 | State-bound signed key operations, service-tier checks, committed `keys_digest`, and guest replay. |
 | Overspend through concurrent/resting orders | 🟢 | Direct-admission reservations, atomic deferred admission, Layer 4 accumulation, and deterministic settlement. |
 | Double-withdraw or reuse an escape claim | 🟢 | Typed withdrawal/claim leaves, root binding, freshness rules, and nullifiers. |

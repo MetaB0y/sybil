@@ -198,12 +198,16 @@ pub async fn submit_signed_order(
             webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
                 |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
             )?;
+            let authorization = webauthn::client_action_authorization(&signer.0, assertion)
+                .map_err(|err| {
+                    AppError::bad_request(format!("Invalid WebAuthn assertion envelope: {err}"))
+                })?;
             state
                 .sequencer
                 .submit_authenticated_order(AuthenticatedOrder {
                     order,
                     nonce: req.nonce,
-                    signer,
+                    authorization,
                 })
                 .await?
         }
@@ -265,13 +269,17 @@ pub async fn cancel_signed_order(
             webauthn::verify_assertion(&state.webauthn, &signer.0, &canonical, assertion).map_err(
                 |err| AppError::bad_request(format!("Invalid WebAuthn assertion: {err}")),
             )?;
+            let authorization = webauthn::client_action_authorization(&signer.0, assertion)
+                .map_err(|err| {
+                    AppError::bad_request(format!("Invalid WebAuthn assertion envelope: {err}"))
+                })?;
             state
                 .sequencer
                 .cancel_authenticated_order(AuthenticatedCancel {
                     account_id: AccountId(req.account_id),
                     order_id: req.order_id,
                     nonce: req.nonce,
-                    signer,
+                    authorization,
                 })
                 .await?;
         }

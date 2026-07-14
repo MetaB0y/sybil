@@ -10,10 +10,10 @@ use crate::block::hash_header;
 use crate::state_schema;
 use crate::types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
-    OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
-    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
-    WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    ChallengeSnapshot, ClientActionWitness, KeyOpAuth, MarketGroupSnapshot, MarketSnapshot,
+    MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot,
+    ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
+    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
 };
 use crate::witness_schema;
 use crate::{AccountKeyDigestRecord, account_keys_digest, empty_account_keys_digest};
@@ -204,13 +204,24 @@ fn byte_identity_witness() -> BlockWitness {
                 available: 6_789,
             },
         }],
-        system_events: vec![SystemEventWitness::OrderCancelled {
-            account_id: 1001,
-            order_id: 41,
-            market_ids: vec![market_b, market_a],
-            side: OrderDirection::SellNo,
-            remaining_quantity: 321,
-        }],
+        system_events: vec![
+            SystemEventWitness::ClientActionAuthorized(ClientActionWitness::Order {
+                account_id: 1001,
+                order: accepted_order.clone(),
+                nonce: 18,
+                authorization: KeyOpAuth::RawP256 {
+                    signer_pubkey: sec1_key(0x02, 0x77),
+                    signature: [0xab; 64],
+                },
+            }),
+            SystemEventWitness::OrderCancelled {
+                account_id: 1001,
+                order_id: 41,
+                market_ids: vec![market_b, market_a],
+                side: OrderDirection::SellNo,
+                remaining_quantity: 321,
+            },
+        ],
         deposit_accumulator: crate::DepositAccumulatorWitness::default(),
         fills: vec![Fill {
             order_id: 42,
@@ -279,7 +290,14 @@ fn account_snapshot(id: u64) -> AccountSnapshot {
         ],
         events_digest: [id as u8; 32],
         keys_digest: empty_account_keys_digest(id),
+        last_trading_nonce: if id == 1001 { 17 } else { 23 },
     }
+}
+
+fn sec1_key(prefix: u8, body: u8) -> [u8; 33] {
+    let mut key = [body; 33];
+    key[0] = prefix;
+    key
 }
 
 fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {

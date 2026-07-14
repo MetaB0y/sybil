@@ -160,6 +160,55 @@ impl Store {
             .map(|_| ())
     }
 
+    pub async fn append_authenticated_direct_admit(
+        &self,
+        resting: &RestingOrder,
+        nonce: u64,
+        authorization: &sybil_verifier::ClientActionAuth,
+    ) -> Result<(), StoreError> {
+        self.append_acknowledged_write(AcknowledgedWrite::AuthenticatedDirectAdmit {
+            resting: resting.clone(),
+            nonce,
+            authorization: authorization.clone(),
+        })
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn append_authenticated_deferred_bundle(
+        &self,
+        submission: &crate::sequencer::OrderSubmission,
+        nonce: u64,
+        authorization: &sybil_verifier::ClientActionAuth,
+    ) -> Result<(), StoreError> {
+        self.append_acknowledged_write(AcknowledgedWrite::AuthenticatedDeferredBundle {
+            submission: submission.clone(),
+            nonce,
+            authorization: authorization.clone(),
+        })
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn append_authenticated_cancel(
+        &self,
+        account_id: AccountId,
+        order_id: u64,
+        nonce: u64,
+        authorization: &sybil_verifier::ClientActionAuth,
+        timestamp_ms: u64,
+    ) -> Result<(), StoreError> {
+        self.append_acknowledged_write(AcknowledgedWrite::AuthenticatedCancel {
+            account_id,
+            order_id,
+            nonce,
+            authorization: authorization.clone(),
+            timestamp_ms,
+        })
+        .await
+        .map(|_| ())
+    }
+
     pub async fn append_control_plane_command(
         &self,
         command: &ControlPlaneCommand,
@@ -223,6 +272,23 @@ pub enum AcknowledgedWrite {
     L1Deposit(L1Deposit),
     BridgeWithdrawal(BridgeWithdrawalRequest),
     BridgeL1Input(crate::bridge::BridgeL1Input),
+    AuthenticatedDirectAdmit {
+        resting: RestingOrder,
+        nonce: u64,
+        authorization: sybil_verifier::ClientActionAuth,
+    },
+    AuthenticatedDeferredBundle {
+        submission: crate::sequencer::OrderSubmission,
+        nonce: u64,
+        authorization: sybil_verifier::ClientActionAuth,
+    },
+    AuthenticatedCancel {
+        account_id: AccountId,
+        order_id: u64,
+        nonce: u64,
+        authorization: sybil_verifier::ClientActionAuth,
+        timestamp_ms: u64,
+    },
 }
 
 impl AcknowledgedWrite {
@@ -230,6 +296,9 @@ impl AcknowledgedWrite {
         match self {
             Self::DirectAdmit(_) => "direct_admit",
             Self::DeferredBundle(_) => "deferred_bundle",
+            Self::AuthenticatedDirectAdmit { .. } => "authenticated_direct_admit",
+            Self::AuthenticatedDeferredBundle { .. } => "authenticated_deferred_bundle",
+            Self::AuthenticatedCancel { .. } => "authenticated_cancel",
             Self::ControlPlane(_) => "control_plane",
             Self::L1Deposit(_) => "l1_deposit",
             Self::BridgeWithdrawal(_) => "bridge_withdrawal",

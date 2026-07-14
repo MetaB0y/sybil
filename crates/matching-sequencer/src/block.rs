@@ -609,6 +609,7 @@ mod tests {
                     positions,
                     events_digest: account.events_digest,
                     keys_digest: account.keys_digest,
+                    last_trading_nonce: account.last_trading_nonce,
                 }
             })
             .collect();

@@ -17,6 +17,7 @@ qmdb = [
 
 [dependencies]
 matching-engine = { path = "../matching-engine" }
+sybil-signing = { path = "../sybil-signing" }
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
 blake3 = { workspace = true }
 commonware-codec = { version = "2026.5.0", optional = true }

@@ -51,7 +51,7 @@ pub enum ConditionDir {
 /// - markets: [A, B, NONE, NONE, NONE]
 /// - num_states: 4
 /// - payoffs depend on state indexing convention
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Order {
     pub id: u64,
 

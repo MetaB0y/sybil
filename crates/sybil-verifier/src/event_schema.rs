@@ -4,8 +4,8 @@ use matching_engine::Fill;
 
 use crate::canonical::append_order;
 use crate::types::{
-    KeyOpAuth, KeyRecord, RejectionReason, SystemEventWitness, WithdrawalRefundReasonWitness,
-    WitnessOrder, WitnessRejection,
+    ClientActionWitness, KeyOpAuth, KeyRecord, RejectionReason, SystemEventWitness,
+    WithdrawalRefundReasonWitness, WitnessOrder, WitnessRejection,
 };
 
 /// Return canonical event leaf bytes in the section order committed by `events_root`.
@@ -197,6 +197,35 @@ pub fn system_event_leaf_value(event: &SystemEventWitness) -> Vec<u8> {
             value.extend_from_slice(&account_id.to_le_bytes());
             value.extend_from_slice(&amount.to_le_bytes());
             value.extend_from_slice(sybil_account_key);
+        }
+        SystemEventWitness::ClientActionAuthorized(action) => {
+            value.push(14);
+            match action {
+                ClientActionWitness::Order {
+                    account_id,
+                    order,
+                    nonce,
+                    authorization,
+                } => {
+                    value.push(0);
+                    value.extend_from_slice(&account_id.to_le_bytes());
+                    append_order(&mut value, order);
+                    value.extend_from_slice(&nonce.to_le_bytes());
+                    append_key_op_auth(&mut value, authorization);
+                }
+                ClientActionWitness::Cancel {
+                    account_id,
+                    order_id,
+                    nonce,
+                    authorization,
+                } => {
+                    value.push(1);
+                    value.extend_from_slice(&account_id.to_le_bytes());
+                    value.extend_from_slice(&order_id.to_le_bytes());
+                    value.extend_from_slice(&nonce.to_le_bytes());
+                    append_key_op_auth(&mut value, authorization);
+                }
+            }
         }
     }
     value
@@ -394,5 +423,26 @@ mod tests {
         });
         assert_eq!(quarantined[18], 12);
         assert_eq!(claimed[18], 13);
+    }
+
+    #[test]
+    fn client_action_tag_and_cancel_shape_are_stable() {
+        let event = SystemEventWitness::ClientActionAuthorized(ClientActionWitness::Cancel {
+            account_id: 7,
+            order_id: 9,
+            nonce: 11,
+            authorization: KeyOpAuth::RawP256 {
+                signer_pubkey: [2; 33],
+                signature: [3; 64],
+            },
+        });
+        let leaf = system_event_leaf_value(&event);
+        assert_eq!(&leaf[..18], b"sybil/event/system");
+        assert_eq!(leaf[18], 14);
+        assert_eq!(leaf[19], 1);
+        assert_eq!(&leaf[20..28], &7u64.to_le_bytes());
+        assert_eq!(&leaf[28..36], &9u64.to_le_bytes());
+        assert_eq!(&leaf[36..44], &11u64.to_le_bytes());
+        assert_eq!(leaf[44], 0);
     }
 }

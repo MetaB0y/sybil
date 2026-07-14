@@ -44,7 +44,7 @@ typed-state qMDB whose active keyspace exactly matches the header root.
 
 | Key family | Commits to |
 |---|---|
-| `acct/{account_id}` | `id`, `balance`, `total_deposited`, non-zero `positions`, `events_digest`, `keys_digest` |
+| `acct/{account_id}` | `id`, `balance`, `total_deposited`, non-zero `positions`, `events_digest`, `keys_digest`, `last_trading_nonce` |
 | `acct_resv/{account_id}` | aggregate reserved cash and positions from active resting orders |
 | `market/{market_id}` | binary market definition, lifecycle status/resolution, metadata digest, resolution template, and last clearing prices |
 | `market_group/{group_id}` | mutually exclusive market group name and member markets |

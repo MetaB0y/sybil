@@ -351,6 +351,7 @@ mod tests {
                 positions: vec![(MarketId::new(0), 0, 10)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: 1,
@@ -359,6 +360,7 @@ mod tests {
                 positions: vec![(MarketId::new(0), 1, 5)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(1),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -376,6 +378,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
         let accounts2 = vec![AccountSnapshot {
             id: 0,
@@ -384,6 +387,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         assert_ne!(
@@ -401,6 +405,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
         let accounts2 = vec![AccountSnapshot {
             id: 0,
@@ -409,6 +414,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         assert_ne!(
@@ -426,6 +432,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
         let mut bridge = BridgeStateSnapshot::default();
         let before = compute_state_root_with_bridge(&accounts, &bridge);
@@ -445,6 +452,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(7),
+            last_trading_nonce: 0,
         }];
         let bridge = BridgeStateSnapshot {
             deposit_cursor: 1,
@@ -481,6 +489,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(7),
+            last_trading_nonce: 0,
         }];
         let first = WithdrawalSnapshot {
             withdrawal_id: 2,
@@ -530,6 +539,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(7),
+            last_trading_nonce: 0,
         }];
         let mut order = matching_engine::Order::new(42);
         order.markets[0] = MarketId::new(1);
@@ -717,6 +727,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
         let state_root = compute_state_root(&post_state);
 
@@ -758,6 +769,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let witness = BlockWitness {
@@ -849,6 +861,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
         let state_root = compute_state_root(&post_state);
 
@@ -903,6 +916,7 @@ mod tests {
             positions: vec![],
             events_digest: [9u8; 32],
             keys_digest: crate::empty_account_keys_digest(9),
+            last_trading_nonce: 0,
         }];
         let pre_state_sidecar = StateSidecarSnapshot {
             markets: vec![MarketSnapshot {
@@ -1069,6 +1083,7 @@ mod tests {
                     .collect(),
                 events_digest,
                 keys_digest: crate::empty_account_keys_digest(7),
+                last_trading_nonce: 0,
             };
             let account_b = AccountSnapshot {
                 id: 7,
@@ -1080,6 +1095,7 @@ mod tests {
                     .collect(),
                 events_digest,
                 keys_digest: crate::empty_account_keys_digest(7),
+                last_trading_nonce: 0,
             };
 
             prop_assert_eq!(
@@ -1107,6 +1123,7 @@ mod tests {
                 positions: positions.clone(),
                 events_digest,
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             };
             let after = AccountSnapshot {
                 id: 0,
@@ -1115,6 +1132,7 @@ mod tests {
                 positions,
                 events_digest,
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             };
 
             prop_assert_ne!(compute_state_root(&[before]), compute_state_root(&[after]));
@@ -1139,6 +1157,7 @@ mod tests {
                 positions: positions.clone(),
                 events_digest,
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             };
             let after = AccountSnapshot {
                 id: 0,
@@ -1147,6 +1166,7 @@ mod tests {
                 positions,
                 events_digest,
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             };
 
             prop_assert_ne!(compute_state_root(&[before]), compute_state_root(&[after]));
@@ -1175,6 +1195,7 @@ mod tests {
                 positions: positions.clone(),
                 events_digest: before_digest,
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             };
             let after = AccountSnapshot {
                 id: 0,
@@ -1183,6 +1204,7 @@ mod tests {
                 positions,
                 events_digest: after_digest,
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             };
 
             prop_assert_ne!(compute_state_root(&[before]), compute_state_root(&[after]));
@@ -1212,6 +1234,7 @@ mod tests {
                 positions: positions.clone(),
                 events_digest,
                 keys_digest: before_digest,
+                last_trading_nonce: 0,
             };
             let after = AccountSnapshot {
                 id: 0,
@@ -1220,6 +1243,7 @@ mod tests {
                 positions,
                 events_digest,
                 keys_digest: after_digest,
+                last_trading_nonce: 0,
             };
 
             prop_assert_ne!(compute_state_root(&[before]), compute_state_root(&[after]));

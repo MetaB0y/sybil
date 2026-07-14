@@ -726,6 +726,7 @@ fn verify_l1_deposit_checkpoint(
             | SystemEventWitness::MarketGroupExtended { .. }
             | SystemEventWitness::KeyRegistered { .. }
             | SystemEventWitness::KeyRevoked { .. }
+            | SystemEventWitness::ClientActionAuthorized(..)
             | SystemEventWitness::QuarantineClaimed { .. } => None,
         })
         .collect::<Vec<_>>();
@@ -1096,6 +1097,7 @@ mod tests {
             positions: vec![(MarketId::new(3), 0, 11), (MarketId::new(3), 1, 11)],
             events_digest: [9u8; 32],
             keys_digest: sybil_verifier::empty_account_keys_digest(7),
+            last_trading_nonce: 0,
         };
         let market = MarketSnapshot {
             market_id: MarketId::new(3),
@@ -1215,6 +1217,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [id as u8; 32],
                 keys_digest: sybil_verifier::empty_account_keys_digest(id),
+                last_trading_nonce: 0,
             })
             .collect::<Vec<_>>();
         let leaves = state_schema::state_root_leaves(&post_state, &state_sidecar);
@@ -1366,6 +1369,7 @@ mod tests {
             positions: Vec::new(),
             events_digest: pre_events_digest,
             keys_digest: sybil_verifier::account_keys_digest(account_id, pre_keys.iter().copied()),
+            last_trading_nonce: 0,
         };
         let post_account = AccountSnapshot {
             events_digest: post_events_digest,
@@ -1467,6 +1471,7 @@ mod tests {
             positions: vec![],
             events_digest: [0; 32],
             keys_digest: sybil_verifier::empty_account_keys_digest(account_id),
+            last_trading_nonce: 0,
         };
         let mut post_account = pre_account.clone();
         post_account.balance = amount;
@@ -1587,6 +1592,7 @@ mod tests {
             positions: vec![],
             events_digest: [0; 32],
             keys_digest: sybil_verifier::empty_account_keys_digest(account_id),
+            last_trading_nonce: 0,
         };
         let mut post_account = pre_account.clone();
         post_account.balance = amount;
@@ -1791,8 +1797,8 @@ mod tests {
         assert_eq!(
             state_transition_public_input_hash(&input.public_inputs),
             [
-                60, 43, 23, 176, 113, 66, 179, 155, 20, 58, 245, 206, 217, 73, 115, 37, 36, 139,
-                224, 86, 204, 150, 255, 45, 175, 136, 69, 181, 44, 199, 108, 70,
+                192, 202, 12, 183, 221, 0, 10, 99, 98, 234, 253, 36, 48, 126, 240, 237, 191, 106,
+                166, 57, 153, 115, 120, 75, 113, 6, 43, 162, 121, 161, 117, 9,
             ]
         );
     }

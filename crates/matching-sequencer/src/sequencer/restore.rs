@@ -225,6 +225,59 @@ impl BlockSequencer {
                 self.pending_bundles.push(submission);
                 Ok(())
             }
+            AcknowledgedWrite::AuthenticatedDirectAdmit {
+                resting,
+                nonce,
+                authorization,
+            } => {
+                let account_id = resting.account_id;
+                let order = resting.order.clone();
+                self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
+                self.order_book.reinsert_for_replay(resting)?;
+                self.apply_client_action_authorized(sybil_verifier::ClientActionWitness::Order {
+                    account_id: account_id.0,
+                    order,
+                    nonce,
+                    authorization,
+                })
+            }
+            AcknowledgedWrite::AuthenticatedDeferredBundle {
+                submission,
+                nonce,
+                authorization,
+            } => {
+                for order in &submission.orders {
+                    self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
+                }
+                let account_id = submission.account_id;
+                let order = submission.orders.first().cloned().ok_or_else(|| {
+                    SequencerError::Persistence(
+                        "authenticated deferred submission has no order".to_string(),
+                    )
+                })?;
+                self.pending_bundles.push(submission);
+                self.apply_client_action_authorized(sybil_verifier::ClientActionWitness::Order {
+                    account_id: account_id.0,
+                    order,
+                    nonce,
+                    authorization,
+                })
+            }
+            AcknowledgedWrite::AuthenticatedCancel {
+                account_id,
+                order_id,
+                nonce,
+                authorization,
+                timestamp_ms,
+            } => {
+                self.apply_client_action_authorized(sybil_verifier::ClientActionWitness::Cancel {
+                    account_id: account_id.0,
+                    order_id,
+                    nonce,
+                    authorization,
+                })?;
+                self.cancel_pending_order_at(account_id, order_id, timestamp_ms)
+            }
             AcknowledgedWrite::ControlPlane(command) => self.replay_control_plane_command(command),
             AcknowledgedWrite::L1Deposit(deposit) => self.ingest_l1_deposit(deposit).map(|_| ()),
             AcknowledgedWrite::BridgeWithdrawal(request) => {

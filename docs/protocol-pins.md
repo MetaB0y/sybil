@@ -12,13 +12,13 @@ status: current
 
 | Pin | Value |
 |---|---:|
-| Witness format | `9` |
+| Witness format | `10` |
 | Empty canonical witness length | `1631` bytes |
 | Golden-vector schema | `4` |
-| Canonical witness vector length | `4003` bytes |
-| Canonical witness length-prefixed SHA-256 | `0xb37ef5be6703feddaf24ac8075851e62701c236464c0cf9a72bf5d41fc299a13` |
+| Canonical witness vector length | `4246` bytes |
+| Canonical witness length-prefixed SHA-256 | `0xca392e3f59a2ac1733a8dad184b4beb91c663672f0a9eb9ad6399a063928dd92` |
 | Transition public-input hash | `0x42197d0dff7bc2f86a6e359f187adda163fc9b4ffaa0e7cfb9845561bb744830` |
-| Empty transition public-input hash | `0x3c2b17b07142b39b143af5ced9497325248be056cc96ff2daf8845b52cc76c46` |
+| Empty transition public-input hash | `0xc0ca0cb7dd000a6362eafd24307ef0edbf6aa6399973784b71062ba279a17509` |
 | Escape public-input hash | `0x35e754909d75fe0658f0bc451471d85f048110d7950b139110e7cd2e90ffb5d5` |
 
 ## OpenVM guest commitments

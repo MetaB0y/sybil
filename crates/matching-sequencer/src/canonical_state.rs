@@ -95,6 +95,7 @@ pub fn snapshot_account(account: &Account) -> AccountSnapshot {
             .collect(),
         events_digest: account.events_digest,
         keys_digest: account.keys_digest,
+        last_trading_nonce: account.last_trading_nonce,
     })
 }
 
@@ -135,6 +136,7 @@ mod tests {
                 positions: vec![(MarketId::new(3), 1, 1), (MarketId::new(1), 0, 2)],
                 events_digest: [2u8; 32],
                 keys_digest: sybil_verifier::empty_account_keys_digest(2),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: 1,
@@ -143,6 +145,7 @@ mod tests {
                 positions: vec![(MarketId::new(9), 0, 0), (MarketId::new(4), 1, 5)],
                 events_digest: [1u8; 32],
                 keys_digest: sybil_verifier::empty_account_keys_digest(1),
+                last_trading_nonce: 0,
             },
         ]);
 
@@ -168,6 +171,7 @@ mod tests {
                 positions: vec![(MarketId::new(7), 0, 3), (MarketId::new(7), 1, 1)],
                 events_digest: [2u8; 32],
                 keys_digest: sybil_verifier::empty_account_keys_digest(2),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: 1,
@@ -180,6 +184,7 @@ mod tests {
                 ],
                 events_digest: [1u8; 32],
                 keys_digest: sybil_verifier::empty_account_keys_digest(1),
+                last_trading_nonce: 0,
             },
         ]);
 

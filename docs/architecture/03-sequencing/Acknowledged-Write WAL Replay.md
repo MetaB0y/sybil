@@ -52,6 +52,9 @@ AcknowledgedWriteEnvelope {
 AcknowledgedWrite =
     DirectAdmit(RestingOrder)
   | DeferredBundle(OrderSubmission)
+  | AuthenticatedDirectAdmit { resting, nonce, authorization }
+  | AuthenticatedDeferredBundle { submission, nonce, authorization }
+  | AuthenticatedCancel { account_id, order_id, nonce, authorization, timestamp_ms }
   | ControlPlane(ControlPlaneCommand)
   | L1Deposit(L1Deposit)
   | BridgeWithdrawal(BridgeWithdrawalRequest)
@@ -83,6 +86,9 @@ Existing live-ordering disciplines remain explicit:
 
 - control-plane, deferred, deposit, withdrawal, and L1-input commands persist
   before mutating live state;
+- each signed order/cancel persists its exact RawP256/WebAuthn envelope, trading
+  nonce, and state effect in one row; replay cannot recover the action without
+  its authorization or advance the nonce without its action;
 - a direct resting-order admit is applied live first, then durably appended;
   append failure rolls the admit back before returning an error;
 - no acknowledged write is allowed before the first committed block snapshot,

@@ -77,7 +77,7 @@ pub use store::{
     DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact, DaArtifactIntegrityError, DaArtifactLookup,
     DaArtifactManifest, DaManifestLookup, DaProviderRef,
 };
-pub use sybil_verifier::{KeyOpAuth, KeyRecord};
+pub use sybil_verifier::{ClientActionAuth, ClientActionWitness, KeyOpAuth, KeyRecord};
 pub use system_event::SystemEvent;
 
 // Re-export oracle types needed by consumers (e.g. sybil-api)

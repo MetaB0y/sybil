@@ -840,6 +840,7 @@ mod tests {
     use crate::crypto::{KeyScope, sign_cancel};
     use crate::market_info::ResolutionConfig;
     use crate::sequencer::SequencerConfig;
+    use crate::store::AcknowledgedWrite;
     use crate::system_event::SystemEvent;
     use matching_engine::{MarketSet, NANOS_PER_DOLLAR, outcome_buy};
     use std::path::PathBuf;
@@ -1635,36 +1636,45 @@ mod tests {
             );
         };
 
-        const EXPECTED_CONTROL_PLANE_COMMANDS: usize = 13;
+        const EXPECTED_CONTROL_PLANE_COMMANDS: usize = 11;
         for restart_round in 0..3 {
             let restored = store.load_state().await.unwrap().unwrap();
             assert_eq!(
-                restored.control_plane_log.len(),
+                restored
+                    .acknowledged_writes
+                    .iter()
+                    .filter(|entry| matches!(entry.write, AcknowledgedWrite::ControlPlane(_)))
+                    .count(),
                 EXPECTED_CONTROL_PLANE_COMMANDS,
                 "restart round {restart_round} should see every acknowledged control-plane command before commit"
             );
             assert!(
-                restored.control_plane_log.iter().any(|command| matches!(
-                    command,
-                    ControlPlaneCommand::ExtendMarketGroup {
+                restored.acknowledged_writes.iter().any(|entry| matches!(
+                    &entry.write,
+                    AcknowledgedWrite::ControlPlane(ControlPlaneCommand::ExtendMarketGroup {
                         group_id,
                         market_id
-                    } if *group_id == 0 && *market_id == metadata_market
+                    }) if *group_id == 0 && *market_id == metadata_market
                 )),
                 "restart round {restart_round} should replay the market group extension"
             );
             assert!(
-                restored.control_plane_log.iter().any(|command| matches!(
-                    command,
-                    ControlPlaneCommand::AdvanceReplayNonce {
+                restored.acknowledged_writes.iter().any(|entry| matches!(
+                    &entry.write,
+                    AcknowledgedWrite::AuthenticatedCancel {
                         account_id,
-                        nonce: 1
+                        nonce: 1,
+                        ..
                     } if *account_id == aid
                 )),
-                "restart round {restart_round} should replay the signed cancel nonce"
+                "restart round {restart_round} should replay the atomic signed cancel"
             );
             assert_eq!(
-                restored.admit_log.len(),
+                restored
+                    .acknowledged_writes
+                    .iter()
+                    .filter(|entry| matches!(entry.write, AcknowledgedWrite::DirectAdmit(_)))
+                    .count(),
                 1,
                 "restart round {restart_round} should replay the direct admit before the cancel command"
             );
@@ -1753,11 +1763,11 @@ mod tests {
         for restart_round in 0..3 {
             let restored_after_commit = store.load_state().await.unwrap().unwrap();
             assert!(
-                restored_after_commit.control_plane_log.is_empty(),
+                restored_after_commit.acknowledged_writes.is_empty(),
                 "control-plane WAL should clear once a block commits the writes"
             );
             assert!(
-                restored_after_commit.admit_log.is_empty(),
+                restored_after_commit.acknowledged_writes.is_empty(),
                 "admit WAL should clear once a block commits the direct admit and cancel"
             );
             let restored_seq = BlockSequencer::restore(
@@ -1838,16 +1848,55 @@ mod tests {
         assert_eq!(withdrawal.amount_nanos, 80 * NANOS_PER_DOLLAR);
 
         let restored = store.load_state().await.unwrap().unwrap();
-        assert_eq!(restored.admit_log.len(), 1);
-        assert_eq!(restored.control_plane_log.len(), 2);
-        assert!(restored.control_plane_log.iter().any(|command| matches!(
-            command,
-            ControlPlaneCommand::AdvanceReplayNonce {
+        let sequences: Vec<u64> = restored
+            .acknowledged_writes
+            .iter()
+            .map(|entry| entry.sequence)
+            .collect();
+        let kinds: Vec<&str> = restored
+            .acknowledged_writes
+            .iter()
+            .map(|entry| entry.write.kind())
+            .collect();
+        assert_eq!(sequences, vec![0, 1, 2]);
+        assert_eq!(
+            kinds,
+            vec!["direct_admit", "authenticated_cancel", "bridge_withdrawal"],
+            "the durable sequence must match actor acknowledgement order exactly"
+        );
+        assert!(matches!(
+            &restored.acknowledged_writes[1].write,
+            AcknowledgedWrite::AuthenticatedCancel {
                 account_id,
-                nonce: 1
-            } if *account_id == aid
-        )));
-        assert_eq!(restored.pending_bridge_withdrawals.len(), 1);
+                order_id,
+                nonce: 1,
+                ..
+            } if *account_id == aid && *order_id == pending[0].order_id
+        ));
+        assert_eq!(
+            restored
+                .acknowledged_writes
+                .iter()
+                .filter(|entry| matches!(entry.write, AcknowledgedWrite::DirectAdmit(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            restored
+                .acknowledged_writes
+                .iter()
+                .filter(|entry| matches!(entry.write, AcknowledgedWrite::ControlPlane(_)))
+                .count(),
+            0
+        );
+        assert_eq!(
+            restored
+                .acknowledged_writes
+                .iter()
+                .filter(|entry| matches!(entry.write, AcknowledgedWrite::BridgeWithdrawal(_)))
+                .count(),
+            1
+        );
         let restored_seq =
             BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), config.clone());
 
@@ -1942,7 +1991,14 @@ mod tests {
             100 * NANOS_PER_DOLLAR as i64
         );
         let pre_crash = store.load_state().await.unwrap().unwrap();
-        assert_eq!(pre_crash.pending_bridge_l1_inputs.len(), 1);
+        assert_eq!(
+            pre_crash
+                .acknowledged_writes
+                .iter()
+                .filter(|entry| matches!(entry.write, AcknowledgedWrite::BridgeL1Input(_)))
+                .count(),
+            1
+        );
 
         handle.crash_actor_for_test().await.unwrap();
         assert_eq!(
@@ -1985,7 +2041,7 @@ mod tests {
             1
         );
         let after_commit = store.load_state().await.unwrap().unwrap();
-        assert!(after_commit.pending_bridge_l1_inputs.is_empty());
+        assert!(after_commit.acknowledged_writes.is_empty());
         assert!(after_commit.bridge_state.withdrawals.is_empty());
         assert_eq!(
             after_commit.accounts.get(aid).unwrap().balance,
@@ -2005,18 +2061,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_pubkey_and_signed_order() {
-        let (seq, aid) = make_test_sequencer();
+        let (mut seq, aid) = make_test_sequencer_with_config(SequencerConfig {
+            block_interval: Duration::from_secs(3_600),
+            ..SequencerConfig::default()
+        });
         let mut ms = MarketSet::new();
         let m0 = ms.add_binary("Test");
-        let handle = SequencerHandle::spawn(seq);
 
         let signing_key =
             <p256::ecdsa::SigningKey as p256::elliptic_curve::Generate>::generate_from_rng(
                 &mut p256::elliptic_curve::rand_core::UnwrapErr(getrandom::SysRng),
             );
         let pubkey = PublicKey(*signing_key.verifying_key());
+        seq.register_pubkey(aid, pubkey).unwrap();
 
-        handle.register_pubkey(aid, pubkey).await.unwrap();
+        let path = temp_store_path("signed-order-proof");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
         handle.produce_block().await.unwrap();
         let genesis_hash = handle.get_genesis_hash().await.unwrap().unwrap();
 
@@ -2026,6 +2087,39 @@ mod tests {
 
         let block = handle.produce_block().await.unwrap();
         assert!(block.canonical.header.order_count >= 1);
+        let witness = store
+            .block_witness(block.canonical.header.height)
+            .unwrap()
+            .expect("persisted signed-order witness");
+        assert!(witness.system_events.iter().any(|event| matches!(
+            event,
+            sybil_verifier::SystemEventWitness::ClientActionAuthorized(
+                sybil_verifier::ClientActionWitness::Order {
+                    account_id,
+                    nonce: 1,
+                    ..
+                }
+            ) if *account_id == aid.0
+        )));
+        assert!(sybil_verifier::verify_full(&witness, false).valid);
+
+        let mut forged = witness;
+        let authorization = forged
+            .system_events
+            .iter_mut()
+            .find_map(|event| match event {
+                sybil_verifier::SystemEventWitness::ClientActionAuthorized(
+                    sybil_verifier::ClientActionWitness::Order { authorization, .. },
+                ) => Some(authorization),
+                _ => None,
+            })
+            .expect("signed order authorization event");
+        if let sybil_verifier::ClientActionAuth::RawP256 { signature, .. } = authorization {
+            signature[0] ^= 1;
+        } else {
+            panic!("raw signed order produced a non-raw authorization envelope");
+        }
+        assert!(!sybil_verifier::verify_full(&forged, false).valid);
     }
 
     #[tokio::test]
@@ -2428,17 +2522,17 @@ mod tests {
         ));
 
         let pending = store.load_state().await.unwrap().unwrap();
-        assert_eq!(pending.control_plane_log.len(), 1);
+        assert_eq!(pending.acknowledged_writes.len(), 1);
         assert!(matches!(
-            &pending.control_plane_log[0],
-            ControlPlaneCommand::CreateAccountWithInitialKey {
+            &pending.acknowledged_writes[0].write,
+            AcknowledgedWrite::ControlPlane(ControlPlaneCommand::CreateAccountWithInitialKey {
                 initial_balance: 17,
                 auth_scheme: AccountAuthScheme::WebAuthn,
                 label: Some(label),
                 scope: KeyScope::Primary,
                 created_at_ms: 123,
                 ..
-            } if label == "primary passkey"
+            }) if label == "primary passkey"
         ));
 
         let mut replayed = BlockSequencer::restore(pending, Arc::new(AdminOracle::new()), config);
@@ -2505,7 +2599,7 @@ mod tests {
 
         let pending_restore = store.load_state().await.unwrap().unwrap();
         assert_eq!(
-            pending_restore.control_plane_log.len(),
+            pending_restore.acknowledged_writes.len(),
             2,
             "only CreateAccount + the accepted bootstrap may enter the control-plane WAL"
         );
@@ -2580,7 +2674,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .control_plane_log
+                .acknowledged_writes
                 .len(),
             1,
             "only account creation may enter the WAL"
@@ -2641,7 +2735,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .control_plane_log
+                .acknowledged_writes
                 .is_empty(),
             "rejected signed registration must not append a WAL row"
         );

@@ -3,7 +3,7 @@ tags: [validium, recovery, data-availability]
 layer: verification
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-14
 ---
 
 # Operator replacement and disaster recovery
@@ -55,11 +55,15 @@ The import path is `Store::import_witness_genesis` in
 recomputes the post-state root, verifies the optional expected root, restores
 the committed head, and is covered by a child-block continuation drill.
 
-Replay nonces are deliberately not proven state. Import starts a fresh nonce
-space, while the preserved `genesis_hash` keeps previously captured signatures
-in their original chain domain. For a witness that does not carry the genesis
-header as its previous header, the operator must supply the known genesis hash
-explicitly; `/v1/health` exposes it on the source chain.
+Witness v10 imports the committed `last_trading_nonce` for every account, so
+previously accepted order/cancel signatures remain spent after recovery. The
+broader operational `last_nonce` is not validity state and is conservatively
+seeded from `last_trading_nonce`; this prevents trading replay while allowing
+non-trading operational nonce space to resume. The preserved `genesis_hash`
+keeps captured signatures in their original chain domain. For a witness that
+does not carry the genesis header as its previous header, the operator must
+supply the known genesis hash explicitly; `/v1/health` exposes it on the source
+chain.
 
 ## Recovery drill
 

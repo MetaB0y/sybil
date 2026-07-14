@@ -28,6 +28,7 @@ use crate::crypto::{
     AuthenticatedKeyRevocation, AuthenticatedOrder, AuthenticatedProfileUpdate, PublicKey,
     RegisteredPubkey, SignedApiKeyCreate, SignedApiKeyRevoke, SignedBridgeWithdrawal, SignedCancel,
     SignedKeyRegistration, SignedKeyRevocation, SignedOrder, SignedProfileUpdate,
+    canonical_cancel_bytes, canonical_order_bytes, raw_client_action_authorization,
     verify_signed_api_key_create, verify_signed_api_key_revoke, verify_signed_bridge_withdrawal,
     verify_signed_cancel, verify_signed_key_registration, verify_signed_key_revocation,
     verify_signed_order, verify_signed_profile_update,

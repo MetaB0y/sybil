@@ -3,12 +3,12 @@ tags: [zk, serialization, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 # Block Witness Format
 
-`BlockWitness` v9 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v10 is the canonical private audit package for a Sybil block. The
 sequencer persists it, native verification replays it, and the OpenVM guest
 receives it inside `StateTransitionGuestInput`. The proof binds the witness by
 recomputing `witness_root` from canonical witness bytes and including that root
@@ -33,7 +33,10 @@ sidecar opens the single quarantine ledger, and claims are guest-replayed per
 ADR-0015. SYB-32 Stage 1a moved the format to v8 by appending committed
 `last_clearing_prices` to every market snapshot. Stage 1b moved it to v9 by
 adding the signature-bound chain `genesis_hash` needed for in-guest key-op
-verification. See
+verification. GitHub #73 moves the format to v10 by appending the committed
+`last_trading_nonce` to account snapshots and
+`ClientActionAuthorized(Order|Cancel)` events carrying exact RawP256/WebAuthn
+envelopes. See
 the historical `design/archive/implemented/witness-v6-keys-transition.md` and
 `docs/adr/0015-deposit-quarantine.md`.
 
@@ -63,15 +66,15 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v9 it is `0x09`.
+The first byte is the format version. For v10 it is `0x0a`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x09
+    version:u8 = 0x0a
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
- || genesis_hash:[u8;32]                       // key-op signing domain
+ || genesis_hash:[u8;32]                       // key/action signing domain
  || orders_section
  || rejections_section
  || system_events_section
@@ -126,13 +129,18 @@ Sections are `count:u64 || item_bytes * count`, except where noted:
 `KeyRecord` is `auth_scheme:u8 || pubkey_sec1:[u8;33] ||
 capability_mask:u32le`. System-event tags 10 and 11 commit key registration and
 revocation; tags 12 and 13 commit `DepositQuarantined` and
-`QuarantineClaimed`, respectively. Key events include the complete raw-P256 or WebAuthn
-authorization envelope. The guest welds each opened set to the post-state
+`QuarantineClaimed`; tag 14 commits `ClientActionAuthorized`.
+Key and client-action events include the complete raw-P256 or WebAuthn
+authorization envelope. Account snapshot bytes append
+`last_trading_nonce:u64le` after `keys_digest`; all three account phases carry
+it. The guest welds each opened set to the post-state
 `keys_digest`, reverse-folds key events to the authenticated pre-state digest,
 then forward-replays them over a running globally unique key universe. During
-that forward fold it cryptographically verifies each envelope over the
-state-bound canonical key-op bytes using `genesis_hash` and the running
-key/event digests.
+that forward fold it cryptographically verifies each key or ordinary-action
+envelope over canonical bytes using `genesis_hash` and the running key set.
+System replay independently requires each client-action nonce to exceed the
+authenticated `last_trading_nonce`, and binding verification maps the exact
+order/cancel event to its block or sidecar effect.
 
 `clearing_prices_section` is:
 
@@ -324,7 +332,7 @@ compute_state_root_with_sidecar(post_state, state_sidecar)
 
 ## Versioning And Compatibility
 
-The version byte is the first byte of `canonical_witness_bytes`. v9 is `0x09`.
+The version byte is the first byte of `canonical_witness_bytes`. v10 is `0x0a`.
 Unknown versions must fail closed. This repo does not maintain dual witness
 decoders for devnet schema changes; ADR-0011 rejects compatibility wrappers
 before launch because they double validity-critical encoder surface.

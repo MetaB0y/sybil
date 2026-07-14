@@ -7141,6 +7141,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "sybil-l1-protocol",
+ "sybil-signing",
  "thiserror 2.0.18",
 ]
 

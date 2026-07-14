@@ -70,18 +70,19 @@ files, creates free-form string status, and stops at
 `proof_status: "not_started"`. It has no typed transition graph, attempt lease,
 retry clock, atomic artifact protocol, epoch assembly, or proof subprocess.
 
-### 3.3 Ordinary authorization is deliberately outside the guest
+### 3.3 Ordinary authorization migration is validity-sensitive
 
-Raw P256 orders/cancels are verified by the sequencer. WebAuthn is verified by
-the API and passed inward as an `Authenticated*` value, discarding the
-authenticator and client-data envelope. `Account.last_nonce` is durable
-operational state but is absent from `AccountSnapshot` and `state_root`.
+The prerequisite and authorization slices are now implemented. One globally
+sequenced acknowledged-write log preserves actor order. Raw-P256 and WebAuthn
+orders/cancels retain their exact authorization envelope through API,
+sequencer, WAL, witness, native verification, and guest-safe verification.
+`Account.last_trading_nonce` is a dedicated validity field committed by the
+account leaf; the broader operational `last_nonce` remains sequencer state for
+profile, read-key, bridge, and other actions outside this first proof scope.
 
-Adding these actions to the witness also changes WAL reasoning. The current
-separate admit, pending-bundle, and control-plane logs replay in a fixed
-cross-table order. Once acknowledgement order determines a proven nonce/key
-transition, that ordering becomes validity-sensitive. This fires the
-single-WAL contingency described by [[Acknowledged-Write WAL Replay]].
+This is witness v10 and a fresh-genesis migration. The guest source now runs
+the shared checks, but its deployment commitment is intentionally repinned
+once with the streamed epoch guest in #15.
 
 ## 4. Architecture
 
@@ -275,14 +276,16 @@ An invalid block poisons its epoch. Later epochs must not skip over it.
 
 ### 7.1 Committed nonce
 
-Add `last_nonce: u64` to the canonical account snapshot/state leaf and all three
-witness account phases. This is a validity migration: witness v10, new state
-roots, new goldens, a new guest commitment, an adapter repin, and fresh genesis.
+Add `last_trading_nonce: u64` to the canonical account snapshot/state leaf and
+all three witness account phases. It advances only for signed orders/cancels;
+other operational actions keep using the uncommitted general `last_nonce`.
+This is a validity migration: witness v10, new state roots, new goldens, a new
+guest commitment, an adapter repin, and fresh genesis.
 
 ### 7.2 Retained authorization
 
-Promote the existing Raw-P256/WebAuthn envelope shape to a general
-`P256Authorization` used by key operations and ordinary actions. The API may
+Reuse the bounded Raw-P256/WebAuthn `KeyOpAuth` envelope as
+`ClientActionAuth` for ordinary actions. The API may
 still perform WebAuthn policy checks for good errors, but it must pass the exact
 `authenticator_data`, `client_data_json`, signer key, and raw signature inward.
 The sequencer and guest re-run the shared verifier; an `Authenticated*` marker
@@ -290,26 +293,19 @@ without an envelope is no longer sufficient.
 
 ### 7.3 Ordered authorization stream
 
-Witness v10 contains one actor-order-preserving `authorized_actions` section:
+Witness v10 appends actor-order-preserving `ClientActionAuthorized` system
+events alongside key mutations:
 
 ```text
-AuthorizedActionWitness {
-    account_id: u64,
-    nonce_before: u64,
-    nonce_after: u64,
-    action: Order { assigned_order_id, signed_order }
-          | Cancel { order_id }
-          | KeyRegister { ... }
-          | KeyRevoke { ... },
-    authorization: P256Authorization,
-}
+ClientActionWitness =
+    Order { account_id, assigned_order, nonce, authorization }
+  | Cancel { account_id, order_id, nonce, authorization }
 ```
 
-For ordinary actions `nonce_after` is the signed nonce and must be strictly
-greater than `nonce_before`; the next action for that account must open the
-prior `nonce_after`. State-bound key operations retain their digest binding and
-participate in the same active-key ordering even if they do not consume the
-ordinary nonce.
+Each ordinary action nonce must be strictly greater than the running
+`last_trading_nonce`; gaps are allowed. State-bound key operations retain their
+digest binding and participate in the same active-key ordering without
+consuming the trading nonce.
 
 The verifier reconstructs block-start active keys from the authenticated
 post-state opening, then replays key mutations and ordinary actions in exact
@@ -320,8 +316,9 @@ acknowledgement order. It verifies:
 - genesis, action fields, and nonce binding;
 - each authorized order maps exactly to a newly introduced witnessed order
   with the server-assigned ID excluded only from signing bytes;
-- each authorized cancel maps exactly to its cancellation event and the
-  pre-state resting order; and
+- each authorized cancel maps exactly to a later cancellation event (the order
+  may have been admitted and cancelled between blocks, leaving no sidecar
+  leaf); and
 - final nonce/key digests match authenticated post-system/post-state leaves.
 
 Carried resting orders are not re-authorized every block: the previous accepted
@@ -577,9 +574,12 @@ outbox is covered by qMDB slot-rotation and randomized crashpoint invariants.
 The globally sequenced acknowledged-write WAL from #76 is also landed: one
 versioned actor-ordered interval covers direct/deferred orders, control-plane
 commands, deposits, withdrawals, and L1 lifecycle inputs; floor/next counters
-detect gaps and replay fails closed. Authorization witness v10, streamed
-`sybil-zk`/OpenVM guest, durable prover scheduler, authenticated service ingest,
-and the STARK subprocess backend remain to be implemented below.
+detect gaps and replay fails closed. Authorization witness v10 is now
+implemented in #73: exact Raw/WebAuthn envelopes survive API/WAL recovery,
+actor-order key membership and signatures are replayed, and account leaves
+commit `last_trading_nonce`. The streamed `sybil-zk`/OpenVM epoch guest and
+coordinated pin/golden update (#15), durable prover scheduler, authenticated
+service ingest, and STARK subprocess backend remain to be implemented below.
 
 GitHub tracking is deliberately split at durable/consensus boundaries:
 
@@ -611,11 +611,14 @@ compile-time/runtime rejected by calldata encoding.
 
 - Land the single acknowledged-write table and fail-closed interval/replay
   tests before making order validity depend on replay order. **Done in #76.**
-- Commit `last_nonce` in account snapshots and state leaves.
+- Commit `last_trading_nonce` in account snapshots and state leaves. **Done in
+  #73; the guest commitment movement is coordinated with #15.**
 - Preserve exact Raw-P256/WebAuthn envelopes from API through sequencer/WAL.
-- Add the ordered authorization witness and shared native/guest verification.
+  **Done in #73.**
+- Add ordered authorization events and shared native/guest-safe verification.
+  **Done in #73.**
 - Prove new orders, cancels, active-key membership, and nonce transitions;
-  include negative, reordering, replay, and cross-block tests.
+  include negative, reordering, replay, and cross-block tests. **Done in #73.**
 
 **Gate:** witness v10/goldens are intentional; native and OpenVM execution reject
 forged, stale, reordered, wrong-scheme, wrong-genesis, and wrong-RP actions.

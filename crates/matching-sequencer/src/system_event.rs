@@ -2,7 +2,7 @@ use matching_engine::{MarketId, Nanos, OrderDirection};
 
 use crate::account::AccountId;
 use crate::bridge::{L1Deposit, WithdrawalLeaf, WithdrawalRefundReason};
-use sybil_verifier::{KeyOpAuth, KeyRecord};
+use sybil_verifier::{ClientActionWitness, KeyOpAuth, KeyRecord};
 
 /// System state changes applied outside the matching pipeline.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -83,6 +83,9 @@ pub enum SystemEvent {
         amount: i64,
         sybil_account_key: [u8; 32],
     },
+    /// Ordinary order/cancel authorization retained for native and guest
+    /// replay in exact actor acknowledgement order.
+    ClientActionAuthorized(ClientActionWitness),
 }
 
 #[cfg(test)]

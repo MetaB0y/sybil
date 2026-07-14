@@ -24,6 +24,7 @@ pub mod arithmetic;
 #[cfg(feature = "qmdb")]
 pub mod block;
 mod canonical;
+pub mod client_action;
 #[cfg(feature = "qmdb")]
 pub mod event_commitment;
 pub mod event_schema;
@@ -72,11 +73,12 @@ pub use account_keys::{
 pub use key_op_auth::{EXPECTED_RP_ID_HASH, EXPECTED_WEBAUTHN_RP_ID, verify_keyop_auth};
 pub use types::{
     AccountReservationSnapshot, AccountSnapshot, BlockWitness, BridgeStateSnapshot,
-    ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord, L1DepositWitness,
-    MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot,
-    QuarantineEntrySnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
-    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalRefundReasonWitness,
-    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection,
+    ChallengeSnapshot, ClientActionAuth, ClientActionWitness, DepositAccumulatorWitness, KeyOpAuth,
+    KeyRecord, L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
+    OracleSourceSnapshot, QuarantineEntrySnapshot, RejectionReason, ResolutionProposalSnapshot,
+    ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
+    WithdrawalRefundReasonWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
+    WitnessRejection,
 };
 pub use violations::{VerificationResult, VerificationStats, Violation, ViolationKind};
 
@@ -99,6 +101,7 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
 pub fn verify_system(witness: &BlockWitness) -> VerificationResult {
     let mut result = system::verify_system_transition(witness);
     result.merge(key_transition::verify_key_transitions(witness));
+    result.merge(client_action::verify_client_action_bindings(witness));
     result
 }
 

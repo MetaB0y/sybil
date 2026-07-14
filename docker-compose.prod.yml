@@ -25,13 +25,11 @@ services:
       # clap treats it as an invalid CIDR. Configure only the exact audited
       # Caddy-facing Docker CIDR; never use a broad private-address range.
       SYBIL_HTTP_TRUSTED_PROXY_CIDRS:
-      # WebAuthn (passkey) relying-party config MUST equal the public web origin
-      # the browser registers passkeys under. If these stay at the localhost
-      # defaults, every assertion fails RpIdHashMismatch/OriginMismatch and ALL
-      # passkey users are locked out (the default account-create mode is passkey).
-      # RP_ID = the app host (no scheme); ORIGIN = scheme + host.
-      SYBIL_WEBAUTHN_RP_ID: "${SYBIL_WEBAUTHN_RP_ID:?Set SYBIL_WEBAUTHN_RP_ID in /opt/sybil/.env (e.g. app.example.com)}"
-      SYBIL_WEBAUTHN_ORIGIN: "${SYBIL_WEBAUTHN_ORIGIN:?Set SYBIL_WEBAUTHN_ORIGIN in /opt/sybil/.env (e.g. https://app.example.com)}"
+      # WebAuthn policy MUST equal the RP/origin compiled into the validity
+      # guest. A mismatch fails the prod preflight; changing hostnames requires
+      # a guest repin and fresh genesis. RP_ID has no scheme; ORIGIN does.
+      SYBIL_WEBAUTHN_RP_ID: "${SYBIL_WEBAUTHN_RP_ID:?Set the guest-pinned RP ID in /opt/sybil/.env}"
+      SYBIL_WEBAUTHN_ORIGIN: "${SYBIL_WEBAUTHN_ORIGIN:?Set the guest-pinned origin in /opt/sybil/.env}"
       # Public devnet runs persistent by default. To intentionally reset,
       # stop sybil-api and remove or replace the sybil-data volume.
       SYBIL_DATA_DIR: "/data"

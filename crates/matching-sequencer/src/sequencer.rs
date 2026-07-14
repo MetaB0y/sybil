@@ -144,6 +144,31 @@ impl BlockSequencer {
     pub fn record_system_event(&mut self, event: SystemEvent) {
         self.pending_system_events.push(event);
     }
+
+    /// Apply one already-verified ordinary client authorization. The account
+    /// baseline is captured before the nonce changes so witness replay opens
+    /// the exact prior cross-block nonce.
+    pub fn apply_client_action_authorized(
+        &mut self,
+        action: sybil_verifier::ClientActionWitness,
+    ) -> Result<(), SequencerError> {
+        let (account_id, nonce) = match &action {
+            sybil_verifier::ClientActionWitness::Order {
+                account_id, nonce, ..
+            }
+            | sybil_verifier::ClientActionWitness::Cancel {
+                account_id, nonce, ..
+            } => (AccountId(*account_id), *nonce),
+        };
+        self.capture_system_account_baseline(account_id);
+        self.advance_replay_nonce(account_id, nonce)?;
+        self.accounts
+            .get_mut(account_id)
+            .expect("nonce advance validated an existing account")
+            .last_trading_nonce = nonce;
+        self.record_system_event(SystemEvent::ClientActionAuthorized(action));
+        Ok(())
+    }
 }
 
 /// Backwards-compatible alias.

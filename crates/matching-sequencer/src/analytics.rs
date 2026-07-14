@@ -648,6 +648,7 @@ impl AnalyticsState {
                 | SystemEvent::MarketGroupExtended { .. }
                 | SystemEvent::KeyRegistered { .. }
                 | SystemEvent::KeyRevoked { .. }
+                | SystemEvent::ClientActionAuthorized(..)
                 | SystemEvent::DepositQuarantined { .. }
                 | SystemEvent::QuarantineClaimed { .. } => {}
             }

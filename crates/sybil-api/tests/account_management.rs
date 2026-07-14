@@ -21,9 +21,10 @@ use sha2::{Digest as _, Sha256};
 use sybil_api::config::ApiConfig;
 use tower::ServiceExt;
 
+use matching_engine::{MarketId, Nanos, Order, Qty};
 use matching_sequencer::crypto::{
     canonical_api_key_create_bytes, canonical_api_key_revoke_bytes,
-    canonical_key_registration_bytes, canonical_key_revocation_bytes,
+    canonical_key_registration_bytes, canonical_key_revocation_bytes, canonical_order_bytes,
     canonical_profile_update_bytes,
 };
 use matching_sequencer::{
@@ -584,6 +585,37 @@ async fn webauthn_keyop_register_and_revoke_fixture_seals_valid_block() {
             "webauthn_assertion": webauthn_assertion(&primary, &canonical, 3),
             "bound_keys_digest_hex": hex::encode(keys_digest),
             "bound_events_digest_hex": hex::encode(events_digest),
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let market_id = handle
+        .create_market("WebAuthn fixture".to_string())
+        .await
+        .unwrap();
+    let mut order = Order::new(0);
+    order.markets[0] = MarketId::new(market_id.0);
+    order.num_markets = 1;
+    order.num_states = 2;
+    order.payoffs[0] = 1;
+    order.limit_price = Nanos(500_000_000);
+    order.max_fill = Qty(3);
+    let canonical = canonical_order_bytes(&order, 1, genesis);
+    let (status, body) = post_json(
+        app.clone(),
+        "/v1/orders/signed",
+        json!({
+            "signer_pubkey_hex": pubkey_hex(&primary),
+            "order": {
+                "market_ids": [market_id.0],
+                "payoffs": [1, 0],
+                "limit_price_nanos": 500_000_000u64,
+                "max_fill": 3u64,
+            },
+            "nonce": 1,
+            "auth_scheme": "webauthn",
+            "webauthn_assertion": webauthn_assertion(&primary, &canonical, 4),
         }),
     )
     .await;

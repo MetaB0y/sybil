@@ -221,14 +221,18 @@ impl BlockSequencer {
         let pre_state_sidecar = self.committed_state_sidecar.clone();
         let pre_deposit_frontier = self.committed_deposit_frontier;
         let mut system_events = std::mem::take(&mut self.pending_system_events);
-        // Phase 0: account creation/key mutations precede all other system
-        // events. Stable sorting preserves admission order within each phase.
+        // Authorization-sensitive events form phase 0 because state-bound key
+        // signatures are admitted against the pre-block events digest. The
+        // stable partition preserves exact actor order among key mutations and
+        // ordinary signed actions, which is the security-sensitive ordering;
+        // other system effects retain their relative order in phase 1.
         system_events.sort_by_key(|event| {
             !matches!(
                 event,
                 SystemEvent::CreateAccount { .. }
                     | SystemEvent::KeyRegistered { .. }
                     | SystemEvent::KeyRevoked { .. }
+                    | SystemEvent::ClientActionAuthorized(..)
             )
         });
         let system_account_baselines = std::mem::take(&mut self.pending_system_account_baselines);
@@ -355,9 +359,12 @@ impl BlockSequencer {
                             crate::digest::update_digest(&account.events_digest, &encoded);
                     }
                 }
-                // Key-op digests are folded at admission so a subsequent key
-                // op in the same block binds to the running digest.
-                SystemEvent::KeyRegistered { .. } | SystemEvent::KeyRevoked { .. } => {}
+                // Key-op digests and client-action nonces are folded at
+                // admission so a later action in the same block binds to the
+                // exact running state.
+                SystemEvent::KeyRegistered { .. }
+                | SystemEvent::KeyRevoked { .. }
+                | SystemEvent::ClientActionAuthorized(..) => {}
             }
         }
         // A terminal leaf remains addressable until the block carrying its

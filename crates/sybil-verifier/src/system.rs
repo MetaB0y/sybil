@@ -40,6 +40,7 @@ pub fn verify_system_transition(witness: &BlockWitness) -> VerificationResult {
                     || expected.total_deposited != actual.total_deposited
                     || normalized_positions(expected) != normalized_positions(actual)
                     || expected.events_digest != actual.events_digest
+                    || expected.last_trading_nonce != actual.last_trading_nonce
                 {
                     violations.push(Violation {
                         kind: ViolationKind::SystemStateMismatch,
@@ -91,6 +92,7 @@ fn apply_event(
                         *account_id,
                         initial_keys.iter().copied(),
                     ),
+                    last_trading_nonce: 0,
                 },
             );
         }
@@ -201,6 +203,24 @@ fn apply_event(
             account.events_digest = update_digest(&account.events_digest, &encoded);
         }
         SystemEventWitness::DepositQuarantined { .. } => {}
+        SystemEventWitness::ClientActionAuthorized(action) => {
+            let (account_id, nonce) = match action {
+                crate::ClientActionWitness::Order {
+                    account_id, nonce, ..
+                }
+                | crate::ClientActionWitness::Cancel {
+                    account_id, nonce, ..
+                } => (*account_id, *nonce),
+            };
+            let account = account_mut(accounts, account_id)?;
+            if nonce <= account.last_trading_nonce {
+                return Err(format!(
+                    "account {account_id} client-action nonce {nonce} is not above prior trading nonce {}",
+                    account.last_trading_nonce
+                ));
+            }
+            account.last_trading_nonce = nonce;
+        }
         SystemEventWitness::WithdrawalFinalized { .. }
         | SystemEventWitness::L1BlockObserved { .. }
         | SystemEventWitness::MarketGroupExtended { .. } => {}
@@ -377,4 +397,50 @@ fn normalized_positions(
         .filter(|(_, _, quantity)| *quantity != 0)
         .map(|(market, outcome, quantity)| ((*market, *outcome), *quantity))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ClientActionWitness, KeyOpAuth};
+
+    fn account(last_trading_nonce: u64) -> AccountSnapshot {
+        AccountSnapshot {
+            id: 7,
+            balance: 0,
+            total_deposited: 0,
+            positions: Vec::new(),
+            events_digest: [0; 32],
+            keys_digest: [0; 32],
+            last_trading_nonce,
+        }
+    }
+
+    fn client_action(nonce: u64) -> SystemEventWitness {
+        SystemEventWitness::ClientActionAuthorized(ClientActionWitness::Order {
+            account_id: 7,
+            order: matching_engine::Order::new(1),
+            nonce,
+            authorization: KeyOpAuth::RawP256 {
+                signer_pubkey: [2; 33],
+                signature: [0; 64],
+            },
+        })
+    }
+
+    #[test]
+    fn client_action_nonce_allows_gaps_and_rejects_same_block_replay() {
+        let mut accounts = BTreeMap::from([(7, account(0))]);
+        apply_event(&mut accounts, &client_action(10), 1).unwrap();
+        assert_eq!(accounts[&7].last_trading_nonce, 10);
+        assert!(apply_event(&mut accounts, &client_action(9), 1).is_err());
+        assert!(apply_event(&mut accounts, &client_action(10), 1).is_err());
+    }
+
+    #[test]
+    fn client_action_nonce_replay_fails_against_prior_block_state() {
+        let mut accounts = BTreeMap::from([(7, account(10))]);
+        assert!(apply_event(&mut accounts, &client_action(10), 2).is_err());
+        assert_eq!(accounts[&7].last_trading_nonce, 10);
+    }
 }

@@ -18,8 +18,8 @@ pub struct BlockWitness {
     pub header: WitnessBlockHeader,
     /// Previous block header (`None` for genesis).
     pub previous_header: Option<WitnessBlockHeader>,
-    /// Chain-instance domain used by validity-critical signed key operations.
-    /// This is a private guest input covered by every key-op signature.
+    /// Chain-instance domain used by validity-critical signed operations.
+    /// This private guest input is covered by every key and client-action signature.
     pub genesis_hash: [u8; 32],
 
     // -- Orders --
@@ -93,6 +93,24 @@ pub struct WitnessRejection {
     pub order: Order,
     pub account_id: u64,
     pub reason: RejectionReason,
+}
+
+/// An ordinary client action whose exact authorization envelope is replayed
+/// against the running key set and cross-block nonce inside the guest.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ClientActionWitness {
+    Order {
+        account_id: u64,
+        order: Order,
+        nonce: u64,
+        authorization: ClientActionAuth,
+    },
+    Cancel {
+        account_id: u64,
+        order_id: u64,
+        nonce: u64,
+        authorization: ClientActionAuth,
+    },
 }
 
 /// Reason an order was rejected (mirrors sequencer's `RejectionReason`).
@@ -202,6 +220,10 @@ pub enum SystemEventWitness {
         amount: i64,
         sybil_account_key: [u8; 32],
     },
+    /// A signature-authorized ordinary order or cancellation. These events
+    /// are emitted in actor acknowledgement order alongside key mutations so
+    /// guest replay observes the exact key/nonce state used at admission.
+    ClientActionAuthorized(ClientActionWitness),
 }
 
 /// Validity-critical signing-key record committed by `keys_digest` v2.
@@ -247,6 +269,10 @@ pub enum KeyOpAuth {
         signature: [u8; 64],
     },
 }
+
+/// Ordinary orders/cancels use the same bounded P256/WebAuthn envelope shape
+/// as key operations, but sign their `sybil-signing` canonical action bytes.
+pub type ClientActionAuth = KeyOpAuth;
 
 mod pubkey_bytes {
     use std::fmt;
@@ -441,6 +467,9 @@ pub struct AccountSnapshot {
     #[serde(default)]
     pub events_digest: [u8; 32],
     pub keys_digest: [u8; 32],
+    /// Highest accepted ordinary order/cancel nonce for this account.
+    #[serde(default)]
+    pub last_trading_nonce: u64,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]

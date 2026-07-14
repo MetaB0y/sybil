@@ -21,6 +21,12 @@ use p256::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 /// be rebuilt and repinned together, and the API RP configuration must match.
 pub const EXPECTED_WEBAUTHN_RP_ID: &str = "app.172-104-31-54.nip.io";
 
+/// Exact browser origin accepted by the guest for the pinned deployment.
+/// This is deliberately stricter than matching only the RP ID hash: an
+/// assertion minted by another origin under the same RP must not authorize a
+/// Sybil action.
+pub const EXPECTED_WEBAUTHN_ORIGIN: &str = "https://app.172-104-31-54.nip.io";
+
 /// `SHA256(EXPECTED_WEBAUTHN_RP_ID)`, pinned as bytes for guest use.
 pub const EXPECTED_RP_ID_HASH: [u8; 32] = [
     0xfd, 0x37, 0x1b, 0x6c, 0x3a, 0x2f, 0x68, 0x64, 0x80, 0x73, 0x5c, 0x34, 0x98, 0x5e, 0x03, 0x36,
@@ -119,6 +125,12 @@ fn verify_webauthn_envelope(
     if fields.type_ != b"webauthn.get" {
         return Err("WebAuthn clientDataJSON type is not webauthn.get".to_string());
     }
+    if fields.origin != EXPECTED_WEBAUTHN_ORIGIN.as_bytes() {
+        return Err("WebAuthn clientDataJSON origin does not match the pinned origin".to_string());
+    }
+    if fields.cross_origin {
+        return Err("cross-origin WebAuthn assertion rejected".to_string());
+    }
     let digest: [u8; 32] = Sha256::digest(canonical_bytes).into();
     if fields.challenge.as_slice() != base64url_sha256(&digest) {
         return Err("WebAuthn clientDataJSON challenge mismatch".to_string());
@@ -129,9 +141,11 @@ fn verify_webauthn_envelope(
 struct ClientDataFields {
     type_: Vec<u8>,
     challenge: Vec<u8>,
+    origin: Vec<u8>,
+    cross_origin: bool,
 }
 
-/// Extract the two security-critical top-level clientDataJSON members.
+/// Extract the security-critical top-level clientDataJSON members.
 ///
 /// Member names and values are decoded according to RFC 8259, including
 /// surrogate-pair handling. Duplicate `type` or `challenge` members are
@@ -144,6 +158,8 @@ fn extract_client_data_fields(bytes: &[u8]) -> Result<ClientDataFields, String> 
 
     let mut type_ = None;
     let mut challenge = None;
+    let mut origin = None;
+    let mut cross_origin = None;
     if parser.take(b'}') {
         return Err("clientDataJSON is missing type and challenge".to_string());
     }
@@ -162,6 +178,16 @@ fn extract_client_data_fields(bytes: &[u8]) -> Result<ClientDataFields, String> 
                 return Err("clientDataJSON has duplicate challenge members".to_string());
             }
             challenge = Some(parser.parse_string()?);
+        } else if key == b"origin" {
+            if origin.is_some() {
+                return Err("clientDataJSON has duplicate origin members".to_string());
+            }
+            origin = Some(parser.parse_string()?);
+        } else if key == b"crossOrigin" {
+            if cross_origin.is_some() {
+                return Err("clientDataJSON has duplicate crossOrigin members".to_string());
+            }
+            cross_origin = Some(parser.parse_bool()?);
         } else {
             parser.skip_value(0)?;
         }
@@ -180,6 +206,8 @@ fn extract_client_data_fields(bytes: &[u8]) -> Result<ClientDataFields, String> 
     Ok(ClientDataFields {
         type_: type_.ok_or_else(|| "clientDataJSON is missing type".to_string())?,
         challenge: challenge.ok_or_else(|| "clientDataJSON is missing challenge".to_string())?,
+        origin: origin.ok_or_else(|| "clientDataJSON is missing origin".to_string())?,
+        cross_origin: cross_origin.unwrap_or(false),
     })
 }
 
@@ -236,6 +264,23 @@ impl JsonParser<'_> {
                 }
                 _ => out.push(byte),
             }
+        }
+    }
+
+    fn parse_bool(&mut self) -> Result<bool, String> {
+        match self.peek() {
+            Some(b't') => {
+                self.expect_literal(b"true")?;
+                Ok(true)
+            }
+            Some(b'f') => {
+                self.expect_literal(b"false")?;
+                Ok(false)
+            }
+            _ => Err(format!(
+                "invalid clientDataJSON boolean at byte {}",
+                self.offset
+            )),
         }
     }
 
@@ -507,18 +552,51 @@ mod tests {
             let fields = extract_client_data_fields(sample).unwrap();
             assert_eq!(fields.type_, b"webauthn.get");
             assert_eq!(fields.challenge, expected);
+            assert_eq!(fields.origin, EXPECTED_WEBAUTHN_ORIGIN.as_bytes());
+            assert!(!fields.cross_origin);
         }
     }
 
     #[test]
     fn challenge_and_member_names_decode_all_json_escape_classes() {
-        let json = br#"{"t\u0079pe":"webauthn\u002eget","chall\u0065nge":"a\/b\\c\"d\b\f\n\r\t\u00e9\ud83d\ude00"}"#;
+        let json = br#"{"t\u0079pe":"webauthn\u002eget","chall\u0065nge":"a\/b\\c\"d\b\f\n\r\t\u00e9\ud83d\ude00","ori\u0067in":"https:\/\/app.172-104-31-54.nip.io","cross\u004frigin":false}"#;
         let fields = extract_client_data_fields(json).unwrap();
         assert_eq!(fields.type_, b"webauthn.get");
         assert_eq!(
             core::str::from_utf8(&fields.challenge).unwrap(),
             "a/b\\c\"d\u{8}\u{c}\n\r\té😀"
         );
+        assert_eq!(fields.origin, EXPECTED_WEBAUTHN_ORIGIN.as_bytes());
+        assert!(!fields.cross_origin);
+    }
+
+    #[test]
+    fn webauthn_rejects_wrong_missing_or_cross_origin_client_data() {
+        let canonical = b"origin-bound canonical action";
+        let digest: [u8; 32] = Sha256::digest(canonical).into();
+        let encoded_challenge = base64url_sha256(&digest);
+        let challenge = core::str::from_utf8(&encoded_challenge).unwrap();
+        let mut authenticator_data = EXPECTED_RP_ID_HASH.to_vec();
+        authenticator_data.push(FLAG_UP | FLAG_UV);
+        authenticator_data.extend_from_slice(&0u32.to_be_bytes());
+
+        for client_data in [
+            format!(
+                "{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}\",\"origin\":\"https://evil.example\",\"crossOrigin\":false}}"
+            ),
+            format!(
+                "{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}\",\"crossOrigin\":false}}"
+            ),
+            format!(
+                "{{\"type\":\"webauthn.get\",\"challenge\":\"{challenge}\",\"origin\":\"{EXPECTED_WEBAUTHN_ORIGIN}\",\"crossOrigin\":true}}"
+            ),
+        ] {
+            assert!(
+                verify_webauthn_envelope(canonical, &authenticator_data, client_data.as_bytes())
+                    .is_err(),
+                "client data unexpectedly accepted: {client_data}"
+            );
+        }
     }
 
     #[test]
@@ -526,6 +604,8 @@ mod tests {
         let rejected: &[&[u8]] = &[
             br#"{"type":"webauthn.get","challenge":"bad","challenge":"good"}"#,
             br#"{"type":"bad","type":"webauthn.get","challenge":"good"}"#,
+            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.172-104-31-54.nip.io","origin":"https://evil.example"}"#,
+            br#"{"type":"webauthn.get","challenge":"good","origin":"https://app.172-104-31-54.nip.io","crossOrigin":false,"crossOrigin":true}"#,
             br#"{"type":"webauthn.get","challenge":"bad","nested":{"challenge":"good"}}"#,
             br#"{"type":"webauthn.get","challenge":"bad\u0022,\u0022challenge\u0022:\u0022good"}"#,
             br#"{"type":"webauthn.get","challenge":"good\ud800"}"#,

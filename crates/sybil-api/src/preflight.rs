@@ -128,6 +128,30 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
             dev_only: true,
         });
     }
+    if config.webauthn_rp_id != sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_RP_ID {
+        out.push(Deviation {
+            knob: "SYBIL_WEBAUTHN_RP_ID",
+            value: config.webauthn_rp_id.clone(),
+            prod_intended: sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_RP_ID,
+            dev_only: true,
+        });
+    }
+    if config.webauthn_origin != sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_ORIGIN {
+        out.push(Deviation {
+            knob: "SYBIL_WEBAUTHN_ORIGIN",
+            value: config.webauthn_origin.clone(),
+            prod_intended: sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_ORIGIN,
+            dev_only: true,
+        });
+    }
+    if !config.webauthn_require_uv {
+        out.push(Deviation {
+            knob: "SYBIL_WEBAUTHN_REQUIRE_UV",
+            value: "false".to_string(),
+            prod_intended: "true",
+            dev_only: true,
+        });
+    }
     if !is_set(&config.service_token) {
         out.push(Deviation {
             knob: "SYBIL_SERVICE_TOKEN",
@@ -282,6 +306,9 @@ mod tests {
             data_dir: "/data".to_string(),
             market_ref_data_path: "/data/ref.json".to_string(),
             admin_feed_key_path: "/data/admin.key".to_string(),
+            webauthn_rp_id: sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_RP_ID.to_string(),
+            webauthn_origin: sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_ORIGIN.to_string(),
+            webauthn_require_uv: true,
             max_recent_fills_per_account: 5_000,
             max_recent_price_points_per_market: 2_000,
             max_recent_equity_points_per_account: 0,
@@ -339,6 +366,26 @@ mod tests {
         );
         assert!(report.blocks_prod_start(false));
         assert!(run_preflight(&config).is_err());
+    }
+
+    #[test]
+    fn webauthn_guest_pin_mismatch_blocks_prod_start() {
+        for config in [
+            ApiConfig {
+                webauthn_rp_id: "example.com".to_string(),
+                ..prod_ready_config()
+            },
+            ApiConfig {
+                webauthn_origin: "https://example.com".to_string(),
+                ..prod_ready_config()
+            },
+            ApiConfig {
+                webauthn_require_uv: false,
+                ..prod_ready_config()
+            },
+        ] {
+            assert!(run_preflight(&config).is_err());
+        }
     }
 
     #[test]

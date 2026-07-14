@@ -16,11 +16,11 @@ use sybil_l1_protocol::{
 use sybil_verifier::commitments::{event_schema, hash_header, state_schema, witness_schema};
 use sybil_verifier::{
     AccountKeyDigestRecord, AccountReservationSnapshot, AccountSnapshot, BlockWitness,
-    BridgeStateSnapshot, ChallengeSnapshot, DepositAccumulatorWitness, KeyOpAuth, KeyRecord,
-    L1DepositWitness, MarketGroupSnapshot, MarketSnapshot, MarketStatusSnapshot,
-    OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot, ResolutionRecordSnapshot,
-    RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot,
-    WitnessBlockHeader, WitnessOrder, WitnessRejection, account_keys_digest,
+    BridgeStateSnapshot, ChallengeSnapshot, ClientActionWitness, DepositAccumulatorWitness,
+    KeyOpAuth, KeyRecord, L1DepositWitness, MarketGroupSnapshot, MarketSnapshot,
+    MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot,
+    ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
+    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection, account_keys_digest,
     empty_account_keys_digest,
 };
 use sybil_zk::{StateTransitionPublicInputs, state_transition_public_input_hash, witness_root};
@@ -528,6 +528,7 @@ fn key_op_witness() -> BlockWitness {
         positions: Vec::new(),
         events_digest: [0u8; 32],
         keys_digest: account_keys_digest(account_id, [primary]),
+        last_trading_nonce: 0,
     };
     let event_bytes = key_event_digest_bytes(0x0a, agent, 42);
     let mut digest = blake3::Hasher::new();
@@ -618,6 +619,7 @@ fn quarantine_claim_witness() -> BlockWitness {
         positions: vec![],
         events_digest: [0; 32],
         keys_digest: empty_account_keys_digest(account_id),
+        last_trading_nonce: 0,
     };
     let claim_bytes = {
         let mut bytes = vec![0x0c];
@@ -818,13 +820,24 @@ fn byte_identity_witness() -> BlockWitness {
                 available: 6_789,
             },
         }],
-        system_events: vec![SystemEventWitness::OrderCancelled {
-            account_id: 1001,
-            order_id: 41,
-            market_ids: vec![market_b, market_a],
-            side: OrderDirection::SellNo,
-            remaining_quantity: 321,
-        }],
+        system_events: vec![
+            SystemEventWitness::ClientActionAuthorized(ClientActionWitness::Order {
+                account_id: 1001,
+                order: accepted_order.clone(),
+                nonce: 18,
+                authorization: KeyOpAuth::RawP256 {
+                    signer_pubkey: sec1_key(0x02, 0x77),
+                    signature: [0xab; 64],
+                },
+            }),
+            SystemEventWitness::OrderCancelled {
+                account_id: 1001,
+                order_id: 41,
+                market_ids: vec![market_b, market_a],
+                side: OrderDirection::SellNo,
+                remaining_quantity: 321,
+            },
+        ],
         deposit_accumulator: sybil_verifier::DepositAccumulatorWitness::default(),
         fills: vec![Fill {
             order_id: 42,
@@ -893,6 +906,7 @@ fn account_snapshot(id: u64) -> AccountSnapshot {
         ],
         events_digest: [id as u8; 32],
         keys_digest: empty_account_keys_digest(id),
+        last_trading_nonce: if id == 1001 { 17 } else { 23 },
     }
 }
 

@@ -224,3 +224,13 @@ effective path and volume mount.
 
 The separate remaining deployment-profile gap is that prod runs the mock
 prover (see Prover section above).
+
+## WebAuthn validity pins
+
+Production startup requires the API WebAuthn policy to equal the values compiled
+into shared native/guest verification: RP ID `app.172-104-31-54.nip.io`, origin
+`https://app.172-104-31-54.nip.io`, and user verification enabled. A mismatch
+would let the API admit an assertion the validity guest must reject, so the
+deployment preflight fails closed. Serving another hostname requires an
+intentional guest rebuild/repin and fresh genesis, not only changing Compose
+environment variables.

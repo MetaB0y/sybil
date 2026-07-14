@@ -42,10 +42,11 @@ impl SequencerActorState {
             .genesis_hash()
             .ok_or(SequencerError::GenesisHashUnavailable)?;
         verify_signed_order(&signed, genesis_hash)?;
+        let authorization = raw_client_action_authorization(&signed.signer, &signed.signature);
         self.handle_authenticated_order(AuthenticatedOrder {
             order: signed.order,
             nonce: signed.nonce,
-            signer: signed.signer,
+            authorization,
         })
         .await
     }
@@ -54,12 +55,43 @@ impl SequencerActorState {
         &mut self,
         authenticated: AuthenticatedOrder,
     ) -> Result<Vec<u64>, SequencerError> {
-        let account_id = self
-            .sequencer
-            .lookup_pubkey(&authenticated.signer)
+        let signer = PublicKey::from_compressed_bytes(authenticated.authorization.signer_pubkey())
             .ok_or(SequencerError::UnknownSigner)?;
-        self.accept_replay_nonce(account_id, authenticated.nonce)
-            .await?;
+        let registered = self
+            .sequencer
+            .lookup_registered_pubkey(&signer)
+            .ok_or(SequencerError::UnknownSigner)?;
+        let expected_scheme = match authenticated.authorization.signer_auth_scheme() {
+            0 => AccountAuthScheme::RawP256,
+            1 => AccountAuthScheme::WebAuthn,
+            _ => return Err(SequencerError::UnknownSigner),
+        };
+        if registered.auth_scheme != expected_scheme {
+            return Err(SequencerError::UnknownSigner);
+        }
+        let account_id = registered.account_id;
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        let canonical =
+            canonical_order_bytes(&authenticated.order, authenticated.nonce, genesis_hash);
+        let signer_record = sybil_verifier::KeyRecord {
+            auth_scheme: registered.auth_scheme.canonical_byte(),
+            pubkey_sec1: signer
+                .compressed_bytes()
+                .try_into()
+                .expect("compressed P-256 key is 33 bytes"),
+            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+        };
+        sybil_verifier::verify_keyop_auth(
+            &authenticated.authorization,
+            [&signer_record],
+            &canonical,
+        )
+        .map_err(|_| SequencerError::InvalidSignature)?;
+        self.sequencer
+            .validate_replay_nonce(account_id, authenticated.nonce)?;
 
         let submission = OrderSubmission {
             account_id,
@@ -67,7 +99,12 @@ impl SequencerActorState {
             mm_constraint: None,
         };
 
-        self.admit_or_defer(submission, false).await
+        self.admit_or_defer_with_authorization(
+            submission,
+            false,
+            Some((authenticated.nonce, authenticated.authorization)),
+        )
+        .await
     }
 
     pub(super) async fn handle_signed_cancel(
@@ -79,11 +116,12 @@ impl SequencerActorState {
             .genesis_hash()
             .ok_or(SequencerError::GenesisHashUnavailable)?;
         verify_signed_cancel(&signed, genesis_hash)?;
+        let authorization = raw_client_action_authorization(&signed.signer, &signed.signature);
         self.handle_authenticated_cancel(AuthenticatedCancel {
             account_id: signed.account_id,
             order_id: signed.order_id,
             nonce: signed.nonce,
-            signer: signed.signer,
+            authorization,
         })
         .await
     }
@@ -92,14 +130,50 @@ impl SequencerActorState {
         &mut self,
         authenticated: AuthenticatedCancel,
     ) -> Result<(), SequencerError> {
-        let account_id = self
-            .sequencer
-            .lookup_pubkey(&authenticated.signer)
+        let signer = PublicKey::from_compressed_bytes(authenticated.authorization.signer_pubkey())
             .ok_or(SequencerError::UnknownSigner)?;
+        let registered = self
+            .sequencer
+            .lookup_registered_pubkey(&signer)
+            .ok_or(SequencerError::UnknownSigner)?;
+        let expected_scheme = match authenticated.authorization.signer_auth_scheme() {
+            0 => AccountAuthScheme::RawP256,
+            1 => AccountAuthScheme::WebAuthn,
+            _ => return Err(SequencerError::UnknownSigner),
+        };
+        if registered.auth_scheme != expected_scheme {
+            return Err(SequencerError::UnknownSigner);
+        }
+        let account_id = registered.account_id;
 
         if account_id != authenticated.account_id {
             return Err(SequencerError::SignerAccountMismatch);
         }
+
+        let genesis_hash = self
+            .sequencer
+            .genesis_hash()
+            .ok_or(SequencerError::GenesisHashUnavailable)?;
+        let canonical = canonical_cancel_bytes(
+            authenticated.account_id,
+            authenticated.order_id,
+            authenticated.nonce,
+            genesis_hash,
+        );
+        let signer_record = sybil_verifier::KeyRecord {
+            auth_scheme: registered.auth_scheme.canonical_byte(),
+            pubkey_sec1: signer
+                .compressed_bytes()
+                .try_into()
+                .expect("compressed P-256 key is 33 bytes"),
+            capability_mask: sybil_verifier::KeyRecord::FULL_CAPABILITY_MASK,
+        };
+        sybil_verifier::verify_keyop_auth(
+            &authenticated.authorization,
+            [&signer_record],
+            &canonical,
+        )
+        .map_err(|_| SequencerError::InvalidSignature)?;
 
         let timestamp_ms = current_timestamp_ms();
         self.sequencer.can_cancel_pending_order(
@@ -107,14 +181,28 @@ impl SequencerActorState {
             authenticated.order_id,
             timestamp_ms,
         )?;
-        self.accept_replay_nonce(account_id, authenticated.nonce)
-            .await?;
-        self.persist_control_plane(&ControlPlaneCommand::CancelPendingOrder {
-            account_id: authenticated.account_id,
-            order_id: authenticated.order_id,
-            timestamp_ms,
-        })
-        .await?;
+        self.sequencer
+            .validate_replay_nonce(account_id, authenticated.nonce)?;
+        if let Some(store) = &self.store {
+            store
+                .append_authenticated_cancel(
+                    authenticated.account_id,
+                    authenticated.order_id,
+                    authenticated.nonce,
+                    &authenticated.authorization,
+                    timestamp_ms,
+                )
+                .await
+                .map_err(|err| SequencerError::Persistence(err.to_string()))?;
+        }
+        self.sequencer
+            .apply_client_action_authorized(sybil_verifier::ClientActionWitness::Cancel {
+                account_id: authenticated.account_id.0,
+                order_id: authenticated.order_id,
+                nonce: authenticated.nonce,
+                authorization: authenticated.authorization,
+            })
+            .expect("authenticated cancel nonce was validated in the actor turn");
         self.sequencer.cancel_pending_order_at(
             authenticated.account_id,
             authenticated.order_id,
@@ -134,6 +222,16 @@ impl SequencerActorState {
         submission: OrderSubmission,
         is_ioc: bool,
     ) -> Result<Vec<u64>, SequencerError> {
+        self.admit_or_defer_with_authorization(submission, is_ioc, None)
+            .await
+    }
+
+    async fn admit_or_defer_with_authorization(
+        &mut self,
+        submission: OrderSubmission,
+        is_ioc: bool,
+        authorization: Option<(u64, sybil_verifier::ClientActionAuth)>,
+    ) -> Result<Vec<u64>, SequencerError> {
         self.check_account_submission_limits(&submission)?;
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -149,9 +247,19 @@ impl SequencerActorState {
                 order_id,
                 resting_order,
             } => {
-                if let Some(store) = &self.store
-                    && let Err(err) = store.append_admit_log(&resting_order).await
-                {
+                let persist_result = if let Some(store) = &self.store {
+                    match &authorization {
+                        Some((nonce, envelope)) => {
+                            store
+                                .append_authenticated_direct_admit(&resting_order, *nonce, envelope)
+                                .await
+                        }
+                        None => store.append_admit_log(&resting_order).await,
+                    }
+                } else {
+                    Ok(())
+                };
+                if let Err(err) = persist_result {
                     // Durability lost — rollback the in-memory admit so
                     // the 200 OK contract holds. If cancel somehow fails
                     // (shouldn't: we just pushed the order), log loudly
@@ -168,6 +276,18 @@ impl SequencerActorState {
                     }
                     return Err(SequencerError::Persistence(err.to_string()));
                 }
+                if let Some((nonce, envelope)) = authorization {
+                    self.sequencer
+                        .apply_client_action_authorized(
+                            sybil_verifier::ClientActionWitness::Order {
+                                account_id: resting_order.account_id.0,
+                                order: resting_order.order,
+                                nonce,
+                                authorization: envelope,
+                            },
+                        )
+                        .expect("authenticated order nonce was validated in the actor turn");
+                }
                 Ok(vec![order_id])
             }
             crate::sequencer::AdmitOutcome::Deferred {
@@ -176,12 +296,34 @@ impl SequencerActorState {
             } => {
                 self.check_deferred_submission_limits(&submission)?;
                 if let Some(store) = &self.store {
-                    store
-                        .append_pending_bundle(&submission)
-                        .await
-                        .map_err(|err| SequencerError::Persistence(err.to_string()))?;
+                    match &authorization {
+                        Some((nonce, envelope)) => {
+                            store
+                                .append_authenticated_deferred_bundle(&submission, *nonce, envelope)
+                                .await
+                        }
+                        None => store.append_pending_bundle(&submission).await,
+                    }
+                    .map_err(|err| SequencerError::Persistence(err.to_string()))?;
                 }
+                let authenticated_order = authorization.as_ref().map(|(nonce, envelope)| {
+                    sybil_verifier::ClientActionWitness::Order {
+                        account_id: submission.account_id.0,
+                        order: submission
+                            .orders
+                            .first()
+                            .expect("authenticated submission contains one order")
+                            .clone(),
+                        nonce: *nonce,
+                        authorization: envelope.clone(),
+                    }
+                });
                 self.sequencer.push_pending_bundle(submission);
+                if let Some(action) = authenticated_order {
+                    self.sequencer
+                        .apply_client_action_authorized(action)
+                        .expect("authenticated order nonce was validated in the actor turn");
+                }
                 Ok(order_ids)
             }
             crate::sequencer::AdmitOutcome::Rejected(err) => Err(err),

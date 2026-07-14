@@ -18,6 +18,7 @@ pub(super) fn bridge_block_data(
             SystemEvent::CreateAccount { .. }
             | SystemEvent::KeyRegistered { .. }
             | SystemEvent::KeyRevoked { .. }
+            | SystemEvent::ClientActionAuthorized(..)
             | SystemEvent::QuarantineClaimed { .. }
             | SystemEvent::Deposit { .. }
             | SystemEvent::WithdrawalRefunded { .. }
@@ -276,6 +277,9 @@ pub(super) fn convert_system_event(event: &SystemEvent) -> SystemEventWitness {
             amount: *amount,
             sybil_account_key: *sybil_account_key,
         },
+        SystemEvent::ClientActionAuthorized(action) => {
+            SystemEventWitness::ClientActionAuthorized(action.clone())
+        }
     }
 }
 
@@ -324,6 +328,7 @@ impl BlockSequencer {
                 SystemEvent::CreateAccount { .. }
                 | SystemEvent::KeyRegistered { .. }
                 | SystemEvent::KeyRevoked { .. }
+                | SystemEvent::ClientActionAuthorized(..)
                 | SystemEvent::QuarantineClaimed { .. }
                 | SystemEvent::Deposit { .. }
                 | SystemEvent::WithdrawalCreated { .. }

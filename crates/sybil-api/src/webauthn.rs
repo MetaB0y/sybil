@@ -160,6 +160,13 @@ pub fn key_op_authorization(
     })
 }
 
+pub fn client_action_authorization(
+    verifying_key: &VerifyingKey,
+    assertion: &WebAuthnAssertion,
+) -> Result<matching_sequencer::ClientActionAuth, WebAuthnError> {
+    key_op_authorization(verifying_key, assertion)
+}
+
 /// Parse and validate a WebAuthn registration payload, returning the compressed
 /// SEC1 P256 public key extracted from the attested COSE EC2 key.
 pub fn public_key_from_registration(

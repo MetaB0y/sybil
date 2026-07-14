@@ -125,6 +125,30 @@ fn system_event_to_response(event: &matching_sequencer::SystemEvent) -> SystemEv
             auth_scheme: key.auth_scheme,
             capability_mask: key.capability_mask,
         },
+        matching_sequencer::SystemEvent::ClientActionAuthorized(action) => {
+            let (account_id, action_name, order_id, nonce, authorization) = match action {
+                matching_sequencer::ClientActionWitness::Order {
+                    account_id,
+                    order,
+                    nonce,
+                    authorization,
+                } => (*account_id, "order", order.id, *nonce, authorization),
+                matching_sequencer::ClientActionWitness::Cancel {
+                    account_id,
+                    order_id,
+                    nonce,
+                    authorization,
+                } => (*account_id, "cancel", *order_id, *nonce, authorization),
+            };
+            SystemEventResponse::ClientActionAuthorized {
+                account_id,
+                action: action_name.to_string(),
+                order_id,
+                nonce,
+                public_key_hex: hex::encode(authorization.signer_pubkey()),
+                auth_scheme: authorization.signer_auth_scheme(),
+            }
+        }
         matching_sequencer::SystemEvent::DepositQuarantined { amount, deposit } => {
             SystemEventResponse::DepositQuarantined {
                 amount_nanos: *amount,

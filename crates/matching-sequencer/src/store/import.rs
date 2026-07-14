@@ -389,9 +389,11 @@ fn account_store_from_witness(accounts: &[AccountSnapshot]) -> Result<AccountSto
             balance: snapshot.balance,
             positions,
             total_deposited: snapshot.total_deposited,
-            // Replay nonces are not proven state; genesis-from-witness starts a
-            // fresh nonce space (SYB-224).
-            last_nonce: 0,
+            // Trading nonces are proven state. Seed the broader operational
+            // nonce to the same floor so an imported checkpoint cannot replay
+            // an already-authorized order or cancellation.
+            last_nonce: snapshot.last_trading_nonce,
+            last_trading_nonce: snapshot.last_trading_nonce,
             events_digest: snapshot.events_digest,
             keys_digest: snapshot.keys_digest,
             profile: Default::default(),

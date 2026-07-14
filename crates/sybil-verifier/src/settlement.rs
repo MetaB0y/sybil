@@ -19,6 +19,7 @@ struct DerivedAccountState {
     total_deposited: i64,
     positions: HashMap<(MarketId, u8), i64>,
     events_digest: [u8; 32],
+    last_trading_nonce: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -56,6 +57,7 @@ fn derive_post_state(
                 total_deposited: snap.total_deposited,
                 positions: pos_map,
                 events_digest: snap.events_digest,
+                last_trading_nonce: snap.last_trading_nonce,
             },
         );
         result.accounts_checked += 1;
@@ -436,6 +438,15 @@ pub fn verify_settlement(witness: &BlockWitness) -> VerificationResult {
                         ),
                     });
                 }
+                if derived_account.last_trading_nonce != claimed.last_trading_nonce {
+                    violations.push(Violation {
+                        kind: ViolationKind::SettlementAccountMismatch,
+                        details: format!(
+                            "Account {}: trading nonce changed during settlement",
+                            account_id
+                        ),
+                    });
+                }
             }
 
             // Check positions
@@ -542,6 +553,7 @@ mod tests {
                             .map(|&(market, outcome, qty)| ((market, outcome), qty))
                             .collect(),
                         events_digest: snapshot.events_digest,
+                        last_trading_nonce: snapshot.last_trading_nonce,
                     },
                 )
             })
@@ -596,6 +608,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let post_state = vec![
@@ -606,6 +619,7 @@ mod tests {
                 positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -614,6 +628,7 @@ mod tests {
                 positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -684,6 +699,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: 7,
@@ -692,6 +708,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(7),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -703,6 +720,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: 7,
@@ -711,6 +729,7 @@ mod tests {
                 positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(7),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -719,6 +738,7 @@ mod tests {
                 positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -775,6 +795,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let witness = BlockWitness {
@@ -834,6 +855,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let post_state = vec![
@@ -844,6 +866,7 @@ mod tests {
                 positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -852,6 +875,7 @@ mod tests {
                 positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -910,6 +934,7 @@ mod tests {
             positions: vec![(m0, 0, q(10) as i64)],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let post_state = vec![
@@ -920,6 +945,7 @@ mod tests {
                 positions: vec![(m0, 0, q(5) as i64)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -928,6 +954,7 @@ mod tests {
                 positions: vec![(m0, 0, -(q(5) as i64))],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -982,6 +1009,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         // Wrong balance in post-state
@@ -992,6 +1020,7 @@ mod tests {
             positions: vec![(m0, 0, qty as i64)],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let witness = BlockWitness {
@@ -1042,6 +1071,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
         let post_state = pre_state.clone();
 
@@ -1095,6 +1125,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let post_state = vec![AccountSnapshot {
@@ -1104,6 +1135,7 @@ mod tests {
             positions: vec![(m0, 0, qty as i64)],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let witness = BlockWitness {
@@ -1165,6 +1197,7 @@ mod tests {
             positions: vec![], // no YES position
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let post_state = vec![AccountSnapshot {
@@ -1174,6 +1207,7 @@ mod tests {
             positions: vec![(m0, 0, -(qty as i64))],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let witness = BlockWitness {
@@ -1241,6 +1275,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -1249,6 +1284,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -1260,6 +1296,7 @@ mod tests {
                 positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -1268,6 +1305,7 @@ mod tests {
                 positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -1327,6 +1365,7 @@ mod tests {
             positions: vec![],
             events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
         }];
 
         let post_state = vec![
@@ -1337,6 +1376,7 @@ mod tests {
                 positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -1345,6 +1385,7 @@ mod tests {
                 positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -1406,6 +1447,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -1414,6 +1456,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -1425,6 +1468,7 @@ mod tests {
                 positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -1433,6 +1477,7 @@ mod tests {
                 positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -1497,6 +1542,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -1505,6 +1551,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -1517,6 +1564,7 @@ mod tests {
                 positions: vec![(m0, 0, qty as i64)],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(0),
+                last_trading_nonce: 0,
             },
             AccountSnapshot {
                 id: mint_id,
@@ -1525,6 +1573,7 @@ mod tests {
                 positions: vec![(m0, 0, -(qty as i64))],
                 events_digest: [0u8; 32],
                 keys_digest: crate::empty_account_keys_digest(mint_id),
+                last_trading_nonce: 0,
             },
         ];
 
@@ -1582,6 +1631,7 @@ mod tests {
                     positions: vec![],
                     events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(id as u64),
+            last_trading_nonce: 0,
                 })
                 .collect();
 
@@ -1615,6 +1665,7 @@ mod tests {
                 positions: vec![],
                 events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
             }];
 
             let derived = derive_post_state(
@@ -1656,6 +1707,7 @@ mod tests {
                     positions: vec![],
                     events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(0),
+            last_trading_nonce: 0,
                 },
                 AccountSnapshot {
                     id: 1,
@@ -1664,6 +1716,7 @@ mod tests {
                     positions: vec![],
                     events_digest: [0u8; 32],
             keys_digest: crate::empty_account_keys_digest(1),
+            last_trading_nonce: 0,
                 },
             ];
 

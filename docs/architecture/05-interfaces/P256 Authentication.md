@@ -3,7 +3,7 @@ tags: [api, authentication, passkeys, security]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-14
 ---
 
 # P256 and WebAuthn authentication
@@ -11,11 +11,11 @@ last_verified: 2026-07-11
 > [!summary] In one paragraph
 > Accounts have a committed set of P256 signing keys. Raw agent keys sign
 > canonical action bytes directly; passkeys sign a WebAuthn assertion whose
-> challenge is the hash of those same bytes. Key registration/revocation is
-> state-bound, carried in witness v9, and re-verified by the OpenVM guest.
-> Ordinary orders/cancels are checked at API/sequencer admission with durable
-> replay nonces, but their signature envelopes and nonce state are not currently
-> re-proved by the guest—an important distinction in the trust model.
+> challenge is the hash of those same bytes. Witness v10 carries key mutations
+> and ordinary order/cancel authorization envelopes in actor order. Native and
+> guest-safe verification replay the active key set, RawP256/WebAuthn signature,
+> exact action, genesis domain, and committed trading nonce. The deployed guest
+> commitment moves with the epoch guest in the coordinated #15 repin.
 
 ## Key and action model
 
@@ -25,10 +25,10 @@ flowchart LR
     ACTION --> HASH["SHA-256 challenge"] --> WEB["WebAuthn assertion<br/>RP · origin · UP/UV"]
     RAW --> EDGE["API / sequencer admission"]
     WEB --> EDGE
-    EDGE --> WAL["Durable nonce or state-bound WAL"]
+    EDGE --> WAL["Atomic authorized-action WAL"]
     WAL --> BLOCK["Block transition"]
     KEYOP["Key register/revoke"] --> WIT["Witness auth envelope"] --> GUEST["Guest P256/WebAuthn verification"]
-    BLOCK --> MATCH["Guest checks order/fill/state validity<br/>not ordinary signature envelope"]
+    BLOCK --> ACTIONWIT["ClientActionAuthorized<br/>exact action · signer · nonce"] --> GUEST
 ```
 
 `KeyRecord` commits auth scheme, compressed SEC1 P256 public key, and a reserved
@@ -60,18 +60,20 @@ are validity-checked, not merely accepted by the server.
 ## Ordinary signed actions
 
 Public signed endpoints include orders and cancellations. Their canonical bytes
-bind the action, account nonce, and chain `genesis_hash`. The sequencer looks up
-the active key, verifies RawP256/WebAuthn at admission, requires a strictly
-increasing per-account nonce, and durably records the nonce advance before the
-action becomes live. Gaps are allowed.
+bind the action, nonce, and chain `genesis_hash`; cancellation bytes also bind
+the account and order ID. The API retains the exact RawP256/WebAuthn envelope,
+and the sequencer appends the action, envelope, and nonce in one acknowledged
+WAL record before acknowledgement. Recovery reconstructs the same
+`ClientActionAuthorized` event.
 
-The block witness contains the accepted order/cancellation effects, so the guest
-checks funding, positions, expiry, limits, settlement, and state transition. It
-does **not** currently contain/re-verify the ordinary signature envelope or the
-prior cross-block nonce. Replay protection for these actions therefore still
-trusts the admission/WAL layer, bounded to one genesis domain. Do not claim that
-all trader intent is proven until this gap is closed or ordinary intent becomes
-otherwise validity-bound.
+The account leaf commits a dedicated `last_trading_nonce`. Native and guest-safe
+verification require each witnessed order/cancel nonce to be strictly greater
+than the authenticated prior value; gaps are allowed. Key mutations and client
+actions share actor acknowledgement order, so an action must be authorized by a
+scheme-matching key active at that exact point. The action event is then bound
+to the accepted/rejected/resting order or later cancellation effect. Profile,
+read-key, bridge, and other operational actions continue to use the broader
+sequencer `last_nonce` and are outside this first trading-intent proof scope.
 
 Unsigned `POST /v1/orders` is a service route: in production it requires the
 service token; dev mode skips that service bearer for local workflows. It is not
@@ -93,8 +95,10 @@ signature covers authenticatorData || SHA-256(clientDataJSON)
 
 The API checks credential/public-key association, `webauthn.get`, challenge,
 origin, RP ID hash, user presence, user verification, signature shape, and
-configured envelope limits. RP ID is the browser app hostname; origin includes
-scheme and hostname. Misconfiguring either locks out passkey actions.
+configured envelope limits. Shared guest-safe verification independently pins
+RP `app.172-104-31-54.nip.io`, exact origin
+`https://app.172-104-31-54.nip.io`, and rejects `crossOrigin: true`. Changing
+either pin is a fresh guest/deployment migration.
 
 Account reads use a separate read-scoped bearer. Passkey login creates such a
 bearer after an assertion; read keys cannot trade, withdraw, or mutate signing
@@ -115,8 +119,8 @@ is no server-side reset or seed phrase. See [Passkey recovery](../../passkey-rec
 |---|---|
 | Canonical ordinary signing bytes | `crates/sybil-signing` |
 | API WebAuthn verification | `crates/sybil-api/src/webauthn.rs`, account/order routes |
-| Admission, nonce WAL, raw signatures | `crates/matching-sequencer/src/crypto.rs`, actor/store |
-| Key digest/transition/auth | `crates/sybil-verifier/src/account_keys.rs`, `key_transition.rs`, `key_op_auth.rs` |
+| Admission, atomic authorization WAL | `crates/matching-sequencer/src/crypto.rs`, actor/store |
+| Key/action/nonce verification | `crates/sybil-verifier/src/client_action.rs`, `system.rs`, `key_transition.rs`, `key_op_auth.rs` |
 | Guest verification | `crates/sybil-zk` and OpenVM guest |
 
 ## See also

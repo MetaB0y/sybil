@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::types::{AccountSnapshot, BlockWitness, KeyRecord, SystemEventWitness};
+use crate::types::{
+    AccountSnapshot, BlockWitness, ClientActionWitness, KeyRecord, SystemEventWitness,
+};
 use crate::violations::{VerificationResult, Violation, ViolationKind};
 
 pub fn verify_key_transitions(witness: &BlockWitness) -> VerificationResult {
@@ -243,6 +245,44 @@ fn verify(witness: &BlockWitness) -> Result<(), String> {
                     crate::system::update_digest(&events_digest, &encoded),
                 );
             }
+            SystemEventWitness::ClientActionAuthorized(action) => {
+                let (account_id, canonical, authorization) = match action {
+                    ClientActionWitness::Order {
+                        account_id,
+                        order,
+                        nonce,
+                        authorization,
+                    } => (
+                        *account_id,
+                        crate::client_action::canonical_order_bytes(
+                            order,
+                            *nonce,
+                            witness.genesis_hash,
+                        ),
+                        authorization,
+                    ),
+                    ClientActionWitness::Cancel {
+                        account_id,
+                        order_id,
+                        nonce,
+                        authorization,
+                    } => (
+                        *account_id,
+                        crate::client_action::canonical_cancel_bytes(
+                            *account_id,
+                            *order_id,
+                            *nonce,
+                            witness.genesis_hash,
+                        ),
+                        authorization,
+                    ),
+                };
+                let keys = running.get(&account_id).ok_or_else(|| {
+                    format!("client action account {account_id} has no running key set")
+                })?;
+                crate::verify_keyop_auth(authorization, keys.iter(), &canonical)
+                    .map_err(|details| format!("account {account_id} client action: {details}"))?;
+            }
             _ => {}
         }
     }
@@ -412,6 +452,7 @@ fn key_touched_accounts(events: &[SystemEventWitness]) -> BTreeSet<u64> {
 fn verify_key_event_order(events: &[SystemEventWitness]) -> Result<(), String> {
     let mut saw_non_key_event = BTreeSet::new();
     for event in events {
+        let is_client_action = matches!(event, SystemEventWitness::ClientActionAuthorized(..));
         let is_key_phase = matches!(
             event,
             SystemEventWitness::CreateAccount { .. }
@@ -419,7 +460,10 @@ fn verify_key_event_order(events: &[SystemEventWitness]) -> Result<(), String> {
                 | SystemEventWitness::KeyRevoked { .. }
         );
         for account_id in event_account_ids(event) {
-            if is_key_phase {
+            if is_client_action {
+                // Ordinary actions mutate only the committed trading nonce,
+                // not the events digest used by state-bound key operations.
+            } else if is_key_phase {
                 if saw_non_key_event.contains(&account_id) {
                     return Err(format!(
                         "key event for account {account_id} follows another same-account system event"
@@ -444,6 +488,10 @@ fn event_account_ids(event: &SystemEventWitness) -> Vec<u64> {
         | SystemEventWitness::OrderCancelled { account_id, .. }
         | SystemEventWitness::KeyRegistered { account_id, .. }
         | SystemEventWitness::KeyRevoked { account_id, .. } => vec![*account_id],
+        SystemEventWitness::ClientActionAuthorized(action) => match action {
+            ClientActionWitness::Order { account_id, .. }
+            | ClientActionWitness::Cancel { account_id, .. } => vec![*account_id],
+        },
         SystemEventWitness::QuarantineClaimed { account_id, .. } => vec![*account_id],
         SystemEventWitness::MarketResolved {
             affected_accounts, ..
@@ -500,6 +548,7 @@ mod tests {
             positions: Vec::new(),
             events_digest: [0u8; 32],
             keys_digest: crate::account_keys_digest(account_id, keys.iter().copied()),
+            last_trading_nonce: 0,
         }
     }
 
@@ -659,5 +708,86 @@ mod tests {
             *authorization = signed_auth(2, &canonical);
         }
         assert!(verify_key_transitions(&revoke).valid);
+    }
+
+    #[test]
+    fn client_order_signature_binds_action_nonce_genesis_and_scheme() {
+        let signer = key(1, 0);
+        let order = matching_engine::Order::new(91);
+        let nonce = 7;
+        let genesis_hash = [0x42; 32];
+        let canonical = crate::client_action::canonical_order_bytes(&order, nonce, genesis_hash);
+        let action = SystemEventWitness::ClientActionAuthorized(ClientActionWitness::Order {
+            account_id: 7,
+            order: order.clone(),
+            nonce,
+            authorization: signed_auth(1, &canonical),
+        });
+        let valid = witness(&[signer], &[signer], vec![action]);
+        assert!(verify_key_transitions(&valid).valid);
+
+        let mut tampered_order = valid.clone();
+        if let SystemEventWitness::ClientActionAuthorized(ClientActionWitness::Order {
+            order,
+            ..
+        }) = &mut tampered_order.system_events[0]
+        {
+            order.max_fill = matching_engine::Qty(1);
+        }
+        assert!(!verify_key_transitions(&tampered_order).valid);
+
+        let mut tampered_signature = valid.clone();
+        if let SystemEventWitness::ClientActionAuthorized(ClientActionWitness::Order {
+            authorization: KeyOpAuth::RawP256 { signature, .. },
+            ..
+        }) = &mut tampered_signature.system_events[0]
+        {
+            signature[0] ^= 1;
+        }
+        assert!(!verify_key_transitions(&tampered_signature).valid);
+
+        let wrong_scheme_signer = key(1, 1);
+        let wrong_scheme = witness(
+            &[wrong_scheme_signer],
+            &[wrong_scheme_signer],
+            valid.system_events.clone(),
+        );
+        assert!(!verify_key_transitions(&wrong_scheme).valid);
+    }
+
+    #[test]
+    fn client_action_observes_exact_key_mutation_order() {
+        let primary = key(1, 0);
+        let agent = key(2, 0);
+        let order = matching_engine::Order::new(92);
+        let canonical_order = crate::client_action::canonical_order_bytes(&order, 1, [0x42; 32]);
+        let action = SystemEventWitness::ClientActionAuthorized(ClientActionWitness::Order {
+            account_id: 7,
+            order,
+            nonce: 1,
+            authorization: signed_auth(1, &canonical_order),
+        });
+        let revoke_canonical = crate::canonical_key_revocation_bytes(
+            [0x42; 32],
+            7,
+            &primary,
+            crate::account_keys_digest(7, [primary, agent]),
+            [0; 32],
+        );
+        let revoke = SystemEventWitness::KeyRevoked {
+            account_id: 7,
+            key: primary,
+            authorization: signed_auth(2, &revoke_canonical),
+        };
+
+        let action_then_revoke = witness(
+            &[primary, agent],
+            &[agent],
+            vec![action.clone(), revoke.clone()],
+        );
+        assert!(verify_key_transitions(&action_then_revoke).valid);
+
+        let revoke_then_action = witness(&[primary, agent], &[agent], vec![revoke, action]);
+        assert!(!verify_key_transitions(&revoke_then_action).valid);
     }
 }

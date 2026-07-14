@@ -454,6 +454,17 @@ pub enum SystemEventResponse {
         auth_scheme: u8,
         capability_mask: u32,
     },
+    /// An order or cancellation whose client authorization was committed to
+    /// the block witness. The signature bytes stay in proof data; this view
+    /// exposes the audit-relevant identity and nonce only.
+    ClientActionAuthorized {
+        account_id: u64,
+        action: String,
+        order_id: u64,
+        nonce: u64,
+        public_key_hex: String,
+        auth_scheme: u8,
+    },
     DepositQuarantined {
         /// Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
         amount_nanos: i64,

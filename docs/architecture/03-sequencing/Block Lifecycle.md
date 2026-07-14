@@ -3,7 +3,7 @@ tags: [sequencer, block]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-14
 ---
 
 # Block lifecycle
@@ -18,7 +18,7 @@ flowchart LR
     ADMIT --> PROBLEM["4. Build supported Problem"]
     PROBLEM --> SOLVE["5. Solve + integer landing"]
     SOLVE --> SETTLE["6. Settle + update book"]
-    SETTLE --> SEAL["7. Roots · block · witness v9"]
+    SETTLE --> SEAL["7. Roots · block · witness v10"]
     SEAL --> PERSIST["8. Persist + fence"]
     PERSIST --> COMMIT["9. Swap live state + publish"]
 ```
@@ -30,7 +30,7 @@ Settlement applies shared integer primitives, derives MINT adjustments, updates 
 Two artifacts leave the kernel:
 
 - `SealedBlock`: canonical block plus explicitly non-validity derived views for REST/WebSocket/SSE.
-- `BlockWitness` v9: transition-complete private material for native verification, proving, DA, and recovery.
+- `BlockWitness` v10: transition-complete private material for native verification, proving, DA, and recovery, including ordinary order/cancel authorization and trading nonces.
 
 ## Invariants
 

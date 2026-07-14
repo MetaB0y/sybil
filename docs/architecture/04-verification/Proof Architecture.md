@@ -87,11 +87,14 @@ Given the private `StateTransitionGuestInput`, the guest re-derives:
 2. canonical events, witness, state, and DA commitments;
 3. order/fill limits, uniform prices, groups, MM budgets, and welfare;
 4. integer settlement, minting, balances, positions, and reservations;
-5. market, bridge, withdrawal, quarantine, and key-operation transitions;
+5. market, bridge, withdrawal, quarantine, key-operation, and ordinary
+   signed-action transitions;
 6. deposit prefix/checkpoint agreement and the exact public-input hash.
 
-Ordinary order/cancel signature envelopes and prior cross-block nonce are not
-guest inputs; see [[P256 Authentication]] and [[Threat Model]].
+Witness v10 retains ordinary order/cancel RawP256/WebAuthn envelopes and the
+account leaf commits `last_trading_nonce`. Shared native/guest verification
+replays both against the actor-ordered active key set; see
+[[P256 Authentication]] and [[Threat Model]].
 
 ## Composing other claims
 
