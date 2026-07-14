@@ -3,7 +3,7 @@ tags: [solver, crate]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-14
 ---
 
 # Decomposed solver
@@ -20,6 +20,9 @@ Rayon may solve independent components concurrently under the `parallel` feature
 - Wraps any `Solver`.
 - Uses proportional response, not the older objective-value/mirror-descent surrogate.
 - Drops/rejects cross-component orders rather than mis-modeling them.
+- A zero component budget disables that MM's local orders before the component
+  solve. Component caps and failures propagate to the aggregate diagnostic;
+  they are not relabeled `Converged` merely because coordination itself ended.
 - Remains an experiment, not the sequencer default.
 
 ## Where this lives

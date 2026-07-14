@@ -3,7 +3,7 @@ tags: [solver, fisher-market, market-maker, research]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 # Pacing bundle solver
@@ -45,20 +45,31 @@ is covered by regression tests and is shared with RC-FW.
 
 ## Integer landing
 
-The continuous mixture is not protocol state. Landing caps fills at the ceiling
-of the mixture and solves the final pacing-supported LP. If rounded quantities
-violate a hard budget at the discovered prices, the projection
-re-linearizes those budget rows and resolves. It finalizes only after reaching
-a budget-consistent fixed point; otherwise it returns an explicit
-`PostProcessingFailure`.
+The continuous mixture is not protocol state. A final pacing-supported LP first
+discovers the primary matching objective and market duals. A second,
+lexicographic LP stays on that primary optimal face and minimizes L1 distance
+to the certified mixture. This prevents an arbitrary basis on a degenerate face
+from replacing the allocation—as happened in a development case with 67.9%
+retained-objective loss. Published prices always come from the primary solve;
+the auxiliary distance-row duals are never treated as market prices.
 
-No different core solver is substituted. A supporting LP can select another
-point on a degenerate optimal face, so the landed objective need not equal the
-certified continuous mixture's objective. Auxiliary utility-band rows were
-tested and rejected: their shadow prices can invalidate the published market
-duals. The benchmark therefore reports integer landing loss and
-`|C_0(D) - p·D|`, so post-price fill mutation cannot masquerade as a better
-allocation.
+Normally scaled books use the exact primary face and check its activity
+directly. Deliberately wide billion-unit books instead use a `1e-8` relative
+near-face band: HiGHS can report an exact auxiliary optimum there while the
+face row is materially infeasible. Before budget projection, the implementation
+compares the nearest-face, primary-basis, and certified-target integer
+candidates under the primary prices and keeps the one with the smallest
+minting-duality residual. It fails explicitly if that support residual exceeds
+$0.05. This gate does not call another solver or replace the primary price
+system. Auxiliary utility bands were tested and rejected because their shadow
+prices can invalidate the published market duals.
+
+After rounding, the projection re-linearizes any violated hard-budget rows and
+resolves to a budget-consistent fixed point. Exhaustion is an explicit
+`PostProcessingFailure`; no different core solver is substituted. The benchmark
+reports retained-objective landing loss, L1 allocation movement, whether budget
+quantities were trimmed, and `|C_0(D) - p·D|`, so post-price mutation cannot
+masquerade as a better allocation.
 
 Zero-budget MM orders are disabled in the retained-cash oracle. The theorem's
 pacing identity assumes `B > 0`; admitting a zero-budget order as a free atom
@@ -73,6 +84,8 @@ market-maker-count scaling separately and retains every cap and failure. Its
 results can guide engineering and the design of a future preregistration; they
 cannot be called held out. [[Retained Cash Solver|RC-FW]] remains the production
 default until a frozen comparison on untouched instances justifies a change.
+The current dated interpretation is
+`design/pacing-bundle-landing-tail-study-2026-07-14.md`.
 
 ## Where this lives
 

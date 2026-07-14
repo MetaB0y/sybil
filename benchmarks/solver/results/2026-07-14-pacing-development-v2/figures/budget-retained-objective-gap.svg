@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="460" viewBox="0 0 780 460">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Inter,Arial,sans-serif;fill:#111827}.axis{stroke:#9ca3af;stroke-width:1}.grid{stroke:#e5e7eb;stroke-width:1}.small{font-size:11px}.tiny{font-size:9px}</style>
+<text x="390.0" y="25.0" font-size="17" text-anchor="middle" font-weight="bold">Retained-cash objective gap under flash-liquidity budgets</text>
+<line class="axis" x1="80" y1="50" x2="80" y2="350"/>
+<line class="axis" x1="80" y1="350" x2="720" y2="350"/>
+<line class="grid" x1="80" y1="350.0" x2="720" y2="350.0"/>
+<text x="72.0" y="354.0" font-size="10" text-anchor="end" font-weight="normal">0.00%</text>
+<line class="grid" x1="80" y1="290.0" x2="720" y2="290.0"/>
+<text x="72.0" y="294.0" font-size="10" text-anchor="end" font-weight="normal">0.46%</text>
+<line class="grid" x1="80" y1="230.0" x2="720" y2="230.0"/>
+<text x="72.0" y="234.0" font-size="10" text-anchor="end" font-weight="normal">0.91%</text>
+<line class="grid" x1="80" y1="170.0" x2="720" y2="170.0"/>
+<text x="72.0" y="174.0" font-size="10" text-anchor="end" font-weight="normal">1.37%</text>
+<line class="grid" x1="80" y1="110.00000000000003" x2="720" y2="110.00000000000003"/>
+<text x="72.0" y="114.0" font-size="10" text-anchor="end" font-weight="normal">1.83%</text>
+<line class="grid" x1="80" y1="50.0" x2="720" y2="50.0"/>
+<text x="72.0" y="54.0" font-size="10" text-anchor="end" font-weight="normal">2.29%</text>
+<text x="80.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">0.1×</text>
+<text x="208.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">0.25×</text>
+<text x="336.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">0.5×</text>
+<text x="464.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">1×</text>
+<text x="592.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">2×</text>
+<text x="720.0" y="370.0" font-size="10" text-anchor="middle" font-weight="normal">10×</text>
+<line x1="80.0" y1="290.1106011154243" x2="80.0" y2="336.5921487349021" stroke="#111827" stroke-width="2"/>
+<line x1="208.0" y1="288.9524789545467" x2="208.0" y2="312.2521287078965" stroke="#111827" stroke-width="2"/>
+<line x1="336.0" y1="82.14285714285717" x2="336.0" y2="109.17782652553569" stroke="#111827" stroke-width="2"/>
+<line x1="464.0" y1="350.0" x2="464.0" y2="350.0" stroke="#111827" stroke-width="2"/>
+<line x1="592.0" y1="350.0" x2="592.0" y2="350.0" stroke="#111827" stroke-width="2"/>
+<line x1="720.0" y1="350.0" x2="720.0" y2="350.0" stroke="#111827" stroke-width="2"/>
+<polyline fill="none" stroke="#111827" stroke-width="2.5" points="80.0,313.4 208.0,303.2 336.0,93.7 464.0,350.0 592.0,350.0 720.0,350.0"/>
+<circle cx="80.0" cy="313.3513749251632" r="4" fill="#111827"/>
+<circle cx="208.0" cy="303.202684296149" r="4" fill="#111827"/>
+<circle cx="336.0" cy="93.73277611178918" r="4" fill="#111827"/>
+<circle cx="464.0" cy="350.0" r="4" fill="#111827"/>
+<circle cx="592.0" cy="350.0" r="4" fill="#111827"/>
+<circle cx="720.0" cy="350.0" r="4" fill="#111827"/>
+<line x1="80.0" y1="342.6438777747977" x2="80.0" y2="349.5239928792566" stroke="#7c3aed" stroke-width="2"/>
+<line x1="208.0" y1="348.18299876158164" x2="208.0" y2="350.0" stroke="#7c3aed" stroke-width="2"/>
+<line x1="336.0" y1="349.6174638424899" x2="336.0" y2="349.9769334836009" stroke="#7c3aed" stroke-width="2"/>
+<line x1="464.0" y1="350.0" x2="464.0" y2="350.0" stroke="#7c3aed" stroke-width="2"/>
+<line x1="592.0" y1="350.0" x2="592.0" y2="350.0" stroke="#7c3aed" stroke-width="2"/>
+<line x1="720.0" y1="350.0" x2="720.0" y2="350.0" stroke="#7c3aed" stroke-width="2"/>
+<polyline fill="none" stroke="#7c3aed" stroke-width="2.5" points="80.0,346.1 208.0,349.4 336.0,349.8 464.0,350.0 592.0,350.0 720.0,350.0"/>
+<circle cx="80.0" cy="346.0839353270272" r="4" fill="#7c3aed"/>
+<circle cx="208.0" cy="349.38509006890047" r="4" fill="#7c3aed"/>
+<circle cx="336.0" cy="349.8454306943449" r="4" fill="#7c3aed"/>
+<circle cx="464.0" cy="350.0" r="4" fill="#7c3aed"/>
+<circle cx="592.0" cy="350.0" r="4" fill="#7c3aed"/>
+<circle cx="720.0" cy="350.0" r="4" fill="#7c3aed"/>
+<line x1="80.0" y1="350.0" x2="80.0" y2="350.0" stroke="#ea580c" stroke-width="2"/>
+<line x1="208.0" y1="350.0" x2="208.0" y2="350.0" stroke="#ea580c" stroke-width="2"/>
+<line x1="336.0" y1="350.0" x2="336.0" y2="350.0" stroke="#ea580c" stroke-width="2"/>
+<line x1="464.0" y1="350.0" x2="464.0" y2="350.0" stroke="#ea580c" stroke-width="2"/>
+<line x1="592.0" y1="350.0" x2="592.0" y2="350.0" stroke="#ea580c" stroke-width="2"/>
+<line x1="720.0" y1="350.0" x2="720.0" y2="350.0" stroke="#ea580c" stroke-width="2"/>
+<polyline fill="none" stroke="#ea580c" stroke-width="2.5" points="80.0,350.0 208.0,350.0 336.0,350.0 464.0,350.0 592.0,350.0 720.0,350.0"/>
+<circle cx="80.0" cy="350.0" r="4" fill="#ea580c"/>
+<circle cx="208.0" cy="350.0" r="4" fill="#ea580c"/>
+<circle cx="336.0" cy="350.0" r="4" fill="#ea580c"/>
+<circle cx="464.0" cy="350.0" r="4" fill="#ea580c"/>
+<circle cx="592.0" cy="350.0" r="4" fill="#ea580c"/>
+<circle cx="720.0" cy="350.0" r="4" fill="#ea580c"/>
+<line x1="80.0" y1="291.96984845452164" x2="80.0" y2="326.79922418218575" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="208.0" y1="346.9190667351348" x2="208.0" y2="349.9846088830326" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="336.0" y1="349.6950725468119" x2="336.0" y2="349.999999551306" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="464.0" y1="350.0" x2="464.0" y2="350.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="592.0" y1="350.0" x2="592.0" y2="350.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="720.0" y1="349.9999837033707" x2="720.0" y2="349.9999910430977" stroke="#1d4ed8" stroke-width="2"/>
+<polyline fill="none" stroke="#1d4ed8" stroke-width="2.5" points="80.0,304.6 208.0,348.5 336.0,349.9 464.0,350.0 592.0,350.0 720.0,350.0"/>
+<circle cx="80.0" cy="304.5934562774661" r="4" fill="#1d4ed8"/>
+<circle cx="208.0" cy="348.4989355786199" r="4" fill="#1d4ed8"/>
+<circle cx="336.0" cy="349.89835387777845" r="4" fill="#1d4ed8"/>
+<circle cx="464.0" cy="350.0" r="4" fill="#1d4ed8"/>
+<circle cx="592.0" cy="350.0" r="4" fill="#1d4ed8"/>
+<circle cx="720.0" cy="349.9999873918343" r="4" fill="#1d4ed8"/>
+<rect x="80" y="430" width="12" height="3" fill="#111827"/>
+<text x="98.0" y="435.0" font-size="10" text-anchor="start" font-weight="normal">LP</text>
+<rect x="260" y="430" width="12" height="3" fill="#7c3aed"/>
+<text x="278.0" y="435.0" font-size="10" text-anchor="start" font-weight="normal">RC-FW</text>
+<rect x="440" y="430" width="12" height="3" fill="#ea580c"/>
+<text x="458.0" y="435.0" font-size="10" text-anchor="start" font-weight="normal">Pacing bundle</text>
+<rect x="620" y="430" width="12" height="3" fill="#1d4ed8"/>
+<text x="638.0" y="435.0" font-size="10" text-anchor="start" font-weight="normal">Quasi</text>
+<text x="400.0" y="402.0" font-size="11" text-anchor="middle" font-weight="normal">Budget / unconstrained MM limit-value; paired bootstrap 95% intervals</text>
+</svg>

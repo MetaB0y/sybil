@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="390" viewBox="0 0 820 390">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Inter,Arial,sans-serif;fill:#111827}.axis{stroke:#9ca3af;stroke-width:1}.grid{stroke:#e5e7eb;stroke-width:1}.small{font-size:11px}.tiny{font-size:9px}</style>
+<text x="410.0" y="25.0" font-size="17" text-anchor="middle" font-weight="bold">Retained-cash objective shortfall on random books</text>
+<line class="axis" x1="80" y1="55" x2="80" y2="300"/>
+<line class="axis" x1="80" y1="300" x2="760" y2="300"/>
+<line class="grid" x1="80" y1="300.0" x2="760" y2="300.0"/>
+<text x="72.0" y="304.0" font-size="10" text-anchor="end" font-weight="normal">0.00%</text>
+<line class="grid" x1="80" y1="251.0" x2="760" y2="251.0"/>
+<text x="72.0" y="255.0" font-size="10" text-anchor="end" font-weight="normal">0.02%</text>
+<line class="grid" x1="80" y1="202.0" x2="760" y2="202.0"/>
+<text x="72.0" y="206.0" font-size="10" text-anchor="end" font-weight="normal">0.05%</text>
+<line class="grid" x1="80" y1="153.0" x2="760" y2="153.0"/>
+<text x="72.0" y="157.0" font-size="10" text-anchor="end" font-weight="normal">0.07%</text>
+<line class="grid" x1="80" y1="104.0" x2="760" y2="104.0"/>
+<text x="72.0" y="108.0" font-size="10" text-anchor="end" font-weight="normal">0.09%</text>
+<line class="grid" x1="80" y1="55.0" x2="760" y2="55.0"/>
+<text x="72.0" y="59.0" font-size="10" text-anchor="end" font-weight="normal">0.11%</text>
+<text x="250.0" y="322.0" font-size="11" text-anchor="middle" font-weight="bold">concentrated</text>
+<text x="178.0" y="340.0" font-size="9" text-anchor="middle" font-weight="normal">LP</text>
+<line x1="178.0" y1="220.76325759520657" x2="178.0" y2="266.76470227597923" stroke="#111827" stroke-width="4"/>
+<circle cx="178.0" cy="256.8820848691478" r="5" fill="#111827"/>
+<text x="226.0" y="340.0" font-size="9" text-anchor="middle" font-weight="normal">RC-FW</text>
+<line x1="226.0" y1="238.46492178191318" x2="226.0" y2="297.04885016772306" stroke="#7c3aed" stroke-width="4"/>
+<circle cx="226.0" cy="295.35896992450114" r="5" fill="#7c3aed"/>
+<text x="274.0" y="340.0" font-size="9" text-anchor="middle" font-weight="normal">Pacing bundle</text>
+<line x1="274.0" y1="299.9947923240537" x2="274.0" y2="300.0" stroke="#ea580c" stroke-width="4"/>
+<circle cx="274.0" cy="300.0" r="5" fill="#ea580c"/>
+<text x="322.0" y="340.0" font-size="9" text-anchor="middle" font-weight="normal">Quasi</text>
+<line x1="322.0" y1="299.77431698750576" x2="322.0" y2="300.0" stroke="#1d4ed8" stroke-width="4"/>
+<circle cx="322.0" cy="299.99665937696784" r="5" fill="#1d4ed8"/>
+<text x="590.0" y="322.0" font-size="11" text-anchor="middle" font-weight="bold">neutral</text>
+<text x="518.0" y="340.0" font-size="9" text-anchor="middle" font-weight="normal">LP</text>
+<line x1="518.0" y1="290.9011357590033" x2="518.0" y2="300.0" stroke="#111827" stroke-width="4"/>
+<circle cx="518.0" cy="300.0" r="5" fill="#111827"/>
+<text x="566.0" y="340.0" font-size="9" text-anchor="middle" font-weight="normal">RC-FW</text>
+<line x1="566.0" y1="288.76739183444096" x2="566.0" y2="300.0" stroke="#7c3aed" stroke-width="4"/>
+<circle cx="566.0" cy="300.0" r="5" fill="#7c3aed"/>
+<text x="614.0" y="340.0" font-size="9" text-anchor="middle" font-weight="normal">Pacing bundle</text>
+<line x1="614.0" y1="300.0" x2="614.0" y2="300.0" stroke="#ea580c" stroke-width="4"/>
+<circle cx="614.0" cy="300.0" r="5" fill="#ea580c"/>
+<text x="662.0" y="340.0" font-size="9" text-anchor="middle" font-weight="normal">Quasi</text>
+<line x1="662.0" y1="299.9992446295883" x2="662.0" y2="299.99999614489013" stroke="#1d4ed8" stroke-width="4"/>
+<circle cx="662.0" cy="299.9999789000758" r="5" fill="#1d4ed8"/>
+<text x="669.0" y="67.0" font-size="9" text-anchor="start" font-weight="normal">×1</text>
+</svg>

@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1256" viewBox="0 0 900 1256">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Inter,Arial,sans-serif;fill:#111827}.axis{stroke:#9ca3af;stroke-width:1}.grid{stroke:#e5e7eb;stroke-width:1}.small{font-size:11px}.tiny{font-size:9px}</style>
+<text x="450.0" y="24.0" font-size="17" text-anchor="middle" font-weight="bold">Continuous optimality certificate by experiment (P95)</text>
+<line class="grid" x1="250.0" y1="45" x2="250.0" y2="1211"/>
+<text x="250.0" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-9%</text>
+<line class="grid" x1="315.55555555555554" y1="45" x2="315.55555555555554" y2="1211"/>
+<text x="315.6" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-8%</text>
+<line class="grid" x1="381.1111111111111" y1="45" x2="381.1111111111111" y2="1211"/>
+<text x="381.1" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-7%</text>
+<line class="grid" x1="446.66666666666663" y1="45" x2="446.66666666666663" y2="1211"/>
+<text x="446.7" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-6%</text>
+<line class="grid" x1="512.2222222222222" y1="45" x2="512.2222222222222" y2="1211"/>
+<text x="512.2" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-5%</text>
+<line class="grid" x1="577.7777777777778" y1="45" x2="577.7777777777778" y2="1211"/>
+<text x="577.8" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-4%</text>
+<line class="grid" x1="643.3333333333333" y1="45" x2="643.3333333333333" y2="1211"/>
+<text x="643.3" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-3%</text>
+<line class="grid" x1="708.8888888888889" y1="45" x2="708.8888888888889" y2="1211"/>
+<text x="708.9" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-2%</text>
+<line class="grid" x1="774.4444444444445" y1="45" x2="774.4444444444445" y2="1211"/>
+<text x="774.4" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^-1%</text>
+<line class="grid" x1="840.0" y1="45" x2="840.0" y2="1211"/>
+<text x="840.0" y="1231.0" font-size="9" text-anchor="middle" font-weight="normal">10^0%</text>
+<text x="240.0" y="50.0" font-size="10" text-anchor="end" font-weight="normal">concentrated-tight · Pacing bundle</text>
+<line x1="250" y1="45" x2="520.3577984460087" y2="45" stroke="#ea580c" stroke-width="3"/>
+<circle cx="520.3577984460087" cy="45" r="5" fill="#ea580c"/>
+<text x="528.4" y="49.0" font-size="9" text-anchor="start" font-weight="normal">1.33e-05%</text>
+<text x="240.0" y="92.0" font-size="10" text-anchor="end" font-weight="normal">concentrated-tight · RC-FW</text>
+<line x1="250" y1="87" x2="787.7185238310082" y2="87" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="787.7185238310082" cy="87" r="5" fill="#7c3aed"/>
+<text x="795.7" y="91.0" font-size="9" text-anchor="start" font-weight="normal">0.159%</text>
+<text x="240.0" y="134.0" font-size="10" text-anchor="end" font-weight="normal">flash-budget-sweep · Pacing bundle</text>
+<line x1="250" y1="129" x2="250.0" y2="129" stroke="#ea580c" stroke-width="3"/>
+<circle cx="250.0" cy="129" r="5" fill="#ea580c"/>
+<text x="258.0" y="133.0" font-size="9" text-anchor="start" font-weight="normal">1e-09%</text>
+<text x="240.0" y="176.0" font-size="10" text-anchor="end" font-weight="normal">flash-budget-sweep · RC-FW</text>
+<line x1="250" y1="171" x2="685.1922210692436" y2="171" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="685.1922210692436" cy="171" r="5" fill="#7c3aed"/>
+<text x="693.2" y="175.0" font-size="9" text-anchor="start" font-weight="normal">0.00435%</text>
+<text x="240.0" y="218.0" font-size="10" text-anchor="end" font-weight="normal">flash-small-reference · Pacing bundle</text>
+<line x1="250" y1="213" x2="250.0" y2="213" stroke="#ea580c" stroke-width="3"/>
+<circle cx="250.0" cy="213" r="5" fill="#ea580c"/>
+<text x="258.0" y="217.0" font-size="9" text-anchor="start" font-weight="normal">1e-09%</text>
+<text x="240.0" y="260.0" font-size="10" text-anchor="end" font-weight="normal">flash-small-reference · RC-FW</text>
+<line x1="250" y1="255" x2="718.2581776369418" y2="255" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="718.2581776369418" cy="255" r="5" fill="#7c3aed"/>
+<text x="726.3" y="259.0" font-size="9" text-anchor="start" font-weight="normal">0.0139%</text>
+<text x="240.0" y="302.0" font-size="10" text-anchor="end" font-weight="normal">mms-01 · Pacing bundle</text>
+<line x1="250" y1="297" x2="250.0" y2="297" stroke="#ea580c" stroke-width="3"/>
+<circle cx="250.0" cy="297" r="5" fill="#ea580c"/>
+<text x="258.0" y="301.0" font-size="9" text-anchor="start" font-weight="normal">1e-09%</text>
+<text x="240.0" y="344.0" font-size="10" text-anchor="end" font-weight="normal">mms-01 · RC-FW</text>
+<line x1="250" y1="339" x2="642.3919002281193" y2="339" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="642.3919002281193" cy="339" r="5" fill="#7c3aed"/>
+<text x="650.4" y="343.0" font-size="9" text-anchor="start" font-weight="normal">0.000967%</text>
+<text x="240.0" y="386.0" font-size="10" text-anchor="end" font-weight="normal">mms-02 · Pacing bundle</text>
+<line x1="250" y1="381" x2="490.5649594719667" y2="381" stroke="#ea580c" stroke-width="3"/>
+<circle cx="490.5649594719667" cy="381" r="5" fill="#ea580c"/>
+<text x="498.6" y="385.0" font-size="9" text-anchor="start" font-weight="normal">4.67e-06%</text>
+<text x="240.0" y="428.0" font-size="10" text-anchor="end" font-weight="normal">mms-02 · RC-FW</text>
+<line x1="250" y1="423" x2="642.4847727562491" y2="423" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="642.4847727562491" cy="423" r="5" fill="#7c3aed"/>
+<text x="650.5" y="427.0" font-size="9" text-anchor="start" font-weight="normal">0.000971%</text>
+<text x="240.0" y="470.0" font-size="10" text-anchor="end" font-weight="normal">mms-04 · Pacing bundle</text>
+<line x1="250" y1="465" x2="438.67747292558147" y2="465" stroke="#ea580c" stroke-width="3"/>
+<circle cx="438.67747292558147" cy="465" r="5" fill="#ea580c"/>
+<text x="446.7" y="469.0" font-size="9" text-anchor="start" font-weight="normal">7.55e-07%</text>
+<text x="240.0" y="512.0" font-size="10" text-anchor="end" font-weight="normal">mms-04 · RC-FW</text>
+<line x1="250" y1="507" x2="642.0638756329408" y2="507" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="642.0638756329408" cy="507" r="5" fill="#7c3aed"/>
+<text x="650.1" y="511.0" font-size="9" text-anchor="start" font-weight="normal">0.000956%</text>
+<text x="240.0" y="554.0" font-size="10" text-anchor="end" font-weight="normal">mms-08 · Pacing bundle</text>
+<line x1="250" y1="549" x2="490.13333107512676" y2="549" stroke="#ea580c" stroke-width="3"/>
+<circle cx="490.13333107512676" cy="549" r="5" fill="#ea580c"/>
+<text x="498.1" y="553.0" font-size="9" text-anchor="start" font-weight="normal">4.6e-06%</text>
+<text x="240.0" y="596.0" font-size="10" text-anchor="end" font-weight="normal">mms-08 · RC-FW</text>
+<line x1="250" y1="591" x2="752.72255204151" y2="591" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="752.72255204151" cy="591" r="5" fill="#7c3aed"/>
+<text x="760.7" y="595.0" font-size="9" text-anchor="start" font-weight="normal">0.0466%</text>
+<text x="240.0" y="638.0" font-size="10" text-anchor="end" font-weight="normal">mms-16 · Pacing bundle</text>
+<line x1="250" y1="633" x2="633.5133443734376" y2="633" stroke="#ea580c" stroke-width="3"/>
+<circle cx="633.5133443734376" cy="633" r="5" fill="#ea580c"/>
+<text x="641.5" y="637.0" font-size="9" text-anchor="start" font-weight="normal">0.000708%</text>
+<text x="240.0" y="680.0" font-size="10" text-anchor="end" font-weight="normal">mms-16 · RC-FW</text>
+<line x1="250" y1="675" x2="789.6024686295713" y2="675" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="789.6024686295713" cy="675" r="5" fill="#7c3aed"/>
+<text x="797.6" y="679.0" font-size="9" text-anchor="start" font-weight="normal">0.17%</text>
+<text x="240.0" y="722.0" font-size="10" text-anchor="end" font-weight="normal">neutral-budget-controls · Pacing bundle</text>
+<line x1="250" y1="717" x2="472.4778738021265" y2="717" stroke="#ea580c" stroke-width="3"/>
+<circle cx="472.4778738021265" cy="717" r="5" fill="#ea580c"/>
+<text x="480.5" y="721.0" font-size="9" text-anchor="start" font-weight="normal">2.48e-06%</text>
+<text x="240.0" y="764.0" font-size="10" text-anchor="end" font-weight="normal">neutral-budget-controls · RC-FW</text>
+<line x1="250" y1="759" x2="745.6755856423533" y2="759" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="745.6755856423533" cy="759" r="5" fill="#7c3aed"/>
+<text x="753.7" y="763.0" font-size="9" text-anchor="start" font-weight="normal">0.0364%</text>
+<text x="240.0" y="806.0" font-size="10" text-anchor="end" font-weight="normal">numerical-range-stress · Pacing bundle</text>
+<line x1="250" y1="801" x2="432.7272043176214" y2="801" stroke="#ea580c" stroke-width="3"/>
+<circle cx="432.7272043176214" cy="801" r="5" fill="#ea580c"/>
+<text x="440.7" y="805.0" font-size="9" text-anchor="start" font-weight="normal">6.13e-07%</text>
+<text x="240.0" y="848.0" font-size="10" text-anchor="end" font-weight="normal">numerical-range-stress · RC-FW</text>
+<line x1="250" y1="843" x2="790.8054483778957" y2="843" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="790.8054483778957" cy="843" r="5" fill="#7c3aed"/>
+<text x="798.8" y="847.0" font-size="9" text-anchor="start" font-weight="normal">0.178%</text>
+<text x="240.0" y="890.0" font-size="10" text-anchor="end" font-weight="normal">orders-00080 · Pacing bundle</text>
+<line x1="250" y1="885" x2="250.0" y2="885" stroke="#ea580c" stroke-width="3"/>
+<circle cx="250.0" cy="885" r="5" fill="#ea580c"/>
+<text x="258.0" y="889.0" font-size="9" text-anchor="start" font-weight="normal">1e-09%</text>
+<text x="240.0" y="932.0" font-size="10" text-anchor="end" font-weight="normal">orders-00080 · RC-FW</text>
+<line x1="250" y1="927" x2="723.8889670178135" y2="927" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="723.8889670178135" cy="927" r="5" fill="#7c3aed"/>
+<text x="731.9" y="931.0" font-size="9" text-anchor="start" font-weight="normal">0.0169%</text>
+<text x="240.0" y="974.0" font-size="10" text-anchor="end" font-weight="normal">orders-00400 · Pacing bundle</text>
+<line x1="250" y1="969" x2="250.0" y2="969" stroke="#ea580c" stroke-width="3"/>
+<circle cx="250.0" cy="969" r="5" fill="#ea580c"/>
+<text x="258.0" y="973.0" font-size="9" text-anchor="start" font-weight="normal">1e-09%</text>
+<text x="240.0" y="1016.0" font-size="10" text-anchor="end" font-weight="normal">orders-00400 · RC-FW</text>
+<line x1="250" y1="1011" x2="642.538434317167" y2="1011" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="642.538434317167" cy="1011" r="5" fill="#7c3aed"/>
+<text x="650.5" y="1015.0" font-size="9" text-anchor="start" font-weight="normal">0.000972%</text>
+<text x="240.0" y="1058.0" font-size="10" text-anchor="end" font-weight="normal">orders-02000 · Pacing bundle</text>
+<line x1="250" y1="1053" x2="250.0" y2="1053" stroke="#ea580c" stroke-width="3"/>
+<circle cx="250.0" cy="1053" r="5" fill="#ea580c"/>
+<text x="258.0" y="1057.0" font-size="9" text-anchor="start" font-weight="normal">1e-09%</text>
+<text x="240.0" y="1100.0" font-size="10" text-anchor="end" font-weight="normal">orders-02000 · RC-FW</text>
+<line x1="250" y1="1095" x2="630.9122058030438" y2="1095" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="630.9122058030438" cy="1095" r="5" fill="#7c3aed"/>
+<text x="638.9" y="1099.0" font-size="9" text-anchor="start" font-weight="normal">0.000646%</text>
+<text x="240.0" y="1142.0" font-size="10" text-anchor="end" font-weight="normal">orders-10000 · Pacing bundle</text>
+<line x1="250" y1="1137" x2="250.0" y2="1137" stroke="#ea580c" stroke-width="3"/>
+<circle cx="250.0" cy="1137" r="5" fill="#ea580c"/>
+<text x="258.0" y="1141.0" font-size="9" text-anchor="start" font-weight="normal">1e-09%</text>
+<text x="240.0" y="1184.0" font-size="10" text-anchor="end" font-weight="normal">orders-10000 · RC-FW</text>
+<line x1="250" y1="1179" x2="643.0673703085592" y2="1179" stroke="#7c3aed" stroke-width="3"/>
+<circle cx="643.0673703085592" cy="1179" r="5" fill="#7c3aed"/>
+<text x="651.1" y="1183.0" font-size="9" text-anchor="start" font-weight="normal">0.000991%</text>
+</svg>

@@ -70,9 +70,10 @@ toolchain metadata. The analyzer validates completeness, then creates
 ## Pacing-bundle development protocol
 
 `protocol-pacing-development.json` compares the certified RC-FW production
-solver, the experimental fully corrective pacing bundle, five-step LP-SLP, and
-corrected-epigraph Clarabel QuasiFisher. It is designed to answer two separate
-scaling questions rather than confound them:
+solver, the experimental fully corrective pacing bundle, five-step LP-SLP,
+corrected-epigraph Clarabel QuasiFisher, and a deliberately budget-blind LP
+negative control. It is designed to answer two separate scaling questions
+rather than confound them:
 
 - order count grows from 80 to 10,000 with exactly two market makers;
 - pacing dimension grows from 1 to 16 market makers with 2,000 orders;
@@ -81,12 +82,20 @@ scaling questions rather than confound them:
 - random, concentrated, heavy-tailed numerical, and tiny reference books keep
   the structural stress from becoming one hand-picked family.
 
-The detailed work metrics include P90/P95/P99/max wall time, LP-oracle calls
+The detailed work metrics include P90/P95/P99/max wall time, landed welfare
+mean/P50/P95/max, retained-objective tails, LP-oracle calls
 and time, restricted-master steps and time, active bundle atoms, certified
-continuous gap, integer landing loss, and the landed minting-duality gap
+continuous gap, integer landing loss, L1 target movement, budget-repair counts,
+and the landed minting-duality gap
 `|C_0(D) - p·D|`. The last metric detects allocations whose prices no longer
 support their post-processed fill vector, even if ordinary limit and budget
 checks still pass.
+
+The 14 July retained run and the investigation of the former 67.9% landing gap
+are documented in
+`design/pacing-bundle-landing-tail-study-2026-07-14.md`. Its lexicographic
+face-preserving landing and price-support gate are materially safer but make the
+10,000-order latency tail an explicit open engineering problem.
 
 Run every declared development row with:
 

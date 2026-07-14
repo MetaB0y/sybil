@@ -3,7 +3,7 @@ tags: [solver, overview]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 # Solver landscape
@@ -37,10 +37,11 @@ flowchart LR
 ```
 
 Shared machinery includes the HiGHS LP oracle, price normalization from duals,
-projection LPs, and integer rounding. Retained-cash projections re-solve
-price-dependent budget rows and finalize only at a budget-consistent fixed
-point; the LP-SLP baseline still has a capped trimming path and is measured as
-such. MM sells are paced through the paper's sell-to-complementary-buy
+lexicographic nearest-face projection, and integer rounding. Retained-cash
+projections preserve the certified target within the primary supporting face,
+re-solve price-dependent budget rows, and finalize only at a budget-consistent
+fixed point; the LP-SLP baseline still has a capped trimming path and is
+measured as such. MM sells are paced through the paper's sell-to-complementary-buy
 reduction, including its exact linear complete-set correction.
 `PipelineResult::diagnostics` reports algorithm termination separately from
 integer validity: convergence, a configured iteration cap, backend failure,

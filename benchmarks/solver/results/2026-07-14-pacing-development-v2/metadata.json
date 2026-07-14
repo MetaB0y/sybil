@@ -1,0 +1,18 @@
+{
+  "cargo": "cargo 1.97.0 (c980f4866 2026-06-30)",
+  "cpu": "Architecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           48 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  16\nOn-line CPU(s) list:                     0-15\nVendor ID:                               AuthenticAMD\nModel name:                              AMD Ryzen 7 5800X 8-Core Processor\nCPU family:                              25\nModel:                                   33\nThread(s) per core:                      2\nCore(s) per socket:                      8\nSocket(s):                               1\nStepping:                                0\nMicrocode version:                       0xa20102e\nFrequency boost:                         enabled\nCPU(s) scaling MHz:                      73%\nCPU max MHz:                             4851.4712\nCPU min MHz:                             2200.0000\nBogoMIPS:                                7603.83\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk clzero irperf xsaveerptr rdpru wbnoinvd arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap ibpb_exit_to_user\nVirtualization:                          AMD-V\nL1d cache:                               256 KiB (8 instances)\nL1i cache:                               256 KiB (8 instances)",
+  "elapsed_seconds": 56,
+  "expected_records": 555,
+  "finished_unix_seconds": 1784030032,
+  "memory": "MemTotal:       32783592 kB\nMemFree:          509636 kB\nMemAvailable:   14595180 kB\nBuffers:          255724 kB\nCached:         13835880 kB",
+  "mode": "full",
+  "os": "Linux anonymous-system 6.6.144-1-MANJARO #1 SMP PREEMPT_DYNAMIC Sat Jul  4 22:18:37 UTC 2026 x86_64 GNU/Linux",
+  "protocol_blake3": "d358686e252daa75ad8ead7bc89d52e7f454a5c0134b1f9bf215a1980f3fa8ab",
+  "protocol_complete": true,
+  "protocol_id": "solver-pacing-bundle-development-v2",
+  "records_written": 555,
+  "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)\nbinary: rustc\ncommit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3\ncommit-date: 2026-07-07\nhost: x86_64-unknown-linux-gnu\nrelease: 1.97.0\nLLVM version: 22.1.6",
+  "schema_version": 1,
+  "source_revision": "0b62dc1f",
+  "started_unix_seconds": 1784029976
+}

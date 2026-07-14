@@ -13,7 +13,7 @@ prices. The general complexity classification is more nuanced than simply
 calling every such book NP-hard; thin books can convexify, while adversarial
 retail walls preserve a genuinely non-concave frontier.
 
-A market maker submits orders on both sides of multiple markets with a capital budget limiting total risk exposure. The capital consumed by each fill depends on the clearing price: buying YES at price p costs `p * qty_units / SHARE_SCALE` in capital, while selling YES costs `(1 - p) * qty_units / SHARE_SCALE`. Since the clearing price p is itself a dual variable determined by the optimization, the budget constraint is `sum(price_m * qty_units_i * coefficient_i / SHARE_SCALE) <= budget_k` — a product of a primal quantity and a dual price. This bilinear coupling means the feasible region is no longer convex, and multiple local optima become possible.
+A market maker submits orders on both sides of multiple markets with a capital budget limiting total risk exposure. The capital consumed by each fill depends on the clearing price: buying YES at price p costs `p * qty_units / SHARE_SCALE` in capital, while selling YES costs `(1 - p) * qty_units / SHARE_SCALE`. Since the clearing price p is itself a dual variable determined by the optimization, the budget constraint is `sum(price_m * qty_units_i * coefficient_i / SHARE_SCALE) <= budget_k` — a product of a primal quantity and a dual price. This bilinear coupling means the feasible region is no longer convex, and multiple local optima become possible. At the engine API boundary, `MmSide::capital_needed` receives the price of the outcome actually traded: either outcome buy consumes its fill price and either outcome sell consumes one minus its fill price. LP internals that hold a YES price convert NO orders before calling it.
 
 The production path changes the objective instead of imposing this non-convex
 constraint directly. [[Retained Cash Solver]] uses the paper's exact
@@ -27,7 +27,7 @@ for the same convex objective; [[Conic Solver|Conic]] is an independent exponent
 [[Decomposed Solver|decomposition]] coordinates a spanning MM across components.
 
 ## Key Properties
-- Capital usage: BuyYes/SellNo = `price * qty_units / SHARE_SCALE`, SellYes/BuyNo = `(1 - price) * qty_units / SHARE_SCALE`
+- In YES-price coordinates: BuyYes/SellNo = `p_yes * qty_units / SHARE_SCALE`, SellYes/BuyNo = `(1 - p_yes) * qty_units / SHARE_SCALE`; the engine API instead receives each order's actual outcome fill price
 - Bilinear: couples primal `q_i` with dual `p_m` and is generally non-convex
 - Only 2-10 MMs in practice — the problem is "almost" an LP
 - Each solver handles this differently: certified reduced-form pacing, SLP

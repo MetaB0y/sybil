@@ -6,6 +6,13 @@ last_verified: 2026-07-13
 
 # Fully corrective pacing bundle: development report
 
+> [!warning] Superseded landing evidence
+> This 13 July report preserves the algorithm-development history, including
+> the original arbitrary-face landing limitation. The lexicographic landing
+> repair and complete five-method rerun are documented in
+> [14 July landing-tail study](pacing-bundle-landing-tail-study-2026-07-14.md).
+> Use that report for current metrics and conclusions.
+
 ## Decision
 
 Keep `RetainedCashSolver` as the production default for now. Add

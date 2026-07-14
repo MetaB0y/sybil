@@ -3,7 +3,7 @@ tags: [solver, crate, fisher-market, market-maker]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 # Retained cash solver
@@ -49,15 +49,29 @@ to consume shared capital should not be enrolled in an MM constraint.
 
 ## Landing and trust boundary
 
-The continuous iterate is not protocol state. Landing caps each order at the
-ceiling of its continuous fill and solves an LP with the final pacing-weighted
-objective. If rounded quantities exceed an MM budget at the resulting prices,
-the projection adds
-those price-linearized budget rows and resolves. It finalizes only after the
-prices and quantities form a budget-consistent fixed point; exhaustion is an
-explicit post-processing failure, not silent trimming or a cross-solver
+The continuous iterate is not protocol state. Landing solves the final
+pacing-weighted objective for prices, then selects the point on that supporting
+optimal face nearest to the certified iterate in L1 distance. Keeping these as
+two lexicographic solves prevents a degenerate LP basis from replacing the
+certified allocation, while ensuring market prices still come only from the
+original matching rows. Normally scaled books use an explicitly checked exact
+face; deliberately wide billion-unit books use a `1e-8` relative near-face band
+directly because HiGHS can otherwise report a materially infeasible exact face
+row. Landing then compares the nearest-face, primary-basis, and certified-target
+integer candidates under the primary prices and chooses the smallest
+minting-duality residual, failing explicitly above $0.05. This is an economic
+support gate within the same solver and price system, not a cross-solver
+fallback.
+
+If rounded quantities exceed an MM budget at the resulting prices, the
+projection adds price-linearized budget rows and resolves. It finalizes only
+after the prices and quantities form a budget-consistent fixed point; exhaustion
+is an explicit post-processing failure, not silent trimming or a cross-solver
 fallback. Welfare is recomputed with signed mint/burn cost, and
-[[Four-Layer Verification|`sybil-verifier`]] remains authoritative.
+[[Four-Layer Verification|`sybil-verifier`]] remains authoritative. Landing
+loss, allocation movement, budget trimming, and minting duality are separate
+diagnostics because continuous convergence alone does not certify integer
+recovery.
 
 `Converged` means the configured certified-gap tolerance was met. An
 `IterationLimit` result may still be integer-valid, but the reported gap—not

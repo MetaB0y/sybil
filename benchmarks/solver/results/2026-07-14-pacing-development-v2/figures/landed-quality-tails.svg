@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="450" viewBox="0 0 980 450">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:Inter,Arial,sans-serif;fill:#111827}.axis{stroke:#9ca3af;stroke-width:1}.grid{stroke:#e5e7eb;stroke-width:1}.small{font-size:11px}.tiny{font-size:9px}</style>
+<text x="490.0" y="24.0" font-size="17" text-anchor="middle" font-weight="bold">Landed economic-quality tails</text>
+<text x="275.0" y="45.0" font-size="12" text-anchor="middle" font-weight="bold">Observed-best net-welfare gap</text>
+<line class="axis" x1="70" y1="60" x2="70" y2="345"/>
+<line class="axis" x1="70" y1="345" x2="480" y2="345"/>
+<line class="grid" x1="70" y1="313.3333333333333" x2="480" y2="313.3333333333333"/>
+<text x="63.0" y="317.3" font-size="9" text-anchor="end" font-weight="normal">10^-7%</text>
+<line class="grid" x1="70" y1="313.3333333333333" x2="480" y2="313.3333333333333"/>
+<text x="63.0" y="317.3" font-size="9" text-anchor="end" font-weight="normal">10^-6%</text>
+<line class="grid" x1="70" y1="281.6666666666667" x2="480" y2="281.6666666666667"/>
+<text x="63.0" y="285.7" font-size="9" text-anchor="end" font-weight="normal">10^-5%</text>
+<line class="grid" x1="70" y1="250.0" x2="480" y2="250.0"/>
+<text x="63.0" y="254.0" font-size="9" text-anchor="end" font-weight="normal">10^-4%</text>
+<line class="grid" x1="70" y1="218.33333333333334" x2="480" y2="218.33333333333334"/>
+<text x="63.0" y="222.3" font-size="9" text-anchor="end" font-weight="normal">10^-3%</text>
+<line class="grid" x1="70" y1="186.66666666666666" x2="480" y2="186.66666666666666"/>
+<text x="63.0" y="190.7" font-size="9" text-anchor="end" font-weight="normal">10^-2%</text>
+<line class="grid" x1="70" y1="155.0" x2="480" y2="155.0"/>
+<text x="63.0" y="159.0" font-size="9" text-anchor="end" font-weight="normal">10^-1%</text>
+<line class="grid" x1="70" y1="123.33333333333334" x2="480" y2="123.33333333333334"/>
+<text x="63.0" y="127.3" font-size="9" text-anchor="end" font-weight="normal">10^0%</text>
+<line class="grid" x1="70" y1="91.66666666666669" x2="480" y2="91.66666666666669"/>
+<text x="63.0" y="95.7" font-size="9" text-anchor="end" font-weight="normal">10^1%</text>
+<line class="grid" x1="70" y1="60.0" x2="480" y2="60.0"/>
+<text x="63.0" y="64.0" font-size="9" text-anchor="end" font-weight="normal">10^2%</text>
+<text x="121.2" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">LP</text>
+<circle cx="121.25" cy="313.3333333333333" r="4" fill="#111827" fill-opacity="0.55"/>
+<circle cx="121.25" cy="157.39751685415814" r="5" fill="#111827" fill-opacity="0.8"/>
+<circle cx="121.25" cy="73.45464901163444" r="6" fill="#111827" fill-opacity="1.0"/>
+<line x1="121.25" y1="313.3333333333333" x2="121.25" y2="73.45464901163444" stroke="#111827" stroke-width="2"/>
+<text x="223.8" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">RC-FW</text>
+<circle cx="223.75" cy="123.91221293638336" r="4" fill="#7c3aed" fill-opacity="0.55"/>
+<circle cx="223.75" cy="97.36409476428204" r="5" fill="#7c3aed" fill-opacity="0.8"/>
+<circle cx="223.75" cy="73.60112590893112" r="6" fill="#7c3aed" fill-opacity="1.0"/>
+<line x1="223.75" y1="123.91221293638336" x2="223.75" y2="73.60112590893112" stroke="#7c3aed" stroke-width="2"/>
+<text x="326.2" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">Pacing bundle</text>
+<circle cx="326.25" cy="133.7362003170497" r="4" fill="#ea580c" fill-opacity="0.55"/>
+<circle cx="326.25" cy="98.56351473815116" r="5" fill="#ea580c" fill-opacity="0.8"/>
+<circle cx="326.25" cy="96.17764961751371" r="6" fill="#ea580c" fill-opacity="1.0"/>
+<line x1="326.25" y1="133.7362003170497" x2="326.25" y2="96.17764961751371" stroke="#ea580c" stroke-width="2"/>
+<text x="428.8" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">Quasi</text>
+<circle cx="428.75" cy="116.66703799719477" r="4" fill="#1d4ed8" fill-opacity="0.55"/>
+<circle cx="428.75" cy="98.52579904204592" r="5" fill="#1d4ed8" fill-opacity="0.8"/>
+<circle cx="428.75" cy="89.70729868751937" r="6" fill="#1d4ed8" fill-opacity="1.0"/>
+<line x1="428.75" y1="116.66703799719477" x2="428.75" y2="89.70729868751937" stroke="#1d4ed8" stroke-width="2"/>
+<text x="760.0" y="45.0" font-size="12" text-anchor="middle" font-weight="bold">Observed-best retained-objective gap</text>
+<line class="axis" x1="555" y1="60" x2="555" y2="345"/>
+<line class="axis" x1="555" y1="345" x2="965" y2="345"/>
+<line class="grid" x1="555" y1="313.3333333333333" x2="965" y2="313.3333333333333"/>
+<text x="548.0" y="317.3" font-size="9" text-anchor="end" font-weight="normal">10^-7%</text>
+<line class="grid" x1="555" y1="313.3333333333333" x2="965" y2="313.3333333333333"/>
+<text x="548.0" y="317.3" font-size="9" text-anchor="end" font-weight="normal">10^-6%</text>
+<line class="grid" x1="555" y1="281.6666666666667" x2="965" y2="281.6666666666667"/>
+<text x="548.0" y="285.7" font-size="9" text-anchor="end" font-weight="normal">10^-5%</text>
+<line class="grid" x1="555" y1="250.0" x2="965" y2="250.0"/>
+<text x="548.0" y="254.0" font-size="9" text-anchor="end" font-weight="normal">10^-4%</text>
+<line class="grid" x1="555" y1="218.33333333333334" x2="965" y2="218.33333333333334"/>
+<text x="548.0" y="222.3" font-size="9" text-anchor="end" font-weight="normal">10^-3%</text>
+<line class="grid" x1="555" y1="186.66666666666666" x2="965" y2="186.66666666666666"/>
+<text x="548.0" y="190.7" font-size="9" text-anchor="end" font-weight="normal">10^-2%</text>
+<line class="grid" x1="555" y1="155.0" x2="965" y2="155.0"/>
+<text x="548.0" y="159.0" font-size="9" text-anchor="end" font-weight="normal">10^-1%</text>
+<line class="grid" x1="555" y1="123.33333333333334" x2="965" y2="123.33333333333334"/>
+<text x="548.0" y="127.3" font-size="9" text-anchor="end" font-weight="normal">10^0%</text>
+<line class="grid" x1="555" y1="91.66666666666669" x2="965" y2="91.66666666666669"/>
+<text x="548.0" y="95.7" font-size="9" text-anchor="end" font-weight="normal">10^1%</text>
+<line class="grid" x1="555" y1="60.0" x2="965" y2="60.0"/>
+<text x="548.0" y="64.0" font-size="9" text-anchor="end" font-weight="normal">10^2%</text>
+<text x="606.2" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">LP</text>
+<circle cx="606.25" cy="150.42556111722166" r="4" fill="#111827" fill-opacity="0.55"/>
+<circle cx="606.25" cy="110.52804398212632" r="5" fill="#111827" fill-opacity="0.8"/>
+<circle cx="606.25" cy="80.98497024024215" r="6" fill="#111827" fill-opacity="1.0"/>
+<line x1="606.25" y1="150.42556111722166" x2="606.25" y2="80.98497024024215" stroke="#111827" stroke-width="2"/>
+<text x="708.8" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">RC-FW</text>
+<circle cx="708.75" cy="237.47563912106062" r="4" fill="#7c3aed" fill-opacity="0.55"/>
+<circle cx="708.75" cy="157.99197375408738" r="5" fill="#7c3aed" fill-opacity="0.8"/>
+<circle cx="708.75" cy="81.54755910200498" r="6" fill="#7c3aed" fill-opacity="1.0"/>
+<line x1="708.75" y1="237.47563912106062" x2="708.75" y2="81.54755910200498" stroke="#7c3aed" stroke-width="2"/>
+<text x="811.2" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">Pacing bundle</text>
+<circle cx="811.25" cy="313.3333333333333" r="4" fill="#ea580c" fill-opacity="0.55"/>
+<circle cx="811.25" cy="225.02044900846033" r="5" fill="#ea580c" fill-opacity="0.8"/>
+<circle cx="811.25" cy="133.0434870770894" r="6" fill="#ea580c" fill-opacity="1.0"/>
+<line x1="811.25" y1="313.3333333333333" x2="811.25" y2="133.0434870770894" stroke="#ea580c" stroke-width="2"/>
+<text x="913.8" y="364.0" font-size="9" text-anchor="middle" font-weight="normal">Quasi</text>
+<circle cx="913.75" cy="313.3333333333333" r="4" fill="#1d4ed8" fill-opacity="0.55"/>
+<circle cx="913.75" cy="135.46666603539913" r="5" fill="#1d4ed8" fill-opacity="0.8"/>
+<circle cx="913.75" cy="131.91788123385322" r="6" fill="#1d4ed8" fill-opacity="1.0"/>
+<line x1="913.75" y1="313.3333333333333" x2="913.75" y2="131.91788123385322" stroke="#1d4ed8" stroke-width="2"/>
+<text x="70.0" y="415.0" font-size="10" text-anchor="start" font-weight="normal">Marker size: P50, P95, maximum. Zeroes are placed at the 10^-6% floor.</text>
+</svg>

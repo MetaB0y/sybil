@@ -3,7 +3,7 @@ tags: [solver, crate]
 layer: solver
 crate: matching-solver
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 # LP solver
@@ -31,8 +31,14 @@ The LP has fill, per-market mint, and group-mint variables with outcome-balance 
 - No entropy objective or entropy tie-breaker exists in the implementation.
 - The capped SLP iteration has no general convergence certificate; diagnostics
   distinguish a solved fixed point from an iteration cap.
+- Orders belonging to a zero-capital MM are disabled before price discovery.
+  Otherwise endpoint prices can make their linearized capital appear free,
+  after which trimming removes the MM fills but cannot recover retail crossing
+  volume that those prices suppressed.
 - The supported execution path is single-market binary; unsupported shapes are filtered/rejected before value execution.
 - HiGHS output is an untrusted floating candidate. Final fills, prices, welfare, and MM checks are integer.
+- HiGHS runs with one thread, parallel mode off, and random seed zero so
+  degenerate landing bases do not vary with host core count.
 - `matching-engine` owns floor/ceil money helpers; `sybil-verifier` owns trusted correctness and net-of-minting welfare.
 
 ## Where this lives
