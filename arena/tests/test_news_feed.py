@@ -3,9 +3,16 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-from live.news_feed import LiveArticle, NewsFeed, PairedNewsBatchBarrier
+from live.news_feed import (
+    GATE_MODEL,
+    LiveArticle,
+    NewsFeed,
+    PairedNewsBatchBarrier,
+    build_search_query,
+    llm_gate_batch,
+)
 from sybil_client.types import Market
 
 
@@ -17,6 +24,27 @@ def _market(mid: int, name: str) -> Market:
         no_price_nanos=500_000_000,
         status="active",
     )
+
+
+def test_relevance_gate_uses_live_deepseek_model():
+    assert GATE_MODEL == "deepseek/deepseek-v4-flash"
+
+
+def test_search_query_retains_late_subject_terms():
+    market = _market(
+        46,
+        "Will a Chinese company have one of the top 10 AI models by December 31?",
+    )
+    assert build_search_query(market) == (
+        "Chinese company have one top 10 AI models December 31"
+    )
+
+
+async def test_relevance_gate_fails_open_on_provider_error():
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(side_effect=TimeoutError("provider"))
+
+    assert await llm_gate_batch(client, ["one", "two"], "market") == [True, True]
 
 
 async def test_multi_market_article_fans_out_to_all_markets(monkeypatch):

@@ -613,12 +613,6 @@ async def _create_default_live_topology(
     metrics: ArenaMetrics,
 ) -> LiveTopology:
     """Build the ordinary one-analyst + Kelly/Flat graph unchanged."""
-    # Preserve the existing strategy-object lifecycle: one instance per arm is
-    # created for the runner and shared across persona sizers.
-    strategies = [
-        ("Kelly", KellyStrategy()),
-        ("Flat", FlatStrategy()),
-    ]
     analysts: list[PersonaAnalyst] = []
     traders: list[LiveLlmTrader] = []
     for persona_key in config.personas:
@@ -646,7 +640,12 @@ async def _create_default_live_topology(
         )
         analysts.append(analyst)
 
-        for strat_label, strategy in strategies:
+        # Strategy instances own account-local state (for example Flat's entry
+        # prices), so each persona/account needs a private instance.
+        for strat_label, strategy in (
+            ("Kelly", KellyStrategy()),
+            ("Flat", FlatStrategy()),
+        ):
             bot_name = f"{persona['name']} ({strat_label})"
             account_id = await _resolve_bot_account(
                 client,
@@ -1051,7 +1050,7 @@ async def run_live(config: LiveConfig):
             len(synthetic_markets_info),
         )
 
-        # 4. Create news feed (with LLM gate using cheap model)
+        # 4. Create the shared news feed and headline relevance gate.
         feed = NewsFeed(
             active,
             api_key=config.api_key,

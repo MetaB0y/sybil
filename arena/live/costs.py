@@ -31,7 +31,6 @@ log = logging.getLogger(__name__)
 # Prices as of 2026-07-05 (openrouter.ai). Fallback only; see module docstring.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
     "deepseek/deepseek-v4-flash": (0.10, 0.30),
-    "google/gemma-4-31b-it": (0.05, 0.10),
 }
 
 # Used when a called model is absent from MODEL_PRICES. Deliberately on the high

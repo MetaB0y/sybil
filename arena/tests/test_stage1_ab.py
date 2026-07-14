@@ -290,6 +290,31 @@ async def test_default_topology_and_names_remain_unchanged(tmp_path, monkeypatch
     assert topology.analysts[0].news_sub is feed._subscribers[0]
 
 
+async def test_default_topology_keeps_strategy_state_private_per_persona(
+    tmp_path, monkeypatch
+):
+    config = LiveConfig(
+        api_key="test",
+        personas=["news_trader", "contrarian"],
+        market_ids=[7],
+    )
+    monkeypatch.setattr(
+        "live.runner._resolve_bot_account",
+        AsyncMock(side_effect=[101, 102, 103, 104]),
+    )
+    db = DecisionDB(str(tmp_path / "default.db"))
+    try:
+        topology = await _create_default_live_topology(
+            MagicMock(), db, config, [7], {7: _market()}, ArenaMetrics()
+        )
+    finally:
+        db.close()
+
+    news_kelly, news_flat, contrarian_kelly, contrarian_flat = topology.traders
+    assert news_kelly.strategy is not contrarian_kelly.strategy
+    assert news_flat.strategy is not contrarian_flat.strategy
+
+
 @pytest.mark.parametrize("market_ids", [None, []])
 def test_stage1_ab_requires_explicit_nonempty_market_cohort(market_ids):
     config = LiveConfig(

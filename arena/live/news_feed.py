@@ -4,7 +4,7 @@ Pipeline:
   1. Google News RSS per market (Google does broad relevance filtering)
   2. Dedup by URL
   3. LLM gate: "Is this headline relevant to {market question}? YES/NO"
-     (cheap model: google/gemma-4-31b-it, ~10 tokens per call)
+     (the same reliable DeepSeek family used by the live analyst)
   4. Fetch full text for YES articles (trafilatura)
   5. Deliver to traders
 
@@ -33,7 +33,7 @@ from .metrics import ArenaMetrics
 
 log = logging.getLogger(__name__)
 
-GATE_MODEL = "google/gemma-4-31b-it"
+GATE_MODEL = "deepseek/deepseek-v4-flash"
 MAX_FEED_FETCH_CONCURRENCY = 32
 MAX_GATE_HEADLINES_PER_MARKET = 8
 
@@ -187,8 +187,11 @@ def build_search_query(market: Market) -> str:
     words = [w.strip("?!.,-–") for w in words]
     words = [w for w in words if w and w.lower() not in filler]
 
-    # Cap at 6 words to keep the query focused
-    query = " ".join(words[:6])
+    # Keep enough of the predicate to retain decisive subject terms near the
+    # end of a question (for example, "AI models"). Google News can handle a
+    # short ten-token query; truncating at six turned several live questions
+    # into vague fragments before their subject appeared.
+    query = " ".join(words[:10])
     return query
 
 
@@ -259,7 +262,11 @@ async def llm_gate_batch(
         return [(i + 1) in nums for i in range(len(headlines))]
     except Exception as e:
         log.warning("LLM gate error: %s", e)
-        return [False] * len(headlines)
+        # Retrieval must not fail closed: URLs are marked seen before this call,
+        # so rejecting on a transient model/provider error would discard the
+        # evidence permanently. The analyst can still ignore an irrelevant
+        # headline if the gate temporarily fails.
+        return [True] * len(headlines)
 
 
 # --------------------------------------------------------------------------- #
@@ -449,7 +456,7 @@ class NewsFeed:
         self._all_articles: list[LiveArticle] = []
         self._warmed_up = False
 
-        # LLM client for the gate (cheap model)
+        # LLM client for the headline relevance gate.
         self._llm_client: openai.AsyncOpenAI | None = None
         if api_key:
             self._llm_client = openai.AsyncOpenAI(
