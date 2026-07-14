@@ -649,8 +649,10 @@ impl MmActor {
         }
 
         // 6. Push reference prices (IO)
-        if !ref_prices.is_empty() {
-            let _ = self.sybil_client.set_reference_prices(&ref_prices).await;
+        if !ref_prices.is_empty()
+            && let Err(error) = self.sybil_client.set_reference_prices(&ref_prices).await
+        {
+            warn!(error = %error, prices = ref_prices.len(), "reference-price update failed");
         }
     }
 

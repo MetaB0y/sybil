@@ -90,7 +90,7 @@ impl FeedActor {
         info!("FeedActor started");
         let mut backoff_secs = 1u64;
 
-        loop {
+        'feed: loop {
             // Check for new token subscriptions (non-blocking drain)
             while let Ok(msg) = self.feed_rx.try_recv() {
                 self.handle_message(msg);
@@ -126,29 +126,48 @@ impl FeedActor {
             // immediately, instead of waiting for the current WebSocket to drop.
             let ws_url = self.config.ws_url.clone();
             let token_ids = self.token_ids.clone();
-            let ws_result = tokio::select! {
-                _ = cancel.cancelled() => {
-                    info!("FeedActor shutting down");
-                    return;
-                }
-                msg = self.feed_rx.recv() => {
-                    match msg {
-                        Some(msg) => {
-                            let added = self.handle_message(msg);
-                            if added > 0 {
-                                info!(
-                                    added,
-                                    tokens = self.token_ids.len(),
-                                    "token subscription changed; reconnecting WebSocket"
-                                );
-                            }
-                            backoff_secs = 1;
-                            continue;
-                        }
-                        None => return,
+            let price_tx = self.price_tx.clone();
+            let ws_feed = ws::run_ws_feed(&ws_url, &token_ids, &price_tx);
+            tokio::pin!(ws_feed);
+            let mut rest_refresh = tokio::time::interval(Duration::from_secs(
+                self.config.rest_poll_interval_secs.max(1),
+            ));
+            // The pre-connect snapshot above is the immediate refresh; consume
+            // interval's immediate first tick so the next one observes the
+            // configured cadence.
+            rest_refresh.tick().await;
+
+            let ws_result = loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        info!("FeedActor shutting down");
+                        return;
                     }
+                    msg = self.feed_rx.recv() => {
+                        match msg {
+                            Some(msg) => {
+                                let added = self.handle_message(msg);
+                                if added > 0 {
+                                    info!(
+                                        added,
+                                        tokens = self.token_ids.len(),
+                                        "token subscription changed; reconnecting WebSocket"
+                                    );
+                                    backoff_secs = 1;
+                                    continue 'feed;
+                                }
+                            }
+                            None => return,
+                        }
+                    }
+                    _ = rest_refresh.tick() => {
+                        // WebSocket messages are change-driven. Quiet order
+                        // books still need fresh timestamps so unchanged prices
+                        // do not become falsely stale.
+                        self.poll_rest_once().await;
+                    }
+                    result = &mut ws_feed => break result,
                 }
-                result = ws::run_ws_feed(&ws_url, &token_ids, &self.price_tx) => result,
             };
 
             match ws_result {
@@ -186,6 +205,12 @@ impl FeedActor {
     async fn poll_rest_once(&self) {
         match self.gamma_client.fetch_midpoints(&self.token_ids).await {
             Ok(prices) => {
+                if prices.is_empty() && !self.token_ids.is_empty() {
+                    warn!(
+                        tokens = self.token_ids.len(),
+                        "REST midpoints returned no prices"
+                    );
+                }
                 let mut snapshot = self.price_tx.borrow().clone();
                 let now = now_ms();
                 for (token_id, price) in prices {
