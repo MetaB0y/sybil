@@ -96,6 +96,12 @@ services:
       - "--db-path=/data/decisions.db"
       - "--mapping-path=/polymarket-data/polymarket_mapping.json"
       - "--metrics-port=9101"
+      # Keep the live bot cohort aligned with the deliberately small curated
+      # mirror. This also prevents pre-reset legacy mirror rows from silently
+      # returning to Arena after an opt-in experiment is retired.
+      - "--market-profile=important-news"
+      - "--max-markets=12"
+      - "--require-reference-prices"
 
     logging: *default-logging
   grafana:

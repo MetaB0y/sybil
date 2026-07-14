@@ -96,6 +96,22 @@ grep -Fq 'targets: ["sybil-arena:9101"]' deploy/prometheus.yml \
     || fail "VictoriaMetrics does not scrape the arena metrics exporter"
 pass "arena metrics are enabled and scraped in dev/prod compose"
 
+prod_arena_service_block=$(
+    awk '
+        /^  sybil-arena:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.prod.yml
+)
+for argument in \
+    '"--market-profile=important-news"' \
+    '"--max-markets=12"' \
+    '"--require-reference-prices"'; do
+    grep -Fq -- "$argument" <<<"$prod_arena_service_block" \
+        || fail "production arena does not pin focused reference-backed market selection ($argument)"
+done
+pass "production arena selects a bounded reference-backed news cohort"
+
 arena_service_block=$(
     awk '
         /^  sybil-arena:/ { in_service = 1; next }
