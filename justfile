@@ -322,6 +322,10 @@ prover-daemon-mock token source_url="http://127.0.0.1:3000" db="target/sybil-pro
 prover-daemon-stark token source_url="http://127.0.0.1:3000" db="target/sybil-prover/prover.redb" artifacts_dir="target/sybil-prover/artifacts" bind="127.0.0.1:3002" epoch_blocks="4":
     cargo run --release -p sybil-prover -- daemon --db {{db}} --artifacts-dir {{artifacts_dir}} --bind {{bind}} --auth-token {{token}} --source-url {{source_url}} --source-token {{token}} --proof-kind stark --epoch-blocks {{epoch_blocks}}
 
+# Run a bounded persistent sequencer -> mock prover multi-epoch restart soak.
+prover-compose-soak:
+    ./scripts/prover-compose-soak.sh
+
 # Write the canonical witness payload and provider-neutral DA manifest from prepared guest input
 prover-publish-da guest_input="target/sybil-guest-input.msgpack" payload="target/sybil-da-witness.bin" manifest="target/sybil-da-manifest.json":
     cargo run -p sybil-prover -- publish-da --guest-input {{guest_input}} --payload {{payload}} --manifest {{manifest}}

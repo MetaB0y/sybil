@@ -53,6 +53,19 @@ Start at 1–4 blocks for real STARK measurements. Increase the target only when
 measured proof throughput stays ahead of block ingress and peak RSS/disk have
 headroom. A new value affects only unassembled work.
 
+The bounded Compose acceptance soak runs only a persistent local sequencer and
+the mock daemon, proves several four-block epochs, hard-kills the prover while
+block production continues, restarts it from redb, and asserts a contiguous
+proven prefix:
+
+```bash
+just prover-compose-soak
+```
+
+It uses an isolated project and bind-mounted directories under `target/`; it
+does not touch the normal Compose volumes. This validates orchestration and
+recovery, not STARK performance.
+
 Do not use `--memory-limit-mib` as the primary production RSS control. OpenVM
 reserves substantially more virtual address space than its resident set, so an
 apparently generous `RLIMIT_AS` can abort a proof well below the host's real

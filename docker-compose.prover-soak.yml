@@ -1,0 +1,54 @@
+version: "2.4"
+
+services:
+  sybil-api:
+    image: sybil-api:latest
+    environment:
+      SYBIL_PORT: "3000"
+      SYBIL_DEV_MODE: "true"
+      SYBIL_DATA_DIR: "/data"
+      SYBIL_BLOCK_INTERVAL_MS: "500"
+      SYBIL_SERVICE_TOKEN: "prover-soak-service"
+      SYBIL_WEBAUTHN_RP_ID: "localhost"
+      SYBIL_WEBAUTHN_ORIGIN: "http://localhost"
+      RUST_LOG: "warn"
+    volumes:
+      - ${PROVER_SOAK_DATA_ROOT}/sequencer:/data
+    mem_limit: "1280m"
+    memswap_limit: "1600m"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/v1/health"]
+      interval: 1s
+      timeout: 1s
+      retries: 90
+    restart: "no"
+
+  sybil-prover:
+    image: sybil-api:latest
+    entrypoint: ["sybil-prover"]
+    command:
+      - "daemon"
+      - "--db=/data/prover.redb"
+      - "--artifacts-dir=/artifacts"
+      - "--bind=0.0.0.0:3002"
+      - "--auth-token=prover-soak-admin"
+      - "--source-url=http://sybil-api:3000"
+      - "--source-token=prover-soak-service"
+      - "--proof-kind=mock"
+      - "--epoch-blocks=4"
+      - "--poll-ms=50"
+      - "--guest-pins=/etc/sybil/sybil-openvm-guest.commit.json"
+    volumes:
+      - ${PROVER_SOAK_DATA_ROOT}/prover:/data
+      - ${PROVER_SOAK_DATA_ROOT}/artifacts:/artifacts
+    depends_on:
+      sybil-api:
+        condition: service_healthy
+    mem_limit: "256m"
+    memswap_limit: "256m"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3002/readyz"]
+      interval: 1s
+      timeout: 1s
+      retries: 60
+    restart: "no"

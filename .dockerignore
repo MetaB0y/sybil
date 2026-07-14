@@ -8,6 +8,15 @@
 !crates/**
 !tools/
 !tools/**
+!zk/
+zk/*
+!zk/openvm-guest/
+zk/openvm-guest/*
+!zk/openvm-guest/openvm/
+zk/openvm-guest/openvm/*
+!zk/openvm-guest/openvm/release/
+zk/openvm-guest/openvm/release/*
+!zk/openvm-guest/openvm/release/sybil-openvm-guest.commit.json
 
 # Do not re-include generated artifacts nested inside an allowed crate.
 crates/**/target/
