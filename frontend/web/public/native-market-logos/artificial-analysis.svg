@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Artificial Analysis">
+  <rect width="64" height="64" rx="8" fill="#fff"/>
+  <g transform="translate(8 8) scale(.9087)">
+    <path d="M46.2194 52.8204H52.8194V39.6104H39.6094V52.8204H46.2194Z" fill="#8842FD"/>
+    <path d="M26.41 0 13.2 13.2H0V26.41H19.81L33.01 13.2H39.61V0H26.41Z" fill="#8842FD"/>
+    <path d="M26.41 26.4102 13.2 39.6102H0V52.8202H19.81L33.01 39.6102H39.61V26.4102H26.41Z" fill="#8842FD"/>
+    <path d="M52.8194 26.4102V13.2002H39.6094V26.4102H52.8194Z" fill="#8842FD"/>
+  </g>
+</svg>
