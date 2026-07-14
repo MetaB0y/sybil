@@ -404,6 +404,13 @@ impl SequencerActorState {
         metrics::gauge!("sybil_state_accounts_total").set(bp.witness.post_state.len() as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
         metrics::gauge!("sybil_recent_block_cache_len").set(self.recent_blocks.len() as f64);
+        let recent_history = self.sequencer.analytics().recent_history_cache_counts();
+        metrics::gauge!("sybil_recent_price_point_entries").set(recent_history.price_points as f64);
+        metrics::gauge!("sybil_recent_fill_entries").set(recent_history.fills as f64);
+        metrics::gauge!("sybil_recent_equity_point_entries")
+            .set(recent_history.equity_points as f64);
+        metrics::gauge!("sybil_recent_account_event_entries")
+            .set(recent_history.account_events as f64);
 
         self.record_per_market_metrics(bp);
     }

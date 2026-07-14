@@ -4,7 +4,7 @@
 rule_files:
   - ../rules.yml
 
-evaluation_interval: 10m
+evaluation_interval: 1m
 
 tests:
   - interval: 10m
@@ -39,9 +39,9 @@ tests:
   - interval: 1m
     input_series:
       - series: 'sybil_http_requests_total{job="sybil-api",instance="sybil-api:3000",path="/v1/bridge/deposits",status="500",method="POST"}'
-        values: "0+0x4 1+0x6"
+        values: "0+0x4 1+1x10"
     alert_rule_test:
-      - eval_time: 7m
+      - eval_time: 8m
         alertname: L1DepositPipelineStalled
         exp_alerts:
           - exp_labels:
@@ -50,7 +50,6 @@ tests:
             exp_annotations:
               summary: "L1 deposit pipeline is stalled"
               description: "The service-tier deposit submit path returned a server error. Unlike an unresolved-key 404, this is not a quarantine disposition and the gapless indexer will retry the head deposit."
-
   - interval: 1m
     input_series:
       - series: 'sybil_http_requests_total{job="sybil-api",instance="sybil-api:3000",path="/v1/bridge/accounts/by-key/{key_hex}",status="404",method="GET"}'

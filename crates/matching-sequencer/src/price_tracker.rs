@@ -380,6 +380,11 @@ impl PriceTracker {
         &self.pending_price_points
     }
 
+    /// Number of price points held by the bounded in-process recent cache.
+    pub fn retained_point_count(&self) -> usize {
+        self.price_history.values().map(Vec::len).sum()
+    }
+
     pub fn clear_pending(&mut self) {
         self.pending_price_points.clear();
     }

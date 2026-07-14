@@ -140,6 +140,11 @@ impl FillRecorder {
         &self.pending_delta
     }
 
+    /// Number of fill records held by the bounded in-process recent cache.
+    pub fn retained_record_count(&self) -> usize {
+        self.account_fills.values().map(Vec::len).sum()
+    }
+
     pub fn clear_pending(&mut self) {
         self.pending_delta.clear();
     }

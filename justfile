@@ -578,12 +578,16 @@ monitoring-check: compose-smoke
     if command -v promtool >/dev/null 2>&1; then
         promtool check config deploy/prometheus.yml
         promtool check rules deploy/vmalert/rules.yml
-        promtool test rules deploy/vmalert/tests/arena-liveness_test.yml
+        for test_file in deploy/vmalert/tests/*_test.yml; do
+            promtool test rules "$test_file"
+        done
     elif command -v docker >/dev/null 2>&1; then
         image="prom/prometheus:v2.52.0"
         docker run --rm --entrypoint promtool -v "$PWD/deploy:/work:ro" "$image" check config /work/prometheus.yml
         docker run --rm --entrypoint promtool -v "$PWD/deploy/vmalert:/work:ro" "$image" check rules /work/rules.yml
-        docker run --rm --entrypoint promtool -v "$PWD/deploy/vmalert:/work:ro" "$image" test rules /work/tests/arena-liveness_test.yml
+        for test_file in deploy/vmalert/tests/*_test.yml; do
+            docker run --rm --entrypoint promtool -v "$PWD/deploy/vmalert:/work:ro" "$image" test rules "/work/tests/$(basename "$test_file")"
+        done
     else
         echo "monitoring-check requires promtool or Docker" >&2
         exit 2

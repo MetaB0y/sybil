@@ -9,13 +9,53 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
+      - series: 'sybil_process_resident_memory_bytes{job="sybil-api",instance="sybil-api:3000"}'
+        values: "419430400+2097152x40"
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: SybilApiMemoryGrowingFast
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: SybilApiMemoryGrowingFast
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-api"
+              instance: "sybil-api:3000"
+              severity: warning
+              component: sequencer
+            exp_annotations:
+              summary: "sybil-api RSS is growing persistently"
+              description: "RSS has grown faster than 32 MiB/hour for 30m. Correlate the recent-history cache, archive, outbox, actor queue, and workload panels before a high absolute-memory alert fires."
+
+  - interval: 1m
+    input_series:
+      - series: 'node_vmstat_oom_kill{job="node",instance="node-exporter:9100"}'
+        values: "0+0x4 1+0x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HostOomKill
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: HostOomKill
+        exp_alerts:
+          - exp_labels:
+              job: "node"
+              instance: "node-exporter:9100"
+              severity: critical
+              component: host
+            exp_annotations:
+              summary: "The kernel killed a process for out-of-memory"
+              description: "node_vmstat_oom_kill increased. Inspect the kernel journal and the Grafana resource panels immediately; container health can remain stale after a global OOM kill."
+
+  - interval: 1m
+    input_series:
       - series: 'sybil_state_accounts_total{job="sybil-api",instance="sybil-api:3000"}'
         values: "0+0x10 0+10x20"
     alert_rule_test:
       - eval_time: 20m
         alertname: SequencerAccountStockGrowingFast
         exp_alerts: []
-      - eval_time: 26m
+      - eval_time: 28m
         alertname: SequencerAccountStockGrowingFast
         exp_alerts:
           - exp_labels:

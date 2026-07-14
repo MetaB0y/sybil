@@ -372,7 +372,17 @@ groups:
           component: sequencer
         annotations:
           summary: "sybil-api memory is near its container limit"
-          description: "sybil-api RSS is above 800 MiB and close to the 900 MiB container limit (current: {{ $value | humanize1024 }}B)."
+          description: "sybil-api RSS is above 800 MiB on a host where the current container limit is 1.25 GiB; global host pressure may kill it before the cgroup limit (current: {{ $value | humanize1024 }}B)."
+
+      - alert: SybilApiMemoryGrowingFast
+        expr: deriv(sybil_process_resident_memory_bytes[30m]) * 3600 > 32 * 1024 * 1024
+        for: 30m
+        labels:
+          severity: warning
+          component: sequencer
+        annotations:
+          summary: "sybil-api RSS is growing persistently"
+          description: "RSS has grown faster than 32 MiB/hour for 30m. Correlate the recent-history cache, archive, outbox, actor queue, and workload panels before a high absolute-memory alert fires."
 
       - alert: HostMemoryLow
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
@@ -399,6 +409,26 @@ groups:
         annotations:
           summary: "Host swap usage is high"
           description: "More than half of host swap is in use. This often precedes scrape timeouts and SSH/API stalls."
+
+      - alert: HostMemoryPressureStalled
+        expr: rate(node_pressure_memory_stalled_seconds_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "Host is stalling on memory pressure"
+          description: "Full memory-pressure stalls consumed more than 5% of wall time for 5m. Scrapes and actor queues may become misleading after this point; shed load or add memory."
+
+      - alert: HostOomKill
+        expr: increase(node_vmstat_oom_kill[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "The kernel killed a process for out-of-memory"
+          description: "node_vmstat_oom_kill increased. Inspect the kernel journal and the Grafana resource panels immediately; container health can remain stale after a global OOM kill."
 
       - alert: HostCpuHigh
         expr: 1 - avg by (instance, job) (rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.85

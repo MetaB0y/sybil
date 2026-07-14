@@ -187,6 +187,18 @@ impl AnalyticsState {
         self.price_tracker.price_history(market_id, from_ms, to_ms)
     }
 
+    /// Sizes of the bounded in-process recent-history caches. These are
+    /// operational diagnostics only; durable product history is owned by
+    /// `sybil-history` and is not included here.
+    pub fn recent_history_cache_counts(&self) -> RecentHistoryCacheCounts {
+        RecentHistoryCacheCounts {
+            price_points: self.price_tracker.retained_point_count(),
+            fills: self.fill_recorder.retained_record_count(),
+            equity_points: self.equity_tracker.retained_point_count(),
+            account_events: self.account_event_log.retained_event_count(),
+        }
+    }
+
     pub fn price_n_hours_ago(
         &self,
         market_id: MarketId,
@@ -751,4 +763,12 @@ impl AnalyticsState {
     pub fn seed_equity_known(&mut self, ids: impl IntoIterator<Item = AccountId>) {
         self.equity_tracker.seed_known(ids);
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RecentHistoryCacheCounts {
+    pub price_points: usize,
+    pub fills: usize,
+    pub equity_points: usize,
+    pub account_events: usize,
 }
