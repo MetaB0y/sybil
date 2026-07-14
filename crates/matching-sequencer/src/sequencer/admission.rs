@@ -106,7 +106,7 @@ impl GroupCoverageTracker {
 
 impl BlockSequencer {
     pub fn try_admit_direct(&mut self, submission: OrderSubmission, now_ms: u64) -> AdmitOutcome {
-        self.try_admit_direct_with_ioc(submission, now_ms, false)
+        self.try_admit_direct_with_ioc(submission, now_ms, false, false)
     }
 
     /// Admit an IOC submission using the currently committed height as the
@@ -114,7 +114,18 @@ impl BlockSequencer {
     /// submission, so a block cannot commit between deriving the expiry and
     /// admitting (or deferring) the order.
     pub fn try_admit_ioc(&mut self, submission: OrderSubmission, now_ms: u64) -> AdmitOutcome {
-        self.try_admit_direct_with_ioc(submission, now_ms, true)
+        self.try_admit_direct_with_ioc(submission, now_ms, true, false)
+    }
+
+    /// Validate and assign an IOC actor package without ever inserting it into
+    /// the resting fast path. Actor epochs are block-targeted atomic packages,
+    /// including the one-market/one-order case.
+    pub(in crate::sequencer) fn prepare_actor_ioc_submission(
+        &mut self,
+        submission: OrderSubmission,
+        now_ms: u64,
+    ) -> AdmitOutcome {
+        self.try_admit_direct_with_ioc(submission, now_ms, true, true)
     }
 
     fn try_admit_direct_with_ioc(
@@ -122,6 +133,7 @@ impl BlockSequencer {
         mut submission: OrderSubmission,
         now_ms: u64,
         is_ioc: bool,
+        force_deferred: bool,
     ) -> AdmitOutcome {
         if is_ioc {
             // IOC means the first batch eligible after this atomic admission.
@@ -161,10 +173,17 @@ impl BlockSequencer {
                         status.as_str()
                     )));
                 }
+                if !self.liquidity_universe.permits(market_id) {
+                    return AdmitOutcome::Rejected(SequencerError::InvalidMarketState(format!(
+                        "market {} is not in active liquidity universe generation {}",
+                        market_id.0, self.liquidity_universe.generation
+                    )));
+                }
             }
         }
 
-        let eligible = submission.mm_constraint.is_none()
+        let eligible = !force_deferred
+            && submission.mm_constraint.is_none()
             && submission.orders.len() == 1
             && submission.orders[0].num_markets == 1;
         let order_ids = self.assign_submission_order_ids(&mut submission);

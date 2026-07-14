@@ -274,7 +274,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     let writer = spawn_api_with_env(
         root.data_dir(),
         root.admin_key_path(),
-        50,
+        1_000,
         &test_admission_env,
     )
     .await;
@@ -534,7 +534,7 @@ async fn acknowledged_dev_api_writes_survive_kill_and_process_restart_before_nex
     .await;
     assert_eq!(post_restart_pending.as_array().unwrap().len(), 1);
 
-    let committer = restart_api_with_env(reader, &root, 50, &test_admission_env).await;
+    let committer = restart_api_with_env(reader, &root, 1_000, &test_admission_env).await;
     wait_for_height_at_least(&client, &committer.base_url, pre_write_height + 1).await;
     pause_blocks(&client, &committer.base_url).await;
     let committed_funding_history = get_json(
@@ -561,8 +561,13 @@ async fn extracted_history_survives_process_restart_and_canonical_block_pruning(
         .build()
         .unwrap();
 
-    let writer =
-        spawn_api_with_env(root.data_dir(), root.admin_key_path(), 50, &retention_env).await;
+    let writer = spawn_api_with_env(
+        root.data_dir(),
+        root.admin_key_path(),
+        1_000,
+        &retention_env,
+    )
+    .await;
     wait_for_height_at_least(&client, &writer.base_url, 1).await;
     pause_blocks(&client, &writer.base_url).await;
 
@@ -695,7 +700,7 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
         .build()
         .unwrap();
 
-    let writer = spawn_api(root.data_dir(), root.admin_key_path(), 50).await;
+    let writer = spawn_api(root.data_dir(), root.admin_key_path(), 1_000).await;
     wait_for_height_at_least(&client, &writer.base_url, 1).await;
     pause_blocks(&client, &writer.base_url).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -785,7 +790,7 @@ async fn deferred_bundle_revalidates_against_replayed_admit_after_process_restar
         "deferred bundle must not appear as directly admitted resting orders"
     );
 
-    let committer = restart_api(writer, &root, 50).await;
+    let committer = restart_api(writer, &root, 1_000).await;
     let target_height = pre_write_height + 1;
     wait_for_height_at_least(&client, &committer.base_url, target_height).await;
     pause_blocks(&client, &committer.base_url).await;

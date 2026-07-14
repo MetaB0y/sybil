@@ -8,13 +8,14 @@ use crate::order_book::RestingOrder;
 use crate::store::{AcknowledgedWrite, SequencedAcknowledgedWrite};
 use crate::validation::{validate_order, validate_order_with_reservation};
 use matching_engine::{
-    MarketId, MarketSet, MmId, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, notional_nanos,
-    outcome_buy, outcome_sell, shares_to_qty,
+    MarketId, MarketSet, MmId, MmSide, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty,
+    notional_nanos, outcome_buy, outcome_sell, shares_to_qty,
 };
 use matching_scenarios::{ScenarioConfig, generate_scenario};
 use proptest::prelude::*;
 use sybil_oracle::{
-    AdminOracle, ResolutionAttestation, ResolutionPolicy, ResolutionTemplate, TemplateId,
+    AdminOracle, MarketStatus, ResolutionAttestation, ResolutionPolicy, ResolutionTemplate,
+    TemplateId,
 };
 
 fn setup() -> (MarketSet, MarketId) {
@@ -285,6 +286,7 @@ fn restored_state_with_resting_orders(
         resolution_templates: Vec::new(),
         acknowledged_writes: Vec::new(),
         bridge_state: seq.bridge_state().clone(),
+        liquidity_universe: seq.liquidity_universe.clone(),
         analytics: restored_analytics_from(seq),
     }
 }
@@ -1300,9 +1302,10 @@ fn placed_order_stats_count_mm_batch_orders() {
     assert_eq!(m0_stats.placed, 1);
     assert_eq!(seq.analytics().platform_order_stats(1_000).0.placed, 1);
     assert_eq!(
-        production.analytics.unique_placers, 0,
-        "MM orders count as orders but not as unique traders"
+        production.analytics.unique_placers, 1,
+        "the MM is a real unique trader"
     );
+    assert_eq!(seq.analytics().trader_count(m0), 1);
     // MM flash orders are counted in matched/unmatched too — they live one
     // block and resolve in-place, so exactly one of the two ticks. This is
     // the property that lets distinct-placed reconcile with matched +
@@ -1714,6 +1717,7 @@ fn test_resting_orders_survive_restart_and_match() {
         resolution_templates: Vec::new(),
         acknowledged_writes: Vec::new(),
         bridge_state: BridgeState::default(),
+        liquidity_universe: Default::default(),
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: seq_a.analytics().last_clearing_prices().clone(),
             market_volumes: seq_a.analytics().market_volumes().clone(),
@@ -1835,6 +1839,7 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
             AcknowledgedWrite::DeferredBundle(deferred),
         ]),
         bridge_state: BridgeState::default(),
+        liquidity_universe: Default::default(),
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: committed.analytics().last_clearing_prices().clone(),
             market_volumes: committed.analytics().market_volumes().clone(),
@@ -1941,6 +1946,7 @@ fn restored_pending_bundle_revalidates_against_replayed_admit_reservations() {
             AcknowledgedWrite::DeferredBundle(deferred),
         ]),
         bridge_state: BridgeState::default(),
+        liquidity_universe: Default::default(),
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: committed.analytics().last_clearing_prices().clone(),
             market_volumes: committed.analytics().market_volumes().clone(),
@@ -3639,8 +3645,8 @@ fn open_batch_unique_placers_filters_resting_orders_by_market() {
         ));
     }
 
-    assert_eq!(seq.open_batch_unique_placers(m0), 2);
-    assert_eq!(seq.open_batch_unique_placers(m1), 1);
+    assert_eq!(seq.open_batch_unique_placers(m0, 0), 2);
+    assert_eq!(seq.open_batch_unique_placers(m1, 0), 1);
 }
 
 #[test]
@@ -4323,4 +4329,299 @@ fn portfolio_summary_values_positions_at_book_midpoint_mark() {
         Nanos(500_000_000),
         "portfolio must value the YES position at the 50c book-midpoint mark, not the old clearing price"
     );
+}
+
+#[test]
+fn liquidity_universe_activates_atomically_and_complete_sets_round_trip_exactly() {
+    let (mut seq, account_id, market_id) =
+        sequencer_with_single_market(10 * NANOS_PER_DOLLAR as i64);
+    let snapshot = seq
+        .activate_liquidity_universe(1, [7; 32], vec![market_id])
+        .unwrap();
+    assert_eq!(snapshot.activated_at_height, 1);
+    assert_eq!(seq.liquidity_universe().generation, 0);
+
+    let activation = seq.produce_block(vec![], 1_000);
+    assert_eq!(activation.block.header.height, 1);
+    assert_eq!(seq.liquidity_universe().generation, 1);
+    assert_eq!(seq.liquidity_universe().market_ids, vec![market_id]);
+
+    let before = seq.accounts.get(account_id).unwrap().balance;
+    let quantity = Qty(q(2));
+    seq.collateralize_complete_set(account_id, market_id, quantity)
+        .unwrap();
+    let collateralized = seq.accounts.get(account_id).unwrap();
+    assert_eq!(collateralized.balance, before - 2 * NANOS_PER_DOLLAR as i64);
+    assert_eq!(collateralized.position(market_id, 0), quantity.0 as i64);
+    assert_eq!(collateralized.position(market_id, 1), quantity.0 as i64);
+
+    seq.redeem_complete_set(account_id, market_id, quantity)
+        .unwrap();
+    let redeemed = seq.accounts.get(account_id).unwrap();
+    assert_eq!(redeemed.balance, before);
+    assert_eq!(redeemed.position(market_id, 0), 0);
+    assert_eq!(redeemed.position(market_id, 1), 0);
+
+    let production = seq.produce_block(vec![], 2_000);
+    assert_eq!(production.block.system_events.len(), 2);
+    let verification = sybil_verifier::verify_block(&production.witness);
+    assert!(verification.valid, "{verification:?}");
+}
+
+#[test]
+fn liquidity_universe_effective_view_filters_terminal_markets_but_retains_commitment() {
+    let (mut seq, _account_id, market_id) =
+        sequencer_with_single_market(10 * NANOS_PER_DOLLAR as i64);
+    seq.activate_liquidity_universe(1, [8; 32], vec![market_id])
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    seq.lifecycle
+        .set_market_status(market_id, MarketStatus::Voided);
+
+    assert!(seq.liquidity_universe().market_ids.is_empty());
+    assert_eq!(
+        seq.committed_liquidity_universe().market_ids,
+        vec![market_id]
+    );
+}
+
+fn one_market_noise_epoch(
+    seq: &BlockSequencer,
+    account_id: AccountId,
+    market_id: MarketId,
+    epoch_id: &str,
+    valid_until_ms: u64,
+) -> ActorEpochSubmission {
+    ActorEpochSubmission {
+        principal_id: "noise-0".to_string(),
+        role: ActorRole::Noise,
+        epoch_id: epoch_id.to_string(),
+        payload_digest: *blake3::hash(epoch_id.as_bytes()).as_bytes(),
+        target_height: seq.height() + 1,
+        valid_until_ms,
+        universe_generation: seq.liquidity_universe().generation,
+        covered_market_ids: vec![market_id],
+        submission: OrderSubmission {
+            account_id,
+            orders: vec![outcome_buy(
+                &seq.markets,
+                0,
+                market_id,
+                0,
+                600_000_000,
+                q(1),
+            )],
+            mm_constraint: None,
+        },
+    }
+}
+
+#[test]
+fn acknowledged_actor_epoch_replays_after_restart() {
+    let (mut seq, _manual_id, market_id) =
+        sequencer_with_single_market(10 * NANOS_PER_DOLLAR as i64);
+    let noise_id = seq.accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+    seq.activate_liquidity_universe(1, [2; 32], vec![market_id])
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    let mut staged = seq.clone();
+    staged
+        .stage_actor_epoch(
+            one_market_noise_epoch(&seq, noise_id, market_id, "restart-noise", 10_000),
+            1_100,
+        )
+        .unwrap();
+    let epoch = staged
+        .pending_actor_epoch("noise-0", 2)
+        .expect("staged epoch exists")
+        .clone();
+    let order_id = epoch.submission.orders[0].id;
+
+    let mut state =
+        restored_state_with_resting_orders(&seq, seq.markets.clone(), seq.order_book.snapshot());
+    state.acknowledged_writes =
+        sequenced_acknowledged_writes(vec![AcknowledgedWrite::ActorEpoch(epoch)]);
+    let oracle: Arc<dyn Oracle> = Arc::new(AdminOracle::new());
+    let mut restored = BlockSequencer::restore(state, oracle, SequencerConfig::default());
+
+    assert_eq!(restored.open_batch_unique_placers(market_id, 1_200), 1);
+    assert!(restored.next_order_id() > order_id);
+    let production = restored.produce_block(vec![], 2_000);
+    assert!(
+        production
+            .witness
+            .orders
+            .iter()
+            .any(|order| order.order.id == order_id)
+    );
+    assert!(sybil_verifier::verify_full(&production.witness, false).valid);
+}
+
+#[test]
+fn open_batch_and_committed_trader_counts_include_actor_mm_and_noise() {
+    let (mut seq, manual_id, market_id) =
+        sequencer_with_single_market(10 * NANOS_PER_DOLLAR as i64);
+    let noise_id = seq.accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+    let mm_account_id = seq.accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+    seq.activate_liquidity_universe(1, [3; 32], vec![market_id])
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    let manual = outcome_buy(&seq.markets, 0, market_id, 0, 550_000_000, q(1));
+    assert!(matches!(
+        seq.try_admit_direct(single_order_sub(manual_id, manual), 1_100),
+        AdmitOutcome::Admitted { .. }
+    ));
+
+    let noise = one_market_noise_epoch(&seq, noise_id, market_id, "noise", 10_000);
+    seq.stage_actor_epoch(noise, 1_100).unwrap();
+
+    let mm_order = outcome_buy(&seq.markets, 0, market_id, 0, 600_000_000, q(1));
+    let mut mm_constraint = MmConstraint::new(MmId(mm_account_id.0), Nanos(NANOS_PER_DOLLAR));
+    mm_constraint.add_order(0, MmSide::BuyYes);
+    let mm_epoch = ActorEpochSubmission {
+        principal_id: "mm".to_string(),
+        role: ActorRole::MarketMaker,
+        epoch_id: "mm".to_string(),
+        payload_digest: *blake3::hash(b"mm").as_bytes(),
+        target_height: seq.height() + 1,
+        valid_until_ms: 10_000,
+        universe_generation: seq.liquidity_universe().generation,
+        covered_market_ids: vec![market_id],
+        submission: OrderSubmission {
+            account_id: mm_account_id,
+            orders: vec![mm_order],
+            mm_constraint: Some(mm_constraint),
+        },
+    };
+    seq.stage_actor_epoch(mm_epoch, 1_100).unwrap();
+
+    assert_eq!(seq.open_batch_unique_placers(market_id, 1_200), 3);
+    assert_eq!(seq.open_batch_unique_placers(market_id, 10_001), 1);
+
+    let problem = seq.open_batch_problem(1_200);
+    assert_eq!(problem.orders.len(), 3);
+    assert_eq!(problem.mm_constraints.len(), 1);
+    assert_eq!(problem.mm_constraints[0].order_ids.len(), 1);
+
+    let production = seq.produce_block(vec![], 2_000);
+    assert_eq!(production.analytics.unique_placers, 3);
+    assert_eq!(production.analytics.placers_by_market[&market_id], 3);
+    assert_eq!(seq.analytics().trader_count(market_id), 3);
+    assert_eq!(seq.analytics().platform_trader_count(), 3);
+}
+
+#[test]
+fn filled_order_analytics_attribute_mm_noise_and_organic_flow() {
+    let (mut seq, organic_id, market_id) =
+        sequencer_with_single_market(10 * NANOS_PER_DOLLAR as i64);
+    let noise_id = seq.accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+    let mm_account_id = seq.accounts.create_account(10 * NANOS_PER_DOLLAR as i64);
+    seq.activate_liquidity_universe(1, [4; 32], vec![market_id])
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+    seq.collateralize_complete_set(mm_account_id, market_id, Qty(q(2)))
+        .unwrap();
+
+    let organic = outcome_buy(&seq.markets, 0, market_id, 0, 650_000_000, q(1));
+    assert!(matches!(
+        seq.try_admit_direct(single_order_sub(organic_id, organic), 1_100),
+        AdmitOutcome::Admitted { .. }
+    ));
+    let mut noise = one_market_noise_epoch(&seq, noise_id, market_id, "noise-fill", 10_000);
+    noise.submission.orders = vec![outcome_buy(
+        &seq.markets,
+        0,
+        market_id,
+        0,
+        700_000_000,
+        q(1),
+    )];
+    seq.stage_actor_epoch(noise, 1_100).unwrap();
+
+    let mm_order = outcome_sell(&seq.markets, 0, market_id, 0, 400_000_000, q(2));
+    let mut mm_constraint = MmConstraint::new(MmId(mm_account_id.0), Nanos(10 * NANOS_PER_DOLLAR));
+    mm_constraint.add_order(0, MmSide::SellYes);
+    seq.stage_actor_epoch(
+        ActorEpochSubmission {
+            principal_id: "mm".to_string(),
+            role: ActorRole::MarketMaker,
+            epoch_id: "mm-fill".to_string(),
+            payload_digest: *blake3::hash(b"mm-fill").as_bytes(),
+            target_height: seq.height() + 1,
+            valid_until_ms: 10_000,
+            universe_generation: seq.liquidity_universe().generation,
+            covered_market_ids: vec![market_id],
+            submission: OrderSubmission {
+                account_id: mm_account_id,
+                orders: vec![mm_order],
+                mm_constraint: Some(mm_constraint),
+            },
+        },
+        1_100,
+    )
+    .unwrap();
+
+    let production = seq.produce_block(vec![], 2_000);
+    assert_eq!(
+        production.analytics.mm_matched_orders_by_market[&market_id],
+        1
+    );
+    assert_eq!(
+        production.analytics.noise_matched_orders_by_market[&market_id],
+        1
+    );
+    assert_eq!(
+        production.analytics.organic_matched_orders_by_market[&market_id],
+        1
+    );
+    assert!(production.analytics.mm_fill_notional_by_market[&market_id] > 0);
+    assert!(production.analytics.noise_fill_notional_by_market[&market_id] > 0);
+    assert!(production.analytics.organic_fill_notional_by_market[&market_id] > 0);
+}
+
+#[test]
+fn one_order_actor_epoch_is_deferred_atomic_ioc_and_never_rests() {
+    let (mut seq, account_id, market_id) =
+        sequencer_with_single_market(10 * NANOS_PER_DOLLAR as i64);
+    seq.activate_liquidity_universe(1, [1; 32], vec![market_id])
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    let epoch = one_market_noise_epoch(&seq, account_id, market_id, "first", 10_000);
+    let ids = seq.stage_actor_epoch(epoch, 1_100).unwrap();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(
+        seq.order_book.len(),
+        0,
+        "actor package bypassed the resting fast path"
+    );
+
+    let production = seq.produce_block(vec![], 2_000);
+    assert_eq!(production.block.header.order_count, 1);
+    assert_eq!(
+        seq.order_book.len(),
+        0,
+        "IOC actor order must expire in its target block"
+    );
+}
+
+#[test]
+fn stale_actor_epoch_is_dropped_and_idempotent_retry_reuses_ids() {
+    let (mut seq, account_id, market_id) =
+        sequencer_with_single_market(10 * NANOS_PER_DOLLAR as i64);
+    seq.activate_liquidity_universe(1, [2; 32], vec![market_id])
+        .unwrap();
+    seq.produce_block(vec![], 1_000);
+
+    let epoch = one_market_noise_epoch(&seq, account_id, market_id, "retry", 1_500);
+    let first_ids = seq.stage_actor_epoch(epoch.clone(), 1_100).unwrap();
+    let retry_ids = seq.stage_actor_epoch(epoch, 1_200).unwrap();
+    assert_eq!(first_ids, retry_ids);
+
+    let production = seq.produce_block(vec![], 2_000);
+    assert_eq!(production.block.header.order_count, 0);
+    assert_eq!(seq.order_book.len(), 0);
 }

@@ -1,10 +1,10 @@
 # Sybil system specification
 
-> **Executive summary:** Sybil is an off-chain prediction-market exchange built around frequent batch auctions, deterministic integer settlement, authenticated state, and validity proofs. A single-writer sequencer admits orders, clears each eligible batch with a welfare solver, commits the next state behind a redb/qMDB fence, and emits a canonical block plus `BlockWitness` v10. Native verification checks each transition; the OpenVM guest verifies and folds contiguous multi-block epochs. Ethereum holds collateral and accepted roots; canonical witness publication supports audit and recovery.
+> **Executive summary:** Sybil is an off-chain prediction-market exchange built around frequent batch auctions, deterministic integer settlement, authenticated state, and validity proofs. A single-writer sequencer admits orders, clears each eligible batch with a welfare solver, commits the next state behind a redb/qMDB fence, and emits a canonical block plus `BlockWitness` v11. Native verification checks each transition; the OpenVM guest verifies and folds contiguous multi-block epochs. Ethereum holds collateral and accepted roots; canonical witness publication supports audit and recovery.
 
 This is the connected implementation guide. Start with the [Architecture Guide](README.md) for intuition and [Sybil Architecture](architecture/Sybil%20Architecture.md) for the full map and reading paths. Per-concept notes and ADRs own detailed rationale. Code, canonical schemas, and tests are the final source of truth.
 
-Status snapshot: **2026-07-14**, through witness v10 client-action authorization, the streamed epoch guest, transactional proof-job delivery, and the durable STARK-first prover daemon.
+Status snapshot: **2026-07-15**, through witness v11 client-action authorization and actor-liquidity commitments, the streamed epoch guest, transactional proof-job delivery, and the durable STARK-first prover daemon.
 
 ---
 
@@ -26,7 +26,7 @@ flowchart LR
     SOLVE --> SETTLE["Integer settlement"]
     SETTLE --> STORE["qMDB + redb fence"]
     STORE --> BLOCK["SealedBlock"]
-    STORE --> WIT["BlockWitness v10"]
+    STORE --> WIT["BlockWitness v11"]
     WIT --> VERIFY["Native + OpenVM verification"]
     VERIFY --> PROVER["Proof / DA artifacts"]
     PROVER --> L1["SybilSettlement + SybilVault"]
@@ -148,13 +148,13 @@ projections are validity inputs or recovery DA.
 
 Canonical witness import can initialize a fresh store at a verified height. This is the implemented disaster-recovery basis for operator replacement.
 
-## 6. Blocks, state, and witness v10
+## 6. Blocks, state, and witness v11
 
 `BlockHeader` commits height, parent hash, typed `state_root`, `events_root`, counts, and timestamp. Public transition inputs additionally bind witness/DA and bridge fields.
 
 `state_root` covers the committed state required to continue safely: accounts, balances, positions, deposited totals, event/key digests, per-account trading nonces, markets and last clearing prices, groups, resting orders/reservations, system counters, bridge deposit frontier/quarantine, and withdrawal/claim state. Analytics and display metadata are excluded.
 
-`BlockWitness` v10 contains the accepted/rejected instructions, system events, fills/prices/constraints, authenticated pre/post account state, pre/post sidecars, account-key universe, key operations, exact order/cancel authorization envelopes, deposit dispositions, bridge state, and the signature-bound `genesis_hash`. Canonical witness bytes—not MessagePack/serde transport bytes—determine `witness_root` and DA binding.
+`BlockWitness` v11 contains the accepted/rejected instructions, system events, fills/prices/constraints, authenticated pre/post account state, pre/post sidecars, account-key universe, key operations, exact order/cancel authorization envelopes, deposit dispositions, bridge state, the committed actor-liquidity universe and complete-set inventory events, and the signature-bound `genesis_hash`. Canonical witness bytes—not MessagePack/serde transport bytes—determine `witness_root` and DA binding.
 
 Canonical encoding is owned by `sybil-verifier`; signing bytes are owned by `sybil-signing`. Native and guest implementations are pinned by golden vectors.
 
@@ -171,7 +171,7 @@ Canonical encoding is owned by `sybil-verifier`; signing bytes are owned by `syb
 | System/sidecar | Deposits, withdrawals, resolution, order book/reservations, market/bridge transition |
 | Keys/intent | Key universe/digests, register/revoke, uniqueness/last-key rules, RawP256/WebAuthn signatures |
 
-Key operations bind current `keys_digest` and `events_digest`. Ordinary signed orders/cancels use genesis-bound canonical bytes and a strictly increasing committed `last_trading_nonce`. Witness v10 carries both envelope classes in actor acknowledgement order, and shared native/guest verification checks scheme-matching active-key membership, exact RawP256/WebAuthn signatures, action/effect binding, and nonce replay. WebAuthn additionally pins RP/origin/challenge, rejects cross-origin assertions, and requires user presence/verification.
+Key operations bind current `keys_digest` and `events_digest`. Ordinary signed orders/cancels use genesis-bound canonical bytes and a strictly increasing committed `last_trading_nonce`. Witness v11 carries both envelope classes in actor acknowledgement order, and shared native/guest verification checks scheme-matching active-key membership, exact RawP256/WebAuthn signatures, action/effect binding, and nonce replay. WebAuthn additionally pins RP/origin/challenge, rejects cross-origin assertions, and requires user presence/verification.
 
 ## 8. ZK, DA, L1, and escape
 

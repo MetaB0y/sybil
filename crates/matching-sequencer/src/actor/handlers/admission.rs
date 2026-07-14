@@ -2,6 +2,29 @@ use super::super::*;
 use super::current_timestamp_ms;
 
 impl SequencerActorState {
+    pub(super) async fn handle_actor_epoch(
+        &mut self,
+        epoch: ActorEpochSubmission,
+    ) -> Result<Vec<u64>, SequencerError> {
+        let principal_id = epoch.principal_id.clone();
+        let target_height = epoch.target_height;
+        let mut candidate = self.sequencer.clone();
+        let ids = candidate.stage_actor_epoch(epoch, current_timestamp_ms())?;
+        if let Some(store) = &self.store {
+            let persisted = candidate
+                .pending_actor_epoch(&principal_id, target_height)
+                .ok_or_else(|| {
+                    SequencerError::Persistence("staged actor epoch disappeared".into())
+                })?;
+            store
+                .upsert_actor_epoch(persisted)
+                .await
+                .map_err(|error| SequencerError::Persistence(error.to_string()))?;
+        }
+        self.sequencer = candidate;
+        Ok(ids)
+    }
+
     pub(super) fn record_submission_metrics(
         &self,
         source: &'static str,

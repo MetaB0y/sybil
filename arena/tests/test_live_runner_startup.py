@@ -47,6 +47,30 @@ async def test_one_shot_snapshot_records_every_account_baseline():
     assert all(call.kwargs["total_orders"] == 2 for call in db.log_snapshot.call_args_list)
 
 
+async def test_one_shot_snapshot_uses_api_positions_for_coordinator_actor():
+    actor = SimpleNamespace(
+        name="Noise-0",
+        account_id=2,
+        client=SimpleNamespace(
+            get_portfolio=AsyncMock(
+                return_value=SimpleNamespace(
+                    balance_dollars=100_000.0,
+                    portfolio_value_dollars=100_001.0,
+                    pnl_dollars=1.0,
+                    positions=[
+                        SimpleNamespace(market_id=7, outcome="YES", quantity=3.5),
+                        SimpleNamespace(market_id=8, outcome="NO", quantity=0),
+                    ],
+                )
+            )
+        ),
+    )
+    db = MagicMock()
+
+    assert await runner.snapshot_portfolios_once([actor], db) == 1
+    assert db.log_snapshot.call_args.kwargs["positions"] == {"7": {"YES": 3.5}}
+
+
 async def test_initial_baseline_is_awaited_before_any_worker_starts(monkeypatch):
     baseline_complete = False
     release_workers = asyncio.Event()

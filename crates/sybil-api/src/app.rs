@@ -78,6 +78,8 @@ use crate::util::now_ms;
         MarketGroupResponse,
         MarketPricesResponse,
         MarketPriceResponse,
+        LiquidityHealthResponse,
+        MarketLiquidityHealthResponse,
         CreateMarketResponse,
         OrderAcceptedResponse,
         CancelOrderResponse,
@@ -414,7 +416,11 @@ fn forwarded_for_client(
 fn is_order_write_path(path: &str) -> bool {
     matches!(
         path,
-        "/v1/orders" | "/v1/orders/signed" | "/v1/orders/cancel/signed"
+        "/v1/orders"
+            | "/v1/orders/signed"
+            | "/v1/orders/cancel/signed"
+            | "/v1/actor/epochs"
+            | "/v1/actor/inventory"
     )
 }
 
@@ -557,6 +563,14 @@ pub const PUBLIC_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "GET",
+        path: "/v1/liquidity/universe",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/liquidity/health",
+    },
+    RouteMount {
+        method: "GET",
         path: "/v1/markets/groups",
     },
     RouteMount {
@@ -684,6 +698,10 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     },
     RouteMount {
         method: "POST",
+        path: "/v1/liquidity/universe/activate",
+    },
+    RouteMount {
+        method: "POST",
         path: "/v1/orders",
     },
     RouteMount {
@@ -784,6 +802,27 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
     },
 ];
 
+/// Dedicated machine-actor bearer tier. Credentials bind a principal, role,
+/// and account; these routes must never inherit the broader service token.
+pub const ACTOR_ROUTE_TABLE: &[RouteMount] = &[
+    RouteMount {
+        method: "GET",
+        path: "/v1/actor/universe",
+    },
+    RouteMount {
+        method: "GET",
+        path: "/v1/actor/mm-quotes",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/actor/epochs",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/actor/inventory",
+    },
+];
+
 pub const DEV_ROUTE_TABLE: &[RouteMount] = &[
     RouteMount {
         method: "GET",
@@ -846,6 +885,8 @@ fn public_routes() -> OpenApiRouter<AppState> {
         .routes(openapi_routes!(routes::markets::search_markets))
         .routes(openapi_routes!(routes::markets::list_markets_summary))
         .routes(openapi_routes!(routes::markets::list_markets))
+        .routes(openapi_routes!(routes::actors::get_liquidity_universe))
+        .routes(openapi_routes!(routes::actors::get_liquidity_health))
         .routes(openapi_routes!(routes::markets::list_market_groups))
         .routes(openapi_routes!(routes::markets::get_prices))
         .routes(openapi_routes!(routes::markets::get_market))
@@ -870,6 +911,7 @@ fn public_routes() -> OpenApiRouter<AppState> {
 fn service_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
         .routes(openapi_routes!(routes::blocks::ws_service_blocks))
+        .routes(openapi_routes!(routes::actors::activate_liquidity_universe))
         // Unsigned orders can name arbitrary accounts and MM budgets.
         .routes(openapi_routes!(routes::orders::submit_orders))
         .routes(openapi_routes!(routes::proofs::get_state_proof))
@@ -904,6 +946,16 @@ fn service_routes() -> OpenApiRouter<AppState> {
         ))
 }
 
+fn actor_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::default()
+        .routes(openapi_routes!(routes::actors::get_actor_universe))
+        .routes(openapi_routes!(routes::actors::get_mm_quotes))
+        .routes(openapi_routes!(routes::actors::submit_actor_epoch))
+        .routes(openapi_routes!(
+            routes::actors::update_complete_set_inventory
+        ))
+}
+
 fn dev_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
         .routes(openapi_routes!(routes::system::attestation))
@@ -919,14 +971,15 @@ fn dev_routes() -> OpenApiRouter<AppState> {
 pub fn openapi_document(include_dev_routes: bool) -> utoipa::openapi::OpenApi {
     let mut routes = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(public_routes())
-        .merge(service_routes());
+        .merge(service_routes())
+        .merge(actor_routes());
     if include_dev_routes {
         routes = routes.merge(dev_routes());
     }
     routes.split_for_parts().1
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -1032,7 +1085,8 @@ pub fn create_router(state: AppState) -> Router {
         .merge(
             service_routes()
                 .route_layer(middleware::from_fn_with_state(state.clone(), service_auth)),
-        );
+        )
+        .merge(actor_routes());
     if state.dev_mode {
         app = app.merge(dev_routes());
     }
@@ -1082,8 +1136,8 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{
-        DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE, http_rate_limit_client_key,
-        metric_path_label, unmatched_metric_label,
+        ACTOR_ROUTE_TABLE, DEV_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, SERVICE_ROUTE_TABLE,
+        http_rate_limit_client_key, metric_path_label, unmatched_metric_label,
     };
 
     fn client_key_request(peer: Option<IpAddr>, forwarded_for: Option<&str>) -> Request<Body> {
@@ -1140,6 +1194,7 @@ mod tests {
         let paths: BTreeSet<&str> = PUBLIC_ROUTE_TABLE
             .iter()
             .chain(SERVICE_ROUTE_TABLE)
+            .chain(ACTOR_ROUTE_TABLE)
             .chain(DEV_ROUTE_TABLE)
             .map(|mount| mount.path)
             .collect();

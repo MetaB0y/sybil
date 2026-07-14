@@ -14,7 +14,7 @@ use tokio::time::{Instant, interval_at};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos, Order, Problem};
+use matching_engine::{MarketGroup, MarketId, MarketSet, Nanos, Order, Problem, Qty};
 use sybil_oracle::{
     DataFeed, FeedId, FeedPubkey, MarketStatus, Oracle, ResolutionRecord, SignedAttestation,
 };
@@ -37,8 +37,8 @@ use crate::error::SequencerError;
 use crate::market_info::{MarketMetadata, MarketSearchQuery};
 use crate::portfolio::PortfolioSummary;
 use crate::sequencer::{
-    BlockSequencer, LeaderboardBase, OrderSubmission, PendingOrderInfo, PreparedBlock,
-    SequencerConfig,
+    ActorEpochSubmission, BlockSequencer, LeaderboardBase, OrderSubmission, PendingOrderInfo,
+    PreparedBlock, SequencerConfig,
 };
 use crate::store::{
     AcknowledgedProofJobRetentionPolicy, AutoResolutionRecord, CanonicalArchiveRetentionPolicy,

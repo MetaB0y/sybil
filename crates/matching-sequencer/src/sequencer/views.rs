@@ -13,6 +13,10 @@ impl BlockSequencer {
         self.config.order_ttl_blocks
     }
 
+    pub(crate) fn liquidity_universe_state(&self) -> &crate::universe::LiquidityUniverse {
+        &self.liquidity_universe
+    }
+
     /// Snapshot of all state needed to persist the most recently produced block.
     ///
     /// Call this on the `next_sequencer` returned by `prepare_block` (or on a
@@ -37,13 +41,14 @@ impl BlockSequencer {
             analytics: self.analytics.snapshot(),
             resting_orders: self.order_book.snapshot(),
             bridge_state: &self.bridge,
+            liquidity_universe: &self.liquidity_universe,
         }
     }
 
     /// Open-batch unique placers for a market — non-persistent computation
-    /// over the resting book plus pending bundles touching `market_id`.
-    /// Excludes MM-constrained bundles and `AccountId::MINT`.
-    pub fn open_batch_unique_placers(&self, market_id: MarketId) -> u32 {
+    /// over every order lane targeting the next block. All real accounts count,
+    /// including market makers; only the protocol-owned MINT account is excluded.
+    pub fn open_batch_unique_placers(&self, market_id: MarketId, now_ms: u64) -> u32 {
         let mut placers: HashSet<AccountId> = HashSet::new();
         for (order, account_id) in self.order_book.resting_orders() {
             if account_id != AccountId::MINT && order.active_markets().any(|m| m == market_id) {
@@ -51,7 +56,7 @@ impl BlockSequencer {
             }
         }
         for bundle in &self.pending_bundles {
-            if bundle.mm_constraint.is_some() || bundle.account_id == AccountId::MINT {
+            if bundle.account_id == AccountId::MINT {
                 continue;
             }
             let touches = bundle
@@ -62,7 +67,97 @@ impl BlockSequencer {
                 placers.insert(bundle.account_id);
             }
         }
+        let target_height = self.height.saturating_add(1);
+        for epoch in self.pending_actor_epochs.values() {
+            if epoch.target_height != target_height
+                || epoch.valid_until_ms < now_ms
+                || epoch.submission.account_id == AccountId::MINT
+            {
+                continue;
+            }
+            let touches = epoch
+                .submission
+                .orders
+                .iter()
+                .any(|order| order.active_markets().any(|m| m == market_id));
+            if touches {
+                placers.insert(epoch.submission.account_id);
+            }
+        }
         placers.len() as u32
+    }
+
+    /// Build the speculative problem for the upcoming batch from every staged
+    /// order lane. This is an off-block read model: it never mutates balances,
+    /// reservations, pending epochs, or consensus state.
+    pub(crate) fn open_batch_problem(&self, now_ms: u64) -> Problem {
+        let target_height = self.height.saturating_add(1);
+        let mut problem = Problem::new("indicative");
+        problem.markets = self.markets.clone();
+        problem.market_groups = self.market_groups.clone();
+
+        let mut seen_order_ids = HashSet::new();
+        for (order, account_id) in self.order_book.resting_orders() {
+            if account_id == AccountId::MINT
+                || order.num_markets != 1
+                || !order
+                    .active_markets()
+                    .all(|market| self.market_is_universe_active(market))
+            {
+                continue;
+            }
+            if seen_order_ids.insert(order.id) {
+                problem.orders.push(order.clone());
+            }
+        }
+
+        let actor_submissions = self.pending_actor_epochs.values().filter_map(|epoch| {
+            (epoch.target_height == target_height && epoch.valid_until_ms >= now_ms)
+                .then_some(&epoch.submission)
+        });
+        for submission in self.pending_bundles.iter().chain(actor_submissions) {
+            if submission.account_id == AccountId::MINT {
+                continue;
+            }
+            let Some(account) = self.accounts.get(submission.account_id) else {
+                continue;
+            };
+            if submission.mm_constraint.is_some() && account.balance <= 0 {
+                continue;
+            }
+
+            let mut included_ids = HashSet::new();
+            for order in &submission.orders {
+                if order.num_markets != 1
+                    || !order
+                        .active_markets()
+                        .all(|market| self.market_is_universe_active(market))
+                {
+                    continue;
+                }
+                if seen_order_ids.insert(order.id) {
+                    included_ids.insert(order.id);
+                    problem.orders.push(order.clone());
+                }
+            }
+
+            if let Some(mut constraint) = submission.mm_constraint.clone() {
+                constraint.max_capital = constraint
+                    .max_capital
+                    .min(Nanos(account.balance.max(0) as u64));
+                constraint
+                    .order_ids
+                    .retain(|order_id| included_ids.contains(order_id));
+                constraint
+                    .order_sides
+                    .retain(|order_id, _| included_ids.contains(order_id));
+                if !constraint.order_ids.is_empty() {
+                    problem.mm_constraints.push(constraint);
+                }
+            }
+        }
+
+        problem
     }
 
     pub fn markets(&self) -> &MarketSet {

@@ -22,9 +22,9 @@ import { dollars, fmtPct, fmtPrice, pctWidth } from "@/lib/dev/format";
 
 const STATE_OPTIONS: ReadonlyArray<readonly [string, string]> = [
   ["all", "All states"],
-  ["cleared", "Cleared"],
+  ["marked", "Has Sybil mark"],
   ["ref", "Reference only"],
-  ["none", "No clears"],
+  ["none", "No Sybil mark"],
   ["pending", "Has pending"],
   ["mismatch", "Large ref mismatch"],
 ];

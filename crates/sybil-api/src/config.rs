@@ -32,6 +32,10 @@ pub struct ApiConfig {
     #[arg(long, default_value = "", env = "SYBIL_SERVICE_TOKEN")]
     pub service_token: String,
 
+    /// JSON file containing one MM plus fifteen role/account-bound noise credentials.
+    #[arg(long, default_value = "", env = "SYBIL_ACTOR_CREDENTIALS_PATH")]
+    pub actor_credentials_path: String,
+
     /// Private history projector base URL. Empty keeps ingestion disabled and
     /// makes historical product endpoints explicitly unavailable; trading and
     /// the durable outbox continue normally.
@@ -346,6 +350,7 @@ impl Default for ApiConfig {
             deployment_profile: "local".to_string(),
             allow_dev_knobs: false,
             service_token: String::new(),
+            actor_credentials_path: String::new(),
             history_url: String::new(),
             history_token: String::new(),
             history_poll_ms: 250,

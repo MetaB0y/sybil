@@ -16,6 +16,10 @@ use url::Url;
 use crate::error::Error;
 use crate::polymarket::types::parse_iso8601_to_ms;
 
+const NANOS_PER_DOLLAR: f64 = 1_000_000_000.0;
+const DEFAULT_NATIVE_MIN_HALF_SPREAD: f64 = 0.01;
+const PRICE_TICK: f64 = 1.0 / NANOS_PER_DOLLAR;
+
 /// Parsed native market catalog.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct NativeMarketCatalog {
@@ -184,6 +188,10 @@ pub struct NativeMarketSpec {
     pub quote_range: NativeQuoteRange,
     pub group_key: Option<String>,
     pub group_size: usize,
+    /// Display/coherence cohort for nested thresholds. This never creates a
+    /// protocol MarketGroup because multiple rungs may resolve YES.
+    pub coherence_key: Option<String>,
+    pub coherence_rank: usize,
     pub end_time_ms: u64,
     description: Option<String>,
     category: String,
@@ -359,6 +367,8 @@ impl NativeMarketTemplate {
                 let mut market_titles = HashSet::new();
                 let mut enabled_count = 0usize;
                 let mut initial_sum = 0.0;
+                let mut quoteable_min_sum = 0.0;
+                let mut quoteable_max_sum = 0.0;
                 for (i, outcome) in outcomes.iter().enumerate() {
                     let outcome_context = format!("{context} outcome #{i} ({:?})", outcome.id);
                     validate_id(&outcome.id, &outcome_context)?;
@@ -390,6 +400,10 @@ impl NativeMarketTemplate {
                     if outcome.enabled {
                         enabled_count += 1;
                         initial_sum += outcome.quote_range.initial;
+                        quoteable_min_sum +=
+                            outcome.quote_range.min + DEFAULT_NATIVE_MIN_HALF_SPREAD + PRICE_TICK;
+                        quoteable_max_sum +=
+                            outcome.quote_range.max - DEFAULT_NATIVE_MIN_HALF_SPREAD - PRICE_TICK;
                     }
                 }
                 if self.enabled && enabled_count < 2 {
@@ -397,9 +411,17 @@ impl NativeMarketTemplate {
                         "{context} enabled categorical template needs at least two enabled outcomes"
                     )));
                 }
-                if self.enabled && initial_sum > 1.0 + f64::EPSILON {
+                if self.enabled && (initial_sum - 1.0).abs() > PRICE_TICK {
                     return Err(Error::NativeCatalog(format!(
-                        "{context} enabled categorical initial prices sum to {initial_sum:.4}, above 1.0"
+                        "{context} enabled categorical initial prices must sum to 1.0, got {initial_sum:.9}"
+                    )));
+                }
+                if self.enabled
+                    && (quoteable_min_sum > 1.0 + PRICE_TICK
+                        || quoteable_max_sum < 1.0 - PRICE_TICK)
+                {
+                    return Err(Error::NativeCatalog(format!(
+                        "{context} categorical quoteable interiors cannot form a bounded simplex"
                     )));
                 }
             }
@@ -510,6 +532,8 @@ impl NativeMarketTemplate {
                     quote_range,
                     group_key: None,
                     group_size: 0,
+                    coherence_key: None,
+                    coherence_rank: 0,
                     end_time_ms,
                     description: Some(format!("Native market. Units: {}.", self.units)),
                     category: self.category.clone(),
@@ -537,6 +561,8 @@ impl NativeMarketTemplate {
                         quote_range: outcome.quote_range,
                         group_key: group_key.clone(),
                         group_size,
+                        coherence_key: None,
+                        coherence_rank: 0,
                         end_time_ms,
                         description: Some(format!(
                             "Native categorical market. Units: {}.",
@@ -562,7 +588,8 @@ impl NativeMarketTemplate {
                 let enabled: Vec<_> = outcomes.iter().filter(|rung| rung.enabled).collect();
                 enabled
                     .into_iter()
-                    .map(|rung| NativeMarketSpec {
+                    .enumerate()
+                    .map(|(coherence_rank, rung)| NativeMarketSpec {
                         template_id: self.id.clone(),
                         market_key: outcome_market_key(&self.id, &rung.id),
                         name: rung.market_title.clone(),
@@ -570,6 +597,8 @@ impl NativeMarketTemplate {
                         quote_range: rung.quote_range,
                         group_key: None,
                         group_size: 0,
+                        coherence_key: Some(native_group_key(&self.id)),
+                        coherence_rank,
                         end_time_ms,
                         description: Some(format!(
                             "Native threshold market. Units: {}.",
@@ -610,6 +639,12 @@ impl NativeQuoteRange {
         if !(self.initial >= self.min && self.initial <= self.max) {
             return Err(Error::NativeCatalog(format!(
                 "{context} initial must lie inside [min, max]"
+            )));
+        }
+        let required_width = 2.0 * (DEFAULT_NATIVE_MIN_HALF_SPREAD + PRICE_TICK);
+        if self.max - self.min <= required_width {
+            return Err(Error::NativeCatalog(format!(
+                "{context} is too narrow for two-sided native quotes"
             )));
         }
         Ok(())
@@ -674,6 +709,7 @@ impl NativeMarketSpec {
     }
 
     pub fn metadata_request(&self) -> SetMarketMetadataRequest {
+        let to_nanos = |price: f64| Some((price * NANOS_PER_DOLLAR).round() as u64);
         SetMarketMetadataRequest {
             external_url: Some(self.source_url.clone()),
             event_id: Some(native_group_key(&self.template_id)),
@@ -691,6 +727,9 @@ impl NativeMarketSpec {
             market_start_date_ms: None,
             group_item_title: self.outcome_title.clone(),
             closed: Some(false),
+            actor_min_yes_nanos: to_nanos(self.quote_range.min),
+            actor_max_yes_nanos: to_nanos(self.quote_range.max),
+            actor_seed_yes_nanos: to_nanos(self.quote_range.initial),
         }
     }
 }
@@ -1029,8 +1068,8 @@ mod tests {
                 "outcome_set": {
                     "type": "categorical",
                     "outcomes": [
-                        { "id": "a", "title": "A", "market_title": "Will A win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } },
-                        { "id": "b", "title": "B", "market_title": "Will B win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.50, "initial": 0.30 } }
+                        { "id": "a", "title": "A", "market_title": "Will A win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.70, "initial": 0.50 } },
+                        { "id": "b", "title": "B", "market_title": "Will B win?", "enabled": true, "quote_range": { "min": 0.20, "max": 0.70, "initial": 0.50 } }
                     ]
                 },
                 "units": "probability",

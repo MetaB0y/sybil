@@ -368,6 +368,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/actor/epochs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["submit_actor_epoch"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/actor/inventory": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["update_complete_set_inventory"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/actor/mm-quotes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_mm_quotes"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/actor/universe": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_actor_universe"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/admin/auto-resolutions": {
     parameters: {
       query?: never;
@@ -837,6 +901,54 @@ export interface paths {
     get: operations["get_leaderboard"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/liquidity/health": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_liquidity_health"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/liquidity/universe": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_liquidity_universe"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/liquidity/universe/activate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["activate_liquidity_universe"];
     delete?: never;
     options?: never;
     head?: never;
@@ -1413,11 +1525,76 @@ export interface components {
        */
       reserved_balance_nanos: string;
     };
+    ActivateLiquidityUniverseRequest: {
+      /** Format: int64 */
+      generation: number;
+      market_ids: number[];
+      policy_digest_hex: string;
+    };
     /** @description Response shape for `GET /v1/activity/overview`. All-time + 24h slices. */
     ActivityOverviewResponse: {
       all_time: components["schemas"]["OverviewBucketResponse"];
       last_24h: components["schemas"]["OverviewBucketResponse"];
     };
+    ActorEpochRequest: {
+      epoch_id: string;
+      market_intents: components["schemas"]["ActorMarketIntent"][];
+      /**
+       * Format: int64
+       * @description Shared market-maker capital limit. Integer nanodollars;
+       *     1_000_000_000 = $1. Forbidden for noise actors.
+       */
+      mm_budget_nanos?: string | null;
+      /** Format: int64 */
+      observed_at_ms: number;
+      /** Format: int64 */
+      target_height: number;
+      /** Format: int64 */
+      universe_generation: number;
+      /** Format: int64 */
+      valid_until_ms: number;
+    };
+    ActorEpochResponse: {
+      accepted: boolean;
+      /** Format: int32 */
+      accepted_orders: number;
+      /** Format: int32 */
+      considered: number;
+      markets: components["schemas"]["ActorMarketReceipt"][];
+      principal_id: string;
+      /** Format: int32 */
+      selected: number;
+      /** Format: int32 */
+      skipped: number;
+      /** Format: int64 */
+      target_height: number;
+      /** Format: int64 */
+      universe_generation: number;
+    };
+    ActorIdentityResponse: {
+      /** Format: int64 */
+      account_id: number;
+      /** Format: int64 */
+      last_observed_height?: number | null;
+      principal_id: string;
+      ready: boolean;
+      role: components["schemas"]["ActorRole"];
+    };
+    ActorMarketIntent: {
+      /** Format: int32 */
+      market_id: number;
+      orders?: components["schemas"]["OrderSpec"][];
+      skip_reason?: string | null;
+    };
+    ActorMarketReceipt: {
+      accepted_order_ids: number[];
+      /** Format: int32 */
+      market_id: number;
+      rejection?: string | null;
+      skip_reason?: string | null;
+    };
+    /** @enum {string} */
+    ActorRole: "market_maker" | "noise";
     AdmitTimingViewResponse: {
       /** Format: int64 */
       account_id: number;
@@ -1554,6 +1731,38 @@ export interface components {
        */
       matched?: number;
       /**
+       * Format: int64
+       * @description MM filled-order notional. Integer nanodollars; 1_000_000_000 = $1.
+       *     Role-attributed notionals intentionally need not sum to unique economic
+       *     trade volume because both matched sides appear.
+       */
+      mm_fill_notional_nanos?: string;
+      /**
+       * Format: int32
+       * @description Filled orders submitted through the market-maker actor epoch.
+       */
+      mm_matched_orders?: number;
+      /**
+       * Format: int64
+       * @description Noise filled-order notional. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      noise_fill_notional_nanos?: string;
+      /**
+       * Format: int32
+       * @description Filled orders submitted through noise actor epochs.
+       */
+      noise_matched_orders?: number;
+      /**
+       * Format: int64
+       * @description Organic filled-order notional. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      organic_fill_notional_nanos?: string;
+      /**
+       * Format: int32
+       * @description Filled orders from manual, LLM, or ordinary non-actor flow.
+       */
+      organic_matched_orders?: number;
+      /**
        * Format: int32
        * @description Non-MM admissions counted against this market in this block.
        *     Multi-market orders credit each active market.
@@ -1561,7 +1770,7 @@ export interface components {
       placed?: number;
       /**
        * Format: int32
-       * @description Unique placers (non-MM accounts) admitted touching this market in
+       * @description Unique real accounts, including MM, admitted touching this market in
        *     the block. Multi-market orders credit each active market; the
        *     platform `unique_placers` scalar counts the account once.
        */
@@ -1646,7 +1855,7 @@ export interface components {
       total_welfare_nanos: string;
       /**
        * Format: int32
-       * @description Unique placers (non-MM accounts) admitted into this block. Platform
+       * @description Unique real accounts, including MM, admitted into this block. Platform
        *     scalar — `by_market[m].placers` is the per-market split.
        */
       unique_placers?: number;
@@ -1730,6 +1939,8 @@ export interface components {
       traders: number;
     };
     BotSummaryResponse: {
+      /** Format: int64 */
+      account_id?: number | null;
       /** @description Member of the most recent non-stale Arena runtime cohort. */
       active: boolean;
       /** Format: double */
@@ -1748,6 +1959,7 @@ export interface components {
       /** Format: double */
       latest_market_price?: number | null;
       latest_timestamp?: string | null;
+      participant_kind?: string | null;
       /** Format: double */
       pnl?: number | null;
       /** Format: double */
@@ -1897,6 +2109,32 @@ export interface components {
       /** @description Hex-encoded compressed P256 public key of the signer. */
       signer_pubkey_hex: string;
       webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
+    };
+    CompleteSetActionRequest:
+      | {
+          /** @enum {string} */
+          action: "collateralize";
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Complete-set size. Integer share-units; 1000 = 1 share.
+           */
+          quantity: number;
+        }
+      | {
+          /** @enum {string} */
+          action: "redeem";
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Complete-set size. Integer share-units; 1000 = 1 share.
+           */
+          quantity: number;
+        };
+    CompleteSetInventoryRequest: {
+      actions: components["schemas"]["CompleteSetActionRequest"][];
     };
     CreateAccountRequest: {
       /**
@@ -2300,22 +2538,135 @@ export interface components {
       /** @description Window this leaderboard was ranked over: `7d`, `30d`, or `all`. */
       window: string;
     };
+    LiquidityHealthResponse: {
+      /** Format: int32 */
+      active_markets: number;
+      actors?: components["schemas"]["ActorIdentityResponse"][];
+      /** Format: int32 */
+      expected_noise_actors: number;
+      /** Format: int64 */
+      height: number;
+      markets: components["schemas"]["MarketLiquidityHealthResponse"][];
+      /** Format: int32 */
+      markets_with_clearing_prices: number;
+      /** Format: int32 */
+      markets_with_noise_fills: number;
+      /** Format: int32 */
+      markets_with_three_noise_actors: number;
+      /** Format: int32 */
+      markets_with_two_noise_actors: number;
+      /** Format: int32 */
+      mm_coverage_bps: number;
+      /** Format: int32 */
+      mm_markets_quoted: number;
+      /** Format: int32 */
+      mm_markets_two_sided: number;
+      /** Format: int32 */
+      mm_two_sided_coverage_bps: number;
+      /** Format: int32 */
+      noise_coverage_bps: number;
+      /** Format: int32 */
+      noise_crossing_coverage_bps: number;
+      /**
+       * Format: int32
+       * @description Markets with a naturally MM-marketable noise order, measured
+       *     post-submission rather than coordinated by the noise actor.
+       */
+      noise_markets_crossing_mm: number;
+      /** Format: int32 */
+      noise_markets_selected: number;
+      /** Format: int32 */
+      observed_noise_actors: number;
+      /** Format: int32 */
+      rolling_mm_coverage_bps: number;
+      /** Format: int32 */
+      rolling_mm_two_sided_coverage_bps: number;
+      /** Format: int32 */
+      rolling_noise_coverage_bps: number;
+      /** Format: int32 */
+      rolling_noise_crossing_coverage_bps: number;
+      /** Format: int32 */
+      rolling_noise_fill_coverage_bps: number;
+      /**
+       * Format: int32
+       * @description Number of committed blocks used for rolling actor coverage.
+       */
+      rolling_window_blocks: number;
+      /** Format: int32 */
+      total_fills: number;
+      /** Format: int32 */
+      total_rejections: number;
+      /**
+       * Format: int64
+       * @description Filled notional across the block. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      total_volume_nanos: string;
+      /** Format: int64 */
+      universe_generation: number;
+    };
+    LiquidityUniverseResponse: {
+      /** Format: int64 */
+      account_id?: number | null;
+      /** Format: int64 */
+      activated_at_height: number;
+      actor_ready: boolean;
+      actor_role?: null | components["schemas"]["ActorRole"];
+      /**
+       * @description Raw committed allow-list before lifecycle filtering. Controllers use
+       *     this to distinguish a newly created market from a resolved old member.
+       */
+      committed_market_ids: number[];
+      /** Format: int64 */
+      generation: number;
+      market_ids: number[];
+      policy_digest_hex: string;
+      /**
+       * @description Present only on the actor-authenticated view. Lets a daemon fail closed
+       *     if its local account configuration does not match its bound credential.
+       */
+      principal_id?: string | null;
+    };
     MarketGroupResponse: {
       /** Format: int64 */
       group_id: number;
       market_ids: number[];
       name: string;
     };
+    MarketLiquidityHealthResponse: {
+      clearing_price_present: boolean;
+      /**
+       * Format: int64
+       * @description Filled notional on this market. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      fill_volume_nanos: string;
+      /** Format: int32 */
+      market_id: number;
+      /** Format: int32 */
+      mm_orders: number;
+      mm_skip_reason?: string | null;
+      /** Format: int32 */
+      noise_actor_count: number;
+      /**
+       * Format: int32
+       * @description Noise orders that happened to be marketable against the accepted MM
+       *     shape. Computed post-submission; noise actors cannot read that shape.
+       */
+      noise_crossing_orders: number;
+      /** Format: int32 */
+      noise_orders: number;
+      /** Format: int32 */
+      other_non_mm_orders: number;
+    };
     MarketPriceResponse: {
       /**
        * Format: int64
-       * @description NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
+       * @description Current NO mark. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_nanos: string;
       /**
        * Format: int64
-       * @description YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
+       * @description Current YES mark. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       yes_price_nanos: string;
@@ -2330,6 +2681,24 @@ export interface components {
       };
     };
     MarketResponse: {
+      /**
+       * Format: int64
+       * @description Actor-only native YES upper guardrail. Integer nanodollars expressed as
+       *     per-share probabilities in [0, 1e9].
+       */
+      actor_max_yes_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Actor-only native YES lower guardrail. Integer nanodollars expressed as
+       *     per-share probabilities in [0, 1e9].
+       */
+      actor_min_yes_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Actor-only native YES initial anchor. Integer nanodollars expressed as
+       *     per-share probabilities in [0, 1e9].
+       */
+      actor_seed_yes_nanos?: string | null;
       /**
        * @description All category buckets the parent event matched on the mirror's
        *     tag-to-bucket lookup (e.g. `["Sports", "Politics"]`). Frontend picks
@@ -2379,7 +2748,7 @@ export interface components {
       /**
        * Format: int64
        * @description Rolling last-10-batch band depth average. Integer nanodollars;
-       *     1_000_000_000 = $1. Zero for markets without a clearing price yet.
+       *     1_000_000_000 = $1. Zero for markets without a committed mark yet.
        *     Pair with `liquidity_band_nanos` for labelling.
        */
       liquidity_avg10_nanos?: string;
@@ -2410,15 +2779,15 @@ export interface components {
       name: string;
       /**
        * Format: int64
-       * @description Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
+       * @description NO mark ~24h ago. See `yes_price_24h_ago_nanos`.
        *     Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_24h_ago_nanos?: string | null;
       /**
        * Format: int64
-       * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
-       *     Prices are per-share probabilities in [0, 1e9].
+       * @description Current NO mark, complementary to the YES mark. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
        */
       no_price_nanos?: string | null;
       /**
@@ -2482,7 +2851,7 @@ export interface components {
       volume_nanos?: string;
       /**
        * Format: int64
-       * @description Clearing YES price ~24h ago, derived from the per-market
+       * @description YES mark ~24h ago, derived from the per-market
        *     hourly snapshot. `None` for markets younger than 24h or wiped on
        *     restart. FE computes the 24h delta as `current - snapshot`.
        *     Integer nanodollars; 1_000_000_000 = $1.
@@ -2491,8 +2860,9 @@ export interface components {
       yes_price_24h_ago_nanos?: string | null;
       /**
        * Format: int64
-       * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
-       *     Prices are per-share probabilities in [0, 1e9].
+       * @description Current YES mark: traded clearing price when filled, otherwise the
+       *     committed book midpoint or carried mark. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
        */
       yes_price_nanos?: string | null;
     };
@@ -2547,14 +2917,14 @@ export interface components {
       name: string;
       /**
        * Format: int64
-       * @description Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+       * @description NO mark ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_24h_ago_nanos?: string | null;
       /**
        * Format: int64
-       * @description Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
-       *     Prices are per-share probabilities in [0, 1e9].
+       * @description Current NO mark, complementary to the YES mark. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
        */
       no_price_nanos?: string | null;
       /** Format: int64 */
@@ -2593,16 +2963,46 @@ export interface components {
       volume_nanos: string;
       /**
        * Format: int64
-       * @description Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
+       * @description YES mark ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       yes_price_24h_ago_nanos?: string | null;
       /**
        * Format: int64
-       * @description Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
-       *     Prices are per-share probabilities in [0, 1e9].
+       * @description Current YES mark: traded clearing price when filled, otherwise the
+       *     committed book midpoint or carried mark. Integer nanodollars;
+       *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
        */
       yes_price_nanos?: string | null;
+    };
+    MmQuoteMarketResponse: {
+      /** Format: int64 */
+      ask_quantity?: number | null;
+      /** Format: int64 */
+      bid_quantity?: number | null;
+      /** Format: int32 */
+      market_id: number;
+      quote_state: string;
+      skip_reason?: string | null;
+      /**
+       * Format: int64
+       * @description Economic YES ask. Integer nanodollars per share; 1_000_000_000 = $1.
+       */
+      yes_ask_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Economic YES bid. Integer nanodollars per share; 1_000_000_000 = $1.
+       */
+      yes_bid_nanos?: string | null;
+    };
+    MmQuoteSnapshotResponse: {
+      markets: components["schemas"]["MmQuoteMarketResponse"][];
+      /** Format: int64 */
+      observed_at_ms: number;
+      /** Format: int64 */
+      target_height: number;
+      /** Format: int64 */
+      universe_generation: number;
     };
     ObserveL1HeightRequest: {
       /**
@@ -2641,7 +3041,11 @@ export interface components {
        *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
        */
       indicative_yes_price_nanos?: string | null;
-      /** Format: int32 */
+      /**
+       * Format: int32
+       * @description Distinct real accounts with an order staged for the upcoming batch,
+       *     including market makers. The protocol MINT account is excluded.
+       */
       unique_placers: number;
     };
     OrderAcceptedResponse: {
@@ -3029,7 +3433,8 @@ export interface components {
       height: number;
       /**
        * Format: int64
-       * @description NO clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+       * @description NO mark at this point. Integer nanodollars; 1_000_000_000 = $1.
+       *     A filled point uses clearing; a quiet point uses book midpoint/carry.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       no_price_nanos: string;
@@ -3042,7 +3447,8 @@ export interface components {
       volume_nanos: string;
       /**
        * Format: int64
-       * @description YES clearing price at this point. Integer nanodollars; 1_000_000_000 = $1.
+       * @description YES mark at this point. Integer nanodollars; 1_000_000_000 = $1.
+       *     A filled point uses clearing; a quiet point uses book midpoint/carry.
        *     Prices are per-share probabilities in [0, 1e9].
        */
       yes_price_nanos: string;
@@ -3157,7 +3563,7 @@ export interface components {
       total_welfare_nanos: string;
       /**
        * Format: int32
-       * @description Unique non-MM accounts admitted into this block. This is an aggregate,
+       * @description Unique real accounts, including MM, admitted into this block. This is an aggregate,
        *     never an account identifier list.
        */
       unique_placers?: number;
@@ -3360,6 +3766,24 @@ export interface components {
       webauthn_assertion?: null | components["schemas"]["WebAuthnAssertion"];
     };
     SetMarketMetadataRequest: {
+      /**
+       * Format: int64
+       * @description Actor-only native YES upper guardrail. Integer nanodollars expressed as
+       *     per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
+       */
+      actor_max_yes_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Actor-only native YES lower guardrail. Integer nanodollars expressed as
+       *     per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
+       */
+      actor_min_yes_nanos?: string | null;
+      /**
+       * Format: int64
+       * @description Actor-only native YES initial anchor. Integer nanodollars expressed as
+       *     per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
+       */
+      actor_seed_yes_nanos?: string | null;
       /**
        * @description All category buckets the parent event matched in the mirror's tag-to-
        *     bucket lookup (e.g. `["Sports", "Politics"]` for an NBA + Trump
@@ -3893,6 +4317,42 @@ export interface components {
           sybil_account_key_hex: string;
           /** @enum {string} */
           type: "quarantine_claimed";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Complete-set size. Integer share-units; 1000 = 1 share.
+           */
+          quantity: number;
+          /** @enum {string} */
+          type: "complete_set_collateralized";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          /** Format: int32 */
+          market_id: number;
+          /**
+           * Format: int64
+           * @description Complete-set size. Integer share-units; 1000 = 1 share.
+           */
+          quantity: number;
+          /** @enum {string} */
+          type: "complete_set_redeemed";
+        }
+      | {
+          /** Format: int64 */
+          activated_at_height: number;
+          /** Format: int64 */
+          generation: number;
+          market_ids: number[];
+          policy_digest_hex: string;
+          /** @enum {string} */
+          type: "liquidity_universe_activated";
         };
     /** @enum {string} */
     TimeInForce: "GTC" | "IOC" | "GTD";
@@ -4878,6 +5338,83 @@ export interface operations {
       };
     };
   };
+  submit_actor_epoch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ActorEpochRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActorEpochResponse"];
+        };
+      };
+    };
+  };
+  update_complete_set_inventory: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompleteSetInventoryRequest"];
+      };
+    };
+    responses: never;
+  };
+  get_mm_quotes: {
+    parameters: {
+      query: {
+        target_height: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MmQuoteSnapshotResponse"];
+        };
+      };
+    };
+  };
+  get_actor_universe: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LiquidityUniverseResponse"];
+        };
+      };
+    };
+  };
   list_auto_resolutions: {
     parameters: {
       query?: never;
@@ -5742,6 +6279,67 @@ export interface operations {
       };
     };
   };
+  get_liquidity_health: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LiquidityHealthResponse"];
+        };
+      };
+    };
+  };
+  get_liquidity_universe: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LiquidityUniverseResponse"];
+        };
+      };
+    };
+  };
+  activate_liquidity_universe: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ActivateLiquidityUniverseRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LiquidityUniverseResponse"];
+        };
+      };
+    };
+  };
   list_markets: {
     parameters: {
       query?: never;
@@ -5894,7 +6492,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Market prices */
+      /** @description Committed Sybil market marks */
       200: {
         headers: {
           [name: string]: unknown;

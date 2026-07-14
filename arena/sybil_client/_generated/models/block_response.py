@@ -24,6 +24,10 @@ if TYPE_CHECKING:
   from ..models.system_event_response_type_11 import SystemEventResponseType11
   from ..models.system_event_response_type_12 import SystemEventResponseType12
   from ..models.system_event_response_type_13 import SystemEventResponseType13
+  from ..models.system_event_response_type_14 import SystemEventResponseType14
+  from ..models.system_event_response_type_15 import SystemEventResponseType15
+  from ..models.system_event_response_type_16 import SystemEventResponseType16
+  from ..models.system_event_response_type_17 import SystemEventResponseType17
   from ..models.system_event_response_type_2 import SystemEventResponseType2
   from ..models.system_event_response_type_3 import SystemEventResponseType3
   from ..models.system_event_response_type_4 import SystemEventResponseType4
@@ -59,7 +63,7 @@ class BlockResponse:
             total_volume_nanos (int): Total traded notional in the block. Integer nanodollars;
                 1_000_000_000 = $1.
             total_welfare_nanos (int): Total solver welfare in the block. Integer nanodollars;
-                1_000_000_000 = $1. Signed: solver rounding can yield small negatives.
+                1_000_000_000 = $1. Verified block welfare is non-negative.
             bridge (BridgeBlockResponse | Unset):
             by_market (BlockResponseByMarket | Unset): Nested per-market block scalars. Each
                 `BlockMarketStats` carries the per-market splits for this block. Old
@@ -71,10 +75,11 @@ class BlockResponse:
             fills (list[FillResponse] | Unset):
             rejections (list[RejectionResponse] | Unset):
             system_events (list[SystemEventResponseType0 | SystemEventResponseType1 | SystemEventResponseType10 |
-                SystemEventResponseType11 | SystemEventResponseType12 | SystemEventResponseType13 | SystemEventResponseType2 |
+                SystemEventResponseType11 | SystemEventResponseType12 | SystemEventResponseType13 | SystemEventResponseType14 |
+                SystemEventResponseType15 | SystemEventResponseType16 | SystemEventResponseType17 | SystemEventResponseType2 |
                 SystemEventResponseType3 | SystemEventResponseType4 | SystemEventResponseType5 | SystemEventResponseType6 |
                 SystemEventResponseType7 | SystemEventResponseType8 | SystemEventResponseType9] | Unset):
-            unique_placers (int | Unset): Unique placers (non-MM accounts) admitted into this block. Platform
+            unique_placers (int | Unset): Unique real accounts, including MM, admitted into this block. Platform
                 scalar — `by_market[m].placers` is the per-market split.
      """
 
@@ -94,7 +99,7 @@ class BlockResponse:
     derived_view_sidecar: DerivedViewSidecarResponse | Unset = UNSET
     fills: list[FillResponse] | Unset = UNSET
     rejections: list[RejectionResponse] | Unset = UNSET
-    system_events: list[SystemEventResponseType0 | SystemEventResponseType1 | SystemEventResponseType10 | SystemEventResponseType11 | SystemEventResponseType12 | SystemEventResponseType13 | SystemEventResponseType2 | SystemEventResponseType3 | SystemEventResponseType4 | SystemEventResponseType5 | SystemEventResponseType6 | SystemEventResponseType7 | SystemEventResponseType8 | SystemEventResponseType9] | Unset = UNSET
+    system_events: list[SystemEventResponseType0 | SystemEventResponseType1 | SystemEventResponseType10 | SystemEventResponseType11 | SystemEventResponseType12 | SystemEventResponseType13 | SystemEventResponseType14 | SystemEventResponseType15 | SystemEventResponseType16 | SystemEventResponseType17 | SystemEventResponseType2 | SystemEventResponseType3 | SystemEventResponseType4 | SystemEventResponseType5 | SystemEventResponseType6 | SystemEventResponseType7 | SystemEventResponseType8 | SystemEventResponseType9] | Unset = UNSET
     unique_placers: int | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -115,6 +120,10 @@ class BlockResponse:
         from ..models.system_event_response_type_11 import SystemEventResponseType11
         from ..models.system_event_response_type_12 import SystemEventResponseType12
         from ..models.system_event_response_type_13 import SystemEventResponseType13
+        from ..models.system_event_response_type_14 import SystemEventResponseType14
+        from ..models.system_event_response_type_15 import SystemEventResponseType15
+        from ..models.system_event_response_type_16 import SystemEventResponseType16
+        from ..models.system_event_response_type_17 import SystemEventResponseType17
         from ..models.system_event_response_type_2 import SystemEventResponseType2
         from ..models.system_event_response_type_3 import SystemEventResponseType3
         from ..models.system_event_response_type_4 import SystemEventResponseType4
@@ -208,6 +217,14 @@ class BlockResponse:
                     system_events_item = system_events_item_data.to_dict()
                 elif isinstance(system_events_item_data, SystemEventResponseType12):
                     system_events_item = system_events_item_data.to_dict()
+                elif isinstance(system_events_item_data, SystemEventResponseType13):
+                    system_events_item = system_events_item_data.to_dict()
+                elif isinstance(system_events_item_data, SystemEventResponseType14):
+                    system_events_item = system_events_item_data.to_dict()
+                elif isinstance(system_events_item_data, SystemEventResponseType15):
+                    system_events_item = system_events_item_data.to_dict()
+                elif isinstance(system_events_item_data, SystemEventResponseType16):
+                    system_events_item = system_events_item_data.to_dict()
                 else:
                     system_events_item = system_events_item_data.to_dict()
 
@@ -267,6 +284,10 @@ class BlockResponse:
         from ..models.system_event_response_type_11 import SystemEventResponseType11
         from ..models.system_event_response_type_12 import SystemEventResponseType12
         from ..models.system_event_response_type_13 import SystemEventResponseType13
+        from ..models.system_event_response_type_14 import SystemEventResponseType14
+        from ..models.system_event_response_type_15 import SystemEventResponseType15
+        from ..models.system_event_response_type_16 import SystemEventResponseType16
+        from ..models.system_event_response_type_17 import SystemEventResponseType17
         from ..models.system_event_response_type_2 import SystemEventResponseType2
         from ..models.system_event_response_type_3 import SystemEventResponseType3
         from ..models.system_event_response_type_4 import SystemEventResponseType4
@@ -361,11 +382,11 @@ class BlockResponse:
 
 
         _system_events = d.pop("system_events", UNSET)
-        system_events: list[SystemEventResponseType0 | SystemEventResponseType1 | SystemEventResponseType10 | SystemEventResponseType11 | SystemEventResponseType12 | SystemEventResponseType13 | SystemEventResponseType2 | SystemEventResponseType3 | SystemEventResponseType4 | SystemEventResponseType5 | SystemEventResponseType6 | SystemEventResponseType7 | SystemEventResponseType8 | SystemEventResponseType9] | Unset = UNSET
+        system_events: list[SystemEventResponseType0 | SystemEventResponseType1 | SystemEventResponseType10 | SystemEventResponseType11 | SystemEventResponseType12 | SystemEventResponseType13 | SystemEventResponseType14 | SystemEventResponseType15 | SystemEventResponseType16 | SystemEventResponseType17 | SystemEventResponseType2 | SystemEventResponseType3 | SystemEventResponseType4 | SystemEventResponseType5 | SystemEventResponseType6 | SystemEventResponseType7 | SystemEventResponseType8 | SystemEventResponseType9] | Unset = UNSET
         if _system_events is not UNSET:
             system_events = []
             for system_events_item_data in _system_events:
-                def _parse_system_events_item(data: object) -> SystemEventResponseType0 | SystemEventResponseType1 | SystemEventResponseType10 | SystemEventResponseType11 | SystemEventResponseType12 | SystemEventResponseType13 | SystemEventResponseType2 | SystemEventResponseType3 | SystemEventResponseType4 | SystemEventResponseType5 | SystemEventResponseType6 | SystemEventResponseType7 | SystemEventResponseType8 | SystemEventResponseType9:
+                def _parse_system_events_item(data: object) -> SystemEventResponseType0 | SystemEventResponseType1 | SystemEventResponseType10 | SystemEventResponseType11 | SystemEventResponseType12 | SystemEventResponseType13 | SystemEventResponseType14 | SystemEventResponseType15 | SystemEventResponseType16 | SystemEventResponseType17 | SystemEventResponseType2 | SystemEventResponseType3 | SystemEventResponseType4 | SystemEventResponseType5 | SystemEventResponseType6 | SystemEventResponseType7 | SystemEventResponseType8 | SystemEventResponseType9:
                     try:
                         if not isinstance(data, dict):
                             raise TypeError()
@@ -496,13 +517,53 @@ class BlockResponse:
                         return componentsschemas_system_event_response_type_12
                     except (TypeError, ValueError, AttributeError, KeyError):
                         pass
+                    try:
+                        if not isinstance(data, dict):
+                            raise TypeError()
+                        componentsschemas_system_event_response_type_13 = SystemEventResponseType13.from_dict(data)
+
+
+
+                        return componentsschemas_system_event_response_type_13
+                    except (TypeError, ValueError, AttributeError, KeyError):
+                        pass
+                    try:
+                        if not isinstance(data, dict):
+                            raise TypeError()
+                        componentsschemas_system_event_response_type_14 = SystemEventResponseType14.from_dict(data)
+
+
+
+                        return componentsschemas_system_event_response_type_14
+                    except (TypeError, ValueError, AttributeError, KeyError):
+                        pass
+                    try:
+                        if not isinstance(data, dict):
+                            raise TypeError()
+                        componentsschemas_system_event_response_type_15 = SystemEventResponseType15.from_dict(data)
+
+
+
+                        return componentsschemas_system_event_response_type_15
+                    except (TypeError, ValueError, AttributeError, KeyError):
+                        pass
+                    try:
+                        if not isinstance(data, dict):
+                            raise TypeError()
+                        componentsschemas_system_event_response_type_16 = SystemEventResponseType16.from_dict(data)
+
+
+
+                        return componentsschemas_system_event_response_type_16
+                    except (TypeError, ValueError, AttributeError, KeyError):
+                        pass
                     if not isinstance(data, dict):
                         raise TypeError()
-                    componentsschemas_system_event_response_type_13 = SystemEventResponseType13.from_dict(data)
+                    componentsschemas_system_event_response_type_17 = SystemEventResponseType17.from_dict(data)
 
 
 
-                    return componentsschemas_system_event_response_type_13
+                    return componentsschemas_system_event_response_type_17
 
                 system_events_item = _parse_system_events_item(system_events_item_data)
 

@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
-use sybil_api_types::NANOS_PER_DOLLAR;
+use sybil_api_types::{ActorRole, NANOS_PER_DOLLAR};
 use sybil_client::SybilClient;
 use sybil_polymarket::autoresolve::{AutoResolveActor, AutoResolveConfig};
 use sybil_polymarket::config::Config;
@@ -33,7 +33,25 @@ async fn resolve_mm_account(
     client: &SybilClient,
     mapping: &Arc<RwLock<MappingStore>>,
     balance_nanos: u64,
+    actor_token: &str,
 ) -> Result<u64, Box<dyn std::error::Error>> {
+    if !actor_token.trim().is_empty() {
+        let session = client.actor_universe(actor_token).await?;
+        if session.actor_role != Some(ActorRole::MarketMaker) {
+            return Err("SYBIL_MM_ACTOR_TOKEN is not bound to the market-maker role".into());
+        }
+        let account_id = session
+            .account_id
+            .ok_or("market-maker actor credential has no account binding")?;
+        client.get_account(account_id).await.map_err(|error| {
+            format!("market-maker actor account {account_id} is unavailable: {error}")
+        })?;
+        let mut map = mapping.write().await;
+        map.set_mm_account_id(account_id);
+        map.save()?;
+        info!(account_id, "using role-bound MM actor account");
+        return Ok(account_id);
+    }
     if let Some(account_id) = mapping.read().await.mm_account_id() {
         match client.get_account(account_id).await {
             Ok(_) => {
@@ -87,25 +105,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = Config::parse();
+    config
+        .validate_liquidity_policy()
+        .map_err(std::io::Error::other)?;
     info!(?config, "starting sybil-polymarket");
 
     // Curated seed set (SYB-150). When a path is configured the mirror syncs
     // ONLY these events (by Polymarket event id); a parse failure is fatal so a
     // typo can't silently fall back to the broad volume scan.
-    let curated_event_ids: Vec<String> = if config.curated_markets_path.is_empty() {
-        Vec::new()
-    } else {
-        let curated = sybil_polymarket::curated::CuratedMarkets::load(std::path::Path::new(
-            &config.curated_markets_path,
-        ))?;
-        let ids = curated.event_ids();
-        info!(
-            path = %config.curated_markets_path,
-            events = ids.len(),
-            "loaded curated markets seed set; mirroring by event id only"
-        );
-        ids
-    };
+    let (curated_event_ids, curated_condition_ids): (Vec<String>, Vec<String>) =
+        if config.curated_markets_path.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            let curated = sybil_polymarket::curated::CuratedMarkets::load(std::path::Path::new(
+                &config.curated_markets_path,
+            ))?;
+            let ids = curated.event_ids();
+            let conditions = curated.condition_ids();
+            info!(
+                path = %config.curated_markets_path,
+                events = ids.len(),
+                conditions = conditions.len(),
+                "loaded exact curated mirror allow-list"
+            );
+            (ids, conditions)
+        };
     let native_catalog = if config.native_markets_path.is_empty() {
         NativeMarketCatalog::default()
     } else {
@@ -220,7 +244,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Resolve the MM account: reattach to the persisted one when the server
     // still knows it, otherwise mint and persist a fresh account (PM-7).
     let balance_nanos = (config.mm_initial_balance_dollars * NANOS_PER_DOLLAR as f64) as u64;
-    let mm_account_id = resolve_mm_account(&sybil_client_sync, &mapping, balance_nanos).await?;
+    let mm_account_id = resolve_mm_account(
+        &sybil_client_sync,
+        &mapping,
+        balance_nanos,
+        &config.mm_actor_token,
+    )
+    .await?;
     info!(
         account_id = mm_account_id,
         balance_dollars = config.mm_initial_balance_dollars,
@@ -230,7 +260,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Channels — size MM channel to fit all existing markets for bootstrap.
     // When category filters are configured, apply the same filtered universe to
     // persisted mappings so an old broad mapping does not silently re-expand MM.
-    let allowed_conditions = if !curated_event_ids.is_empty() {
+    let allowed_conditions = if !curated_condition_ids.is_empty() {
+        Some(
+            curated_condition_ids
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>(),
+        )
+    } else if !curated_event_ids.is_empty() {
         // Curated mode: scope the MM bootstrap to the curated events' active
         // conditions so a broad persisted mapping cannot re-expand the MM.
         match gamma_client.fetch_curated_events(&curated_event_ids).await {
@@ -334,6 +371,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 quote_range: to_mm_quote_range(spec.quote_range),
                 group_key,
                 group_size,
+                coherence_key: spec.coherence_key,
+                coherence_rank: spec.coherence_rank,
             });
         }
     }
@@ -421,6 +460,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             mm_tx,
             mm_live_rx,
             curated_event_ids,
+            curated_condition_ids,
             native_catalog_sync,
         );
         actor.run(cancel_sync).await;

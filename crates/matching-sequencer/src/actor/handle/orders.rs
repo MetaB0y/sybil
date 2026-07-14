@@ -1,6 +1,6 @@
 use crate::crypto::{AuthenticatedCancel, AuthenticatedOrder, SignedCancel, SignedOrder};
 use crate::error::SequencerError;
-use crate::sequencer::OrderSubmission;
+use crate::sequencer::{ActorEpochSubmission, OrderSubmission};
 
 use super::super::SequencerMsg;
 use super::SequencerHandle;
@@ -21,6 +21,14 @@ impl SequencerHandle {
         submission: OrderSubmission,
     ) -> Result<Vec<u64>, SequencerError> {
         self.rpc(|reply| SequencerMsg::SubmitIocOrder(submission, reply))
+            .await?
+    }
+
+    pub async fn submit_actor_epoch(
+        &self,
+        epoch: ActorEpochSubmission,
+    ) -> Result<Vec<u64>, SequencerError> {
+        self.rpc(|reply| SequencerMsg::SubmitActorEpoch(epoch, reply))
             .await?
     }
 

@@ -6,17 +6,15 @@
  * "traders in this batch" count and the pro hero's indicative trio.
  *
  * All real backend computations:
- *  - `uniquePlacers` — distinct non-MM traders with a resting order in the
- *    open batch (`open_batch_unique_placers`).
+ *  - `uniquePlacers` — distinct real accounts across every open-batch order
+ *    lane, including market makers (`open_batch_unique_placers`).
  *  - `indicativeYesPriceNanos` / `indicativeVolumeNanos` — a ~750ms
- *    shadow-solve over the resting book (backend C2). Price is `null` when
- *    the market has no resting orders to solve; volume is `0n` when nothing
- *    crosses.
+ *    shadow-solve over resting, deferred, and actor orders, including MM
+ *    constraints (backend C2). Price is `null` when the open batch is empty;
+ *    volume is `0n` when nothing crosses.
  *
  * Polling pauses while the tab is hidden. Query state remains explicit so the
  * rail never turns an unavailable live read into a real-looking empty batch.
- * Expect placers 0 / price null on most markets — the resting book is near-empty
- * (same reason `liq` reads 0).
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -25,15 +23,15 @@ import { parseNanos } from "@/lib/format/nanos";
 import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 
 /** Poll cadence — scales with the batch cadence (BLOCK_INTERVAL_MS) so the rail
- *  samples the open batch ~4× per window: live enough to show orders resting in,
+ *  samples the open batch ~4× per window: live enough to show staged orders,
  *  without hammering the ~750ms shadow-solve. (Was 1s, tuned to the old 2s batch.) */
 const OPEN_BATCH_POLL_MS = Math.round(BLOCK_INTERVAL_MS / 4);
 
 export type OpenBatchLive = {
-  /** Distinct non-MM traders with a resting order in the open batch. */
+  /** Distinct real accounts with an order staged for the open batch. */
   uniquePlacers: number;
   /** Indicative YES clearing price (nanos) from the shadow-solve, or `null`
-   *  when the market has no resting orders to solve. */
+   *  when the market has no open-batch orders to solve. */
   indicativeYesPriceNanos: bigint | null;
   /** Notional volume (nanos) the shadow-solve would clear — `0n` when
    *  nothing crosses. */

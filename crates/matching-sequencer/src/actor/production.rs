@@ -170,6 +170,11 @@ impl SequencerActorState {
             }
         };
 
+        // An indicative result is scoped to one target height. Clear the
+        // just-sealed batch immediately; an in-flight old-height solve is
+        // also rejected by the target-height guard in message dispatch.
+        self.indicative_cache.clear();
+
         #[cfg(test)]
         if test_crashpoint == Some(SequencerTestCrashpoint::AfterCommit) {
             return Err(ActorProcessingErr::from(
@@ -209,8 +214,8 @@ impl SequencerActorState {
     }
 
     /// Indicative scheduler tick (C2). Builds a speculative `Problem` from
-    /// the current resting book (Tier 1: no pending bundles, no MM flash),
-    /// kicks off a `spawn_blocking` solve, and self-sends an
+    /// every order lane targeting the next block (resting, deferred, and
+    /// actor epochs, including MM constraints), kicks off a `spawn_blocking` solve, and self-sends an
     /// `IndicativeUpdate` once the solver returns. An actor-local in-flight
     /// gate prevents the ~750ms timer from stacking LP jobs when one solve is
     /// slower than the cadence.
@@ -221,35 +226,22 @@ impl SequencerActorState {
         if !self.indicative_solve_gate.try_start() {
             return;
         }
-        // Tier 1: single-market only. The LP solver asserts num_markets==1,
-        // and multi-market orders sit in `pending_bundles`, not the book.
-        let resting_orders: Vec<Order> = self
-            .sequencer
-            .order_book()
-            .resting_orders()
-            .filter(|(o, _)| o.num_markets == 1)
-            .map(|(o, _)| o.clone())
-            .collect();
-
-        if resting_orders.is_empty() {
-            // Nothing to solve. Leave the cache untouched so the last good
-            // snapshot remains visible (FE displays staleness via
-            // `computed_at_ms`).
-            self.indicative_solve_gate.finish();
-            return;
-        }
-
-        let mut problem = Problem::new("indicative");
-        problem.markets = self.sequencer.markets().clone();
-        problem.orders = resting_orders;
-        problem.market_groups = self.sequencer.market_groups().to_vec();
-        // mm_constraints intentionally empty (Tier 1 — no MM flash liquidity).
-
-        let last_clearing = self.sequencer.analytics().last_clearing_prices().clone();
         let computed_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
+        let target_height = self.sequencer.height().saturating_add(1);
+        let problem = self.sequencer.open_batch_problem(computed_at_ms);
+
+        if problem.orders.is_empty() {
+            // The open batch is genuinely empty. Do not leak the preceding
+            // batch's indicative price/volume through the cache.
+            self.indicative_cache.clear();
+            self.indicative_solve_gate.finish();
+            return;
+        }
+
+        let last_clearing = self.sequencer.analytics().last_clearing_prices().clone();
         let target = myself.clone();
         let mailbox = self.mailbox_monitor.clone();
 
@@ -268,7 +260,10 @@ impl SequencerActorState {
                             &last_clearing,
                             computed_at_ms,
                         );
-                        SequencerMsg::IndicativeUpdate(snapshots)
+                        SequencerMsg::IndicativeUpdate {
+                            target_height,
+                            snapshots,
+                        }
                     }
                     Err(payload) => SequencerMsg::IndicativeSolveFailed {
                         solver: solver_name,

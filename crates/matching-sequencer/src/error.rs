@@ -211,6 +211,36 @@ pub enum SequencerError {
     /// The requested market already belongs to another market group.
     #[error("market already belongs to group {group_id}")]
     MarketAlreadyGrouped { group_id: u64 },
+    #[error("complete-set quantity must be positive")]
+    CompleteSetInvalidQuantity,
+    #[error("complete-set account not found")]
+    CompleteSetAccountNotFound,
+    #[error("complete-set arithmetic overflow")]
+    CompleteSetArithmetic,
+    #[error(
+        "insufficient cash for complete-set collateralization: required {required}, available {available}"
+    )]
+    CompleteSetInsufficientCash { required: i64, available: i64 },
+    #[error(
+        "insufficient complete-set inventory: required {required}, YES {yes_available}, NO {no_available}"
+    )]
+    CompleteSetInsufficientInventory {
+        required: i64,
+        yes_available: i64,
+        no_available: i64,
+    },
+    #[error(
+        "liquidity universe generation must advance exactly once: current {current}, requested {requested}"
+    )]
+    LiquidityUniverseGeneration { current: u64, requested: u64 },
+    #[error("liquidity universe must contain at least one market")]
+    LiquidityUniverseEmpty,
+    #[error("liquidity universe includes unknown or non-tradeable market {0:?}")]
+    LiquidityUniverseInvalidMarket(MarketId),
+    #[error(
+        "liquidity universe must activate all unresolved members of protocol group {0} as a unit"
+    )]
+    LiquidityUniversePartialGroup(u64),
     /// The requested block was not found.
     #[error("block not found")]
     BlockNotFound,

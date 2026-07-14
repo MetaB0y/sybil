@@ -63,6 +63,12 @@ export interface DevBlockMarketStats {
   matched?: number;
   unmatched?: number;
   welfare_nanos?: number | string | null;
+  mm_matched_orders?: number;
+  noise_matched_orders?: number;
+  organic_matched_orders?: number;
+  mm_fill_notional_nanos?: number | string | null;
+  noise_fill_notional_nanos?: number | string | null;
+  organic_fill_notional_nanos?: number | string | null;
 }
 
 export interface DevBlock {
@@ -82,6 +88,57 @@ export interface DevBlock {
   resolved_market_ids?: number[];
   by_market?: Record<string, DevBlockMarketStats>;
   bridge?: unknown;
+}
+
+export interface DevMarketLiquidityHealth {
+  market_id: number;
+  mm_orders: number;
+  mm_skip_reason?: string | null;
+  noise_actor_count: number;
+  noise_orders: number;
+  noise_crossing_orders: number;
+  other_non_mm_orders: number;
+  clearing_price_present: boolean;
+  fill_volume_nanos: number | string;
+}
+
+export interface DevActorIdentity {
+  account_id: number;
+  principal_id: string;
+  role: "market_maker" | "noise" | string;
+  last_observed_height?: number | null;
+  ready: boolean;
+}
+
+export interface DevLiquidityHealth {
+  height: number;
+  universe_generation: number;
+  active_markets: number;
+  mm_markets_quoted: number;
+  mm_coverage_bps: number;
+  mm_markets_two_sided: number;
+  mm_two_sided_coverage_bps: number;
+  expected_noise_actors: number;
+  observed_noise_actors: number;
+  markets_with_two_noise_actors: number;
+  markets_with_three_noise_actors: number;
+  noise_markets_selected: number;
+  noise_coverage_bps: number;
+  noise_markets_crossing_mm: number;
+  noise_crossing_coverage_bps: number;
+  markets_with_noise_fills: number;
+  rolling_window_blocks: number;
+  rolling_mm_coverage_bps: number;
+  rolling_mm_two_sided_coverage_bps: number;
+  rolling_noise_coverage_bps: number;
+  rolling_noise_crossing_coverage_bps: number;
+  rolling_noise_fill_coverage_bps: number;
+  markets_with_clearing_prices: number;
+  total_fills: number;
+  total_rejections: number;
+  total_volume_nanos: number | string;
+  actors: DevActorIdentity[];
+  markets: DevMarketLiquidityHealth[];
 }
 
 export interface DevOverviewBucket {
@@ -125,6 +182,8 @@ export interface DevBotDecision {
 
 export interface DevBotSummary {
   trader_name: string;
+  account_id?: number | null;
+  participant_kind?: "llm" | "noise" | "legacy" | string | null;
   decision_count?: number;
   avg_edge?: number;
   latest_market_name?: string;

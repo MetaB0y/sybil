@@ -6,9 +6,9 @@ use redb::{Database, TableDefinition};
 use super::testutil::*;
 use super::*;
 use crate::AdminOracle;
-use crate::OrderSubmission;
 use crate::account::AccountStore;
 use crate::market_lifecycle::MarketLifecycle;
+use crate::{ActorEpochSubmission, ActorRole, OrderSubmission};
 
 fn store_test_sequencer_config() -> crate::SequencerConfig {
     crate::SequencerConfig {
@@ -961,6 +961,30 @@ async fn acknowledged_writes_preserve_one_cross_subsystem_sequence() {
     };
     store.append_pending_bundle(&deferred).await.unwrap();
 
+    let actor_epoch = ActorEpochSubmission {
+        principal_id: "noise-test".to_string(),
+        role: ActorRole::Noise,
+        epoch_id: "noise-test-2".to_string(),
+        payload_digest: [0x55; 32],
+        target_height: 2,
+        valid_until_ms: 10_000,
+        universe_generation: 0,
+        covered_market_ids: vec![market_id],
+        submission: OrderSubmission {
+            account_id,
+            orders: vec![outcome_buy(
+                &markets,
+                3,
+                market_id,
+                0,
+                NANOS_PER_DOLLAR / 2,
+                1,
+            )],
+            mm_constraint: None,
+        },
+    };
+    store.upsert_actor_epoch(&actor_epoch).await.unwrap();
+
     let deposit = L1Deposit {
         deposit_id: 1,
         account_id: Some(account_id),
@@ -1003,13 +1027,14 @@ async fn acknowledged_writes_preserve_one_cross_subsystem_sequence() {
         .iter()
         .map(|entry| entry.write.kind())
         .collect();
-    assert_eq!(sequences, vec![0, 1, 2, 3, 4, 5]);
+    assert_eq!(sequences, vec![0, 1, 2, 3, 4, 5, 6]);
     assert_eq!(
         kinds,
         vec![
             "control_plane",
             "direct_admit",
             "deferred_bundle",
+            "actor_epoch",
             "l1_deposit",
             "bridge_withdrawal",
             "bridge_l1_input",

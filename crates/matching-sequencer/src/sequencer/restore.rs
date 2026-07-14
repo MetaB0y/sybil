@@ -33,6 +33,7 @@ impl BlockSequencer {
             &market_groups,
             &lifecycle,
             &last_clearing_prices,
+            &crate::universe::LiquidityUniverse::default(),
         );
         let committed_deposit_frontier = bridge.deposit_frontier;
         Self {
@@ -43,6 +44,8 @@ impl BlockSequencer {
             height: 0,
             markets,
             market_groups,
+            liquidity_universe: crate::universe::LiquidityUniverse::default(),
+            pending_liquidity_universe: None,
             last_header: None,
             genesis_hash: None,
             committed_state_sidecar,
@@ -55,6 +58,7 @@ impl BlockSequencer {
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
             pending_bundles: Vec::new(),
+            pending_actor_epochs: BTreeMap::new(),
             config,
         }
     }
@@ -134,6 +138,7 @@ impl BlockSequencer {
             &state.market_groups,
             &lifecycle,
             &state.analytics.last_clearing_prices,
+            &state.liquidity_universe,
         );
         let committed_deposit_frontier = state.bridge_state.deposit_frontier;
         let mut order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
@@ -165,6 +170,8 @@ impl BlockSequencer {
             height: state.height,
             markets: state.markets,
             market_groups: state.market_groups,
+            liquidity_universe: state.liquidity_universe,
+            pending_liquidity_universe: None,
             last_header: state.last_header,
             genesis_hash: Some(state.genesis_hash),
             committed_state_sidecar,
@@ -176,7 +183,9 @@ impl BlockSequencer {
             bridge: state.bridge_state,
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
+            // Rebuilt below from the globally ordered acknowledged-write log.
             pending_bundles: Vec::new(),
+            pending_actor_epochs: BTreeMap::new(),
             config,
         };
         for entry in acknowledged_writes {
@@ -291,6 +300,27 @@ impl BlockSequencer {
                     self.observe_bridge_l1_height(height).map(|_| ())
                 }
             },
+            AcknowledgedWrite::ActorEpoch(epoch) => {
+                let expected_height = self.height.saturating_add(1);
+                if epoch.target_height != expected_height
+                    || epoch.universe_generation != self.liquidity_universe.generation
+                {
+                    return Err(SequencerError::Persistence(format!(
+                        "acknowledged actor epoch {} targets height/generation {}/{}, expected {}/{}",
+                        epoch.epoch_id,
+                        epoch.target_height,
+                        epoch.universe_generation,
+                        expected_height,
+                        self.liquidity_universe.generation,
+                    )));
+                }
+                for order in &epoch.submission.orders {
+                    self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
+                }
+                self.pending_actor_epochs
+                    .insert((epoch.principal_id.clone(), epoch.target_height), epoch);
+                Ok(())
+            }
         }
     }
 
@@ -514,6 +544,31 @@ impl BlockSequencer {
                 self.apply_prepared_account_with_initial_key(prepared);
                 Ok(())
             }
+            ControlPlaneCommand::CollateralizeCompleteSet {
+                account_id,
+                market_id,
+                quantity,
+            } => self.collateralize_complete_set(
+                account_id,
+                market_id,
+                matching_engine::Qty(quantity),
+            ),
+            ControlPlaneCommand::RedeemCompleteSet {
+                account_id,
+                market_id,
+                quantity,
+            } => self.redeem_complete_set(account_id, market_id, matching_engine::Qty(quantity)),
+            ControlPlaneCommand::ActivateLiquidityUniverse {
+                generation,
+                policy_digest,
+                market_ids,
+            } => self
+                .activate_liquidity_universe(generation, policy_digest, market_ids)
+                .map(|_| ()),
+            ControlPlaneCommand::ApplyCompleteSetInventoryActions {
+                account_id,
+                actions,
+            } => self.apply_complete_set_inventory_actions(account_id, &actions),
         }
     }
 }

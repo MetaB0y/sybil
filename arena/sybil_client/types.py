@@ -67,6 +67,9 @@ class Market:
     expiry_timestamp_ms: int = 0
     created_at_ms: int = 0
     volume_nanos: int = 0
+    actor_min_yes_nanos: int | None = None
+    actor_max_yes_nanos: int | None = None
+    actor_seed_yes_nanos: int | None = None
 
     @property
     def yes_price(self) -> float:

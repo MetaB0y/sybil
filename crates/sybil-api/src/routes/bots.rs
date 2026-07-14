@@ -19,6 +19,8 @@ const MAX_BOT_EQUITY_LIMIT: usize = 1_000;
 
 type SnapshotRow = (
     String,
+    Option<i64>,
+    Option<String>,
     Option<f64>,
     Option<f64>,
     Option<f64>,
@@ -135,6 +137,8 @@ pub struct BotStatsResponse {
 #[derive(Debug, Clone, Default, Serialize, utoipa::ToSchema)]
 pub struct BotSummaryResponse {
     pub trader_name: String,
+    pub account_id: Option<i64>,
+    pub participant_kind: Option<String>,
     /// Member of the most recent non-stale Arena runtime cohort.
     pub active: bool,
     /// Runtime role such as competitor, load, or noise.
@@ -534,7 +538,7 @@ fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotS
     }
 
     let with_totals = conn.prepare(
-        "SELECT p.trader_name, p.balance, p.portfolio_value, p.pnl, p.total_fills, p.total_orders, p.timestamp \
+        "SELECT p.trader_name, p.account_id, p.participant_kind, p.balance, p.portfolio_value, p.pnl, p.total_fills, p.total_orders, p.timestamp \
          FROM portfolio_snapshots p \
          JOIN (SELECT trader_name, MAX(id) AS id FROM portfolio_snapshots GROUP BY trader_name) latest \
            ON p.trader_name = latest.trader_name AND p.id = latest.id",
@@ -544,12 +548,14 @@ fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotS
         && let Ok(rows) = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, Option<f64>>(1)?,
-                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<String>>(2)?,
                 row.get::<_, Option<f64>>(3)?,
-                row.get::<_, Option<i64>>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<f64>>(4)?,
+                row.get::<_, Option<f64>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, Option<String>>(8)?,
             ))
         })
     {
@@ -570,6 +576,8 @@ fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotS
     let Ok(rows) = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
+            None,
+            Some("legacy".to_string()),
             row.get::<_, Option<f64>>(1)?,
             row.get::<_, Option<f64>>(2)?,
             row.get::<_, Option<f64>>(3)?,
@@ -586,7 +594,17 @@ fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotS
 }
 
 fn apply_snapshot(summaries: &mut HashMap<String, BotSummaryResponse>, row: SnapshotRow) {
-    let (trader_name, balance, portfolio_value, pnl, total_fills, total_orders, timestamp) = row;
+    let (
+        trader_name,
+        account_id,
+        participant_kind,
+        balance,
+        portfolio_value,
+        pnl,
+        total_fills,
+        total_orders,
+        timestamp,
+    ) = row;
     let summary = summaries
         .entry(trader_name.clone())
         .or_insert_with(|| BotSummaryResponse {
@@ -596,6 +614,8 @@ fn apply_snapshot(summaries: &mut HashMap<String, BotSummaryResponse>, row: Snap
     if summary.latest_balance.is_none() {
         summary.latest_balance = balance;
     }
+    summary.account_id = account_id;
+    summary.participant_kind = participant_kind;
     summary.portfolio_value = portfolio_value;
     summary.pnl = pnl;
     summary.total_fills = total_fills;
@@ -874,7 +894,9 @@ mod tests {
                 pnl REAL,
                 positions TEXT,
                 total_fills INTEGER DEFAULT 0,
-                total_orders INTEGER DEFAULT 0
+                total_orders INTEGER DEFAULT 0,
+                account_id INTEGER,
+                participant_kind TEXT DEFAULT 'legacy'
             );",
         )
         .expect("create snapshots table");
@@ -1034,5 +1056,27 @@ mod tests {
         assert_eq!(rows[0].portfolio_value, Some(100.0));
         assert_eq!(rows[1].portfolio_value, Some(104.0));
         assert_eq!(rows[1].total_orders, Some(14));
+    }
+
+    #[test]
+    fn load_summaries_exposes_runtime_account_and_participant_kind() {
+        let conn = Connection::open_in_memory().expect("sqlite");
+        decisions_table(&conn);
+        snapshots_table(&conn);
+        conn.execute(
+            "INSERT INTO portfolio_snapshots (
+                trader_name, timestamp, balance, portfolio_value, pnl,
+                positions, total_fills, total_orders, account_id, participant_kind
+            ) VALUES ('alice', '2026-07-15T00:00:00+00:00', 90.0, 101.0, 1.0,
+                      '{}', 3, 5, 17, 'llm')",
+            [],
+        )
+        .expect("insert snapshot");
+
+        let summaries = load_summaries(&conn).expect("load summaries");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].account_id, Some(17));
+        assert_eq!(summaries[0].participant_kind.as_deref(), Some("llm"));
+        assert_eq!(summaries[0].pnl, Some(1.0));
     }
 }

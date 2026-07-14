@@ -1,29 +1,365 @@
 {
-  "description": "Small curated Polymarket mirror seed set for the AI/technology devnet. Addressed by Polymarket Gamma event id so selection is deterministic and auditable. When `--curated-markets-path`/`CURATED_MARKETS_PATH` points at this file, the mirror fetches exactly these events by id and mirrors their active, non-closed child markets instead of scanning volume-ranked categories. The set deliberately excludes sports, weather, short-expiry markets, broad outcome ladders, and valuation grids. These 4 event entries expanded to 7 active child markets when verified on 2026-07-14. Each Sybil market retains its Polymarket condition id, parent event id, and event URL as provenance. To update: verify `https://gamma-api.polymarket.com/events?id=<event_id>` reports active=true, closed=false, and at least one active non-closed child, then add or remove an entry and redeploy sybil-polymarket.",
-  "events": [
+  "description": "Exact reviewed Polymarket mirror allow-list for Actor Liquidity v2. Every child is addressed by stable condition id; newly added children of an event are never included implicitly. Migration assertion: exactly 72 mirror children.",
+  "conditions": [
     {
+      "condition_id": "0x042a712f74fb759c5eec43cdd1a70dd00d33671ff15fa70b4d47a559cc213f14",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (LOW) $500B by December 31?"
+    },
+    {
+      "condition_id": "0x0a0fb756d8dc5c3cf0a16eebc7d6d39406155a41e13d00bf615fc0fcd9e9c31a",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $1.25T by December 31?"
+    },
+    {
+      "condition_id": "0x0a7e49c536cc4a9ddfaca10ac9aec476e358c2d29a9e13d5cc320ad0335374a8",
+      "event_id": "192873",
+      "title": "Will OpenAI announce glasses in 2026?"
+    },
+    {
+      "condition_id": "0x0ed3f07970b2d212acf460bbd4209a13ec4e4b45395b34f8d0bd9df05c909cda",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $2.0T by December 31?"
+    },
+    {
+      "condition_id": "0x18d4e1c2e60d67e788adc175928eea7188ddc07191e7ff7fde5459168c16fe8c",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (LOW) $600B by December 31?"
+    },
+    {
+      "condition_id": "0x192617b6b85adde1ce846a603effd87d76cc5e57c0a544f41388df8d4961fa2f",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $4.0T by December 31?"
+    },
+    {
+      "condition_id": "0x22637d3841428fd3efcf8cdff418ab97663676f1c6e634c32740ee390ca19d89",
       "event_id": "333737",
-      "slug": "will-a-chinese-company-have-the-best-ai-model-by-december-31",
-      "title": "Will a Chinese company have a top AI model by December 31?",
-      "note": "Four durable benchmark-rank binaries (top 3, top 5, top 10, and best), all ending 2026-12-31. Closely matches Sybil's native AI-leaderboard theme without a large outcome fan-out."
+      "title": "Will a Chinese company have one of the top 10 AI models by December 31?"
     },
     {
-      "event_id": "79075",
-      "slug": "us-enacts-ai-safety-bill-before-2027",
-      "title": "U.S. enacts AI safety bill before 2027?",
-      "note": "Single binary market. Ends 2026-12-31."
+      "condition_id": "0x25d1a9d23e1bb0a8e6bf8c89e36bac306f5a348a4bf5e64729d8889053381c98",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: Z.ai"
     },
     {
+      "condition_id": "0x277a3ae83692e2242b1ccf6c345646908075a1e94ff7151359aeaf8c9495cbc4",
+      "event_id": "83771",
+      "title": "Dan Clancy out as Twitch CEO before 2027?"
+    },
+    {
+      "condition_id": "0x2b16027151939383432ca27284c5b45a87e588f3755e7502ecf5332d12f479ac",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Meituan"
+    },
+    {
+      "condition_id": "0x2c185587bad5fe008a477755ed1dfbbb9f5828e84596aa9c6d9f60ebe6bc705d",
+      "event_id": "333737",
+      "title": "Will a Chinese company have one of the top 5 AI models by December 31?"
+    },
+    {
+      "condition_id": "0x2d9e8b66e63e7b169416eed9d241a5aa633ba0052f553bb64a824e21f1be04c4",
+      "event_id": "192873",
+      "title": "Will OpenAI announce a phone in 2026?"
+    },
+    {
+      "condition_id": "0x2f2c1c9fb95be15c18394b3ac9ba6431ccffda7a383d08d7ab7379330e0fecaf",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: None in 2026"
+    },
+    {
+      "condition_id": "0x32c24495fa457397bd0b0be80bc7c11c9a6271cb8cee05a2bd9afaad0d7e21ec",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: xAI"
+    },
+    {
+      "condition_id": "0x3ae127fe5aea62414a5902c438ac63207d561fcb42c8a61ccef1a25f17e0570c",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (LOW) $800B by December 31?"
+    },
+    {
+      "condition_id": "0x3ff9124b87f05d7a65ec801f28cb336b86c16a2197afb0139731610d55e21d27",
+      "event_id": "192873",
+      "title": "Will OpenAI announce earbuds or headphones in 2026?"
+    },
+    {
+      "condition_id": "0x42c3ffd70998d46d4774897386fb919c77b959a4ba869a7b4259ceda3038db72",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Moonshot"
+    },
+    {
+      "condition_id": "0x456a6fc21b414098046a33440896cb6cfaa86dc1a0032f2a73af21980b5e1099",
+      "event_id": "192873",
+      "title": "Will OpenAI announce a ring in 2026?"
+    },
+    {
+      "condition_id": "0x475c9930c09c7a7526a9596dd4dc191a31ef99253ccbf7045720501fc49ba0fb",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $2.5T by December 31?"
+    },
+    {
+      "condition_id": "0x483e4a4b837150e3454c471abaf09b1eb259fc0cf5ecdc138e50a73a5e6befea",
+      "event_id": "83771",
+      "title": "Sundar Pichai out as Google CEO before 2027?"
+    },
+    {
+      "condition_id": "0x51d057952ea481efcbadf8d96afbc6781b9295e0932bcaf3380e2f58ce15d39d",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Amazon"
+    },
+    {
+      "condition_id": "0x52f69f432e4962ec580f020c68d9bcae62db97cdf64b7d9c28ba01f9025b22f3",
+      "event_id": "83771",
+      "title": "Andy Jassy out as Amazon CEO before 2027?"
+    },
+    {
+      "condition_id": "0x57678b4114e42eab8bb5858ee3d20b54ab3b55c18344ffcb8156e78b2066f448",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: Anthropic"
+    },
+    {
+      "condition_id": "0x5a73aca57a88d051e913a731234c4cf280b58a27c0f6f9ca02ab77d4b357736a",
+      "event_id": "83771",
+      "title": "Brian Armstrong out as Coinbase CEO before 2027?"
+    },
+    {
+      "condition_id": "0x6231089f4ea288201b55d3000b19ef8e56ce5edc50a2806067c8b2e4c6d43dc2",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (HIGH) $5.0T by December 31?"
+    },
+    {
+      "condition_id": "0x62b614201ee04912119c4bd45e4ab8d98d05cc5a4c5af88d89e2b5728fbd1412",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $3.0T by December 31?"
+    },
+    {
+      "condition_id": "0x66ac2e679490cd3d3b3f62661d7ce7f57ff1eadabd316e7f2372fdfeab490485",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: DeepSeek"
+    },
+    {
+      "condition_id": "0x67adc22bcf8c1c7ff1a96cfa71d4221f5cc2ae6dc746989741d58bc8f3aa46f8",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: DeepSeek"
+    },
+    {
+      "condition_id": "0x6cfe7a9e60cccf76f79b654192e32585c1f4808ac1abbe17291386b5dc3d6242",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $900B by December 31?"
+    },
+    {
+      "condition_id": "0x6f107a898291e9e227ef0835f74062c7fbf450363da765cec5372b86cf3686c7",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $1.0T by December 31?"
+    },
+    {
+      "condition_id": "0x7143797a3bfe16d1df11269f331b49d93ce09912c17e1a672b88b8dca72a270a",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Baidu"
+    },
+    {
+      "condition_id": "0x782472918d01e1f758c3601540be9cb25357e3ea567903dcb0372ec67ff49af1",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (LOW) $700B by December 31?"
+    },
+    {
+      "condition_id": "0x784beb8f89bcbc448a281050de26a227a258e535eee33e578ef10f25440c4731",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Microsoft"
+    },
+    {
+      "condition_id": "0x857398c4502bc725fef7efb3cd503a30d3e18e486ab8173fdf505a76cf83b168",
       "event_id": "85299",
-      "slug": "ai-bubble-burst-by",
-      "title": "AI bubble burst by...? (2026 leg)",
-      "note": "One active 2026 binary. The March-2026 and December-2025 legs are closed and filtered out by the mirror. Durable macro/AI question ending 2026-12-31."
+      "title": "AI bubble burst in 2026?"
     },
     {
+      "condition_id": "0x91a003371cb96dc30511f883052d6b5957d9f099f02704f9838523a260dd1162",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (HIGH) $1.5T by December 31?"
+    },
+    {
+      "condition_id": "0x94863fef07e2101b8008f3994fe9fb79da69bede7f02f976d62797cf73e6d22f",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Mistral"
+    },
+    {
+      "condition_id": "0x94f240d042917cabd55f0bcbcac7d4d2accd4436773bf91596f76572cac643cb",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Google"
+    },
+    {
+      "condition_id": "0x94f4991478e6da755120244efaca30a170f08945107d2fc2e6313d9f77390be4",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Z.ai"
+    },
+    {
+      "condition_id": "0x9808175a3da0c4c5c12884209195e3e6236bd82ce435f34e6b88c92b0a7c4db9",
+      "event_id": "192873",
+      "title": "Will OpenAI announce a necklace-style wearable in 2026?"
+    },
+    {
+      "condition_id": "0x9a615dee0c451b49b0dd68f6ae48d88fa3bdc15669828f725eb309ac5fe56333",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (HIGH) $1.25T by December 31?"
+    },
+    {
+      "condition_id": "0xa1c9cfeae7485998351b99d7c1297a6aa0d3a90f1757e3436c71ba047d039313",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: Mistral"
+    },
+    {
+      "condition_id": "0xa872761e9ce30c1618039af7bcd168da16a97502441739276e485b214f3f847e",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: xAI"
+    },
+    {
+      "condition_id": "0xaee6153d03242be37cea3995233ecacd46e49ccd8e38e85fc27738841bad492f",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (LOW) $800B by December 31?"
+    },
+    {
+      "condition_id": "0xb202db72798accbbae7e83a9ccb4e7120a6556af622a8acd51013041b29c100e",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $1.75T by December 31?"
+    },
+    {
+      "condition_id": "0xb2140927d199c1f224b3485bcd36400481a8382e6746e16c138e067532e90ad6",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (HIGH) $4.0T by December 31?"
+    },
+    {
+      "condition_id": "0xb4da508a1a36438fd1b44143415f7359abcbcc23c8d67cab26af43a4562ced2a",
+      "event_id": "83771",
+      "title": "Sam Altman out as OpenAI CEO before 2027?"
+    },
+    {
+      "condition_id": "0xb5574c0e233906ecd6dd2c9c3e309509124aa864f6f6a793e70c39b98efb0558",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: Alibaba"
+    },
+    {
+      "condition_id": "0xba3981309bcbbd6c89f44f10354f8b9d26b33cb34ba0b972f62d6268fa6addcd",
+      "event_id": "192873",
+      "title": "Will OpenAI announce a computer (Laptop/Desktop) in 2026?"
+    },
+    {
+      "condition_id": "0xbef3c5d2db53c02b66ad25c4b460746c502af74ad9105858a1e107da545cc828",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (LOW) $700B by December 31?"
+    },
+    {
+      "condition_id": "0xc15a7548e3f5c17dd61cebeba2f105ce6a8c36e5dce50331ad308b26094c5a78",
+      "event_id": "192873",
+      "title": "Will OpenAI announce a tablet in 2026?"
+    },
+    {
+      "condition_id": "0xc167a7967ffbc3b1a864ffbaf11fa1c9fd6904877692a5ba25e3e7f3d01ed644",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Meta"
+    },
+    {
+      "condition_id": "0xc48b0f7896658f9ebb8e3d58202bb1b4e756bb69af6bd64bc4ffd0c7e82aa64c",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: Google"
+    },
+    {
+      "condition_id": "0xc68fea7daba83292fdd7bb704f26d38c4f678cbc2ff69c4175d47c55e74b4321",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (HIGH) $1.75T by December 31?"
+    },
+    {
+      "condition_id": "0xc71dbe9724f537b220b58e35a0a023ca9f6883117b3723eecf6384c5b2c51d45",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $1.5T by December 31?"
+    },
+    {
+      "condition_id": "0xca52ff40e910f20d6af4ae3b475f6fa00c4a31205d732cfb2c2e1d09dff21932",
+      "event_id": "333737",
+      "title": "Will a Chinese company have the best AI model by December 31?"
+    },
+    {
+      "condition_id": "0xccc84033ab481e4c1ed49fce3889e54a9f6c127b819a3bc17bbf2359d1e4c2bd",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: OpenAI"
+    },
+    {
+      "condition_id": "0xcd7a77ab87d7f22781bcb1b302601ebc857241d65cd288c30121950399017d8e",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Alibaba"
+    },
+    {
+      "condition_id": "0xcdbf64cb434d132ae3eba2c6d4aa8123dde9f90bd8641a5cd31ceddee6d935b8",
+      "event_id": "79075",
+      "title": "U.S. enacts AI safety bill before 2027?"
+    },
+    {
+      "condition_id": "0xd594753a5d2b4d3b9e65cdd06c3cbb0645d70be7626fad94774f45560b150d23",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (HIGH) $3.0T by December 31?"
+    },
+    {
+      "condition_id": "0xdc7c8ada1b8d28300cdc783578e8754d2570a3da067965be15bba638cb94f83a",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (HIGH) $2.5T by December 31?"
+    },
+    {
+      "condition_id": "0xe1c1ad2a8552dbb0ac83b1baf7986d74849fbef0e209d44efbd2f2e5254e4e75",
+      "event_id": "192873",
+      "title": "Will OpenAI announce a watch in 2026?"
+    },
+    {
+      "condition_id": "0xe5fbcaf9e6eee30018a5e19d9e96296c7fd6be8502f8c8239a80a3108198417c",
+      "event_id": "192873",
+      "title": "Will OpenAI announce a head-mounted display in 2026?"
+    },
+    {
+      "condition_id": "0xe944062b6d02b59c5f6c39cd4d35538918053c0c7e5f8d7fa0ab1d4edb9baa46",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: Anthropic"
+    },
+    {
+      "condition_id": "0xea4597aeb552f1d7b98a79805b802b0fa14d49e91df983852774d91168deff31",
+      "event_id": "556382",
+      "title": "Which company has best AI model end of 2026?: ByteDance"
+    },
+    {
+      "condition_id": "0xec68eadfac48a30f23f3a7f4acc4428d65bac28cc61f7daf2581f42201d72d48",
+      "event_id": "192873",
+      "title": "Will OpenAI announce a clip-on device for clothing in 2026?"
+    },
+    {
+      "condition_id": "0xed31f0e6ee1b983560996c0d7fe88b18181ba74479ce58ed78b88027f6cc50f3",
       "event_id": "96557",
-      "slug": "will-ai-be-charged-with-a-crime-before-2027",
-      "title": "Will AI be charged with a crime before 2027?",
-      "note": "Single technology/legal binary ending 2026-12-31."
+      "title": "Will AI be charged with a crime before 2027?"
+    },
+    {
+      "condition_id": "0xedbfee6204f26891dbeaebf58c031cb8d9f66d5c9118b4fcdd886c75ba0071e3",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (HIGH) $5.0T by December 31?"
+    },
+    {
+      "condition_id": "0xf19307d3b033f5d9df233a70283fbdfdbff5f0b01ee3d9ad9b6e4f100b030f91",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (LOW) $600B by December 31?"
+    },
+    {
+      "condition_id": "0xf32da8a1740a0d58ffdf87343afefb0bcca4b355cc88e2dba8fd78a88a5308d2",
+      "event_id": "500753",
+      "title": "Will Anthropic's valuation hit (HIGH) $2.0T by December 31?"
+    },
+    {
+      "condition_id": "0xf4aff06686ee874668335fe94999e249fdf4de02a031afc9ee791a911b0e8717",
+      "event_id": "333737",
+      "title": "Will a Chinese company have one of the top 3 AI models by December 31?"
+    },
+    {
+      "condition_id": "0xf57c3d72c028f618464e1e472eda7ded96ce1c30c31e3a3c453e5e418a6f4de4",
+      "event_id": "500775",
+      "title": "Will OpenAI's valuation hit (LOW) $750B by December 31?"
+    },
+    {
+      "condition_id": "0xff51f2c13120c22abe5781c21a2bb4dc81a8013c38b2dd472b634cad6c8ac53b",
+      "event_id": "206787",
+      "title": "Which company's AI will first hit 1550 on Chatbot Arena in 2026?: OpenAI"
     }
   ]
 }

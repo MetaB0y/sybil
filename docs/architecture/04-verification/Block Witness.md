@@ -3,12 +3,12 @@ tags: [zk, serialization, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 ---
 
 # Block Witness Format
 
-`BlockWitness` v10 is the canonical private audit package for a Sybil block. The
+`BlockWitness` v11 is the canonical private audit package for a Sybil block. The
 sequencer persists it, native verification replays it, and the OpenVM epoch
 guest receives one witness per streamed `StateTransitionGuestInput`. Each
 per-block hash binds the witness by recomputing `witness_root`; the epoch proof
@@ -36,7 +36,9 @@ adding the signature-bound chain `genesis_hash` needed for in-guest key-op
 verification. GitHub #73 moves the format to v10 by appending the committed
 `last_trading_nonce` to account snapshots and
 `ClientActionAuthorized(Order|Cancel)` events carrying exact RawP256/WebAuthn
-envelopes. See
+envelopes. Actor Liquidity v2.1 moves the format to v11 by appending the
+committed liquidity-universe snapshot plus complete-set collateralization,
+redemption, and universe-activation events. See
 the historical `design/archive/implemented/witness-v6-keys-transition.md` and
 `docs/adr/0015-deposit-quarantine.md`.
 
@@ -66,11 +68,11 @@ Primitive encodings:
 
 ## Layout
 
-The first byte is the format version. For v10 it is `0x0a`.
+The first byte is the format version. For v11 it is `0x0b`.
 
 ```text
 canonical_witness_bytes =
-    version:u8 = 0x0a
+    version:u8 = 0x0b
  || header
  || previous_header_tag:u8                     // 0 = none, 1 = present
  || previous_header?                           // if tag == 1
@@ -141,6 +143,11 @@ envelope over canonical bytes using `genesis_hash` and the running key set.
 System replay independently requires each client-action nonce to exceed the
 authenticated `last_trading_nonce`, and binding verification maps the exact
 order/cancel event to its block or sidecar effect.
+
+System-event tags 15 and 16 commit complete-set collateralization and
+redemption; tag 17 commits liquidity-universe activation. The sidecar carries
+the full committed universe snapshot so native and guest replay authenticate
+the exact role-bound actor allow-list used by the block.
 
 `clearing_prices_section` is:
 
@@ -351,7 +358,7 @@ compute_state_root_with_sidecar(post_state, state_sidecar)
 
 ## Versioning And Compatibility
 
-The version byte is the first byte of `canonical_witness_bytes`. v10 is `0x0a`.
+The version byte is the first byte of `canonical_witness_bytes`. v11 is `0x0b`.
 Unknown versions must fail closed. This repo does not maintain dual witness
 decoders for devnet schema changes; ADR-0011 rejects compatibility wrappers
 before launch because they double validity-critical encoder surface.

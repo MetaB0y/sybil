@@ -24,6 +24,15 @@ T = TypeVar("T", bound="SetMarketMetadataRequest")
 class SetMarketMetadataRequest:
     """ 
         Attributes:
+            actor_max_yes_nanos (int | None | Unset): Actor-only native YES upper guardrail. Integer nanodollars expressed
+                as
+                per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
+            actor_min_yes_nanos (int | None | Unset): Actor-only native YES lower guardrail. Integer nanodollars expressed
+                as
+                per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
+            actor_seed_yes_nanos (int | None | Unset): Actor-only native YES initial anchor. Integer nanodollars expressed
+                as
+                per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
             categories (list[str] | None | Unset): All category buckets the parent event matched in the mirror's tag-to-
                 bucket lookup (e.g. `["Sports", "Politics"]` for an NBA + Trump
                 event). One per matched row; the frontend picks which to render
@@ -55,6 +64,9 @@ class SetMarketMetadataRequest:
                 snapshot (`/v1/events/{id}/raw` `markets[].conditionId`).
      """
 
+    actor_max_yes_nanos: int | None | Unset = UNSET
+    actor_min_yes_nanos: int | None | Unset = UNSET
+    actor_seed_yes_nanos: int | None | Unset = UNSET
     categories: list[str] | None | Unset = UNSET
     category: None | str | Unset = UNSET
     closed: bool | None | Unset = UNSET
@@ -78,6 +90,24 @@ class SetMarketMetadataRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
+        actor_max_yes_nanos: int | None | Unset
+        if isinstance(self.actor_max_yes_nanos, Unset):
+            actor_max_yes_nanos = UNSET
+        else:
+            actor_max_yes_nanos = self.actor_max_yes_nanos
+
+        actor_min_yes_nanos: int | None | Unset
+        if isinstance(self.actor_min_yes_nanos, Unset):
+            actor_min_yes_nanos = UNSET
+        else:
+            actor_min_yes_nanos = self.actor_min_yes_nanos
+
+        actor_seed_yes_nanos: int | None | Unset
+        if isinstance(self.actor_seed_yes_nanos, Unset):
+            actor_seed_yes_nanos = UNSET
+        else:
+            actor_seed_yes_nanos = self.actor_seed_yes_nanos
+
         categories: list[str] | None | Unset
         if isinstance(self.categories, Unset):
             categories = UNSET
@@ -183,6 +213,12 @@ class SetMarketMetadataRequest:
         field_dict.update(self.additional_properties)
         field_dict.update({
         })
+        if actor_max_yes_nanos is not UNSET:
+            field_dict["actor_max_yes_nanos"] = actor_max_yes_nanos
+        if actor_min_yes_nanos is not UNSET:
+            field_dict["actor_min_yes_nanos"] = actor_min_yes_nanos
+        if actor_seed_yes_nanos is not UNSET:
+            field_dict["actor_seed_yes_nanos"] = actor_seed_yes_nanos
         if categories is not UNSET:
             field_dict["categories"] = categories
         if category is not UNSET:
@@ -223,6 +259,36 @@ class SetMarketMetadataRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        def _parse_actor_max_yes_nanos(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        actor_max_yes_nanos = _parse_actor_max_yes_nanos(d.pop("actor_max_yes_nanos", UNSET))
+
+
+        def _parse_actor_min_yes_nanos(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        actor_min_yes_nanos = _parse_actor_min_yes_nanos(d.pop("actor_min_yes_nanos", UNSET))
+
+
+        def _parse_actor_seed_yes_nanos(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        actor_seed_yes_nanos = _parse_actor_seed_yes_nanos(d.pop("actor_seed_yes_nanos", UNSET))
+
+
         def _parse_categories(data: object) -> list[str] | None | Unset:
             if data is None:
                 return data
@@ -392,6 +458,9 @@ class SetMarketMetadataRequest:
 
 
         set_market_metadata_request = cls(
+            actor_max_yes_nanos=actor_max_yes_nanos,
+            actor_min_yes_nanos=actor_min_yes_nanos,
+            actor_seed_yes_nanos=actor_seed_yes_nanos,
             categories=categories,
             category=category,
             closed=closed,

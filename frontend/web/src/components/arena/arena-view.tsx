@@ -663,7 +663,12 @@ export function ArenaView() {
     traderHistoryState,
     driftState,
   );
-  const totals = useMemo(() => summarizeBots(summaries), [summaries]);
+  const llmSummaries = useMemo(
+    () => summaries.filter((summary) => summary.participant_kind === "llm"),
+    [summaries],
+  );
+  const totals = useMemo(() => summarizeBots(llmSummaries), [llmSummaries]);
+  const llmTotalsReady = llmSummaries.length > 0;
   const strategies = useMemo(() => strategyRows(summaries), [summaries]);
   const tokenCost = estimateTokenCost(tokenUsage);
   const latestDecision = stats?.latest_decision_timestamp
@@ -714,19 +719,19 @@ export function ArenaView() {
           sub={"latest " + latestDecision}
         />
         <Stat
-          label="Bots"
-          value={fmtInt(stats?.traders)}
+          label="LLM Traders"
+          value={fmtInt(llmSummaries.length)}
           sub={fmtInt(stats?.snapshots) + " portfolio snapshots"}
         />
         <Stat
-          label="Arena PnL"
-          value={money(totals.pnl, true)}
-          tone={totals.pnl >= 0 ? "yes" : "no"}
-          sub={"portfolio " + money(totals.portfolioValue)}
+          label="Arena PnL · LLM Only"
+          value={llmTotalsReady ? money(totals.pnl, true) : "—"}
+          tone={!llmTotalsReady ? "warn" : totals.pnl >= 0 ? "yes" : "no"}
+          sub={llmTotalsReady ? "portfolio " + money(totals.portfolioValue) : "LLM account metadata unavailable"}
         />
         <Stat
           label="Orders / Fills"
-          value={fmtInt(totals.orders) + " / " + fmtInt(totals.fills)}
+          value={llmTotalsReady ? fmtInt(totals.orders) + " / " + fmtInt(totals.fills) : "—"}
           sub="latest bot snapshots"
         />
         <Stat

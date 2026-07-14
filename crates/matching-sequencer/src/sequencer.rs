@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use matching_engine::{
@@ -35,16 +35,19 @@ use crate::order_book::{OrderBook, RestingExit, RestingRevalidationExit};
 use crate::settlement;
 use crate::store::{AcknowledgedWrite, ControlPlaneCommand, RestoredState, SequencerSnapshot};
 use crate::system_event::SystemEvent;
+use crate::universe::LiquidityUniverse;
 use crate::validation::validate_order_shape;
 
 mod accounts;
 mod admission;
 mod bridge_ops;
+mod complete_sets;
 mod config;
 mod markets;
 mod production;
 mod restore;
 mod types;
+mod universe;
 mod views;
 
 pub use self::config::{
@@ -52,8 +55,8 @@ pub use self::config::{
 };
 pub use self::restore::SequencerRestoreError;
 pub use self::types::{
-    AdmitOutcome, BatchResult, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,
-    PreparedBlock, batch_result_from_block,
+    ActorEpochSubmission, ActorRole, AdmitOutcome, BatchResult, LeaderboardBase, LeaderboardRow,
+    OrderSubmission, PendingOrderInfo, PreparedBlock, batch_result_from_block,
 };
 
 fn current_timestamp_ms() -> u64 {
@@ -82,6 +85,10 @@ pub struct BlockSequencer {
     markets: MarketSet,
     /// Market groups (multi-outcome event constraints).
     market_groups: Vec<MarketGroup>,
+    /// Versioned exact market allow-list. Generation zero is legacy bootstrap.
+    liquidity_universe: LiquidityUniverse,
+    /// Candidate staged for atomic activation at the next block boundary.
+    pending_liquidity_universe: Option<LiquidityUniverse>,
     /// Last block header for hash chaining.
     last_header: Option<BlockHeader>,
     /// Hash of the first committed block header; scopes signed order/cancel bytes.
@@ -119,6 +126,8 @@ pub struct BlockSequencer {
     /// acknowledged-write WAL so restart cannot drop it or reorder it against
     /// another subsystem.
     pending_bundles: Vec<OrderSubmission>,
+    /// Dedicated replaceable actor packages, keyed by principal and target block.
+    pending_actor_epochs: BTreeMap<(String, u64), ActorEpochSubmission>,
     /// Runtime configuration for this sequencer and its surrounding actor.
     pub config: SequencerConfig,
 }

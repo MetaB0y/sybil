@@ -27,6 +27,7 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
 
     // Track cumulative balance reservations per account (intra-batch)
     let mut reserved_balance: HashMap<u64, i64> = HashMap::new();
+    let mut reserved_positions: HashMap<(u64, matching_engine::MarketId, u8), i64> = HashMap::new();
 
     // Verify accepted orders
     for wo in &witness.orders {
@@ -62,11 +63,6 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
             });
         }
 
-        // MM orders skip balance validation (matching sequencer behavior)
-        if wo.is_mm {
-            continue;
-        }
-
         let Some(snap) = post_system_state.get(&wo.account_id) else {
             violations.push(Violation {
                 kind: ViolationKind::AcceptedOrderMissingAccount,
@@ -83,6 +79,10 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
         let has_negative = order.payoffs[..num_states].iter().any(|&p| p < 0);
 
         if has_positive && !has_negative {
+            // MM buys are governed by the shared `MmConstraint` budget.
+            if wo.is_mm {
+                continue;
+            }
             // Pure buy: check balance covers worst-case cost
             let Some(max_cost) = checked_price_qty_ceil(order.limit_price, order.max_fill) else {
                 violations.push(Violation {
@@ -151,12 +151,17 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                         };
 
                         // Look up position in post-system-state snapshot
-                        let available = snap
+                        let position = snap
                             .positions
                             .iter()
                             .find(|&&(m, o, _)| m == market && o == outcome)
                             .map(|&(_, _, q)| q)
                             .unwrap_or(0);
+                        let reserved = reserved_positions
+                            .get(&(wo.account_id, market, outcome))
+                            .copied()
+                            .unwrap_or(0);
+                        let available = position.saturating_sub(reserved);
 
                         if sell_qty > available {
                             violations.push(Violation {
@@ -167,6 +172,10 @@ pub fn verify_orders(witness: &BlockWitness) -> VerificationResult {
                                 ),
                             });
                         }
+                        let entry = reserved_positions
+                            .entry((wo.account_id, market, outcome))
+                            .or_insert(0);
+                        *entry = entry.saturating_add(sell_qty);
                     }
                 }
             }

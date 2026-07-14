@@ -10,6 +10,8 @@ import {
   fmtLiquidity,
   fmtYesDelta24h,
   accountAggregates,
+  actorPnlCohorts,
+  participantRoleIndex,
   formatOrder,
 } from "./derive";
 import type {
@@ -22,10 +24,10 @@ import type {
 const mkt = (o: Partial<DevMarket> & { market_id: number; name: string }): DevMarket => o;
 
 describe("dev/derive", () => {
-  it("priceState classifies cleared / ref only / no clears", () => {
-    expect(priceState(mkt({ market_id: 1, name: "a", yes_price_nanos: 5e8 }))).toBe("cleared");
+  it("priceState classifies Sybil mark / ref only / unpriced", () => {
+    expect(priceState(mkt({ market_id: 1, name: "a", yes_price_nanos: 5e8 }))).toBe("Sybil mark");
     expect(priceState(mkt({ market_id: 1, name: "a", reference_price_nanos: 5e8 }))).toBe("ref only");
-    expect(priceState(mkt({ market_id: 1, name: "a" }))).toBe("no clears");
+    expect(priceState(mkt({ market_id: 1, name: "a" }))).toBe("unpriced");
   });
 
   it("priceGap is the absolute yes-vs-ref difference in dollars", () => {
@@ -33,15 +35,15 @@ describe("dev/derive", () => {
     expect(priceGap(mkt({ market_id: 1, name: "a", yes_price_nanos: 6e8 }))).toBe(0);
   });
 
-  it("filterMarkets applies search and the cleared state filter", () => {
+  it("filterMarkets applies search and the marked state filter", () => {
     const markets = [
       mkt({ market_id: 1, name: "Trump wins", yes_price_nanos: 5e8, volume_nanos: 100 }),
       mkt({ market_id: 2, name: "Rain tomorrow", volume_nanos: 200 }),
     ];
     const search = filterMarkets(markets, { search: "trump", group: "", state: "all" }, pendingIndex([]));
     expect(search.map((m) => m.market_id)).toEqual([1]);
-    const cleared = filterMarkets(markets, { search: "", group: "", state: "cleared" }, pendingIndex([]));
-    expect(cleared.map((m) => m.market_id)).toEqual([1]);
+    const marked = filterMarkets(markets, { search: "", group: "", state: "marked" }, pendingIndex([]));
+    expect(marked.map((m) => m.market_id)).toEqual([1]);
   });
 
   it("pendingIndex counts orders per market by side", () => {
@@ -93,13 +95,38 @@ describe("dev/derive", () => {
       },
       { account_id: 2, balance_nanos: 3e9, pnl_nanos: 2e9, positions: [] },
     ];
-    const marketIdx = new Map<number, DevMarket>([
-      [1, mkt({ market_id: 1, name: "a", reference_price_nanos: 5e8 })],
-    ]);
-    const agg = accountAggregates(accounts, marketIdx, null);
-    expect(agg.mmCashNanos).toBe(8e9);
+    const agg = accountAggregates(accounts, null);
+    expect(agg.cashNanos).toBe(8e9);
+    expect(agg.pnlNanos).toBe(2e9);
     expect(agg.accountZeroIsInactive).toBe(true);
     expect(agg.activeTradingAccounts.map((a) => a.account_id)).toEqual([1, 2]);
+  });
+
+  it("actor PnL cohorts use runtime roles and never treat all accounts as MM", () => {
+    const accounts: DevAccountPortfolio[] = [
+      { account_id: 1, portfolio_value_nanos: 100e9, pnl_nanos: -3e9 },
+      { account_id: 2, portfolio_value_nanos: 20e9, pnl_nanos: 2e9 },
+      { account_id: 17, portfolio_value_nanos: 10e9, pnl_nanos: 1e9 },
+      { account_id: 99, portfolio_value_nanos: 5e9, pnl_nanos: 4e9 },
+    ];
+    const roles = participantRoleIndex(
+      {
+        actors: [
+          { account_id: 1, principal_id: "mm", role: "market_maker", ready: true },
+          { account_id: 2, principal_id: "noise-0", role: "noise", ready: true },
+        ],
+      } as never,
+      {
+        summaries: [{ trader_name: "LLM", account_id: 17, participant_kind: "llm" }],
+      },
+    );
+    const pnl = actorPnlCohorts(accounts, roles);
+
+    expect(pnl.mm.pnlNanos).toBe(-3e9);
+    expect(pnl.noise.pnlNanos).toBe(2e9);
+    expect(pnl.llm.pnlNanos).toBe(1e9);
+    expect(pnl.all.pnlNanos).toBe(0);
+    expect(pnl.otherAccountCount).toBe(1);
   });
 
   it("formatOrder formats side, quantity and price for both price branches", () => {

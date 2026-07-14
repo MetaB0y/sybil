@@ -12,6 +12,7 @@ use sybil_client::{PublicBlockStreamEvent, SybilClient};
 
 mod quotes;
 
+use quotes::quoteable_bounds;
 pub use quotes::{QuoteConfig, QuoteInput, generate_quotes, select_rotating_quotes};
 
 /// Default variance prior for markets with insufficient price history.
@@ -80,6 +81,10 @@ pub enum MmMessage {
         group_key: Option<String>,
         /// Number of markets in the categorical group. 0 for standalone binary.
         group_size: usize,
+        /// Threshold-ladder coherence only; never used as protocol group
+        /// membership or complete-set coverage.
+        coherence_key: Option<String>,
+        coherence_rank: usize,
     },
 }
 
@@ -92,6 +97,8 @@ struct MarketState {
     price_source: PriceSource,
     group_key: Option<String>,
     group_size: usize,
+    coherence_key: Option<String>,
+    coherence_rank: usize,
     // Inventory (updated via periodic API sync)
     yes_position: i64,
     no_position: i64,
@@ -106,8 +113,10 @@ enum PriceSource {
     },
     Native {
         quote_range: QuoteRange,
-        /// Latest valid Sybil YES clearing price, seeded from the catalog.
+        /// Robust Sybil actor mark, seeded from the catalog.
         current_mid: f64,
+        qualifying_observations: VecDeque<(f64, u64, u64)>,
+        last_qualifying_height: Option<u64>,
     },
 }
 
@@ -127,6 +136,8 @@ impl MarketState {
             price_source: PriceSource::Mirror { yes_token_id },
             group_key,
             group_size,
+            coherence_key: None,
+            coherence_rank: 0,
             yes_position: 0,
             no_position: 0,
             price_history,
@@ -138,6 +149,8 @@ impl MarketState {
         sybil_market_id: u32,
         group_key: Option<String>,
         group_size: usize,
+        coherence_key: Option<String>,
+        coherence_rank: usize,
         quote_range: QuoteRange,
         vol_window: usize,
     ) -> Self {
@@ -148,9 +161,13 @@ impl MarketState {
             price_source: PriceSource::Native {
                 quote_range,
                 current_mid: quote_range.initial,
+                qualifying_observations: VecDeque::new(),
+                last_qualifying_height: None,
             },
             group_key,
             group_size,
+            coherence_key,
+            coherence_rank,
             yes_position: 0,
             no_position: 0,
             price_history,
@@ -188,9 +205,9 @@ impl MarketState {
 
     /// Dollar exposure for this market given a reference mid price.
     fn exposure(&self, mid: f64) -> f64 {
-        let yes_val = qty_units_to_shares(self.yes_position) * mid;
-        let no_val = qty_units_to_shares(self.no_position) * (1.0 - mid);
-        yes_val.abs() + no_val.abs()
+        let yes_excess = self.yes_position.saturating_sub(self.no_position).max(0);
+        let no_excess = self.no_position.saturating_sub(self.yes_position).max(0);
+        qty_units_to_shares(yes_excess) * mid + qty_units_to_shares(no_excess) * (1.0 - mid)
     }
 
     fn budget_mid(&self, snapshot: &PriceSnapshot) -> f64 {
@@ -203,6 +220,138 @@ impl MarketState {
     }
 }
 
+fn weighted_median(observations: &VecDeque<(f64, u64, u64)>, weight_cap_nanos: u64) -> Option<f64> {
+    let mut rows = observations
+        .iter()
+        .map(|(price, notional, _)| (*price, (*notional).min(weight_cap_nanos).max(1)))
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return None;
+    }
+    rows.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let total = rows.iter().fold(0u128, |sum, (_, weight)| {
+        sum.saturating_add(u128::from(*weight))
+    });
+    let threshold = total.div_ceil(2);
+    let mut cumulative = 0u128;
+    for (price, weight) in rows {
+        cumulative = cumulative.saturating_add(u128::from(weight));
+        if cumulative >= threshold {
+            return Some(price);
+        }
+    }
+    None
+}
+
+/// Euclidean projection onto a bounded simplex. This is off-protocol actor
+/// state; submitted prices are still landed as integer nanos.
+fn project_bounded_simplex(values: &[f64], lower: &[f64], upper: &[f64]) -> Option<Vec<f64>> {
+    if values.len() != lower.len() || values.len() != upper.len() || values.is_empty() {
+        return None;
+    }
+    let lower_sum: f64 = lower.iter().sum();
+    let upper_sum: f64 = upper.iter().sum();
+    if lower_sum > 1.0 + 1e-9 || upper_sum < 1.0 - 1e-9 {
+        return None;
+    }
+    let mut lambda_low = values
+        .iter()
+        .zip(upper)
+        .map(|(value, max)| value - max)
+        .fold(f64::INFINITY, f64::min);
+    let mut lambda_high = values
+        .iter()
+        .zip(lower)
+        .map(|(value, min)| value - min)
+        .fold(f64::NEG_INFINITY, f64::max);
+    for _ in 0..96 {
+        let lambda = (lambda_low + lambda_high) / 2.0;
+        let sum: f64 = values
+            .iter()
+            .zip(lower)
+            .zip(upper)
+            .map(|((value, min), max)| (value - lambda).clamp(*min, *max))
+            .sum();
+        if sum > 1.0 {
+            lambda_low = lambda;
+        } else {
+            lambda_high = lambda;
+        }
+    }
+    let lambda = (lambda_low + lambda_high) / 2.0;
+    let mut projected = values
+        .iter()
+        .zip(lower)
+        .zip(upper)
+        .map(|((value, min), max)| (value - lambda).clamp(*min, *max))
+        .collect::<Vec<_>>();
+    let residual = 1.0 - projected.iter().sum::<f64>();
+    if residual.abs() > 1e-10
+        && let Some((index, _)) = projected.iter().enumerate().find(|(index, value)| {
+            let candidate = **value + residual;
+            candidate >= lower[*index] - 1e-12 && candidate <= upper[*index] + 1e-12
+        })
+    {
+        projected[index] += residual;
+    }
+    Some(projected)
+}
+
+fn project_bounded_nonincreasing(values: &[f64], lower: &[f64], upper: &[f64]) -> Option<Vec<f64>> {
+    if values.len() != lower.len() || values.len() != upper.len() || values.is_empty() {
+        return None;
+    }
+    if lower.windows(2).any(|pair| pair[0] + 1e-12 < pair[1])
+        || upper.windows(2).any(|pair| pair[0] + 1e-12 < pair[1])
+    {
+        return None;
+    }
+    #[derive(Clone, Copy)]
+    struct Block {
+        start: usize,
+        end: usize,
+        sum: f64,
+        weight: usize,
+    }
+    let mut blocks = Vec::<Block>::new();
+    for (index, value) in values.iter().enumerate() {
+        blocks.push(Block {
+            start: index,
+            end: index,
+            sum: *value,
+            weight: 1,
+        });
+        while blocks.len() >= 2 {
+            let right = blocks[blocks.len() - 1];
+            let left = blocks[blocks.len() - 2];
+            if left.sum / left.weight as f64 >= right.sum / right.weight as f64 {
+                break;
+            }
+            blocks.pop();
+            blocks.pop();
+            blocks.push(Block {
+                start: left.start,
+                end: right.end,
+                sum: left.sum + right.sum,
+                weight: left.weight + right.weight,
+            });
+        }
+    }
+    let mut projected = vec![0.0; values.len()];
+    for block in blocks {
+        let mean = block.sum / block.weight as f64;
+        for index in block.start..=block.end {
+            projected[index] = mean.clamp(lower[index], upper[index]);
+        }
+    }
+    // Coherent bounds make the clamp preserve order. Keep the explicit check
+    // so catalog mistakes fail closed instead of leaking crossed ladders.
+    projected
+        .windows(2)
+        .all(|pair| pair[0] + 1e-12 >= pair[1])
+        .then_some(projected)
+}
+
 // --------------------------------------------------------------------------- //
 // Aggregate MM state
 // --------------------------------------------------------------------------- //
@@ -210,7 +359,6 @@ impl MarketState {
 struct MmState {
     markets: HashMap<u32, MarketState>,
     last_sync_block: u64,
-    next_quote_index: usize,
 }
 
 impl MmState {
@@ -218,7 +366,6 @@ impl MmState {
         Self {
             markets: HashMap::new(),
             last_sync_block: 0,
-            next_quote_index: 0,
         }
     }
 }
@@ -420,6 +567,8 @@ impl MmActor {
                 quote_range,
                 group_key,
                 group_size,
+                coherence_key,
+                coherence_rank,
             } => {
                 info!(
                     sybil_market_id,
@@ -437,6 +586,8 @@ impl MmActor {
                         sybil_market_id,
                         group_key,
                         group_size,
+                        coherence_key,
+                        coherence_rank,
                         quote_range,
                         self.config.mm_vol_window,
                     ),
@@ -448,12 +599,12 @@ impl MmActor {
 
     // ----- Position sync -------------------------------------------------- //
 
-    async fn sync_positions(&mut self) {
+    async fn sync_positions(&mut self) -> bool {
         let account = match self.sybil_client.get_account(self.account_id).await {
             Ok(a) => a,
             Err(e) => {
                 warn!(error = %e, "position sync failed");
-                return;
+                return false;
             }
         };
 
@@ -477,6 +628,7 @@ impl MmActor {
             positions = account.positions.len(),
             "position sync complete"
         );
+        true
     }
 
     // ----- Budget computation --------------------------------------------- //
@@ -517,23 +669,179 @@ impl MmActor {
         self.update_native_midpoints(block);
     }
 
-    /// Let native markets discover prices on Sybil after their catalog seed.
-    /// A clearing vector is `[YES, NO]`; invalid or terminal values are ignored.
+    /// Let native markets discover prices from qualifying organic Sybil flow.
+    /// MM/noise-only fills and zero-volume clearing vectors have exactly zero
+    /// weight, preventing actor feedback from walking marks to a guardrail.
     fn update_native_midpoints(&mut self, block: &PublicBlockResponse) {
+        let min_organic_notional_nanos = (self.config.mm_native_min_organic_notional_dollars
+            * NANOS_PER_DOLLAR as f64)
+            .round() as u64;
+        let observation_weight_cap_nanos = (self.config.mm_native_observation_weight_cap_dollars
+            * NANOS_PER_DOLLAR as f64)
+            .round() as u64;
+        let observation_window = self.config.mm_native_observation_window;
+        let max_step = self.config.mm_native_max_step;
+        let ewma_weight = self.config.mm_native_ewma_weight;
+        let seed_reversion = self.config.mm_native_seed_reversion;
+        let quote_config = QuoteConfig {
+            gamma: self.config.mm_gamma,
+            base_spread: self.config.mm_half_spread,
+            min_spread: self.config.mm_min_spread,
+            max_position: self.config.mm_max_position as i64,
+            quote_size_dollars: self.config.mm_quote_size_dollars,
+        };
         for market in self.state.markets.values_mut() {
-            let PriceSource::Native { current_mid, .. } = &mut market.price_source else {
+            let updated_mid = {
+                let PriceSource::Native {
+                    quote_range,
+                    current_mid,
+                    qualifying_observations,
+                    last_qualifying_height,
+                } = &mut market.price_source
+                else {
+                    continue;
+                };
+                let stats = block.by_market.get(&market.sybil_market_id.to_string());
+                let qualifies = stats.is_some_and(|stats| {
+                    stats.organic_matched_orders > 0
+                        && stats.organic_fill_notional_nanos >= min_organic_notional_nanos
+                        && stats.volume_nanos > 0
+                });
+                let observed = qualifies
+                    .then(|| {
+                        block
+                            .clearing_prices_nanos
+                            .get(&market.sybil_market_id.to_string())
+                            .and_then(|prices| prices.first())
+                            .map(|yes_nanos| *yes_nanos as f64 / NANOS_PER_DOLLAR as f64)
+                            .filter(|mid| mid.is_finite() && *mid > 0.0 && *mid < 1.0)
+                    })
+                    .flatten();
+                if let Some(observed) = observed {
+                    let notional = stats
+                        .map(|stats| stats.organic_fill_notional_nanos)
+                        .unwrap_or_default();
+                    qualifying_observations.push_back((observed, notional, block.height));
+                    while qualifying_observations.len() > observation_window {
+                        qualifying_observations.pop_front();
+                    }
+                    *last_qualifying_height = Some(block.height);
+                    let candidate =
+                        weighted_median(qualifying_observations, observation_weight_cap_nanos)
+                            .unwrap_or(observed);
+                    let capped_delta = (candidate - *current_mid).clamp(-max_step, max_step);
+                    *current_mid += ewma_weight * capped_delta;
+                } else {
+                    *current_mid += seed_reversion * (quote_range.initial - *current_mid);
+                }
+                if let Some((min, max)) = quoteable_bounds(*quote_range, &quote_config) {
+                    *current_mid = (*current_mid).clamp(min, max);
+                } else {
+                    *current_mid = quote_range.initial.clamp(quote_range.min, quote_range.max);
+                }
+                *current_mid
+            };
+            market.push_price(updated_mid);
+        }
+
+        // Mutually-exclusive native groups must remain coherent even when
+        // organic evidence touches only one child. Project the whole actor-mark
+        // vector onto its bounded simplex after individual robust updates.
+        let mut native_groups = HashMap::<String, Vec<u32>>::new();
+        for market in self.state.markets.values() {
+            if matches!(&market.price_source, PriceSource::Native { .. })
+                && let Some(group_key) = &market.group_key
+            {
+                native_groups
+                    .entry(group_key.clone())
+                    .or_default()
+                    .push(market.sybil_market_id);
+            }
+        }
+        for market_ids in native_groups.values_mut() {
+            market_ids.sort_unstable();
+            let mut values = Vec::with_capacity(market_ids.len());
+            let mut lower = Vec::with_capacity(market_ids.len());
+            let mut upper = Vec::with_capacity(market_ids.len());
+            for market_id in market_ids.iter() {
+                let Some(market) = self.state.markets.get(market_id) else {
+                    continue;
+                };
+                let PriceSource::Native {
+                    quote_range,
+                    current_mid,
+                    ..
+                } = &market.price_source
+                else {
+                    continue;
+                };
+                let Some((min, max)) = quoteable_bounds(*quote_range, &quote_config) else {
+                    continue;
+                };
+                values.push(*current_mid);
+                lower.push(min);
+                upper.push(max);
+            }
+            let Some(projected) = project_bounded_simplex(&values, &lower, &upper) else {
+                warn!(market_ids = ?market_ids, "native actor-mark simplex is infeasible");
                 continue;
             };
-            let Some(yes_nanos) = block
-                .clearing_prices_nanos
-                .get(&market.sybil_market_id.to_string())
-                .and_then(|prices| prices.first())
-            else {
+            for (market_id, projected_mid) in market_ids.iter().zip(projected) {
+                if let Some(market) = self.state.markets.get_mut(market_id)
+                    && let PriceSource::Native { current_mid, .. } = &mut market.price_source
+                {
+                    *current_mid = projected_mid;
+                }
+            }
+        }
+
+        let mut threshold_cohorts = HashMap::<String, Vec<(usize, u32)>>::new();
+        for market in self.state.markets.values() {
+            if let Some(coherence_key) = &market.coherence_key {
+                threshold_cohorts
+                    .entry(coherence_key.clone())
+                    .or_default()
+                    .push((market.coherence_rank, market.sybil_market_id));
+            }
+        }
+        for cohort in threshold_cohorts.values_mut() {
+            cohort.sort_unstable();
+            let market_ids = cohort
+                .iter()
+                .map(|(_, market_id)| *market_id)
+                .collect::<Vec<_>>();
+            let mut values = Vec::with_capacity(market_ids.len());
+            let mut lower = Vec::with_capacity(market_ids.len());
+            let mut upper = Vec::with_capacity(market_ids.len());
+            for market_id in &market_ids {
+                let Some(market) = self.state.markets.get(market_id) else {
+                    continue;
+                };
+                let PriceSource::Native {
+                    quote_range,
+                    current_mid,
+                    ..
+                } = &market.price_source
+                else {
+                    continue;
+                };
+                let Some((min, max)) = quoteable_bounds(*quote_range, &quote_config) else {
+                    continue;
+                };
+                values.push(*current_mid);
+                lower.push(min);
+                upper.push(max);
+            }
+            let Some(projected) = project_bounded_nonincreasing(&values, &lower, &upper) else {
+                warn!(market_ids = ?market_ids, "native threshold actor marks are infeasible");
                 continue;
             };
-            let mid = *yes_nanos as f64 / NANOS_PER_DOLLAR as f64;
-            if mid > 0.0 && mid < 1.0 {
-                *current_mid = mid;
+            for (market_id, projected_mid) in market_ids.iter().zip(projected) {
+                if let Some(market) = self.state.markets.get_mut(market_id)
+                    && let PriceSource::Native { current_mid, .. } = &mut market.price_source
+                {
+                    *current_mid = projected_mid;
+                }
             }
         }
     }
@@ -551,11 +859,21 @@ impl MmActor {
 
         // 1. Periodic position sync
         self.maybe_sync_positions(block.height).await;
+        self.reconcile_complete_set_inventory().await;
 
         // 2. Dynamic budget
         let budget_nanos = self.compute_budget(&snapshot);
         if budget_nanos == 0 {
-            debug!("budget exhausted (exposure at max), skipping block");
+            debug!("budget exhausted (exposure at max), submitting typed all-market pause");
+            let skip_reasons = self
+                .state
+                .markets
+                .keys()
+                .map(|market_id| (*market_id, "insufficient_budget".to_string()))
+                .collect();
+            let _ = self
+                .submit_orders(&[], &skip_reasons, 0, block.height)
+                .await;
             return;
         }
 
@@ -563,22 +881,27 @@ impl MmActor {
         //    Staleness is now evaluated per token (PM-4): a single frozen token
         //    stops being quoted even while its neighbours keep updating.
         let staleness_ms = self.config.mm_staleness_ms;
+        let hard_staleness_ms = self.config.mm_hard_staleness_ms;
         let mut ref_prices = HashMap::new();
         let mut quote_inputs = Vec::new();
+        let mut skip_reasons = HashMap::new();
 
         for ms in self.state.markets.values_mut() {
-            let (mid, quote_range) = match &ms.price_source {
+            let (mid, quote_range, spread_multiplier, size_multiplier) = match &ms.price_source {
                 PriceSource::Mirror { yes_token_id } => {
                     let Some(&mid) = snapshot.midpoints.get(yes_token_id) else {
                         // Never seen a price for this token; nothing to publish or quote.
+                        skip_reasons
+                            .insert(ms.sybil_market_id, "reference_never_observed".to_string());
                         continue;
                     };
 
-                    if snapshot.token_is_stale(yes_token_id, now, staleness_ms) {
+                    if snapshot.token_is_stale(yes_token_id, now, hard_staleness_ms) {
                         // PM-6: a frozen token's reference price is evicted so downstream
                         // `--require-reference-prices` consumers stop trading on it
                         // rather than being picked off on the stale value.
                         ref_prices.insert(ms.sybil_market_id, REFERENCE_PRICE_EVICTION_SENTINEL);
+                        skip_reasons.insert(ms.sybil_market_id, "reference_hard_stale".to_string());
                         continue;
                     }
 
@@ -593,15 +916,26 @@ impl MmActor {
 
                     if !(mid > 0.01 && mid < 0.99) {
                         // Out of band: near-resolved, don't quote.
+                        skip_reasons.insert(ms.sybil_market_id, "reference_extreme".to_string());
                         continue;
                     }
 
-                    (mid, None)
+                    if snapshot.token_is_stale(yes_token_id, now, staleness_ms) {
+                        (
+                            mid,
+                            None,
+                            self.config.mm_soft_stale_spread_multiplier,
+                            self.config.mm_soft_stale_size_multiplier,
+                        )
+                    } else {
+                        (mid, None, 1.0, 1.0)
+                    }
                 }
                 PriceSource::Native {
                     quote_range,
                     current_mid,
-                } => (*current_mid, Some(*quote_range)),
+                    ..
+                } => (*current_mid, Some(*quote_range), 1.0, 1.0),
             };
 
             ms.push_price(mid);
@@ -616,6 +950,8 @@ impl MmActor {
                 group_key: ms.group_key.clone(),
                 group_size: ms.group_size,
                 quote_range,
+                spread_multiplier,
+                size_multiplier,
             });
         }
         quote_inputs.sort_by_key(|input| input.market_id);
@@ -628,21 +964,24 @@ impl MmActor {
             max_position: self.config.mm_max_position as i64,
             quote_size_dollars: self.config.mm_quote_size_dollars,
         };
-        let start_index = self.state.next_quote_index;
-        let (orders, next_quote_index) = select_rotating_quotes(
-            &quote_inputs,
-            &quote_config,
-            start_index,
-            self.config.mm_max_orders_per_block,
-        );
-        self.state.next_quote_index = next_quote_index;
+        let mut orders = Vec::with_capacity(quote_inputs.len().saturating_mul(2));
+        for input in &quote_inputs {
+            let market_orders = generate_quotes(input, &quote_config);
+            if market_orders.is_empty() {
+                skip_reasons
+                    .entry(input.market_id)
+                    .or_insert_with(|| "inventory_or_quote_unavailable".to_string());
+            } else {
+                orders.extend(market_orders);
+            }
+        }
 
         // 5. Submit (IO). A whole-batch rejection that names a non-tradeable
         //    market lets us drop the poison defensively (PM-1 defence in depth)
         //    even if we never saw its `MarketResolved` (e.g. missed block, or a
         //    market that became untradeable for another reason).
         if let Some(poisoned) = self
-            .submit_orders(&orders, budget_nanos, block.height)
+            .submit_orders(&orders, &skip_reasons, budget_nanos, block.height)
             .await
         {
             self.untrack_market(poisoned, "batch_rejected_untradeable");
@@ -657,12 +996,66 @@ impl MmActor {
     }
 
     async fn maybe_sync_positions(&mut self, block_height: u64) {
-        if block_height.saturating_sub(self.state.last_sync_block)
+        if (block_height.saturating_sub(self.state.last_sync_block)
             >= self.config.mm_sync_interval_blocks
-            || self.state.last_sync_block == 0
+            || self.state.last_sync_block == 0)
+            && self.sync_positions().await
         {
-            self.sync_positions().await;
             self.state.last_sync_block = block_height;
+        }
+    }
+
+    async fn reconcile_complete_set_inventory(&mut self) {
+        if self.config.mm_actor_token.trim().is_empty() {
+            return;
+        }
+        let target = whole_shares_to_qty_units(
+            self.config
+                .mm_complete_set_target_shares
+                .min(self.config.mm_max_position) as i64,
+        );
+        if target <= 0 {
+            return;
+        }
+        let actions = self
+            .state
+            .markets
+            .values()
+            .filter_map(|market| {
+                let neutral = market.yes_position.min(market.no_position).max(0);
+                let deficit = target.saturating_sub(neutral);
+                (deficit > 0).then_some(CompleteSetActionRequest::Collateralize {
+                    market_id: market.sybil_market_id,
+                    quantity: deficit as u64,
+                })
+            })
+            .collect::<Vec<_>>();
+        if actions.is_empty() {
+            return;
+        }
+        let request = CompleteSetInventoryRequest { actions };
+        match self
+            .sybil_client
+            .update_complete_set_inventory(&self.config.mm_actor_token, &request)
+            .await
+        {
+            Ok(()) => {
+                for action in request.actions {
+                    let CompleteSetActionRequest::Collateralize {
+                        market_id,
+                        quantity,
+                    } = action
+                    else {
+                        continue;
+                    };
+                    if let Some(market) = self.state.markets.get_mut(&market_id) {
+                        let quantity = i64::try_from(quantity).unwrap_or(i64::MAX);
+                        market.yes_position = market.yes_position.saturating_add(quantity);
+                        market.no_position = market.no_position.saturating_add(quantity);
+                    }
+                }
+            }
+            Err(error) => warn!(%error, "complete-set inventory reconciliation failed"),
         }
     }
 
@@ -672,9 +1065,98 @@ impl MmActor {
     async fn submit_orders(
         &self,
         orders: &[OrderSpec],
+        skip_reasons: &HashMap<u32, String>,
         budget_nanos: u64,
         block_height: u64,
     ) -> Option<u32> {
+        if !self.config.mm_actor_token.trim().is_empty() {
+            let universe = match self
+                .sybil_client
+                .actor_universe(&self.config.mm_actor_token)
+                .await
+            {
+                Ok(universe) if universe.actor_ready => universe,
+                Ok(_) => {
+                    warn!("MM actor submission paused: liquidity universe not committed");
+                    return None;
+                }
+                Err(error) => {
+                    warn!(%error, "MM actor submission paused: universe lookup failed");
+                    return None;
+                }
+            };
+            if universe.account_id != Some(self.account_id)
+                || universe.actor_role != Some(ActorRole::MarketMaker)
+            {
+                warn!(
+                    configured_account = self.account_id,
+                    credential_account = universe.account_id,
+                    credential_role = ?universe.actor_role,
+                    "MM actor submission paused: credential binding mismatch"
+                );
+                return None;
+            }
+            let mut by_market = HashMap::<u32, Vec<OrderSpec>>::new();
+            for order in orders {
+                let market_id = match order {
+                    OrderSpec::BuyYes { market_id, .. }
+                    | OrderSpec::BuyNo { market_id, .. }
+                    | OrderSpec::SellYes { market_id, .. }
+                    | OrderSpec::SellNo { market_id, .. } => *market_id,
+                };
+                by_market.entry(market_id).or_default().push(order.clone());
+            }
+            let market_intents = universe
+                .market_ids
+                .iter()
+                .map(|market_id| {
+                    let market_orders = by_market.remove(market_id).unwrap_or_default();
+                    ActorMarketIntent {
+                        market_id: *market_id,
+                        skip_reason: market_orders.is_empty().then(|| {
+                            skip_reasons
+                                .get(market_id)
+                                .cloned()
+                                .unwrap_or_else(|| "market_not_tracked".to_string())
+                        }),
+                        orders: market_orders,
+                    }
+                })
+                .collect();
+            let observed_at_ms = now_ms();
+            let request = ActorEpochRequest {
+                epoch_id: format!(
+                    "mm-{}-{}",
+                    universe.generation,
+                    block_height.saturating_add(1)
+                ),
+                target_height: block_height.saturating_add(1),
+                universe_generation: universe.generation,
+                observed_at_ms,
+                valid_until_ms: observed_at_ms.saturating_add(30_000),
+                market_intents,
+                mm_budget_nanos: Some(budget_nanos),
+            };
+            match self
+                .sybil_client
+                .submit_actor_epoch(&self.config.mm_actor_token, &request)
+                .await
+            {
+                Ok(receipt) => {
+                    debug!(
+                        block = block_height,
+                        markets = receipt.markets.len(),
+                        orders = orders.len(),
+                        "submitted all-market MM actor epoch"
+                    );
+                    return None;
+                }
+                Err(error) => {
+                    warn!(block = block_height, %error, "MM actor epoch submission failed");
+                    return None;
+                }
+            }
+        }
         if orders.is_empty() {
             return None;
         }
@@ -819,6 +1301,8 @@ mod tests {
             },
             group_key: None,
             group_size: 0,
+            coherence_key: None,
+            coherence_rank: 0,
         });
     }
 
@@ -871,10 +1355,174 @@ mod tests {
         block
             .clearing_prices_nanos
             .insert("7".to_string(), vec![700_000_000, 300_000_000]);
+        block.by_market.insert(
+            "7".to_string(),
+            BlockMarketStats {
+                volume_nanos: 2 * NANOS_PER_DOLLAR,
+                organic_matched_orders: 1,
+                organic_fill_notional_nanos: 2 * NANOS_PER_DOLLAR,
+                ..BlockMarketStats::default()
+            },
+        );
         actor.observe_block(&block);
 
         let market = actor.state.markets.get(&7).expect("tracked native market");
-        assert_eq!(market.budget_mid(&PriceSnapshot::default()), 0.7);
+        assert_eq!(market.budget_mid(&PriceSnapshot::default()), 0.403);
+    }
+
+    #[test]
+    fn native_midpoint_ignores_actor_only_flow() {
+        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        track_native(&mut actor, 7, 0.4);
+
+        let mut block = block_resolving(&[]);
+        block
+            .clearing_prices_nanos
+            .insert("7".to_string(), vec![700_000_000, 300_000_000]);
+        block.by_market.insert(
+            "7".to_string(),
+            BlockMarketStats {
+                volume_nanos: 2 * NANOS_PER_DOLLAR,
+                mm_matched_orders: 1,
+                noise_matched_orders: 1,
+                mm_fill_notional_nanos: 2 * NANOS_PER_DOLLAR,
+                noise_fill_notional_nanos: 2 * NANOS_PER_DOLLAR,
+                ..BlockMarketStats::default()
+            },
+        );
+        actor.observe_block(&block);
+
+        let market = actor.state.markets.get(&7).expect("tracked native market");
+        assert_eq!(market.budget_mid(&PriceSnapshot::default()), 0.4);
+    }
+
+    #[test]
+    fn native_midpoint_ignores_zero_volume_organic_clearing_vector() {
+        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        track_native(&mut actor, 7, 0.4);
+
+        let mut block = block_resolving(&[]);
+        block
+            .clearing_prices_nanos
+            .insert("7".to_string(), vec![700_000_000, 300_000_000]);
+        block.by_market.insert(
+            "7".to_string(),
+            BlockMarketStats {
+                volume_nanos: 0,
+                organic_matched_orders: 1,
+                organic_fill_notional_nanos: 2 * NANOS_PER_DOLLAR,
+                ..BlockMarketStats::default()
+            },
+        );
+        actor.observe_block(&block);
+
+        let market = actor.state.markets.get(&7).expect("tracked native market");
+        assert_eq!(market.budget_mid(&PriceSnapshot::default()), 0.4);
+    }
+
+    #[test]
+    fn native_midpoint_step_is_capped_and_quiet_blocks_revert_to_seed() {
+        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        track_native(&mut actor, 7, 0.4);
+
+        let mut organic = block_resolving(&[]);
+        organic
+            .clearing_prices_nanos
+            .insert("7".to_string(), vec![900_000_000, 100_000_000]);
+        organic.by_market.insert(
+            "7".to_string(),
+            BlockMarketStats {
+                volume_nanos: 2 * NANOS_PER_DOLLAR,
+                organic_matched_orders: 1,
+                organic_fill_notional_nanos: 2 * NANOS_PER_DOLLAR,
+                ..BlockMarketStats::default()
+            },
+        );
+        actor.observe_block(&organic);
+        let moved = actor
+            .state
+            .markets
+            .get(&7)
+            .expect("tracked native market")
+            .budget_mid(&PriceSnapshot::default());
+        assert!((moved - 0.403).abs() < 1e-12);
+
+        let mut quiet = block_resolving(&[]);
+        quiet.height = 2;
+        actor.observe_block(&quiet);
+        let reverted = actor
+            .state
+            .markets
+            .get(&7)
+            .expect("tracked native market")
+            .budget_mid(&PriceSnapshot::default());
+        assert!(reverted < moved);
+        assert!(reverted > 0.4);
+    }
+
+    #[test]
+    fn actor_only_flow_cannot_walk_native_mark_to_guardrail_after_ten_thousand_blocks() {
+        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        track_native(&mut actor, 7, 0.4);
+
+        let mut block = block_resolving(&[]);
+        block
+            .clearing_prices_nanos
+            .insert("7".to_string(), vec![940_000_000, 60_000_000]);
+        block.by_market.insert(
+            "7".to_string(),
+            BlockMarketStats {
+                volume_nanos: 10 * NANOS_PER_DOLLAR,
+                mm_matched_orders: 1,
+                noise_matched_orders: 1,
+                mm_fill_notional_nanos: 10 * NANOS_PER_DOLLAR,
+                noise_fill_notional_nanos: 10 * NANOS_PER_DOLLAR,
+                ..BlockMarketStats::default()
+            },
+        );
+        for height in 1..=10_000 {
+            block.height = height;
+            actor.observe_block(&block);
+        }
+
+        let mid = actor
+            .state
+            .markets
+            .get(&7)
+            .expect("tracked native market")
+            .budget_mid(&PriceSnapshot::default());
+        assert_eq!(mid, 0.4);
+        let mut input = default_input(mid);
+        input.quote_range = Some(QuoteRange {
+            min: 0.05,
+            max: 0.95,
+            initial: 0.4,
+        });
+        assert_eq!(generate_quotes(&input, &default_config()).len(), 2);
+    }
+
+    #[test]
+    fn native_coherence_projections_are_bounded_and_ordered() {
+        let simplex = project_bounded_simplex(&[0.8, 0.7, 0.6], &[0.1, 0.1, 0.1], &[0.8, 0.8, 0.8])
+            .expect("feasible bounded simplex");
+        assert!((simplex.iter().sum::<f64>() - 1.0).abs() < 1e-10);
+        assert!(
+            simplex
+                .iter()
+                .all(|value| (0.1 - 1e-12..=0.8 + 1e-12).contains(value))
+        );
+
+        let ladder = project_bounded_nonincreasing(
+            &[0.2, 0.7, 0.3],
+            &[0.15, 0.10, 0.05],
+            &[0.90, 0.80, 0.70],
+        )
+        .expect("feasible bounded ladder");
+        assert!(ladder.windows(2).all(|pair| pair[0] >= pair[1]));
     }
 
     #[test]
@@ -922,11 +1570,13 @@ mod tests {
             mid,
             sigma_sq: 0.0005,
             net_inventory: 0.0,
-            yes_position: 0,
-            no_position: 0,
+            yes_position: q(100),
+            no_position: q(100),
             group_key: None,
             group_size: 0,
             quote_range: None,
+            spread_multiplier: 1.0,
+            size_multiplier: 1.0,
         }
     }
 
@@ -945,29 +1595,29 @@ mod tests {
     #[test]
     fn symmetric_quotes_at_midpoint() {
         let orders = generate_quotes(&default_input(0.5), &default_config());
-        // Should have BuyYes + BuyNo (no sells since no position)
-        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
-        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
         assert!(
-            !orders
+            orders
                 .iter()
                 .any(|o| matches!(o, OrderSpec::SellYes { .. }))
         );
-        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+        assert!(
+            !orders
+                .iter()
+                .any(|o| matches!(o, OrderSpec::BuyYes { .. } | OrderSpec::BuyNo { .. }))
+        );
     }
 
     #[test]
-    fn grouped_markets_quote_yes_and_no_from_cash() {
+    fn grouped_markets_quote_both_economic_sides_from_complete_sets() {
         let orders = generate_quotes(&grouped_input(0.7), &default_config());
 
-        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
-        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
         assert!(
-            !orders
+            orders
                 .iter()
                 .any(|o| matches!(o, OrderSpec::SellYes { .. }))
         );
-        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
     }
 
     #[test]
@@ -979,19 +1629,19 @@ mod tests {
         long_yes.yes_position = q(1000);
         let orders = generate_quotes(&long_yes, &config);
 
-        let yes_bid = orders.iter().find_map(|o| match o {
-            OrderSpec::BuyYes {
+        let yes_ask = orders.iter().find_map(|o| match o {
+            OrderSpec::SellYes {
                 limit_price_nanos, ..
             } => Some(*limit_price_nanos),
             _ => None,
         });
-        // With long inventory, reservation price < mid, so bid should be below 0.48
-        assert!(yes_bid.is_some());
-        assert!(yes_bid.unwrap() < 480_000_000);
+        // With long directional YES inventory, the reservation and ask move lower.
+        assert!(yes_ask.is_some());
+        assert!(yes_ask.unwrap() < 520_000_000);
     }
 
     #[test]
-    fn inventory_skews_quotes_against_inventory_on_both_buy_sides() {
+    fn inventory_skews_both_complete_set_sell_quotes() {
         let config = default_config();
         let neutral_orders = generate_quotes(&default_input(0.5), &config);
         let mut long_yes = default_input(0.5);
@@ -999,45 +1649,45 @@ mod tests {
         long_yes.yes_position = q(1000);
         let long_yes_orders = generate_quotes(&long_yes, &config);
 
-        let neutral_yes_bid = neutral_orders
+        let neutral_yes_ask = neutral_orders
             .iter()
             .find_map(|order| match order {
-                OrderSpec::BuyYes {
+                OrderSpec::SellYes {
                     limit_price_nanos, ..
                 } => Some(*limit_price_nanos),
                 _ => None,
             })
             .unwrap();
-        let long_yes_bid = long_yes_orders
+        let long_yes_ask = long_yes_orders
             .iter()
             .find_map(|order| match order {
-                OrderSpec::BuyYes {
+                OrderSpec::SellYes {
                     limit_price_nanos, ..
                 } => Some(*limit_price_nanos),
                 _ => None,
             })
             .unwrap();
-        let neutral_no_bid = neutral_orders
+        let neutral_no_ask = neutral_orders
             .iter()
             .find_map(|order| match order {
-                OrderSpec::BuyNo {
+                OrderSpec::SellNo {
                     limit_price_nanos, ..
                 } => Some(*limit_price_nanos),
                 _ => None,
             })
             .unwrap();
-        let long_yes_no_bid = long_yes_orders
+        let long_yes_no_ask = long_yes_orders
             .iter()
             .find_map(|order| match order {
-                OrderSpec::BuyNo {
+                OrderSpec::SellNo {
                     limit_price_nanos, ..
                 } => Some(*limit_price_nanos),
                 _ => None,
             })
             .unwrap();
 
-        assert!(long_yes_bid < neutral_yes_bid);
-        assert!(long_yes_no_bid > neutral_no_bid);
+        assert!(long_yes_ask < neutral_yes_ask);
+        assert!(long_yes_no_ask > neutral_no_ask);
     }
 
     #[test]
@@ -1056,17 +1706,20 @@ mod tests {
     }
 
     #[test]
-    fn at_position_limit_no_buy() {
+    fn complete_inventory_never_generates_cash_buy_orders() {
         let config = default_config();
         let mut input = default_input(0.5);
         input.yes_position = q(5000); // at max_position
         let orders = generate_quotes(&input, &config);
-        // At YES limit → no BuyYes
-        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
+        assert!(
+            !orders
+                .iter()
+                .any(|o| matches!(o, OrderSpec::BuyYes { .. } | OrderSpec::BuyNo { .. }))
+        );
     }
 
     #[test]
-    fn buy_quantity_is_capped_to_remaining_position_room() {
+    fn sell_quantities_are_capped_to_held_complete_sets() {
         let mut config = default_config();
         config.max_position = 100;
         config.quote_size_dollars = 100.0;
@@ -1076,16 +1729,16 @@ mod tests {
 
         let orders = generate_quotes(&input, &config);
         let yes_quantity = orders.iter().find_map(|order| match order {
-            OrderSpec::BuyYes { quantity, .. } => Some(*quantity),
+            OrderSpec::SellYes { quantity, .. } => Some(*quantity),
             _ => None,
         });
         let no_quantity = orders.iter().find_map(|order| match order {
-            OrderSpec::BuyNo { quantity, .. } => Some(*quantity),
+            OrderSpec::SellNo { quantity, .. } => Some(*quantity),
             _ => None,
         });
 
-        assert_eq!(yes_quantity, Some(q(1) as u64));
-        assert_eq!(no_quantity, Some(q(2) as u64));
+        assert_eq!(yes_quantity, Some(q(99) as u64));
+        assert_eq!(no_quantity, Some(q(98) as u64));
     }
 
     #[test]
@@ -1093,8 +1746,8 @@ mod tests {
         let config = default_config();
         let input = grouped_input(0.5);
         let orders = generate_quotes(&input, &config);
-        assert!(orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
-        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+        assert!(orders.iter().any(|o| matches!(o, OrderSpec::SellNo { .. })));
+        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyNo { .. })));
     }
 
     #[test]
@@ -1143,11 +1796,11 @@ mod tests {
         assert_eq!(orders.len(), 6);
         assert_eq!(next_index, 3);
         assert!(orders.iter().any(|order| match order {
-            OrderSpec::BuyYes { market_id, .. } => *market_id == 1,
+            OrderSpec::SellYes { market_id, .. } => *market_id == 1,
             _ => false,
         }));
         assert!(orders.iter().any(|order| match order {
-            OrderSpec::BuyYes { market_id, .. } => *market_id == 3,
+            OrderSpec::SellYes { market_id, .. } => *market_id == 3,
             _ => false,
         }));
     }
@@ -1168,11 +1821,11 @@ mod tests {
         assert_eq!(orders.len(), 4);
         assert_eq!(next_index, 5);
         assert!(orders.iter().any(|order| match order {
-            OrderSpec::BuyYes { market_id, .. } => *market_id == 4,
+            OrderSpec::SellYes { market_id, .. } => *market_id == 4,
             _ => false,
         }));
         assert!(orders.iter().any(|order| match order {
-            OrderSpec::BuyYes { market_id, .. } => *market_id == 5,
+            OrderSpec::SellYes { market_id, .. } => *market_id == 5,
             _ => false,
         }));
     }
@@ -1191,31 +1844,20 @@ mod tests {
         let (orders, next_index) = select_rotating_quotes(&inputs, &config, 0, 12);
 
         assert_eq!(next_index, 0);
-        assert_eq!(
+        assert_eq!(orders.len(), 6);
+        assert!(
             orders
                 .iter()
-                .filter(|order| matches!(order, OrderSpec::BuyNo { .. }))
-                .count(),
-            1
+                .all(|order| matches!(order, OrderSpec::SellYes { .. } | OrderSpec::SellNo { .. }))
         );
-        let buy_no_market = orders.iter().find_map(|order| match order {
-            OrderSpec::BuyNo { market_id, .. } => Some(*market_id),
-            _ => None,
-        });
-        assert!(buy_no_market.is_some());
-        assert!(!orders.iter().any(|order| match order {
-            OrderSpec::BuyYes { market_id, .. } => Some(*market_id) == buy_no_market,
-            _ => false,
-        }));
     }
 
     #[test]
-    fn edge_price_suppresses_yes_bid() {
+    fn edge_price_retains_two_sided_quotes() {
         let config = default_config();
-        // Price near 0 → reservation clamps to 0.02, YES bid likely below threshold
+        // A near-edge reservation is recovered into the quoteable interior.
         let orders = generate_quotes(&default_input(0.005), &config);
-        // YES bid should be suppressed (too low), but NO side may still generate
-        assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
+        assert_eq!(orders.len(), 2);
     }
 
     #[test]
@@ -1229,27 +1871,27 @@ mod tests {
         let low_orders = generate_quotes(&low_vol, &config);
         let high_orders = generate_quotes(&high_vol, &config);
 
-        let low_bid = low_orders
+        let low_ask = low_orders
             .iter()
             .find_map(|o| match o {
-                OrderSpec::BuyYes {
+                OrderSpec::SellYes {
                     limit_price_nanos, ..
                 } => Some(*limit_price_nanos),
                 _ => None,
             })
             .unwrap();
-        let high_bid = high_orders
+        let high_ask = high_orders
             .iter()
             .find_map(|o| match o {
-                OrderSpec::BuyYes {
+                OrderSpec::SellYes {
                     limit_price_nanos, ..
                 } => Some(*limit_price_nanos),
                 _ => None,
             })
             .unwrap();
 
-        // Higher volatility → wider spread → lower bid
-        assert!(high_bid < low_bid);
+        // Higher volatility → wider spread → higher ask.
+        assert!(high_ask > low_ask);
     }
 
     #[test]
@@ -1302,6 +1944,8 @@ mod tests {
             },
             group_key: None,
             group_size: 0,
+            coherence_key: None,
+            coherence_rank: 0,
         });
         actor.state.markets.get_mut(&99).unwrap().yes_position = q(50);
 

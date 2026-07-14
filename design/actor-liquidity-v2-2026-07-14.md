@@ -11,6 +11,11 @@ date: 2026-07-14
 > product rules and the code-backed design needed to implement them. It does
 > not describe current behavior and does not override code, ADRs, or the
 > architecture vault.
+>
+> **Post-soak amendment:**
+> [Actor Liquidity v2.1](actor-liquidity-v2.1-2026-07-15.md) supersedes the
+> native-mark, MM boundary, noise topology, actor-health, PnL, testing, and
+> rollout rules in this document wherever they conflict.
 
 ## 1. Decision summary
 

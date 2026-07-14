@@ -2,6 +2,82 @@ use super::super::*;
 use super::current_timestamp_ms;
 
 impl SequencerActorState {
+    pub(super) async fn handle_collateralize_complete_set(
+        &mut self,
+        account_id: AccountId,
+        market_id: MarketId,
+        quantity: Qty,
+    ) -> Result<(), SequencerError> {
+        let mut candidate = self.sequencer.clone();
+        candidate.collateralize_complete_set(account_id, market_id, quantity)?;
+        self.persist_control_plane(&ControlPlaneCommand::CollateralizeCompleteSet {
+            account_id,
+            market_id,
+            quantity: quantity.0,
+        })
+        .await?;
+        self.sequencer = candidate;
+        Ok(())
+    }
+
+    pub(super) async fn handle_redeem_complete_set(
+        &mut self,
+        account_id: AccountId,
+        market_id: MarketId,
+        quantity: Qty,
+    ) -> Result<(), SequencerError> {
+        let mut candidate = self.sequencer.clone();
+        candidate.redeem_complete_set(account_id, market_id, quantity)?;
+        self.persist_control_plane(&ControlPlaneCommand::RedeemCompleteSet {
+            account_id,
+            market_id,
+            quantity: quantity.0,
+        })
+        .await?;
+        self.sequencer = candidate;
+        Ok(())
+    }
+
+    pub(super) async fn handle_complete_set_inventory_actions(
+        &mut self,
+        account_id: AccountId,
+        actions: Vec<crate::CompleteSetInventoryAction>,
+    ) -> Result<(), SequencerError> {
+        if actions.is_empty() || actions.len() > 1_024 {
+            return Err(SequencerError::InvalidMarketState(
+                "complete-set inventory batch must contain 1..=1024 actions".into(),
+            ));
+        }
+        let mut candidate = self.sequencer.clone();
+        candidate.apply_complete_set_inventory_actions(account_id, &actions)?;
+        self.persist_control_plane(&ControlPlaneCommand::ApplyCompleteSetInventoryActions {
+            account_id,
+            actions,
+        })
+        .await?;
+        self.sequencer = candidate;
+        Ok(())
+    }
+
+    pub(super) async fn handle_activate_liquidity_universe(
+        &mut self,
+        generation: u64,
+        policy_digest: [u8; 32],
+        market_ids: Vec<MarketId>,
+    ) -> Result<sybil_verifier::LiquidityUniverseSnapshot, SequencerError> {
+        let mut candidate = self.sequencer.clone();
+        let snapshot =
+            candidate.activate_liquidity_universe(generation, policy_digest, market_ids.clone())?;
+        self.persist_control_plane(&ControlPlaneCommand::ActivateLiquidityUniverse {
+            generation,
+            policy_digest,
+            market_ids,
+        })
+        .await?;
+        self.sequencer = candidate;
+        Ok(snapshot)
+    }
+
     fn validate_keyop_state_binding(
         &self,
         account_id: AccountId,

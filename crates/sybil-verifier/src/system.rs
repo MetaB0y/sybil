@@ -2,7 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use matching_engine::{MarketId, NANOS_PER_DOLLAR, Nanos, OrderDirection, Qty, notional_nanos};
+use matching_engine::{
+    MarketId, NANOS_PER_DOLLAR, Nanos, OrderDirection, Qty, collateralize_complete_set,
+    notional_nanos, redeem_complete_set,
+};
 
 use crate::types::{
     AccountSnapshot, BlockWitness, KeyRecord, SystemEventWitness, WithdrawalRefundReasonWitness,
@@ -202,6 +205,49 @@ fn apply_event(
             let encoded = encode_quarantine_claimed_event(*amount, block_height);
             account.events_digest = update_digest(&account.events_digest, &encoded);
         }
+        SystemEventWitness::CompleteSetCollateralized {
+            account_id,
+            market_id,
+            quantity,
+        }
+        | SystemEventWitness::CompleteSetRedeemed {
+            account_id,
+            market_id,
+            quantity,
+        } => {
+            if *quantity == 0 {
+                return Err("complete-set quantity must be positive".to_string());
+            }
+            let collateralize =
+                matches!(event, SystemEventWitness::CompleteSetCollateralized { .. });
+            let delta = if collateralize {
+                collateralize_complete_set(Qty(*quantity))
+            } else {
+                redeem_complete_set(Qty(*quantity))
+            }
+            .map_err(|_| "complete-set arithmetic overflowed".to_string())?;
+            let account = account_mut(accounts, *account_id)?;
+            if collateralize && account.balance < -delta.balance_delta {
+                return Err(format!(
+                    "account {account_id} lacks cash for complete-set collateralization"
+                ));
+            }
+            if !collateralize {
+                let required = i64::try_from(*quantity)
+                    .map_err(|_| "complete-set quantity exceeds i64".to_string())?;
+                let yes = position(account, *market_id, 0);
+                let no = position(account, *market_id, 1);
+                if yes < required || no < required {
+                    return Err(format!("account {account_id} lacks complete-set inventory"));
+                }
+            }
+            account.balance = checked_add(account.balance, delta.balance_delta, *account_id)?;
+            add_position(account, *market_id, 0, delta.yes_delta)?;
+            add_position(account, *market_id, 1, delta.no_delta)?;
+            let encoded =
+                encode_complete_set_event(collateralize, *market_id, *quantity, block_height);
+            account.events_digest = update_digest(&account.events_digest, &encoded);
+        }
         SystemEventWitness::DepositQuarantined { .. } => {}
         SystemEventWitness::ClientActionAuthorized(action) => {
             let (account_id, nonce) = match action {
@@ -223,9 +269,56 @@ fn apply_event(
         }
         SystemEventWitness::WithdrawalFinalized { .. }
         | SystemEventWitness::L1BlockObserved { .. }
-        | SystemEventWitness::MarketGroupExtended { .. } => {}
+        | SystemEventWitness::MarketGroupExtended { .. }
+        | SystemEventWitness::LiquidityUniverseActivated { .. } => {}
     }
     Ok(())
+}
+
+fn position(account: &AccountSnapshot, market_id: MarketId, outcome: u8) -> i64 {
+    account
+        .positions
+        .iter()
+        .find(|(market, side, _)| *market == market_id && *side == outcome)
+        .map(|(_, _, quantity)| *quantity)
+        .unwrap_or(0)
+}
+
+fn add_position(
+    account: &mut AccountSnapshot,
+    market_id: MarketId,
+    outcome: u8,
+    delta: i64,
+) -> Result<(), String> {
+    if let Some((_, _, quantity)) = account
+        .positions
+        .iter_mut()
+        .find(|(market, side, _)| *market == market_id && *side == outcome)
+    {
+        *quantity = quantity
+            .checked_add(delta)
+            .ok_or_else(|| "complete-set position overflowed".to_string())?;
+    } else if delta != 0 {
+        account.positions.push((market_id, outcome, delta));
+    }
+    account.positions.retain(|(_, _, quantity)| *quantity != 0);
+    account
+        .positions
+        .sort_by_key(|(market, side, _)| (market.0, *side));
+    Ok(())
+}
+
+fn encode_complete_set_event(
+    collateralize: bool,
+    market_id: MarketId,
+    quantity: u64,
+    block_height: u64,
+) -> Vec<u8> {
+    let mut bytes = encode_fill_prefix(if collateralize { 0x0d } else { 0x0e }, 21);
+    bytes.extend_from_slice(&market_id.0.to_le_bytes());
+    bytes.extend_from_slice(&quantity.to_le_bytes());
+    bytes.extend_from_slice(&block_height.to_le_bytes());
+    bytes
 }
 
 fn encode_quarantine_claimed_event(amount: i64, block_height: u64) -> Vec<u8> {

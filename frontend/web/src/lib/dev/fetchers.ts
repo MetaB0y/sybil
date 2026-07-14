@@ -10,6 +10,7 @@ import type {
   DevActivityOverview,
   DevOpenBatch,
   DevBotsResponse,
+  DevLiquidityHealth,
 } from "./types";
 
 const API_BASE =
@@ -35,6 +36,15 @@ export function useDevMarkets() {
       if (error || !data) throw new Error("/v1/markets/summary failed");
       return data as unknown as DevMarket[];
     },
+    refetchInterval: 10_000,
+  });
+}
+
+export function useDevLiquidityHealth() {
+  return useQuery({
+    queryKey: ["dev", "liquidity-health"],
+    queryFn: async () =>
+      await rawGet<DevLiquidityHealth>("/v1/liquidity/health"),
     refetchInterval: 10_000,
   });
 }
@@ -81,14 +91,26 @@ export function useDevPendingOrders() {
   });
 }
 
-/** Account portfolios for ids 0..47 plus any id seen in pending orders. */
+/**
+ * Account portfolios for runtime-discovered participants. Actor credentials,
+ * current Arena snapshots, and pending orders are the identity sources; only
+ * account zero is intrinsic because it is the protocol system account.
+ */
 export function useDevAccounts(extraIds: number[] = []) {
+  const health = useDevLiquidityHealth().data;
+  const bots = useDevBots().data;
+  const pending = useDevPendingOrders().data ?? [];
+  const discoveredIds = [
+    0,
+    ...(health?.actors ?? []).map((actor) => Number(actor.account_id)),
+    ...(bots?.summaries ?? []).map((summary) => Number(summary.account_id)),
+    ...pending.map((order) => Number(order.account_id)),
+    ...extraIds,
+  ].filter((id) => Number.isSafeInteger(id) && id >= 0);
+  const ids = [...new Set(discoveredIds)].sort((a, b) => a - b);
   return useQuery({
-    queryKey: ["dev", "accounts", [...extraIds].sort((a, b) => a - b)],
+    queryKey: ["dev", "accounts", ids],
     queryFn: async () => {
-      const ids = Array.from(
-        new Set([...Array.from({ length: 48 }, (_, i) => i), ...extraIds])
-      ).sort((a, b) => a - b);
       const rows = await Promise.all(
         ids.map((id) => rawGet<DevAccountPortfolio>(`/v1/accounts/${id}/portfolio`))
       );
@@ -142,7 +164,7 @@ export function useDevPortfolio(accountId: number) {
 
 /** Recent fills per account, for the Participants table fill counts. */
 export function useDevAccountFills(ids: number[]) {
-  const sorted = [...new Set(ids)].slice(0, 24).sort((a, b) => a - b);
+  const sorted = [...new Set(ids)].sort((a, b) => a - b);
   return useQuery({
     queryKey: ["dev", "account-fills", sorted],
     queryFn: async () => {

@@ -53,6 +53,7 @@ fn canonical_da_payload_is_a_self_contained_full_state_snapshot() {
             }],
             ..BridgeStateSnapshot::default()
         },
+        liquidity_universe: Default::default(),
         markets: vec![market],
         market_groups: vec![MarketGroupSnapshot {
             group_id: 5,

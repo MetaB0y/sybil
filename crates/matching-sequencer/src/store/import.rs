@@ -42,13 +42,14 @@ impl Store {
         let sequencer = BlockSequencer::try_restore(restored, oracle, config)
             .map_err(|error| StoreError::WitnessImport(error.to_string()))?;
         let snapshot = sequencer.snapshot();
-        let rebuilt_sidecar = state_sidecar_snapshot_from_resting_orders(
+        let rebuilt_sidecar = state_sidecar_snapshot_from_resting_orders_with_universe(
             snapshot.bridge_state,
             &snapshot.resting_orders,
             snapshot.markets,
             snapshot.market_groups,
             snapshot.lifecycle,
             snapshot.analytics.last_clearing_prices,
+            snapshot.liquidity_universe,
         );
         let rebuilt_accounts =
             crate::canonical_state::CanonicalState::from_accounts(snapshot.accounts);
@@ -256,13 +257,16 @@ fn restored_state_from_witness(
     for (&market_id, metadata) in &market_metadata {
         lifecycle.set_market_metadata(market_id, metadata.clone());
     }
-    let rebuilt_sidecar = state_sidecar_snapshot_from_resting_orders(
+    let rebuilt_sidecar = state_sidecar_snapshot_from_resting_orders_with_universe(
         &bridge_state,
         &restored_resting_orders,
         &markets,
         &market_groups,
         &lifecycle,
         &last_clearing_prices,
+        &crate::universe::LiquidityUniverse::from_snapshot(
+            witness.state_sidecar.liquidity_universe.clone(),
+        ),
     );
     let rebuilt_root = sybil_verifier::block::compute_state_root_with_sidecar(
         crate::canonical_state::CanonicalState::from_accounts(&accounts).as_snapshots(),
@@ -293,6 +297,9 @@ fn restored_state_from_witness(
         acknowledged_writes: Vec::new(),
         analytics: empty_import_analytics(last_clearing_prices),
         bridge_state,
+        liquidity_universe: crate::universe::LiquidityUniverse::from_snapshot(
+            witness.state_sidecar.liquidity_universe.clone(),
+        ),
     })
 }
 

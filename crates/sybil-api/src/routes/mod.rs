@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod actors;
 pub mod aggregates;
 pub mod auto_resolution;
 pub mod blocks;

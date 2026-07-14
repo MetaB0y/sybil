@@ -75,7 +75,11 @@ use crate::aggregates::{
     CostBasisTrackerSnapshot, LiquidityTrackerSnapshot, OrderStatsTrackerSnapshot,
     TraderTrackerSnapshot, WelfareTrackerSnapshot,
 };
-use crate::block::{BlockHeader, SealedBlock, state_sidecar_snapshot_from_resting_orders};
+#[cfg(test)]
+use crate::block::state_sidecar_snapshot_from_resting_orders;
+use crate::block::{
+    BlockHeader, SealedBlock, state_sidecar_snapshot_from_resting_orders_with_universe,
+};
 #[cfg(test)]
 use crate::bridge::BridgeL1Input;
 use crate::bridge::{

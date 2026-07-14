@@ -262,6 +262,15 @@ fn append_witness_state_sidecar_with_domain(
 ) {
     out.extend_from_slice(domain);
     append_witness_bridge(out, &sidecar.bridge);
+    append_u64(out, sidecar.liquidity_universe.generation);
+    out.extend_from_slice(&sidecar.liquidity_universe.policy_digest);
+    append_u64(out, sidecar.liquidity_universe.activated_at_height);
+    let mut universe_markets = sidecar.liquidity_universe.market_ids.clone();
+    universe_markets.sort_by_key(|market| market.0);
+    append_u64(out, universe_markets.len() as u64);
+    for market in universe_markets {
+        append_market_id(out, market);
+    }
 
     let mut markets: Vec<_> = sidecar.markets.iter().collect();
     markets.sort_by_key(|market| market.market_id.0);

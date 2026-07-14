@@ -128,9 +128,37 @@ pub enum ControlPlaneCommand {
         #[serde(default)]
         created_at_ms: u64,
     },
+    CollateralizeCompleteSet {
+        account_id: AccountId,
+        market_id: MarketId,
+        quantity: u64,
+    },
+    RedeemCompleteSet {
+        account_id: AccountId,
+        market_id: MarketId,
+        quantity: u64,
+    },
+    ActivateLiquidityUniverse {
+        generation: u64,
+        policy_digest: [u8; 32],
+        market_ids: Vec<MarketId>,
+    },
+    ApplyCompleteSetInventoryActions {
+        account_id: AccountId,
+        actions: Vec<crate::CompleteSetInventoryAction>,
+    },
 }
 
 impl Store {
+    pub async fn upsert_actor_epoch(
+        &self,
+        epoch: &crate::sequencer::ActorEpochSubmission,
+    ) -> Result<(), StoreError> {
+        self.append_acknowledged_write(AcknowledgedWrite::ActorEpoch(epoch.clone()))
+            .await
+            .map(|_| ())
+    }
+
     /// Append one pending bundle submission to the durable recovery log.
     ///
     /// Called by the actor on every admit that routes to the in-memory
@@ -289,6 +317,10 @@ pub enum AcknowledgedWrite {
         authorization: sybil_verifier::ClientActionAuth,
         timestamp_ms: u64,
     },
+    /// Replaceable MM/noise target-block intent. Replaying multiple rows for
+    /// one principal/height preserves acceptance order; the sequencer keeps
+    /// only the latest valid epoch in its in-memory replacement map.
+    ActorEpoch(crate::sequencer::ActorEpochSubmission),
 }
 
 impl AcknowledgedWrite {
@@ -299,6 +331,7 @@ impl AcknowledgedWrite {
             Self::AuthenticatedDirectAdmit { .. } => "authenticated_direct_admit",
             Self::AuthenticatedDeferredBundle { .. } => "authenticated_deferred_bundle",
             Self::AuthenticatedCancel { .. } => "authenticated_cancel",
+            Self::ActorEpoch(_) => "actor_epoch",
             Self::ControlPlane(_) => "control_plane",
             Self::L1Deposit(_) => "l1_deposit",
             Self::BridgeWithdrawal(_) => "bridge_withdrawal",

@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-15
 ---
 
 # Persistence
@@ -105,6 +105,8 @@ Persisted today:
 - **Order book**: resting orders and their reservations in `resting_orders`
 - **Deferred submissions**: `DeferredBundle` rows in `acknowledged_writes`
 - **Direct admits**: `DirectAdmit` rows in `acknowledged_writes`
+- **Role-bound actor epochs**: replaceable `ActorEpoch` rows in
+  `acknowledged_writes`
 
 Still not persisted:
 
@@ -165,8 +167,9 @@ Implemented today:
 - Oracle feed registration
 - Resolution template installation
 
-Direct admits, deferred bundles, control-plane commands, deposits, withdrawal
-creation, and confirmed L1 lifecycle inputs are variants in that same log.
+Direct admits, deferred bundles, role-bound actor epochs, control-plane
+commands, deposits, withdrawal creation, and confirmed L1 lifecycle inputs are
+variants in that same log.
 Cross-subsystem ordering is therefore data, not a collection of pairwise
 restore rules. Any invalid row or application divergence stops recovery.
 
@@ -280,8 +283,8 @@ This is the whole reason the commit fence lives in redb.
 - Counter state and next IDs
 - Resting orders and reservations
 - The exact global sequence of direct admits, deferred submissions,
-  control-plane commands, deposits, withdrawals, and L1 lifecycle inputs
-  accepted after the last committed block
+  role-bound actor epochs, control-plane commands, deposits, withdrawals, and
+  L1 lifecycle inputs accepted after the last committed block
 - Product-history batches not yet delivered to `sybil-history`
 - Pending acknowledged account creation/funding events, which are replayed and
   exported only when a later block commits

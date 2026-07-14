@@ -378,10 +378,9 @@ impl AnalyticsState {
         account_id: AccountId,
         markets: Vec<MarketId>,
         timestamp_ms: u64,
-        is_mm: bool,
     ) {
         self.trader_tracker
-            .record_placed(account_id, markets, timestamp_ms, is_mm);
+            .record_placed(account_id, markets, timestamp_ms);
     }
 
     pub fn record_order_placed(
@@ -479,7 +478,7 @@ impl AnalyticsState {
                 continue;
             };
             let markets: Vec<MarketId> = order.active_markets().collect();
-            self.record_trader_placement(*account_id, markets, timestamp_ms, *is_mm);
+            self.record_trader_placement(*account_id, markets, timestamp_ms);
             if !*is_mm {
                 self.record_order_history(
                     *account_id,
@@ -650,7 +649,10 @@ impl AnalyticsState {
                 | SystemEvent::KeyRevoked { .. }
                 | SystemEvent::ClientActionAuthorized(..)
                 | SystemEvent::DepositQuarantined { .. }
-                | SystemEvent::QuarantineClaimed { .. } => {}
+                | SystemEvent::QuarantineClaimed { .. }
+                | SystemEvent::CompleteSetCollateralized { .. }
+                | SystemEvent::CompleteSetRedeemed { .. }
+                | SystemEvent::LiquidityUniverseActivated { .. } => {}
             }
         }
     }

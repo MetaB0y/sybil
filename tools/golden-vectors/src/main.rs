@@ -17,11 +17,11 @@ use sybil_verifier::commitments::{event_schema, hash_header, state_schema, witne
 use sybil_verifier::{
     AccountKeyDigestRecord, AccountReservationSnapshot, AccountSnapshot, BlockWitness,
     BridgeStateSnapshot, ChallengeSnapshot, ClientActionWitness, DepositAccumulatorWitness,
-    KeyOpAuth, KeyRecord, L1DepositWitness, MarketGroupSnapshot, MarketSnapshot,
-    MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason, ResolutionProposalSnapshot,
-    ResolutionRecordSnapshot, RestingOrderSnapshot, StateSidecarSnapshot, SystemEventWitness,
-    WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder, WitnessRejection, account_keys_digest,
-    empty_account_keys_digest,
+    KeyOpAuth, KeyRecord, L1DepositWitness, LiquidityUniverseSnapshot, MarketGroupSnapshot,
+    MarketSnapshot, MarketStatusSnapshot, OracleSourceSnapshot, RejectionReason,
+    ResolutionProposalSnapshot, ResolutionRecordSnapshot, RestingOrderSnapshot,
+    StateSidecarSnapshot, SystemEventWitness, WithdrawalSnapshot, WitnessBlockHeader, WitnessOrder,
+    WitnessRejection, account_keys_digest, empty_account_keys_digest,
 };
 use sybil_zk::{
     EpochTransitionPublicInputs, StateTransitionPublicInputs, epoch_transition_public_input_hash,
@@ -971,6 +971,12 @@ fn state_sidecar(resting_order: Order) -> StateSidecarSnapshot {
     };
 
     StateSidecarSnapshot {
+        liquidity_universe: LiquidityUniverseSnapshot {
+            generation: 4,
+            policy_digest: [7u8; 32],
+            activated_at_height: 8,
+            market_ids: vec![MarketId::new(3), MarketId::new(9)],
+        },
         bridge: BridgeStateSnapshot {
             deposit_cursor: 14,
             deposit_root: [8u8; 32],

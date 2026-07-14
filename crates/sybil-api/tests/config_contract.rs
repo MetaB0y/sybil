@@ -31,7 +31,8 @@ use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use sybil_api::app::{
-    DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, RouteMount, SERVICE_ROUTE_TABLE,
+    ACTOR_ROUTE_TABLE, DEV_ROUTE_TABLE, OWNER_ROUTE_TABLE, PUBLIC_ROUTE_TABLE, RouteMount,
+    SERVICE_ROUTE_TABLE,
 };
 use sybil_api::config::ApiConfig;
 use sybil_api::webauthn::WebAuthnVerifierConfig;
@@ -222,17 +223,23 @@ fn route_tiers_are_disjoint() {
             !DEV_ROUTE_TABLE.contains(mount),
             "{mount:?} is in both PUBLIC and DEV tiers"
         );
+        assert!(!ACTOR_ROUTE_TABLE.contains(mount));
     }
     for mount in OWNER_ROUTE_TABLE {
         assert!(!PUBLIC_ROUTE_TABLE.contains(mount));
         assert!(!SERVICE_ROUTE_TABLE.contains(mount));
         assert!(!DEV_ROUTE_TABLE.contains(mount));
+        assert!(!ACTOR_ROUTE_TABLE.contains(mount));
     }
     for mount in SERVICE_ROUTE_TABLE {
         assert!(
             !DEV_ROUTE_TABLE.contains(mount),
             "{mount:?} is in both SERVICE and DEV tiers"
         );
+        assert!(!ACTOR_ROUTE_TABLE.contains(mount));
+    }
+    for mount in ACTOR_ROUTE_TABLE {
+        assert!(!DEV_ROUTE_TABLE.contains(mount));
     }
 }
 

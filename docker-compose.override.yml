@@ -10,18 +10,18 @@ services:
       context: .
       args: *rust-build-args
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${SYBIL_LOCAL_API_PORT:-3000}:3000"
 
   sybil-history:
     build:
       context: .
       args: *rust-build-args
     ports:
-      - "127.0.0.1:3003:3003"
+      - "127.0.0.1:${SYBIL_LOCAL_HISTORY_PORT:-3003}:3003"
 
   sybil-web:
     ports:
-      - "127.0.0.1:3005:3000"
+      - "127.0.0.1:${SYBIL_LOCAL_WEB_PORT:-3005}:3000"
 
   sybil-polymarket:
     build:
@@ -38,20 +38,20 @@ services:
   sybil-arena-dashboard:
     build: ./arena
     ports:
-      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:${SYBIL_LOCAL_ARENA_PORT:-8501}:8501"
 
   sybil-prover:
     ports:
-      - "127.0.0.1:3002:3002"
+      - "127.0.0.1:${SYBIL_LOCAL_PROVER_PORT:-3002}:3002"
 
   victoriametrics:
     ports:
-      - "127.0.0.1:8428:8428"
+      - "127.0.0.1:${SYBIL_LOCAL_METRICS_PORT:-8428}:8428"
 
   vmalert:
     ports:
-      - "127.0.0.1:8880:8880"
+      - "127.0.0.1:${SYBIL_LOCAL_ALERTS_PORT:-8880}:8880"
 
   grafana:
     ports:
-      - "127.0.0.1:3001:3000"
+      - "127.0.0.1:${SYBIL_LOCAL_GRAFANA_PORT:-3001}:3000"

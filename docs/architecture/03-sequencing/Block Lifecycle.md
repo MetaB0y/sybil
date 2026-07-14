@@ -3,7 +3,7 @@ tags: [sequencer, block]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 ---
 
 # Block lifecycle
@@ -18,19 +18,25 @@ flowchart LR
     ADMIT --> PROBLEM["4. Build supported Problem"]
     PROBLEM --> SOLVE["5. Solve + integer landing"]
     SOLVE --> SETTLE["6. Settle + update book"]
-    SETTLE --> SEAL["7. Roots · block · witness v10"]
+    SETTLE --> SEAL["7. Roots · block · witness v11"]
     SEAL --> PERSIST["8. Persist + fence"]
     PERSIST --> COMMIT["9. Swap live state + publish"]
 ```
 
-Simple non-MM orders are normally already reserved in the resting book. MM-constrained and supported multi-order submissions drain from the durable deferred queue. Unsupported order shapes never enter the solver. MM quotes are one-shot; eligible non-MM remainders rest according to time-in-force and TTL.
+Simple non-MM orders are normally already reserved in the resting book. MM-constrained and supported multi-order submissions drain from the durable deferred queue. Role-bound actor epochs are a separate durable lane keyed by `(principal, target_height)`: retries are idempotent, later packages supersede before cutoff, every order is IOC for exactly the target block, and expired wall-clock packages are dropped. Actor epochs bypass the public 64-order and account/global submission caps but retain role caps and ordinary market/order validity. Unsupported order shapes never enter the solver. MM quotes are one-shot; eligible ordinary non-MM remainders rest according to time-in-force and TTL.
 
 Settlement applies shared integer primitives, derives MINT adjustments, updates committed last clearing prices, processes deposit/quarantine and withdrawal lifecycle effects, and preserves unresolved market-group structure. Witness assembly captures account state, key operations/universe, bridge/deposit dispositions, pre/post sidecars, fills, prices, constraints, and canonical events.
 
 Two artifacts leave the kernel:
 
 - `SealedBlock`: canonical block plus explicitly non-validity derived views for REST/WebSocket/SSE.
-- `BlockWitness` v10: transition-complete private material for native verification, proving, DA, and recovery, including ordinary order/cancel authorization and trading nonces.
+- `BlockWitness` v11: transition-complete private material for native verification, proving, DA, and recovery. It includes ordinary order/cancel authorization and trading nonces, the committed liquidity universe, and complete-set inventory events.
+
+`SealedBlock` analytics also attribute filled order counts and filled-order
+notional per market to market-maker, noise, or organic flow. The attribution is
+joined from target-block actor epochs after solving and is intentionally absent
+from the canonical block, state root, witness, solver objective, and settlement.
+Native actor marks use it to ensure MM/noise-only flow has zero feedback weight.
 
 ## Invariants
 

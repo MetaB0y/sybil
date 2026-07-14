@@ -161,6 +161,9 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         market_start_date_ms: args.ref_data.and_then(|r| r.market_start_date_ms),
         group_item_title: args.ref_data.and_then(|r| r.group_item_title.clone()),
         closed: args.ref_data.and_then(|r| r.closed),
+        actor_min_yes_nanos: args.ref_data.and_then(|r| r.actor_min_yes_nanos),
+        actor_max_yes_nanos: args.ref_data.and_then(|r| r.actor_max_yes_nanos),
+        actor_seed_yes_nanos: args.ref_data.and_then(|r| r.actor_seed_yes_nanos),
     }
 }
 
@@ -208,6 +211,13 @@ pub async fn list_markets(
     .instrument(tracing::info_span!("list_markets.fetch"))
     .await?;
     let (liquidity_by_market, liquidity_band_nanos) = liquidity;
+    let universe = state.sequencer.get_liquidity_universe().await?;
+    let active_universe = (universe.generation > 0).then(|| {
+        universe
+            .market_ids
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+    });
 
     let ref_prices = state.reference_prices.read().await;
     let market_ref_data = state.market_ref_data.read().await;
@@ -216,6 +226,11 @@ pub async fn list_markets(
         tracing::info_span!("list_markets.build_response", markets = markets.len()).entered();
     let response: Vec<MarketResponse> = markets
         .iter()
+        .filter(|market| {
+            active_universe
+                .as_ref()
+                .is_none_or(|active| active.contains(&market.id))
+        })
         .map(|m| {
             let market_prices = prices.get(&m.id);
             let status = statuses
@@ -301,6 +316,13 @@ pub async fn list_markets_summary(
     .instrument(tracing::info_span!("list_markets_summary.fetch"))
     .await?;
     let (liquidity_by_market, liquidity_band_nanos) = liquidity;
+    let universe = state.sequencer.get_liquidity_universe().await?;
+    let active_universe = (universe.generation > 0).then(|| {
+        universe
+            .market_ids
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+    });
 
     let ref_prices = state.reference_prices.read().await;
 
@@ -311,6 +333,11 @@ pub async fn list_markets_summary(
     .entered();
     let response: Vec<MarketSummaryResponse> = markets
         .iter()
+        .filter(|market| {
+            active_universe
+                .as_ref()
+                .is_none_or(|active| active.contains(&market.id))
+        })
         .map(|m| {
             let market_prices = prices.get(&m.id);
             let status = statuses
@@ -572,7 +599,7 @@ pub async fn extend_market_group(
     get,
     path = "/v1/markets/prices",
     responses(
-        (status = 200, description = "Market prices", body = MarketPricesResponse)
+        (status = 200, description = "Committed Sybil market marks", body = MarketPricesResponse)
     )
 )]
 pub async fn get_prices(
@@ -1041,6 +1068,23 @@ pub async fn set_market_metadata(
     Path(id): Path<u32>,
     Json(req): Json<SetMarketMetadataRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    let requested_range = (
+        req.actor_min_yes_nanos,
+        req.actor_max_yes_nanos,
+        req.actor_seed_yes_nanos,
+    );
+    if requested_range.0.is_some() || requested_range.1.is_some() || requested_range.2.is_some() {
+        let (Some(min), Some(max), Some(seed)) = requested_range else {
+            return Err(AppError::bad_request(
+                "actor native guardrails must set min, max, and seed together",
+            ));
+        };
+        if min > seed || seed > max || max > NANOS_PER_DOLLAR {
+            return Err(AppError::bad_request(
+                "actor native guardrails must satisfy 0 <= min <= seed <= max <= 1e9",
+            ));
+        }
+    }
     let mut ref_data = state.market_ref_data.write().await;
     let entry = ref_data.entry(id).or_insert_with(MarketRefData::default);
     if let Some(v) = req.external_url {
@@ -1090,6 +1134,11 @@ pub async fn set_market_metadata(
     }
     if let Some(v) = req.closed {
         entry.closed = Some(v);
+    }
+    if let (Some(min), Some(max), Some(seed)) = requested_range {
+        entry.actor_min_yes_nanos = Some(min);
+        entry.actor_max_yes_nanos = Some(max);
+        entry.actor_seed_yes_nanos = Some(seed);
     }
     save_market_ref_data(&ref_data, state.market_ref_data_path.as_deref());
     Ok(Json(serde_json::json!({"updated": true})))

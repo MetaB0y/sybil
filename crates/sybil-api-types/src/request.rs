@@ -459,6 +459,69 @@ pub struct SubmitOrderRequest {
     pub mm_budget_nanos: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ActorRole {
+    MarketMaker,
+    Noise,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ActorMarketIntent {
+    pub market_id: u32,
+    #[serde(default)]
+    pub orders: Vec<OrderSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ActorEpochRequest {
+    pub epoch_id: String,
+    pub target_height: u64,
+    pub universe_generation: u64,
+    pub observed_at_ms: u64,
+    pub valid_until_ms: u64,
+    pub market_intents: Vec<ActorMarketIntent>,
+    /// Shared market-maker capital limit. Integer nanodollars;
+    /// 1_000_000_000 = $1. Forbidden for noise actors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mm_budget_nanos: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum CompleteSetActionRequest {
+    Collateralize {
+        market_id: u32,
+        /// Complete-set size. Integer share-units; 1000 = 1 share.
+        quantity: u64,
+    },
+    Redeem {
+        market_id: u32,
+        /// Complete-set size. Integer share-units; 1000 = 1 share.
+        quantity: u64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CompleteSetInventoryRequest {
+    pub actions: Vec<CompleteSetActionRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ActivateLiquidityUniverseRequest {
+    pub generation: u64,
+    pub policy_digest_hex: String,
+    pub market_ids: Vec<u32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "UPPERCASE")]
@@ -687,6 +750,18 @@ pub struct SetMarketMetadataRequest {
     /// markets from the listing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed: Option<bool>,
+    /// Actor-only native YES lower guardrail. Integer nanodollars expressed as
+    /// per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_min_yes_nanos: Option<u64>,
+    /// Actor-only native YES upper guardrail. Integer nanodollars expressed as
+    /// per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_max_yes_nanos: Option<u64>,
+    /// Actor-only native YES initial anchor. Integer nanodollars expressed as
+    /// per-share probabilities in [0, 1e9]. Off-block policy, never user validity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_seed_yes_nanos: Option<u64>,
 }
 
 /// Which confidence tier a proposed automated resolution (SYB-48) landed in.

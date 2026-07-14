@@ -32,7 +32,7 @@ export const GLOSSARY: Record<string, string> = {
   "All-time welfare":
     "Total trader surplus across every fill since launch — for each trade, how much better than its limit price it cleared, times quantity. The cumulative value Sybil's uniform-price batches have created for traders.",
   "Portfolio value":
-    "Your cash balance plus the current value of every open position, marked at the latest batch clearing price.",
+    "Your cash balance plus every open position valued at the committed Sybil mark: latest trade price, or the current two-sided book midpoint while quiet.",
   "Net deposits":
     "Everything you've deposited minus what you've withdrawn. When your portfolio line sits above it you're in profit; below it, at a loss.",
 };

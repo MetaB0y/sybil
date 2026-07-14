@@ -11,6 +11,7 @@ services:
     volumes:
       - sybil-data:/data
       - arena-data:/arena-data
+      - ${SYBIL_ACTOR_CREDENTIALS_FILE:?Set SYBIL_ACTOR_CREDENTIALS_FILE to the sixteen-actor JSON file}:/run/secrets/sybil-actor-credentials.json:ro
     environment:
       # Selects the prod durability posture and arms the startup preflight
       # guardrail (SYB-133): sybil-api refuses to boot if any dev-only knob is
@@ -19,6 +20,7 @@ services:
       SYBIL_DEPLOYMENT_PROFILE: "prod"
       SYBIL_DEV_MODE: "false"
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
+      SYBIL_ACTOR_CREDENTIALS_PATH: "/run/secrets/sybil-actor-credentials.json"
       SYBIL_CORS_ORIGINS: "${SYBIL_CORS_ORIGINS:-}"
       # A null Compose value omits the variable unless it is explicitly set in
       # the host environment or .env. Passing an empty string is not equivalent:
@@ -68,17 +70,24 @@ services:
       SYBIL_HISTORY_CANDLE_RESOLUTIONS_SECS: "60,300,3600"
     logging: *default-logging
   sybil-polymarket:
+    volumes:
+      - polymarket-data:/data
+      - ./crates/sybil-polymarket/curated_markets.json:/etc/sybil/curated_markets.json:ro
+      - ./crates/sybil-polymarket/native_markets.json:/etc/sybil/native_markets.json:ro
     environment:
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
+      SYBIL_MM_ACTOR_TOKEN: "${SYBIL_MM_ACTOR_TOKEN:?Set the market-maker actor token in /opt/sybil/.env}"
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--max-events=50"
       - "--mirror-excluded-categories=sports"
       - "--mm-half-spread=0.01"
       - "--mm-budget-dollars=5000"
-      - "--mm-initial-balance-dollars=1000000"
+      - "--mm-quote-size-dollars=200"
+      - "--mm-initial-balance-dollars=5000000"
+      - "--mm-max-position=20000"
+      - "--mm-complete-set-target-shares=20000"
       - "--mm-max-markets=0"
-      - "--mm-max-orders-per-block=64"
       - "--mapping-store-path=/data/polymarket_mapping.json"
       - "--sync-interval-secs=120"
       - "--curated-markets-path=/etc/sybil/curated_markets.json"
@@ -88,10 +97,16 @@ services:
   sybil-arena:
     volumes:
       - polymarket-data:/polymarket-data:ro
+      - ${SYBIL_ACTOR_CREDENTIALS_FILE:?Set SYBIL_ACTOR_CREDENTIALS_FILE to the sixteen-actor JSON file}:/run/secrets/sybil-actor-credentials.json:ro
     env_file:
       - ./arena.env
     environment:
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
+      SYBIL_NOISE_ACTORS_JSON: "/run/secrets/sybil-actor-credentials.json"
+      ARENA_NOISE_MIN_ORDER_DOLLARS: "7"
+      ARENA_NOISE_MAX_ORDER_DOLLARS: "150"
+      ARENA_NOISE_INVENTORY_BIAS_DOLLARS: "800"
+      ARENA_NOISE_STATE_PATH: "/data/noise-state.json"
     command:
       - "--sybil-url=http://sybil-api:3000"
       - "--model=deepseek/deepseek-v4-flash"

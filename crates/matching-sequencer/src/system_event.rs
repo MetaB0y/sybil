@@ -86,6 +86,24 @@ pub enum SystemEvent {
     /// Ordinary order/cancel authorization retained for native and guest
     /// replay in exact actor acknowledgement order.
     ClientActionAuthorized(ClientActionWitness),
+    /// Convert account cash into equal YES and NO inventory at $1/share.
+    CompleteSetCollateralized {
+        account_id: AccountId,
+        market_id: MarketId,
+        quantity: u64,
+    },
+    /// Convert equal YES and NO inventory back into account cash.
+    CompleteSetRedeemed {
+        account_id: AccountId,
+        market_id: MarketId,
+        quantity: u64,
+    },
+    LiquidityUniverseActivated {
+        generation: u64,
+        policy_digest: [u8; 32],
+        activated_at_height: u64,
+        market_ids: Vec<MarketId>,
+    },
 }
 
 #[cfg(test)]

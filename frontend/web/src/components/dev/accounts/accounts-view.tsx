@@ -7,20 +7,22 @@ import { Panel, PanelBody, PanelHead } from "@/components/dev/primitives/panel";
 import {
   accountAggregates,
   marketIndex,
+  participantRoleIndex,
+  participantRoleLabel,
   pendingByAccount,
   pendingIndex,
-  positionRefValue,
   topPendingMarkets,
 } from "@/lib/dev/derive";
 import {
   useDevAccountFills,
   useDevAccounts,
+  useDevBots,
+  useDevLiquidityHealth,
   useDevMarkets,
   useDevPendingOrders,
 } from "@/lib/dev/fetchers";
 import {
   dollars,
-  dollarsFloat,
   fmtInt,
   fmtPrice,
   moneySigned,
@@ -67,8 +69,13 @@ export function AccountsView() {
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
     null,
   );
+  const [outcomeFilter, setOutcomeFilter] = useState<"ALL" | "YES" | "NO">(
+    "ALL",
+  );
 
   const accounts = useDevAccounts().data ?? [];
+  const liquidityHealth = useDevLiquidityHealth().data;
+  const bots = useDevBots().data;
   const pendingOrders = useDevPendingOrders().data ?? [];
   const markets = useDevMarkets().data ?? [];
 
@@ -76,7 +83,11 @@ export function AccountsView() {
   const pendIdx = pendingIndex(pendingOrders);
   const pendByAcct = pendingByAccount(pendingOrders);
 
-  const agg = accountAggregates(accounts, mIdx, selectedAccountId, pendByAcct);
+  const roles = participantRoleIndex(liquidityHealth, bots);
+  const agg = accountAggregates(accounts, selectedAccountId, pendByAcct);
+  const topPositions = agg.positionsByValue
+    .filter((position) => outcomeFilter === "ALL" || position.outcome === outcomeFilter)
+    .slice(0, 25);
 
   const fills =
     useDevAccountFills(agg.activeTradingAccounts.map((a) => a.account_id))
@@ -86,6 +97,21 @@ export function AccountsView() {
   const marketName = (id: number): string => {
     const m = mIdx.get(Number(id));
     return m ? m.name : "#" + id;
+  };
+  const shares = (quantity: number): string =>
+    (Number(quantity) / 1_000).toLocaleString(undefined, {
+      maximumFractionDigits: 3,
+    });
+  const outcomeSummary = (account: (typeof accounts)[number], outcome: "YES" | "NO") => {
+    const positions = (account.positions ?? []).filter((position) => position.outcome === outcome);
+    return {
+      count: positions.length,
+      quantity: positions.reduce((sum, position) => sum + Number(position.quantity || 0), 0),
+      valueNanos: positions.reduce(
+        (sum, position) => sum + Number(position.value_nanos || 0),
+        0,
+      ),
+    };
   };
 
   return (
@@ -104,7 +130,7 @@ export function AccountsView() {
             title="Active Trading Accounts"
             actions={
               <span style={mutedSpan}>
-                Aggregated positions, pending orders, and reference marks
+                Canonical cash, portfolios, and PnL from Sybil
               </span>
             }
           />
@@ -136,7 +162,7 @@ export function AccountsView() {
                   {agg.activeTradingAccounts.length + " active accounts"}
                 </span>
               </button>
-              {agg.activeTradingAccounts.slice(0, 18).map((a) => {
+              {agg.activeTradingAccounts.map((a) => {
                 const active = selectedAccountId === a.account_id;
                 return (
                   <button
@@ -153,7 +179,9 @@ export function AccountsView() {
                         : chipBase
                     }
                   >
-                    <strong>{"Account #" + a.account_id}</strong>
+                    <strong>
+                      {participantRoleLabel(a.account_id, roles) + " #" + a.account_id}
+                    </strong>
                     <span>
                       {accountPendingCount(a.account_id) +
                         " pending, " +
@@ -165,7 +193,7 @@ export function AccountsView() {
               })}
             </div>
 
-            <StatGrid columns={5}>
+            <StatGrid columns={4}>
               <Stat
                 label="Scope"
                 value={agg.selectedTradingAccounts.length}
@@ -177,60 +205,83 @@ export function AccountsView() {
               />
               <Stat
                 label="Pending Orders"
-                value={fmtInt(agg.mmPendingOrders)}
+                value={fmtInt(agg.pendingOrders)}
                 tone="warn"
                 sub="resting liquidity"
               />
               <Stat
                 label="Cash"
-                value={"$" + dollars(agg.mmCashNanos)}
-                sub={agg.mmPositionCount + " positions"}
+                value={"$" + dollars(agg.cashNanos)}
+                sub="available cash"
               />
               <Stat
-                label="Ref Portfolio"
-                value={"$" + dollarsFloat(agg.mmReferenceTotal)}
+                label="Sybil Portfolio"
+                value={"$" + dollars(agg.portfolioValueNanos)}
                 tone="cyan"
-                sub="cash plus reference marks"
+                sub="canonical Sybil mark"
               />
               <Stat
-                label="Ref PnL"
-                value={moneySigned(agg.mmReferencePnl)}
-                tone={agg.mmReferencePnl >= 0 ? "yes" : "no"}
-                sub={"Sybil mark $" + dollars(agg.mmSybilValueNanos)}
+                label="Sybil PnL"
+                value={moneySigned(agg.pnlNanos / 1e9)}
+                tone={agg.pnlNanos >= 0 ? "yes" : "no"}
+                sub="canonical account PnL"
+              />
+              <Stat
+                label="Positions"
+                value={fmtInt(agg.positionCount)}
+                sub="all outcomes"
+              />
+              <Stat
+                label="YES Positions"
+                value={fmtInt(agg.yes.count)}
+                tone="yes"
+                sub={`${shares(agg.yes.quantity)} shares · $${dollars(agg.yes.valueNanos)}`}
+              />
+              <Stat
+                label="NO Positions"
+                value={fmtInt(agg.no.count)}
+                tone="no"
+                sub={`${shares(agg.no.quantity)} shares · $${dollars(agg.no.valueNanos)}`}
               />
             </StatGrid>
 
-            {agg.accountZeroIsInactive ? (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: "10px 11px",
-                  border: "1px solid var(--border-2)",
-                  borderRadius: 8,
-                  background: "var(--surface-2)",
-                }}
-              >
-                <strong>Account #0 is not the market maker</strong>
-                <div style={{ marginTop: 4, ...mutedSpan }}>
-                  Account #0 currently has no positions or pending orders. This
-                  panel now follows accounts with actual activity instead of
-                  pinning the MM view to #0.
-                </div>
-              </div>
-            ) : null}
-
-            <h3
+            <div
               style={{
                 margin: "14px 0 8px",
-                fontSize: 10,
-                fontWeight: 650,
-                letterSpacing: 0.4,
-                textTransform: "uppercase",
-                color: "var(--fg-3)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
               }}
             >
-              Top Positions
-            </h3>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 10,
+                  fontWeight: 650,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  color: "var(--fg-3)",
+                }}
+              >
+                Top 25 Positions by Sybil Value
+              </h3>
+              <div style={{ display: "flex", gap: 5 }}>
+                {(["ALL", "YES", "NO"] as const).map((outcome) => (
+                  <button
+                    key={outcome}
+                    type="button"
+                    onClick={() => setOutcomeFilter(outcome)}
+                    style={
+                      outcomeFilter === outcome
+                        ? { ...chipBase, padding: "4px 8px", borderColor: "var(--accent)", color: "var(--accent)" }
+                        : { ...chipBase, padding: "4px 8px" }
+                    }
+                  >
+                    {outcome === "ALL" ? "All" : outcome}
+                  </button>
+                ))}
+              </div>
+            </div>
             <DataTable maxHeight={300}>
               <thead>
                 <tr>
@@ -239,11 +290,10 @@ export function AccountsView() {
                   <Th>Outcome</Th>
                   <Th align="right">Qty</Th>
                   <Th align="right">Sybil Value</Th>
-                  <Th align="right">Ref Mark</Th>
                 </tr>
               </thead>
               <tbody>
-                {agg.topMmPositions.map((p) => (
+                {topPositions.map((p) => (
                   <tr
                     key={p.account_id + "-" + p.market_id + "-" + p.outcome}
                   >
@@ -257,19 +307,16 @@ export function AccountsView() {
                       {p.outcome}
                     </Td>
                     <Td mono align="right">
-                      {p.quantity}
+                      {shares(p.quantity)}
                     </Td>
                     <Td mono align="right">
                       {"$" + dollars(p.value_nanos)}
                     </Td>
-                    <Td mono tone="accent" align="right">
-                      {"$" + dollarsFloat(positionRefValue(p, mIdx))}
-                    </Td>
                   </tr>
                 ))}
-                {agg.topMmPositions.length === 0 ? (
+                {topPositions.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={emptyMsg}>
+                    <td colSpan={5} style={emptyMsg}>
                       No positions for the selected scope.
                     </td>
                   </tr>
@@ -283,14 +330,16 @@ export function AccountsView() {
         <Panel>
           <PanelHead title="Participants" />
           <PanelBody>
-            <DataTable maxHeight={520} minWidth={520}>
+            <DataTable maxHeight={520} minWidth={920}>
               <thead>
                 <tr>
                   <Th>Account</Th>
+                  <Th>Role</Th>
                   <Th align="right">Cash</Th>
                   <Th align="right">Portfolio</Th>
                   <Th align="right">PnL</Th>
-                  <Th align="right">Positions</Th>
+                  <Th align="right">YES Positions</Th>
+                  <Th align="right">NO Positions</Th>
                   <Th align="right">Pending</Th>
                   <Th align="right">Recent Fills</Th>
                 </tr>
@@ -298,11 +347,14 @@ export function AccountsView() {
               <tbody>
                 {accounts.map((a) => {
                   const pnl = (Number(a.pnl_nanos) || 0) / 1e9;
+                  const yes = outcomeSummary(a, "YES");
+                  const no = outcomeSummary(a, "NO");
                   return (
                     <tr key={a.account_id}>
                       <Td mono tone="accent">
                         {"#" + a.account_id}
                       </Td>
+                      <Td>{participantRoleLabel(a.account_id, roles)}</Td>
                       <Td mono align="right">
                         {"$" + dollars(a.balance_nanos)}
                       </Td>
@@ -312,8 +364,11 @@ export function AccountsView() {
                       <Td mono tone={pnl >= 0 ? "yes" : "no"} align="right">
                         {moneySigned(pnl)}
                       </Td>
-                      <Td mono align="right">
-                        {(a.positions ?? []).length}
+                      <Td mono tone="yes" align="right">
+                        {`${yes.count} · ${shares(yes.quantity)} sh · $${dollars(yes.valueNanos)}`}
+                      </Td>
+                      <Td mono tone="no" align="right">
+                        {`${no.count} · ${shares(no.quantity)} sh · $${dollars(no.valueNanos)}`}
                       </Td>
                       <Td mono tone="warn" align="right">
                         {accountPendingCount(a.account_id)}
@@ -326,7 +381,7 @@ export function AccountsView() {
                 })}
                 {accounts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={emptyMsg}>
+                    <td colSpan={9} style={emptyMsg}>
                       Loading account portfolios...
                     </td>
                   </tr>

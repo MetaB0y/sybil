@@ -8,13 +8,17 @@ import { Pill } from "@/components/dev/primitives/pill";
 import { Stat, StatGrid } from "@/components/dev/primitives/stat";
 import {
   accountAggregates,
+  actorPnlCohorts,
   buildInsights,
   buildQuickAnswer,
   marketIndex,
+  participantRoleIndex,
   pendingByAccount,
 } from "@/lib/dev/derive";
 import {
   useDevAccounts,
+  useDevBots,
+  useDevLiquidityHealth,
   useDevMarkets,
   useDevPendingOrders,
 } from "@/lib/dev/fetchers";
@@ -51,12 +55,19 @@ export function OverviewView() {
 
   const markets = useDevMarkets().data ?? [];
   const pendingOrders = useDevPendingOrders().data ?? [];
-  const accounts = useDevAccounts().data ?? [];
+  const accountsQuery = useDevAccounts();
+  const accounts = accountsQuery.data ?? [];
+  const botsQuery = useDevBots();
+  const bots = botsQuery.data;
   const { blocks } = useDevRecentBlocks();
+  const liquidityHealth = useDevLiquidityHealth().data;
+  const liquidityExceptions = (liquidityHealth?.markets ?? [])
+    .filter((market) => market.mm_orders === 0)
+    .slice(0, 12);
 
   // ── trivial aggregates (computed inline per the console getters) ──────
   const pricedCount = markets.filter((m) => present(m.yes_price_nanos)).length;
-  const noClearCount = markets.length - pricedCount;
+  const unpricedCount = markets.length - pricedCount;
   const refCount = markets.filter((m) => present(m.reference_price_nanos)).length;
   const refOnlyCount = markets.filter(
     (m) => !present(m.yes_price_nanos) && present(m.reference_price_nanos),
@@ -74,12 +85,14 @@ export function OverviewView() {
   ).size;
 
   const mIdx = marketIndex(markets);
-  const aggregates = accountAggregates(
-    accounts,
-    mIdx,
-    null,
-    pendingByAccount(pendingOrders),
-  );
+  const aggregates = accountAggregates(accounts, null, pendingByAccount(pendingOrders));
+  const roles = participantRoleIndex(liquidityHealth, bots);
+  const pnl = actorPnlCohorts(accounts, roles);
+  const actorMetadataReady = (liquidityHealth?.actors?.length ?? 0) > 0;
+  const llmMetadataReady = bots?.db_available === true;
+  const accountDataReady = accountsQuery.isSuccess;
+  const mmNoiseReady = actorMetadataReady && accountDataReady;
+  const allActorsReady = mmNoiseReady && llmMetadataReady;
 
   const insights = buildInsights({ markets, blocks, pendingOrders });
 
@@ -105,11 +118,11 @@ export function OverviewView() {
 
   return (
     <div>
-      <StatGrid columns={6}>
+      <StatGrid columns={5}>
         <Stat
           label="Markets"
           value={markets.length}
-          sub={`${pricedCount} cleared / ${noClearCount} no clears`}
+          sub={`${pricedCount} marked / ${unpricedCount} unpriced`}
         />
         <Stat
           label="Reference Prices"
@@ -135,13 +148,94 @@ export function OverviewView() {
           tone={recentFills > 0 ? "yes" : "no"}
           sub={`${fmtInt(recentOrders)} orders seen`}
         />
+      </StatGrid>
+
+      <StatGrid columns={4} style={{ marginTop: 12 }}>
         <Stat
-          label="MM Ref PnL"
-          value={moneySigned(aggregates.mmReferencePnl)}
-          tone={aggregates.mmReferencePnl >= 0 ? "yes" : "no"}
-          sub={`${aggregates.mmPositionCount} positions, ${aggregates.activeTradingAccounts.length} active accounts`}
+          label="MM PnL · Sybil Mark"
+          value={mmNoiseReady ? moneySigned(pnl.mm.pnlNanos / 1e9) : "—"}
+          tone={!mmNoiseReady ? "warn" : pnl.mm.pnlNanos >= 0 ? "yes" : "no"}
+          sub={mmNoiseReady ? `$${dollars(pnl.mm.portfolioValueNanos)} portfolio · ${pnl.mm.accountCount} account` : "runtime actor metadata unavailable"}
+        />
+        <Stat
+          label="Noise PnL · Sybil Mark"
+          value={mmNoiseReady ? moneySigned(pnl.noise.pnlNanos / 1e9) : "—"}
+          tone={!mmNoiseReady ? "warn" : pnl.noise.pnlNanos >= 0 ? "yes" : "no"}
+          sub={mmNoiseReady ? `$${dollars(pnl.noise.portfolioValueNanos)} portfolio · ${pnl.noise.accountCount} accounts` : "runtime actor metadata unavailable"}
+        />
+        <Stat
+          label="LLM PnL · Sybil Mark"
+          value={llmMetadataReady && accountDataReady ? moneySigned(pnl.llm.pnlNanos / 1e9) : "—"}
+          tone={!llmMetadataReady || !accountDataReady ? "warn" : pnl.llm.pnlNanos >= 0 ? "yes" : "no"}
+          sub={llmMetadataReady && accountDataReady ? `$${dollars(pnl.llm.portfolioValueNanos)} portfolio · ${pnl.llm.accountCount} accounts` : "Arena account metadata unavailable"}
+        />
+        <Stat
+          label="All Actors PnL · Sybil Mark"
+          value={allActorsReady ? moneySigned(pnl.all.pnlNanos / 1e9) : "—"}
+          tone={!allActorsReady ? "warn" : pnl.all.pnlNanos >= 0 ? "yes" : "no"}
+          sub={allActorsReady ? `$${dollars(pnl.all.portfolioValueNanos)} portfolio · ${pnl.all.accountCount} actors · ${pnl.otherAccountCount} other` : "complete role metadata unavailable"}
         />
       </StatGrid>
+
+      <Panel style={{ marginTop: 12 }}>
+        <PanelHead title="Actor Liquidity · Latest Block" />
+        <PanelBody>
+          <StatGrid columns={6}>
+            <Stat
+              label="Universe"
+              value={liquidityHealth?.active_markets ?? "—"}
+              sub={liquidityHealth ? `generation ${liquidityHealth.universe_generation} · block #${liquidityHealth.height}` : "health feed unavailable"}
+            />
+            <Stat
+              label="MM Coverage"
+              value={liquidityHealth ? `${(liquidityHealth.mm_coverage_bps / 100).toFixed(1)}%` : "—"}
+              tone={(liquidityHealth?.mm_coverage_bps ?? 0) >= 8000 ? "yes" : "no"}
+              sub={liquidityHealth ? `${liquidityHealth.mm_markets_quoted}/${liquidityHealth.active_markets} current · ${(liquidityHealth.rolling_mm_coverage_bps / 100).toFixed(1)}% over ${liquidityHealth.rolling_window_blocks}` : "target 100%"}
+            />
+            <Stat
+              label="MM Two-Sided"
+              value={liquidityHealth ? `${(liquidityHealth.rolling_mm_two_sided_coverage_bps / 100).toFixed(1)}%` : "—"}
+              tone={(liquidityHealth?.rolling_mm_two_sided_coverage_bps ?? 0) >= 9800 ? "yes" : "warn"}
+              sub={liquidityHealth ? `${liquidityHealth.mm_markets_two_sided}/${liquidityHealth.active_markets} current · ${liquidityHealth.rolling_window_blocks}-block window` : "healthy target ≥ 98%"}
+            />
+            <Stat
+              label="Noise Actors"
+              value={liquidityHealth ? `${liquidityHealth.observed_noise_actors}/${liquidityHealth.expected_noise_actors}` : "—"}
+              tone={liquidityHealth && liquidityHealth.observed_noise_actors === liquidityHealth.expected_noise_actors ? "yes" : "warn"}
+              sub="durable actor packages observed"
+            />
+            <Stat
+              label="Noise Coverage"
+              value={liquidityHealth ? `${(liquidityHealth.rolling_noise_coverage_bps / 100).toFixed(1)}%` : "—"}
+              tone={liquidityHealth && liquidityHealth.rolling_noise_coverage_bps >= 2200 && liquidityHealth.rolling_noise_coverage_bps <= 2800 ? "yes" : "warn"}
+              sub={liquidityHealth ? `${liquidityHealth.noise_markets_selected}/${liquidityHealth.active_markets} current · ${liquidityHealth.rolling_window_blocks}-block window` : "rolling target 22–28%"}
+            />
+            <Stat
+              label="Noise Fill Markets"
+              value={liquidityHealth ? `${(liquidityHealth.rolling_noise_fill_coverage_bps / 100).toFixed(1)}%` : "—"}
+              tone={(liquidityHealth?.rolling_noise_fill_coverage_bps ?? 0) >= 1000 && (liquidityHealth?.rolling_noise_fill_coverage_bps ?? 0) <= 2000 ? "yes" : "warn"}
+              sub={liquidityHealth ? `${liquidityHealth.markets_with_noise_fills}/${liquidityHealth.active_markets} current · ${(liquidityHealth.rolling_noise_crossing_coverage_bps / 100).toFixed(1)}% naturally marketable vs MM` : "rolling target 10–20%"}
+            />
+            <Stat
+              label="Block Flow"
+              value={liquidityHealth ? `${liquidityHealth.total_fills} fills` : "—"}
+              tone={(liquidityHealth?.total_fills ?? 0) > 0 ? "yes" : "no"}
+              sub={liquidityHealth ? `$${dollars(liquidityHealth.total_volume_nanos)} volume · ${liquidityHealth.total_rejections} rejected` : "latest committed block"}
+            />
+          </StatGrid>
+          {liquidityExceptions.length > 0 ? (
+            <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-2)" }}>
+              Exceptions: {liquidityExceptions.map((market) =>
+                `#${market.market_id} MM:${market.mm_orders || market.mm_skip_reason || "missing"}`
+              ).join(" · ")}
+            </div>
+          ) : liquidityHealth ? (
+            <div style={{ marginTop: 10, fontSize: 11, color: "var(--yes)" }}>
+              Every active market received an MM order package.
+            </div>
+          ) : null}
+        </PanelBody>
+      </Panel>
 
       <div
         style={{

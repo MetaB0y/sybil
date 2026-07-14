@@ -629,6 +629,26 @@ docker-down:
 docker-logs:
     {{LOCAL_COMPOSE}} logs -f sybil-api
 
+# Build and run the isolated laptop-only Actor Liquidity soak stack.
+local-soak-prepare:
+    ./scripts/local-soak.sh prepare
+
+local-soak-up:
+    ./scripts/local-soak.sh up
+
+local-soak-status:
+    ./scripts/local-soak.sh status
+
+local-soak-logs:
+    ./scripts/local-soak.sh logs
+
+local-soak-stop:
+    ./scripts/local-soak.sh stop
+
+# Remove only the dedicated local-soak containers, volumes, and generated tokens.
+local-soak-clean:
+    ./scripts/local-soak.sh clean
+
 # ── Polymarket Mirror ──────────────────────────────────────────────────────
 
 # Run Polymarket mirror (sybil-api must be running in dev-mode)

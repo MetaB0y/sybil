@@ -141,6 +141,7 @@ pub(super) struct TestEnv {
     empty_prices: HashMap<MarketId, Vec<Nanos>>,
     empty_volumes: HashMap<MarketId, u64>,
     pub(super) bridge_state: BridgeState,
+    liquidity_universe: crate::universe::LiquidityUniverse,
     genesis_hash: [u8; 32],
 }
 
@@ -151,6 +152,7 @@ impl TestEnv {
             empty_prices: HashMap::new(),
             empty_volumes: HashMap::new(),
             bridge_state: BridgeState::default(),
+            liquidity_universe: Default::default(),
             genesis_hash: [0x42; 32],
         }
     }
@@ -195,6 +197,7 @@ impl TestEnv {
                 history_events_delta: Vec::new(),
             },
             bridge_state: &self.bridge_state,
+            liquidity_universe: &self.liquidity_universe,
             resting_orders,
         }
     }
@@ -237,6 +240,7 @@ impl TestEnv {
                 history_events_delta,
             },
             bridge_state: &self.bridge_state,
+            liquidity_universe: &self.liquidity_universe,
             resting_orders: Vec::new(),
         }
     }

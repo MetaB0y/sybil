@@ -3,7 +3,7 @@ tags: [infrastructure, crate]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-15
 ---
 
 The REST API is the external interface to the exchange. Built with Axum, it
@@ -13,6 +13,33 @@ Current exchange reads/writes use `SequencerHandle`; historical reads are
 owner-authorized here and proxied to the private `sybil-history` service.
 
 The endpoint groups are: **System** (`/v1/health`, `/v1/state-root`), **Proofs** (`/v1/proofs/state/{leaf_key_hex}`), **Data Availability** (`/v1/da/{height}/manifest`, `/v1/da/{height}/payload`), **Accounts** (create, query balance/positions, fund, register keys), **Markets** (list, create, query details/prices/groups, resolve), **Orders** (submit unsigned or [[P256 Authentication|signed]]), **Bridge** (status, account bridge keys, L1 deposits, signed/unsigned withdrawal leaves), and **Blocks** (latest, by height, privacy-preserving [[WebSocket Block Stream|public WebSocket stream]] at `/v2/blocks/ws?from_block=N`, plus [[SSE Block Stream|SSE]] as a third-party convenience). `/v1/health` reads committed height and genesis hash in one actor snapshot; snapshot failure returns 503 rather than reporting a partial chain identity as healthy. Operator/service writes, the state-proof and DA-payload custody surfaces, authenticated canonical v1 block stream, and bridge operations require `Authorization: Bearer $SYBIL_SERVICE_TOKEN`; an unset token fails closed. Dev mode skips that service bearer check for local workflows and additionally mounts simulation pause/resume, diagnostic all-pending/orderbook listings, and the explicit unverified [[Attestation|attestation shape stub]].
+
+Actor Liquidity v2.1 adds a separate role-bound surface. `GET
+/v1/actor/universe`, `GET /v1/actor/mm-quotes`, `POST /v1/actor/epochs`, and
+`POST /v1/actor/inventory` require one of exactly sixteen configured actor
+bearer credentials (one MM and fifteen noise accounts). The account and role
+come from the credential, never the request. Epochs target `head + 1`, use a
+short wall-clock validity window, and obey per-role/per-market caps. MM epochs
+name every effective market exactly once; noise epochs serialize only their
+independently selected active markets and the API expands them to committed
+universe coverage before sequencing. The MM quote read exposes only a bounded
+accepted-epoch economic bid/ask receipt, not inventory or order ids. It is a
+Dev/operations diagnostic and is never an input to noise pricing. Market price
+reads expose the committed Sybil mark: clearing when filled, otherwise book
+midpoint or carry-forward. `GET
+/v1/liquidity/universe` publishes the effective committed allow-list;
+service-authenticated activation stages its next monotonic generation. Public
+`GET /v1/liquidity/health` is an off-block human diagnostic showing latest-block
+MM/noise coverage, runtime actor identities, and per-market exceptions; its
+receipt cache is not validity state.
+
+The per-market open-batch read treats every real order placer consistently.
+`unique_placers` unions ordinary resting orders, deferred bundles, and valid
+next-height actor epochs, including MM accounts, while excluding only the
+protocol MINT account. Its indicative price and volume come from a speculative
+solve over those same lanes and retain the MM portfolio-budget constraints.
+Indicative results are height-scoped so a slow solve for a sealed batch cannot
+overwrite the next batch's cache.
 
 Per-account reads (`/accounts/{id}`, portfolio, fills, equity, events, orders,
 signing-key metadata, read-key metadata, bridge key, active withdrawals, and private summary) require

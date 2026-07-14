@@ -76,11 +76,77 @@ pub fn verify_sidecar(witness: &BlockWitness) -> VerificationResult {
     violations.extend(quarantine.violations);
     verify_market_transition(witness, &mut violations);
     verify_market_group_transition(witness, &mut violations);
+    verify_liquidity_universe_transition(witness, &mut violations);
 
     VerificationResult {
         valid: violations.is_empty(),
         violations,
         stats: VerificationStats::default(),
+    }
+}
+
+fn verify_liquidity_universe_transition(witness: &BlockWitness, violations: &mut Vec<Violation>) {
+    let pre = &witness.pre_state_sidecar.liquidity_universe;
+    let post = &witness.state_sidecar.liquidity_universe;
+    let activations = witness
+        .system_events
+        .iter()
+        .filter_map(|event| match event {
+            SystemEventWitness::LiquidityUniverseActivated {
+                generation,
+                policy_digest,
+                activated_at_height,
+                market_ids,
+            } => Some((
+                *generation,
+                *policy_digest,
+                *activated_at_height,
+                market_ids,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let ids_are_canonical = |ids: &[MarketId]| ids.windows(2).all(|pair| pair[0].0 < pair[1].0);
+    if !ids_are_canonical(&post.market_ids) {
+        violations.push(Violation {
+            kind: ViolationKind::SidecarLiquidityUniverseMismatch,
+            details: "post-state universe market ids are not strictly sorted and unique".into(),
+        });
+    }
+    if post.generation > 0 && post.market_ids.is_empty() {
+        violations.push(Violation {
+            kind: ViolationKind::SidecarLiquidityUniverseMismatch,
+            details: "non-bootstrap universe cannot be empty".into(),
+        });
+    }
+
+    match activations.as_slice() {
+        [] if post != pre => violations.push(Violation {
+            kind: ViolationKind::SidecarLiquidityUniverseMismatch,
+            details: "liquidity universe changed without an activation event".into(),
+        }),
+        [] => {}
+        [(generation, digest, activated_at_height, market_ids)] => {
+            let valid = *generation == pre.generation.saturating_add(1)
+                && *activated_at_height == witness.header.height
+                && post.generation == *generation
+                && post.policy_digest == *digest
+                && post.activated_at_height == *activated_at_height
+                && post.market_ids.as_slice() == market_ids.as_slice();
+            if !valid {
+                violations.push(Violation {
+                    kind: ViolationKind::SidecarLiquidityUniverseMismatch,
+                    details:
+                        "activation event does not reproduce the monotonic post-state universe"
+                            .into(),
+                });
+            }
+        }
+        _ => violations.push(Violation {
+            kind: ViolationKind::SidecarLiquidityUniverseMismatch,
+            details: "a block may contain at most one liquidity universe activation".into(),
+        }),
     }
 }
 

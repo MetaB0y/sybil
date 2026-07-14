@@ -33,11 +33,10 @@ class MarketSummaryResponse:
                 Mirrors `MarketResponse`.
             liquidity_band_nanos (int | Unset): Liquidity price-band width. Integer nanodollars; 1_000_000_000 = $1.
                 Mirrors `MarketResponse`.
-            no_price_24h_ago_nanos (int | None | Unset): Clearing NO price ~24h ago. Integer nanodollars; 1_000_000_000 =
-                $1.
+            no_price_24h_ago_nanos (int | None | Unset): NO mark ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            no_price_nanos (int | None | Unset): Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
-                Prices are per-share probabilities in [0, 1e9].
+            no_price_nanos (int | None | Unset): Current NO mark, complementary to the YES mark. Integer nanodollars;
+                1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
             orders_matched_total (int | Unset):
             orders_placed_total (int | Unset): All-time placed/matched/unmatched (mirrors `MarketResponse`).
             orders_unmatched_total (int | Unset):
@@ -49,11 +48,11 @@ class MarketSummaryResponse:
             volume_24h_nanos (int | Unset): Rolling 24h trading volume. Integer nanodollars; 1_000_000_000 = $1.
                 Mirrors
                 `MarketResponse.volume_24h_nanos`).
-            yes_price_24h_ago_nanos (int | None | Unset): Clearing YES price ~24h ago. Integer nanodollars; 1_000_000_000 =
-                $1.
+            yes_price_24h_ago_nanos (int | None | Unset): YES mark ~24h ago. Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            yes_price_nanos (int | None | Unset): Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
-                Prices are per-share probabilities in [0, 1e9].
+            yes_price_nanos (int | None | Unset): Current YES mark: traded clearing price when filled, otherwise the
+                committed book midpoint or carried mark. Integer nanodollars;
+                1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
      """
 
     market_id: int

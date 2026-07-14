@@ -3,8 +3,8 @@
 //! `BlockWitness`.
 //!
 //! Inclusion rules:
-//! - MM-constrained submissions excluded (liquidity provider, not trader).
-//! - `AccountId::MINT` excluded (system account).
+//! - Every real placing account counts, including market makers.
+//! - `AccountId::MINT` is excluded because it is a protocol system account.
 //! - Multi-market orders credit each active market; the platform set
 //!   accounts for the placer once (so platform total != sum-of-per-market).
 //!
@@ -27,7 +27,7 @@ const MILLIS_PER_DAY: u64 = 24 * MILLIS_PER_HOUR;
 
 #[derive(Clone, Debug, Default)]
 pub struct TraderTracker {
-    /// Per-market all-time placers (excludes MM, MINT).
+    /// Per-market all-time placers (excludes only MINT).
     per_market: HashMap<MarketId, HashSet<AccountId>>,
     /// Platform-wide all-time placers.
     platform: HashSet<AccountId>,
@@ -91,16 +91,15 @@ impl TraderTracker {
         }
     }
 
-    /// Record an admitted placement. No-op for MM submissions and MINT.
+    /// Record an admitted placement. No-op only for MINT.
     /// `markets` is every active market the order touches.
     pub fn record_placed(
         &mut self,
         account_id: AccountId,
         markets: impl IntoIterator<Item = MarketId>,
         ts_ms: u64,
-        is_mm: bool,
     ) {
-        if is_mm || account_id == AccountId::MINT {
+        if account_id == AccountId::MINT {
             return;
         }
         for m in markets {
@@ -201,7 +200,7 @@ mod tests {
     #[test]
     fn records_single_market_placement() {
         let mut t = TraderTracker::new();
-        t.record_placed(acc(1), [mid(7)], 0, false);
+        t.record_placed(acc(1), [mid(7)], 0);
         assert_eq!(t.per_market_count(mid(7)), 1);
         assert_eq!(t.platform_count(), 1);
     }
@@ -209,24 +208,24 @@ mod tests {
     #[test]
     fn deduplicates_repeat_placements() {
         let mut t = TraderTracker::new();
-        t.record_placed(acc(1), [mid(7)], 0, false);
-        t.record_placed(acc(1), [mid(7)], 1_000, false);
+        t.record_placed(acc(1), [mid(7)], 0);
+        t.record_placed(acc(1), [mid(7)], 1_000);
         assert_eq!(t.per_market_count(mid(7)), 1);
         assert_eq!(t.platform_count(), 1);
     }
 
     #[test]
-    fn skips_mm_orders() {
+    fn includes_market_maker_accounts() {
         let mut t = TraderTracker::new();
-        t.record_placed(acc(1), [mid(7)], 0, true);
-        assert_eq!(t.per_market_count(mid(7)), 0);
-        assert_eq!(t.platform_count(), 0);
+        t.record_placed(acc(1), [mid(7)], 0);
+        assert_eq!(t.per_market_count(mid(7)), 1);
+        assert_eq!(t.platform_count(), 1);
     }
 
     #[test]
     fn skips_mint_account() {
         let mut t = TraderTracker::new();
-        t.record_placed(AccountId::MINT, [mid(7)], 0, false);
+        t.record_placed(AccountId::MINT, [mid(7)], 0);
         assert_eq!(t.per_market_count(mid(7)), 0);
         assert_eq!(t.platform_count(), 0);
     }
@@ -234,7 +233,7 @@ mod tests {
     #[test]
     fn multi_market_credits_each_but_platform_once() {
         let mut t = TraderTracker::new();
-        t.record_placed(acc(1), [mid(7), mid(8)], 0, false);
+        t.record_placed(acc(1), [mid(7), mid(8)], 0);
         assert_eq!(t.per_market_count(mid(7)), 1);
         assert_eq!(t.per_market_count(mid(8)), 1);
         // Platform counts the placer once.
@@ -244,9 +243,9 @@ mod tests {
     #[test]
     fn event_count_unions_over_markets() {
         let mut t = TraderTracker::new();
-        t.record_placed(acc(1), [mid(7)], 0, false);
-        t.record_placed(acc(2), [mid(8)], 0, false);
-        t.record_placed(acc(3), [mid(7), mid(8)], 0, false);
+        t.record_placed(acc(1), [mid(7)], 0);
+        t.record_placed(acc(2), [mid(8)], 0);
+        t.record_placed(acc(3), [mid(7), mid(8)], 0);
         // Union over {7, 8} = {1, 2, 3}.
         assert_eq!(t.event_count(&[mid(7), mid(8)]), 3);
     }
@@ -254,8 +253,8 @@ mod tests {
     #[test]
     fn bucket_rolls_on_hour_boundary() {
         let mut t = TraderTracker::new();
-        t.record_placed(acc(1), [mid(7)], 0, false);
-        t.record_placed(acc(2), [mid(7)], MILLIS_PER_HOUR, false);
+        t.record_placed(acc(1), [mid(7)], 0);
+        t.record_placed(acc(2), [mid(7)], MILLIS_PER_HOUR);
         // Two distinct buckets, each holding one placer.
         let snap = t.snapshot();
         assert_eq!(snap.hourly_buckets.len(), 2);
@@ -268,7 +267,7 @@ mod tests {
         let mut t = TraderTracker::new();
         // 26 distinct hours → cap 25 retains the latest 25 (the head is dropped).
         for h in 0..26u64 {
-            t.record_placed(acc(h), [mid(7)], h * MILLIS_PER_HOUR, false);
+            t.record_placed(acc(h), [mid(7)], h * MILLIS_PER_HOUR);
         }
         let snap = t.snapshot();
         assert_eq!(snap.hourly_buckets.len(), HOURLY_BUCKET_CAP);
@@ -280,9 +279,9 @@ mod tests {
     fn platform_24h_count_is_window_union() {
         let mut t = TraderTracker::new();
         // Three placers in three distinct hourly buckets.
-        t.record_placed(acc(1), [mid(7)], 0, false);
-        t.record_placed(acc(2), [mid(7)], 12 * MILLIS_PER_HOUR, false);
-        t.record_placed(acc(3), [mid(7)], 23 * MILLIS_PER_HOUR, false);
+        t.record_placed(acc(1), [mid(7)], 0);
+        t.record_placed(acc(2), [mid(7)], 12 * MILLIS_PER_HOUR);
+        t.record_placed(acc(3), [mid(7)], 23 * MILLIS_PER_HOUR);
         // At now=24h all three buckets are inside the 24h window
         // (bucket-at-0 right edge = 1h > cutoff = 0).
         assert_eq!(t.platform_24h_count(24 * MILLIS_PER_HOUR), 3);
@@ -293,8 +292,8 @@ mod tests {
     #[test]
     fn snapshot_round_trip_preserves_state() {
         let mut t = TraderTracker::new();
-        t.record_placed(acc(1), [mid(7), mid(8)], 0, false);
-        t.record_placed(acc(2), [mid(8)], MILLIS_PER_HOUR, false);
+        t.record_placed(acc(1), [mid(7), mid(8)], 0);
+        t.record_placed(acc(2), [mid(8)], MILLIS_PER_HOUR);
         let snap = t.snapshot();
         let restored = TraderTracker::restore(snap);
         assert_eq!(restored.per_market_count(mid(7)), 1);
@@ -308,8 +307,8 @@ mod tests {
         let mut a = TraderTracker::new();
         let mut b = TraderTracker::new();
         for n in 0..5u64 {
-            a.record_placed(acc(n), [mid(7)], 0, false);
-            b.record_placed(acc(n), [mid(7)], 0, false);
+            a.record_placed(acc(n), [mid(7)], 0);
+            b.record_placed(acc(n), [mid(7)], 0);
         }
         let sa = a.snapshot();
         let sb = b.snapshot();

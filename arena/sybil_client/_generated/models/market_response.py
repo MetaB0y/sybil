@@ -27,6 +27,15 @@ class MarketResponse:
             market_id (int):
             name (str):
             status (str):
+            actor_max_yes_nanos (int | None | Unset): Actor-only native YES upper guardrail. Integer nanodollars expressed
+                as
+                per-share probabilities in [0, 1e9].
+            actor_min_yes_nanos (int | None | Unset): Actor-only native YES lower guardrail. Integer nanodollars expressed
+                as
+                per-share probabilities in [0, 1e9].
+            actor_seed_yes_nanos (int | None | Unset): Actor-only native YES initial anchor. Integer nanodollars expressed
+                as
+                per-share probabilities in [0, 1e9].
             categories (list[str] | None | Unset): All category buckets the parent event matched on the mirror's
                 tag-to-bucket lookup (e.g. `["Sports", "Politics"]`). Frontend picks
                 one for display via its own priority list. None for sybil-native
@@ -49,7 +58,7 @@ class MarketResponse:
                 block; the frontend uses it as the per-outcome name so it needn't fetch
                 the raw event JSON just for labels.
             liquidity_avg10_nanos (int | Unset): Rolling last-10-batch band depth average. Integer nanodollars;
-                1_000_000_000 = $1. Zero for markets without a clearing price yet.
+                1_000_000_000 = $1. Zero for markets without a committed mark yet.
                 Pair with `liquidity_band_nanos` for labelling.
             liquidity_band_nanos (int | Unset): Width of the band the liquidity score uses (the ± in "$X ±$0.05").
                 Integer nanodollars; 1_000_000_000 = $1.
@@ -59,11 +68,11 @@ class MarketResponse:
             market_icon_url (None | str | Unset): Per-market icon URL (secondary image fallback).
             market_image_url (None | str | Unset): Per-market image URL.
             market_start_date_ms (int | None | Unset): Per-market start date (epoch ms) from Polymarket. Display/sort only.
-            no_price_24h_ago_nanos (int | None | Unset): Clearing NO price ~24h ago. See `yes_price_24h_ago_nanos`.
+            no_price_24h_ago_nanos (int | None | Unset): NO mark ~24h ago. See `yes_price_24h_ago_nanos`.
                 Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            no_price_nanos (int | None | Unset): Current NO clearing price. Integer nanodollars; 1_000_000_000 = $1.
-                Prices are per-share probabilities in [0, 1e9].
+            no_price_nanos (int | None | Unset): Current NO mark, complementary to the YES mark. Integer nanodollars;
+                1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
             orders_matched_total (int | Unset): All-time admissions that received at least one fill (B5's
                 `has_been_matched` true at removal time). Cancels are NOT counted.
             orders_placed_total (int | Unset): All-time non-MM admissions counted against this market. Multi-market
@@ -88,18 +97,22 @@ class MarketResponse:
                 Off-block;
                 "since last restart" until prod persistence is enabled.
             volume_nanos (int | Unset): All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
-            yes_price_24h_ago_nanos (int | None | Unset): Clearing YES price ~24h ago, derived from the per-market
+            yes_price_24h_ago_nanos (int | None | Unset): YES mark ~24h ago, derived from the per-market
                 hourly snapshot. `None` for markets younger than 24h or wiped on
                 restart. FE computes the 24h delta as `current - snapshot`.
                 Integer nanodollars; 1_000_000_000 = $1.
                 Prices are per-share probabilities in [0, 1e9].
-            yes_price_nanos (int | None | Unset): Current YES clearing price. Integer nanodollars; 1_000_000_000 = $1.
-                Prices are per-share probabilities in [0, 1e9].
+            yes_price_nanos (int | None | Unset): Current YES mark: traded clearing price when filled, otherwise the
+                committed book midpoint or carried mark. Integer nanodollars;
+                1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
      """
 
     market_id: int
     name: str
     status: str
+    actor_max_yes_nanos: int | None | Unset = UNSET
+    actor_min_yes_nanos: int | None | Unset = UNSET
+    actor_seed_yes_nanos: int | None | Unset = UNSET
     categories: list[str] | None | Unset = UNSET
     category: None | str | Unset = UNSET
     challenge_deadline_ms: int | None | Unset = UNSET
@@ -148,6 +161,24 @@ class MarketResponse:
         name = self.name
 
         status = self.status
+
+        actor_max_yes_nanos: int | None | Unset
+        if isinstance(self.actor_max_yes_nanos, Unset):
+            actor_max_yes_nanos = UNSET
+        else:
+            actor_max_yes_nanos = self.actor_max_yes_nanos
+
+        actor_min_yes_nanos: int | None | Unset
+        if isinstance(self.actor_min_yes_nanos, Unset):
+            actor_min_yes_nanos = UNSET
+        else:
+            actor_min_yes_nanos = self.actor_min_yes_nanos
+
+        actor_seed_yes_nanos: int | None | Unset
+        if isinstance(self.actor_seed_yes_nanos, Unset):
+            actor_seed_yes_nanos = UNSET
+        else:
+            actor_seed_yes_nanos = self.actor_seed_yes_nanos
 
         categories: list[str] | None | Unset
         if isinstance(self.categories, Unset):
@@ -349,6 +380,12 @@ class MarketResponse:
             "name": name,
             "status": status,
         })
+        if actor_max_yes_nanos is not UNSET:
+            field_dict["actor_max_yes_nanos"] = actor_max_yes_nanos
+        if actor_min_yes_nanos is not UNSET:
+            field_dict["actor_min_yes_nanos"] = actor_min_yes_nanos
+        if actor_seed_yes_nanos is not UNSET:
+            field_dict["actor_seed_yes_nanos"] = actor_seed_yes_nanos
         if categories is not UNSET:
             field_dict["categories"] = categories
         if category is not UNSET:
@@ -434,6 +471,36 @@ class MarketResponse:
         name = d.pop("name")
 
         status = d.pop("status")
+
+        def _parse_actor_max_yes_nanos(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        actor_max_yes_nanos = _parse_actor_max_yes_nanos(d.pop("actor_max_yes_nanos", UNSET))
+
+
+        def _parse_actor_min_yes_nanos(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        actor_min_yes_nanos = _parse_actor_min_yes_nanos(d.pop("actor_min_yes_nanos", UNSET))
+
+
+        def _parse_actor_seed_yes_nanos(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        actor_seed_yes_nanos = _parse_actor_seed_yes_nanos(d.pop("actor_seed_yes_nanos", UNSET))
+
 
         def _parse_categories(data: object) -> list[str] | None | Unset:
             if data is None:
@@ -751,6 +818,9 @@ class MarketResponse:
             market_id=market_id,
             name=name,
             status=status,
+            actor_max_yes_nanos=actor_max_yes_nanos,
+            actor_min_yes_nanos=actor_min_yes_nanos,
+            actor_seed_yes_nanos=actor_seed_yes_nanos,
             categories=categories,
             category=category,
             challenge_deadline_ms=challenge_deadline_ms,

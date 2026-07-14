@@ -11,7 +11,7 @@ export type Portfolio = components["schemas"]["PortfolioResponse"];
 
 /**
  * GET /v1/accounts/{id}/portfolio. Invalidates on every block so positions
- * and PnL reflect the latest clearing prices. When the block WS is not live,
+ * and PnL reflect the latest committed Sybil marks. When the block WS is not live,
  * falls back to interval polling so Holdings still refresh (fills land
  * on-chain even while the socket reconnects).
  */
