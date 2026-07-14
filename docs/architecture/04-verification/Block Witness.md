@@ -9,10 +9,10 @@ last_verified: 2026-07-14
 # Block Witness Format
 
 `BlockWitness` v10 is the canonical private audit package for a Sybil block. The
-sequencer persists it, native verification replays it, and the OpenVM guest
-receives it inside `StateTransitionGuestInput`. The proof binds the witness by
-recomputing `witness_root` from canonical witness bytes and including that root
-in the state-transition public inputs.
+sequencer persists it, native verification replays it, and the OpenVM epoch
+guest receives one witness per streamed `StateTransitionGuestInput`. Each
+per-block hash binds the witness by recomputing `witness_root`; the epoch proof
+then folds those hashes in order.
 
 The witness proves value-relevant state: order validity, fills, settlement,
 post-state qMDB membership, event-root reconstruction, sidecar transition, and
@@ -265,6 +265,25 @@ state_transition_public_input_hash =
         events_root,
         witness_root,
         da_commitment,
+        deposit_root,
+        deposit_count
+    ))
+```
+
+The deployed guest folds each verified per-block hash and DA commitment, then
+reveals:
+
+```text
+epoch_transition_public_input_hash =
+    keccak256(abi.encode(
+        "sybil/openvm/epoch-transition/v1",
+        start_height,
+        end_height,
+        start_state_root,
+        end_state_root,
+        block_count,
+        blocks_commitment,
+        epoch_da_commitment,
         deposit_root,
         deposit_count
     ))

@@ -8,6 +8,7 @@ use sybil_verifier::{
     commitments::witness_schema,
 };
 
+mod epoch;
 mod guest_commitments;
 mod header_hash {
     use sybil_verifier::WitnessBlockHeader;
@@ -15,6 +16,12 @@ mod header_hash {
     include!("header_hash_impl.rs");
 }
 
+pub use epoch::{
+    EPOCH_BLOCKS_DOMAIN, EPOCH_BLOCKS_FOLD_DOMAIN, EPOCH_DA_DOMAIN, EPOCH_DA_FOLD_DOMAIN,
+    EPOCH_TRANSITION_DOMAIN, EPOCH_TRANSITION_INPUT_VERSION, EpochTransitionAccumulator,
+    EpochTransitionError, EpochTransitionHeader, EpochTransitionPublicInputs, MAX_EPOCH_BLOCKS,
+    epoch_transition_public_input_hash, verify_epoch_transition_inputs,
+};
 pub use guest_commitments::{
     QMDB_STATE_CHUNK_SIZE, QmdbStateExclusionProof, QmdbStateKeyValueProof,
     QmdbStateOperationProof, QmdbStateRangeProof, QmdbStateRootProof, compute_events_root,
@@ -1089,6 +1096,51 @@ mod tests {
         }
     }
 
+    fn next_empty_guest_input(previous: &StateTransitionGuestInput) -> StateTransitionGuestInput {
+        let previous_header = previous.witness.header.clone();
+        let state_sidecar = previous.witness.state_sidecar.clone();
+        let state_root_proof = previous.state_root_proof.clone();
+        let events_root = events_root_from_event_bytes(&[]).expect("empty events root");
+        let header = WitnessBlockHeader {
+            height: previous_header.height + 1,
+            parent_hash: hash_header(&previous_header),
+            state_root: previous_header.state_root,
+            events_root,
+            order_count: 0,
+            fill_count: 0,
+            timestamp_ms: previous_header.timestamp_ms + 1_000,
+        };
+        let witness = BlockWitness {
+            header,
+            previous_header: Some(previous_header),
+            genesis_hash: previous.witness.genesis_hash,
+            orders: vec![],
+            rejections: vec![],
+            system_events: vec![],
+            deposit_accumulator: DepositAccumulatorWitness::default(),
+            fills: vec![],
+            clearing_prices: Default::default(),
+            total_welfare: 0,
+            minting_cost: 0,
+            mm_constraints: vec![],
+            market_groups: vec![],
+            pre_state: previous.witness.post_state.clone(),
+            post_system_state: previous.witness.post_state.clone(),
+            post_state: previous.witness.post_state.clone(),
+            account_keys: previous.witness.account_keys.clone(),
+            state_sidecar: state_sidecar.clone(),
+            pre_state_sidecar: state_sidecar,
+            resolved_markets: vec![],
+        };
+        StateTransitionGuestInput {
+            public_inputs: public_inputs_from_witness(&witness),
+            witness,
+            da_provider_refs: vec![],
+            state_root_proof: state_root_proof.clone(),
+            pre_state_root_proof: state_root_proof,
+        }
+    }
+
     fn non_empty_guest_input() -> StateTransitionGuestInput {
         let account = AccountSnapshot {
             id: 7,
@@ -1736,6 +1788,94 @@ mod tests {
             verify_state_transition_input(&input),
             Ok(state_transition_public_input_hash(&input.public_inputs))
         );
+    }
+
+    #[test]
+    fn epoch_transition_verifies_one_two_and_four_streamed_blocks() {
+        let first = empty_guest_input();
+        let second = next_empty_guest_input(&first);
+        let third = next_empty_guest_input(&second);
+        let fourth = next_empty_guest_input(&third);
+        let blocks = [first, second, third, fourth];
+
+        for count in [1usize, 2, 4] {
+            let mut accumulator = EpochTransitionAccumulator::new();
+            for block in &blocks[..count] {
+                accumulator.push(block).unwrap();
+            }
+            let claimed = accumulator.finish().unwrap();
+            let expected_hash = epoch_transition_public_input_hash(&claimed);
+            assert_eq!(
+                verify_epoch_transition_inputs(&claimed, &blocks[..count]),
+                Ok(expected_hash)
+            );
+        }
+    }
+
+    #[test]
+    fn epoch_transition_rejects_boundary_and_commitment_tampering() {
+        let first = empty_guest_input();
+        let second = next_empty_guest_input(&first);
+        let blocks = [first.clone(), second.clone()];
+        let mut accumulator = EpochTransitionAccumulator::new();
+        accumulator.push(&first).unwrap();
+        accumulator.push(&second).unwrap();
+        let claimed = accumulator.finish().unwrap();
+
+        let mutations: [fn(&mut EpochTransitionPublicInputs); 4] = [
+            |inputs: &mut EpochTransitionPublicInputs| inputs.blocks_commitment[0] ^= 1,
+            |inputs: &mut EpochTransitionPublicInputs| inputs.epoch_da_commitment[0] ^= 1,
+            |inputs: &mut EpochTransitionPublicInputs| inputs.end_state_root[0] ^= 1,
+            |inputs: &mut EpochTransitionPublicInputs| inputs.deposit_root[0] ^= 1,
+        ];
+        for mutate in mutations {
+            let mut tampered = claimed.clone();
+            mutate(&mut tampered);
+            assert_eq!(
+                verify_epoch_transition_inputs(&tampered, &blocks),
+                Err(EpochTransitionError::PublicInputsMismatch)
+            );
+        }
+
+        let mut wrong_genesis = second.clone();
+        wrong_genesis.witness.genesis_hash[0] ^= 1;
+        wrong_genesis.public_inputs = public_inputs_from_witness(&wrong_genesis.witness);
+        assert!(verify_state_transition_input(&wrong_genesis).is_ok());
+        assert!(matches!(
+            verify_epoch_transition_inputs(&claimed, &[first.clone(), wrong_genesis]),
+            Err(EpochTransitionError::GenesisHashMismatch { index: 1 })
+        ));
+
+        let mut height_gap = second.clone();
+        height_gap.witness.header.height += 1;
+        height_gap.public_inputs = public_inputs_from_witness(&height_gap.witness);
+        assert!(verify_state_transition_input(&height_gap).is_ok());
+        assert!(matches!(
+            verify_epoch_transition_inputs(&claimed, &[first.clone(), height_gap]),
+            Err(EpochTransitionError::NonConsecutiveHeight { index: 1, .. })
+        ));
+
+        let mut wrong_previous_header = second;
+        wrong_previous_header
+            .witness
+            .previous_header
+            .as_mut()
+            .unwrap()
+            .timestamp_ms += 1;
+        wrong_previous_header.witness.header.parent_hash = hash_header(
+            wrong_previous_header
+                .witness
+                .previous_header
+                .as_ref()
+                .unwrap(),
+        );
+        wrong_previous_header.public_inputs =
+            public_inputs_from_witness(&wrong_previous_header.witness);
+        assert!(verify_state_transition_input(&wrong_previous_header).is_ok());
+        assert!(matches!(
+            verify_epoch_transition_inputs(&claimed, &[first, wrong_previous_header]),
+            Err(EpochTransitionError::PreviousHeaderMismatch { index: 1 })
+        ));
     }
 
     #[test]

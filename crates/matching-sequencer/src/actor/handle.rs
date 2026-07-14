@@ -2102,6 +2102,12 @@ mod tests {
             ) if *account_id == aid.0
         )));
         assert!(sybil_verifier::verify_full(&witness, false).valid);
+        let order_id = witness
+            .orders
+            .first()
+            .expect("signed order in witnessed block")
+            .order
+            .id;
 
         let mut forged = witness;
         let authorization = forged
@@ -2120,6 +2126,61 @@ mod tests {
             panic!("raw signed order produced a non-raw authorization envelope");
         }
         assert!(!sybil_verifier::verify_full(&forged, false).valid);
+
+        let cancel = crate::crypto::sign_cancel(aid, order_id, 2, genesis_hash, &signing_key);
+        handle.cancel_signed_order(cancel).await.unwrap();
+        let cancel_block = handle.produce_block().await.unwrap();
+        let cancel_witness = store
+            .block_witness(cancel_block.canonical.header.height)
+            .unwrap()
+            .expect("persisted signed-cancel witness");
+        assert!(cancel_witness.system_events.iter().any(|event| matches!(
+            event,
+            sybil_verifier::SystemEventWitness::ClientActionAuthorized(
+                sybil_verifier::ClientActionWitness::Cancel {
+                    account_id,
+                    order_id: witnessed_order_id,
+                    nonce: 2,
+                    ..
+                }
+            ) if *account_id == aid.0 && *witnessed_order_id == order_id
+        )));
+
+        let epoch_entries = store
+            .proof_job_outbox_page(Some(block.canonical.header.height - 1), 2)
+            .unwrap();
+        assert_eq!(
+            epoch_entries
+                .iter()
+                .map(|entry| entry.height)
+                .collect::<Vec<_>>(),
+            vec![
+                block.canonical.header.height,
+                cancel_block.canonical.header.height
+            ]
+        );
+        let epoch_inputs = epoch_entries
+            .into_iter()
+            .map(|entry| {
+                let job: sybil_proof_protocol::StateTransitionProofJob =
+                    rmp_serde::from_slice(&entry.bytes).unwrap();
+                sybil_proof_protocol::build_state_transition_guest_input(job).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut accumulator = sybil_proof_protocol::EpochTransitionAccumulator::new();
+        for input in &epoch_inputs {
+            accumulator.push(input).unwrap();
+        }
+        let epoch_public_inputs = accumulator.finish().unwrap();
+        assert_eq!(
+            sybil_proof_protocol::verify_epoch_transition_inputs(
+                &epoch_public_inputs,
+                &epoch_inputs
+            ),
+            Ok(sybil_proof_protocol::epoch_transition_public_input_hash(
+                &epoch_public_inputs
+            ))
+        );
     }
 
     #[tokio::test]

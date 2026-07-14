@@ -9,8 +9,8 @@ last_verified: 2026-07-14
 
 > [!summary] In one paragraph
 > A trusted Sybil root authenticates complete typed state, the events of one
-> block, and the parent-linked block history. The transition guest proves that
-> those commitments came from a valid exchange transition; qMDB membership or
+> block, and the parent-linked block history. The epoch guest proves that every
+> transition in a contiguous range produced those commitments; qMDB membership or
 > exclusion proofs open individual state leaves. These primitives support
 > auditing, withdrawals, escape, and future selective claims, but they do not
 > make every historical or privacy-preserving query available automatically.
@@ -81,7 +81,7 @@ touched-leaves-only witness unless the recovery/trust model is redesigned.
 
 ## What the transition proof establishes
 
-Given the private `StateTransitionGuestInput`, the guest re-derives:
+For every streamed private `StateTransitionGuestInput`, the guest re-derives:
 
 1. header, parent/height, count, and block hash bindings;
 2. canonical events, witness, state, and DA commitments;
@@ -89,7 +89,11 @@ Given the private `StateTransitionGuestInput`, the guest re-derives:
 4. integer settlement, minting, balances, positions, and reservations;
 5. market, bridge, withdrawal, quarantine, key-operation, and ordinary
    signed-action transitions;
-6. deposit prefix/checkpoint agreement and the exact public-input hash.
+6. deposit prefix/checkpoint agreement and the per-block public-input hash.
+
+It then requires exact header/root/genesis chaining, folds the verified block
+hashes and DA commitments in order, and reveals one epoch public-input hash for
+the claimed start/end range.
 
 Witness v10 retains ordinary order/cancel RawP256/WebAuthn envelopes and the
 account leaf commits `last_trading_nonce`. Shared native/guest verification

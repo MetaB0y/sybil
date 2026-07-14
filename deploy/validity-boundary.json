@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fingerprint": "sha256:d1993fb6c49de9f5d539e3ab1d003f2dd17697c202583a1ddfe3ddc44e263596",
+  "fingerprint": "sha256:b1d8156c3c7a56f93ab61c215db01f1b83bb3894e92142dfd6799ee7ace88c9a",
   "inputs": {
     "commonware_packages": [
       {
@@ -70,35 +70,35 @@
         "checksum": "dfad44dd2c8e97d55dbe271802740e919d2ce8839277ea53d958381caab92a44"
       }
     ],
-    "golden_vectors_sha256": "5c207422e30ffb09a02dbce60258bd9fe6e525d0410c1887fe675fd4d5bc6e3c",
+    "golden_vectors_sha256": "38850bf4f933152dd1a2407266f3b41753ea528e7a530d07f6162f00c5a05b35",
     "guests": {
       "state_transition": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "f2ff66653bff273500e289f66fa52e94609ff6179830fddd8adc2b34be35b2d3",
-        "app_exe_commit": "0x0018b4390609b3e57883160fbec353413cda5982cef98b32d340820e8bdeb30d",
+        "source_sha256": "038ac1bea902cfc7cc02c8c3372080ac2665f6bca71502f05aef88522e17e250",
+        "app_exe_commit": "0x0029c549755b05fc91ce327c57b0eb995933271d8477348cba35724cb2a6b305",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
         "openvm_tag": "v2.0.0",
-        "source_sha256": "03c528405fd00de51dc96fee09ca04c3a6d3f4da361566251d4c56aaf16ca432",
-        "app_exe_commit": "0x006af4f629b4e749ee6b2a0f717dadbf651f6639b305b1482b8ea5f98ef539c5",
+        "source_sha256": "0740b478b7b4240e2dc37437c455014f42c047a5329a845864c1db0a532b6be4",
+        "app_exe_commit": "0x0050a798448ab3a198a2a04515a01a37a726f160d4add775bd6a87297afc6b97",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     },
     "desired_validity_pins": {
       "state_transition": {
-        "app_exe_commit": "0x0018b4390609b3e57883160fbec353413cda5982cef98b32d340820e8bdeb30d",
+        "app_exe_commit": "0x0029c549755b05fc91ce327c57b0eb995933271d8477348cba35724cb2a6b305",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       },
       "escape_claim": {
-        "app_exe_commit": "0x006af4f629b4e749ee6b2a0f717dadbf651f6639b305b1482b8ea5f98ef539c5",
+        "app_exe_commit": "0x0050a798448ab3a198a2a04515a01a37a726f160d4add775bd6a87297afc6b97",
         "app_vm_commit": "0x006185384dcac8a449ebcad26ce224c07145ad440e4739b237439a4318d3cd9d"
       }
     }
   },
   "decision": {
     "action": "fresh_genesis",
-    "reason": "Signed complete-set welfare semantics changed; old devnet blocks are incompatible with the new verifier.",
+    "reason": "Witness v10 client-action authorization and streamed multi-block epoch verification change both validity guest commitments; ADR-0019 records the design.",
     "reference": "docs/runbooks/fresh-genesis-redeploy.md"
   }
 }

@@ -1,23 +1,24 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use sha3::{Digest as _, Keccak256};
 
+use crate::{
+    AbiWord, StateTransitionGuestInput, ZkTransitionError, abi_encode_domain_and_words, keccak256,
+    verify_state_transition_input,
+};
+
+pub const EPOCH_TRANSITION_INPUT_VERSION: u8 = 1;
 pub const EPOCH_TRANSITION_DOMAIN: &[u8] = b"sybil/openvm/epoch-transition/v1";
 pub const EPOCH_BLOCKS_DOMAIN: &[u8] = b"sybil/epoch/blocks/v1";
 pub const EPOCH_BLOCKS_FOLD_DOMAIN: &[u8] = b"sybil/epoch/blocks/fold/v1";
 pub const EPOCH_DA_DOMAIN: &[u8] = b"sybil/epoch/da/v1";
 pub const EPOCH_DA_FOLD_DOMAIN: &[u8] = b"sybil/epoch/da/fold/v1";
-/// Future guest protocol ceiling. Deployments should use a substantially
-/// smaller operational epoch size.
+
+/// Protocol ceiling. Deployments should use a substantially smaller measured
+/// operational epoch size.
 pub const MAX_EPOCH_BLOCKS: u64 = 4_096;
 
 /// Public statement produced by verifying one contiguous sequence of blocks.
-///
-/// This host-side type and fold deliberately live outside `sybil-zk` until the
-/// authorization witness and streaming epoch guest are ready for their single
-/// intentional commitment repin. The guest implementation must reuse these
-/// exact domains, layout, and golden vector in that migration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EpochTransitionPublicInputs {
     pub start_height: u64,
@@ -29,6 +30,56 @@ pub struct EpochTransitionPublicInputs {
     pub epoch_da_commitment: [u8; 32],
     pub deposit_root: [u8; 32],
     pub deposit_count: u64,
+}
+
+/// First OpenVM stream item. Its bounded block count tells the guest exactly
+/// how many independently encoded block items to read without allocating a
+/// giant epoch vector.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EpochTransitionHeader {
+    pub format_version: u8,
+    pub public_inputs: EpochTransitionPublicInputs,
+}
+
+impl EpochTransitionHeader {
+    pub fn new(public_inputs: EpochTransitionPublicInputs) -> Self {
+        Self {
+            format_version: EPOCH_TRANSITION_INPUT_VERSION,
+            public_inputs,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), EpochTransitionError> {
+        if self.format_version != EPOCH_TRANSITION_INPUT_VERSION {
+            return Err(EpochTransitionError::UnsupportedInputVersion {
+                expected: EPOCH_TRANSITION_INPUT_VERSION,
+                actual: self.format_version,
+            });
+        }
+        if self.public_inputs.block_count == 0 {
+            return Err(EpochTransitionError::EmptyEpoch);
+        }
+        if self.public_inputs.block_count > MAX_EPOCH_BLOCKS {
+            return Err(EpochTransitionError::TooManyBlocks {
+                max: MAX_EPOCH_BLOCKS,
+            });
+        }
+        let expected_end = self
+            .public_inputs
+            .start_height
+            .checked_add(self.public_inputs.block_count)
+            .ok_or(EpochTransitionError::HeightOverflow {
+                previous: self.public_inputs.start_height,
+            })?;
+        if self.public_inputs.end_height != expected_end {
+            return Err(EpochTransitionError::ClaimedHeightRangeMismatch {
+                start: self.public_inputs.start_height,
+                count: self.public_inputs.block_count,
+                end: self.public_inputs.end_height,
+            });
+        }
+        Ok(())
+    }
 }
 
 pub fn epoch_transition_public_input_hash(inputs: &EpochTransitionPublicInputs) -> [u8; 32] {
@@ -48,9 +99,8 @@ pub fn epoch_transition_public_input_hash(inputs: &EpochTransitionPublicInputs) 
     ))
 }
 
-/// Incremental host verifier/fold used by epoch assembly and the mock backend.
-/// It owns only the prior header, so callers may drop each large block input
-/// immediately after `push` returns.
+/// Incremental native/guest verifier. It retains only the prior header and
+/// commitment folds, so callers may drop each large block input after `push`.
 #[derive(Clone, Debug)]
 pub struct EpochTransitionAccumulator {
     block_count: u64,
@@ -93,10 +143,7 @@ impl EpochTransitionAccumulator {
         self.block_count
     }
 
-    pub fn push(
-        &mut self,
-        input: &sybil_zk::StateTransitionGuestInput,
-    ) -> Result<(), EpochTransitionError> {
+    pub fn push(&mut self, input: &StateTransitionGuestInput) -> Result<(), EpochTransitionError> {
         if self.block_count >= MAX_EPOCH_BLOCKS {
             return Err(EpochTransitionError::TooManyBlocks {
                 max: MAX_EPOCH_BLOCKS,
@@ -104,7 +151,7 @@ impl EpochTransitionAccumulator {
         }
 
         let index = self.block_count;
-        let block_public_input_hash = sybil_zk::verify_state_transition_input(input)
+        let block_public_input_hash = verify_state_transition_input(input)
             .map_err(|source| EpochTransitionError::BlockVerification { index, source })?;
 
         if let Some(expected_genesis_hash) = self.genesis_hash {
@@ -115,7 +162,7 @@ impl EpochTransitionAccumulator {
             let previous_header = self
                 .previous_header
                 .as_ref()
-                .expect("non-empty epoch accumulator has a previous header");
+                .expect("non-empty epoch accumulator has a prior header");
             let expected_height = previous_header.height.checked_add(1).ok_or(
                 EpochTransitionError::HeightOverflow {
                     previous: previous_header.height,
@@ -177,32 +224,50 @@ impl EpochTransitionAccumulator {
             deposit_count: self.deposit_count,
         })
     }
+
+    pub fn finish_and_verify(
+        self,
+        header: &EpochTransitionHeader,
+    ) -> Result<[u8; 32], EpochTransitionError> {
+        header.validate()?;
+        let computed = self.finish()?;
+        if computed != header.public_inputs {
+            return Err(EpochTransitionError::PublicInputsMismatch);
+        }
+        Ok(epoch_transition_public_input_hash(&header.public_inputs))
+    }
 }
 
 pub fn verify_epoch_transition_inputs(
     claimed: &EpochTransitionPublicInputs,
-    blocks: &[sybil_zk::StateTransitionGuestInput],
+    blocks: &[StateTransitionGuestInput],
 ) -> Result<[u8; 32], EpochTransitionError> {
+    let header = EpochTransitionHeader::new(claimed.clone());
     let mut accumulator = EpochTransitionAccumulator::new();
     for block in blocks {
         accumulator.push(block)?;
     }
-    let computed = accumulator.finish()?;
-    if &computed != claimed {
-        return Err(EpochTransitionError::PublicInputsMismatch);
-    }
-    Ok(epoch_transition_public_input_hash(claimed))
+    accumulator.finish_and_verify(&header)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EpochTransitionError {
+    UnsupportedInputVersion {
+        expected: u8,
+        actual: u8,
+    },
     EmptyEpoch,
     TooManyBlocks {
         max: u64,
     },
+    ClaimedHeightRangeMismatch {
+        start: u64,
+        count: u64,
+        end: u64,
+    },
     BlockVerification {
         index: u64,
-        source: sybil_zk::ZkTransitionError,
+        source: ZkTransitionError,
     },
     GenesisHashMismatch {
         index: u64,
@@ -227,10 +292,18 @@ pub enum EpochTransitionError {
 impl fmt::Display for EpochTransitionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedInputVersion { expected, actual } => write!(
+                f,
+                "unsupported epoch input version: expected {expected}, got {actual}"
+            ),
             Self::EmptyEpoch => write!(f, "epoch must contain at least one block"),
             Self::TooManyBlocks { max } => {
                 write!(f, "epoch exceeds the protocol maximum of {max} blocks")
             }
+            Self::ClaimedHeightRangeMismatch { start, count, end } => write!(
+                f,
+                "claimed epoch height range is inconsistent: start {start} + count {count} != end {end}"
+            ),
             Self::BlockVerification { index, source } => {
                 write!(f, "epoch block {index} failed verification: {source}")
             }
@@ -248,18 +321,14 @@ impl fmt::Display for EpochTransitionError {
                 f,
                 "epoch block {index} is not consecutive: expected height {expected}, got {actual}"
             ),
-            Self::StateChainMismatch { index } => {
-                write!(
-                    f,
-                    "epoch block {index} does not continue the prior state root"
-                )
-            }
-            Self::PreviousHeaderMismatch { index } => {
-                write!(
-                    f,
-                    "epoch block {index} does not embed the exact prior header"
-                )
-            }
+            Self::StateChainMismatch { index } => write!(
+                f,
+                "epoch block {index} does not continue the prior state root"
+            ),
+            Self::PreviousHeaderMismatch { index } => write!(
+                f,
+                "epoch block {index} does not embed the exact prior header"
+            ),
             Self::PublicInputsMismatch => {
                 write!(
                     f,
@@ -304,71 +373,28 @@ fn headers_equal(
         && left.timestamp_ms == right.timestamp_ms
 }
 
-fn keccak256(bytes: &[u8]) -> [u8; 32] {
-    let mut hasher = Keccak256::new();
-    hasher.update(bytes);
-    hasher.finalize().into()
-}
-
-enum AbiWord {
-    Uint(u64),
-    Bytes32([u8; 32]),
-}
-
-fn abi_encode_domain_and_words(domain: &[u8], words: &[AbiWord]) -> Vec<u8> {
-    let head_words = 1 + words.len();
-    let mut out = Vec::with_capacity(head_words * 32 + 32 + padded_len(domain.len()));
-    out.extend_from_slice(&abi_usize_word(head_words * 32));
-    for word in words {
-        match word {
-            AbiWord::Uint(value) => out.extend_from_slice(&abi_u64_word(*value)),
-            AbiWord::Bytes32(bytes) => out.extend_from_slice(bytes),
-        }
-    }
-
-    out.extend_from_slice(&abi_usize_word(domain.len()));
-    out.extend_from_slice(domain);
-    out.resize(out.len() + padded_len(domain.len()) - domain.len(), 0);
-    out
-}
-
-fn abi_u64_word(value: u64) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out[24..].copy_from_slice(&value.to_be_bytes());
-    out
-}
-
-fn abi_usize_word(value: usize) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    out[24..].copy_from_slice(&(value as u64).to_be_bytes());
-    out
-}
-
-fn padded_len(len: usize) -> usize {
-    len.div_ceil(32) * 32
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn epoch_public_input_hash_solidity_golden_vector() {
-        let inputs = EpochTransitionPublicInputs {
+    fn public_inputs(block_count: u64) -> EpochTransitionPublicInputs {
+        EpochTransitionPublicInputs {
             start_height: 10,
-            end_height: 12,
+            end_height: 10 + block_count,
             start_state_root: [1; 32],
             end_state_root: [2; 32],
-            block_count: 2,
+            block_count,
             blocks_commitment: [3; 32],
             epoch_da_commitment: [4; 32],
             deposit_root: [5; 32],
             deposit_count: 7,
-        };
+        }
+    }
 
-        // Independently generated with `cast abi-encode` + `cast keccak`.
+    #[test]
+    fn epoch_public_input_hash_solidity_golden_vector() {
         assert_eq!(
-            epoch_transition_public_input_hash(&inputs),
+            epoch_transition_public_input_hash(&public_inputs(2)),
             [
                 0x7e, 0xf3, 0xa4, 0xd5, 0x37, 0x3c, 0x7d, 0xa2, 0xb5, 0xa6, 0x95, 0x20, 0x06, 0xaf,
                 0xf3, 0xb0, 0xd7, 0xb8, 0x4b, 0x3e, 0xed, 0xfa, 0xe7, 0xfa, 0x30, 0x95, 0xda, 0x5b,
@@ -378,7 +404,37 @@ mod tests {
     }
 
     #[test]
-    fn empty_epoch_is_rejected() {
+    fn header_rejects_zero_oversize_version_and_inconsistent_range() {
+        assert_eq!(
+            EpochTransitionHeader::new(public_inputs(0)).validate(),
+            Err(EpochTransitionError::EmptyEpoch)
+        );
+
+        let oversized = EpochTransitionHeader::new(public_inputs(MAX_EPOCH_BLOCKS + 1));
+        assert_eq!(
+            oversized.validate(),
+            Err(EpochTransitionError::TooManyBlocks {
+                max: MAX_EPOCH_BLOCKS
+            })
+        );
+
+        let mut wrong_version = EpochTransitionHeader::new(public_inputs(1));
+        wrong_version.format_version += 1;
+        assert!(matches!(
+            wrong_version.validate(),
+            Err(EpochTransitionError::UnsupportedInputVersion { .. })
+        ));
+
+        let mut bad_range = EpochTransitionHeader::new(public_inputs(2));
+        bad_range.public_inputs.end_height += 1;
+        assert!(matches!(
+            bad_range.validate(),
+            Err(EpochTransitionError::ClaimedHeightRangeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn empty_accumulator_is_rejected() {
         assert_eq!(
             EpochTransitionAccumulator::new().finish(),
             Err(EpochTransitionError::EmptyEpoch)

@@ -1,7 +1,9 @@
 # Sybil OpenVM guest
 
-Standalone OpenVM guest program for Sybil state-transition verification, pinned
-to `cargo-openvm` **v2.0.0**. It lives outside the root Cargo workspace
+Standalone OpenVM guest program for Sybil contiguous-epoch transition
+verification, pinned to `cargo-openvm` **v2.0.0**. It reads a versioned epoch
+header and then one separately encoded block input at a time, retaining only
+the chaining/fold state between blocks. It lives outside the root Cargo workspace
 so normal `cargo test --workspace` does not require the OpenVM
 toolchain. See the architecture note **ZK Integration Path** (`docs/architecture/`)
 for how the guest fits the validium proof pipeline.
@@ -66,9 +68,9 @@ untracked key files match the tracked `key_material` hashes (first measured
 across workspaces 2026-07-10). The 2026-07-10 upgrade to OpenVM v2.0.0 final
 moved both commitments because the final release replaces the beta proof
 system with SWIRL and changes the SHA-2 VM AIR. The committed `commit.json` +
-lock carry the current-source commitments. The RustCrypto SHA-2 0.11 / SHA-3
-0.12 upgrade moved `app_exe_commit` to `0x004cc5ec…`; `app_vm_commit` remains
-`0x00618538…`. A fresh genesis
+lock carry the current-source commitments. Witness v10 authorization plus the
+streamed epoch entrypoint moved `app_exe_commit` to `0x005418fc…`;
+`app_vm_commit` remains `0x00618538…`. A fresh genesis
 and adapter redeploy must use these pins; older commitment compatibility is
 not supported.
 

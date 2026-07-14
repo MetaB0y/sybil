@@ -87,6 +87,7 @@ status: current
 | Canonical witness length-prefixed SHA-256 | `{golden["canonical_witness"]["length_prefixed_sha256"]}` |
 | Transition public-input hash | `{golden["state_transition_public_inputs"]["hash"]}` |
 | Empty transition public-input hash | `{empty_public_input_hash()}` |
+| Epoch transition public-input hash | `{golden["epoch_transition_public_inputs"]["hash"]}` |
 | Escape public-input hash | `{golden["escape_claim_public_inputs"]["hash"]}` |
 
 ## OpenVM guest commitments

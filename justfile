@@ -223,7 +223,7 @@ zk-escape-smoke:
     echo "escape_smoke_dir=$workdir"
     echo "zk_escape_smoke=ok"
 
-# Convert a prepared guest input artifact into OpenVM CLI input JSON
+# Convert one prepared block input into a one-block epoch OpenVM CLI stream
 openvm-input guest_input="target/sybil-guest-input.msgpack" openvm_input="target/sybil-openvm-input.json":
     cargo run --manifest-path zk/openvm-tools/Cargo.toml -- encode-input --guest-input {{guest_input}} --openvm-input {{openvm_input}}
 
@@ -268,7 +268,7 @@ zk-smoke prove="false":
       echo "app_proof=$app_proof"
     fi
 
-    echo "public_input_hash=$(cat "$public_hash")"
+    echo "block_public_input_hash=$(cat "$public_hash")"
     echo "da_payload_dir=$da_payload_dir"
     echo "da_manifest=$da_manifest"
     echo "openvm_input=$openvm_input"

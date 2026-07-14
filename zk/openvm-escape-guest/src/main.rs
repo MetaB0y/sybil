@@ -1,7 +1,7 @@
 use openvm::io::{read_vec, reveal_bytes32};
 #[allow(unused_imports)]
 use openvm_p256::P256Point;
-use sybil_escape_claim::{verify_escape_claim, EscapeClaimGuestInput};
+use sybil_escape_claim::{EscapeClaimGuestInput, verify_escape_claim};
 
 openvm::init!("openvm_init.rs");
 

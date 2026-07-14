@@ -1,10 +1,10 @@
 # Sybil system specification
 
-> **Executive summary:** Sybil is an off-chain prediction-market exchange built around frequent batch auctions, deterministic integer settlement, authenticated state, and validity proofs. A single-writer sequencer admits orders, clears each eligible batch with a welfare solver, commits the next state behind a redb/qMDB fence, and emits a canonical block plus `BlockWitness` v10. Native and OpenVM verification re-derive the transition. Ethereum holds collateral and accepted roots; canonical witness publication supports audit and recovery.
+> **Executive summary:** Sybil is an off-chain prediction-market exchange built around frequent batch auctions, deterministic integer settlement, authenticated state, and validity proofs. A single-writer sequencer admits orders, clears each eligible batch with a welfare solver, commits the next state behind a redb/qMDB fence, and emits a canonical block plus `BlockWitness` v10. Native verification checks each transition; the OpenVM guest verifies and folds contiguous multi-block epochs. Ethereum holds collateral and accepted roots; canonical witness publication supports audit and recovery.
 
 This is the connected implementation guide. Start with the [Architecture Guide](README.md) for intuition and [Sybil Architecture](architecture/Sybil%20Architecture.md) for the full map and reading paths. Per-concept notes and ADRs own detailed rationale. Code, canonical schemas, and tests are the final source of truth.
 
-Status snapshot: **2026-07-14**, through witness v10 client-action authorization and the epoch-prover foundation.
+Status snapshot: **2026-07-14**, through witness v10 client-action authorization, the streamed epoch guest, and the durable proof-job foundation.
 
 ---
 
@@ -177,13 +177,19 @@ Key operations bind current `keys_digest` and `events_digest`. Ordinary signed o
 
 The host/guest boundary has two main Rust homes:
 
-- `sybil-zk`: guest-safe transition and escape-claim verification plus public-input binding.
+- `sybil-zk`: guest-safe per-block verification, streamed epoch chaining/folds,
+  and public-input binding.
 - `sybil-proof-protocol`: portable proof jobs, epoch identities, typed proof kinds/envelopes, and exact-byte transport digests.
 - `sybil-prover`: proof preparation/backends, optional sequencer-store debug export, artifacts/API, DA publication, and L1 calldata/submission support.
 - `sybil-custody`: user-side own-leaf snapshots, full-payload reconstruction,
   Form-L proving, adapter wrapping, and optional `escapeClaim` submission.
 
-OpenVM guest/tool workspaces remain separately pinned. Local guest execution, proof smoke paths, canonical inputs, contracts, and calldata exist. Production proving and real verifier deployment are operational requirements; unsafe/mock adapters are development-only.
+OpenVM guest/tool workspaces remain separately pinned. The main guest reads a
+bounded epoch header followed by one independently encoded block at a time and
+reveals the ordered epoch hash. Local guest execution, proof smoke paths,
+canonical inputs, contracts, and calldata exist. Production scheduling/STARK
+operation and real verifier deployment are operational requirements;
+unsafe/mock adapters are development-only.
 
 `SybilVault` custodies collateral and builds the deposit tree. `SybilSettlement` accepts consecutive proven roots bound to the vault checkpoint and pinned guest commitments. Normal withdrawals use typed leaves, proofs, nullifiers, and a queue.
 

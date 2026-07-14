@@ -8,7 +8,8 @@ last_verified: 2026-07-14
 # ZK Integration Path
 
 Sybil is a Validium: execution data stays off-chain, while Ethereum accepts a
-new exchange state root only after an OpenVM proof attests to the transition.
+new exchange state root only after an OpenVM proof attests to a contiguous
+epoch of transitions.
 The guest reuses the same integer-only verification rules as native execution;
 Solidity sees a compact public-input hash rather than orders, fills, or account
 balances.
@@ -40,19 +41,20 @@ flowchart LR
     A --> C
 ```
 
-The public input binds the parent and new state roots, block identity,
-commitments to events, witness, and DA, and the deposit checkpoint. A valid
-proof therefore means the transition rules ran against exactly the data the L1
-contracts record. See [[Proof Architecture]] for the authenticated-data model
-and [[L1 Settlement and Vault]] for the contract boundary.
+The epoch public input binds the start/end heights and state roots, ordered
+folds of every block public-input hash and DA commitment, and the final deposit
+checkpoint. A valid proof therefore means the transition rules ran against
+every contiguous block in the claimed range. See [[Proof Architecture]] for
+the authenticated-data model and [[L1 Settlement and Vault]] for the contract
+boundary.
 
 ## Implemented Components
 
 | Component | Responsibility |
 |---|---|
 | `sybil-verifier` | Native match, settlement, block-integrity, and order checks |
-| `sybil-zk` | Deployed guest-safe per-block verification and public-input hashing |
-| `sybil-proof-protocol` | Portable jobs, host epoch fold/IDs, proof kinds/envelopes, transport digests |
+| `sybil-zk` | Guest-safe per-block verification plus streamed epoch chaining/folds/public inputs |
+| `sybil-proof-protocol` | Portable jobs, epoch IDs, proof kinds/envelopes, transport digests |
 | `sybil-prover` | Guest inputs, mock/backend boundary, DA artifacts, worker/API, and L1 calldata |
 | `zk/openvm-guest` | OpenVM 2.0 main transition program |
 | `sybil-escape-claim` | Small, independent Form-L escape statement |
@@ -68,7 +70,10 @@ into ordinary server builds.
 
 ## What the Transition Guest Proves
 
-Given a [[Block Witness]] and ordered post-state qMDB proofs, the guest:
+OpenVM stdin begins with a bounded `EpochTransitionHeader`, followed by one
+independently encoded `StateTransitionGuestInput` per block. The guest reads,
+verifies, folds, and drops each block before reading the next. For every block
+it:
 
 1. derives the canonical typed state leaves and verifies them against the
    public `new_state_root`;
@@ -76,9 +81,15 @@ Given a [[Block Witness]] and ordered post-state qMDB proofs, the guest:
 3. recomputes the event root and witness root from [[Canonical Serialization]];
 4. reconstructs the L1 deposit checkpoint and checks credited or quarantined
    deposits, automatic claims, and the quarantine ledger;
-5. runs the four native verification layers; and
-6. reveals `keccak256(abi.encode("sybil/openvm/state-transition/v1", ...))`,
-   which the settlement contract expects.
+5. runs the native validity layers, including key/action authorization; and
+6. requires identical genesis, exact previous-header equality, consecutive
+   heights, and state-root chaining against the prior streamed block.
+
+After the declared count, it matches the claimed endpoints and final deposit
+checkpoint, recomputes the ordered block/DA folds, and reveals
+`keccak256(abi.encode("sybil/openvm/epoch-transition/v1", ...))`. The
+single-block transition hash remains an internal fold item and diagnostic API,
+not the deployed guest's final reveal.
 
 The guest contains small SHA-256/MMR verifiers for the pinned Commonware qMDB
 proof formats. It does not link Commonware's native storage or cryptography
@@ -100,10 +111,10 @@ The current compatibility worker uses a file inbox and per-block artifact direct
 It validates a job, prepares guest input, writes the DA payload and manifest,
 records the public-input hash, and exposes artifact status over HTTP. This is a
 service boundary, not yet the redb-backed production scheduler: prepared jobs
-start with `proof_status: "not_started"`. Host epoch folding and a typed mock
-envelope exist without changing the deployed guest fingerprint; the streamed
-guest, durable scheduling, OpenVM STARK subprocess execution, and
-authenticated outbox pull/ack remain the next implementation stage. See
+start with `proof_status: "not_started"`. The streamed epoch guest, native
+fold, OpenVM serializer, typed envelopes, and transactional source outbox are
+implemented. Durable scheduling, authenticated pull/ack, and the continuously
+running OpenVM STARK subprocess backend remain the next stage. See
 [ADR-0019](../../adr/0019-epoch-stark-prover-service.md).
 
 `da_commitment` binds the canonical witness payload, height, state root,
@@ -158,7 +169,8 @@ adapter. Never silently regenerate pins during an ordinary test.
 ## Current Limits
 
 - Real OpenVM execution and proof drills exist, but the normal local worker
-  prepares artifacts rather than continuously scheduling and publishing proofs.
+  prepares per-block artifacts rather than continuously assembling, scheduling,
+  and publishing epoch proofs.
 - The file-backed DA path does not provide the availability, encryption, or
   recovery guarantees required for production.
 - Escape proving/submission is implemented; the dedicated proof generator for

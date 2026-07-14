@@ -80,9 +80,8 @@ sequencer, WAL, witness, native verification, and guest-safe verification.
 account leaf; the broader operational `last_nonce` remains sequencer state for
 profile, read-key, bridge, and other actions outside this first proof scope.
 
-This is witness v10 and a fresh-genesis migration. The guest source now runs
-the shared checks, but its deployment commitment is intentionally repinned
-once with the streamed epoch guest in #15.
+This is witness v10 and a fresh-genesis migration. The main and escape guest
+commitments are now repinned together with the streamed epoch guest in #15.
 
 ## 4. Architecture
 
@@ -566,11 +565,11 @@ are service-authenticated, logged, and idempotent.
 ## 15. Implementation phases
 
 Current implementation status (2026-07-14): the protocol crate/extraction,
-typed envelope and payload binding, host-side streaming epoch accumulator,
+typed envelope and payload binding, guest-safe streaming epoch accumulator,
 typed mock backend, and transactional sequencer proof-job outbox are landed.
-The accumulator stays in `sybil-proof-protocol` until the intentional guest
-repin so this intermediate slice does not move deployed validity pins. The
-outbox is covered by qMDB slot-rotation and randomized crashpoint invariants.
+The accumulator now lives in `sybil-zk`; `sybil-proof-protocol` re-exports it
+for host compatibility. The outbox is covered by qMDB slot-rotation and
+randomized crashpoint invariants.
 The globally sequenced acknowledged-write WAL from #76 is also landed: one
 versioned actor-ordered interval covers direct/deferred orders, control-plane
 commands, deposits, withdrawals, and L1 lifecycle inputs; floor/next counters
@@ -578,8 +577,9 @@ detect gaps and replay fails closed. Authorization witness v10 is now
 implemented in #73: exact Raw/WebAuthn envelopes survive API/WAL recovery,
 actor-order key membership and signatures are replayed, and account leaves
 commit `last_trading_nonce`. The streamed `sybil-zk`/OpenVM epoch guest and
-coordinated pin/golden update (#15), durable prover scheduler, authenticated
-service ingest, and STARK subprocess backend remain to be implemented below.
+coordinated pin/golden update are implemented in #15. The durable prover
+scheduler, authenticated service ingest, and STARK subprocess backend remain
+to be implemented below.
 
 GitHub tracking is deliberately split at durable/consensus boundaries:
 
@@ -637,10 +637,13 @@ with its exact job—never one without the other.
 ### Phase D — epoch statement and streaming guest
 
 - Implement epoch public inputs, folds, IDs, and native verification in
-  `sybil-zk`.
+  `sybil-zk`. **Done in #15.**
 - Change the OpenVM guest/tooling to header + one input stream item per block.
+  **Done in #15.**
 - Add 1/2/N-block chaining tests and tamper every boundary/commitment.
+  **Done in #15, including a persisted signed order→cancel two-block epoch.**
 - Repin once after Phase B and D are both complete.
+  **Done in #15 for both validity guests; fresh genesis remains a deployment action.**
 
 **Gate:** native and OpenVM execution reveal identical epoch hashes; a two-block
 proof exercises an authorized order in block one and authorized cancel in block
