@@ -436,17 +436,22 @@ quarantined. A DB record whose artifact is absent/corrupt returns to retry.
 ### 9.4 Leases and retries
 
 An attempt has a durable owner UUID and lease deadline. The daemon renews the
-lease while the OpenVM subprocess is alive. On restart, an expired lease makes
-the epoch retryable. Retries use bounded exponential backoff with jitter and a
-maximum automatic attempt count; manual retry is explicit and audited.
+lease while the OpenVM subprocess is alive. Startup and periodic scheduler
+reconciliation make an expired lease retryable when automatic attempts remain,
+or permanently failed when the limit is exhausted. Retries use bounded
+exponential backoff with jitter and a maximum automatic attempt count; manual
+retry is explicit and audited, preserves monotonic attempt numbering, and
+authorizes one new attempt without erasing history.
 
 Input/validity failures are permanent and halt the contiguous frontier.
 Resource/process failures are retryable. The service never skips a poisoned
 epoch to prove a later one as if the chain were contiguous.
 
-The OpenVM child runs in its own process group with time and memory limits. A
-daemon shutdown stops accepting new work, terminates the child cleanly, then
-lets the lease/reconciliation rules recover.
+The OpenVM child runs in its own process group with a timeout. An optional
+`RLIMIT_AS` ceiling is a fail-fast virtual-address guard, not an RSS limit;
+deployment memory isolation belongs to the service/container cgroup. A daemon
+shutdown stops accepting new work, terminates the child cleanly, then lets the
+lease/reconciliation rules recover.
 
 ## 10. Epoch assembly
 
@@ -514,7 +519,7 @@ aggregation is still resource-intensive. The daemon exposes and enforces:
 - maximum encoded bytes per block and epoch;
 - maximum blocks per epoch;
 - one proving child at a time;
-- subprocess timeout and memory ceiling;
+- subprocess timeout plus deployment cgroup memory/swap ceilings;
 - disk high-water marks for inbox, attempts, and retained artifacts; and
 - backpressure/alerts before capacity exhaustion.
 
@@ -523,6 +528,12 @@ promise constant prover memory—the trace/proof system still scales with total
 execution—and must be measured with real workloads. Start with small epochs,
 record peak RSS/wall time/cycles, then raise toward 360 only when the service
 keeps up faster than block production.
+
+The first local OpenVM v2 one-block acceptance measurement exceeded 22 GiB of
+cgroup-charged memory. An `RLIMIT_AS` run aborted earlier despite lower RSS
+because OpenVM's virtual mapping was larger. Treat a 32 GiB workstation with no
+swap and active desktop applications as below the validated prover profile;
+retain host headroom and swap or use a dedicated higher-memory machine.
 
 ## 13. API and observability
 

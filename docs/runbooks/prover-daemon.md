@@ -46,12 +46,21 @@ Important configuration:
 | `SYBIL_PROVER_SOURCE_URL` | Sybil API base URL |
 | `SYBIL_PROVER_SOURCE_TOKEN` | API service bearer for pull/ack |
 | `SYBIL_PROVER_AUTH_TOKEN` | separate bearer for daemon ingest/admin mutations |
-| `--memory-limit-mib` | Linux `prlimit` address-space ceiling; zero disables it |
+| `--memory-limit-mib` | Linux `RLIMIT_AS` ceiling; zero disables it. This limits virtual address space, not RSS |
 | `--command-timeout-secs` | per encoder/prove/verify subprocess timeout |
 
 Start at 1–4 blocks for real STARK measurements. Increase the target only when
 measured proof throughput stays ahead of block ingress and peak RSS/disk have
 headroom. A new value affects only unassembled work.
+
+Do not use `--memory-limit-mib` as the primary production RSS control. OpenVM
+reserves substantially more virtual address space than its resident set, so an
+apparently generous `RLIMIT_AS` can abort a proof well below the host's real
+memory limit. Run the daemon in a dedicated container/systemd cgroup with an
+actual-memory ceiling and a higher OOM-kill preference than the shell or
+supervisor. Keep host swap and several GiB of non-prover headroom. A July 2026
+one-block OpenVM v2 acceptance run exceeded 22 GiB charged memory; 32 GiB with
+no swap and a desktop workload was not a proving-capable profile.
 
 ## Health and status
 
@@ -76,15 +85,17 @@ curl -X POST -H "Authorization: Bearer $SYBIL_PROVER_AUTH_TOKEN" \
 ```
 
 Partial sealing is for deploy/genesis boundaries, not ordinary scheduling.
-Manual retry is audited and resets an exhausted/permanent epoch to `Ready`; it
-cannot rewrite a proven or currently leased epoch.
+Manual retry is audited and moves an exhausted/permanent epoch to `Ready`; it
+preserves the monotonic attempt number and cannot rewrite a proven or currently
+leased epoch.
 
 ## Crash and recovery behavior
 
 On restart the daemon:
 
 1. quarantines interrupted temporary directories;
-2. makes expired attempts retryable;
+2. makes expired attempts retryable when automatic attempts remain, otherwise
+   marks the epoch permanently failed;
 3. validates every redb-referenced artifact;
 4. returns missing/corrupt artifacts to retry; and
 5. adopts an exact valid final artifact left by a crash after atomic rename but
@@ -100,7 +111,9 @@ Proof attempts carry an owner UUID, attempt number, and renewable deadline.
 Subprocess/resource failures retry with bounded exponential backoff and
 deterministic jitter. Validity failures halt permanently until explicit
 operator review. Graceful shutdown drops the kill-on-drop OpenVM child and
-leaves its durable lease for normal recovery.
+leaves its durable lease for normal recovery. The scheduler reconciles expired
+leases both at startup and on every idle tick, so a worker disappearing after
+startup cannot leave the frontier indefinitely stuck in `Proving`.
 
 ## Backup and restore
 
@@ -119,4 +132,3 @@ curl -fsS http://127.0.0.1:3002/metrics | grep '^sybil_prover_'
 Do not edit artifact directories or redb records manually. Quarantined outputs
 are evidence for debugging; remove them only after the corresponding epoch is
 proven and retained according to policy.
-

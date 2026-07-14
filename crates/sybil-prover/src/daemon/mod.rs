@@ -298,6 +298,11 @@ async fn scheduler_loop(
                 }
             }
             _ = ticker.tick() => {
+                let recovered = runtime.store.recover_expired(now_ms())?;
+                runtime
+                    .metrics
+                    .recovered_leases_total
+                    .fetch_add(recovered, Ordering::Relaxed);
                 while runtime.store.assemble_next(
                     runtime.backend_kind.proof_kind(),
                     false,
@@ -755,6 +760,49 @@ mod tests {
                 .is_none()
         );
         assert_eq!(first.epoch.first_block_height, 1);
+    }
+
+    #[tokio::test]
+    async fn expired_final_lease_is_terminal_and_manual_retry_is_monotonic() {
+        let (_fixture, jobs) = proof_jobs(1).await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("prover.redb");
+        let store = DaemonStore::open(&path, 1, 1, 10).expect("store");
+        store.ingest(jobs[0].clone(), 1).expect("ingest");
+        store
+            .assemble_next(ProofKind::Mock, false, 2, "test")
+            .expect("assemble")
+            .expect("epoch");
+        let owner = Uuid::new_v4();
+        let first = store
+            .claim_next(owner, 10, 100)
+            .expect("claim")
+            .expect("first attempt");
+        assert_eq!(first.epoch.attempt_count, 1);
+        drop(store);
+
+        let reopened = DaemonStore::open(&path, 1, 1, 10).expect("reopen");
+        assert_eq!(reopened.recover_expired(111).expect("recover"), 1);
+        let terminal = reopened.read_epoch(1).expect("read").expect("epoch");
+        assert!(matches!(terminal.state, EpochState::FailedPermanent));
+        assert_eq!(terminal.attempt_count, 1);
+        assert!(
+            reopened
+                .claim_next(owner, 10, 112)
+                .expect("terminal barrier")
+                .is_none()
+        );
+
+        let retried = reopened
+            .manual_retry(1, "test-admin", 113)
+            .expect("manual retry");
+        assert!(matches!(retried.state, EpochState::Ready));
+        assert_eq!(retried.attempt_count, 1);
+        let second = reopened
+            .claim_next(owner, 10, 114)
+            .expect("manual claim")
+            .expect("second attempt");
+        assert_eq!(second.epoch.attempt_count, 2);
     }
 
     #[tokio::test]

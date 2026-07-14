@@ -349,7 +349,11 @@ impl DaemonStore {
             ) {
                 return Ok(None);
             }
-            if current.attempt_count >= policy.max_attempts {
+            // A manual retry moves a terminal epoch back to Ready without
+            // erasing its monotonic attempt number or durable history.
+            if current.attempt_count >= policy.max_attempts
+                && !matches!(current.state, EpochState::Ready)
+            {
                 return Ok(None);
             }
             let bytes = encode(&epoch)?;
@@ -560,6 +564,7 @@ impl DaemonStore {
     }
 
     pub fn recover_expired(&self, now_ms: u64) -> Result<u64, DaemonError> {
+        let policy = self.policy()?;
         let expired = self
             .list_epochs()?
             .into_iter()
@@ -590,11 +595,20 @@ impl DaemonStore {
                 if !still_expired {
                     continue;
                 }
-                epoch.state = EpochState::RetryWait {
-                    retry_at_ms: now_ms,
+                let exhausted = current.attempt_count >= policy.max_attempts;
+                epoch.state = if exhausted {
+                    EpochState::FailedPermanent
+                } else {
+                    EpochState::RetryWait {
+                        retry_at_ms: now_ms,
+                    }
                 };
                 epoch.updated_at_ms = now_ms;
-                epoch.last_error = Some("recovered expired proof lease".to_string());
+                epoch.last_error = Some(if exhausted {
+                    "recovered expired proof lease; automatic attempt limit reached".to_string()
+                } else {
+                    "recovered expired proof lease".to_string()
+                });
                 let bytes = encode(&epoch)?;
                 epochs.insert(epoch.first_block_height, bytes.as_slice())?;
             }
@@ -610,7 +624,11 @@ impl DaemonStore {
                 &txn,
                 now_ms,
                 "recovery",
-                "lease_expired",
+                if epoch.state == EpochState::FailedPermanent {
+                    "lease_expired_permanent"
+                } else {
+                    "lease_expired"
+                },
                 &format!(
                     "first_block={} attempt={} owner={}",
                     epoch.first_block_height, lease.attempt, lease.owner
@@ -741,7 +759,6 @@ impl DaemonStore {
                 )));
             }
             epoch.state = EpochState::Ready;
-            epoch.attempt_count = 0;
             epoch.updated_at_ms = now_ms;
             epoch.last_error = None;
             let bytes = encode(&epoch)?;
