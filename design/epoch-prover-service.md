@@ -529,11 +529,13 @@ execution—and must be measured with real workloads. Start with small epochs,
 record peak RSS/wall time/cycles, then raise toward 360 only when the service
 keeps up faster than block production.
 
-The first local OpenVM v2 one-block acceptance measurement exceeded 22 GiB of
-cgroup-charged memory. An `RLIMIT_AS` run aborted earlier despite lower RSS
-because OpenVM's virtual mapping was larger. Treat a 32 GiB workstation with no
-swap and active desktop applications as below the validated prover profile;
-retain host headroom and swap or use a dedicated higher-memory machine.
+The first local OpenVM v2 one-block acceptance completed at a 22.0 GiB
+cgroup-charged peak under a 24 GiB hard cap. A 22 GiB no-swap hard cap killed
+the worker; after adding 16 GiB host swap the proof completed with less than
+400 MiB swapped. An `RLIMIT_AS` run aborted earlier despite lower RSS because
+OpenVM's virtual mapping was larger. Treat this as a lower-bound measurement,
+retain host headroom and swap, and capacity-test multi-block epochs on dedicated
+prover hardware.
 
 ## 13. API and observability
 

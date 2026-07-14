@@ -59,8 +59,10 @@ apparently generous `RLIMIT_AS` can abort a proof well below the host's real
 memory limit. Run the daemon in a dedicated container/systemd cgroup with an
 actual-memory ceiling and a higher OOM-kill preference than the shell or
 supervisor. Keep host swap and several GiB of non-prover headroom. A July 2026
-one-block OpenVM v2 acceptance run exceeded 22 GiB charged memory; 32 GiB with
-no swap and a desktop workload was not a proving-capable profile.
+one-block OpenVM v2 acceptance run completed with a 22.0 GiB charged-memory
+peak under a 24 GiB hard cap. The same run was killed at a 22 GiB hard cap on a
+32 GiB no-swap desktop; after adding 16 GiB host swap it completed while using
+less than 400 MiB of swap. Treat those figures as a floor, not a capacity SLO.
 
 ## Health and status
 

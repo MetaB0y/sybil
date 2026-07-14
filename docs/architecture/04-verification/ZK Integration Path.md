@@ -175,10 +175,11 @@ adapter. Never silently regenerate pins during an ordinary test.
 
 ## Current Limits
 
-- The daemon continuously assembles and schedules real root-STARK proofs, but
-  a local one-block OpenVM v2 run exceeded 22 GiB charged memory. Completion,
-  sustained capacity/RSS measurements on dedicated prover hardware, and the
-  multi-restart STARK soak remain rollout gates.
+- The daemon continuously assembles and schedules real root-STARK proofs. A
+  local one-block OpenVM v2 proof completed and reloaded after restart at a
+  22.0 GiB charged-memory peak under a 24 GiB cap with host swap available.
+  Sustained multi-block capacity/RSS measurements and the deployment soak on
+  dedicated prover hardware remain rollout gates.
 - The file-backed DA path does not provide the availability, encryption, or
   recovery guarantees required for production.
 - Escape proving/submission is implemented; the dedicated proof generator for
