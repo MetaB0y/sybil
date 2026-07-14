@@ -6,7 +6,8 @@ import pytest
 
 from bots.base import BaseAgent
 from bots.informed import FixedProbabilityModel
-from sybil_client.types import Account, AccountFill, Block, BuyNo, BuyYes
+from sybil_client.client import SybilClientError
+from sybil_client.types import Account, AccountFill, Block, BuyNo, BuyYes, Position
 
 
 class TestProbabilityModel:
@@ -305,6 +306,104 @@ async def test_base_agent_cursor_tailing_continues_after_retention_trims_tail():
     assert [fill.order_id for fill in agent._fill_history] == [50, 51]
     assert agent._last_fill_cursor == "6.51"
     client.get_account_fills.assert_any_await(7, limit=100, after="1.10")
+
+
+@pytest.mark.anyio
+async def test_base_agent_reconciles_expired_fill_cursor_then_resumes_tailing(caplog):
+    client = AsyncMock()
+    client.get_account.side_effect = [
+        Account(id=7, balance_nanos=50_000_000_000, positions=[]),
+        Account(
+            id=7,
+            balance_nanos=49_000_000_000,
+            positions=[Position(market_id=3, outcome="YES", quantity=2)],
+        ),
+        Account(
+            id=7,
+            balance_nanos=48_000_000_000,
+            positions=[Position(market_id=3, outcome="YES", quantity=3)],
+        ),
+    ]
+    retained_tail = AccountFill(
+        cursor="6.51",
+        order_id=51,
+        fill_qty=1,
+        fill_price_nanos=510_000_000,
+        block_height=6,
+        timestamp_ms=6,
+    )
+    new_fill = AccountFill(
+        cursor="7.52",
+        order_id=52,
+        fill_qty=1,
+        fill_price_nanos=520_000_000,
+        block_height=7,
+        timestamp_ms=7,
+    )
+    client.get_account_fills.side_effect = [
+        SybilClientError(410, "cursor gap"),
+        [retained_tail],
+        [new_fill],
+    ]
+    agent = _DummyAgent(client=client, account_id=7, name="Dummy")
+    block = Block(
+        height=7,
+        parent_hash="",
+        state_root="",
+        fills=[],
+        clearing_prices={},
+        total_welfare=0,
+        total_volume=0,
+        orders_filled=0,
+    )
+
+    with caplog.at_level("WARNING"):
+        await agent._update_state(block)
+
+    assert agent._last_fill_cursor == "6.51"
+    assert agent.positions == {(3, "YES"): 2}
+    assert agent.balance_history == [49.0]
+    assert agent._fill_history == []
+    assert "reconciled from canonical account state" in caplog.text
+    client.get_account_fills.assert_any_await(7, limit=1, offset=0)
+
+    await agent._update_state(block)
+
+    assert agent._last_fill_cursor == "7.52"
+    assert agent.positions == {(3, "YES"): 3}
+    assert [fill.order_id for fill in agent._fill_history] == [52]
+    client.get_account_fills.assert_any_await(7, limit=100, after="6.51")
+
+
+@pytest.mark.anyio
+async def test_base_agent_reconciles_pruned_empty_fill_history_at_chain_tip():
+    client = AsyncMock()
+    client.get_account.return_value = Account(
+        id=7,
+        balance_nanos=50_000_000_000,
+        positions=[],
+    )
+    client.get_account_fills.side_effect = [
+        SybilClientError(410, "cursor gap"),
+        [],
+    ]
+    client.health.return_value = {"height": 99}
+    agent = _DummyAgent(client=client, account_id=7, name="Dummy")
+    block = Block(
+        height=1,
+        parent_hash="",
+        state_root="",
+        fills=[],
+        clearing_prices={},
+        total_welfare=0,
+        total_volume=0,
+        orders_filled=0,
+    )
+
+    await agent._update_state(block)
+
+    assert agent._last_fill_cursor == f"99.{2**64 - 1}"
+    client.health.assert_awaited_once_with()
 
 
 @pytest.mark.anyio

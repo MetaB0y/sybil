@@ -4,6 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 
 from sybil_client import Block, OrderSpec, SybilClient
+from sybil_client.client import SybilClientError
 from sybil_client.types import TimeInForce
 
 log = logging.getLogger(__name__)
@@ -136,17 +137,20 @@ class BaseAgent(ABC):
         """Update positions and balance from account state."""
         try:
             account = await self.client.get_account(self.account_id)
-            self.positions = {
-                (pos.market_id, pos.outcome): pos.quantity for pos in account.positions
-            }
-            self.balance_history.append(account.balance_dollars)
+            self._apply_canonical_account(account)
 
             # Fetch all fills we haven't seen yet.
             page_size = 100
             while True:
-                new_fills = await self.client.get_account_fills(
-                    self.account_id, limit=page_size, after=self._last_fill_cursor
-                )
+                try:
+                    new_fills = await self.client.get_account_fills(
+                        self.account_id, limit=page_size, after=self._last_fill_cursor
+                    )
+                except SybilClientError as exc:
+                    if exc.status_code != 410:
+                        raise
+                    await self._reconcile_fill_cursor()
+                    break
                 if not new_fills:
                     break
                 self._fill_history.extend(new_fills)
@@ -158,6 +162,43 @@ class BaseAgent(ABC):
 
         except Exception as e:
             print(f"[{self.name}] Failed to update state: {e}")
+
+    def _apply_canonical_account(self, account, *, replace_latest_balance: bool = False) -> None:
+        """Replace strategy state from the canonical account snapshot."""
+        self.positions = {
+            (pos.market_id, pos.outcome): pos.quantity for pos in account.positions
+        }
+        if replace_latest_balance and self.balance_history:
+            self.balance_history[-1] = account.balance_dollars
+        else:
+            self.balance_history.append(account.balance_dollars)
+
+    async def _reconcile_fill_cursor(self) -> None:
+        """Resume live fill tailing after retained history overtakes our cursor.
+
+        Positions and cash come from the canonical account endpoint, so replaying
+        an incomplete retained suffix would be misleading. Advance to the newest
+        retained fill (or the current chain tip when no row remains), then refresh
+        the canonical snapshot after choosing that boundary. Future fills continue
+        normally from the new cursor.
+        """
+        latest = await self.client.get_account_fills(self.account_id, limit=1, offset=0)
+        if latest:
+            cursor = latest[0].cursor
+        else:
+            health = await self.client.health()
+            cursor = f"{int(health['height'])}.{2**64 - 1}"
+
+        account = await self.client.get_account(self.account_id)
+        self._last_fill_cursor = cursor
+        self._apply_canonical_account(account, replace_latest_balance=True)
+        log.warning(
+            "Fill history cursor expired; reconciled from canonical account state: "
+            "name=%s account_id=%d resume_after=%s",
+            self.name,
+            self.account_id,
+            cursor,
+        )
 
     async def _has_pending_orders(self) -> bool:
         """Avoid stacking reservations from previously accepted orders."""
