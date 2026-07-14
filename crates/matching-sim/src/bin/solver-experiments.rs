@@ -208,6 +208,8 @@ struct RunRecord {
     oracle_time_seconds: Option<f64>,
     master_time_seconds: Option<f64>,
     integer_landing_loss: Option<f64>,
+    integer_landing_l1_ratio: Option<f64>,
+    integer_landing_budget_trimmed: Option<bool>,
     primal_residual: Option<f64>,
     dual_residual: Option<f64>,
     solver_message: Option<String>,
@@ -259,6 +261,8 @@ struct SolveOutput {
     oracle_time_seconds: Option<f64>,
     master_time_seconds: Option<f64>,
     integer_landing_loss: Option<f64>,
+    integer_landing_l1_ratio: Option<f64>,
+    integer_landing_budget_trimmed: Option<bool>,
     primal_residual: Option<f64>,
     dual_residual: Option<f64>,
     message: Option<String>,
@@ -641,6 +645,8 @@ fn run_one(
                 oracle_time_seconds: None,
                 master_time_seconds: None,
                 integer_landing_loss: None,
+                integer_landing_l1_ratio: None,
+                integer_landing_budget_trimmed: None,
                 primal_residual: None,
                 dual_residual: None,
                 solver_message: None,
@@ -777,6 +783,8 @@ fn record_solve(
             oracle_time_seconds: output.oracle_time_seconds,
             master_time_seconds: output.master_time_seconds,
             integer_landing_loss: output.integer_landing_loss,
+            integer_landing_l1_ratio: output.integer_landing_l1_ratio,
+            integer_landing_budget_trimmed: output.integer_landing_budget_trimmed,
             primal_residual: output.primal_residual,
             dual_residual: output.dual_residual,
             solver_message: output.message,
@@ -918,6 +926,8 @@ fn execute_solver(solver: &SolverSpec, problem: &Problem) -> SolveOutput {
                 oracle_time_seconds: None,
                 master_time_seconds: None,
                 integer_landing_loss: None,
+                integer_landing_l1_ratio: None,
+                integer_landing_budget_trimmed: None,
                 primal_residual: None,
                 dual_residual: None,
                 message,
@@ -965,6 +975,8 @@ fn pipeline_output(pipeline: PipelineResult, problem: &Problem) -> SolveOutput {
         oracle_time_seconds: pipeline.diagnostics.oracle_time_secs,
         master_time_seconds: pipeline.diagnostics.master_time_secs,
         integer_landing_loss: pipeline.diagnostics.integer_landing_loss,
+        integer_landing_l1_ratio: pipeline.diagnostics.integer_landing_l1_ratio,
+        integer_landing_budget_trimmed: pipeline.diagnostics.integer_landing_budget_trimmed,
         primal_residual: pipeline.diagnostics.primal_residual,
         dual_residual: pipeline.diagnostics.dual_residual,
         message: pipeline.diagnostics.message,
@@ -1217,10 +1229,40 @@ fn aggregate_allocation(fills: &[Fill]) -> BTreeMap<u64, u64> {
 }
 
 fn problem_fingerprint(problem: &Problem) -> Result<String, serde_json::Error> {
+    // `MarketSet` and `MmConstraint::order_sides` use `HashMap` internally.
+    // Serializing them directly makes an identical generated book hash
+    // differently across fresh processes, defeating the cross-solver and
+    // retained-artifact integrity checks. Preserve every solver-relevant
+    // sequence, but canonicalize the map-backed collections first.
+    let mut markets: Vec<_> = problem
+        .markets
+        .iter()
+        .map(|market| (market.id, &market.name))
+        .collect();
+    markets.sort_unstable_by_key(|(market_id, _)| *market_id);
+    let mm_constraints: Vec<_> = problem
+        .mm_constraints
+        .iter()
+        .map(|constraint| {
+            let mut order_sides: Vec<_> = constraint
+                .order_sides
+                .iter()
+                .map(|(&order_id, &side)| (order_id, side))
+                .collect();
+            order_sides.sort_unstable_by_key(|(order_id, _)| *order_id);
+            (
+                constraint.mm_id,
+                constraint.max_capital,
+                &constraint.order_ids,
+                order_sides,
+            )
+        })
+        .collect();
     let bytes = serde_json::to_vec(&(
-        &problem.markets,
+        problem.markets.next_id(),
+        markets,
         &problem.orders,
-        &problem.mm_constraints,
+        mm_constraints,
         &problem.market_groups,
     ))?;
     Ok(blake3::hash(&bytes).to_hex().to_string())
@@ -1308,5 +1350,36 @@ mod tests {
         let bytes = include_bytes!("../../../../benchmarks/solver/protocol-v2.json");
         let protocol: Protocol = serde_json::from_slice(bytes).expect("parse protocol");
         validate_protocol(&protocol).expect("valid protocol");
+    }
+
+    #[test]
+    fn problem_fingerprint_canonicalizes_hash_map_insertion_order() {
+        use matching_engine::{Market, MmConstraint, MmId, MmSide};
+
+        let build = |reverse: bool| {
+            let mut problem = Problem::new("fingerprint");
+            let markets = [
+                Market::new(MarketId::new(0), "zero"),
+                Market::new(MarketId::new(1), "one"),
+            ];
+            for index in if reverse { [1, 0] } else { [0, 1] } {
+                problem.markets.add_market(markets[index].clone());
+            }
+
+            let mut constraint = MmConstraint::new(MmId(7), Nanos(42));
+            constraint.order_ids = vec![10, 20];
+            let sides = [(10, MmSide::BuyYes), (20, MmSide::SellNo)];
+            for index in if reverse { [1, 0] } else { [0, 1] } {
+                let (order_id, side) = sides[index];
+                constraint.order_sides.insert(order_id, side);
+            }
+            problem.mm_constraints.push(constraint);
+            problem
+        };
+
+        assert_eq!(
+            problem_fingerprint(&build(false)).expect("forward fingerprint"),
+            problem_fingerprint(&build(true)).expect("reverse fingerprint")
+        );
     }
 }

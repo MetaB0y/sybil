@@ -112,6 +112,13 @@ pub struct SolverDiagnostics {
     /// Objective lost when the continuous allocation is landed into integer
     /// protocol quantities. Negative numerical noise is reported as zero.
     pub integer_landing_loss: Option<f64>,
+    /// L1 distance from the continuous target to landed quantities, divided
+    /// by the sum of their coordinate-wise maxima. This distinguishes small
+    /// integer rounding from projection onto a distant degenerate LP vertex.
+    pub integer_landing_l1_ratio: Option<f64>,
+    /// Whether final integer budget repair had to trim the nearest-face target
+    /// after the supporting-price fixed-point loop reached its cap.
+    pub integer_landing_budget_trimmed: Option<bool>,
     /// Backend-reported residuals when available.
     pub primal_residual: Option<f64>,
     pub dual_residual: Option<f64>,

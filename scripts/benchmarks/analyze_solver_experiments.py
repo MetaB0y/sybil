@@ -214,6 +214,11 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
             if row["comparisons"].get("observed_best_retained_cash_objective_gap_bps")
             is not None
         ]
+        welfare_gaps = [
+            row["comparisons"]["observed_best_welfare_gap_bps"] / 100.0
+            for row in successful
+            if row["comparisons"].get("observed_best_welfare_gap_bps") is not None
+        ]
         hard_budget_gaps = [
             row["comparisons"]["unconstrained_lp_welfare_gap_bps"] / 100.0
             for row in successful
@@ -251,10 +256,34 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
             for row in successful
             if row.get("integer_landing_loss") is not None
         ]
+        landing_relative_losses = [
+            row["integer_landing_loss"] / abs(row["objective_value"]) * 100.0
+            for row in successful
+            if row.get("integer_landing_loss") is not None
+            and row.get("objective_value") not in (None, 0)
+        ]
+        landing_l1_ratios = [
+            row["integer_landing_l1_ratio"] * 100.0
+            for row in successful
+            if row.get("integer_landing_l1_ratio") is not None
+        ]
         minting_duality_gaps = [
             row["minting_duality_gap_nanos"] / 1e9
             for row in successful
             if row.get("minting_duality_gap_nanos") is not None
+        ]
+        minting_duality_relative = [
+            row["minting_duality_gap_nanos"]
+            / max(
+                abs(row["zero_temperature_minting_cost_nanos"]),
+                abs(row["signed_minting_cost_nanos"]),
+                1.0,
+            )
+            * 100.0
+            for row in successful
+            if row.get("minting_duality_gap_nanos") is not None
+            and row.get("zero_temperature_minting_cost_nanos") is not None
+            and row.get("signed_minting_cost_nanos") is not None
         ]
         convergence = Counter(row["termination"] for row in rows)
         statuses = Counter(row["run_status"] for row in rows)
@@ -298,10 +327,16 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
                 "lp_gap_min_percent": min(gaps) if gaps else None,
                 "lp_gap_max_percent": max(gaps) if gaps else None,
                 "allocation_l1_median": median(allocation),
+                "welfare_gap_mean_percent": mean(welfare_gaps),
+                "welfare_gap_median_percent": median(welfare_gaps),
+                "welfare_gap_p95_percent": quantile(welfare_gaps, 0.95),
+                "welfare_gap_max_percent": max(welfare_gaps) if welfare_gaps else None,
                 "retained_gap_mean_percent": mean(retained_gaps),
                 "retained_gap_median_percent": median(retained_gaps),
                 "retained_gap_p25_percent": quantile(retained_gaps, 0.25),
                 "retained_gap_p75_percent": quantile(retained_gaps, 0.75),
+                "retained_gap_p95_percent": quantile(retained_gaps, 0.95),
+                "retained_gap_max_percent": max(retained_gaps) if retained_gaps else None,
                 "hard_budget_welfare_gap_median_percent": median(hard_budget_gaps),
                 "paper_bound_ratio_median": median(bound_ratios),
                 "paper_bound_ratio_max": max(bound_ratios) if bound_ratios else None,
@@ -316,10 +351,34 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
                 "integer_landing_loss_max_dollars": max(landing_losses)
                 if landing_losses
                 else None,
+                "integer_landing_relative_median_percent": median(landing_relative_losses),
+                "integer_landing_relative_p95_percent": quantile(
+                    landing_relative_losses, 0.95
+                ),
+                "integer_landing_relative_max_percent": max(landing_relative_losses)
+                if landing_relative_losses
+                else None,
+                "integer_landing_l1_median_percent": median(landing_l1_ratios),
+                "integer_landing_l1_p95_percent": quantile(landing_l1_ratios, 0.95),
+                "integer_landing_l1_max_percent": max(landing_l1_ratios)
+                if landing_l1_ratios
+                else None,
+                "integer_landing_budget_trimmed": sum(
+                    row.get("integer_landing_budget_trimmed") is True for row in successful
+                ),
                 "minting_duality_gap_median_dollars": median(minting_duality_gaps),
                 "minting_duality_gap_p95_dollars": quantile(minting_duality_gaps, 0.95),
                 "minting_duality_gap_max_dollars": max(minting_duality_gaps)
                 if minting_duality_gaps
+                else None,
+                "minting_duality_relative_median_percent": median(
+                    minting_duality_relative
+                ),
+                "minting_duality_relative_p95_percent": quantile(
+                    minting_duality_relative, 0.95
+                ),
+                "minting_duality_relative_max_percent": max(minting_duality_relative)
+                if minting_duality_relative
                 else None,
             }
         )
@@ -331,6 +390,116 @@ def aggregate(records: list[dict[str, Any]], dimensions: tuple[str, ...]) -> lis
         )
         result.append(item)
     return result
+
+
+def compact_outlier(row: dict[str, Any]) -> dict[str, Any]:
+    objective = row.get("objective_value")
+    landing_loss = row.get("integer_landing_loss")
+    landing_relative = (
+        landing_loss / abs(objective) * 100.0
+        if landing_loss is not None and objective not in (None, 0)
+        else None
+    )
+    return {
+        "experiment_id": row["experiment_id"],
+        "suite": row["suite"],
+        "profile": row["profile"],
+        "scale": row["scale"],
+        "seed": row["seed"],
+        "budget_scale": row["budget_scale"],
+        "solver_id": row["solver_id"],
+        "termination": row["termination"],
+        "net_welfare_dollars": row["net_welfare_nanos"] / 1e9,
+        "retained_objective_dollars": row["retained_cash_objective_nanos"] / 1e9,
+        "welfare_gap_percent": (
+            row["comparisons"]["observed_best_welfare_gap_bps"] / 100.0
+            if row["comparisons"].get("observed_best_welfare_gap_bps") is not None
+            else None
+        ),
+        "retained_gap_percent": (
+            row["comparisons"]["observed_best_retained_cash_objective_gap_bps"] / 100.0
+            if row["comparisons"].get("observed_best_retained_cash_objective_gap_bps")
+            is not None
+            else None
+        ),
+        "integer_landing_loss_dollars": (
+            landing_loss / 1e9 if landing_loss is not None else None
+        ),
+        "integer_landing_relative_percent": landing_relative,
+        "integer_landing_l1_percent": (
+            row["integer_landing_l1_ratio"] * 100.0
+            if row.get("integer_landing_l1_ratio") is not None
+            else None
+        ),
+        "integer_landing_budget_trimmed": row.get("integer_landing_budget_trimmed"),
+        "optimality_gap_dollars": (
+            row["optimality_gap"] / 1e9 if row.get("optimality_gap") is not None else None
+        ),
+        "minting_duality_gap_dollars": (
+            row["minting_duality_gap_nanos"] / 1e9
+            if row.get("minting_duality_gap_nanos") is not None
+            else None
+        ),
+        "minting_duality_relative_percent": (
+            row["minting_duality_gap_nanos"]
+            / max(
+                abs(row["zero_temperature_minting_cost_nanos"]),
+                abs(row["signed_minting_cost_nanos"]),
+                1.0,
+            )
+            * 100.0
+            if row.get("minting_duality_gap_nanos") is not None
+            and row.get("zero_temperature_minting_cost_nanos") is not None
+            and row.get("signed_minting_cost_nanos") is not None
+            else None
+        ),
+    }
+
+
+def worst_cases(records: list[dict[str, Any]], limit: int = 12) -> dict[str, list[dict[str, Any]]]:
+    successful = [row for row in records if row["benchmark_success"]]
+
+    def ranked(metric: Any) -> list[dict[str, Any]]:
+        candidates = [(metric(row), row) for row in successful]
+        candidates = [(value, row) for value, row in candidates if value is not None]
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return [compact_outlier(row) for _, row in candidates[:limit]]
+
+    return {
+        "welfare_gap": ranked(
+            lambda row: row["comparisons"].get("observed_best_welfare_gap_bps")
+        ),
+        "retained_objective_gap": ranked(
+            lambda row: row["comparisons"].get(
+                "observed_best_retained_cash_objective_gap_bps"
+            )
+        ),
+        "relative_landing_loss": ranked(
+            lambda row: (
+                row["integer_landing_loss"] / abs(row["objective_value"])
+                if row.get("integer_landing_loss") is not None
+                and row.get("objective_value") not in (None, 0)
+                else None
+            )
+        ),
+        "landing_allocation_distance": ranked(
+            lambda row: row.get("integer_landing_l1_ratio")
+        ),
+        "relative_minting_duality_gap": ranked(
+            lambda row: (
+                row["minting_duality_gap_nanos"]
+                / max(
+                    abs(row["zero_temperature_minting_cost_nanos"]),
+                    abs(row["signed_minting_cost_nanos"]),
+                    1.0,
+                )
+                if row.get("minting_duality_gap_nanos") is not None
+                and row.get("zero_temperature_minting_cost_nanos") is not None
+                and row.get("signed_minting_cost_nanos") is not None
+                else None
+            )
+        ),
+    }
 
 
 def make_summary(
@@ -362,6 +531,7 @@ def make_summary(
         "order_scaling": aggregate(order_scaling, ("scale", "solver_id")),
         "mm_scaling": aggregate(mm_scaling, ("scale", "solver_id")),
         "experiments": aggregate(records, ("experiment_id", "solver_id")),
+        "worst_cases": worst_cases(records),
     }
 
 
@@ -482,6 +652,39 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
             )
         )
 
+    lines.extend(["", "## Landed economic quality tails", ""])
+    rows = []
+    for row in summary["overall"]:
+        rows.append(
+            [
+                SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                format_number(row["welfare_gap_mean_percent"], 4),
+                format_number(row["welfare_gap_median_percent"], 4),
+                format_number(row["welfare_gap_p95_percent"], 4),
+                format_number(row["welfare_gap_max_percent"], 4),
+                format_number(row["retained_gap_mean_percent"], 4),
+                format_number(row["retained_gap_median_percent"], 4),
+                format_number(row["retained_gap_p95_percent"], 4),
+                format_number(row["retained_gap_max_percent"], 4),
+            ]
+        )
+    lines.append(
+        markdown_table(
+            [
+                "Solver",
+                "Welfare mean %",
+                "Welfare P50 %",
+                "Welfare P95 %",
+                "Welfare max %",
+                "Retained mean %",
+                "Retained P50 %",
+                "Retained P95 %",
+                "Retained max %",
+            ],
+            rows,
+        )
+    )
+
     landing = [
         row
         for row in summary["overall"]
@@ -498,9 +701,16 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
                     format_number(row["integer_landing_loss_median_dollars"], 6),
                     format_number(row["integer_landing_loss_p95_dollars"], 6),
                     format_number(row["integer_landing_loss_max_dollars"], 6),
+                    format_number(row["integer_landing_relative_p95_percent"], 6),
+                    format_number(row["integer_landing_relative_max_percent"], 6),
+                    format_number(row["integer_landing_l1_p95_percent"], 6),
+                    format_number(row["integer_landing_l1_max_percent"], 6),
+                    str(row["integer_landing_budget_trimmed"]),
                     format_number(row["minting_duality_gap_median_dollars"], 9),
                     format_number(row["minting_duality_gap_p95_dollars"], 9),
                     format_number(row["minting_duality_gap_max_dollars"], 9),
+                    format_number(row["minting_duality_relative_p95_percent"], 9),
+                    format_number(row["minting_duality_relative_max_percent"], 9),
                 ]
             )
         lines.append(
@@ -510,13 +720,113 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
                     "Landing loss P50 $",
                     "Landing loss P95 $",
                     "Landing loss max $",
+                    "Relative loss P95 %",
+                    "Relative loss max %",
+                    "Allocation L1 P95 %",
+                    "Allocation L1 max %",
+                    "Budget repairs",
                     "Mint duality P50 $",
                     "Mint duality P95 $",
                     "Mint duality max $",
+                    "Mint duality P95 %",
+                    "Mint duality max %",
                 ],
                 rows,
             )
         )
+
+    lines.extend(["", "## Worst landed welfare gaps", ""])
+    rows = []
+    for row in summary["worst_cases"]["welfare_gap"]:
+        rows.append(
+            [
+                row["experiment_id"],
+                str(row["seed"]),
+                f"{row['budget_scale']:g}×",
+                SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                format_number(row["net_welfare_dollars"], 4),
+                format_number(row["welfare_gap_percent"], 4),
+                format_number(row["retained_gap_percent"], 4),
+                format_number(row["integer_landing_relative_percent"], 6),
+                format_number(row["integer_landing_l1_percent"], 6),
+            ]
+        )
+    lines.append(
+        markdown_table(
+            [
+                "Experiment",
+                "Seed",
+                "Budget",
+                "Solver",
+                "Net welfare $",
+                "Welfare gap %",
+                "Retained gap %",
+                "Landing loss %",
+                "Landing L1 %",
+            ],
+            rows,
+        )
+    )
+
+    lines.extend(["", "## Worst relative landing losses", ""])
+    rows = []
+    for row in summary["worst_cases"]["relative_landing_loss"]:
+        rows.append(
+            [
+                row["experiment_id"],
+                str(row["seed"]),
+                f"{row['budget_scale']:g}×",
+                SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                format_number(row["integer_landing_loss_dollars"], 6),
+                format_number(row["integer_landing_relative_percent"], 6),
+                format_number(row["integer_landing_l1_percent"], 6),
+                format_number(row["optimality_gap_dollars"], 6),
+            ]
+        )
+    lines.append(
+        markdown_table(
+            [
+                "Experiment",
+                "Seed",
+                "Budget",
+                "Solver",
+                "Landing loss $",
+                "Landing loss %",
+                "Allocation L1 %",
+                "Core gap $",
+            ],
+            rows,
+        )
+    )
+
+    lines.extend(["", "## Worst relative minting-duality residuals", ""])
+    rows = []
+    for row in summary["worst_cases"]["relative_minting_duality_gap"]:
+        rows.append(
+            [
+                row["experiment_id"],
+                str(row["seed"]),
+                f"{row['budget_scale']:g}×",
+                SHORT_LABELS.get(row["solver_id"], row["solver_id"]),
+                format_number(row["minting_duality_gap_dollars"], 9),
+                format_number(row["minting_duality_relative_percent"], 9),
+                format_number(row["integer_landing_l1_percent"], 6),
+            ]
+        )
+    lines.append(
+        markdown_table(
+            [
+                "Experiment",
+                "Seed",
+                "Budget",
+                "Solver",
+                "Mint duality $",
+                "Mint duality %",
+                "Landing L1 %",
+            ],
+            rows,
+        )
+    )
 
     lines.extend(["", "## Random-book quality", ""])
     rows = []
@@ -644,7 +954,7 @@ def write_markdown_v2(summary: dict[str, Any], output: Path) -> None:
 
     for title, section in (
         ("Numerical-range stress", "numerical"),
-        ("Exact small-instance reference", "reference"),
+        ("Small-instance observed-best reference (not exact)", "reference"),
         ("Retained-cash ablation", "ablation"),
     ):
         if not summary[section]:
@@ -910,6 +1220,81 @@ def write_quality_figure_v2(summary: dict[str, Any], output: Path) -> None:
             body.append(f'<circle cx="{x}" cy="{middle}" r="5" fill="{color}"/>')
             if item["failed"]:
                 body.append(text(x + 7, y0 + 12, f"×{item['failed']}", 9))
+    output.write_text(svg_document(width, height, body))
+
+
+def write_quality_tail_figure(summary: dict[str, Any], output: Path) -> None:
+    rows = [row for row in summary["overall"] if row["welfare_gap_max_percent"] is not None]
+    if not rows:
+        output.write_text(
+            svg_document(900, 120, [text(450, 60, "No landed quality observations", 15, "middle")])
+        )
+        return
+
+    preferred = ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+    lookup = {row["solver_id"]: row for row in rows}
+    solvers = [solver for solver in preferred if solver in lookup]
+    solvers.extend(sorted(set(lookup) - set(solvers) - {"lp-unconstrained"}))
+    panels = [
+        ("Observed-best net-welfare gap", "welfare_gap"),
+        ("Observed-best retained-objective gap", "retained_gap"),
+    ]
+    values = [
+        row[f"{prefix}_{stat}_percent"]
+        for row in rows
+        for _, prefix in panels
+        for stat in ("median", "p95", "max")
+        if row[f"{prefix}_{stat}_percent"] is not None
+        and row[f"{prefix}_{stat}_percent"] > 0
+    ]
+    floor = 1e-6
+    log_min = math.floor(math.log10(min(values + [floor])))
+    log_max = math.ceil(math.log10(max(values + [0.1])))
+    if log_min == log_max:
+        log_max += 1
+
+    width, height = 980, 450
+    body = [text(width / 2, 24, "Landed economic-quality tails", 17, "middle", "bold")]
+    for panel_index, (title, prefix) in enumerate(panels):
+        x0, y0, plot_w, plot_h = 70 + panel_index * 485, 60, 410, 285
+        body.append(text(x0 + plot_w / 2, 45, title, 12, "middle", "bold"))
+        body.extend(
+            [
+                f'<line class="axis" x1="{x0}" y1="{y0}" x2="{x0}" y2="{y0 + plot_h}"/>',
+                f'<line class="axis" x1="{x0}" y1="{y0 + plot_h}" x2="{x0 + plot_w}" y2="{y0 + plot_h}"/>',
+            ]
+        )
+        transform = lambda value: y0 + plot_h - (
+            math.log10(max(value, floor)) - log_min
+        ) / (log_max - log_min) * plot_h
+        for exponent in range(log_min, log_max + 1):
+            value = 10**exponent
+            y = transform(value)
+            body.append(
+                f'<line class="grid" x1="{x0}" y1="{y}" x2="{x0 + plot_w}" y2="{y}"/>'
+            )
+            body.append(text(x0 - 7, y + 4, f"10^{exponent}%", 9, "end"))
+        for solver_index, solver in enumerate(solvers):
+            row = lookup[solver]
+            x = x0 + (solver_index + 0.5) * plot_w / max(1, len(solvers))
+            body.append(text(x, y0 + plot_h + 19, SHORT_LABELS.get(solver, solver), 9, "middle"))
+            points = []
+            for stat, radius, opacity in (("median", 4, 0.55), ("p95", 5, 0.8), ("max", 6, 1.0)):
+                value = row[f"{prefix}_{stat}_percent"]
+                if value is None:
+                    continue
+                y = transform(value)
+                points.append(y)
+                body.append(
+                    f'<circle cx="{x}" cy="{y}" r="{radius}" fill="{COLORS.get(solver, "#374151")}" '
+                    f'fill-opacity="{opacity}"/>'
+                )
+            if points:
+                body.append(
+                    f'<line x1="{x}" y1="{max(points)}" x2="{x}" y2="{min(points)}" '
+                    f'stroke="{COLORS.get(solver, "#374151")}" stroke-width="2"/>'
+                )
+    body.append(text(70, height - 35, "Marker size: P50, P95, maximum. Zeroes are placed at the 10^-6% floor.", 10))
     output.write_text(svg_document(width, height, body))
 
 
@@ -1271,6 +1656,7 @@ def main() -> None:
     if summary["schema_version"] >= 2:
         write_utilization_figure(summary, figures / "budget-capital-utilization.svg")
         write_certificate_figure(summary, figures / "certificate-gap.svg")
+        write_quality_tail_figure(summary, figures / "landed-quality-tails.svg")
     print(f"validated {len(records)} records; wrote {output_dir}")
 
 

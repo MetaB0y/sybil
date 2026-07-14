@@ -17,7 +17,7 @@ use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{
     ReusableLpOracle, SolverContext, build_solver_context, project_and_finalize,
-    project_and_finalize_with_objective, welfare_weights,
+    support_and_finalize_target_with_objective, welfare_weights,
 };
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
 
@@ -240,7 +240,13 @@ impl RetainedCashSolver {
             let final_utilities = model.utilities(&q);
             let final_alpha = model.pacing_factors(&final_utilities);
             let projection_objective = model.oracle_coefficients_from_alpha(&final_alpha);
-            project_and_finalize_with_objective(&q, problem, &ctx, &projection_objective, start)
+            support_and_finalize_target_with_objective(
+                &q,
+                problem,
+                &ctx,
+                &projection_objective,
+                start,
+            )
         } else {
             project_and_finalize(&q, problem, &ctx, start)
         };
@@ -252,6 +258,7 @@ impl RetainedCashSolver {
                 q.iter().all(|value| value.is_finite()),
             ));
         } else {
+            let integer_landing_budget_trimmed = result.diagnostics.integer_landing_budget_trimmed;
             let landed_q = landed_quantities(problem, &result);
             let landed_objective =
                 model.objective_for_landed_fills(&landed_q, &result.result.fills);
@@ -271,6 +278,8 @@ impl RetainedCashSolver {
                 oracle_calls: Some(oracle_calls),
                 oracle_time_secs: Some(oracle_time.as_secs_f64()),
                 integer_landing_loss: Some((objective - landed_objective).max(0.0)),
+                integer_landing_l1_ratio: landing_l1_ratio(&q, &landed_q),
+                integer_landing_budget_trimmed,
                 message: Some(
                     "objective/gap/landing loss are continuous retained-cash nanodollars"
                         .to_string(),
@@ -317,6 +326,20 @@ pub(crate) fn landed_quantities(problem: &Problem, result: &PipelineResult) -> V
         .iter()
         .map(|order| fills.get(&order.id).copied().unwrap_or(0) as f64)
         .collect()
+}
+
+pub(crate) fn landing_l1_ratio(target: &[f64], landed: &[f64]) -> Option<f64> {
+    let numerator: f64 = target
+        .iter()
+        .zip(landed)
+        .map(|(&left, &right)| (left - right).abs())
+        .sum();
+    let denominator: f64 = target
+        .iter()
+        .zip(landed)
+        .map(|(&left, &right)| left.abs().max(right.abs()))
+        .sum();
+    (denominator > 0.0).then_some(numerator / denominator)
 }
 
 /// Evaluate the shifted retained-cash objective on landed protocol fills.
@@ -418,6 +441,12 @@ impl<'a> ObjectiveModel<'a> {
                 NANOS_PER_DOLLAR as f64 + welfare_weights[order_index]
             };
             mm_groups[mm_index].push(order_index);
+        }
+        // `mm_order_index_map` is a HashMap convenience view. Canonicalize its
+        // iteration order before any floating-point utility sums so process-
+        // randomized hash seeds cannot move a solve across its gap tolerance.
+        for group in &mut mm_groups {
+            group.sort_unstable();
         }
         let budgets = problem
             .mm_constraints
@@ -661,8 +690,11 @@ pub fn zero_temperature_minting_cost_for_fills(
 mod tests {
     use super::*;
     use matching_engine::{
-        MmConstraint, MmId, MmSide, Nanos, outcome_buy, outcome_sell, shares_to_qty, simple_no_buy,
-        simple_yes_buy,
+        MmConstraint, MmId, MmSide, Nanos, Qty, notional_nanos, outcome_buy, outcome_sell,
+        shares_to_qty, simple_no_buy, simple_yes_buy,
+    };
+    use matching_scenarios::{
+        FlashLiquidityConfig, ScenarioConfig, generate_flash_liquidity_scenario, generate_scenario,
     };
 
     fn tight_budget_problem(budget_dollars: u64) -> Problem {
@@ -710,6 +742,70 @@ mod tests {
         let mut mm = MmConstraint::new(MmId::new(1), Nanos(budget_dollars * NANOS_PER_DOLLAR));
         mm.add_order(200, MmSide::SellYes);
         problem.mm_constraints.push(mm);
+        problem
+    }
+
+    fn calibrate_budgets_from_unconstrained_lp(problem: &mut Problem, fraction: f64) {
+        let mut unconstrained = problem.clone();
+        unconstrained.mm_constraints.clear();
+        let unconstrained = crate::LpSolver::new().solve(&unconstrained);
+        let unconstrained_q: HashMap<_, _> = unconstrained
+            .result
+            .fills
+            .iter()
+            .map(|fill| (fill.order_id, fill.fill_qty))
+            .collect();
+        let order_map: HashMap<_, _> = problem
+            .orders
+            .iter()
+            .map(|order| (order.id, order))
+            .collect();
+        for mm in &mut problem.mm_constraints {
+            let limit_value = mm
+                .order_ids
+                .iter()
+                .map(|order_id| {
+                    let order = order_map[order_id];
+                    let value = if order.is_seller() {
+                        Nanos(NANOS_PER_DOLLAR - order.limit_price.0)
+                    } else {
+                        order.limit_price
+                    };
+                    notional_nanos(
+                        value,
+                        unconstrained_q.get(order_id).copied().unwrap_or(Qty::ZERO),
+                    )
+                    .0
+                })
+                .sum::<u64>();
+            mm.max_capital = Nanos((limit_value as f64 * fraction).round() as u64);
+        }
+    }
+
+    fn wide_range_problem(seed: u64) -> Problem {
+        let mut problem = generate_scenario(ScenarioConfig {
+            seed,
+            num_markets: 30,
+            market_group_probability: 0.65,
+            num_orders: 3_000,
+            order_size_min: 1,
+            order_size_max: 10_000,
+            order_size_power: 3.5,
+            retail_buy_probability: 0.65,
+            liquidity_scarcity: 0.4,
+            hot_market_fraction: 0.1,
+            hot_order_probability: 0.75,
+            liquidity_depth_levels: 6,
+            liquidity_dispersion: 1.5,
+            num_mms: 2,
+            mm_budget_min: 100,
+            mm_budget_max: 100_000,
+            mm_spread_bps: 75,
+            mm_capacity_multiplier: 50,
+            mm_market_coverage_fraction: 1.0,
+            mm_market_coverage_max: 30,
+        });
+        calibrate_budgets_from_unconstrained_lp(&mut problem, 0.25);
         problem
     }
 
@@ -786,5 +882,158 @@ mod tests {
         let model = ObjectiveModel::new(&problem, &ctx);
         let q = vec![0.0, shares_to_qty(10).0 as f64];
         assert_eq!(model.utilities(&q)[0], 5.0 * NANOS_PER_DOLLAR as f64);
+    }
+
+    #[test]
+    fn flash_reference_landing_preserves_the_certified_core() {
+        let mut problem = generate_flash_liquidity_scenario(FlashLiquidityConfig {
+            seed: 16_400,
+            num_markets: 4,
+            opportunities_per_market: 2,
+            num_mms: 1,
+            quantity_min_shares: 10,
+            quantity_max_shares: 30,
+            initial_budget_dollars: 1_000,
+        });
+        calibrate_budgets_from_unconstrained_lp(&mut problem, 0.25);
+
+        let result = RetainedCashSolver::new().solve(&problem);
+        assert_eq!(result.diagnostics.status, TerminationStatus::Converged);
+        let objective = result.diagnostics.objective_value.unwrap();
+        let landing_loss = result.diagnostics.integer_landing_loss.unwrap();
+        assert!(
+            landing_loss <= objective.abs() * 0.01,
+            "landing lost {landing_loss} of a {objective} certified core"
+        );
+    }
+
+    #[test]
+    fn supported_wide_range_landings_preserve_minting_duality() {
+        for seed in [16_200, 16_201, 16_202, 16_204] {
+            let problem = wide_range_problem(seed);
+            let result = crate::PacingBundleSolver::with_config(crate::PacingBundleConfig {
+                max_iterations: 200,
+                gap_rel: 1e-8,
+                ..Default::default()
+            })
+            .solve(&problem);
+            assert_ne!(
+                result.diagnostics.status,
+                TerminationStatus::PostProcessingFailure,
+                "seed {seed}: {:?}",
+                result.diagnostics,
+            );
+            let objective = result.diagnostics.objective_value.unwrap();
+            let landing_loss = result.diagnostics.integer_landing_loss.unwrap();
+            assert!(
+                landing_loss <= objective.abs() * 1e-3,
+                "seed {seed} landing lost {}% of the core objective",
+                landing_loss / objective.abs() * 100.0,
+            );
+            let zero_temperature =
+                zero_temperature_minting_cost_for_fills(&problem, &result.result.fills);
+            let duality_gap = (zero_temperature - result.result.minting_cost as f64).abs();
+            assert!(
+                duality_gap <= 50_000_000.0,
+                "seed {seed} landed minting duality gap was ${}",
+                duality_gap / NANOS_PER_DOLLAR as f64,
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_wide_range_integer_face_fails_explicitly() {
+        let problem = wide_range_problem(16_203);
+        let result = crate::PacingBundleSolver::with_config(crate::PacingBundleConfig {
+            max_iterations: 200,
+            gap_rel: 1e-8,
+            ..Default::default()
+        })
+        .solve(&problem);
+
+        assert_eq!(
+            result.diagnostics.status,
+            TerminationStatus::PostProcessingFailure
+        );
+        assert_eq!(result.diagnostics.algorithm, "target-support-lp");
+        assert!(
+            result
+                .diagnostics
+                .message
+                .as_deref()
+                .is_some_and(|message| message
+                    .contains("no integer candidate was supported by primary minting prices")),
+            "unexpected diagnostic: {:?}",
+            result.diagnostics,
+        );
+    }
+
+    #[test]
+    fn nearest_face_landing_is_available_on_multi_mm_flash_book() {
+        let mut problem = generate_flash_liquidity_scenario(FlashLiquidityConfig {
+            seed: 18_303,
+            num_markets: 40,
+            opportunities_per_market: 25,
+            num_mms: 8,
+            quantity_min_shares: 5,
+            quantity_max_shares: 250,
+            initial_budget_dollars: 25_000,
+        });
+        calibrate_budgets_from_unconstrained_lp(&mut problem, 0.25);
+
+        let result = crate::PacingBundleSolver::new().solve(&problem);
+        assert_ne!(
+            result.diagnostics.status,
+            TerminationStatus::PostProcessingFailure,
+            "{:?}",
+            result.diagnostics,
+        );
+        assert!(!result.result.fills.is_empty());
+    }
+
+    #[test]
+    fn support_gate_precedes_hard_budget_projection_on_large_book() {
+        let mut problem = Problem::new("support_before_budget_projection");
+        let market = problem.markets.add_binary("market");
+        problem.orders.extend([
+            simple_yes_buy(&problem.markets, 1, market, 600_000_000, 1),
+            simple_no_buy(&problem.markets, 2, market, 600_000_000, 1),
+            outcome_sell(&problem.markets, 3, market, 0, 400_000_000, 1),
+            outcome_sell(&problem.markets, 4, market, 1, 400_000_000, 1),
+            simple_no_buy(&problem.markets, 5, market, NANOS_PER_DOLLAR, 1_000_000_000),
+            simple_yes_buy(&problem.markets, 6, market, NANOS_PER_DOLLAR, 1_000_000_000),
+        ]);
+        let mut mm = MmConstraint::new(MmId::new(1), Nanos(500_000_000_000_000));
+        mm.add_order(5, MmSide::BuyNo);
+        problem.mm_constraints.push(mm);
+
+        for result in [
+            RetainedCashSolver::new().solve(&problem),
+            crate::PacingBundleSolver::new().solve(&problem),
+        ] {
+            assert_ne!(
+                result.diagnostics.status,
+                TerminationStatus::PostProcessingFailure,
+                "{:?}",
+                result.diagnostics,
+            );
+            let zero_temperature =
+                zero_temperature_minting_cost_for_fills(&problem, &result.result.fills);
+            let support_gap = (zero_temperature - result.result.minting_cost as f64).abs();
+            assert!(
+                support_gap <= 50_000_000.0,
+                "landed support gap was ${}",
+                support_gap / NANOS_PER_DOLLAR as f64,
+            );
+            let mm_fill = result.result.fills.iter().find(|fill| fill.order_id == 5);
+            let capital = mm_fill
+                .map(|fill| {
+                    MmSide::BuyNo
+                        .capital_needed(fill.fill_price, fill.fill_qty)
+                        .0
+                })
+                .unwrap_or(0);
+            assert!(capital <= 500_000_000_000_000);
+        }
     }
 }

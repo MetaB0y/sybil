@@ -51,6 +51,7 @@ struct ComponentSolveOutcome {
     converged: bool,
     convergence_metric: Option<f64>,
     component_failures: usize,
+    component_caps: usize,
 }
 
 impl<S: crate::Solver> DecomposedSolver<S> {
@@ -123,6 +124,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
             );
             ComponentSolveOutcome {
                 component_failures: count_component_failures(&results),
+                component_caps: count_component_caps(&results),
                 results,
                 iterations: 1,
                 converged: true,
@@ -142,27 +144,37 @@ impl<S: crate::Solver> DecomposedSolver<S> {
         };
 
         // Step 8: Aggregate + post-process (global budget enforcement, welfare recompute).
+        let mut diagnostic_parts = Vec::new();
+        if dropped > 0 {
+            diagnostic_parts.push(format!("dropped {dropped} cross-component orders"));
+        }
+        if outcome.component_failures > 0 {
+            diagnostic_parts.push(format!(
+                "{} component solves failed",
+                outcome.component_failures
+            ));
+        }
+        if outcome.component_caps > 0 {
+            diagnostic_parts.push(format!(
+                "{} component solves reached a cap",
+                outcome.component_caps
+            ));
+        }
+
         let mut result = assemble_final(problem, outcome.results);
         result.total_time_secs = start.elapsed().as_secs_f64();
         result.diagnostics = SolverDiagnostics {
             algorithm: format!("decomposed-{}", self.inner.name().to_lowercase()),
             status: if outcome.component_failures > 0 {
                 TerminationStatus::NumericalFailure
-            } else if outcome.converged {
+            } else if outcome.converged && outcome.component_caps == 0 {
                 TerminationStatus::Converged
             } else {
                 TerminationStatus::IterationLimit
             },
             iterations: Some(outcome.iterations),
             convergence_metric: outcome.convergence_metric,
-            message: match (dropped, outcome.component_failures) {
-                (0, 0) => None,
-                (dropped, 0) => Some(format!("dropped {dropped} cross-component orders")),
-                (0, failures) => Some(format!("{failures} component solves failed")),
-                (dropped, failures) => Some(format!(
-                    "{failures} component solves failed; dropped {dropped} cross-component orders"
-                )),
-            },
+            message: (!diagnostic_parts.is_empty()).then(|| diagnostic_parts.join("; ")),
             ..Default::default()
         };
         result
@@ -410,6 +422,7 @@ impl<S: crate::Solver> DecomposedSolver<S> {
 
         ComponentSolveOutcome {
             component_failures: count_component_failures(&best_results),
+            component_caps: count_component_caps(&best_results),
             results: best_results,
             iterations: iterations_run,
             converged: did_converge,
@@ -428,6 +441,18 @@ fn count_component_failures(results: &[PipelineResult]) -> usize {
                     | TerminationStatus::NumericalFailure
                     | TerminationStatus::PostProcessingFailure
                     | TerminationStatus::Infeasible
+            )
+        })
+        .count()
+}
+
+fn count_component_caps(results: &[PipelineResult]) -> usize {
+    results
+        .iter()
+        .filter(|result| {
+            matches!(
+                result.diagnostics.status,
+                TerminationStatus::IterationLimit | TerminationStatus::TimeLimit
             )
         })
         .count()
@@ -637,6 +662,15 @@ fn build_sub_problem(
             .unwrap_or(0);
 
         if budget == 0 {
+            // Treat a zero component allocation as no flash liquidity. Leaving
+            // seller-side MM orders unconstrained lets them set an endpoint
+            // price, after which global trimming removes their fills but
+            // cannot recover otherwise feasible retail crossing volume.
+            for order in &mut orders {
+                if mm.order_ids.contains(&order.id) {
+                    order.max_fill = matching_engine::Qty::ZERO;
+                }
+            }
             continue;
         }
 
@@ -1212,7 +1246,7 @@ mod tests {
     /// scarcity* (`B_k^m ∝ V_k^m`), which on an asymmetric book differs from the
     /// superseded *equal-utility* target — and proportional response reaches it.
     ///
-    /// Deep component A: the MM buys NO cheaply (cost 0.20/share) against its own
+    /// Deep component A: the MM buys NO at 0.80/share against its own
     /// high limit (0.90), saturating its 50-dollar share (no cash retained).
     /// Shallow component B: the MM can only place a small position, spending 10
     /// of its 50 and retaining 40 as cash. Deployed value `V = U + s` (weighted
@@ -1274,9 +1308,9 @@ mod tests {
             vec![(0, comps)]
         };
 
-        // Synthetic component fills. NO cost = (1 - fill_price)·qty.
-        //   A: 250 shares @ fill 0.80  → spend 0.20·250 = 50 (budget-binding)
-        //   B:  50 shares @ fill 0.80  → spend 0.20·50  = 10 (40 retained)
+        // Synthetic component fills. A buyer pays the traded outcome's price.
+        //   A: 250 shares @ fill 0.80  → spend exceeds 50 (retained cash floors at 0)
+        //   B:  50 shares @ fill 0.80  → spend 40 (10 retained)
         let mut res_a = PipelineResult::empty();
         res_a
             .result
@@ -1300,14 +1334,14 @@ mod tests {
             compute_mm_deployed_values(&problem, &results, &order_components, &budgets, &spanning);
 
         // V = U + s, in nanos.  U = 0.90·qty, s = budget − spend.
-        //   V_A = 0.90·250 + (50 − 50) = 225
-        //   V_B = 0.90·50  + (50 − 10) = 45 + 40 = 85
+        //   V_A = 0.90·250 + 0 = 225
+        //   V_B = 0.90·50  + (50 − 40) = 45 + 10 = 55
         let v_a = deployed[&(0, comp_a)];
         let v_b = deployed[&(0, comp_b)];
         assert_eq!(v_a as u64, 225 * DOLLAR, "V_A = U_A + s_A");
-        assert_eq!(v_b as u64, 85 * DOLLAR, "V_B = U_B + s_B");
+        assert_eq!(v_b as u64, 55 * DOLLAR, "V_B = U_B + s_B");
 
-        // The equal-budget start is NOT equal scarcity: B/V differs (0.22 vs 0.59).
+        // The equal-budget start is NOT equal scarcity: B/V differs (0.22 vs 0.91).
         assert!(
             !check_convergence(&deployed, &budgets, &spanning, 1e-4),
             "equal budget is not equal scarcity on an asymmetric book"
@@ -1319,7 +1353,7 @@ mod tests {
             budgets.entry(0).or_default().insert(comp, budget);
         }
 
-        // Now scarcity is equalized (both ≈ 100 / 310 = 0.3226) → converged.
+        // Now scarcity is equalized (both ≈ 100 / 280 = 0.3571) → converged.
         let new_a = budgets[&0][&comp_a] as f64 / v_a;
         let new_b = budgets[&0][&comp_b] as f64 / v_b;
         assert!(

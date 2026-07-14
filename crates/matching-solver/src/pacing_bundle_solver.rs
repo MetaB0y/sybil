@@ -18,10 +18,10 @@ use matching_engine::{NANOS_PER_DOLLAR, Problem, SHARE_SCALE};
 
 use crate::lp_solver::{
     ReusableLpOracle, build_solver_context, project_and_finalize,
-    project_and_finalize_with_objective,
+    support_and_finalize_target_with_objective,
 };
 use crate::result::{PipelineResult, SolverDiagnostics, TerminationStatus};
-use crate::retained_cash_solver::{ObjectiveModel, landed_quantities};
+use crate::retained_cash_solver::{ObjectiveModel, landed_quantities, landing_l1_ratio};
 
 /// Configuration for the experimental fully corrective pacing-bundle solver.
 #[derive(Clone, Debug)]
@@ -49,7 +49,10 @@ impl Default for PacingBundleConfig {
             max_iterations: 100,
             max_master_iterations: 1_000,
             gap_abs_nanos: 1_000_000.0,
-            gap_rel: 1e-5,
+            // Landing needs a near-stationary target, not merely a small
+            // objective error: a loose supporting gap can be close in value
+            // while far from the exact optimal face on degenerate books.
+            gap_rel: 1e-8,
             master_gap_abs_nanos: 1_000.0,
             master_gap_rel: 1e-9,
             line_search_steps: 48,
@@ -199,7 +202,13 @@ impl PacingBundleSolver {
         let mut result = if converged && numerical_failure.is_none() {
             let final_alpha = model.pacing_factors(&master.utilities);
             let projection_objective = model.oracle_coefficients_from_alpha(&final_alpha);
-            project_and_finalize_with_objective(&q, problem, &ctx, &projection_objective, start)
+            support_and_finalize_target_with_objective(
+                &q,
+                problem,
+                &ctx,
+                &projection_objective,
+                start,
+            )
         } else {
             project_and_finalize(&q, problem, &ctx, start)
         };
@@ -211,6 +220,7 @@ impl PacingBundleSolver {
                 q.iter().all(|value| value.is_finite()),
             ));
         } else {
+            let integer_landing_budget_trimmed = result.diagnostics.integer_landing_budget_trimmed;
             let landed_q = landed_quantities(problem, &result);
             let landed_objective =
                 model.objective_for_landed_fills(&landed_q, &result.result.fills);
@@ -238,6 +248,8 @@ impl PacingBundleSolver {
                 optimality_gap: last_gap.is_finite().then_some(last_gap),
                 oracle_calls: Some(oracle_calls),
                 integer_landing_loss: Some((objective - landed_objective).max(0.0)),
+                integer_landing_l1_ratio: landing_l1_ratio(&q, &landed_q),
+                integer_landing_budget_trimmed,
                 master_iterations: Some(master_iterations),
                 active_atoms: Some(master.active_atoms()),
                 oracle_time_secs: Some(oracle_time.as_secs_f64()),

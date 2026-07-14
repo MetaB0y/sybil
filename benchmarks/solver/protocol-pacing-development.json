@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "protocol_id": "solver-pacing-bundle-development-v1",
-  "title": "Development-only pacing-bundle, LP-SLP, and corrected-conic correctness, work, and orthogonal scaling stress",
+  "protocol_id": "solver-pacing-bundle-development-v2",
+  "title": "Development-only pacing-bundle landing, welfare-tail, LP controls, corrected-conic, and orthogonal scaling stress",
   "analysis_policy": {
     "evidence_status": "development-only; never present these results as untouched or held-out evaluation",
     "primary_unit": "one declared order book, budget ratio, and solver",
@@ -9,7 +9,7 @@
     "primary_objective": "shifted retained-cash objective in nanodollars, evaluated on every landed allocation",
     "primary_certificate": "method-specific valid upper bound minus continuous retained-cash primal objective",
     "failure_policy": "retain every panic, empty result, backend error, timeout, iteration cap, and verifier-invalid allocation",
-    "selection_policy": "run every declared seed, budget, all four solvers, order-count scale, and MM-count scale; no post-hoc book filtering",
+    "selection_policy": "run every declared seed, budget, all four feasible solvers plus the budget-blind LP negative control, every order-count scale, and every MM-count scale; no post-hoc book filtering",
     "tuning_policy": "all seeds are below 30000 and may inform implementation; a later paper claim requires a separately frozen implementation and untouched seed range",
     "missing_policy": "no invented quality or runtime values for failed runs; denominators remain declared counts",
     "scaling_policy": "vary order count at two MMs, then MM count at 2000 orders, so problem size and pacing dimension are not confounded"
@@ -21,6 +21,11 @@
     "budget_scale": 1.0
   },
   "solvers": {
+    "lp-unconstrained": {
+      "kind": "lp-unconstrained",
+      "label": "Budget-blind unconstrained LP negative control",
+      "fallback_to_lp": false
+    },
     "lp": {
       "kind": "lp",
       "label": "Five-step price-linearized LP-SLP baseline",
@@ -41,7 +46,7 @@
       "label": "Certified fully corrective pacing bundle",
       "max_iterations": 100,
       "max_master_iterations": 1000,
-      "tolerance": 0.00001,
+      "tolerance": 0.00000001,
       "absolute_tolerance": 1000000.0,
       "master_tolerance": 0.000000001,
       "master_absolute_tolerance": 1000.0,
@@ -248,7 +253,7 @@
       "seed_count": 5,
       "budget_scales": [0.5, 1.0, 4.0],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "concentrated-tight",
@@ -259,7 +264,7 @@
       "seed_count": 5,
       "budget_scales": [0.5],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "numerical-range-stress",
@@ -270,7 +275,7 @@
       "seed_count": 5,
       "budget_scales": [0.25, 10.0],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "flash-budget-sweep",
@@ -281,7 +286,7 @@
       "seed_count": 5,
       "budget_scales": [0.1, 0.25, 0.5, 1.0, 2.0, 10.0],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "flash-small-reference",
@@ -292,7 +297,7 @@
       "seed_count": 5,
       "budget_scales": [0.25, 0.5, 1.0],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "orders-00080",
@@ -303,7 +308,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "orders-00400",
@@ -314,7 +319,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "orders-02000",
@@ -325,7 +330,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "orders-10000",
@@ -336,7 +341,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "mms-01",
@@ -347,7 +352,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "mms-02",
@@ -358,7 +363,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "mms-04",
@@ -369,7 +374,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "mms-08",
@@ -380,7 +385,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     },
     {
       "id": "mms-16",
@@ -391,7 +396,7 @@
       "seed_count": 4,
       "budget_scales": [0.25],
       "budget_basis": "lp_limit_value",
-      "solvers": ["lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
+      "solvers": ["lp-unconstrained", "lp", "retained-cash-fw", "pacing-bundle", "conic-quasi"]
     }
   ]
 }

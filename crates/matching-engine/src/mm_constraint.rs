@@ -30,33 +30,32 @@ impl MmId {
 /// Side of an MM order for capital calculation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MmSide {
-    /// Selling YES tokens (capital = (1 - price) * qty / SHARE_SCALE)
+    /// Selling YES tokens (capital = (1 - fill_price) * qty / SHARE_SCALE)
     SellYes,
-    /// Buying YES tokens (capital = price * qty / SHARE_SCALE)
+    /// Buying YES tokens (capital = fill_price * qty / SHARE_SCALE)
     BuyYes,
-    /// Selling NO tokens (capital = price * qty / SHARE_SCALE)
+    /// Selling NO tokens (capital = (1 - fill_price) * qty / SHARE_SCALE)
     SellNo,
-    /// Buying NO tokens (capital = (1 - price) * qty / SHARE_SCALE)
+    /// Buying NO tokens (capital = fill_price * qty / SHARE_SCALE)
     BuyNo,
 }
 
 impl MmSide {
     /// Calculate capital needed for this side at given price and quantity.
     ///
-    /// Prices are in nanos (1e9 = $1). Quantity is in fixed-point share units.
-    /// Returns capital needed in nanos, rounded up for conservative budget checks.
+    /// `price` is the price of the outcome traded by the order, not always the
+    /// YES price. Prices are in nanos (1e9 = $1), and quantity is in fixed-point
+    /// share units. Returns capital needed in nanos, rounded up for conservative
+    /// budget checks.
     pub fn capital_needed(&self, price: Nanos, quantity: Qty) -> Nanos {
         use crate::types::NANOS_PER_DOLLAR;
 
         let price_per_share = match self {
-            MmSide::SellYes | MmSide::BuyNo => {
-                // Net cost: (1 - price) per unit
+            MmSide::SellYes | MmSide::SellNo => {
+                // A seller receives `price` now and retains a $1 liability.
                 Nanos(NANOS_PER_DOLLAR.saturating_sub(price.0))
             }
-            MmSide::BuyYes | MmSide::SellNo => {
-                // Net cost: price per unit
-                price
-            }
+            MmSide::BuyYes | MmSide::BuyNo => price,
         };
 
         notional_nanos_ceil(price_per_share, quantity)
@@ -67,13 +66,13 @@ impl MmSide {
         use crate::types::NANOS_PER_DOLLAR;
 
         let price_per_share = match self {
-            MmSide::SellYes | MmSide::BuyNo => {
+            MmSide::SellYes | MmSide::SellNo => {
                 if price.0 > NANOS_PER_DOLLAR {
                     return None;
                 }
                 Nanos(NANOS_PER_DOLLAR - price.0)
             }
-            MmSide::BuyYes | MmSide::SellNo => price,
+            MmSide::BuyYes | MmSide::BuyNo => price,
         };
 
         checked_notional_nanos_ceil(price_per_share, quantity)
@@ -185,6 +184,30 @@ mod tests {
         // Buying YES at $0.60 = capital cost of $0.60 per unit
         let capital = MmSide::BuyYes.capital_needed(Nanos(600_000_000), shares_to_qty(100));
         assert_eq!(capital, Nanos(60_000_000_000)); // $60
+    }
+
+    #[test]
+    fn test_mm_side_capital_uses_the_traded_outcome_price() {
+        let quantity = shares_to_qty(100);
+        let yes_price = Nanos(600_000_000);
+        let no_price = Nanos(400_000_000);
+
+        assert_eq!(
+            MmSide::BuyNo.capital_needed(no_price, quantity),
+            Nanos(40_000_000_000),
+        );
+        assert_eq!(
+            MmSide::SellNo.capital_needed(no_price, quantity),
+            Nanos(60_000_000_000),
+        );
+        assert_eq!(
+            MmSide::BuyYes.capital_needed(yes_price, quantity),
+            Nanos(60_000_000_000),
+        );
+        assert_eq!(
+            MmSide::SellYes.capital_needed(yes_price, quantity),
+            Nanos(40_000_000_000),
+        );
     }
 
     #[test]
