@@ -4243,6 +4243,7 @@ dependencies = [
  "sybil-history-types",
  "sybil-l1-protocol",
  "sybil-oracle",
+ "sybil-proof-protocol",
  "sybil-signing",
  "sybil-verifier",
  "sybil-zk",
@@ -7073,11 +7074,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sybil-proof-protocol"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "sha3 0.12.0",
+ "sybil-verifier",
+ "sybil-zk",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "sybil-prover"
 version = "0.1.0"
 dependencies = [
  "alloy",
  "axum",
+ "blake3",
  "clap",
  "hex",
  "matching-engine",
@@ -7092,6 +7106,7 @@ dependencies = [
  "sybil-escape-claim",
  "sybil-l1-abi",
  "sybil-oracle",
+ "sybil-proof-protocol",
  "sybil-verifier",
  "sybil-zk",
  "thiserror 2.0.18",

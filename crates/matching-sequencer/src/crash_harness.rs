@@ -399,6 +399,28 @@ impl Harness {
             qmdb_root.root, header.state_root,
             "{context}: fenced qMDB root differs from committed header"
         );
+        let proof_jobs = self
+            .store
+            .proof_job_outbox_page(None, 100_000)
+            .unwrap_or_else(|error| panic!("{context}: proof-job outbox read failed: {error}"));
+        let latest_proof_job = proof_jobs
+            .last()
+            .unwrap_or_else(|| panic!("{context}: committed chain has no proof job"));
+        assert_eq!(
+            latest_proof_job.height, header.height,
+            "{context}: proof-job frontier differs from committed header"
+        );
+        assert!(
+            proof_jobs
+                .windows(2)
+                .all(|pair| pair[1].height == pair[0].height + 1),
+            "{context}: proof-job outbox contains a committed-height gap"
+        );
+        let decoded_job: sybil_proof_protocol::StateTransitionProofJob =
+            rmp_serde::from_slice(&latest_proof_job.bytes)
+                .unwrap_or_else(|error| panic!("{context}: latest proof job is corrupt: {error}"));
+        assert_eq!(decoded_job.block_height, header.height);
+        assert_eq!(decoded_job.state_root, header.state_root);
         let has_uncommitted_wal = has_uncommitted_wal(&restored);
         let seq =
             BlockSequencer::restore(restored, Arc::new(AdminOracle::new()), self.config.clone());

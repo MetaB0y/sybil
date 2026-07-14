@@ -23,6 +23,7 @@ required-features = ["mock-live"]
 [dependencies]
 alloy = { workspace = true, features = ["sol-types", "std"] }
 axum = { version = "0.8", features = ["json"] }
+blake3 = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 hex = { workspace = true }
 matching-engine = { path = "../matching-engine", optional = true }
@@ -35,6 +36,7 @@ serde_json = { workspace = true }
 sha3 = { workspace = true }
 sybil-api-types = { path = "../sybil-api-types", optional = true }
 sybil-oracle = { path = "../sybil-oracle", optional = true }
+sybil-proof-protocol = { path = "../sybil-proof-protocol" }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
 sybil-escape-claim = { path = "../sybil-escape-claim" }

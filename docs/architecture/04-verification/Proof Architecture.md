@@ -2,7 +2,7 @@
 tags: [zk, infrastructure, authenticated-data]
 layer: verification
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-14
 ---
 
 # Proof architecture
@@ -117,8 +117,11 @@ Not currently provided as general services:
 
 ## Retention and availability
 
-The fenced A/B live qMDB slots are not a historical proof archive. Historical
-claims require retained journals/snapshots or reconstruction from canonical DA.
+The fenced A/B live qMDB slots are not a historical proof archive. Transition
+proving remains possible because each witnessed commit captures a portable
+pre/post qMDB proof job transactionally before rotation. Arbitrary historical
+claims still require retained journals/snapshots or reconstruction from
+canonical DA.
 The API stores blocks and DA payloads according to configured retention, but a
 production provider/decryption/disclosure policy is still required. See
 [[Historical Data Serving]], [[Data Availability]], and [[Operator Replacement]].
@@ -130,7 +133,9 @@ production provider/decryption/disclosure policy is still required. See
 | Typed state/event canonical bytes | `crates/sybil-verifier` |
 | qMDB native roots and persistent slots | `matching-sequencer` store/qMDB modules |
 | Guest qMDB, transition, DA, public inputs | `crates/sybil-zk` |
-| Proof jobs/artifacts/submission | `crates/sybil-prover` |
+| Portable jobs/envelopes | `crates/sybil-proof-protocol` |
+| Job capture | `matching-sequencer` store/outbox |
+| Epoch assembly, artifacts, submission | `crates/sybil-prover` |
 | Escape-specific claim | `crates/sybil-escape-claim`, `crates/sybil-custody` |
 | L1 accepted roots and adapters | `contracts/src/` |
 | Current hashes/commitments | [Generated protocol pins](../../protocol-pins.md) |

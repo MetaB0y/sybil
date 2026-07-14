@@ -174,7 +174,8 @@ Authorization has two boundaries. Key operations bind current `keys_digest` and 
 The host/guest boundary has two main Rust homes:
 
 - `sybil-zk`: guest-safe transition and escape-claim verification plus public-input binding.
-- `sybil-prover`: proof jobs, optional sequencer-store export, preparation, artifacts/API, DA publication, and L1 calldata/submission support.
+- `sybil-proof-protocol`: portable proof jobs, epoch identities, typed proof kinds/envelopes, and exact-byte transport digests.
+- `sybil-prover`: proof preparation/backends, optional sequencer-store debug export, artifacts/API, DA publication, and L1 calldata/submission support.
 - `sybil-custody`: user-side own-leaf snapshots, full-payload reconstruction,
   Form-L proving, adapter wrapping, and optional `escapeClaim` submission.
 

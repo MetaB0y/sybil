@@ -6,7 +6,7 @@ use matching_engine::MarketSet;
 use matching_sequencer::store::Store;
 use matching_sequencer::{AccountStore, AdminOracle, BlockSequencer, SequencerConfig};
 
-use crate::{StateTransitionProofJobId, collect_state_transition_proof_job};
+use crate::StateTransitionProofJobId;
 
 #[derive(Args)]
 pub struct WitgenArgs {
@@ -72,8 +72,8 @@ pub enum WitgenCliError {
         #[source]
         source: matching_sequencer::store::StoreError,
     },
-    #[error("sequencer store has no persisted latest block witness")]
-    MissingLatestWitness,
+    #[error("sequencer store has no persisted proof job")]
+    MissingProofJob,
     #[error("collect proof job: {0}")]
     CollectProofJob(#[from] crate::SequencerStoreWitgenError),
     #[error("encode MessagePack proof job for {path}: {source}")]
@@ -82,14 +82,16 @@ pub enum WitgenCliError {
         #[source]
         source: rmp_serde::encode::Error,
     },
+    #[error("decode MessagePack proof job from outbox: {0}")]
+    DecodeProofJob(#[source] rmp_serde::decode::Error),
     #[error("write {path}: {source}")]
     Write {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
-    #[error("read latest block witness: {0}")]
-    ReadWitness(#[source] matching_sequencer::store::StoreError),
+    #[error("read proof-job outbox: {0}")]
+    ReadProofJob(#[source] matching_sequencer::store::StoreError),
     #[error("persist smoke block: {0}")]
     PersistSmokeBlock(#[source] matching_sequencer::store::StoreError),
     #[error("escape smoke fixture: {0}")]
@@ -324,14 +326,15 @@ async fn export_latest(args: ExportLatestArgs) -> Result<(), WitgenCliError> {
         path: args.store.clone(),
         source,
     })?;
-    let witness = store
-        .latest_block_witness()
-        .map_err(WitgenCliError::ReadWitness)?
-        .ok_or(WitgenCliError::MissingLatestWitness)?;
-    let job = collect_state_transition_proof_job(&store, witness).await?;
+    let entry = store
+        .latest_proof_job_outbox_entry()
+        .map_err(WitgenCliError::ReadProofJob)?
+        .ok_or(WitgenCliError::MissingProofJob)?;
+    let job: crate::StateTransitionProofJob =
+        rmp_serde::from_slice(&entry.bytes).map_err(WitgenCliError::DecodeProofJob)?;
     let job_id = job.id();
 
-    write_msgpack_named(&args.job, &job)?;
+    write_bytes(&args.job, &entry.bytes)?;
 
     print_job_id(&job_id);
     println!("state_leaf_proofs={}", job.state_leaf_proofs.len());
@@ -367,8 +370,13 @@ async fn smoke_job(args: SmokeJobArgs) -> Result<(), WitgenCliError> {
         .await
         .map_err(WitgenCliError::PersistSmokeBlock)?;
 
-    let job = collect_state_transition_proof_job(&store, production.witness).await?;
-    write_msgpack_named(&args.job, &job)?;
+    let entry = store
+        .latest_proof_job_outbox_entry()
+        .map_err(WitgenCliError::ReadProofJob)?
+        .ok_or(WitgenCliError::MissingProofJob)?;
+    let job: crate::StateTransitionProofJob =
+        rmp_serde::from_slice(&entry.bytes).map_err(WitgenCliError::DecodeProofJob)?;
+    write_bytes(&args.job, &entry.bytes)?;
 
     print_job_id(&job.id());
     println!("state_leaf_proofs={}", job.state_leaf_proofs.len());
@@ -382,6 +390,13 @@ fn write_msgpack_named<T: serde::Serialize>(path: &Path, value: &T) -> Result<()
         path: path.to_path_buf(),
         source,
     })?;
+    std::fs::write(path, bytes).map_err(|source| WitgenCliError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), WitgenCliError> {
     std::fs::write(path, bytes).map_err(|source| WitgenCliError::Write {
         path: path.to_path_buf(),
         source,

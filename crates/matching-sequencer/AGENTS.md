@@ -18,6 +18,8 @@ through `SequencerHandle`. Simulation-only agents remain in `sequencer-sim`.
 - Every acknowledged between-block mutation is durable-before-live and follows
   the fixed WAL replay order.
 - redb is the commit authority; recovery reads only the fenced qMDB slot.
+- A witnessed block and its portable proof job cross the same redb fence;
+  capture pre/post qMDB proofs before either A/B slot can rotate.
 - `OrderBook` owns resting-order reservations. Replay re-derives aggregates.
 - Settlement uses shared `matching-engine` integer helpers and MINT derivation.
 - Unsupported value-bearing order shapes fail closed at admission.

@@ -2,7 +2,7 @@
 tags: [zk]
 layer: verification
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-14
 ---
 
 # ZK Integration Path
@@ -24,8 +24,8 @@ proof generator.
 
 ```mermaid
 flowchart LR
-    S[Sequencer store] --> J[Portable proof job]
-    J --> P[Prover worker]
+    S[Sequencer fenced commit] --> J[Durable proof-job outbox]
+    J --> P[Standalone prover]
     P --> D[DA payload + manifest]
     P --> G[OpenVM transition guest]
     G --> R[Proof + public-input hash]
@@ -51,8 +51,9 @@ and [[L1 Settlement and Vault]] for the contract boundary.
 | Component | Responsibility |
 |---|---|
 | `sybil-verifier` | Native match, settlement, block-integrity, and order checks |
-| `sybil-zk` | Guest-safe transition verification and public-input hashing |
-| `sybil-prover` | Proof jobs, guest inputs, DA artifacts, worker/API, and L1 calldata |
+| `sybil-zk` | Deployed guest-safe per-block verification and public-input hashing |
+| `sybil-proof-protocol` | Portable jobs, host epoch fold/IDs, proof kinds/envelopes, transport digests |
+| `sybil-prover` | Guest inputs, mock/backend boundary, DA artifacts, worker/API, and L1 calldata |
 | `zk/openvm-guest` | OpenVM 2.0 main transition program |
 | `sybil-escape-claim` | Small, independent Form-L escape statement |
 | `zk/openvm-escape-guest` | OpenVM escape program |
@@ -88,14 +89,22 @@ input hashes, and guest commitments are tracked in the generated
 ## Proof-Job and DA Boundary
 
 `StateTransitionProofJob` is the portable, versioned handoff between sequencer
-storage and a prover. The default `sybil-prover` path has no sequencer
-dependency; store extraction lives behind the `sequencer-store` feature.
+storage and a prover. A witnessed block captures its post-state proof and, when
+present, prior-state proof before qMDB A/B rotation. The serialized bytes cross
+the same redb fence as the committed block and remain in an ordered outbox.
+Exact-byte digests make ingest acknowledgements idempotent and conflict-safe.
+The default `sybil-prover` path has no sequencer dependency; direct store access
+remains debug-only behind the `sequencer-store` feature.
 
-The current worker uses a file inbox and durable per-block artifact directories.
+The current compatibility worker uses a file inbox and per-block artifact directories.
 It validates a job, prepares guest input, writes the DA payload and manifest,
 records the public-input hash, and exposes artifact status over HTTP. This is a
-clean service boundary, not yet a production proving scheduler: prepared jobs
-start with `proof_status: "not_started"`.
+service boundary, not yet the redb-backed production scheduler: prepared jobs
+start with `proof_status: "not_started"`. Host epoch folding and a typed mock
+envelope exist without changing the deployed guest fingerprint; the streamed
+guest, durable scheduling, OpenVM STARK subprocess execution, and
+authenticated outbox pull/ack remain the next implementation stage. See
+[ADR-0019](../../adr/0019-epoch-stark-prover-service.md).
 
 `da_commitment` binds the canonical witness payload, height, state root,
 witness root, payload length, and provider-reference hash. The file provider is

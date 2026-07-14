@@ -11,6 +11,7 @@ matching-solver = { path = "../matching-solver", features = ["lp"] }
 sybil-signing = { path = "../sybil-signing" }
 sybil-oracle = { path = "../sybil-oracle" }
 sybil-l1-protocol = { path = "../sybil-l1-protocol" }
+sybil-proof-protocol = { path = "../sybil-proof-protocol" }
 sybil-verifier = { path = "../sybil-verifier" }
 sybil-zk = { path = "../sybil-zk" }
 sybil-history-types = { path = "../sybil-history-types" }

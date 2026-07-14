@@ -2,7 +2,7 @@
 tags: [infrastructure]
 layer: core
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 The Rust workspace is organized as a directed acyclic graph (DAG) of crates.
@@ -15,15 +15,16 @@ The dependency DAG flows in three tiers. **Foundation**: `matching-engine` defin
 
 The ZK boundary is deliberately split from block production. `sybil-zk`
 depends on `sybil-verifier` with native qMDB runtime features disabled and
-contains the guest-safe transition verifier. `sybil-prover` owns the host-side
-proof job type, job-to-guest-input conversion, worker/API artifact surface,
-DA publication, and L1 calldata encoding. Its default build depends on
-`sybil-verifier` and `sybil-zk` but not on `matching-sequencer`; the optional
-`sequencer-store` feature adds the `witgen` subcommands that read persisted
-block/proof material from the sequencer store. The sequencer depends on
-`sybil-zk` only for the shared serializable qMDB proof structs; it still
-produces and persists blocks, witnesses, and qMDB proof material without
-assembling prover inputs.
+contains the currently deployed guest-safe per-block transition verifier. The
+dependency-light `sybil-proof-protocol` owns portable jobs, the host-side epoch
+fold preview, content-derived epoch IDs, proof kinds/envelopes, and exact-byte
+transport digests. Both `matching-sequencer` and `sybil-prover` depend on it
+without a cycle. The sequencer captures each witnessed block's pre/post qMDB
+proof job before A/B slot rotation and commits it beside the product-history
+batch in the block's redb-fenced outboxes. `sybil-prover` owns host
+preparation, backends, worker/API artifacts, DA publication, and L1 calldata.
+Its default build does not depend on `matching-sequencer`; the optional
+`sequencer-store` feature remains debug/store tooling.
 
 Emergency exit has its own narrow verifier/tool split. `sybil-escape-claim`
 owns guest-safe Form-L account/reservation verification and public inputs;
@@ -68,6 +69,7 @@ graph TB
     ORACLE --> SEQ
     VERIFIER --> SEQ
     ZK --> SEQ
+    PROOFPROTO --> SEQ
 
     SEQ --> API["sybil-api"]
     HISTTYPES["sybil-history-types<br/>private committed facts + queries"] --> SEQ
@@ -84,6 +86,9 @@ graph TB
     ZK --> ESCAPEGUEST
     VERIFIER --> PROVER["sybil-prover"]
     ZK --> PROVER
+    VERIFIER --> PROOFPROTO["sybil-proof-protocol<br/>portable jobs · typed envelopes"]
+    ZK --> PROOFPROTO
+    PROOFPROTO --> PROVER
     SEQ -.->|"sequencer-store feature"| PROVER
     ZK --> OPENVM["zk/openvm-guest"]
 
@@ -119,10 +124,11 @@ graph TB
 - Sequencer composes middle-tier crates into the block production pipeline
 - `sybil-history-types` is the narrow replay contract; `sybil-history` owns
   product-history storage/query load without depending on the sequencer
-- `sybil-zk` is guest-safe verification; `sybil-prover` owns portable proof jobs and host-side prover input construction
-- `sybil-prover witgen ...` is sequencer-side tooling for exporting latest-block proof jobs from the store, gated behind `sequencer-store`
+- `sybil-zk` is guest-safe verification; `sybil-proof-protocol` is the portable sequencer/prover handoff; `sybil-prover` owns host orchestration
+- Witnessed block commit captures ordered durable history and proof-job outboxes before qMDB slots rotate
+- `sybil-prover witgen ...` remains debug store tooling behind `sequencer-store`; it is not the production ingest boundary
 - Default `sybil-prover` builds are the proof-job CLI/service boundary and settlement calldata encoder; they do not depend on the sequencer
-- Sequencer owns block production and persistence, not prover input assembly; its `sybil-zk` edge is limited to shared qMDB proof structs
+- Sequencer owns block production and transactional proof-job capture, not epoch assembly or proving
 - `sybil-signing` is client-signature serialization, not validity-commitment serialization
 - `sybil-client` is THE Rust HTTP client (SYB-171): `sybil-polymarket` and the `sybil-admin` CLI both depend on it; no hand-written duplicate should be reintroduced
 - `sybil-l1-protocol` stays guest-safe and dependency-light; `sybil-l1-abi` gives host clients one unconditional set of generated Alloy bindings

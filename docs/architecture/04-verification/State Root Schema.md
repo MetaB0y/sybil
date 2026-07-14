@@ -3,7 +3,7 @@ tags: [zk, spec]
 layer: verification
 crate: sybil-verifier
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-14
 ---
 
 # State Root Schema
@@ -155,9 +155,10 @@ The account qMDB slot currently stores:
 
 `QmdbState` exposes the committed typed-state root plus typed-leaf inclusion
 and exclusion proofs. Those proofs verify directly against
-`BlockHeader.state_root` for the fenced slot recorded by redb.
-The sequencer persists this material; `sybil-prover` owns turning it into
-portable proof jobs and then OpenVM prover input.
+`BlockHeader.state_root` for the fenced slot recorded by redb. During witnessed
+block commit, the sequencer converts the required pre/post proofs into a
+`sybil-proof-protocol` job and stores it in the same redb fence transaction.
+`sybil-prover` consumes the portable job and owns epoch assembly/proving.
 
 ## Proof API
 

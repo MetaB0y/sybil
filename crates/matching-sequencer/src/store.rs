@@ -88,6 +88,15 @@ use crate::order_book::{
 use crate::price_tracker::{RollingPriceAnchorsSnapshot, RollingVolumeSnapshot};
 use crate::sequencer::{BlockSequencer, SequencerConfig};
 
+/// One exact portable proof-job payload from the durable sequencer outbox.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProofJobOutboxEntry {
+    pub height: u64,
+    pub digest: [u8; 32],
+    pub bytes: Vec<u8>,
+    pub acknowledged: bool,
+}
+
 mod auto_resolution;
 mod codec;
 mod commit;

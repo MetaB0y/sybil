@@ -2,6 +2,18 @@ use serde::{Deserialize, Serialize};
 use sybil_verifier::{BlockWitness, commitments::state_schema};
 
 pub const STATE_TRANSITION_PROOF_JOB_VERSION: u8 = 2;
+pub const PROOF_JOB_TRANSPORT_DIGEST_DOMAIN: &[u8] = b"sybil/proof-job-transport/v1";
+
+/// Digest of the exact serialized bytes transferred through the proof-job
+/// outbox. This is distinct from the content-derived logical job ID: an ack
+/// must identify the bytes the prover made durable.
+pub fn proof_job_transport_digest(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(PROOF_JOB_TRANSPORT_DIGEST_DOMAIN);
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+    *hasher.finalize().as_bytes()
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StateTransitionProofJob {
@@ -257,5 +269,17 @@ mod tests {
                 field: "block_hash"
             })
         ));
+    }
+
+    #[test]
+    fn transport_digest_binds_length_and_bytes() {
+        assert_ne!(
+            proof_job_transport_digest(b"ab"),
+            proof_job_transport_digest(b"a")
+        );
+        assert_ne!(
+            proof_job_transport_digest(b"ab"),
+            proof_job_transport_digest(b"ba")
+        );
     }
 }

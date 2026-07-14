@@ -59,6 +59,7 @@ relevant, not replaced).
 | [0016](0016-public-market-tape-and-recovery-da-boundaries.md) | Public market tape, private canonical blocks, and distinct recovery DA | Accepted | No |
 | [0017](0017-bounded-durable-account-history.md) | Bounded durable account history with explicit retention semantics | Superseded by ADR-0018 | No |
 | [0018](0018-extract-private-history-service.md) | Private history service behind a transactional outbox | Accepted | No |
+| [0019](0019-epoch-stark-prover-service.md) | Epoch STARK proofs from a durable standalone prover service | Accepted | Yes |
 
 > These first ten are **backfilled** from decisions already made and already in
 > production; their rationale was reconstructed from the design/review estate

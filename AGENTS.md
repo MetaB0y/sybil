@@ -48,6 +48,7 @@ sybil/
 │   ├── sybil-oracle/              # Oracle/resolution service
 │   ├── sybil-verifier/            # Native canonical witness/state verification
 │   ├── sybil-zk/                  # Guest-safe transition/public-input verification
+│   ├── sybil-proof-protocol/      # Portable proof jobs, epoch IDs, typed proof envelopes
 │   ├── sybil-prover/              # Proof jobs, DA artifacts, calldata/submission
 │   ├── sybil-escape-claim/         # Guest-safe conservative escape statement
 │   ├── sybil-custody/              # User snapshots, reconstruction, escape proving CLI

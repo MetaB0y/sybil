@@ -8,7 +8,7 @@ pub mod abi;
 pub mod artifacts;
 pub mod da;
 pub mod error;
-pub mod job;
+pub mod mock_backend;
 pub mod serve;
 
 #[cfg(feature = "mock-live")]
@@ -19,7 +19,7 @@ pub mod sequencer_store;
 pub mod witgen_cli;
 
 pub use error::ProverCliError;
-pub use job::{
+pub use sybil_proof_protocol::{
     ProofJobError, STATE_TRANSITION_PROOF_JOB_VERSION, StateTransitionProofJob,
     StateTransitionProofJobId, StateTransitionStateLeafProof, build_state_transition_guest_input,
 };

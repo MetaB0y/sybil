@@ -1,6 +1,102 @@
 use super::*;
 
 impl Store {
+    pub fn latest_proof_job_outbox_entry(&self) -> Result<Option<ProofJobOutboxEntry>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let jobs = txn.open_table(PROOF_JOB_OUTBOX)?;
+        let acks = txn.open_table(PROOF_JOB_ACKS)?;
+        let Some(row) = jobs.iter()?.next_back() else {
+            return Ok(None);
+        };
+        let (height, value) = row?;
+        let height = height.value();
+        let bytes = value.value().to_vec();
+        let digest = sybil_proof_protocol::proof_job_transport_digest(&bytes);
+        let acknowledged = acks
+            .get(height)?
+            .is_some_and(|stored| stored.value() == digest);
+        Ok(Some(ProofJobOutboxEntry {
+            height,
+            digest,
+            bytes,
+            acknowledged,
+        }))
+    }
+
+    /// Read portable proof jobs in strictly increasing committed-height order.
+    /// Rows remain readable after acknowledgement until a separate retention
+    /// policy safely prunes them.
+    pub fn proof_job_outbox_page(
+        &self,
+        after_height: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<ProofJobOutboxEntry>, StoreError> {
+        if limit == 0 || after_height == Some(u64::MAX) {
+            return Ok(Vec::new());
+        }
+        let start = after_height.map_or(0, |height| height + 1);
+        let txn = self.db.begin_read()?;
+        let jobs = txn.open_table(PROOF_JOB_OUTBOX)?;
+        let acks = txn.open_table(PROOF_JOB_ACKS)?;
+        let mut entries = Vec::with_capacity(limit);
+        for row in jobs.range(start..)?.take(limit) {
+            let (height, value) = row?;
+            let height = height.value();
+            let bytes = value.value().to_vec();
+            let digest = sybil_proof_protocol::proof_job_transport_digest(&bytes);
+            let acknowledged = acks
+                .get(height)?
+                .is_some_and(|stored| stored.value() == digest);
+            entries.push(ProofJobOutboxEntry {
+                height,
+                digest,
+                bytes,
+                acknowledged,
+            });
+        }
+        Ok(entries)
+    }
+
+    /// Record that the prover made these exact bytes durable. A wrong digest
+    /// fails closed and cannot acknowledge a conflicting/corrupt payload.
+    pub async fn acknowledge_proof_job(
+        &self,
+        height: u64,
+        digest: [u8; 32],
+    ) -> Result<(), StoreError> {
+        self.redb_write(move |db| {
+            let txn = db.begin_write()?;
+            {
+                let jobs = txn.open_table(PROOF_JOB_OUTBOX)?;
+                let job = jobs.get(height)?.ok_or_else(|| {
+                    StoreError::ProofJob(format!(
+                        "cannot acknowledge missing proof job at height {height}"
+                    ))
+                })?;
+                let expected = sybil_proof_protocol::proof_job_transport_digest(job.value());
+                if digest != expected {
+                    return Err(StoreError::ProofJob(format!(
+                        "ack digest does not match proof job at height {height}"
+                    )));
+                }
+            }
+            {
+                let mut acks = txn.open_table(PROOF_JOB_ACKS)?;
+                if let Some(existing) = acks.get(height)?
+                    && existing.value() != digest
+                {
+                    return Err(StoreError::ProofJob(format!(
+                        "conflicting ack digest already exists at height {height}"
+                    )));
+                }
+                acks.insert(height, digest.as_slice())?;
+            }
+            txn.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn state_qmdb_root(
         &self,
         slot: AccountSnapshotSlot,

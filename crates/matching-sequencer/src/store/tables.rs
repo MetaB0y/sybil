@@ -44,6 +44,16 @@ pub(super) const BLOCK_WITNESSES: TableDefinition<u64, &[u8]> =
 pub(super) const PRODUCT_HISTORY_OUTBOX: TableDefinition<u64, &[u8]> =
     TableDefinition::new("history_outbox_v1");
 
+/// Portable state-transition proof jobs captured before qMDB slot rotation.
+/// Rows are retained until the prover has durably acknowledged the exact byte
+/// digest; pruning policy is intentionally separate from block-history
+/// retention because old qMDB proof material cannot be reconstructed.
+pub(super) const PROOF_JOB_OUTBOX: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("proof_job_outbox");
+/// Height -> acknowledged exact transport digest.
+pub(super) const PROOF_JOB_ACKS: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("proof_job_acks");
+
 /// Pubkey registry: compressed_point (33 bytes) → account_id (u64)
 pub(super) const PUBKEY_REGISTRY: TableDefinition<&[u8], u64> =
     TableDefinition::new("pubkey_registry");

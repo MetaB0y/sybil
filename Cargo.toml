@@ -23,6 +23,7 @@ members = [
     "crates/sybil-escape-claim",
     "crates/sybil-custody",
     "crates/sybil-prover",
+    "crates/sybil-proof-protocol",
     "crates/sybil-polymarket",
     "tools/golden-vectors",
 ]

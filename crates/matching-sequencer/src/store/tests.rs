@@ -584,6 +584,43 @@ async fn save_block_with_witness_prunes_historical_witnesses() {
         .unwrap()
         .expect("latest witness retained");
     assert_eq!(latest.header.height, header2.height);
+
+    // Unlike the latest-only witness cache, portable jobs survive qMDB slot
+    // rotation and remain ordered until the prover acknowledges exact bytes.
+    let outbox = store.proof_job_outbox_page(None, 10).unwrap();
+    assert_eq!(
+        outbox.iter().map(|entry| entry.height).collect::<Vec<_>>(),
+        vec![header1.height, header2.height]
+    );
+    assert!(outbox.iter().all(|entry| !entry.acknowledged));
+    for entry in &outbox {
+        let job: sybil_proof_protocol::StateTransitionProofJob =
+            rmp_serde::from_slice(&entry.bytes).unwrap();
+        assert_eq!(job.block_height, entry.height);
+        sybil_proof_protocol::build_state_transition_guest_input(job).unwrap();
+    }
+
+    let mut wrong_digest = outbox[0].digest;
+    wrong_digest[0] ^= 1;
+    assert!(matches!(
+        store
+            .acknowledge_proof_job(header1.height, wrong_digest)
+            .await,
+        Err(StoreError::ProofJob(_))
+    ));
+    store
+        .acknowledge_proof_job(header1.height, outbox[0].digest)
+        .await
+        .unwrap();
+    // Exact repeated acknowledgements are idempotent.
+    store
+        .acknowledge_proof_job(header1.height, outbox[0].digest)
+        .await
+        .unwrap();
+
+    let outbox = store.proof_job_outbox_page(None, 10).unwrap();
+    assert!(outbox[0].acknowledged);
+    assert!(!outbox[1].acknowledged);
 }
 
 #[tokio::test]
@@ -1290,6 +1327,10 @@ async fn import_witness_drill_restores_head_and_produces_children() {
         1,
         "first block leaves one order resting"
     );
+    source_store
+        .save_block_with_witness_and_history(seq.snapshot(), &first.witness, &first.sealed_block())
+        .await
+        .unwrap();
 
     let deposit = next_l1_deposit_for(&seq, bridge_account, 100_000);
     seq.ingest_l1_deposit(deposit).unwrap();
@@ -1438,6 +1479,13 @@ async fn import_witness_drill_restores_head_and_produces_children() {
         sybil_verifier::commitments::witness_schema::canonical_witness_bytes(&latest),
         sybil_verifier::commitments::witness_schema::canonical_witness_bytes(&decoded)
     );
+    assert!(
+        fresh_store
+            .latest_proof_job_outbox_entry()
+            .unwrap()
+            .is_none(),
+        "the imported head is a recovery checkpoint without a local pre-state proof"
+    );
 
     let restored = fresh_store.load_state().await.unwrap().unwrap();
     assert_eq!(restored.height, second.block.header.height);
@@ -1496,6 +1544,10 @@ async fn import_witness_drill_restores_head_and_produces_children() {
             &child.witness.state_sidecar,
         )
     );
+    fresh_store
+        .save_block_with_witness(restored_seq.snapshot(), &child.witness)
+        .await
+        .unwrap();
 
     let grandchild = restored_seq.produce_block(Vec::new(), 4_000);
     assert_eq!(
@@ -1518,6 +1570,19 @@ async fn import_witness_drill_restores_head_and_produces_children() {
             &grandchild.witness.post_state,
             &grandchild.witness.state_sidecar,
         )
+    );
+    fresh_store
+        .save_block_with_witness(restored_seq.snapshot(), &grandchild.witness)
+        .await
+        .unwrap();
+    assert_eq!(
+        fresh_store
+            .proof_job_outbox_page(None, 10)
+            .unwrap()
+            .iter()
+            .map(|entry| entry.height)
+            .collect::<Vec<_>>(),
+        vec![child.block.header.height, grandchild.block.header.height]
     );
 
     assert_eq!(

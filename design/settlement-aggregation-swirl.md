@@ -10,7 +10,9 @@ sources: OpenVM v2.0.0 docs (tag v2.0.0), blog.openvm.dev, SWIRL paper, repo @ 2
 # SYB-119: Aggregation vs monolithic settlement proofs under OpenVM 2.0.0 (SWIRL)
 
 > **Status note (2026-07-11):** this is a dated research recommendation, not a
-> statement that an epoch guest or aggregation pipeline exists in `main`.
+> statement that an epoch guest or aggregation pipeline exists in `main`. The
+> revalidated runtime design and implementation sequence now live in
+> [`epoch-prover-service.md`](epoch-prover-service.md) and ADR-0019.
 
 **TL;DR.** SWIRL did change the economics, but not where we expected. The EVM leg is still
 a Halo2/KZG wrapper (~316K gas to verify on-chain), and per-block L1 submission is still

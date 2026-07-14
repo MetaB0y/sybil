@@ -80,7 +80,11 @@ impl Store {
             next_withdrawal_id: snapshot.bridge_state.next_withdrawal_id,
         };
 
-        self.save_block_with_witness(snapshot, &witness).await?;
+        // The imported head is a trusted recovery checkpoint, not a locally
+        // replayable transition: the fresh store has no qMDB slot for its
+        // `previous_header`. Its first child resumes mandatory proof-job
+        // capture using this checkpoint as the pre-state slot.
+        self.save_imported_checkpoint(snapshot, &witness).await?;
         Ok(summary)
     }
 
@@ -103,6 +107,8 @@ impl Store {
                 txn.open_table(CANONICAL_BLOCK_ARCHIVE)?.len()?,
             ),
             ("block_witnesses", txn.open_table(BLOCK_WITNESSES)?.len()?),
+            ("proof_job_outbox", txn.open_table(PROOF_JOB_OUTBOX)?.len()?),
+            ("proof_job_acks", txn.open_table(PROOF_JOB_ACKS)?.len()?),
             ("da_artifacts", txn.open_table(DA_ARTIFACTS)?.len()?),
             ("da_manifests", txn.open_table(DA_MANIFESTS)?.len()?),
             ("pubkey_registry", txn.open_table(PUBKEY_REGISTRY)?.len()?),

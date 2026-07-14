@@ -61,6 +61,7 @@ struct RedbBlockCommit {
     replay_block_bytes: Option<Vec<u8>>,
     witness_bytes: Option<Vec<u8>>,
     history_batch_bytes: Option<Vec<u8>>,
+    proof_job_bytes: Option<Vec<u8>>,
     pubkey_rows: Vec<(Vec<u8>, crate::crypto::RegisteredPubkey)>,
     clearing_price_rows: Vec<(u32, Vec<u8>)>,
     market_volume_rows: Vec<(u32, u64)>,
@@ -79,6 +80,15 @@ struct RedbBlockCommit {
     fill_total_counts_bytes: Vec<u8>,
     cost_basis_tracker_bytes: Vec<u8>,
     counters: PersistedCoreCounters,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProofJobCapture {
+    Required,
+    /// A disaster-recovery checkpoint has no local pre-state qMDB slot, so
+    /// its incoming transition cannot be reconstructed. Children of the
+    /// checkpoint return to required capture immediately.
+    SkipImportedCheckpoint,
 }
 
 fn history_event_kind(
@@ -213,6 +223,7 @@ fn build_redb_block_commit(
     witness: Option<&BlockWitness>,
     replay_block: Option<&SealedBlock>,
     next_slot: AccountSnapshotSlot,
+    proof_job_bytes: Option<Vec<u8>>,
 ) -> Result<RedbBlockCommit, StoreError> {
     let mut market_rows = Vec::new();
     for (id, market) in snapshot.markets.iter_with_ids() {
@@ -300,6 +311,7 @@ fn build_redb_block_commit(
         replay_block_bytes,
         witness_bytes,
         history_batch_bytes,
+        proof_job_bytes,
         pubkey_rows,
         clearing_price_rows,
         market_volume_rows,
@@ -410,6 +422,20 @@ where
                 )));
             }
             drop(existing);
+        }
+        table.insert(commit.height, bytes.as_slice())?;
+    }
+
+    if let Some(bytes) = &commit.proof_job_bytes {
+        let mut table = txn.open_table(PROOF_JOB_OUTBOX)?;
+        let conflicts = table
+            .get(commit.height)?
+            .is_some_and(|existing| existing.value() != bytes.as_slice());
+        if conflicts {
+            return Err(StoreError::ProofJob(format!(
+                "different proof-job bytes already exist at committed height {}",
+                commit.height
+            )));
         }
         table.insert(commit.height, bytes.as_slice())?;
     }
@@ -616,6 +642,8 @@ impl Store {
         txn.open_table(CANONICAL_BLOCK_ARCHIVE)?;
         txn.open_table(BLOCK_WITNESSES)?;
         txn.open_table(PRODUCT_HISTORY_OUTBOX)?;
+        txn.open_table(PROOF_JOB_OUTBOX)?;
+        txn.open_table(PROOF_JOB_ACKS)?;
         txn.open_table(DA_ARTIFACTS)?;
         txn.open_table(DA_MANIFESTS)?;
         txn.open_table(PUBKEY_REGISTRY)?;
@@ -682,7 +710,8 @@ impl Store {
     }
     /// Save the sequencer state after a block. Single ACID transaction.
     pub async fn save_block(&self, snapshot: SequencerSnapshot<'_>) -> Result<(), StoreError> {
-        self.save_block_inner(snapshot, None, None).await
+        self.save_block_inner(snapshot, None, None, ProofJobCapture::Required)
+            .await
     }
 
     /// Save the sequencer state and its witness after a block.
@@ -695,7 +724,8 @@ impl Store {
         snapshot: SequencerSnapshot<'_>,
         witness: &BlockWitness,
     ) -> Result<(), StoreError> {
-        self.save_block_inner(snapshot, Some(witness), None).await
+        self.save_block_inner(snapshot, Some(witness), None, ProofJobCapture::Required)
+            .await
     }
 
     /// Save sequencer state, witness, and the API replay block payload after
@@ -707,8 +737,27 @@ impl Store {
         witness: &BlockWitness,
         block: &SealedBlock,
     ) -> Result<(), StoreError> {
-        self.save_block_inner(snapshot, Some(witness), Some(block))
-            .await
+        self.save_block_inner(
+            snapshot,
+            Some(witness),
+            Some(block),
+            ProofJobCapture::Required,
+        )
+        .await
+    }
+
+    pub(super) async fn save_imported_checkpoint(
+        &self,
+        snapshot: SequencerSnapshot<'_>,
+        witness: &BlockWitness,
+    ) -> Result<(), StoreError> {
+        self.save_block_inner(
+            snapshot,
+            Some(witness),
+            None,
+            ProofJobCapture::SkipImportedCheckpoint,
+        )
+        .await
     }
 
     async fn save_block_inner(
@@ -716,6 +765,7 @@ impl Store {
         snapshot: SequencerSnapshot<'_>,
         witness: Option<&BlockWitness>,
         replay_block: Option<&SealedBlock>,
+        proof_job_capture: ProofJobCapture,
     ) -> Result<(), StoreError> {
         if let Some(witness) = witness {
             validate_witness_header(snapshot.header, witness)?;
@@ -769,7 +819,19 @@ impl Store {
         #[cfg(test)]
         self.fail_save_block_at(StoreFaultPoint::AfterQmdbPersistBeforeRedbFence)?;
 
-        let commit = build_redb_block_commit(&snapshot, witness, replay_block, next_slot)?;
+        // Capture qMDB leaf proofs before the next block can rotate either of
+        // the two slots. The serialized job crosses the same redb commit fence
+        // as the block, so a committed block cannot lose its proving material.
+        let proof_job_bytes = match (witness, proof_job_capture) {
+            (Some(witness), ProofJobCapture::Required) => Some(
+                self.build_proof_job_bytes(witness, next_slot, current_fence)
+                    .await?,
+            ),
+            (None, _) | (Some(_), ProofJobCapture::SkipImportedCheckpoint) => None,
+        };
+
+        let commit =
+            build_redb_block_commit(&snapshot, witness, replay_block, next_slot, proof_job_bytes)?;
         #[cfg(test)]
         let fault_injection = self.save_block_faults();
         self.redb_write(move |db| {
@@ -789,6 +851,113 @@ impl Store {
 
         debug!(height = snapshot.header.height, "block persisted");
         Ok(())
+    }
+
+    async fn build_proof_job_bytes(
+        &self,
+        witness: &BlockWitness,
+        post_slot: AccountSnapshotSlot,
+        current_fence: Option<AccountStateFence>,
+    ) -> Result<Vec<u8>, StoreError> {
+        let post_leaves = sybil_verifier::commitments::state_schema::state_root_leaves(
+            &witness.post_state,
+            &witness.state_sidecar,
+        );
+        let mut state_leaf_proofs = Vec::with_capacity(post_leaves.len());
+        for (index, (key, value)) in post_leaves.iter().enumerate() {
+            let proof = self
+                .account_state_store
+                .qmdb_state_leaf_proof(post_slot, key)
+                .await?
+                .ok_or_else(|| {
+                    StoreError::ProofJob(format!(
+                        "missing post-state qMDB proof at sorted leaf index {index}"
+                    ))
+                })?;
+            if proof.root != witness.header.state_root
+                || proof.slot != post_slot
+                || &proof.leaf_key != key
+                || &proof.leaf_value != value
+                || !proof.verify()
+            {
+                return Err(StoreError::ProofJob(format!(
+                    "invalid post-state qMDB proof at sorted leaf index {index}"
+                )));
+            }
+            state_leaf_proofs.push(sybil_proof_protocol::StateTransitionStateLeafProof {
+                key: key.clone(),
+                value: value.clone(),
+                proof: proof.proof_parts(),
+            });
+        }
+
+        let mut pre_state_leaf_proofs = Vec::new();
+        if let Some(previous) = &witness.previous_header {
+            let pre_fence = current_fence.ok_or_else(|| {
+                StoreError::ProofJob(
+                    "non-genesis witness has no committed pre-state qMDB slot".to_string(),
+                )
+            })?;
+            if pre_fence.height != previous.height {
+                return Err(StoreError::ProofJob(format!(
+                    "pre-state fence height {} does not match witness previous height {}",
+                    pre_fence.height, previous.height
+                )));
+            }
+            let pre_root = self
+                .account_state_store
+                .qmdb_state_root(pre_fence.slot)
+                .await?;
+            if pre_root.root != previous.state_root {
+                return Err(StoreError::ProofJob(
+                    "pre-state qMDB root does not match witness previous header".to_string(),
+                ));
+            }
+
+            let pre_leaves = sybil_verifier::commitments::state_schema::state_root_leaves(
+                &witness.pre_state,
+                &witness.pre_state_sidecar,
+            );
+            pre_state_leaf_proofs.reserve(pre_leaves.len());
+            for (index, (key, value)) in pre_leaves.iter().enumerate() {
+                let proof = self
+                    .account_state_store
+                    .qmdb_state_leaf_proof(pre_fence.slot, key)
+                    .await?
+                    .ok_or_else(|| {
+                        StoreError::ProofJob(format!(
+                            "missing pre-state qMDB proof at sorted leaf index {index}"
+                        ))
+                    })?;
+                if proof.root != previous.state_root
+                    || proof.slot != pre_fence.slot
+                    || &proof.leaf_key != key
+                    || &proof.leaf_value != value
+                    || !proof.verify()
+                {
+                    return Err(StoreError::ProofJob(format!(
+                        "invalid pre-state qMDB proof at sorted leaf index {index}"
+                    )));
+                }
+                pre_state_leaf_proofs.push(sybil_proof_protocol::StateTransitionStateLeafProof {
+                    key: key.clone(),
+                    value: value.clone(),
+                    proof: proof.proof_parts(),
+                });
+            }
+        }
+
+        let job = sybil_proof_protocol::StateTransitionProofJob::new(
+            witness.clone(),
+            state_leaf_proofs,
+            pre_state_leaf_proofs,
+        );
+        // Rebuild the guest input now, while failures can still abort the
+        // block. This validates ordering and both qMDB roots without changing
+        // the guest commitment or running a prover in the sequencer process.
+        sybil_proof_protocol::build_state_transition_guest_input(job.clone())
+            .map_err(|error| StoreError::ProofJob(error.to_string()))?;
+        rmp_serde::to_vec_named(&job).map_err(StoreError::from)
     }
 }
 
@@ -828,6 +997,8 @@ pub enum StoreError {
     CorruptLayout(String),
     #[error("witness import refused: {0}")]
     WitnessImport(String),
+    #[error("proof-job capture failed: {0}")]
+    ProofJob(String),
     #[cfg(test)]
     #[error("injected store fault: {0}")]
     InjectedFault(String),

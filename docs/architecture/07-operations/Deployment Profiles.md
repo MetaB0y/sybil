@@ -3,7 +3,7 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 Sybil runs the same API/history images in three very different postures. The
@@ -119,21 +119,31 @@ At boot, before opening the store or binding the socket,
 
 `local` and `devnet` never block; only `prod` fail-closes.
 
-## Witness retention policy (today's reality)
+## Witness and proof-job retention policy
 
 - Block witnesses persist to the `block_witnesses` redb table **only when a
   store is configured** (`SYBIL_DATA_DIR` set). There is **no**
   `SYBIL_PERSIST_BLOCK_WITNESSES` toggle — the ticket's hypothetical knob does
   not exist in the code.
-- Persistence is **latest-only**: each block's save runs
+- The convenience witness cache is **latest-only**: each block's save runs
   `table.retain(|h, _| h == current_height)`, so exactly one witness (the most
-  recent block) is retained. Older full-state witnesses are dropped by design —
-  they grow redb quickly and do not yield independently provable historical
-  blocks (historical qMDB slots are not retained yet).
+  recent block) is retained. Older full-state witnesses are dropped by design.
   > `crates/matching-sequencer/src/store.rs`
-- Consequence: `GET /v1/blocks/{height}` replay works from `blocks_full`, but
-  independent re-proving is only possible for the latest block. This is a known
-  design limitation, not a config knob.
+- Proving material is no longer latest-only. Before either fenced A/B qMDB slot
+  can rotate, a witnessed block captures its ordered pre/post leaf proofs into
+  a portable job. The job is inserted into `proof_job_outbox` in the same redb
+  transaction that commits the block fence. Exact-byte acknowledgements live
+  in `proof_job_acks`; a wrong digest fails closed. Jobs are not pruned yet, so
+  independent proving survives witness pruning and prolonged prover downtime.
+- `GET /v1/blocks/{height}` replay remains backed by the bounded canonical
+  block archive. The proof outbox is currently a store boundary, not yet a
+  public endpoint; authenticated pull/ack and retention-after-ack are part of
+  the standalone-prover rollout in
+  [ADR-0019](../../adr/0019-epoch-stark-prover-service.md).
+- A witness imported into an empty store is an explicit recovery checkpoint,
+  not a claim that the fresh node can prove the incoming historical transition.
+  It has no outbox row; its first locally produced child resumes mandatory job
+  capture.
 - DA/custody artifacts are separate from `block_witnesses`: when a store is
   configured, each committed block schedules a best-effort write to
   `da_artifacts` containing the canonical witness payload bytes and a paired

@@ -230,6 +230,22 @@ mod tests {
                 &next_input.public_inputs
             ))
         );
+
+        let mock =
+            crate::mock_backend::prove_mock_epoch(&[input, next_input], [7; 32], [8; 32], 123)
+                .expect("contiguous epoch has a mock proof");
+        assert_eq!(
+            mock.envelope.proof_kind,
+            sybil_proof_protocol::ProofKind::Mock
+        );
+        assert_eq!(mock.envelope.public_inputs.block_count, 2);
+        assert_eq!(mock.envelope.validate_payload(&mock.payload), Ok(()));
+        assert!(matches!(
+            mock.envelope.require_l1_submittable(),
+            Err(sybil_proof_protocol::ProofEnvelopeError::NotL1Submittable {
+                proof_kind: sybil_proof_protocol::ProofKind::Mock
+            })
+        ));
     }
 
     #[tokio::test]
