@@ -60,8 +60,8 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
 
     // Position limits
     let max_position_units = whole_shares_to_qty_units(config.max_position);
-    let at_yes_limit = input.yes_position >= max_position_units;
-    let at_no_limit = input.no_position >= max_position_units;
+    let yes_buy_room = max_position_units.saturating_sub(input.yes_position.max(0)) as u64;
+    let no_buy_room = max_position_units.saturating_sub(input.no_position.max(0)) as u64;
 
     // Inventory-adjusted sizing
     let inv_ratio = (input.net_inventory.abs() / config.max_position as f64).min(1.0);
@@ -72,12 +72,15 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     let yes_bid = r - half_spread;
     let yes_ask = r + half_spread;
 
-    if !at_yes_limit && price_in_band(yes_bid, yes_order_min, yes_order_max) {
-        orders.push(OrderSpec::BuyYes {
-            market_id: input.market_id,
-            limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
-            quantity: shares_to_qty_units(buy_size / yes_bid),
-        });
+    if yes_buy_room > 0 && price_in_band(yes_bid, yes_order_min, yes_order_max) {
+        let quantity = shares_to_qty_units(buy_size / yes_bid).min(yes_buy_room);
+        if quantity > 0 {
+            orders.push(OrderSpec::BuyYes {
+                market_id: input.market_id,
+                limit_price_nanos: (yes_bid * NANOS_PER_DOLLAR as f64) as u64,
+                quantity,
+            });
+        }
     }
 
     if input.yes_position > 0 && price_in_band(yes_ask, yes_order_min, yes_order_max) {
@@ -99,12 +102,15 @@ pub fn generate_quotes(input: &QuoteInput, config: &QuoteConfig) -> Vec<OrderSpe
     let no_bid = (1.0 - r) - half_spread;
     let no_ask = (1.0 - r) + half_spread;
 
-    if !at_no_limit && price_in_band(no_bid, no_order_min, no_order_max) {
-        orders.push(OrderSpec::BuyNo {
-            market_id: input.market_id,
-            limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
-            quantity: shares_to_qty_units(buy_size / no_bid),
-        });
+    if no_buy_room > 0 && price_in_band(no_bid, no_order_min, no_order_max) {
+        let quantity = shares_to_qty_units(buy_size / no_bid).min(no_buy_room);
+        if quantity > 0 {
+            orders.push(OrderSpec::BuyNo {
+                market_id: input.market_id,
+                limit_price_nanos: (no_bid * NANOS_PER_DOLLAR as f64) as u64,
+                quantity,
+            });
+        }
     }
 
     if input.no_position > 0 && price_in_band(no_ask, no_order_min, no_order_max) {

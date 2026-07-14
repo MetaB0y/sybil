@@ -14,5 +14,5 @@
 mod client;
 mod error;
 
-pub use client::{AttestationVerification, SybilClient};
+pub use client::{AttestationVerification, PublicBlockStreamEvent, SybilClient};
 pub use error::Error;

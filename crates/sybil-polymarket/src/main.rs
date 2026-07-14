@@ -250,9 +250,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(error) => {
                 warn!(
                     error = %error,
-                    "failed to fetch curated events; bootstrapping all persisted mapped markets"
+                    "failed to fetch curated events; skipping persisted mirrored MM bootstrap"
                 );
-                None
+                // Curated mode is an allowlist. A transient Gamma failure must
+                // not turn it into "quote every market ever persisted".
+                Some(HashSet::new())
             }
         }
     } else if config.mirror_categories.is_empty() && config.mirror_excluded_categories.is_empty() {

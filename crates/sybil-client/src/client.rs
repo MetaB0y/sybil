@@ -26,6 +26,20 @@ pub enum AttestationVerification {
     },
 }
 
+/// One item from the public block stream.
+///
+/// Most consumers only need committed blocks and should use
+/// [`SybilClient::stream_blocks_from_block`]. Consumers whose behavior differs
+/// between replay and live following (for example, a market maker that must
+/// observe missed lifecycle events without submitting historical quotes) use
+/// [`SybilClient::stream_block_events_from_block`] so the replay boundary is
+/// explicit.
+#[derive(Debug, Clone)]
+pub enum PublicBlockStreamEvent {
+    Block(Box<PublicBlockResponse>),
+    ReplayComplete { up_to_height: u64 },
+}
+
 const STUB_ATTESTATION_WARNING: &str = "development attestation stub accepted; no Nitro signature, certificate chain, or PCR was verified";
 
 /// HTTP client for the Sybil API. This is THE shared client (SYB-171); it is
@@ -569,6 +583,30 @@ impl SybilClient {
         from_block: Option<u64>,
     ) -> Result<impl futures_util::Stream<Item = Result<PublicBlockResponse, Error>> + use<>, Error>
     {
+        let events = self.stream_block_events_from_block(from_block).await?;
+        Ok(events.filter_map(|event| async move {
+            match event {
+                Ok(PublicBlockStreamEvent::Block(block)) => Some(Ok(*block)),
+                Ok(PublicBlockStreamEvent::ReplayComplete { .. }) => None,
+                Err(error) => Some(Err(error)),
+            }
+        }))
+    }
+
+    /// Stream blocks and preserve the boundary between replay and live data.
+    ///
+    /// When `from_block` is `Some`, zero or more replayed [`PublicBlockStreamEvent::Block`]
+    /// items are followed by exactly one [`PublicBlockStreamEvent::ReplayComplete`]
+    /// before live blocks. This prevents side-effecting consumers from treating
+    /// historical blocks as fresh work while still letting them observe missed
+    /// lifecycle state.
+    pub async fn stream_block_events_from_block(
+        &self,
+        from_block: Option<u64>,
+    ) -> Result<
+        impl futures_util::Stream<Item = Result<PublicBlockStreamEvent, Error>> + use<>,
+        Error,
+    > {
         let url = self.block_ws_url(from_block)?;
         let (socket, _) = tokio_tungstenite::connect_async(&url)
             .await
@@ -584,8 +622,7 @@ impl SybilClient {
 
                 match msg {
                     Message::Text(text) => match decode_block_stream_message(text.as_ref()) {
-                        Ok(Some(block)) => return Some((Ok(block), socket)),
-                        Ok(None) => continue,
+                        Ok(event) => return Some((Ok(event), socket)),
                         Err(e) => return Some((Err(e), socket)),
                     },
                     Message::Binary(bytes) => {
@@ -601,8 +638,7 @@ impl SybilClient {
                             }
                         };
                         match decode_block_stream_message(text) {
-                            Ok(Some(block)) => return Some((Ok(block), socket)),
-                            Ok(None) => continue,
+                            Ok(event) => return Some((Ok(event), socket)),
                             Err(e) => return Some((Err(e), socket)),
                         }
                     }
@@ -651,7 +687,7 @@ fn classify_attestation(
     })
 }
 
-fn decode_block_stream_message(text: &str) -> Result<Option<PublicBlockResponse>, Error> {
+fn decode_block_stream_message(text: &str) -> Result<PublicBlockStreamEvent, Error> {
     let msg: PublicBlockStreamMessage = serde_json::from_str(text)?;
     if msg.v != PUBLIC_BLOCK_STREAM_VERSION {
         return Err(Error::Protocol(format!(
@@ -661,8 +697,10 @@ fn decode_block_stream_message(text: &str) -> Result<Option<PublicBlockResponse>
     }
 
     match msg.payload {
-        PublicBlockStreamPayload::Block { data } => Ok(Some(*data)),
-        PublicBlockStreamPayload::ReplayComplete { .. } => Ok(None),
+        PublicBlockStreamPayload::Block { data } => Ok(PublicBlockStreamEvent::Block(data)),
+        PublicBlockStreamPayload::ReplayComplete { up_to_height } => {
+            Ok(PublicBlockStreamEvent::ReplayComplete { up_to_height })
+        }
         PublicBlockStreamPayload::Lagged {
             skipped,
             last_sent_height,
@@ -686,7 +724,10 @@ fn decode_block_stream_message(text: &str) -> Result<Option<PublicBlockResponse>
 mod tests {
     use std::collections::HashMap;
 
-    use super::{AttestationVerification, classify_attestation};
+    use super::{
+        AttestationVerification, PublicBlockStreamEvent, classify_attestation,
+        decode_block_stream_message,
+    };
     use crate::Error;
     use sybil_api_types::AttestationResponse;
 
@@ -718,5 +759,17 @@ mod tests {
         assert!(
             matches!(error, Error::Attestation(message) if message.contains("refusing to trust"))
         );
+    }
+
+    #[test]
+    fn replay_complete_boundary_is_preserved() {
+        let event =
+            decode_block_stream_message(r#"{"v":2,"type":"replay_complete","up_to_height":42}"#)
+                .expect("valid replay boundary");
+
+        assert!(matches!(
+            event,
+            PublicBlockStreamEvent::ReplayComplete { up_to_height: 42 }
+        ));
     }
 }

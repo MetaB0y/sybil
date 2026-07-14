@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::feed::PriceSnapshot;
 use sybil_api_types::*;
-use sybil_client::SybilClient;
+use sybil_client::{PublicBlockStreamEvent, SybilClient};
 
 mod quotes;
 
@@ -101,8 +101,14 @@ struct MarketState {
 }
 
 enum PriceSource {
-    Mirror { yes_token_id: String },
-    Native { quote_range: QuoteRange },
+    Mirror {
+        yes_token_id: String,
+    },
+    Native {
+        quote_range: QuoteRange,
+        /// Latest valid Sybil YES clearing price, seeded from the catalog.
+        current_mid: f64,
+    },
 }
 
 impl MarketState {
@@ -139,7 +145,10 @@ impl MarketState {
         price_history.push_back(quote_range.initial);
         Self {
             sybil_market_id,
-            price_source: PriceSource::Native { quote_range },
+            price_source: PriceSource::Native {
+                quote_range,
+                current_mid: quote_range.initial,
+            },
             group_key,
             group_size,
             yes_position: 0,
@@ -189,7 +198,7 @@ impl MarketState {
             PriceSource::Mirror { yes_token_id } => {
                 snapshot.midpoints.get(yes_token_id).copied().unwrap_or(0.5)
             }
-            PriceSource::Native { quote_range } => quote_range.initial,
+            PriceSource::Native { current_mid, .. } => *current_mid,
         }
     }
 }
@@ -305,7 +314,7 @@ impl MmActor {
             );
             let block_stream = match self
                 .sybil_client
-                .stream_blocks_from_block(next_from_block)
+                .stream_block_events_from_block(next_from_block)
                 .await
             {
                 Ok(s) => s,
@@ -317,6 +326,7 @@ impl MmActor {
             };
 
             tokio::pin!(block_stream);
+            let mut replaying = next_from_block.is_some();
 
             loop {
                 tokio::select! {
@@ -330,11 +340,23 @@ impl MmActor {
                             None => return,
                         }
                     }
-                    block = block_stream.next() => {
-                        match block {
-                            Some(Ok(block)) => {
+                    event = block_stream.next() => {
+                        match event {
+                            Some(Ok(PublicBlockStreamEvent::Block(block))) => {
                                 next_from_block = Some(block.height.saturating_add(1));
-                                self.on_block(&block).await;
+                                if replaying {
+                                    // Replayed blocks repair local lifecycle and native price
+                                    // state only. Historical blocks are never fresh quote ticks.
+                                    self.observe_block(&block);
+                                } else {
+                                    self.on_block(&block).await;
+                                }
+                            }
+                            Some(Ok(PublicBlockStreamEvent::ReplayComplete { up_to_height })) => {
+                                debug!(up_to_height, "block replay complete; following live stream");
+                                self.sync_positions().await;
+                                self.state.last_sync_block = up_to_height;
+                                replaying = false;
                             }
                             Some(Err(sybil_client::Error::RetentionGap {
                                 requested_height,
@@ -487,17 +509,45 @@ impl MmActor {
         }
     }
 
+    /// Apply block state that matters during both replay and live following.
+    /// Side effects that create new work (quoting and API writes) deliberately
+    /// remain in `on_block` and therefore run only for live blocks.
+    fn observe_block(&mut self, block: &PublicBlockResponse) {
+        self.untrack_resolved(block);
+        self.update_native_midpoints(block);
+    }
+
+    /// Let native markets discover prices on Sybil after their catalog seed.
+    /// A clearing vector is `[YES, NO]`; invalid or terminal values are ignored.
+    fn update_native_midpoints(&mut self, block: &PublicBlockResponse) {
+        for market in self.state.markets.values_mut() {
+            let PriceSource::Native { current_mid, .. } = &mut market.price_source else {
+                continue;
+            };
+            let Some(yes_nanos) = block
+                .clearing_prices_nanos
+                .get(&market.sybil_market_id.to_string())
+                .and_then(|prices| prices.first())
+            else {
+                continue;
+            };
+            let mid = *yes_nanos as f64 / NANOS_PER_DOLLAR as f64;
+            if mid > 0.0 && mid < 1.0 {
+                *current_mid = mid;
+            }
+        }
+    }
+
     // ----- Per-block quote generation ------------------------------------- //
 
     async fn on_block(&mut self, block: &PublicBlockResponse) {
         let snapshot = self.price_rx.borrow().clone();
         let now = now_ms();
 
-        // 0. Lifecycle: untrack markets the chain resolved this block (PM-1 root
-        //    fix). The mirror already receives `MarketResolved` on the block
-        //    stream it consumes; acting on it here stops a resolved market from
-        //    poisoning the whole IOC batch and frees its live-set slot (PM-8).
-        self.untrack_resolved(block);
+        // 0. Observe lifecycle and native clearing prices. The same state-only
+        //    observation also runs during replay, while the quote side effects
+        //    below are live-only.
+        self.observe_block(block);
 
         // 1. Periodic position sync
         self.maybe_sync_positions(block.height).await;
@@ -548,7 +598,10 @@ impl MmActor {
 
                     (mid, None)
                 }
-                PriceSource::Native { quote_range } => (quote_range.initial, Some(*quote_range)),
+                PriceSource::Native {
+                    quote_range,
+                    current_mid,
+                } => (*current_mid, Some(*quote_range)),
             };
 
             ms.push_price(mid);
@@ -753,6 +806,20 @@ mod tests {
         });
     }
 
+    fn track_native(actor: &mut MmActor, market_id: u32, initial_mid: f64) {
+        actor.handle_message(MmMessage::MarketNative {
+            sybil_market_id: market_id,
+            native_market_key: format!("native-{market_id}"),
+            quote_range: QuoteRange {
+                min: 0.05,
+                max: 0.95,
+                initial: initial_mid,
+            },
+            group_key: None,
+            group_size: 0,
+        });
+    }
+
     fn block_resolving(market_ids: &[u32]) -> PublicBlockResponse {
         PublicBlockResponse {
             height: 1,
@@ -790,6 +857,38 @@ mod tests {
         assert!(actor.state.markets.contains_key(&11));
         // PM-8: the freed slot is published back to Sync.
         assert_eq!(*live_rx.borrow(), 1);
+    }
+
+    #[test]
+    fn native_midpoint_follows_latest_valid_clearing_price() {
+        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        track_native(&mut actor, 7, 0.4);
+
+        let mut block = block_resolving(&[]);
+        block
+            .clearing_prices_nanos
+            .insert("7".to_string(), vec![700_000_000, 300_000_000]);
+        actor.observe_block(&block);
+
+        let market = actor.state.markets.get(&7).expect("tracked native market");
+        assert_eq!(market.budget_mid(&PriceSnapshot::default()), 0.7);
+    }
+
+    #[test]
+    fn native_midpoint_ignores_terminal_clearing_price() {
+        let (live_tx, _live_rx) = watch::channel(0usize);
+        let (mut actor, _price_tx) = test_actor(live_tx);
+        track_native(&mut actor, 7, 0.4);
+
+        let mut block = block_resolving(&[]);
+        block
+            .clearing_prices_nanos
+            .insert("7".to_string(), vec![NANOS_PER_DOLLAR, 0]);
+        actor.observe_block(&block);
+
+        let market = actor.state.markets.get(&7).expect("tracked native market");
+        assert_eq!(market.budget_mid(&PriceSnapshot::default()), 0.4);
     }
 
     #[test]
@@ -962,6 +1061,29 @@ mod tests {
         let orders = generate_quotes(&input, &config);
         // At YES limit → no BuyYes
         assert!(!orders.iter().any(|o| matches!(o, OrderSpec::BuyYes { .. })));
+    }
+
+    #[test]
+    fn buy_quantity_is_capped_to_remaining_position_room() {
+        let mut config = default_config();
+        config.max_position = 100;
+        config.quote_size_dollars = 100.0;
+        let mut input = default_input(0.5);
+        input.yes_position = q(99);
+        input.no_position = q(98);
+
+        let orders = generate_quotes(&input, &config);
+        let yes_quantity = orders.iter().find_map(|order| match order {
+            OrderSpec::BuyYes { quantity, .. } => Some(*quantity),
+            _ => None,
+        });
+        let no_quantity = orders.iter().find_map(|order| match order {
+            OrderSpec::BuyNo { quantity, .. } => Some(*quantity),
+            _ => None,
+        });
+
+        assert_eq!(yes_quantity, Some(q(1) as u64));
+        assert_eq!(no_quantity, Some(q(2) as u64));
     }
 
     #[test]

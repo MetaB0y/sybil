@@ -3,7 +3,7 @@ tags: [infrastructure]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-12
+last_verified: 2026-07-14
 ---
 
 The WebSocket block stream is the first-party production transport for the
@@ -53,6 +53,14 @@ Clients should read the `v` field first and ignore messages whose version they d
 ## Reconnect Flow
 
 On disconnect (either a clean `lagged` close or a transport error), a client that has seen block `H` reconnects with `?from_block=H+1`. The server replays every block in `[H+1, current_head]` from the recent cache or canonical archive, emits `replay_complete`, then switches to the live feed. There is no gap and no duplicate.
+
+The shared Rust client preserves this distinction through
+`stream_block_events_from_block`. Side-effecting consumers must use that event
+stream and defer fresh work until `ReplayComplete`; the block-only convenience
+stream intentionally hides the boundary and is appropriate only when replaying
+a block has the same effect as observing it live. The Polymarket MM, for
+example, replays lifecycle and native-price state but never emits historical
+quotes.
 
 Replay reads the canonical archive (physical redb table `blocks_full`) after
 the recent cache has evicted a block. If `from_block` is below the retained floor, the server emits

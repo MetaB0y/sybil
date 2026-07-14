@@ -161,11 +161,11 @@ mod tests {
 
     #[test]
     fn checked_in_seed_set_parses_and_is_nonempty() {
-        // The file the deploy actually ships. Keeps the checked-in config
-        // honest against the parser (all 10 ticket events, valid ids).
+        // The file the deploy actually ships. Keep the small reviewed set
+        // honest against the parser and accidental catalog expansion.
         let data = include_str!("../curated_markets.json");
         let curated = CuratedMarkets::parse_json(data).unwrap();
-        assert_eq!(curated.len(), 10, "expected the 10 SYB-150 seed events");
+        assert_eq!(curated.len(), 4, "expected the four reviewed seed events");
         // Every id is a non-empty numeric string.
         for id in curated.event_ids() {
             assert!(
@@ -173,9 +173,9 @@ mod tests {
                 "non-numeric id {id}"
             );
         }
-        // The two valuation-threshold events are present and documented.
-        let ids = curated.event_ids();
-        assert!(ids.contains(&"500753".to_string()), "Anthropic valuation");
-        assert!(ids.contains(&"500775".to_string()), "OpenAI valuation");
+        assert_eq!(
+            curated.event_ids(),
+            ["333737", "79075", "85299", "96557"].map(str::to_string)
+        );
     }
 }
