@@ -393,19 +393,18 @@
       }
     },
     {
-      "title": "Reference Price Coverage",
+      "title": "Live Reference Prices",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 76 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
-        { "expr": "sybil_reference_prices_total", "legendFormat": "reference prices", "refId": "A" },
+        { "expr": "sybil_reference_prices_active_total", "legendFormat": "active references", "refId": "A" },
         { "expr": "sybil_price_reference_pairs_total", "legendFormat": "priced pairs", "refId": "B" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [
           { "color": "red", "value": null },
-          { "color": "orange", "value": 100 },
-          { "color": "green", "value": 200 }
+          { "color": "green", "value": 1 }
         ] } },
         "overrides": []
       }

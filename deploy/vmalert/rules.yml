@@ -157,21 +157,15 @@ groups:
           summary: "Polymarket reference prices are stale"
           description: "The API has not received a reference-price update for more than 3m. The mirror, Polymarket feed, or API reference-price endpoint may be broken."
 
-      - alert: ReferencePriceCoverageLow
-        expr: |
-          (
-            max(sybil_reference_prices_active_total)
-            / clamp_min(max(sybil_reference_eligible_markets_active_total), 1)
-          ) < 0.6
-          and
-          max(sybil_reference_eligible_markets_active_total) >= 20
-        for: 10m
+      - alert: ReferencePriceFeedMissing
+        expr: max(sybil_reference_prices_active_total) == 0
+        for: 3m
         labels:
-          severity: warning
+          severity: critical
           component: polymarket
         annotations:
-          summary: "Polymarket reference-price coverage is low"
-          description: "Fewer than 60% of active reference-eligible mirror markets have live reference prices (current ratio: {{ $value | humanizePercentage }}). Polymarket coverage may have dropped or the mirror may not be tracking enough tokens."
+          summary: "Polymarket reference-price feed is empty"
+          description: "No active Polymarket reference price has been present for 3m. The curated feed, mirror process, or API update path is broken."
 
       - alert: SybilPriceDivergenceHigh
         expr: |
@@ -224,18 +218,18 @@ groups:
 
       - alert: SybilPriceReferenceIntersectionLow
         expr: |
-          max(sybil_reference_prices_total) >= 100
+          max(sybil_reference_prices_active_total) >= 1
           and
-          max(sybil_markets_priced_total) >= 20
+          max(sybil_markets_priced_total) >= 1
           and
-          max(sybil_price_reference_pairs_total) < 20
+          max(sybil_price_reference_pairs_total) < 1
         for: 10m
         labels:
           severity: warning
           component: arena
         annotations:
-          summary: "Few Sybil priced markets have Polymarket references"
-          description: "Sybil has both local clearing prices and Polymarket reference prices, but fewer than 20 markets are in the intersection. Divergence alerts are suppressed until this sample is large enough."
+          summary: "Sybil prices do not overlap Polymarket references"
+          description: "Sybil has both local prices and a live curated Polymarket feed, but no market is in their intersection. Price-comparison monitoring is blind."
 
       - alert: BlockProductionStalled
         expr: rate(sybil_blocks_produced[2m]) == 0 and up{job="sybil-api"} == 1

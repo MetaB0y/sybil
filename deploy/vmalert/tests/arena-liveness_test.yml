@@ -1,4 +1,4 @@
-# Prometheus-compatible tests for dynamic reference coverage. Run:
+# Prometheus-compatible tests for Arena and curated reference liveness. Run:
 #   promtool test rules deploy/vmalert/tests/arena-liveness_test.yml
 
 rule_files:
@@ -29,31 +29,27 @@ tests:
 
   - interval: 1m
     input_series:
-      - series: 'sybil_reference_eligible_markets_active_total{job="sybil-api"}'
-        values: "72+0x20"
       - series: 'sybil_reference_prices_active_total{job="sybil-api"}'
-        values: "72+0x20"
+        values: "7+0x20"
     alert_rule_test:
       - eval_time: 20m
-        alertname: ReferencePriceCoverageLow
+        alertname: ReferencePriceFeedMissing
         exp_alerts: []
 
   - interval: 1m
     input_series:
-      - series: 'sybil_reference_eligible_markets_active_total{job="sybil-api"}'
-        values: "72+0x20"
       - series: 'sybil_reference_prices_active_total{job="sybil-api"}'
-        values: "30+0x20"
+        values: "0+0x10"
     alert_rule_test:
-      - eval_time: 9m
-        alertname: ReferencePriceCoverageLow
+      - eval_time: 2m
+        alertname: ReferencePriceFeedMissing
         exp_alerts: []
-      - eval_time: 11m
-        alertname: ReferencePriceCoverageLow
+      - eval_time: 4m
+        alertname: ReferencePriceFeedMissing
         exp_alerts:
           - exp_labels:
-              severity: warning
+              severity: critical
               component: polymarket
             exp_annotations:
-              summary: "Polymarket reference-price coverage is low"
-              description: "Fewer than 60% of active reference-eligible mirror markets have live reference prices (current ratio: 41.67%). Polymarket coverage may have dropped or the mirror may not be tracking enough tokens."
+              summary: "Polymarket reference-price feed is empty"
+              description: "No active Polymarket reference price has been present for 3m. The curated feed, mirror process, or API update path is broken."
