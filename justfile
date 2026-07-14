@@ -688,8 +688,11 @@ deploy-arena: deploy-sync deploy-prod-env-check deploy-openrouter-env-check && d
     ssh {{SERVER}} 'cd /opt/sybil && {{COMPOSE_PROD}} up -d sybil-arena sybil-arena-dashboard caddy'
 
 # Deploy observability stack (node-exporter + VictoriaMetrics + vmalert + Grafana)
+# Recreate the processes even when Compose wiring is unchanged: VictoriaMetrics
+# scrape config and vmalert local rule files are read into process memory and a
+# bind-mount update alone does not reliably activate them.
 deploy-monitoring: deploy-sync deploy-prod-env-check
-    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --remove-orphans node-exporter victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_PROD}} up -d --remove-orphans node-exporter victoriametrics vmalert grafana; fi'
+    ssh {{SERVER}} 'cd /opt/sybil && if test -f .env && grep -q "^TELEGRAM_BOT_TOKEN=." .env && grep -q "^TELEGRAM_CHAT_ID=." .env; then {{COMPOSE_TELEGRAM}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana telegram-alerts; else {{COMPOSE_PROD}} up -d --force-recreate --remove-orphans node-exporter victoriametrics vmalert grafana; fi'
 
 # Enable Telegram delivery for vmalert alerts. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in /opt/sybil/.env on the server.
 deploy-telegram-alerts: deploy-sync deploy-prod-env-check
