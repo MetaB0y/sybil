@@ -214,6 +214,10 @@ pub async fn test_app_with_store_api_config(
         BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, sequencer_config);
     let store = Arc::new(Store::open(&temp_store_path()).expect("test store opens"));
     let handle = SequencerHandle::spawn_with_shared_store(sequencer, Some(Arc::clone(&store)));
+    handle
+        .produce_block()
+        .await
+        .expect("store-backed test app commits its replay baseline");
     let state = history_backed_state(handle.clone(), store, api_config).await;
     (create_router(state), handle)
 }
@@ -237,6 +241,10 @@ pub async fn test_app_with_store_zero_caps(dev_mode: bool) -> (Router, Sequencer
     let sequencer = BlockSequencer::with_default_solver(accounts, markets, vec![], oracle, config);
     let store = Arc::new(Store::open(&temp_store_path()).expect("test store opens"));
     let handle = SequencerHandle::spawn_with_shared_store(sequencer, Some(Arc::clone(&store)));
+    handle
+        .produce_block()
+        .await
+        .expect("store-backed test app commits its replay baseline");
     let api_config = ApiConfig {
         dev_mode,
         ..ApiConfig::default()

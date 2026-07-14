@@ -574,9 +574,12 @@ typed mock backend, and transactional sequencer proof-job outbox are landed.
 The accumulator stays in `sybil-proof-protocol` until the intentional guest
 repin so this intermediate slice does not move deployed validity pins. The
 outbox is covered by qMDB slot-rotation and randomized crashpoint invariants.
-unified authorization WAL/witness migration, streamed `sybil-zk`/OpenVM guest,
-durable prover scheduler, authenticated service ingest, and STARK subprocess
-backend remain to be implemented in the phases below.
+The globally sequenced acknowledged-write WAL from #76 is also landed: one
+versioned actor-ordered interval covers direct/deferred orders, control-plane
+commands, deposits, withdrawals, and L1 lifecycle inputs; floor/next counters
+detect gaps and replay fails closed. Authorization witness v10, streamed
+`sybil-zk`/OpenVM guest, durable prover scheduler, authenticated service ingest,
+and the STARK subprocess backend remain to be implemented below.
 
 GitHub tracking is deliberately split at durable/consensus boundaries:
 
@@ -606,8 +609,8 @@ compile-time/runtime rejected by calldata encoding.
 
 ### Phase B — unified acknowledgement order and authorization witness v10
 
-- Land the single acknowledged-write table and migration tests before making
-  order validity depend on replay order.
+- Land the single acknowledged-write table and fail-closed interval/replay
+  tests before making order validity depend on replay order. **Done in #76.**
 - Commit `last_nonce` in account snapshots and state leaves.
 - Preserve exact Raw-P256/WebAuthn envelopes from API through sequencer/WAL.
 - Add the ordered authorization witness and shared native/guest verification.

@@ -1,3 +1,4 @@
+use super::wal::AcknowledgedWriteEnvelope;
 use super::*;
 
 /// Store-restored analytics projections. These are grouped separately from
@@ -35,28 +36,101 @@ pub struct RestoredState {
     pub data_feeds: Vec<DataFeed>,
     /// All installed resolution templates.
     pub resolution_templates: Vec<ResolutionTemplate>,
-    /// Bundle / MM / multi-market submissions that were admitted after the
-    /// last committed block. The actor replays these into its in-memory
-    /// pending queue so nothing acknowledged with a 200 OK is dropped by a
-    /// crash.
-    pub pending_bundles: Vec<crate::sequencer::OrderSubmission>,
-    /// Non-MM single-market admissions that went into the resting book
-    /// after the last committed block. On restart these are re-inserted
-    /// on top of `resting_orders` before the sequencer starts processing.
-    pub admit_log: Vec<RestingOrder>,
-    /// Acknowledged control-plane mutations accepted after the last committed
-    /// block. Replayed after snapshot restore so those writes are not lost.
-    pub control_plane_log: Vec<ControlPlaneCommand>,
+    /// Every state-affecting actor mutation accepted after the committed
+    /// snapshot, in exact durable sequence order.
+    pub acknowledged_writes: Vec<SequencedAcknowledgedWrite>,
     /// Derived analytics projections restored from redb.
     pub analytics: AnalyticsRestoredState,
     /// L1 bridge sidecar state restored from the last committed block.
     pub bridge_state: BridgeState,
-    /// L1 deposits durably accepted after the last committed block.
-    pub pending_l1_deposits: Vec<L1Deposit>,
-    /// Bridge withdrawals durably accepted after the last committed block.
-    pub pending_bridge_withdrawals: Vec<BridgeWithdrawalRequest>,
-    /// Confirmed bridge L1 inputs durably accepted after the last block.
-    pub pending_bridge_l1_inputs: Vec<BridgeL1Input>,
+}
+
+fn read_acknowledged_writes(
+    txn: &redb::ReadTransaction,
+) -> Result<Vec<SequencedAcknowledgedWrite>, StoreError> {
+    match read_acknowledged_writes_inner(txn) {
+        Ok(writes) => Ok(writes),
+        Err(error) => {
+            metrics::counter!(
+                "sybil_restore_acknowledged_write_failures_total",
+                "kind" => "stored_log"
+            )
+            .increment(1);
+            Err(error)
+        }
+    }
+}
+
+// Prometheus gauges use f64 at the metrics-library boundary; restored
+// protocol state and all validation remain integer-only.
+#[allow(clippy::disallowed_types)]
+fn read_acknowledged_writes_inner(
+    txn: &redb::ReadTransaction,
+) -> Result<Vec<SequencedAcknowledgedWrite>, StoreError> {
+    let counters = txn.open_table(COUNTERS)?;
+    let floor = counters
+        .get(KEY_ACKNOWLEDGED_WRITE_FLOOR)?
+        .ok_or_else(|| StoreError::CorruptLayout("missing acknowledged-write floor".to_string()))?
+        .value();
+    let next = counters
+        .get(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ)?
+        .ok_or_else(|| {
+            StoreError::CorruptLayout("missing acknowledged-write next sequence".to_string())
+        })?
+        .value();
+    if next < floor {
+        return Err(StoreError::CorruptLayout(format!(
+            "acknowledged-write next sequence {next} is below floor {floor}"
+        )));
+    }
+
+    let table = txn.open_table(ACKNOWLEDGED_WRITES)?;
+    let mut expected = floor;
+    let mut writes = Vec::new();
+    for entry in table.iter()? {
+        let (key, value) = entry?;
+        let sequence = key.value();
+        if sequence != expected {
+            return Err(StoreError::CorruptLayout(format!(
+                "acknowledged-write WAL gap: expected sequence {expected}, found {sequence}"
+            )));
+        }
+        if sequence >= next {
+            return Err(StoreError::CorruptLayout(format!(
+                "acknowledged-write sequence {sequence} is at or above next sequence {next}"
+            )));
+        }
+        let envelope: AcknowledgedWriteEnvelope = rmp_serde::from_slice(value.value())?;
+        if envelope.version != ACKNOWLEDGED_WRITE_ENVELOPE_VERSION {
+            return Err(StoreError::UnsupportedLayout(format!(
+                "acknowledged-write envelope version {}, expected {}",
+                envelope.version, ACKNOWLEDGED_WRITE_ENVELOPE_VERSION
+            )));
+        }
+        if envelope.sequence != sequence {
+            return Err(StoreError::CorruptLayout(format!(
+                "acknowledged-write key {sequence} contains envelope sequence {}",
+                envelope.sequence
+            )));
+        }
+        writes.push(SequencedAcknowledgedWrite {
+            sequence,
+            write: envelope.write,
+        });
+        expected = expected.checked_add(1).ok_or_else(|| {
+            StoreError::CorruptLayout("acknowledged-write sequence exhausted".to_string())
+        })?;
+    }
+    if expected != next {
+        return Err(StoreError::CorruptLayout(format!(
+            "acknowledged-write WAL ended at {expected}, expected next sequence {next}"
+        )));
+    }
+
+    metrics::gauge!("sybil_acknowledged_write_committed_floor").set(floor as f64);
+    metrics::gauge!("sybil_acknowledged_write_next_sequence").set(next as f64);
+    metrics::gauge!("sybil_acknowledged_write_pending_rows").set(writes.len() as f64);
+    Ok(writes)
 }
 
 impl Store {
@@ -64,6 +138,11 @@ impl Store {
     pub async fn load_state(&self) -> Result<Option<RestoredState>, StoreError> {
         let txn = self.db.begin_read()?;
         let Some(recovery_metadata) = read_recovery_metadata(&txn)? else {
+            if !read_acknowledged_writes(&txn)?.is_empty() {
+                return Err(StoreError::CorruptLayout(
+                    "acknowledged writes exist without a committed recovery snapshot".to_string(),
+                ));
+            }
             return Ok(None);
         };
 
@@ -245,40 +324,19 @@ impl Store {
             out
         };
 
-        let pending_bundles: Vec<crate::sequencer::OrderSubmission> = {
-            let table = txn.open_table(PENDING_BUNDLES)?;
-            let mut out = Vec::new();
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                out.push(rmp_serde::from_slice(value.value())?);
-            }
-            out
-        };
-
-        let admit_log: Vec<RestingOrder> = {
-            let table = txn.open_table(ADMIT_LOG)?;
-            let mut out = Vec::new();
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                out.push(rmp_serde::from_slice(value.value())?);
-            }
-            out
-        };
-
         validate_restored_reservations(&resting_orders)
             .map_err(|error| StoreError::CorruptLayout(error.to_string()))?;
-        validate_restored_reservations(&admit_log)
-            .map_err(|error| StoreError::CorruptLayout(format!("admit log {error}")))?;
-
-        let control_plane_log: Vec<ControlPlaneCommand> = {
-            let table = txn.open_table(CONTROL_PLANE_LOG)?;
-            let mut out = Vec::new();
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                out.push(rmp_serde::from_slice(value.value())?);
-            }
-            out
-        };
+        let acknowledged_writes = read_acknowledged_writes(&txn)?;
+        let direct_admits: Vec<RestingOrder> = acknowledged_writes
+            .iter()
+            .filter_map(|entry| match &entry.write {
+                AcknowledgedWrite::DirectAdmit(resting) => Some(resting.clone()),
+                _ => None,
+            })
+            .collect();
+        validate_restored_reservations(&direct_admits).map_err(|error| {
+            StoreError::CorruptLayout(format!("acknowledged direct-admit row {error}"))
+        })?;
 
         let account_fills = Vec::new();
 
@@ -288,36 +346,6 @@ impl Store {
                 Some(value) => rmp_serde::from_slice(value.value())?,
                 None => BridgeState::default(),
             }
-        };
-
-        let pending_l1_deposits: Vec<L1Deposit> = {
-            let table = txn.open_table(PENDING_L1_DEPOSITS)?;
-            let mut out = Vec::new();
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                out.push(rmp_serde::from_slice(value.value())?);
-            }
-            out
-        };
-
-        let pending_bridge_withdrawals: Vec<BridgeWithdrawalRequest> = {
-            let table = txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
-            let mut out = Vec::new();
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                out.push(rmp_serde::from_slice(value.value())?);
-            }
-            out
-        };
-
-        let pending_bridge_l1_inputs: Vec<BridgeL1Input> = {
-            let table = txn.open_table(PENDING_BRIDGE_L1_INPUTS)?;
-            let mut out = Vec::new();
-            for entry in table.iter()? {
-                let (_, value) = entry?;
-                out.push(rmp_serde::from_slice(value.value())?);
-            }
-            out
         };
 
         if latest_witness_exists {
@@ -450,16 +478,11 @@ impl Store {
             groups = market_groups.len(),
             clearing_prices = last_clearing_prices.len(),
             resting_orders = resting_orders.len(),
-            pending_bundles = pending_bundles.len(),
-            admit_log = admit_log.len(),
-            control_plane_log = control_plane_log.len(),
+            acknowledged_writes = acknowledged_writes.len(),
             account_fills = account_fills.len(),
             data_feeds = data_feeds.len(),
             resolution_templates = resolution_templates.len(),
             bridge_deposit_cursor = bridge_state.deposit_cursor,
-            pending_l1_deposits = pending_l1_deposits.len(),
-            pending_bridge_withdrawals = pending_bridge_withdrawals.len(),
-            pending_bridge_l1_inputs = pending_bridge_l1_inputs.len(),
             "state restored from store"
         );
 
@@ -477,9 +500,7 @@ impl Store {
             resting_orders,
             data_feeds,
             resolution_templates,
-            pending_bundles,
-            admit_log,
-            control_plane_log,
+            acknowledged_writes,
             analytics: AnalyticsRestoredState {
                 last_clearing_prices,
                 market_volumes,
@@ -496,9 +517,6 @@ impl Store {
                 next_product_event_seq,
             },
             bridge_state,
-            pending_l1_deposits,
-            pending_bridge_withdrawals,
-            pending_bridge_l1_inputs,
         }))
     }
 
@@ -643,6 +661,13 @@ pub(super) fn initialize_or_validate_layout(db: &Database) -> Result<(), StoreEr
                     STORE_LAYOUT_VERSION, version
                 )));
             }
+            let floor = counters.get(KEY_ACKNOWLEDGED_WRITE_FLOOR)?;
+            let next = counters.get(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ)?;
+            if floor.is_none() || next.is_none() {
+                return Err(StoreError::CorruptLayout(
+                    "layout v2 is missing acknowledged-write sequence counters".to_string(),
+                ));
+            }
         }
         None => {
             let has_existing_state = counters.get(KEY_HEIGHT)?.is_some()
@@ -660,6 +685,8 @@ pub(super) fn initialize_or_validate_layout(db: &Database) -> Result<(), StoreEr
             let txn = db.begin_write()?;
             let mut counters = txn.open_table(COUNTERS)?;
             counters.insert(KEY_STORE_LAYOUT_VERSION, STORE_LAYOUT_VERSION)?;
+            counters.insert(KEY_ACKNOWLEDGED_WRITE_FLOOR, 0)?;
+            counters.insert(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ, 0)?;
             drop(counters);
             txn.commit()?;
         }

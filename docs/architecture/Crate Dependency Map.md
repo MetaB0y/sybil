@@ -50,9 +50,9 @@ owns unconditional Alloy-generated contract calls, structs, and events for
 host clients. `sybil-l1-indexer` uses those crates plus `sybil-client`: it
 queries L1 through an Alloy provider, resolves the Sybil account through the
 service-only reverse bridge-key route, and submits deposits through the
-existing API bridge endpoint. The sequencer still receives deposits through
-its current `pending_l1_deposits` WAL path; the indexer does not bypass
-`sybil-api` or introduce a new storage dependency.
+existing API bridge endpoint. The sequencer records those deposits as
+`L1Deposit` entries in its globally ordered acknowledged-write log; the
+indexer does not bypass `sybil-api` or introduce a new storage dependency.
 
 The Python `arena/` sits outside the Rust workspace entirely, connected only via HTTP to `sybil-api`. This clean boundary means the Python bots can be developed, tested, and deployed independently of the Rust code — they only need a running server. The separation also means the arena doesn't need to compile any Rust code, which is important for Python-first developers who want to build bots without a Rust toolchain.
 

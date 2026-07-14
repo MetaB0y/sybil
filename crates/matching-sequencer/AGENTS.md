@@ -15,8 +15,9 @@ through `SequencerHandle`. Simulation-only agents remain in `sequencer-sim`.
 
 - Prepare a block on a clone; persist it and flip the redb commit fence before
   swapping live state or publishing.
-- Every acknowledged between-block mutation is durable-before-live and follows
-  the fixed WAL replay order.
+- Every acknowledged between-block mutation is durable-before-live in the one
+  globally sequenced WAL; recovery requires the complete `[floor, next)`
+  interval and replays exact actor acceptance order.
 - redb is the commit authority; recovery reads only the fenced qMDB slot.
 - A witnessed block and its portable proof job cross the same redb fence;
   capture pre/post qMDB proofs before either A/B slot can rotate.

@@ -93,6 +93,7 @@ Authoritative state needed to resume the exchange after a crash:
 | `redb` | `clearing_prices` | last clearing price vector per market |
 | `redb` | `market_volumes` | cumulative traded volume per market |
 | `redb` | `counters` | next IDs, store layout version, and the authoritative account-state fence |
+| `redb` | `acknowledged_writes` | exact actor-ordered between-block suffix, authenticated by floor/next counters |
 
 The account snapshot and typed-state tree both use logical qmdb slots `A` and
 `B`. Only one slot is committed at a time; redb records which one.
@@ -102,21 +103,21 @@ The account snapshot and typed-state tree both use logical qmdb slots `A` and
 Persisted today:
 
 - **Order book**: resting orders and their reservations in `resting_orders`
-- **Deferred submissions**: MM / bundle / multi-market submissions in `pending_bundles`
-- **Admit log**: direct-admitted single-market orders accepted after the last committed block in `admit_log`
+- **Deferred submissions**: `DeferredBundle` rows in `acknowledged_writes`
+- **Direct admits**: `DirectAdmit` rows in `acknowledged_writes`
 
 Still not persisted:
 
 - **MM runtime state**: inventory, short-term price history, and variance estimation state
 
-The order state tables protect the API's 200 OK contract: anything acknowledged before a crash is either already in the committed order-book snapshot or replayed from an incremental log.
+The snapshot plus global WAL protect the API's 200 OK contract: anything
+acknowledged before a crash is either committed in the order-book snapshot or
+replayed from the exact actor-ordered suffix.
 
 On restore, the sequencer rebuilds the resting book from the committed
-snapshot plus the admit log before it drains deferred pending bundles. It must
-advance `next_order_id` past every replayed resting-order id before assigning
-fresh ids to pending-bundle orders. Otherwise a restart with both `admit_log`
-and `pending_bundles` can reuse an order id in the first replay block and trip
-the verifier's duplicate-order check.
+snapshot, then dispatches direct admits and deferred bundles at their global
+sequence positions. Both variants advance `next_order_id`, preventing reuse in
+the first replay block.
 
 Deferred pending bundles are not trusted as already validated after restore.
 They are drained through normal block-time validation against the restored
@@ -124,18 +125,23 @@ resting-book reservations. If replayed state makes a bundle stale or
 over-reserved, its orders become block rejections instead of accepted witness
 orders.
 
-## Acknowledged Control-Plane Mutations
+## Globally Ordered Acknowledged Mutations
 
 The same 200 OK contract must apply to control-plane mutations, not only orders. Account creation, funding, pubkey registration, market creation, metadata updates, cancellation, and resolution are all user-visible state transitions. If one is acknowledged after the last committed block and the process restarts before the next block snapshot, it needs an incremental durability path.
 
-This is implemented with a small redb write-ahead table for acknowledged control-plane commands:
+All subsystems share one versioned redb write-ahead table:
 
-1. Serialize the validated command with a monotonic sequence number.
-2. Commit the command before mutating in-memory sequencer state or before returning success.
-3. Replay unapplied commands after loading the last committed block snapshot.
-4. Clear commands atomically when `save_block()` commits a block that includes their effects.
+1. Allocate a lifetime-monotonic sequence in the same transaction as the row.
+2. Bind the sequence into the versioned envelope and commit before returning
+   success.
+3. Replay the complete `[floor, next)` interval after the committed snapshot.
+4. Clear rows and advance `floor = next` in the block-fence transaction.
 
-This mirrors `admit_log` and `pending_bundles`: the block snapshot stays the primary checkpoint, while the log protects acknowledged writes between checkpoints. Commands must be deterministic under replay. Market and feed IDs are reallocated from the committed `next_*` counters in the same WAL order; timestamp-bearing commands carry the acknowledged timestamp so sidecar history does not depend on restart time.
+The block snapshot stays the primary checkpoint; the log protects only the
+acknowledged suffix. Commands must be deterministic under replay. Market and
+feed IDs are reallocated from committed counters in the same global order;
+timestamp-bearing commands carry the acknowledged timestamp so history does
+not depend on restart time.
 
 For public account onboarding, account allocation and its initial signing key
 are one `CreateAccountWithInitialKey` control-plane command; bare service-tier
@@ -159,22 +165,14 @@ Implemented today:
 - Oracle feed registration
 - Resolution template installation
 
-Bridge deposits and withdrawals use dedicated WAL tables because they are
-bridge-sidecar inputs rather than generic control-plane commands. Recovery
-replays the admitted resting-order log into the order book, then replays the
-control-plane WAL, then replays bridge deposit/withdrawal WALs. That order is an
-invariant: bridge withdrawals validate against account balances and resting-book
-reservations, so an acknowledged cancellation or funding command must be visible
-before pending bridge withdrawals are replayed.
-
-The separate WAL tables preserve state correctness but do not preserve exact
-cross-subsystem system-event ordering. If event interleaving becomes
-validity-sensitive, migrate these acknowledged-write paths into one globally
-sequenced WAL rather than adding more pairwise replay rules.
+Direct admits, deferred bundles, control-plane commands, deposits, withdrawal
+creation, and confirmed L1 lifecycle inputs are variants in that same log.
+Cross-subsystem ordering is therefore data, not a collection of pairwise
+restore rules. Any invalid row or application divergence stops recovery.
 
 Resolution templates are also persisted in the committed snapshot. A WAL alone
 would protect template installation only until the next block; once
-`save_block()` clears the control-plane log, templates must be snapshot state
+`save_block()` clears the acknowledged suffix, templates must be snapshot state
 like feeds and market metadata.
 
 ## Tier 3: Derived Views
@@ -234,7 +232,9 @@ Startup recovery is intentionally fence-driven:
 2. Read the canonical block height and canonical account-state fence from redb.
 3. Read only the fenced qmdb slot.
 4. Reject the store as corrupt if the fenced qmdb slot's `height` or `next_account_id` does not match redb.
-5. Restore the in-memory sequencer state from those committed structures.
+5. Require `acknowledged_writes` to contain exactly `[floor, next)`.
+6. Replay that interval in sequence order and reject any semantic divergence.
+7. Restore derived indexes only after the complete replay succeeds.
 
 Recovery never scans qmdb looking for "the newest" snapshot. The fence is the authority.
 
@@ -252,6 +252,10 @@ The current model relies on explicit invariants:
   for the same account and sidecar snapshot.
 - The typed-state qmdb slot root must equal the committed block header
   `state_root`.
+- Acknowledged writes require an existing committed snapshot baseline.
+- The WAL contains every and only sequence in `[acknowledged_write_floor,
+  next_acknowledged_write_seq)`; key and envelope sequences match.
+- An acknowledged replay error halts recovery; rows are never silently dropped.
 - Recovery trusts redb's fence, not qmdb recency.
 
 When any of these fail, startup should reject the store as unsupported or corrupt rather than guessing.
@@ -275,8 +279,9 @@ This is the whole reason the commit fence lives in redb.
 - Pubkey registry
 - Counter state and next IDs
 - Resting orders and reservations
-- Direct-admit recovery log and deferred submissions admitted after the last committed block
-- Control-plane recovery log for acknowledged account, market, resolution, cancellation, feed, and template mutations admitted after the last committed block
+- The exact global sequence of direct admits, deferred submissions,
+  control-plane commands, deposits, withdrawals, and L1 lifecycle inputs
+  accepted after the last committed block
 - Product-history batches not yet delivered to `sybil-history`
 - Pending acknowledged account creation/funding events, which are replayed and
   exported only when a later block commits

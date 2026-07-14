@@ -128,6 +128,15 @@ pub(crate) enum CancelError {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ReservationError {
     #[error(
+        "negative replay reservation for account {} order {}",
+        .account_id.0,
+        .order_id
+    )]
+    NegativeReplayReservation {
+        account_id: AccountId,
+        order_id: u64,
+    },
+    #[error(
         "reservation balance over-release for account {}: currently reserved {}, attempted release {}",
         .account_id.0,
         .currently_reserved,
@@ -335,21 +344,18 @@ impl OrderBook {
 
     /// Reinsert a pre-validated `RestingOrder` (replay path).
     ///
-    /// Used by the admit-log recovery: the order was already validated and
+    /// Used by acknowledged-write recovery: the order was already validated and
     /// reserved at original admit time, so we trust the payload and just
-    /// append it + update the reservation aggregates. Orders with negative
-    /// reservations are dropped with a warning, matching `restore`'s behavior.
-    pub fn reinsert_for_replay(&mut self, resting: RestingOrder) {
+    /// append it + update the reservation aggregates. Invalid rows fail
+    /// recovery; acknowledged state must never be silently dropped.
+    pub fn reinsert_for_replay(&mut self, resting: RestingOrder) -> Result<(), ReservationError> {
         if resting.reserved_balance < 0
             || resting.reserved_positions.iter().any(|(_, qty)| *qty < 0)
         {
-            tracing::warn!(
-                order_id = resting.order.id,
-                account_id = ?resting.account_id,
-                reserved_balance = resting.reserved_balance,
-                "dropping replayed admit with invalid reservation"
-            );
-            return;
+            return Err(ReservationError::NegativeReplayReservation {
+                account_id: resting.account_id,
+                order_id: resting.order.id,
+            });
         }
         if resting.reserved_balance > 0 {
             *self
@@ -364,6 +370,7 @@ impl OrderBook {
                 .or_insert(0) += qty;
         }
         self.orders.push(resting);
+        Ok(())
     }
 
     /// Current reserved balance for an account.

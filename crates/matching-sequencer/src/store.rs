@@ -1,9 +1,10 @@
 //! Block-boundary persistence via redb plus a qmdb-backed account snapshot.
 //!
 //! Philosophy: snapshot core state after each block in a single ACID transaction.
-//! On crash, we resume from the last committed block plus any bundle submissions
-//! that were admitted after it (replayed from the `PENDING_BUNDLES` table). The
-//! in-progress solve is lost but its inputs are durable.
+//! On crash, we resume from the last committed block plus every mutation
+//! accepted after it, replayed in exact actor order from the global
+//! `ACKNOWLEDGED_WRITES` table. The in-progress solve is lost but its accepted
+//! inputs are durable.
 //!
 //! The account-state boundary is explicit:
 //! - qmdb stores account snapshots and typed state roots
@@ -75,9 +76,10 @@ use crate::aggregates::{
     TraderTrackerSnapshot, WelfareTrackerSnapshot,
 };
 use crate::block::{BlockHeader, SealedBlock, state_sidecar_snapshot_from_resting_orders};
+#[cfg(test)]
+use crate::bridge::BridgeL1Input;
 use crate::bridge::{
-    BridgeL1Input, BridgeState, BridgeWithdrawalRequest, L1Deposit, L1WithdrawalStatus,
-    WithdrawalLeaf,
+    BridgeState, BridgeWithdrawalRequest, L1Deposit, L1WithdrawalStatus, WithdrawalLeaf,
 };
 use crate::market_info::{AccountFillRecord, MarketMetadata, ResolutionConfig};
 use crate::market_lifecycle::MarketLifecycle;
@@ -139,4 +141,7 @@ pub use self::restore::{AnalyticsRestoredState, RestoredState};
 pub use self::retention::{
     CanonicalArchiveMeta, CanonicalArchivePruneReport, CanonicalArchiveRetentionPolicy,
 };
-pub use self::wal::ControlPlaneCommand;
+pub use self::wal::{
+    ACKNOWLEDGED_WRITE_ENVELOPE_VERSION, AcknowledgedWrite, ControlPlaneCommand,
+    SequencedAcknowledgedWrite,
+};

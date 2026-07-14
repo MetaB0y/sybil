@@ -13,7 +13,13 @@ last_verified: 2026-07-11
 
 Simple single-market, non-MM orders are admitted directly into the [[Pending Orders and TTL|resting order book]] at submission time, after validation and capital reservation. That makes them visible immediately and eligible for the next [[Block Lifecycle|block]] without waiting in an unvalidated queue.
 
-Supported submissions that cannot be safely admitted one order at a time still use the deferred path: MM-constrained orders and multi-order bundles of supported single-market orders. They are durably appended to `PENDING_BUNDLES` and drained into the next block. This preserves flash-liquidity, atomicity, and group self-trade-prevention semantics. Multi-market/custom payoff execution is rejected at API, admission, solver, and verifier boundaries.
+Supported submissions that cannot be safely admitted one order at a time still
+use the deferred path: MM-constrained orders and multi-order bundles of
+supported single-market orders. They are durably appended as `DeferredBundle`
+rows in the global acknowledged-write WAL and drained into the next block. This
+preserves flash-liquidity, atomicity, group self-trade-prevention semantics, and
+exact ordering against nonce/key/bridge actions. Multi-market/custom payoff
+execution is rejected at API, admission, solver, and verifier boundaries.
 
 Admission has lightweight backpressure before either path mutates state:
 
@@ -55,7 +61,7 @@ graph TB
 ## Where This Lives
 > `crates/matching-sequencer/src/actor.rs` — admission limits and deferred-buffer routing
 > `crates/matching-sequencer/src/sequencer.rs` — direct admit vs deferred submission decision
-> `crates/matching-sequencer/src/store.rs` — `PENDING_BUNDLES` and admit-log persistence
+> `crates/matching-sequencer/src/store/wal.rs` — global `DirectAdmit` / `DeferredBundle` durability
 
 ## See Also
 - [[Block Lifecycle]] — deferred submissions are merged at block production

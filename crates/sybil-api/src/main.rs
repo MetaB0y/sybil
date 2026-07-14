@@ -350,6 +350,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let seq_config = sequencer_config_from_api(&config);
+    let needs_persistent_baseline = restored.is_none() && store.is_some();
 
     let handle = if let Some(state) = restored {
         tracing::info!(
@@ -361,7 +362,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Restored from persistent store"
         );
 
-        let mut sequencer = BlockSequencer::restore(state, oracle, seq_config);
+        let mut sequencer =
+            BlockSequencer::try_restore(state, oracle, seq_config).map_err(|e| {
+                std::io::Error::other(format!("failed to replay acknowledged writes: {e}"))
+            })?;
 
         // Add any seed markets not already present
         for name in &config.seed_markets {
@@ -387,6 +391,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         SequencerHandle::spawn_with_shared_store(sequencer, store.clone())
     };
+
+    if needs_persistent_baseline {
+        let baseline = handle.produce_block().await.map_err(|error| {
+            std::io::Error::other(format!(
+                "failed to commit the initial persistence baseline: {error}"
+            ))
+        })?;
+        tracing::info!(
+            height = baseline.canonical.header.height,
+            "Committed initial persistence baseline before accepting writes"
+        );
+    }
 
     tracing::info!(
         block_interval_ms = config.block_interval_ms,

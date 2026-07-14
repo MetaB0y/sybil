@@ -524,28 +524,18 @@ where
     }
 
     {
-        let mut table = txn.open_table(PENDING_BUNDLES)?;
+        let mut table = txn.open_table(ACKNOWLEDGED_WRITES)?;
         table.retain(|_, _| false)?;
     }
     {
-        let mut table = txn.open_table(ADMIT_LOG)?;
-        table.retain(|_, _| false)?;
-    }
-    {
-        let mut table = txn.open_table(CONTROL_PLANE_LOG)?;
-        table.retain(|_, _| false)?;
-    }
-    {
-        let mut table = txn.open_table(PENDING_L1_DEPOSITS)?;
-        table.retain(|_, _| false)?;
-    }
-    {
-        let mut table = txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
-        table.retain(|_, _| false)?;
-    }
-    {
-        let mut table = txn.open_table(PENDING_BRIDGE_L1_INPUTS)?;
-        table.retain(|_, _| false)?;
+        let mut counters = txn.open_table(COUNTERS)?;
+        let next = counters
+            .get(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ)?
+            .ok_or_else(|| {
+                StoreError::CorruptLayout("missing acknowledged-write next sequence".to_string())
+            })?
+            .value();
+        counters.insert(KEY_ACKNOWLEDGED_WRITE_FLOOR, next)?;
     }
 
     {
@@ -654,15 +644,10 @@ impl Store {
         txn.open_table(CLEARING_PRICES)?;
         txn.open_table(MARKET_VOLUMES)?;
         txn.open_table(RESTING_ORDERS)?;
-        txn.open_table(PENDING_BUNDLES)?;
-        txn.open_table(ADMIT_LOG)?;
-        txn.open_table(CONTROL_PLANE_LOG)?;
+        txn.open_table(ACKNOWLEDGED_WRITES)?;
         txn.open_table(DATA_FEEDS)?;
         txn.open_table(RESOLUTION_TEMPLATES)?;
         txn.open_table(BRIDGE_STATE)?;
-        txn.open_table(PENDING_L1_DEPOSITS)?;
-        txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?;
-        txn.open_table(PENDING_BRIDGE_L1_INPUTS)?;
         txn.open_table(TRADER_TRACKER)?;
         txn.open_table(ROLLING_VOLUME)?;
         txn.open_table(ROLLING_PRICE_ANCHORS)?;
@@ -999,6 +984,8 @@ pub enum StoreError {
     WitnessImport(String),
     #[error("proof-job capture failed: {0}")]
     ProofJob(String),
+    #[error("cannot acknowledge a write before the first committed block snapshot")]
+    AcknowledgedWriteBeforeSnapshot,
     #[cfg(test)]
     #[error("injected store fault: {0}")]
     InjectedFault(String),

@@ -1275,6 +1275,7 @@ async fn market_price_history_is_projected_beyond_recent_cache() {
     .await;
     let market_id = parse_json(&body)["market_id"].as_u64().unwrap();
 
+    let mut traded_heights = Vec::new();
     for (yes_price, no_price) in [(600_000_000u64, 500_000_000u64), (700_000_000, 400_000_000)] {
         let (status, _) = post_json(
             app.clone(),
@@ -1313,6 +1314,7 @@ async fn market_price_history_is_projected_beyond_recent_cache() {
             !block.canonical.fills.is_empty(),
             "expected fills from crossing orders"
         );
+        traded_heights.push(block.canonical.header.height);
     }
 
     let (status, body) = get(
@@ -1333,8 +1335,8 @@ async fn market_price_history_is_projected_beyond_recent_cache() {
         response.get("next_before_height").is_none(),
         "full page should not advertise another page: {response}"
     );
-    assert_eq!(points[0]["height"].as_u64().unwrap(), 1);
-    assert_eq!(points[1]["height"].as_u64().unwrap(), 2);
+    assert_eq!(points[0]["height"].as_u64().unwrap(), traded_heights[0]);
+    assert_eq!(points[1]["height"].as_u64().unwrap(), traded_heights[1]);
     assert!(
         points
             .iter()
@@ -1375,19 +1377,31 @@ async fn market_price_history_is_projected_beyond_recent_cache() {
     let limited = parse_json(&body);
     let limited_points = limited["points"].as_array().unwrap();
     assert_eq!(limited_points.len(), 1);
-    assert_eq!(limited_points[0]["height"].as_u64().unwrap(), 2);
-    assert_eq!(limited["next_before_height"].as_u64().unwrap(), 2);
+    assert_eq!(
+        limited_points[0]["height"].as_u64().unwrap(),
+        traded_heights[1]
+    );
+    assert_eq!(
+        limited["next_before_height"].as_u64().unwrap(),
+        traded_heights[1]
+    );
 
     let (status, body) = get(
         app,
-        &format!("/v1/markets/{market_id}/prices/history?limit=1&before_height=2"),
+        &format!(
+            "/v1/markets/{market_id}/prices/history?limit=1&before_height={}",
+            traded_heights[1]
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     let older = parse_json(&body);
     let older_points = older["points"].as_array().unwrap();
     assert_eq!(older_points.len(), 1);
-    assert_eq!(older_points[0]["height"].as_u64().unwrap(), 1);
+    assert_eq!(
+        older_points[0]["height"].as_u64().unwrap(),
+        traded_heights[0]
+    );
     assert!(
         older.get("next_before_height").is_none(),
         "oldest page should not advertise another page: {older}"
@@ -2222,7 +2236,16 @@ async fn blocks_endpoint_pages_canonical_archive_beyond_recent_cache() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(parse_json(&body).as_array().unwrap().is_empty());
+    let page = parse_json(&body);
+    let page = page.as_array().unwrap();
+    assert_eq!(page.len(), 1, "the persistent replay baseline is retained");
+    let baseline_height = b0
+        .canonical
+        .header
+        .height
+        .checked_sub(1)
+        .expect("explicit block follows the replay baseline");
+    assert_eq!(page[0]["height"].as_u64().unwrap(), baseline_height);
 }
 
 #[tokio::test]

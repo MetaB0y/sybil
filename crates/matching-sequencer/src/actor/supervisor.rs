@@ -97,7 +97,17 @@ impl SequencerSupervisorState {
             return;
         }
 
-        let sequencer = BlockSequencer::restore(state, self.oracle.clone(), self.config.clone());
+        let sequencer =
+            match BlockSequencer::try_restore(state, self.oracle.clone(), self.config.clone()) {
+                Ok(sequencer) => sequencer,
+                Err(error) => {
+                    tracing::error!(
+                        error = %error,
+                        "acknowledged-write replay failed; sequencer restart remains halted"
+                    );
+                    return;
+                }
+            };
 
         match self.spawn_child(myself, sequencer).await {
             Ok(()) => tracing::warn!("sequencer actor restarted from persistent snapshot"),

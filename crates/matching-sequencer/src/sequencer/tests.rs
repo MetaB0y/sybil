@@ -5,6 +5,7 @@ use crate::crypto::sign_attestation;
 use crate::error::RejectionReason;
 use crate::market_info::ResolutionConfig;
 use crate::order_book::RestingOrder;
+use crate::store::{AcknowledgedWrite, SequencedAcknowledgedWrite};
 use crate::validation::{validate_order, validate_order_with_reservation};
 use matching_engine::{
     MarketId, MarketSet, MmId, NANOS_PER_DOLLAR, Nanos, Order, Problem, Qty, notional_nanos,
@@ -282,15 +283,23 @@ fn restored_state_with_resting_orders(
         resting_orders,
         data_feeds: Vec::new(),
         resolution_templates: Vec::new(),
-        pending_bundles: Vec::new(),
-        control_plane_log: Vec::new(),
-        pending_l1_deposits: Vec::new(),
-        pending_bridge_withdrawals: Vec::new(),
-        pending_bridge_l1_inputs: Vec::new(),
+        acknowledged_writes: Vec::new(),
         bridge_state: seq.bridge_state().clone(),
-        admit_log: Vec::new(),
         analytics: restored_analytics_from(seq),
     }
+}
+
+fn sequenced_acknowledged_writes(
+    writes: Vec<AcknowledgedWrite>,
+) -> Vec<SequencedAcknowledgedWrite> {
+    writes
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, write)| SequencedAcknowledgedWrite {
+            sequence: sequence as u64,
+            write,
+        })
+        .collect()
 }
 
 fn total_balance(seq: &BlockSequencer) -> i64 {
@@ -778,8 +787,10 @@ fn pending_l1_cancel_replay_restores_refund_once_after_crash() {
     let event = test_withdrawal_event(&withdrawal, L1WithdrawalStatus::Cancelled, 5);
 
     let mut restored_state = restored_state_with_resting_orders(&seq, MarketSet::new(), vec![]);
-    restored_state.pending_bridge_l1_inputs =
-        vec![crate::bridge::BridgeL1Input::WithdrawalEvent(event.clone())];
+    restored_state.acknowledged_writes =
+        sequenced_acknowledged_writes(vec![AcknowledgedWrite::BridgeL1Input(
+            crate::bridge::BridgeL1Input::WithdrawalEvent(event.clone()),
+        )]);
     let mut restored = BlockSequencer::restore(
         restored_state,
         Arc::new(AdminOracle::new()),
@@ -1701,13 +1712,8 @@ fn test_resting_orders_survive_restart_and_match() {
         resting_orders: seq_a.order_book.snapshot(),
         data_feeds: Vec::new(),
         resolution_templates: Vec::new(),
-        pending_bundles: Vec::new(),
-        control_plane_log: Vec::new(),
-        pending_l1_deposits: Vec::new(),
-        pending_bridge_withdrawals: Vec::new(),
-        pending_bridge_l1_inputs: Vec::new(),
+        acknowledged_writes: Vec::new(),
         bridge_state: BridgeState::default(),
-        admit_log: Vec::new(),
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: seq_a.analytics().last_clearing_prices().clone(),
             market_volumes: seq_a.analytics().market_volumes().clone(),
@@ -1824,13 +1830,11 @@ fn restore_advances_next_order_id_past_replayed_admit_log_before_pending_bundles
         resting_orders: committed.order_book.snapshot(),
         data_feeds: Vec::new(),
         resolution_templates: Vec::new(),
-        pending_bundles: vec![deferred],
-        control_plane_log: Vec::new(),
-        pending_l1_deposits: Vec::new(),
-        pending_bridge_withdrawals: Vec::new(),
-        pending_bridge_l1_inputs: Vec::new(),
+        acknowledged_writes: sequenced_acknowledged_writes(vec![
+            AcknowledgedWrite::DirectAdmit(replayed_admit),
+            AcknowledgedWrite::DeferredBundle(deferred),
+        ]),
         bridge_state: BridgeState::default(),
-        admit_log: vec![replayed_admit],
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: committed.analytics().last_clearing_prices().clone(),
             market_volumes: committed.analytics().market_volumes().clone(),
@@ -1932,13 +1936,11 @@ fn restored_pending_bundle_revalidates_against_replayed_admit_reservations() {
         resting_orders: committed.order_book.snapshot(),
         data_feeds: Vec::new(),
         resolution_templates: Vec::new(),
-        pending_bundles: vec![deferred],
-        control_plane_log: Vec::new(),
-        pending_l1_deposits: Vec::new(),
-        pending_bridge_withdrawals: Vec::new(),
-        pending_bridge_l1_inputs: Vec::new(),
+        acknowledged_writes: sequenced_acknowledged_writes(vec![
+            AcknowledgedWrite::DirectAdmit(replayed_admit),
+            AcknowledgedWrite::DeferredBundle(deferred),
+        ]),
         bridge_state: BridgeState::default(),
-        admit_log: vec![replayed_admit],
         analytics: crate::store::AnalyticsRestoredState {
             last_clearing_prices: committed.analytics().last_clearing_prices().clone(),
             market_volumes: committed.analytics().market_volumes().clone(),
@@ -2039,7 +2041,10 @@ fn restore_expires_stale_resting_orders_before_bridge_wal_replay() {
         markets.clone(),
         stale_checkpoint_resting_orders,
     );
-    state.pending_bridge_withdrawals = vec![withdrawal_request];
+    state.acknowledged_writes =
+        sequenced_acknowledged_writes(vec![AcknowledgedWrite::BridgeWithdrawal(
+            withdrawal_request,
+        )]);
 
     let restored = BlockSequencer::restore(state, oracle, config);
 
@@ -2056,7 +2061,7 @@ fn restore_expires_stale_resting_orders_before_bridge_wal_replay() {
 }
 
 #[test]
-fn restore_drops_invalid_bridge_and_deposit_wal_rows() {
+fn restore_rejects_invalid_acknowledged_write_rows() {
     let (markets, _) = setup();
     let mut accounts = AccountStore::new();
     let aid = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
@@ -2094,17 +2099,23 @@ fn restore_drops_invalid_bridge_and_deposit_wal_rows() {
 
     let mut state =
         restored_state_with_resting_orders(&seq, markets.clone(), seq.order_book.snapshot());
-    state.pending_l1_deposits = vec![invalid_deposit];
-    state.pending_bridge_withdrawals = vec![invalid_withdrawal];
+    state.acknowledged_writes = sequenced_acknowledged_writes(vec![
+        AcknowledgedWrite::L1Deposit(invalid_deposit),
+        AcknowledgedWrite::BridgeWithdrawal(invalid_withdrawal),
+    ]);
 
-    let restored = BlockSequencer::restore(state, oracle, config);
-
-    assert_eq!(
-        restored.accounts.get(aid).unwrap().balance,
-        100 * NANOS_PER_DOLLAR as i64
-    );
-    assert_eq!(restored.bridge_state().deposit_cursor, 0);
-    assert!(restored.bridge_state().withdrawals.is_empty());
+    let error = match BlockSequencer::try_restore(state, oracle, config) {
+        Ok(_) => panic!("invalid acknowledged write must fail closed"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        SequencerRestoreError::AcknowledgedWrite {
+            sequence: 0,
+            kind: "l1_deposit",
+            ..
+        }
+    ));
 }
 
 #[test]

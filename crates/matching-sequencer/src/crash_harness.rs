@@ -972,12 +972,7 @@ fn assert_reservations_rederive(seq: &BlockSequencer, context: &str) {
 }
 
 fn has_uncommitted_wal(restored: &RestoredState) -> bool {
-    !restored.pending_bundles.is_empty()
-        || !restored.admit_log.is_empty()
-        || !restored.control_plane_log.is_empty()
-        || !restored.pending_l1_deposits.is_empty()
-        || !restored.pending_bridge_withdrawals.is_empty()
-        || !restored.pending_bridge_l1_inputs.is_empty()
+    !restored.acknowledged_writes.is_empty()
 }
 
 fn signing_key_for(seed: u64, account_id: AccountId) -> SigningKey {

@@ -95,50 +95,18 @@ pub(super) const RESTING_ORDERS: TableDefinition<&str, &[u8]> =
 
 pub(super) const KEY_RESTING_ORDERS_SNAPSHOT: &str = "snapshot";
 
-/// Pending bundle submissions: monotonic seq (u64) → msgpack(OrderSubmission).
-/// Append-only buffer for MM / multi-market / multi-order submissions that
-/// must wait for the block-time solver path. Each admit appends one row.
-/// Cleared atomically inside `save_block` when the bundles get consumed into
-/// a committed block. On restart, the table is replayed into the actor's
-/// in-memory pending queue so nothing submitted with a 200 OK is lost.
-pub(super) const PENDING_BUNDLES: TableDefinition<u64, &[u8]> =
-    TableDefinition::new("pending_bundles");
-
-/// Admit log: monotonic seq (u64) → msgpack(RestingOrder).
-/// Append-only log of non-MM single-market admissions that entered the
-/// resting book after the last committed block. Each admit appends one row
-/// before the 200 OK returns, so a crash between admit and the next block
-/// commit doesn't drop orders from `try_admit_direct`. Cleared atomically
-/// inside `save_block` when those admissions become part of the next
-/// `RESTING_ORDERS` snapshot; restart loads the snapshot and then replays
-/// this table on top.
-pub(super) const ADMIT_LOG: TableDefinition<u64, &[u8]> = TableDefinition::new("admit_log");
-
-/// Control-plane command WAL: monotonic seq (u64) -> msgpack(ControlPlaneCommand).
-/// Protects acknowledged account, market, resolution, cancellation, feed, and
-/// template mutations accepted after the last committed block. Cleared
-/// atomically inside `save_block`.
-pub(super) const CONTROL_PLANE_LOG: TableDefinition<u64, &[u8]> =
-    TableDefinition::new("control_plane_log");
+/// Global acknowledged-write WAL: sequence -> named MessagePack envelope.
+///
+/// Every actor mutation that can affect the next proven state uses this one
+/// keyspace. `KEY_ACKNOWLEDGED_WRITE_FLOOR..KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ`
+/// is therefore a gap-free interval, preserving exact cross-subsystem actor
+/// acceptance order across restart.
+pub(super) const ACKNOWLEDGED_WRITES: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("acknowledged_writes");
 
 /// L1 bridge sidecar state: consumed deposit cursor/root and withdrawal leaves.
 pub(super) const BRIDGE_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("bridge_state");
 pub(super) const KEY_BRIDGE_STATE: &str = "state";
-
-/// L1 deposits observed after the last committed block. They are replayed on
-/// restart and cleared atomically once a block commits them into state.
-pub(super) const PENDING_L1_DEPOSITS: TableDefinition<u64, &[u8]> =
-    TableDefinition::new("pending_l1_deposits");
-
-/// Bridge withdrawals requested after the last committed block. They are
-/// replayed on restart and cleared atomically once a block commits them.
-pub(super) const PENDING_BRIDGE_WITHDRAWALS: TableDefinition<u64, &[u8]> =
-    TableDefinition::new("pending_bridge_withdrawals");
-
-/// Confirmed L1 withdrawal events/cursor observations acknowledged after the
-/// last block. Replayed on restart and cleared with the committing block.
-pub(super) const PENDING_BRIDGE_L1_INPUTS: TableDefinition<u64, &[u8]> =
-    TableDefinition::new("pending_bridge_l1_inputs");
 
 /// Trader tracker snapshot — one row keyed "snapshot" holding the full
 /// `TraderTrackerSnapshot` payload. Off-block sidecar; missing table on
@@ -220,8 +188,10 @@ pub(super) const KEY_ACCOUNT_STATE_SLOT: &str = "account_state_slot";
 pub(super) const KEY_NEXT_PRODUCT_EVENT_SEQ: &str = "history_event_next_seq";
 pub(super) const KEY_CANONICAL_ARCHIVE_OLDEST_HEIGHT: &str = "blocks_full_min_height";
 pub(super) const KEY_LAST_CANONICAL_ARCHIVE_MAINTENANCE_HEIGHT: &str = "last_history_prune_height";
+pub(super) const KEY_ACKNOWLEDGED_WRITE_FLOOR: &str = "acknowledged_write_floor";
+pub(super) const KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ: &str = "next_acknowledged_write_seq";
 
-pub(super) const STORE_LAYOUT_VERSION: u64 = 1;
+pub(super) const STORE_LAYOUT_VERSION: u64 = 2;
 
 // TODO: Tier 2 tables (remaining)
 // const MM_STATE: TableDefinition<u32, &[u8]> = TableDefinition::new("mm_state");

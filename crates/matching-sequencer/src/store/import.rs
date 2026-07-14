@@ -39,7 +39,8 @@ impl Store {
 
         let restored = restored_state_from_witness(&witness, &config, genesis_hash)?;
         let oracle = Arc::new(AdminOracle::new());
-        let sequencer = BlockSequencer::restore(restored, oracle, config);
+        let sequencer = BlockSequencer::try_restore(restored, oracle, config)
+            .map_err(|error| StoreError::WitnessImport(error.to_string()))?;
         let snapshot = sequencer.snapshot();
         let rebuilt_sidecar = state_sidecar_snapshot_from_resting_orders(
             snapshot.bridge_state,
@@ -115,26 +116,12 @@ impl Store {
             ("clearing_prices", txn.open_table(CLEARING_PRICES)?.len()?),
             ("market_volumes", txn.open_table(MARKET_VOLUMES)?.len()?),
             ("resting_orders", txn.open_table(RESTING_ORDERS)?.len()?),
-            ("pending_bundles", txn.open_table(PENDING_BUNDLES)?.len()?),
-            ("admit_log", txn.open_table(ADMIT_LOG)?.len()?),
             (
-                "control_plane_log",
-                txn.open_table(CONTROL_PLANE_LOG)?.len()?,
+                "acknowledged_writes",
+                txn.open_table(ACKNOWLEDGED_WRITES)?.len()?,
             ),
             ("chain_meta", txn.open_table(CHAIN_META)?.len()?),
             ("bridge_state", txn.open_table(BRIDGE_STATE)?.len()?),
-            (
-                "pending_l1_deposits",
-                txn.open_table(PENDING_L1_DEPOSITS)?.len()?,
-            ),
-            (
-                "pending_bridge_withdrawals",
-                txn.open_table(PENDING_BRIDGE_WITHDRAWALS)?.len()?,
-            ),
-            (
-                "pending_bridge_l1_inputs",
-                txn.open_table(PENDING_BRIDGE_L1_INPUTS)?.len()?,
-            ),
         ];
         for (table, rows) in data_rows {
             if rows != 0 {
@@ -303,14 +290,9 @@ fn restored_state_from_witness(
         resting_orders: restored_resting_orders,
         data_feeds: Vec::new(),
         resolution_templates: Vec::new(),
-        pending_bundles: Vec::new(),
-        admit_log: Vec::new(),
-        control_plane_log: Vec::new(),
+        acknowledged_writes: Vec::new(),
         analytics: empty_import_analytics(last_clearing_prices),
         bridge_state,
-        pending_l1_deposits: Vec::new(),
-        pending_bridge_withdrawals: Vec::new(),
-        pending_bridge_l1_inputs: Vec::new(),
     })
 }
 

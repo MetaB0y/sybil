@@ -148,8 +148,8 @@ impl SequencerActorState {
             metrics::counter!("sybil_persistence_failures").increment(1);
             // The live sequencer still holds the pending bundles — the drain
             // happened on the clone. The next tick will retry, and the
-            // PENDING_BUNDLES redb table wasn't cleared because save_block's
-            // transaction rolled back atomically.
+            // The global acknowledged-write WAL was not cleared because
+            // save_block's transaction rolled back atomically.
             tracing::error!(error = %error, "prepared block discarded before commit; pending bundles retained for retry");
             return Ok(BlockTickOutcome::PersistFailed(error));
         }

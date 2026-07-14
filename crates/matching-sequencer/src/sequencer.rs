@@ -33,7 +33,7 @@ use crate::market_info::MarketMetadata;
 use crate::market_lifecycle::MarketLifecycle;
 use crate::order_book::{OrderBook, RestingExit, RestingRevalidationExit};
 use crate::settlement;
-use crate::store::{ControlPlaneCommand, RestoredState, SequencerSnapshot};
+use crate::store::{AcknowledgedWrite, ControlPlaneCommand, RestoredState, SequencerSnapshot};
 use crate::system_event::SystemEvent;
 use crate::validation::validate_order_shape;
 
@@ -50,6 +50,7 @@ mod views;
 pub use self::config::{
     DEFAULT_MIN_RESTING_ORDER_NOTIONAL_NANOS, DEFAULT_ORDER_TTL_BLOCKS, SequencerConfig,
 };
+pub use self::restore::SequencerRestoreError;
 pub use self::types::{
     AdmitOutcome, BatchResult, LeaderboardBase, LeaderboardRow, OrderSubmission, PendingOrderInfo,
     PreparedBlock, batch_result_from_block,
@@ -114,8 +115,9 @@ pub struct BlockSequencer {
     /// Buffered submissions that couldn't be admitted into the resting book
     /// at submit time (MM-constrained, multi-order, multi-market). Drained
     /// by the clone inside `prepare_block` and consumed by the solver. The
-    /// durable counterpart lives in the `PENDING_BUNDLES` redb table so a
-    /// crash between admit and the next block commit doesn't drop them.
+    /// durable counterpart is a `DeferredBundle` row in the global
+    /// acknowledged-write WAL so restart cannot drop it or reorder it against
+    /// another subsystem.
     pending_bundles: Vec<OrderSubmission>,
     /// Runtime configuration for this sequencer and its surrounding actor.
     pub config: SequencerConfig,

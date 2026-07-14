@@ -2717,6 +2717,7 @@ mod tests {
         };
         let (sequencer, _) = make_test_sequencer_with_config(config.clone());
         let handle = SequencerHandle::spawn_with_store_arc(sequencer, Some(store.clone()));
+        handle.produce_block().await.unwrap();
         let account = handle.create_account(0).await.unwrap();
 
         let primary =
@@ -3082,6 +3083,11 @@ mod tests {
             .unwrap()
             .positions
             .insert((market_id, 0), 10);
+        accounts
+            .get_mut(buyer)
+            .unwrap()
+            .positions
+            .insert((market_id, 1), 10);
 
         let seq = BlockSequencer::with_default_solver(
             accounts,
@@ -3091,6 +3097,7 @@ mod tests {
             config.clone(),
         );
         let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+        let baseline = handle.produce_block().await.unwrap();
 
         handle
             .submit_order(OrderSubmission {
@@ -3147,12 +3154,14 @@ mod tests {
         assert_eq!(
             heights,
             vec![
+                baseline.canonical.header.height,
                 block1.canonical.header.height,
                 block2.canonical.header.height
             ],
             "each fenced block commit must append exactly one history batch"
         );
-        assert!(batches.iter().all(|batch| {
+        assert!(batches[0].prices.is_empty());
+        assert!(batches.iter().skip(1).all(|batch| {
             batch.prices.len() == 1
                 && batch.prices[0].market_id == market_id.0
                 && batch.prices[0].volume_nanos > 0
@@ -3193,7 +3202,10 @@ mod tests {
                 payload_hash: batch.payload_hash,
             })
             .collect();
-        assert_eq!(store.acknowledge_product_history_batches(&acks).unwrap(), 2);
+        assert_eq!(
+            store.acknowledge_product_history_batches(&acks).unwrap(),
+            batches.len()
+        );
         assert_eq!(store.product_history_outbox_len().unwrap(), 0);
         assert_eq!(store.acknowledge_product_history_batches(&acks).unwrap(), 0);
     }

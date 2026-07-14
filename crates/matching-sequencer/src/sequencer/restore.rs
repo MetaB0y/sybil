@@ -1,5 +1,18 @@
 use super::*;
 
+#[derive(Debug, thiserror::Error)]
+pub enum SequencerRestoreError {
+    #[error("failed to expire stale committed resting orders during restore: {0}")]
+    SnapshotExpiry(#[source] crate::order_book::ReservationError),
+    #[error("failed to replay acknowledged write {sequence} ({kind}): {source}")]
+    AcknowledgedWrite {
+        sequence: u64,
+        kind: &'static str,
+        #[source]
+        source: SequencerError,
+    },
+}
+
 impl BlockSequencer {
     pub fn new(
         accounts: AccountStore,
@@ -83,10 +96,22 @@ impl BlockSequencer {
         )
     }
 
-    /// Restore from persisted state.
+    /// Restore from persisted state, panicking rather than starting from a
+    /// partial acknowledged-write prefix. Production startup uses
+    /// [`Self::try_restore`] to surface the same fail-closed error cleanly.
     pub fn restore(state: RestoredState, oracle: Arc<dyn Oracle>, config: SequencerConfig) -> Self {
+        Self::try_restore(state, oracle, config)
+            .expect("persisted sequencer state must replay without divergence")
+    }
+
+    /// Restore from the committed snapshot and replay the complete global
+    /// acknowledged-write interval in exact actor acceptance order.
+    pub fn try_restore(
+        state: RestoredState,
+        oracle: Arc<dyn Oracle>,
+        config: SequencerConfig,
+    ) -> Result<Self, SequencerRestoreError> {
         let solver: Arc<dyn Solver> = Arc::new(matching_solver::RetainedCashSolver::new());
-        let control_plane_log = state.control_plane_log.clone();
         let mut lifecycle = MarketLifecycle::new(oracle);
         for (market_id, status) in state.market_statuses {
             lifecycle.set_market_status(market_id, status);
@@ -112,25 +137,26 @@ impl BlockSequencer {
         );
         let committed_deposit_frontier = state.bridge_state.deposit_frontier;
         let mut order_book = OrderBook::restore(state.resting_orders, config.order_ttl_blocks);
-        // Replay the admit-log WAL on top of the snapshot: every non-MM
-        // admit since the last committed block is durable on its own row
-        // and must be re-inserted before the sequencer starts taking new
-        // traffic, so nothing acknowledged with a 200 OK is dropped by a
-        // crash.
-        for resting in state.admit_log {
-            order_book.reinsert_for_replay(resting);
+        // A committed snapshot should already have swept these orders. Keep
+        // the recovery repair before all later acknowledged writes so those
+        // writes observe the same post-block state the live actor observed.
+        let expired_on_restore = order_book
+            .expire_committed_through(state.height)
+            .map_err(SequencerRestoreError::SnapshotExpiry)?;
+        if !expired_on_restore.is_empty() {
+            metrics::counter!("sybil_restore_expired_resting_orders_total")
+                .increment(expired_on_restore.len() as u64);
+            debug!(
+                height = state.height,
+                expired_orders = expired_on_restore.len(),
+                "expired stale resting orders before acknowledged-write replay"
+            );
         }
         let next_order_id = order_book
             .resting_orders()
             .map(|(order, _)| order.id.saturating_add(1))
-            .chain(
-                state
-                    .pending_bundles
-                    .iter()
-                    .flat_map(|submission| submission.orders.iter())
-                    .map(|order| order.id.saturating_add(1)),
-            )
             .fold(state.next_order_id, u64::max);
+        let acknowledged_writes = state.acknowledged_writes;
         let mut restored = Self {
             accounts: state.accounts,
             solver,
@@ -150,108 +176,69 @@ impl BlockSequencer {
             bridge: state.bridge_state,
             pending_system_events: Vec::new(),
             pending_system_account_baselines: HashMap::new(),
-            pending_bundles: state.pending_bundles,
+            pending_bundles: Vec::new(),
             config,
         };
-        // Control-plane replay can create/fund accounts and cancel resting
-        // orders. Bridge WAL validation depends on those effects, so it must
-        // run before deposits/withdrawals are replayed. The separate WAL
-        // tables still do not encode exact cross-subsystem event ordering; if
-        // system-event interleaving becomes consensus-sensitive, collapse these
-        // into one sequenced acknowledged-write log.
-        for command in control_plane_log {
-            if let Err(error) = restored.replay_control_plane_command(command) {
+        for entry in acknowledged_writes {
+            let sequence = entry.sequence;
+            let kind = entry.write.kind();
+            if let Err(source) = restored.replay_acknowledged_write(entry.write) {
                 metrics::counter!(
-                    "sybil_restore_wal_rows_dropped_total",
-                    "kind" => "control_plane"
+                    "sybil_restore_acknowledged_write_failures_total",
+                    "kind" => kind
                 )
                 .increment(1);
-                tracing::warn!(
+                tracing::error!(
                     height = restored.height,
-                    %error,
-                    "dropping invalid control-plane WAL row during restore"
+                    sequence,
+                    kind,
+                    error = %source,
+                    "acknowledged-write replay diverged; refusing partial recovery"
                 );
-            }
-        }
-
-        let expired_on_restore = restored
-            .order_book
-            .expire_committed_through(restored.height)
-            .expect("restored reservation aggregates were validated before replay");
-        if !expired_on_restore.is_empty() {
-            metrics::counter!("sybil_restore_expired_resting_orders_total")
-                .increment(expired_on_restore.len() as u64);
-            debug!(
-                height = restored.height,
-                expired_orders = expired_on_restore.len(),
-                "expired stale resting orders during restore"
-            );
-        }
-
-        for deposit in state.pending_l1_deposits {
-            let account_id = deposit.account_id;
-            let deposit_id = deposit.deposit_id;
-            if let Err(error) = restored.ingest_l1_deposit(deposit) {
-                metrics::counter!(
-                    "sybil_restore_wal_rows_dropped_total",
-                    "kind" => "l1_deposit"
-                )
-                .increment(1);
-                tracing::warn!(
-                    height = restored.height,
-                    deposit_id,
-                    account_id = ?account_id,
-                    %error,
-                    "dropping invalid pending l1 deposit WAL row during restore"
-                );
-            }
-        }
-        for request in state.pending_bridge_withdrawals {
-            let account_id = request.account_id;
-            let amount_token_units = request.amount_token_units;
-            let expiry_height = request.expiry_height;
-            if let Err(error) = restored.request_bridge_withdrawal(request) {
-                metrics::counter!(
-                    "sybil_restore_wal_rows_dropped_total",
-                    "kind" => "bridge_withdrawal"
-                )
-                .increment(1);
-                tracing::warn!(
-                    height = restored.height,
-                    account_id = ?account_id,
-                    amount_token_units,
-                    expiry_height,
-                    %error,
-                    "dropping invalid pending bridge withdrawal WAL row during restore"
-                );
-            }
-        }
-        for input in state.pending_bridge_l1_inputs {
-            let result = match input {
-                crate::bridge::BridgeL1Input::WithdrawalEvent(event) => {
-                    restored.apply_bridge_withdrawal_l1_event(event).map(|_| ())
-                }
-                crate::bridge::BridgeL1Input::ObservedHeight(height) => {
-                    restored.observe_bridge_l1_height(height).map(|_| ())
-                }
-            };
-            if let Err(error) = result {
-                metrics::counter!(
-                    "sybil_restore_wal_rows_dropped_total",
-                    "kind" => "bridge_l1_input"
-                )
-                .increment(1);
-                tracing::warn!(
-                    height = restored.height,
-                    %error,
-                    "dropping invalid pending bridge L1 input WAL row during restore"
-                );
+                return Err(SequencerRestoreError::AcknowledgedWrite {
+                    sequence,
+                    kind,
+                    source,
+                });
             }
         }
         let account_ids: Vec<AccountId> = restored.accounts.iter().map(|(id, _)| *id).collect();
         restored.analytics.seed_equity_known(account_ids);
         restored.rebuild_api_key_index();
-        restored
+        Ok(restored)
+    }
+
+    fn replay_acknowledged_write(
+        &mut self,
+        write: AcknowledgedWrite,
+    ) -> Result<(), SequencerError> {
+        match write {
+            AcknowledgedWrite::DirectAdmit(resting) => {
+                self.next_order_id = self.next_order_id.max(resting.order.id.saturating_add(1));
+                self.order_book.reinsert_for_replay(resting)?;
+                Ok(())
+            }
+            AcknowledgedWrite::DeferredBundle(submission) => {
+                for order in &submission.orders {
+                    self.next_order_id = self.next_order_id.max(order.id.saturating_add(1));
+                }
+                self.pending_bundles.push(submission);
+                Ok(())
+            }
+            AcknowledgedWrite::ControlPlane(command) => self.replay_control_plane_command(command),
+            AcknowledgedWrite::L1Deposit(deposit) => self.ingest_l1_deposit(deposit).map(|_| ()),
+            AcknowledgedWrite::BridgeWithdrawal(request) => {
+                self.request_bridge_withdrawal(request).map(|_| ())
+            }
+            AcknowledgedWrite::BridgeL1Input(input) => match input {
+                crate::bridge::BridgeL1Input::WithdrawalEvent(event) => {
+                    self.apply_bridge_withdrawal_l1_event(event).map(|_| ())
+                }
+                crate::bridge::BridgeL1Input::ObservedHeight(height) => {
+                    self.observe_bridge_l1_height(height).map(|_| ())
+                }
+            },
+        }
     }
 
     /// Rebuild the derived active-API-key reverse index from persisted accounts

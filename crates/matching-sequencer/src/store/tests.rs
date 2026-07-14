@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
-use matching_engine::MarketSet;
+use matching_engine::{MarketSet, MmConstraint, MmId, NANOS_PER_DOLLAR, outcome_buy};
 use redb::{Database, TableDefinition};
 
 use super::testutil::*;
 use super::*;
+use crate::AdminOracle;
+use crate::OrderSubmission;
+use crate::account::AccountStore;
+use crate::market_lifecycle::MarketLifecycle;
 
 fn store_test_sequencer_config() -> crate::SequencerConfig {
     crate::SequencerConfig {
@@ -733,9 +737,253 @@ async fn test_store_restores_pending_bridge_wals() {
         .unwrap();
 
     let restored = store.load_state().await.unwrap().unwrap();
-    assert_eq!(restored.pending_l1_deposits, vec![deposit]);
-    assert_eq!(restored.pending_bridge_withdrawals, vec![withdrawal]);
-    assert_eq!(restored.pending_bridge_l1_inputs, vec![l1_input]);
+    assert_eq!(restored.acknowledged_writes.len(), 3);
+    assert!(matches!(
+        &restored.acknowledged_writes[0].write,
+        AcknowledgedWrite::L1Deposit(value) if value == &deposit
+    ));
+    assert!(matches!(
+        &restored.acknowledged_writes[1].write,
+        AcknowledgedWrite::BridgeWithdrawal(value) if value == &withdrawal
+    ));
+    assert!(matches!(
+        &restored.acknowledged_writes[2].write,
+        AcknowledgedWrite::BridgeL1Input(value) if value == &l1_input
+    ));
+}
+
+#[tokio::test]
+async fn acknowledged_writes_preserve_one_cross_subsystem_sequence() {
+    let path = temp_db_path("store-global-ack-sequence");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let mut markets = MarketSet::new();
+    let market_id = markets.add_binary("global ack order");
+    let env = TestEnv::new();
+    let mut accounts = AccountStore::new();
+    let account_id = accounts.create_account(100 * NANOS_PER_DOLLAR as i64);
+    store
+        .save_block(env.snapshot(
+            &accounts,
+            &markets,
+            &lifecycle,
+            &sample_header(1),
+            1,
+            None,
+            vec![],
+        ))
+        .await
+        .unwrap();
+
+    store
+        .append_control_plane_command(&ControlPlaneCommand::AdvanceReplayNonce {
+            account_id,
+            nonce: 1,
+        })
+        .await
+        .unwrap();
+
+    let mut book = OrderBook::new(10);
+    let accepted = book
+        .accept(
+            outcome_buy(&markets, 1, market_id, 0, NANOS_PER_DOLLAR / 2, 1),
+            account_id,
+            accounts.get(account_id).unwrap(),
+            1,
+            0,
+        )
+        .unwrap();
+    store
+        .append_admit_log(&accepted.resting_order)
+        .await
+        .unwrap();
+
+    let deferred = OrderSubmission {
+        account_id,
+        orders: vec![outcome_buy(
+            &markets,
+            2,
+            market_id,
+            0,
+            NANOS_PER_DOLLAR / 2,
+            1,
+        )],
+        mm_constraint: Some(MmConstraint::new(MmId(1), Nanos(NANOS_PER_DOLLAR))),
+    };
+    store.append_pending_bundle(&deferred).await.unwrap();
+
+    let deposit = L1Deposit {
+        deposit_id: 1,
+        account_id: Some(account_id),
+        chain_id: 1,
+        vault_address: [0x10; 20],
+        token_address: [0x20; 20],
+        sender: [0x30; 20],
+        sybil_account_key: crate::bridge::account_key(account_id),
+        amount_token_units: 10_000,
+        deposit_root: [0x44; 32],
+    };
+    store.append_pending_l1_deposit(&deposit).await.unwrap();
+
+    let withdrawal = BridgeWithdrawalRequest {
+        account_id,
+        chain_id: 1,
+        vault_address: [0x10; 20],
+        recipient: [0x40; 20],
+        token_address: [0x20; 20],
+        amount_token_units: 4_000,
+        expiry_height: 10,
+    };
+    store
+        .append_pending_bridge_withdrawal(&withdrawal)
+        .await
+        .unwrap();
+    store
+        .append_pending_bridge_l1_input(&BridgeL1Input::ObservedHeight(42))
+        .await
+        .unwrap();
+
+    let restored = store.load_state().await.unwrap().unwrap();
+    let sequences: Vec<u64> = restored
+        .acknowledged_writes
+        .iter()
+        .map(|entry| entry.sequence)
+        .collect();
+    let kinds: Vec<&str> = restored
+        .acknowledged_writes
+        .iter()
+        .map(|entry| entry.write.kind())
+        .collect();
+    assert_eq!(sequences, vec![0, 1, 2, 3, 4, 5]);
+    assert_eq!(
+        kinds,
+        vec![
+            "control_plane",
+            "direct_admit",
+            "deferred_bundle",
+            "l1_deposit",
+            "bridge_withdrawal",
+            "bridge_l1_input",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn acknowledged_write_requires_a_committed_replay_baseline() {
+    let path = temp_db_path("store-global-ack-needs-baseline");
+    let store = Store::open(&path).unwrap();
+    let error = store
+        .append_control_plane_command(&ControlPlaneCommand::AdvanceReplayNonce {
+            account_id: AccountId(7),
+            nonce: 1,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, StoreError::AcknowledgedWriteBeforeSnapshot));
+    assert!(store.load_state().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn acknowledged_write_floor_detects_a_missing_first_row() {
+    let path = temp_db_path("store-global-ack-floor-gap");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let markets = MarketSet::new();
+    let env = TestEnv::new();
+    let accounts = AccountStore::new();
+    store
+        .save_block(env.snapshot(
+            &accounts,
+            &markets,
+            &lifecycle,
+            &sample_header(1),
+            1,
+            None,
+            vec![],
+        ))
+        .await
+        .unwrap();
+    for nonce in [1, 2] {
+        store
+            .append_control_plane_command(&ControlPlaneCommand::AdvanceReplayNonce {
+                account_id: AccountId(7),
+                nonce,
+            })
+            .await
+            .unwrap();
+    }
+
+    let txn = store.db.begin_write().unwrap();
+    {
+        let mut table = txn.open_table(ACKNOWLEDGED_WRITES).unwrap();
+        table.remove(0).unwrap();
+    }
+    txn.commit().unwrap();
+
+    let error = match store.load_state().await {
+        Ok(_) => panic!("missing first acknowledged-write row must fail closed"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        StoreError::CorruptLayout(message)
+            if message.contains("expected sequence 0, found 1")
+    ));
+}
+
+#[tokio::test]
+async fn acknowledged_write_sequence_remains_monotonic_across_block_fences() {
+    let path = temp_db_path("store-global-ack-monotonic");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let markets = MarketSet::new();
+    let env = TestEnv::new();
+    let accounts = AccountStore::new();
+    store
+        .save_block(env.snapshot(
+            &accounts,
+            &markets,
+            &lifecycle,
+            &sample_header(1),
+            1,
+            None,
+            vec![],
+        ))
+        .await
+        .unwrap();
+    store
+        .append_control_plane_command(&ControlPlaneCommand::AdvanceReplayNonce {
+            account_id: AccountId(7),
+            nonce: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .save_block(env.snapshot(
+            &accounts,
+            &markets,
+            &lifecycle,
+            &sample_header(2),
+            1,
+            None,
+            vec![],
+        ))
+        .await
+        .unwrap();
+    store
+        .append_control_plane_command(&ControlPlaneCommand::AdvanceReplayNonce {
+            account_id: AccountId(7),
+            nonce: 2,
+        })
+        .await
+        .unwrap();
+
+    let restored = store.load_state().await.unwrap().unwrap();
+    assert_eq!(restored.acknowledged_writes.len(), 1);
+    assert_eq!(restored.acknowledged_writes[0].sequence, 1);
 }
 
 #[tokio::test]
@@ -1801,7 +2049,13 @@ async fn test_store_roundtrips_admit_log_and_replays_on_restore() {
     // Load + restore: the order must live again in the book, with its
     // reservation correctly accounted for.
     let restored = store.load_state().await.unwrap().unwrap();
-    assert_eq!(restored.admit_log.len(), 1);
+    assert!(matches!(
+        restored.acknowledged_writes.as_slice(),
+        [SequencedAcknowledgedWrite {
+            write: AcknowledgedWrite::DirectAdmit(_),
+            ..
+        }]
+    ));
     assert!(restored.resting_orders.is_empty());
 
     let seq = BlockSequencer::restore(restored, oracle, store_test_sequencer_config());
@@ -1826,7 +2080,7 @@ async fn test_store_roundtrips_admit_log_and_replays_on_restore() {
         .unwrap();
 
     let restored_after = store.load_state().await.unwrap().unwrap();
-    assert!(restored_after.admit_log.is_empty());
+    assert!(restored_after.acknowledged_writes.is_empty());
 }
 
 #[tokio::test]
@@ -1921,8 +2175,16 @@ async fn test_store_roundtrips_pending_bundles() {
     store.append_pending_bundle(&sub).await.unwrap();
 
     let restored_before = store.load_state().await.unwrap().unwrap();
-    assert_eq!(restored_before.pending_bundles.len(), 2);
-    assert_eq!(restored_before.pending_bundles[0].account_id, AccountId(42));
+    assert_eq!(restored_before.acknowledged_writes.len(), 2);
+    assert!(
+        restored_before
+            .acknowledged_writes
+            .iter()
+            .all(|entry| matches!(
+                &entry.write,
+                AcknowledgedWrite::DeferredBundle(bundle) if bundle.account_id == AccountId(42)
+            ))
+    );
 
     // save_block must clear the pending table atomically with the commit.
     store
@@ -1939,5 +2201,5 @@ async fn test_store_roundtrips_pending_bundles() {
         .unwrap();
 
     let restored_after = store.load_state().await.unwrap().unwrap();
-    assert!(restored_after.pending_bundles.is_empty());
+    assert!(restored_after.acknowledged_writes.is_empty());
 }

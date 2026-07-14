@@ -133,7 +133,11 @@ Sybil uses block snapshots plus small acknowledged-write WALs—not event sourci
   immutable raw history batches plus account/time/market query projections.
 - **The redb fence is the commit decision.** Recovery opens exactly the fenced qMDB slot and rejects height/root mismatch.
 
-Between blocks, separate WAL tables protect direct admits, deferred bundles, control-plane commands, deposits, withdrawals, and L1 lifecycle inputs. Replay order is fixed and tested: committed snapshot/book → admit rows/id advance → control plane/expiry → deposits → withdrawal creation → L1 lifecycle inputs; deferred bundles wait for the next normal solve.
+Between blocks, one globally sequenced acknowledged-write WAL protects direct
+admits, deferred bundles, control-plane commands, deposits, withdrawals, and L1
+lifecycle inputs. Recovery requires the exact `[floor, next)` interval and
+replays actor acceptance order; deferred bundles still wait for the next normal
+solve.
 
 Full canonical block replay and private recovery DA remain sequencer concerns.
 Product history—fills, account events, equity, committed prices, and candles—is
@@ -236,7 +240,8 @@ owns the detailed evidence and remediation order.
 7. Key-operation P256/WebAuthn signatures and state bindings are checked at admission and in the guest; ordinary signed-action replay protection remains an admission/WAL guarantee.
 8. The header roots equal canonical typed state/events; public inputs bind witness, DA, bridge, height, and parent transition.
 9. Acknowledged writes survive restart; no block is published before the redb fence commits it.
-10. Recovery reads only the fenced qMDB slot and follows the fixed WAL replay order.
+10. Recovery reads only the fenced qMDB slot and replays the complete global
+    acknowledged-write interval in exact actor acceptance order.
 11. Derived analytics/history never affect validity.
 12. Resolution is irreversible; resolved markets cannot trade and groups retain only valid unresolved structure.
 13. L1 roots are consecutive, deposit-checkpoint bound, verifier-gated, and withdrawal/escape claims are nullifier-protected.

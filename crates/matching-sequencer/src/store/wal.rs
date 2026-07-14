@@ -136,16 +136,16 @@ impl Store {
     /// Called by the actor on every admit that routes to the in-memory
     /// pending queue (MM-constrained, multi-order, or multi-market orders).
     /// The row is cleared atomically inside `save_block` when the bundle is
-    /// consumed into a committed block. The next-seq is derived from the
-    /// current table max so restart-then-admit doesn't collide with the
-    /// replayed rows that are still in memory.
+    /// consumed into a committed block. Sequence allocation and row insertion
+    /// share one redb transaction, so restart-then-admit cannot collide with
+    /// replayed rows that are still pending after the committed floor.
     pub async fn append_pending_bundle(
         &self,
         submission: &crate::sequencer::OrderSubmission,
     ) -> Result<(), StoreError> {
-        let bytes = rmp_serde::to_vec(submission)?;
-        self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_BUNDLES, bytes))
+        self.append_acknowledged_write(AcknowledgedWrite::DeferredBundle(submission.clone()))
             .await
+            .map(|_| ())
     }
 
     /// Append one `RestingOrder` to the admit-log WAL.
@@ -155,64 +155,150 @@ impl Store {
     /// row is committed to redb. Rows are cleared atomically by `save_block`
     /// once the admit is rolled into the next `RESTING_ORDERS` snapshot.
     pub async fn append_admit_log(&self, resting: &RestingOrder) -> Result<(), StoreError> {
-        let bytes = rmp_serde::to_vec(resting)?;
-        self.redb_write(move |db| append_msgpack_row_bytes(&db, ADMIT_LOG, bytes))
+        self.append_acknowledged_write(AcknowledgedWrite::DirectAdmit(resting.clone()))
             .await
+            .map(|_| ())
     }
 
     pub async fn append_control_plane_command(
         &self,
         command: &ControlPlaneCommand,
     ) -> Result<(), StoreError> {
-        let bytes = rmp_serde::to_vec(command)?;
-        self.redb_write(move |db| append_msgpack_row_bytes(&db, CONTROL_PLANE_LOG, bytes))
+        self.append_acknowledged_write(AcknowledgedWrite::ControlPlane(command.clone()))
             .await
+            .map(|_| ())
     }
 
     pub async fn append_pending_l1_deposit(&self, deposit: &L1Deposit) -> Result<(), StoreError> {
-        let bytes = rmp_serde::to_vec(deposit)?;
-        self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_L1_DEPOSITS, bytes))
+        self.append_acknowledged_write(AcknowledgedWrite::L1Deposit(deposit.clone()))
             .await
+            .map(|_| ())
     }
 
     pub async fn append_pending_bridge_withdrawal(
         &self,
         request: &BridgeWithdrawalRequest,
     ) -> Result<(), StoreError> {
-        let bytes = rmp_serde::to_vec(request)?;
-        self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_BRIDGE_WITHDRAWALS, bytes))
+        self.append_acknowledged_write(AcknowledgedWrite::BridgeWithdrawal(request.clone()))
             .await
+            .map(|_| ())
     }
 
     pub async fn append_pending_bridge_l1_input(
         &self,
         input: &crate::bridge::BridgeL1Input,
     ) -> Result<(), StoreError> {
-        let bytes = rmp_serde::to_vec(input)?;
-        self.redb_write(move |db| append_msgpack_row_bytes(&db, PENDING_BRIDGE_L1_INPUTS, bytes))
+        self.append_acknowledged_write(AcknowledgedWrite::BridgeL1Input(input.clone()))
             .await
+            .map(|_| ())
+    }
+
+    // Prometheus gauges use f64 at the metrics-library boundary; protocol
+    // state and sequence allocation remain integer-only.
+    #[allow(clippy::disallowed_types)]
+    async fn append_acknowledged_write(&self, write: AcknowledgedWrite) -> Result<u64, StoreError> {
+        let kind = write.kind();
+        let sequence = self
+            .redb_write(move |db| append_acknowledged_write_row(&db, write))
+            .await?;
+        metrics::counter!("sybil_acknowledged_writes_appended_total", "kind" => kind).increment(1);
+        metrics::gauge!("sybil_acknowledged_write_next_sequence")
+            .set(sequence.saturating_add(1) as f64);
+        Ok(sequence)
     }
 }
 
-fn append_msgpack_row_bytes(
+pub const ACKNOWLEDGED_WRITE_ENVELOPE_VERSION: u8 = 1;
+
+/// One actor-ordered mutation accepted after the committed block fence.
+///
+/// Variants are intentionally append-only. The outer envelope carries an
+/// explicit format version and repeats the redb key sequence so moving bytes
+/// between keys is detected during restore.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum AcknowledgedWrite {
+    DirectAdmit(RestingOrder),
+    DeferredBundle(crate::sequencer::OrderSubmission),
+    ControlPlane(ControlPlaneCommand),
+    L1Deposit(L1Deposit),
+    BridgeWithdrawal(BridgeWithdrawalRequest),
+    BridgeL1Input(crate::bridge::BridgeL1Input),
+}
+
+impl AcknowledgedWrite {
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::DirectAdmit(_) => "direct_admit",
+            Self::DeferredBundle(_) => "deferred_bundle",
+            Self::ControlPlane(_) => "control_plane",
+            Self::L1Deposit(_) => "l1_deposit",
+            Self::BridgeWithdrawal(_) => "bridge_withdrawal",
+            Self::BridgeL1Input(_) => "bridge_l1_input",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SequencedAcknowledgedWrite {
+    pub sequence: u64,
+    pub write: AcknowledgedWrite,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct AcknowledgedWriteEnvelope {
+    pub version: u8,
+    pub sequence: u64,
+    pub write: AcknowledgedWrite,
+}
+
+fn append_acknowledged_write_row(
     db: &Database,
-    table: TableDefinition<u64, &[u8]>,
-    bytes: Vec<u8>,
-) -> Result<(), StoreError> {
+    write: AcknowledgedWrite,
+) -> Result<u64, StoreError> {
     let txn = db.begin_write()?;
-    let next_seq = {
-        let table = txn.open_table(table)?;
-        let last_key = table
-            .iter()?
-            .next_back()
-            .transpose()?
-            .map(|(k, _)| k.value());
-        last_key.map(|k| k + 1).unwrap_or(0)
+    let sequence = {
+        let mut counters = txn.open_table(COUNTERS)?;
+        if counters.get(KEY_HEIGHT)?.is_none() {
+            return Err(StoreError::AcknowledgedWriteBeforeSnapshot);
+        }
+        let floor = counters
+            .get(KEY_ACKNOWLEDGED_WRITE_FLOOR)?
+            .ok_or_else(|| {
+                StoreError::CorruptLayout("missing acknowledged-write floor".to_string())
+            })?
+            .value();
+        let next = counters
+            .get(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ)?
+            .ok_or_else(|| {
+                StoreError::CorruptLayout("missing acknowledged-write next sequence".to_string())
+            })?
+            .value();
+        if next < floor {
+            return Err(StoreError::CorruptLayout(format!(
+                "acknowledged-write next sequence {next} is below floor {floor}"
+            )));
+        }
+        let following = next.checked_add(1).ok_or_else(|| {
+            StoreError::CorruptLayout("acknowledged-write sequence exhausted".to_string())
+        })?;
+        counters.insert(KEY_NEXT_ACKNOWLEDGED_WRITE_SEQ, following)?;
+        next
     };
+    let envelope = AcknowledgedWriteEnvelope {
+        version: ACKNOWLEDGED_WRITE_ENVELOPE_VERSION,
+        sequence,
+        write,
+    };
+    let bytes = rmp_serde::to_vec_named(&envelope)?;
     {
-        let mut table = txn.open_table(table)?;
-        table.insert(next_seq, bytes.as_slice())?;
+        let mut table = txn.open_table(ACKNOWLEDGED_WRITES)?;
+        if table.get(sequence)?.is_some() {
+            return Err(StoreError::CorruptLayout(format!(
+                "acknowledged-write sequence {sequence} already exists"
+            )));
+        }
+        table.insert(sequence, bytes.as_slice())?;
     }
     txn.commit()?;
-    Ok(())
+    Ok(sequence)
 }
