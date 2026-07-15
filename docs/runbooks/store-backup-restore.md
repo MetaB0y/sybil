@@ -1,7 +1,7 @@
 ---
 tags: [runbook, persistence, recovery]
 status: current
-last_verified: 2026-07-11
+last_verified: 2026-07-15
 ---
 
 # Sequencer store backup and restore
@@ -146,6 +146,58 @@ fail before the restore container is started.
 
 Any difference exits nonzero. A 24-hour drill block interval prevents the
 restored node from advancing before those exact comparisons.
+
+## Acknowledged-write restore failure
+
+`AcknowledgedWriteRestoreFailure` is a critical integrity incident. It means
+the sequencer could not validate or deterministically replay the durable
+between-block suffix whose writes were already acknowledged to clients.
+
+On a cold-start failure, `sybil-api` stays in a deliberately unhealthy,
+recovery-only mode. It serves only `GET /metrics` and a `503 GET /v1/health`
+with `status = "restore_failed"`; the normal API router and every exchange
+write are absent. This keeps the failure counter scrapeable without allowing a
+partial state to serve. The alert remains latched while the current process's
+counter is nonzero and clears only after a clean restart restores successfully.
+
+The alert's `kind` identifies the first failed boundary:
+
+- `stored_log` means the `[floor, next)` interval, row key/envelope, version, or
+  encoded value was missing, inconsistent, or undecodable;
+- any acknowledged-write variant, such as `authenticated_cancel`, means the
+  row decoded but deterministic application diverged from the committed
+  snapshot. The API log records the sequence and underlying error.
+
+Respond as follows:
+
+1. Stop upstream writers and automated dependants. Leave `sybil-api` in
+   recovery-only mode long enough to capture its logs, the alert labels, image
+   digest/revision, UTC timestamps, and both recovery endpoints. Stop the L1
+   indexer too, if enabled.
+2. Preserve the exact failed `sybil-data` volume before changing anything.
+   Prefer a provider/host volume snapshot. Otherwise stop `sybil-api` and copy
+   the whole volume—`sybil.redb` and `sybil.qmdb/`—into a separately named,
+   read-only incident archive. Record checksums and move a copy off-host.
+   `store-backup.sh` is expected to reject this invalid source during its
+   verification phase; that rejection is not permission to delete the raw
+   incident copy.
+3. Investigate only on a duplicate. Correlate `kind`, the logged WAL sequence,
+   `[floor, next)`, the deployed binary revision, and the last successful
+   backup/drill. Establish whether this is byte corruption, an incomplete
+   interval, an unsupported envelope, or code/replay divergence.
+4. Never edit counters, delete or rewrite the failed row, skip it as benign,
+   copy only a successfully decoded prefix, or use
+   `just deploy-reset-state CONFIRM`. Each would silently abandon a write that
+   a client was told succeeded.
+5. Recover production only from a known-good full-store backup that passes
+   `store-restore-drill.sh` under the exact intended binary, following
+   [Restore to production](#restore-to-production). If no such backup exists,
+   keep the service halted and preserve the evidence for a code-level forensic
+   recovery; do not improvise a new authoritative state.
+6. Start `sybil-api` alone. Require `200 /v1/health`, stable chain identity and
+   roots, a zero/absent restore-failure counter, and no qMDB mismatch or repair
+   failure. Then run `scripts/post-deploy-smoke.sh` and the synthetic probe
+   before restarting the mirror, arena, prover, or L1 indexer.
 
 ## Restore to production
 

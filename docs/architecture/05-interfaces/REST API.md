@@ -132,6 +132,13 @@ nonce advancement, WAL append, or live mutation. Read endpoints continue to
 serve the last trusted state. Dev-mode resume cannot clear an integrity halt;
 recovery requires an operator restart from the last committed fence.
 
+Cold-start persistence rejection has a narrower surface because no trusted
+sequencer snapshot exists to serve. The process enters recovery-only mode with
+only `/metrics` and a `503 /v1/health` response whose status is
+`restore_failed`; the normal router, reads, streams, and writes are not
+mounted. This keeps acknowledged-write restore failures observable while
+preventing partial recovery from becoming an API state.
+
 Per-client HTTP buckets use the socket peer by default and ignore forwarding
 headers. `SYBIL_HTTP_TRUSTED_PROXY_CIDRS` may name the exact reverse-proxy
 networks allowed to supply `X-Forwarded-For`/`X-Real-IP`. For a trusted peer,

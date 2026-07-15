@@ -338,6 +338,23 @@ groups:
           summary: "Typed qMDB root repair failed"
           description: "The sequencer failed to repair the fenced typed-state qMDB root from redb. The API should refuse startup or block commit."
 
+      - alert: AcknowledgedWriteRestoreFailure
+        # Cold-start recovery exposes this series for the first time at 1, so
+        # increase() would miss the incident without a previously scraped zero.
+        # Keep the page latched until a clean process restart resets the metric.
+        expr: |
+          sum by (kind) (
+            sybil_restore_acknowledged_write_failures_total
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Acknowledged-write restore failed"
+          description: "The sequencer rejected its durable acknowledged-write suffix (kind={{ $labels.kind }}). Preserve the store and stop writes; never bypass, edit, or discard the failed row."
+          runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/store-backup-restore.md#acknowledged-write-restore-failure"
+
       - alert: PersistenceFailing
         expr: increase(sybil_persistence_failures[5m]) > 0
         for: 0m

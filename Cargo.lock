@@ -6844,6 +6844,7 @@ dependencies = [
  "opentelemetry_sdk 0.32.1",
  "p256 0.14.0",
  "ratelimit",
+ "redb",
  "reqwest 0.13.4",
  "rmp-serde",
  "rusqlite",

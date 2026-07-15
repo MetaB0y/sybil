@@ -3,7 +3,7 @@ tags: [infrastructure, storage, recovery]
 layer: sequencer
 crate: matching-sequencer
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 ---
 
 # Acknowledged-write WAL replay
@@ -144,8 +144,15 @@ The store exports:
 Structural/envelope failures use `kind="stored_log"`; deterministic replay
 failures use the acknowledged-write variant kind.
 
-Any restore failure is an integrity incident. Preserve the store, stop writes,
-and investigate the missing/corrupt row or deterministic replay divergence.
+Any restore failure is an integrity incident. A cold-start failure enters an
+unhealthy recovery-only HTTP mode that mounts only `/metrics` and
+`/v1/health`; the exchange router and all writes remain absent. This prevents a
+process-local counter from disappearing before its first scrape. The critical
+`AcknowledgedWriteRestoreFailure` alert groups by `kind` and latches on a
+nonzero counter, including a failure already present at the first scrape.
+Preserve the store, stop writes, and follow the
+[store recovery runbook](../../runbooks/store-backup-restore.md#acknowledged-write-restore-failure)
+to investigate the missing/corrupt row or deterministic replay divergence.
 
 A runtime block-invariant failure uses the same fail-stop principle: the actor
 mailbox rejects all canonical writes before they can append another WAL row.
