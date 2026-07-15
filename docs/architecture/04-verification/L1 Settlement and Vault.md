@@ -97,6 +97,30 @@ existing byte-level goldens guarding the Rust/Solidity boundary. RPC/finality
 policy remains an operational trust boundary; root mismatch or cursor/vault
 identity mismatch is fatal in the indexer.
 
+#### Same-deposit-ID substitution argument
+
+The cumulative root binds every deposit leaf field: chain, vault, id, token,
+sender, raw Sybil account key, and amount. For a malicious RPC or service to
+replace the next leaf while preserving its id, it must choose one of two
+checkpoints:
+
+1. **Retain the canonical `depositRootByCount(id)`.** The sequencer folds the
+   substituted leaf onto its committed pre-frontier and obtains a different
+   root, so it rejects before credit or quarantine.
+2. **Supply the substituted leaf's recomputed root.** The indexer's pinned
+   `depositRootByCount(id)` call rejects it before service submission. Even if
+   a dishonest RPC lies about both the log and call, the transition guest binds
+   that different root into its public inputs and `SybilSettlement` rejects it
+   against the vault's real mapping before accepting the state root.
+
+The argument relies on Keccak collision resistance and the settlement/vault
+binding; it does not turn a single JSON-RPC endpoint into an authenticated L1
+view. A fully dishonest RPC can still induce temporary, unprovable off-chain
+state before L1 submission fails. Therefore deposit ingress remains
+service-gated and real-funds operation still requires the finalized/provider
+or receipt-proof policy described below. Deterministic indexer, sequencer, and
+Foundry tests cover both root choices.
+
 ### Confirmed-prefix checkpoint and deep reorgs
 
 The indexer requires a deployment-bound cursor file. Cursor schema v2 stores

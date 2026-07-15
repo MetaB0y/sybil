@@ -149,6 +149,42 @@ contract SybilBridgeTest {
         require(!ok, "bad deposit root accepted");
     }
 
+    function testSameDepositIdSubstitutionCannotSatisfyVaultCheckpoint() public {
+        vault.deposit(1_000_000, ACCOUNT_KEY);
+        bytes32 canonicalRoot = vault.depositRootByCount(1);
+
+        // Preserve the id but substitute the credited amount. A root that is
+        // internally consistent with that forged leaf is necessarily different
+        // from the vault's canonical root for count 1.
+        bytes32 forgedLeaf =
+            vault.hashDepositLeaf(vault.depositLeaf(1, address(this), ACCOUNT_KEY, 1_000_001));
+        bytes32 forgedRoot = forgedLeaf;
+        for (uint8 level = 0; level < 32; level++) {
+            forgedRoot = vault.hashNode(forgedRoot, vault.zeroHashes(level));
+        }
+        require(forgedRoot != canonicalRoot, "substitution retained canonical root");
+
+        SybilTypes.StateTransitionPublicInputs memory inputs =
+            _nextRootInputs(bytes32(0), 0, keccak256("forged-deposit-state"));
+        inputs.depositRoot = forgedRoot;
+        (bool ok, bytes memory revertData) = address(settlement)
+            .call(
+                abi.encodeWithSelector(
+                    SybilSettlement.submitStateRoot.selector, inputs, bytes("proof")
+                )
+            );
+        require(!ok, "same-id substituted deposit root accepted");
+        bytes4 selector;
+        assembly {
+            selector := mload(add(revertData, 32))
+        }
+        require(
+            selector == SybilSettlement.DepositRootMismatch.selector,
+            "substitution failed for the wrong reason"
+        );
+        require(settlement.latestHeight() == 0, "forged state advanced settlement");
+    }
+
     function testStateRootSubmissionRejectsDepositCountBeyondVaultZeroRootBypass() public {
         SybilTypes.StateTransitionPublicInputs memory inputs =
             _nextRootInputs(bytes32(0), 0, keccak256("state-1"));

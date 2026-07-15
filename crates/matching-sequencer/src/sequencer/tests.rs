@@ -822,6 +822,36 @@ fn bridge_deposit_requires_next_l1_cursor() {
 }
 
 #[test]
+fn same_id_substitution_cannot_reuse_the_canonical_deposit_root() {
+    let (seq, aid) = make_sequencer(0);
+    let canonical = next_l1_deposit(&seq, aid, 10_000);
+    let canonical_root = canonical.deposit_root;
+
+    // A malicious service changes a leaf field while retaining the vault's
+    // canonical root. The sequencer reconstructs the root from every leaf
+    // field and the persisted frontier, so this branch cannot be credited.
+    let mut substituted = canonical.clone();
+    substituted.amount_token_units += 1;
+    assert!(matches!(
+        seq.validate_l1_deposit(&substituted),
+        Err(SequencerError::Bridge(message)) if message.contains("deposit root mismatch")
+    ));
+
+    // Recomputing a self-consistent root makes the substitution internally
+    // valid, but necessarily changes the checkpoint. The L1 indexer and
+    // SybilSettlement compare this value with vault.depositRootByCount(id).
+    let mut frontier = seq.bridge_state().deposit_frontier;
+    substituted.deposit_root = crate::bridge::append_deposit_frontier(
+        &mut frontier,
+        seq.bridge_state().deposit_cursor,
+        &substituted,
+    )
+    .expect("test deposit fits in frontier");
+    assert_ne!(substituted.deposit_root, canonical_root);
+    assert!(seq.validate_l1_deposit(&substituted).is_ok());
+}
+
+#[test]
 fn quarantined_deposit_is_auto_claimed_on_witnessed_key_registration_across_blocks() {
     use p256::ecdsa::signature::Signer as _;
 

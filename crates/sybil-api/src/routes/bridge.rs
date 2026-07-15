@@ -271,9 +271,13 @@ pub async fn submit_l1_deposit(
     State(state): State<AppState>,
     Json(req): Json<SubmitL1DepositRequest>,
 ) -> Result<Json<BridgeDepositResponse>, AppError> {
-    // TODO(SYB-188/SYB-178): this service-gated scaffold trusts the operator's
-    // submitted L1 event fields. Production deposit soundness must verify L1
-    // inclusion/finality against the vault deposit root before crediting.
+    // This service-gated route trusts the indexer for L1 delivery. The
+    // sequencer reconstructs the submitted leaf/root and the eventual L1
+    // settlement independently matches the proven checkpoint to the vault, so
+    // a same-id leaf substitution cannot become an accepted L1 state root.
+    // Production ingress still needs authenticated receipt/finality policy to
+    // prevent a dishonest RPC from creating temporary unprovable off-chain
+    // state; bearer authorization alone is not an L1 inclusion proof.
     if req.quarantine == req.account_id.is_some() {
         return Err(AppError::bad_request(
             "exactly one deposit disposition is required: account_id or quarantine=true",
