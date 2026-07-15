@@ -15,6 +15,7 @@ import type { components } from "../api/schema";
 import { parseNanos } from "../format/nanos";
 
 export type LeaderboardWindow = "7D" | "30D" | "ALL";
+export const DEFAULT_LEADERBOARD_WINDOW: LeaderboardWindow = "ALL";
 
 /** Segmented-control window → API query token. */
 export const WINDOW_QUERY: Record<LeaderboardWindow, "7d" | "30d" | "all"> = {
@@ -92,7 +93,7 @@ export function useLeaderboard(
   };
 }
 
-function leaderboardErrorMessage(error: unknown): string {
+export function leaderboardErrorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "error" in error) {
     const detail = (error as { error?: unknown }).error;
     if (typeof detail === "string" && detail.trim() !== "") return detail;

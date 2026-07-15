@@ -3,7 +3,7 @@ use axum::extract::{Query, State};
 use std::collections::HashMap;
 
 use matching_sequencer::LeaderboardRow;
-use sybil_history_types::EquityBaselinesQuery;
+use sybil_history_types::{EquityBaselinesQuery, ProjectionStatus};
 
 use crate::state::AppState;
 use crate::types::error::AppError;
@@ -39,6 +39,14 @@ fn window_since_ms(window: &str, now_ms: u64) -> u64 {
     }
 }
 
+fn history_window_is_incomplete(status: &ProjectionStatus, since_ms: u64) -> bool {
+    match (status.first_height, status.first_timestamp_ms) {
+        (Some(first_height), Some(_)) if first_height <= 1 => false,
+        (Some(_), Some(first_timestamp_ms)) => first_timestamp_ms > since_ms,
+        _ => true,
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct LeaderboardParams {
     pub window: Option<String>,
@@ -55,7 +63,7 @@ pub struct LeaderboardParams {
     ),
     responses(
         (status = 200, description = "Ranked trader leaderboard, best PnL first", body = LeaderboardResponse),
-        (status = 503, description = "History service unavailable for windowed ranking")
+        (status = 503, description = "History service unavailable or incomplete for windowed ranking")
     )
 )]
 pub async fn get_leaderboard(
@@ -67,7 +75,7 @@ pub async fn get_leaderboard(
     let since_ms = window_since_ms(window, now_ms());
 
     let bases = state.cached_leaderboard_bases().await?;
-    let baselines = if since_ms == 0 {
+    let baselines = if since_ms == 0 || bases.is_empty() {
         HashMap::new()
     } else {
         let history = state.history.as_ref().ok_or_else(|| {
@@ -79,16 +87,8 @@ pub async fn get_leaderboard(
                 at_or_before_ms: since_ms,
             })
             .await?;
-        if response
-            .status
-            .first_height
-            .is_some_and(|height| height > 1)
-            && response
-                .status
-                .first_timestamp_ms
-                .is_some_and(|first| first > since_ms)
-        {
-            return Err(AppError::history_unavailable(
+        if history_window_is_incomplete(&response.status, since_ms) {
+            return Err(AppError::history_incomplete(
                 "Leaderboard window predates available historical data",
             ));
         }
@@ -185,5 +185,38 @@ mod tests {
         assert_eq!(window_since_ms("30d", now), now - 30 * DAY_MS);
         // Saturating: window longer than elapsed time clamps to 0.
         assert_eq!(window_since_ms("30d", 5 * DAY_MS), 0);
+    }
+
+    #[test]
+    fn window_history_completeness_fails_closed() {
+        let since_ms = 1_000;
+        let status = |first_height, first_timestamp_ms| ProjectionStatus {
+            genesis_hash: Some([7; 32]),
+            first_height,
+            first_timestamp_ms,
+            indexed_through_height: Some(10),
+        };
+
+        assert!(!history_window_is_incomplete(
+            &status(Some(1), Some(2_000)),
+            since_ms
+        ));
+        assert!(!history_window_is_incomplete(
+            &status(Some(5), Some(since_ms)),
+            since_ms
+        ));
+        assert!(history_window_is_incomplete(
+            &status(Some(5), Some(2_000)),
+            since_ms
+        ));
+        assert!(history_window_is_incomplete(&status(None, None), since_ms));
+        assert!(history_window_is_incomplete(
+            &status(Some(5), None),
+            since_ms
+        ));
+        assert!(history_window_is_incomplete(
+            &status(Some(1), None),
+            since_ms
+        ));
     }
 }

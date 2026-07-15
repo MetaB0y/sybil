@@ -2,7 +2,7 @@
 tags: [infrastructure, storage, history]
 layer: sequencer
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-15
 ---
 
 # Historical data serving
@@ -92,11 +92,14 @@ this authorization check is O(1) and does not enqueue a sequencer RPC.
 - Leaderboard bases are refreshed into an API read model once per committed
   block. Windowed rankings combine that model with history-service opening
   anchors; all-time rankings need no historical scan and neither path performs
-  per-request sequencer work.
+  per-request sequencer work. A windowed request with no publishable bases is
+  also immediately and legitimately empty; it does not require history.
 - Price points and sparse OHLCV candles page by stable height/time cursors.
 - Responses expose `indexed_through_height` and
   `history_complete_from_height`. An unavailable/unconfigured backend is a
-  typed `HISTORY_UNAVAILABLE` response, never an empty successful history.
+  typed `HISTORY_UNAVAILABLE` response, while a projector whose indexed floor
+  cannot cover a requested leaderboard window returns `HISTORY_INCOMPLETE`.
+  Neither condition is represented as an empty successful history.
 
 The first indexed batch may be above height one when a new projector is
 bootstrapped from an existing sequencer. That floor is disclosed as incomplete

@@ -3,7 +3,24 @@ import { describe, expect, it } from "vitest";
 import { LeaderboardReadNotice, LeaderboardTable } from "./leaderboard-table";
 
 describe("LeaderboardTable read states", () => {
-  it("does not turn a cold transport failure into an empty leaderboard", () => {
+  it("shows a legitimate empty state for a successful all-time read", () => {
+    const html = renderToStaticMarkup(
+      <LeaderboardTable
+        rows={[]}
+        isLoading={false}
+        isRetrying={false}
+        readState="ready"
+        onRetry={() => {}}
+        myAccountId={null}
+      />,
+    );
+
+    expect(html).toContain("no ranked traders yet");
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain("leaderboard unavailable");
+  });
+
+  it("does not turn an incomplete window into an empty leaderboard", () => {
     const html = renderToStaticMarkup(
       <LeaderboardTable
         rows={[]}

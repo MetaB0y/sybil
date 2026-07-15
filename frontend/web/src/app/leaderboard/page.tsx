@@ -12,12 +12,15 @@ import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { WindowTabs } from "@/components/leaderboard/window-tabs";
 import { useAccountSession } from "@/lib/account/use-account";
 import {
+  DEFAULT_LEADERBOARD_WINDOW,
   useLeaderboard,
   type LeaderboardWindow,
 } from "@/lib/leaderboard/use-leaderboard";
 
 export default function LeaderboardPage() {
-  const [window, setWindow] = useState<LeaderboardWindow>("ALL");
+  const [window, setWindow] = useState<LeaderboardWindow>(
+    DEFAULT_LEADERBOARD_WINDOW,
+  );
   const session = useAccountSession();
   const { rows, isLoading, isRetrying, readState, errorMessage, retry } =
     useLeaderboard(window);
