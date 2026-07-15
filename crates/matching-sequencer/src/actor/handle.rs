@@ -1231,6 +1231,7 @@ mod tests {
 
     #[tokio::test]
     async fn max_orders_per_submission_bounds_request_amplification() {
+        assert_eq!(SequencerConfig::default().max_orders_per_submission, 512);
         let config = SequencerConfig {
             max_orders_per_submission: 1,
             ..SequencerConfig::default()

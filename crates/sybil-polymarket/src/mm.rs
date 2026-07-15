@@ -1153,6 +1153,31 @@ mod tests {
     }
 
     #[test]
+    fn default_submission_limit_covers_two_sided_206_market_epoch() {
+        let runtime_config = Config::parse_from(["sybil-polymarket"]);
+        assert_eq!(runtime_config.mm_max_orders_per_block, 512);
+
+        let quote_config = default_config();
+        let inputs: Vec<_> = (1..=206)
+            .map(|market_id| {
+                let mut input = default_input(0.5);
+                input.market_id = market_id;
+                input
+            })
+            .collect();
+
+        let (orders, next_index) = select_rotating_quotes(
+            &inputs,
+            &quote_config,
+            0,
+            runtime_config.mm_max_orders_per_block,
+        );
+
+        assert_eq!(orders.len(), 412);
+        assert_eq!(next_index, 0);
+    }
+
+    #[test]
     fn rotating_selection_resumes_from_cursor() {
         let config = default_config();
         let inputs: Vec<_> = (1..=10)

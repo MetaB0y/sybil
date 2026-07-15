@@ -18,8 +18,9 @@ pub struct SequencerConfig {
     /// Cap on buffered MM / multi-market submissions waiting for the next
     /// block. A runaway client hits backpressure before exhausting memory.
     pub max_pending_bundles: usize,
-    /// Maximum number of orders accepted in one submission. Bounds request
-    /// amplification before the solver ever sees the payload.
+    /// Maximum number of orders accepted in one submission. The service-only
+    /// bulk route needs enough room for one two-sided quote across the current
+    /// market catalog; this still bounds amplification before solver work.
     pub max_orders_per_submission: usize,
     /// Per-account sustained submission rate. Set generously: this is a guard
     /// rail for runaway agents, not a normal trading throttle.
@@ -88,7 +89,7 @@ impl Default for SequencerConfig {
             order_ttl_blocks: DEFAULT_ORDER_TTL_BLOCKS,
             block_interval: std::time::Duration::from_secs(1),
             max_pending_bundles: 10_000,
-            max_orders_per_submission: 64,
+            max_orders_per_submission: 512,
             max_submissions_per_account_per_second: 50,
             submission_burst_per_account: 200,
             max_global_submissions_per_second: 1_000,

@@ -41,6 +41,11 @@ use common::test_app_with_config;
 
 const TOKEN: &str = "config-contract-token";
 
+#[test]
+fn service_bulk_order_default_has_full_catalog_headroom() {
+    assert_eq!(ApiConfig::default().max_orders_per_submission, 512);
+}
+
 fn method_of(method: &str) -> Method {
     match method {
         "GET" => Method::GET,
