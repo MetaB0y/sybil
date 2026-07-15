@@ -34,8 +34,8 @@ struct GroupBidState {
 
 #[derive(Clone, Copy, Default)]
 struct BinaryBidState {
-    yes_limit: u64,
-    no_limit: u64,
+    yes_limit: Option<u64>,
+    no_limit: Option<u64>,
 }
 
 impl GroupCoverageTracker {
@@ -71,9 +71,9 @@ impl GroupCoverageTracker {
             .copied()
             .unwrap_or_default();
         if yes_pay > 0 && no_pay == 0 {
-            binary.yes_limit = binary.yes_limit.max(order.limit_price.0);
+            record_highest_optional_limit(&mut binary.yes_limit, order.limit_price.0);
         } else if yes_pay == 0 && no_pay > 0 {
-            binary.no_limit = binary.no_limit.max(order.limit_price.0);
+            record_highest_optional_limit(&mut binary.no_limit, order.limit_price.0);
         } else {
             return false; // Sell or mixed — not a coverage concern
         }
@@ -107,9 +107,9 @@ impl GroupCoverageTracker {
         let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
         let binary = self.binary_limits.entry((account_id, market)).or_default();
         if yes_pay > 0 && no_pay == 0 {
-            binary.yes_limit = binary.yes_limit.max(order.limit_price.0);
+            record_highest_optional_limit(&mut binary.yes_limit, order.limit_price.0);
         } else if yes_pay == 0 && no_pay > 0 {
-            binary.no_limit = binary.no_limit.max(order.limit_price.0);
+            record_highest_optional_limit(&mut binary.no_limit, order.limit_price.0);
         } else {
             return;
         }
@@ -125,7 +125,14 @@ impl GroupCoverageTracker {
 }
 
 fn binary_limits_cross(state: BinaryBidState) -> bool {
-    u128::from(state.yes_limit) + u128::from(state.no_limit) >= u128::from(NANOS_PER_DOLLAR)
+    match (state.yes_limit, state.no_limit) {
+        (Some(yes), Some(no)) => u128::from(yes) + u128::from(no) >= u128::from(NANOS_PER_DOLLAR),
+        _ => false,
+    }
+}
+
+fn record_highest_optional_limit(current: &mut Option<u64>, candidate: u64) {
+    *current = Some(current.map_or(candidate, |limit| limit.max(candidate)));
 }
 
 fn record_highest_limit(limits: &mut HashMap<MarketId, u64>, market: MarketId, limit: u64) {

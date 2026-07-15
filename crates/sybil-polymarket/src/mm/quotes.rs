@@ -265,9 +265,13 @@ fn record_limit(state: &mut GroupQuoteState, order: &OrderSpec) {
 }
 
 fn complementary_limits_cross(state: &GroupQuoteState, market_id: u32) -> bool {
-    let yes = state.yes_limits.get(&market_id).copied().unwrap_or(0);
-    let no = state.no_limits.get(&market_id).copied().unwrap_or(0);
-    u128::from(yes) + u128::from(no) >= u128::from(NANOS_PER_DOLLAR)
+    match (
+        state.yes_limits.get(&market_id),
+        state.no_limits.get(&market_id),
+    ) {
+        (Some(yes), Some(no)) => u128::from(*yes) + u128::from(*no) >= u128::from(NANOS_PER_DOLLAR),
+        _ => false,
+    }
 }
 
 // --------------------------------------------------------------------------- //
