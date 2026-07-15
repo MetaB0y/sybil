@@ -72,7 +72,7 @@ flowchart TB
 | Register/revoke a key for another account | 🟢 | State-bound signed key operations, service-tier checks, committed `keys_digest`, and guest replay. |
 | Overspend through concurrent/resting orders | 🟢 | Direct-admission reservations, atomic deferred admission, Layer 4 accumulation, and deterministic settlement. |
 | Double-withdraw or reuse an escape claim | 🟢 | Typed withdrawal/claim leaves, root binding, freshness rules, and nullifiers. |
-| Exhaust parsing, signatures, actor queues, solver work, or persistent state | 🟠 / 🔴 | Public onboarding has route/client flow limits plus a durable lifetime account cap; read-key records, resting-order admission, and DA reads are also bounded. Product-history outbox growth during a prolonged projector outage remains an open stock/liveness attack. |
+| Exhaust parsing, signatures, actor queues, solver work, or persistent state | 🟠 / 🔴 | Public onboarding has route/client flow limits plus a durable lifetime account cap; read-key records, resting-order admission, and DA reads are also bounded. Product-history outbox growth during a prolonged projector outage remains an open stock/liveness attack; exact backlog and host-disk alerts are devnet detection, not the missing overflow policy. |
 
 ## Resource exhaustion and free state
 
@@ -80,7 +80,8 @@ The current public surface does **not** satisfy the assumption that persistent
 state is bounded by deposited capital. The highest-priority gaps are:
 
 - the product-history outbox can grow without a byte/row budget while its
-  projector is unavailable;
+  projector is unavailable (policy tracked in
+  [GitHub #90](https://github.com/MetaB0y/sybil/issues/90));
 - some durable histories still require explicit retention economics.
 
 Anonymous account creation no longer accepts caller-selected funding: it uses a

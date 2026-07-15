@@ -183,7 +183,9 @@ The sequencer persists only the export boundary for product history:
   block commit. It carries fill, account-event, equity, and committed-price
   facts plus genesis/block/state identity. A background publisher acknowledges
   and deletes rows only after the private history projector has durably applied
-  their height.
+  their height. An additive metadata counter tracks exact encoded payload bytes
+  in the same insert/delete transaction; rows, payload bytes, oldest/newest
+  height, and oldest age are observable without rescanning the backlog.
 - **Product-event sequence counter**: the next event id remains canonical
   sequencer metadata so restart never derives identity by scanning a query
   projection.

@@ -144,7 +144,10 @@ Product historyâ€”fills, account events, equity, committed prices, and candlesâ€
 delivered at least once from the fenced outbox. Projection is contiguous,
 genesis-bound, idempotent, and atomic. Historical reads bypass the sequencer
 actor and expose indexing/completeness metadata. Neither the outbox nor its
-projections are validity inputs or recovery DA.
+projections are validity inputs or recovery DA. Exact logical backlog bytes,
+rows, oldest/newest height, and oldest age are observable even when no projector
+URL is configured; root-filesystem alerts cover redb/page and shared-volume
+overhead that logical bytes exclude.
 
 Canonical witness import can initialize a fresh store at a verified height. This is the implemented disaster-recovery basis for operator replacement.
 
@@ -233,9 +236,11 @@ Anonymous onboarding has a durable lifetime account-stock cap, a server-chosen
 fixed play-money grant, and dedicated flow limits; account ids are never reused.
 Unbounded product-history outbox growth during a prolonged projector outage can
 still grow storage without deposited capital. This availability gap must be
-closed, monitored, or service-gated
-before real-value deployment; the [dated audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md)
-owns the detailed evidence and remediation order.
+closed by an explicit overflow/archive policy before real-value deployment;
+devnet monitors it without silently deleting rows. The
+[dated audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md)
+owns the detailed evidence, and
+[GitHub #90](https://github.com/MetaB0y/sybil/issues/90) owns the decision.
 
 ## 11. Consolidated invariants
 

@@ -61,6 +61,7 @@ struct RedbBlockCommit {
     replay_block_bytes: Option<Vec<u8>>,
     witness_bytes: Option<Vec<u8>>,
     history_batch_bytes: Option<Vec<u8>>,
+    history_batch_committed_at_ms: Option<u64>,
     proof_job_bytes: Option<Vec<u8>>,
     pubkey_rows: Vec<(Vec<u8>, crate::crypto::RegisteredPubkey)>,
     clearing_price_rows: Vec<(u32, Vec<u8>)>,
@@ -255,6 +256,7 @@ fn build_redb_block_commit(
     let history_batch_bytes = Some(rmp_serde::to_vec(&build_committed_history_batch(
         snapshot,
     )?)?);
+    let history_batch_committed_at_ms = Some(snapshot.header.timestamp_ms);
 
     let pubkey_rows = snapshot
         .pubkey_registry
@@ -311,6 +313,7 @@ fn build_redb_block_commit(
         replay_block_bytes,
         witness_bytes,
         history_batch_bytes,
+        history_batch_committed_at_ms,
         proof_job_bytes,
         pubkey_rows,
         clearing_price_rows,
@@ -413,17 +416,58 @@ where
     }
 
     if let Some(bytes) = &commit.history_batch_bytes {
-        let mut table = txn.open_table(PRODUCT_HISTORY_OUTBOX)?;
-        if let Some(existing) = table.get(commit.height)? {
-            if existing.value() != bytes.as_slice() {
-                return Err(StoreError::CorruptLayout(format!(
-                    "conflicting product-history outbox batch at height {}",
-                    commit.height
-                )));
+        let (inserted_payload_bytes, became_oldest) = {
+            let mut table = txn.open_table(PRODUCT_HISTORY_OUTBOX)?;
+            if let Some(existing) = table.get(commit.height)? {
+                if existing.value() != bytes.as_slice() {
+                    return Err(StoreError::CorruptLayout(format!(
+                        "conflicting product-history outbox batch at height {}",
+                        commit.height
+                    )));
+                }
+                drop(existing);
+                (0, false)
+            } else {
+                let became_oldest = table.is_empty()?;
+                table.insert(commit.height, bytes.as_slice())?;
+                (
+                    u64::try_from(bytes.len()).map_err(|_| {
+                        StoreError::CorruptLayout(
+                            "product-history outbox payload length exceeds u64".to_string(),
+                        )
+                    })?,
+                    became_oldest,
+                )
             }
-            drop(existing);
+        };
+        if inserted_payload_bytes > 0 {
+            let mut meta = txn.open_table(PRODUCT_HISTORY_OUTBOX_META)?;
+            let current = meta
+                .get(KEY_PRODUCT_HISTORY_OUTBOX_PAYLOAD_BYTES)?
+                .map(|value| value.value())
+                .ok_or_else(|| {
+                    StoreError::CorruptLayout(
+                        "missing product-history outbox payload-byte counter".to_string(),
+                    )
+                })?;
+            let updated = current.checked_add(inserted_payload_bytes).ok_or_else(|| {
+                StoreError::CorruptLayout(
+                    "product-history outbox payload-byte counter overflow".to_string(),
+                )
+            })?;
+            meta.insert(KEY_PRODUCT_HISTORY_OUTBOX_PAYLOAD_BYTES, updated)?;
+            if became_oldest {
+                let committed_at_ms = commit.history_batch_committed_at_ms.ok_or_else(|| {
+                    StoreError::CorruptLayout(
+                        "product-history batch is missing its commit timestamp".to_string(),
+                    )
+                })?;
+                meta.insert(
+                    KEY_PRODUCT_HISTORY_OUTBOX_OLDEST_COMMITTED_AT_MS,
+                    committed_at_ms,
+                )?;
+            }
         }
-        table.insert(commit.height, bytes.as_slice())?;
     }
 
     if let Some(bytes) = &commit.proof_job_bytes {
@@ -632,6 +676,7 @@ impl Store {
         txn.open_table(CANONICAL_BLOCK_ARCHIVE)?;
         txn.open_table(BLOCK_WITNESSES)?;
         txn.open_table(PRODUCT_HISTORY_OUTBOX)?;
+        txn.open_table(PRODUCT_HISTORY_OUTBOX_META)?;
         txn.open_table(PROOF_JOB_OUTBOX)?;
         txn.open_table(PROOF_JOB_ACKS)?;
         txn.open_table(PROOF_JOB_RETENTION_META)?;
@@ -662,6 +707,7 @@ impl Store {
         txn.commit()?;
 
         initialize_or_validate_layout(&db)?;
+        super::history_outbox::initialize_product_history_outbox_meta(&db)?;
         if prune_historical_block_rows(&db)? {
             match db.compact() {
                 Ok(true) => info!(?path, "compacted store after pruning historical block rows"),

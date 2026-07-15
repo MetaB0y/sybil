@@ -43,6 +43,13 @@ pub(super) const BLOCK_WITNESSES: TableDefinition<u64, &[u8]> =
 /// per-record indexes and rollups belong to the projector, not this database.
 pub(super) const PRODUCT_HISTORY_OUTBOX: TableDefinition<u64, &[u8]> =
     TableDefinition::new("history_outbox_v1");
+/// Exact logical payload-byte accounting for the product-history source
+/// outbox. This is updated in the same transaction as row insertion/deletion;
+/// it deliberately excludes redb keys, pages, indexes, and fragmentation.
+pub(super) const PRODUCT_HISTORY_OUTBOX_META: TableDefinition<&str, u64> =
+    TableDefinition::new("history_outbox_meta");
+pub(super) const KEY_PRODUCT_HISTORY_OUTBOX_PAYLOAD_BYTES: &str = "payload_bytes";
+pub(super) const KEY_PRODUCT_HISTORY_OUTBOX_OLDEST_COMMITTED_AT_MS: &str = "oldest_committed_at_ms";
 
 /// Portable state-transition proof jobs captured before qMDB slot rotation.
 /// Rows are retained until the prover has durably acknowledged the exact byte

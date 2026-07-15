@@ -495,10 +495,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 worker_cancel.child_token(),
             ));
         }
-        (Some(_), None) => {
+        (Some(store), None) => {
             tracing::warn!(
                 "history service is not configured; durable outbox rows will accumulate"
             );
+            workers.spawn(sybil_api::history::run_outbox_monitor(
+                store,
+                Duration::from_millis(config.history_poll_ms),
+                worker_cancel.child_token(),
+            ));
         }
         (None, Some(_)) => {
             tracing::warn!(

@@ -456,6 +456,32 @@ groups:
           summary: "Host memory is low"
           description: "Available host memory has been below 10% for 10m (current ratio: {{ $value | humanizePercentage }})."
 
+      - alert: HostDiskSpaceLow
+        expr: |
+          node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs"}
+          / node_filesystem_size_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs"}
+          < 0.15
+        for: 10m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Host root filesystem space is low"
+          description: "Available space on the root filesystem has been below 15% for 10m (current ratio: {{ $value | humanizePercentage }}). Sequencer and history Docker volumes share this filesystem; inspect outbox/history/archive growth before redb writes fail."
+
+      - alert: HostDiskSpaceCritical
+        expr: |
+          node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs"}
+          / node_filesystem_size_bytes{job="node",mountpoint="/",fstype!~"tmpfs|overlay|squashfs"}
+          < 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "Host root filesystem is nearly full"
+          description: "Available space on the root filesystem is below 5% (current ratio: {{ $value | humanizePercentage }}). Preserve the stores and stop discretionary writers; do not delete product-history outbox rows without a verified durable sink."
+
       - alert: HostSwapHigh
         expr: |
           node_memory_SwapTotal_bytes > 0
@@ -697,6 +723,28 @@ groups:
         annotations:
           summary: "Public onboarding account stock is exhausted"
           description: "No lifetime public account allocations remain. Anonymous onboarding now returns PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED; account ids are not reclaimed automatically. See docs/runbooks/resource-liveness.md."
+
+      - alert: ProductHistoryOutboxStale
+        expr: |
+          sybil_product_history_outbox_oldest_age_seconds > 900
+          and sybil_product_history_outbox_backlog_rows > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: history
+        annotations:
+          summary: "Product-history source outbox is stale"
+          description: "The oldest unacknowledged product-history batch has been at least 15m old for 5m (current age: {{ $value | humanizeDuration }}). Check projector health, credentials, network, redb writes, and disk capacity; trading continues while this backlog consumes sequencer disk. See docs/runbooks/resource-liveness.md."
+
+      - alert: ProductHistoryOutboxLarge
+        expr: sybil_product_history_outbox_payload_bytes > 256 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+          component: history
+        annotations:
+          summary: "Product-history source outbox is large"
+          description: "Encoded product-history payloads retained in the sequencer outbox exceed 256 MiB (current: {{ $value | humanize1024 }}B), excluding redb page overhead. Restore projector throughput before shared-host disk pressure threatens canonical persistence. See docs/runbooks/resource-liveness.md."
 
       - alert: WitnessPayloadLarge
         expr: max(sybil_witness_payload_bytes{quantile="0.99"}) > 8 * 1024 * 1024
