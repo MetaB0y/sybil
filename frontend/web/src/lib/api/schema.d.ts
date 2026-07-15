@@ -5734,7 +5734,7 @@ export interface operations {
           "application/json": components["schemas"]["LeaderboardResponse"];
         };
       };
-      /** @description History service unavailable for windowed ranking */
+      /** @description History service unavailable or incomplete for windowed ranking */
       503: {
         headers: {
           [name: string]: unknown;

@@ -3,7 +3,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::{get, post_json, test_app_with_store};
+use common::{get, post_json, test_app, test_app_with_store};
 use matching_sequencer::{
     AccountAuthScheme, AccountId, AuthenticatedProfileUpdate, PublicKey, RegisteredPubkey,
     SequencerHandle,
@@ -173,4 +173,13 @@ async fn leaderboard_honours_limit_cap_and_window_param() {
         let body = leaderboard(&app, query).await;
         assert_eq!(body["window"], expected, "query {query}");
     }
+}
+
+#[tokio::test]
+async fn empty_windowed_leaderboard_does_not_require_history() {
+    let (app, _handle) = test_app(true).await;
+
+    let body = leaderboard(&app, "window=7d").await;
+    assert_eq!(body["window"], "7d");
+    assert_eq!(body["entries"], json!([]));
 }

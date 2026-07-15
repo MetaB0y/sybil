@@ -1,8 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { formatRoiBps, formatSignedDollars, signColor } from "./format";
-import { toLeaderboardRows } from "./use-leaderboard";
+import {
+  DEFAULT_LEADERBOARD_WINDOW,
+  leaderboardErrorMessage,
+  toLeaderboardRows,
+  WINDOW_QUERY,
+} from "./use-leaderboard";
 
 const DOLLAR = 1_000_000_000n;
+
+describe("leaderboard read contract", () => {
+  it("defaults to the immediately queryable all-time window", () => {
+    expect(DEFAULT_LEADERBOARD_WINDOW).toBe("ALL");
+    expect(WINDOW_QUERY[DEFAULT_LEADERBOARD_WINDOW]).toBe("all");
+  });
+
+  it("preserves a structured historical-completeness reason", () => {
+    expect(
+      leaderboardErrorMessage({
+        code: "HISTORY_INCOMPLETE",
+        error: "Leaderboard window predates available historical data",
+      }),
+    ).toBe("Leaderboard window predates available historical data");
+  });
+
+  it("uses a transport-safe fallback when no structured reason exists", () => {
+    expect(leaderboardErrorMessage(new TypeError("connection reset"))).toBe(
+      "Rankings could not be loaded",
+    );
+  });
+});
 
 describe("formatSignedDollars", () => {
   it("signs positive and negative PnL, keeps zero clean", () => {

@@ -138,6 +138,18 @@ impl AppError {
         }
     }
 
+    pub fn history_incomplete(error: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            body: ErrorBody {
+                error: error.into(),
+                code: "HISTORY_INCOMPLETE".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
     pub fn sequencer_integrity_halted() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -348,5 +360,13 @@ mod tests {
             error.body.error,
             "Sequencer writes are unavailable after an integrity failure"
         );
+    }
+
+    #[test]
+    fn incomplete_history_has_a_distinct_stable_code() {
+        let error = AppError::history_incomplete("window predates history");
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.body.code, "HISTORY_INCOMPLETE");
+        assert_eq!(error.body.error, "window predates history");
     }
 }
