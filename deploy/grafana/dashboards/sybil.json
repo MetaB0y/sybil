@@ -642,6 +642,98 @@
           { "matcher": { "id": "byName", "options": "OOM kills / 5m" }, "properties": [{ "id": "unit", "value": "none" }] }
         ]
       }
+    },
+    {
+      "title": "L1 Indexer",
+      "type": "row",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 113 }
+    },
+    {
+      "title": "L1 Indexer Ready",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 114 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_l1_indexer_ready", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null },
+          { "color": "green", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "L1 Reorg Latched",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 114 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_l1_indexer_reorg_latched", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "L1 Checkpoint Block",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 114 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_l1_indexer_checkpoint_block", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "thresholds": { "steps": [{ "color": "blue", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "L1 Confirmed Lag",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 114 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_l1_indexer_confirmed_lag_blocks", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 32 },
+          { "color": "red", "value": 64 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "L1 Indexer Progress",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 118 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_l1_indexer_latest_block", "legendFormat": "latest", "refId": "A" },
+        { "expr": "sybil_l1_indexer_confirmed_tip_block", "legendFormat": "confirmed tip", "refId": "B" },
+        { "expr": "sybil_l1_indexer_checkpoint_block", "legendFormat": "checkpoint", "refId": "C" },
+        { "expr": "sybil_l1_indexer_next_from_block", "legendFormat": "next from", "refId": "D" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "L1 Indexer Failures",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 118 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sum by (kind) (sybil_l1_indexer_fatal_failures_total)", "legendFormat": "fatal: {{kind}}", "refId": "A" },
+        { "expr": "sybil_l1_indexer_consecutive_rpc_failures", "legendFormat": "consecutive RPC", "refId": "B" },
+        { "expr": "sybil_l1_indexer_cursor_persistence_failures_total", "legendFormat": "cursor persistence", "refId": "C" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 35 } },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,

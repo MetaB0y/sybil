@@ -61,6 +61,14 @@ for service in sybil-api sybil-polymarket sybil-prover; do
 done
 pass "default compose config includes core devnet services"
 
+available_profiles=$(compose config --profiles)
+contains_service "$available_profiles" "l1-indexer" \
+    || fail "L1 indexer is not isolated behind its explicit Compose profile"
+l1_services=$(compose --profile l1-indexer config --services)
+contains_service "$l1_services" "sybil-l1-indexer" \
+    || fail "l1-indexer profile does not enable sybil-l1-indexer"
+pass "L1 indexer is explicit opt-in deployment state"
+
 compose config --quiet
 pass "compose config parses"
 
@@ -80,6 +88,28 @@ grep -Fq 'SYBIL_PROVER_SOURCE_URL' <<<"$prover_service_block" \
 grep -Fq 'SYBIL_PROVER_PROOF_KIND' <<<"$prover_service_block" \
     || fail "sybil-prover has no explicit typed backend"
 pass "durable prover daemon, source, backend, and volumes are explicit"
+
+l1_indexer_service_block=$(
+    awk '
+        /^  sybil-l1-indexer:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.yml
+)
+for expected in \
+    'entrypoint: ["sybil-l1-indexer"]' \
+    'SYBIL_L1_CURSOR_PATH: "/l1-indexer-data/cursor.json"' \
+    'SYBIL_L1_METRICS_BIND: "0.0.0.0:9102"' \
+    'l1-indexer-data:/l1-indexer-data' \
+    'http://127.0.0.1:9102/healthz'; do
+    grep -Fq "$expected" <<<"$l1_indexer_service_block" \
+        || fail "L1 indexer deployment is missing $expected"
+done
+grep -Fq '/app/bin/sybil-l1-indexer' Dockerfile \
+    || fail "server image does not package sybil-l1-indexer"
+grep -Fq 'targets: ["sybil-l1-indexer:9102"]' deploy/prometheus.yml \
+    || fail "VictoriaMetrics does not scrape the L1 indexer metrics listener"
+pass "L1 indexer binary, durable cursor, healthcheck, and scrape target are wired"
 
 for compose_file in docker-compose.yml docker-compose.prod.yml; do
     grep -Fq -- '"--metrics-port=9101"' "$compose_file" \

@@ -1,7 +1,7 @@
 ---
 tags: [runbook, monitoring, operations]
 status: current
-last_verified: 2026-07-12
+last_verified: 2026-07-15
 ---
 
 # Synthetic monitoring and alert delivery
@@ -83,6 +83,24 @@ notifier as `http://telegram-alerts:8080`. The bridge accepts vmalert's
 Alertmanager-v2 `/api/v2/alerts` payload and uses `TELEGRAM_BOT_TOKEN` /
 `TELEGRAM_CHAT_ID` from `/opt/sybil/.env`. The probe never calls Telegram and
 does not duplicate delivery or deduplication logic.
+
+### L1 indexer alert path
+
+When the opt-in `l1-indexer` Compose profile is enabled, VictoriaMetrics
+scrapes `sybil-l1-indexer:9102` independently of ingestion. A fatal integrity
+error leaves that listener alive, returns 503 from `/healthz`, and pages through
+`L1IndexerFatalFailure` on the first nonzero sample. `L1IndexerNotReady`,
+`L1IndexerRpcFailureBurst`, and `L1IndexerConfirmedLagHigh` cover sustained
+unready state, repeated RPC failures, and checkpoint lag. Their firing and
+recovery fixtures live in
+`deploy/vmalert/tests/l1-indexer-health_test.yml`; the Compose smoke gate checks
+the packaged binary, durable cursor mount, healthcheck, and scrape target.
+
+The profile is absent in deployments without an L1 vault, so the shared rule
+set deliberately does not alert on an absent target. Once the profile is
+enabled, configure the host/container supervisor to page if the process or
+target disappears. Semantic alert ownership and incident response are in the
+[L1 reorg recovery runbook](l1-reorg-recovery.md#indexer-alerts-and-diagnosis).
 
 ## Install the five-minute timer
 
