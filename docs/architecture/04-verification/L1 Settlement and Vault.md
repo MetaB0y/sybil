@@ -239,6 +239,15 @@ Escape activation and valid escape claims remain permissionless. Live key
 custody belongs in a private operator inventory; see the
 [administrator runbook](../../runbooks/admin-keys.md).
 
+The Foundry money-path suite pins exact rejection selectors, terminal/replay
+states, ERC-20 `false` rollback and retry, escape freeze behavior, and
+timelocked authorization. `just contracts-coverage` generates filtered LCOV
+for the production adapter, settlement, vault, and shared access control,
+enforcing per-contract floors plus a 95% aggregate branch floor. Tests, mocks,
+deployment scripts, and the unsafe development adapter cannot inflate that
+gate; the current inventory and exclusions live in
+`contracts/COVERAGE.md`.
+
 ## Typed state and Rust ownership
 
 The proof path relies on committed account, reservation, market/group,

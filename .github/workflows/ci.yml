@@ -202,6 +202,9 @@ jobs:
         working-directory: contracts
         run: forge test -vvv
 
+      - name: Enforce money-path branch coverage
+        run: ./scripts/check-contract-coverage.sh
+
   zk:
     name: ZK Guest & Tools
     runs-on: ubuntu-latest

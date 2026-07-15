@@ -9,11 +9,25 @@ contract MockUSDC is IERC20Minimal {
     uint8 public constant decimals = 6;
 
     uint256 public totalSupply;
+    bool public failTransfer;
+    bool public failTransferFrom;
     mapping(address account => uint256 balance) public balanceOf;
     mapping(address owner => mapping(address spender => uint256 allowance)) public allowance;
 
     event Transfer(address indexed from, address indexed to, uint256 amount);
     event Approval(address indexed owner, address indexed spender, uint256 amount);
+
+    function setFailTransfer(
+        bool value
+    ) external {
+        failTransfer = value;
+    }
+
+    function setFailTransferFrom(
+        bool value
+    ) external {
+        failTransferFrom = value;
+    }
 
     function mint(
         address to,
@@ -37,6 +51,7 @@ contract MockUSDC is IERC20Minimal {
         address to,
         uint256 amount
     ) external returns (bool) {
+        if (failTransfer) return false;
         _transfer(msg.sender, to, amount);
         return true;
     }
@@ -46,6 +61,7 @@ contract MockUSDC is IERC20Minimal {
         address to,
         uint256 amount
     ) external returns (bool) {
+        if (failTransferFrom) return false;
         uint256 allowed = allowance[from][msg.sender];
         require(allowed >= amount, "ALLOWANCE");
         if (allowed != type(uint256).max) {
