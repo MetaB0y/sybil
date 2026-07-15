@@ -50,6 +50,10 @@ qMDB proofs. Those rules execute in [[ZK Integration Path|the guest]] over a
   and VM commitments from [current protocol pins](../../protocol-pins.md).
 - `UnsafeAcceptAllVerifierAdapter` is Anvil-only and never evidence of
   production validity.
+- The separate Sepolia mock profile is constructor-bound to chain `11155111`
+  and always deploys a fresh publicly mintable token beside its accept-all
+  adapters. It proves public-testnet plumbing only; it cannot become a
+  real-verifier or real-collateral deployment by configuration.
 
 ## `SybilSettlement`
 

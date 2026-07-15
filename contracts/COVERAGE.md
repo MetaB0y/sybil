@@ -9,7 +9,7 @@ move collateral, or control those operations. The same gate runs in the
 ## Current measured baseline
 
 Captured on 2026-07-15 with Forge 1.6.0-v1.7.0 (`f83bad9`). Foundry disables
-optimizer settings and `viaIR` for coverage. All 77 tests passed.
+optimizer settings and `viaIR` for coverage. All 79 tests passed.
 
 | Production file | Lines | Statements | Branches | Functions |
 |---|---:|---:|---:|---:|
@@ -62,7 +62,8 @@ The focused failure suite now pins:
   admin transfer, and timestamp overflow.
 
 Scripts are deployment plumbing rather than contract state machines and remain
-outside the floor. `src/dev/UnsafeAcceptAllVerifierAdapter.sol` is deliberately
-excluded because it is Anvil-only and accepting every proof is its documented
-unsafe behavior. Golden-vector parity and Anvil deployment smoke remain
-separate gates.
+outside the floor. `src/dev/` is deliberately excluded: both accept-all
+adapters and the publicly mintable Sepolia collateral are unsafe environment
+fixtures, not production validity or custody implementations. Their chain and
+warning boundaries have focused tests and deployment smoke instead.
+Golden-vector parity and Anvil deployment smoke remain separate gates.
