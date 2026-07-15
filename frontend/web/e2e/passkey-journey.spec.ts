@@ -730,6 +730,9 @@ test("never-traded market does not fabricate a 50c quote", async ({
   );
   const market = nullPrice!;
 
+  // The Place order sheet is the compact-layout entry point; desktop keeps
+  // order entry in the reviewed right-hand Lite/Pro rail instead.
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/m/${market.market_id}`);
   const placeOrder = page.getByRole("button", { name: "Place order" });
   await expect(placeOrder.first()).toBeVisible({ timeout: 20_000 });
