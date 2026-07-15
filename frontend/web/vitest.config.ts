@@ -8,6 +8,7 @@ export default defineConfig({
       "src/**/*.test.ts",
       "src/**/*.test.tsx",
       "scripts/**/*.test.ts",
+      "scripts/**/*.test.mjs",
     ],
   },
   resolve: {

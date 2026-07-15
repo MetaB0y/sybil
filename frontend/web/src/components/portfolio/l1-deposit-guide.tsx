@@ -3,6 +3,9 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { api } from "@/lib/api/client";
+import type { components } from "@/lib/api/schema";
+
+type BridgeDomain = components["schemas"]["BridgeDomainResponse"];
 
 export function L1DepositGuide({ accountId }: { accountId: number }) {
   const bridgeKey = useQuery({
@@ -17,18 +20,28 @@ export function L1DepositGuide({ accountId }: { accountId: number }) {
     staleTime: Number.POSITIVE_INFINITY,
     refetchOnWindowFocus: false,
   });
+  const bridgeStatus = useQuery({
+    queryKey: ["bridge", "status"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/v1/bridge/status");
+      if (error || !data) throw new Error("fetch bridge status failed");
+      return data;
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false,
+  });
 
-  if (bridgeKey.isPending) {
+  if (bridgeKey.isPending || bridgeStatus.isPending) {
     return (
       <DepositGuideShell>
         <div role="status" aria-busy="true" className="text-annotation">
-          Loading your L1 deposit key…
+          Loading verified L1 deposit instructions…
         </div>
       </DepositGuideShell>
     );
   }
 
-  if (bridgeKey.error) {
+  if (bridgeKey.error || bridgeStatus.error) {
     return (
       <DepositGuideShell>
         <div
@@ -36,16 +49,21 @@ export function L1DepositGuide({ accountId }: { accountId: number }) {
           style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
         >
           <span style={{ ...bodyText, color: "var(--no)" }}>
-            Your deposit key is unavailable. Do not send a deposit until it can
-            be verified.
+            Deposit instructions are unavailable. The account key and configured
+            chain, vault, and token must all be verified before sending
+            anything.
           </span>
           <button
             type="button"
-            onClick={() => void bridgeKey.refetch()}
-            disabled={bridgeKey.isFetching}
+            onClick={() =>
+              void Promise.all([bridgeKey.refetch(), bridgeStatus.refetch()])
+            }
+            disabled={bridgeKey.isFetching || bridgeStatus.isFetching}
             style={retryButtonStyle}
           >
-            {bridgeKey.isFetching ? "Retrying…" : "Retry"}
+            {bridgeKey.isFetching || bridgeStatus.isFetching
+              ? "Retrying…"
+              : "Retry"}
           </button>
         </div>
       </DepositGuideShell>
@@ -57,6 +75,7 @@ export function L1DepositGuide({ accountId }: { accountId: number }) {
       <L1DepositGuidance
         accountId={accountId}
         sybilAccountKeyHex={bridgeKey.data.sybil_account_key_hex}
+        domain={bridgeStatus.data.configured_domain ?? null}
       />
     </DepositGuideShell>
   );
@@ -65,9 +84,11 @@ export function L1DepositGuide({ accountId }: { accountId: number }) {
 export function L1DepositGuidance({
   accountId,
   sybilAccountKeyHex,
+  domain,
 }: {
   accountId: number;
   sybilAccountKeyHex: string;
+  domain?: BridgeDomain | null;
 }) {
   const displayKey = sybilAccountKeyHex.startsWith("0x")
     ? sybilAccountKeyHex
@@ -75,10 +96,14 @@ export function L1DepositGuidance({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <BridgeDomainGuidance domain={domain ?? null} />
+
       <p style={{ ...bodyText, margin: 0 }}>
-        For the devnet vault flow, this is the 32-byte routing key the deposit
-        call expects. It belongs to account #{accountId} and is different from
-        your passkey or signing public key.
+        {domain
+          ? "For the configured devnet vault, this is the 32-byte routing key the deposit call expects."
+          : "This account routing key is shown for identity and recovery only while L1 deposit admission is unavailable."}{" "}
+        It belongs to account #{accountId} and is different from your passkey or
+        signing public key.
       </p>
 
       <div>
@@ -140,6 +165,88 @@ export function L1DepositGuidance({
   );
 }
 
+export function BridgeDomainGuidance({
+  domain,
+}: {
+  domain: BridgeDomain | null;
+}) {
+  if (!domain) {
+    return (
+      <div role="alert" style={domainWarningStyle}>
+        <div
+          className="eyebrow"
+          style={{ color: "var(--no)", marginBottom: 5 }}
+        >
+          Deposits unavailable
+        </div>
+        <p style={{ ...bodyText, margin: 0 }}>
+          This API has no configured L1 chain, vault, and collateral token. Do
+          not send tokens using the routing key below.
+        </p>
+      </div>
+    );
+  }
+
+  const rows = [
+    ["Network", bridgeChainLabel(domain.chain_id)],
+    ["Vault", normalizeHexAddress(domain.vault_address_hex)],
+    ["Token", normalizeHexAddress(domain.token_address_hex)],
+  ] as const;
+  return (
+    <section aria-label="Configured L1 deposit domain" style={domainReadyStyle}>
+      <div
+        className="eyebrow"
+        style={{ color: "var(--accent)", marginBottom: 7 }}
+      >
+        Configured bridge domain
+      </div>
+      <dl
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto minmax(0, 1fr)",
+          gap: "6px 12px",
+          margin: 0,
+        }}
+      >
+        {rows.map(([label, value]) => (
+          <div key={label} style={{ display: "contents" }}>
+            <dt style={{ ...bodyText, color: "var(--fg-4)" }}>{label}</dt>
+            <dd
+              style={{
+                margin: 0,
+                color: "var(--fg-1)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                overflowWrap: "anywhere",
+                userSelect: "all",
+              }}
+            >
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p style={{ ...bodyText, margin: "9px 0 0", color: "var(--fg-4)" }}>
+        No in-browser wallet transaction is available. Verify the wallet
+        network, vault, and token independently. This status does not attest the
+        token&apos;s value or verifier safety; do not use real funds.
+      </p>
+    </section>
+  );
+}
+
+export function bridgeChainLabel(chainId: number): string {
+  return chainId === 11_155_111
+    ? "Sepolia (chain 11155111)"
+    : `Chain ${chainId}`;
+}
+
+function normalizeHexAddress(value: string): string {
+  return value.startsWith("0x") || value.startsWith("0X")
+    ? value
+    : `0x${value}`;
+}
+
 function DepositGuideShell({ children }: { children: React.ReactNode }) {
   return (
     <section
@@ -188,4 +295,18 @@ const retryButtonStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: 11,
   cursor: "pointer",
+};
+
+const domainWarningStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 6,
+  border: "1px solid color-mix(in srgb, var(--no) 35%, var(--border-1))",
+  background: "color-mix(in srgb, var(--no) 7%, transparent)",
+};
+
+const domainReadyStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 6,
+  border: "1px solid color-mix(in srgb, var(--accent) 30%, var(--border-1))",
+  background: "color-mix(in srgb, var(--accent) 6%, transparent)",
 };

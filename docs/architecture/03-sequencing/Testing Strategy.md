@@ -10,7 +10,8 @@ last_verified: 2026-07-15
 Sybil's tests should make regressions cheap to catch without turning the test
 suite into another distributed system. The default path is a small ladder of
 increasing realism: pure deterministic tests, in-process API tests, process
-restart tests, then a tiny Docker smoke layer.
+restart tests, a tiny Docker smoke layer, then browser acceptance against an
+assembled deployment.
 
 ## Principles
 
@@ -31,6 +32,10 @@ restart tests, then a tiny Docker smoke layer.
 - **Bound resource use.** Deterministic tests should use tiny block-history and
   projection fixtures plus bounded response pages. Capacity tests are a
   separate, explicitly invoked layer.
+- **Classify browser authority.** A browser acceptance run must say whether it
+  is read-only, limited to a new disposable account, injecting a local fault,
+  or acting as an operator. Missing fixtures block the run; they do not grant
+  permission to mutate unrelated shared state.
 
 ## Test Ladder
 
@@ -114,11 +119,15 @@ the highest-value deployment contract:
   prover daemon/redb/source boundary plus durable API/admin-feed-key wiring without
   starting containers.
 - `just itest-compose` uses an isolated project and throwaway volumes, starts
-  only `sybil-api`, runs the shared `sybil-client` `seed_book` fixture over real
-  HTTP, and asserts exact statuses, fills, clearing prices, reservations, and
-  marked-balance conservation. It always runs `down -v` and retains container
-  logs under `target/itest-compose/` on failure. `--dry-run` on the script runs
-  its assertion self-test without Docker.
+  the API/history pair and a chain-11155111 Anvil process, deploys the exact
+  accept-all Sepolia mock profile, runs the shared `sybil-client` `seed_book`
+  fixture over real HTTP, and asserts exact trading conservation plus a real
+  deposit/index/signed-withdrawal/relay/queue/delayed-finalize lifecycle. It
+  runs the relay twice before indexing to pin restart idempotence. The default
+  performs no proving; the older custody proof drill requires explicit
+  `--with-escape`. Cleanup always runs `down -v`, and failures retain container
+  logs under `target/itest-compose/`. `--dry-run` runs its assertion self-test
+  without Docker.
 
 The fixture is `SYB-247-v1`: BuyYes 0.60 × 1000 and BuyNo 0.50 × 2000. The
 partially filled NO order pins the exact YES/NO clearing vector at 0.50/0.50;
@@ -126,7 +135,31 @@ matched volume is exactly 1000 share-units. Run id 0 is single-use on fresh
 state. Persistent devnet smoke callers choose a new numeric `--run-id`, which
 deterministically derives disjoint P256 seeds and replay nonces.
 
-### 5. Explicit Load and Isolation Tests
+### 5. Browser and Computer-Use Acceptance
+
+Browser acceptance tests what an assembled product communicates and permits;
+it does not replace endpoint, signing, or state-machine tests. Playwright owns
+repeatable browser-protocol checks such as virtual WebAuthn, focus containment,
+responsive geometry, and an exact signed-order journey.
+
+`frontend/web/computer-use/scenarios` is the tool-independent exploratory
+layer. Each Markdown scenario has a checked seven-field header and fixed prose
+contract: intent, preconditions, ordered steps, visible assertions, evidence,
+cleanup, and stop conditions. Fixture names express capabilities rather than
+hard-coded market/account IDs. Modes bound authority to `read-only`,
+`disposable-account`, `controlled-fault`, or explicitly authorized `operator`
+runs. The checker rejects implementation selectors so a different browser
+agent can execute the same product contract.
+
+Run `pnpm scenarios:check` in `frontend/web`; it is also part of
+`just frontend-check`. Print the human catalog with `pnpm scenarios:list` or a
+runner-facing catalog with `node scripts/check-computer-use-scenarios.mjs
+--json`. Execution artifacts and redacted result records belong under
+`target/computer-use`, not in source control. A missing screen or fixture is a
+blocked product capability and should point to an issue; it is never silently
+mocked into a pass.
+
+### 6. Explicit Load and Isolation Tests
 
 Load tests are not part of the default CI ladder. They target an already
 running release stack through public HTTP and answer resource/coupling
@@ -155,11 +188,14 @@ actually fills. See the [WebSocket load runbook](../../runbooks/websocket-load.m
 
 ## Next Implementation Slice
 
-1. Add a disposable, seeded API/history process fixture for a short automated
+1. Execute the P0 computer-use catalog against an exact-build disposable devnet
+   and retain redacted result records; keep physical-device claims distinct
+   from virtual-authenticator evidence.
+2. Add a disposable, seeded API/history process fixture for a short automated
    historical-load smoke; keep capacity thresholds outside ordinary CI.
-2. Add focused properties for sell-side position reservations and cancellation /
+3. Add focused properties for sell-side position reservations and cancellation /
    expiry release invariants.
-3. Move helpers into a separate test-support crate only if multiple crates begin
+4. Move helpers into a separate test-support crate only if multiple crates begin
    sharing the same public fixtures.
 
 This gives us better coverage without creating a new testing platform.

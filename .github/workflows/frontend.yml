@@ -30,6 +30,9 @@ jobs:
       - name: Generated API schema drift
         run: pnpm types:check
 
+      - name: Computer-use scenario contract
+        run: pnpm scenarios:check
+
       - name: Typecheck
         run: pnpm tsc --noEmit
 

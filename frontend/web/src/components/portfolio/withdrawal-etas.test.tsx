@@ -31,9 +31,12 @@ describe("WithdrawalStatusPanel", () => {
     expect(html).toContain("Normal withdrawals");
     expect(html).toContain("No active withdrawal leaves");
     expect(html).toContain("New withdrawal requests are not enabled");
-    expect(html).toContain("signed API is service-gated");
-    expect(html).toContain("does not by itself release L1 funds");
-    expect(html).toContain("proof-backed vault claim path is still incomplete");
+    expect(html).toContain("owner-signed API can create");
+    expect(html).toContain("relay, delayed L1 finalization");
+    expect(html).toContain(
+      "accept-all mock relay is not real-funds proof security",
+    );
+    expect(html).not.toContain("signed API is service-gated");
     expect(html).not.toContain(">Withdraw<");
   });
 
@@ -53,6 +56,8 @@ describe("WithdrawalStatusPanel", () => {
     expect(html).toContain("1 active");
     expect(html).toContain("#1 · $1.00");
     expect(html).toContain("cancel window");
-    expect(html).toContain("does not by itself release L1 funds");
+    expect(html).toContain(
+      "accept-all mock relay is not real-funds proof security",
+    );
   });
 });

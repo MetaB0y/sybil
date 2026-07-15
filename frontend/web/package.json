@@ -15,6 +15,8 @@
     "tokens:sync": "node scripts/sync-tokens.mjs",
     "types:generate": "bash scripts/generate-types.sh",
     "types:check": "bash scripts/generate-types.sh --check",
+    "scenarios:check": "node scripts/check-computer-use-scenarios.mjs",
+    "scenarios:list": "node scripts/check-computer-use-scenarios.mjs --list",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "SYBIL_SMOKE=1 vitest run scripts/smoke-signed-flow.test.ts --reporter=verbose",
