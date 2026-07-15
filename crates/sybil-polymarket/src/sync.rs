@@ -43,6 +43,9 @@ pub struct SyncActor {
     /// sync fetches exactly these events by id instead of the volume-ranked
     /// category scan.
     curated_event_ids: Vec<String>,
+    /// Exact child conditions retained from fetched curated parent events.
+    /// This is mirror policy only; it is not protocol-validity state.
+    curated_condition_ids: HashSet<String>,
     /// Native market templates to ensure on Sybil before the mirror scan.
     native_catalog: NativeMarketCatalog,
 }
@@ -70,6 +73,7 @@ impl SyncActor {
         mm_tx: mpsc::Sender<MmMessage>,
         mm_live_rx: watch::Receiver<usize>,
         curated_event_ids: Vec<String>,
+        curated_condition_ids: Vec<String>,
         native_catalog: NativeMarketCatalog,
     ) -> Self {
         Self {
@@ -82,6 +86,7 @@ impl SyncActor {
             mm_live_rx,
             first_sync: true,
             curated_event_ids,
+            curated_condition_ids: curated_condition_ids.into_iter().collect(),
             native_catalog,
         }
     }
@@ -119,7 +124,7 @@ impl SyncActor {
 
         // Curated mode (SYB-150): mirror exactly the allowlisted events by id.
         // Otherwise fall back to the volume-ranked category scan.
-        let events = if self.curated_event_ids.is_empty() {
+        let mut events = if self.curated_event_ids.is_empty() {
             self.gamma_client
                 .fetch_active_events(
                     self.config.max_events,
@@ -133,6 +138,15 @@ impl SyncActor {
                 .fetch_curated_events(&self.curated_event_ids)
                 .await?
         };
+        if !self.curated_condition_ids.is_empty() {
+            for event in &mut events {
+                event.markets.retain(|market| {
+                    self.curated_condition_ids
+                        .contains(&market.condition_id.to_ascii_lowercase())
+                });
+            }
+            events.retain(|event| !event.markets.is_empty());
+        }
 
         // Baseline live-set size for MM admission this cycle (PM-8). Copied out
         // of the watch so we never hold the borrow across an await, and bumped

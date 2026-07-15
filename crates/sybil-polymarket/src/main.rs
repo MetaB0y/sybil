@@ -89,23 +89,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::parse();
     info!(?config, "starting sybil-polymarket");
 
-    // Curated seed set (SYB-150). When a path is configured the mirror syncs
-    // ONLY these events (by Polymarket event id); a parse failure is fatal so a
-    // typo can't silently fall back to the broad volume scan.
-    let curated_event_ids: Vec<String> = if config.curated_markets_path.is_empty() {
-        Vec::new()
-    } else {
-        let curated = sybil_polymarket::curated::CuratedMarkets::load(std::path::Path::new(
-            &config.curated_markets_path,
-        ))?;
-        let ids = curated.event_ids();
-        info!(
-            path = %config.curated_markets_path,
-            events = ids.len(),
-            "loaded curated markets seed set; mirroring by event id only"
-        );
-        ids
-    };
+    // Curated seed set (SYB-150). Parent event ids are fetch keys; exact child
+    // condition ids, when present, are the authoritative mirror allow-list.
+    // Parse failure is fatal so a typo cannot fall back to the broad scan.
+    let (curated_event_ids, curated_condition_ids): (Vec<String>, Vec<String>) =
+        if config.curated_markets_path.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            let curated = sybil_polymarket::curated::CuratedMarkets::load(std::path::Path::new(
+                &config.curated_markets_path,
+            ))?;
+            let events = curated.event_ids();
+            let conditions = curated.condition_ids();
+            info!(
+                path = %config.curated_markets_path,
+                events = events.len(),
+                conditions = conditions.len(),
+                "loaded curated mirror allow-list"
+            );
+            (events, conditions)
+        };
     let native_catalog = if config.native_markets_path.is_empty() {
         NativeMarketCatalog::default()
     } else {
@@ -230,7 +233,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Channels — size MM channel to fit all existing markets for bootstrap.
     // When category filters are configured, apply the same filtered universe to
     // persisted mappings so an old broad mapping does not silently re-expand MM.
-    let allowed_conditions = if !curated_event_ids.is_empty() {
+    let allowed_conditions = if !curated_condition_ids.is_empty() {
+        Some(
+            curated_condition_ids
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>(),
+        )
+    } else if !curated_event_ids.is_empty() {
         // Curated mode: scope the MM bootstrap to the curated events' active
         // conditions so a broad persisted mapping cannot re-expand the MM.
         match gamma_client.fetch_curated_events(&curated_event_ids).await {
@@ -421,6 +431,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             mm_tx,
             mm_live_rx,
             curated_event_ids,
+            curated_condition_ids,
             native_catalog_sync,
         );
         actor.run(cancel_sync).await;

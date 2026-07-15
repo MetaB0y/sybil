@@ -4,15 +4,15 @@
 //! active Polymarket events by volume and mirrors the top N that pass the
 //! category filters. That is right for a broad mirror but wrong for a
 //! hand-picked launch set: we want a specific, reviewed list of AI / company /
-//! tech questions, addressed by Polymarket **event id** so the selection is
-//! deterministic and auditable across redeploys.
+//! tech questions, addressed by stable Polymarket **condition id** so the
+//! selection is deterministic and parent events cannot silently add children.
 //!
 //! This module loads that curated list from a JSON file (see
 //! `crates/sybil-polymarket/curated_markets.json`). When
 //! `--curated-markets-path` / `CURATED_MARKETS_PATH` is set, [`SyncActor`]
-//! fetches exactly these events by id (via
+//! fetches their parent events by id (via
 //! [`GammaClient::fetch_curated_events`]) instead of the volume scan, and the
-//! MM bootstrap in `main.rs` scopes its allowed-condition set to them.
+//! mirror and MM bootstrap retain only the configured condition ids.
 //!
 //! Provenance for the resulting Sybil markets is unchanged and needs no new
 //! field: each mirrored market still carries `polymarket_condition_id`,
@@ -40,6 +40,22 @@ pub struct CuratedMarkets {
     /// Curated events, in listing order.
     #[serde(default)]
     pub events: Vec<CuratedEvent>,
+    /// Exact reviewed child markets. When non-empty, this is the authoritative
+    /// child allow-list; event ids are used only to fetch parent metadata.
+    #[serde(default)]
+    pub conditions: Vec<CuratedCondition>,
+}
+
+/// One exact Polymarket child market.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CuratedCondition {
+    /// Stable 32-byte Polymarket condition id.
+    pub condition_id: String,
+    /// Parent Gamma event id used to fetch the child.
+    pub event_id: String,
+    /// Human-readable cross-check only.
+    #[serde(default)]
+    pub title: String,
 }
 
 /// One curated Polymarket event.
@@ -83,27 +99,60 @@ impl CuratedMarkets {
                 )));
             }
         }
+        let mut seen = HashSet::new();
+        for (i, market) in self.conditions.iter().enumerate() {
+            let condition_id = market.condition_id.trim();
+            if condition_id.len() != 66
+                || !condition_id.starts_with("0x")
+                || !condition_id[2..].chars().all(|ch| ch.is_ascii_hexdigit())
+            {
+                return Err(Error::PolymarketApi(format!(
+                    "curated condition #{i} is not a 32-byte 0x condition id"
+                )));
+            }
+            if market.event_id.trim().is_empty() || !seen.insert(condition_id.to_ascii_lowercase())
+            {
+                return Err(Error::PolymarketApi(format!(
+                    "curated condition #{i} has an empty event id or duplicate condition id"
+                )));
+            }
+        }
         Ok(())
     }
 
     /// De-duplicated, order-preserving list of Polymarket event ids to fetch.
     pub fn event_ids(&self) -> Vec<String> {
         let mut seen = HashSet::new();
-        self.events
+        self.conditions
             .iter()
-            .map(|event| event.event_id.trim().to_string())
+            .map(|market| market.event_id.as_str())
+            .chain(self.events.iter().map(|event| event.event_id.as_str()))
+            .map(str::trim)
+            .map(str::to_string)
             .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+            .collect()
+    }
+
+    /// Exact, normalized condition ids to retain after fetching parent events.
+    pub fn condition_ids(&self) -> Vec<String> {
+        self.conditions
+            .iter()
+            .map(|market| market.condition_id.trim().to_ascii_lowercase())
             .collect()
     }
 
     /// Number of curated events.
     pub fn len(&self) -> usize {
-        self.events.len()
+        if self.conditions.is_empty() {
+            self.events.len()
+        } else {
+            self.conditions.len()
+        }
     }
 
     /// Whether the curated set is empty.
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        self.events.is_empty() && self.conditions.is_empty()
     }
 }
 
@@ -157,25 +206,39 @@ mod tests {
         let curated = CuratedMarkets::parse_json("{}").unwrap();
         assert!(curated.is_empty());
         assert!(curated.event_ids().is_empty());
+        assert!(curated.condition_ids().is_empty());
+    }
+
+    #[test]
+    fn exact_conditions_drive_parent_fetch_and_reject_duplicates() {
+        let id = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let json = format!(
+            r#"{{ "conditions": [
+                {{ "condition_id": "{id}", "event_id": "7" }},
+                {{ "condition_id": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "event_id": "7" }}
+            ] }}"#
+        );
+        let curated = CuratedMarkets::parse_json(&json).unwrap();
+        assert_eq!(curated.event_ids(), vec!["7"]);
+        assert_eq!(curated.condition_ids().len(), 2);
+
+        let duplicate = format!(
+            r#"{{ "conditions": [
+                {{ "condition_id": "{id}", "event_id": "7" }},
+                {{ "condition_id": "{id}", "event_id": "8" }}
+            ] }}"#
+        );
+        assert!(CuratedMarkets::parse_json(&duplicate).is_err());
     }
 
     #[test]
     fn checked_in_seed_set_parses_and_is_nonempty() {
-        // The file the deploy actually ships. Keep the small reviewed set
+        // The file the deploy actually ships. Keep the reviewed child set
         // honest against the parser and accidental catalog expansion.
         let data = include_str!("../curated_markets.json");
         let curated = CuratedMarkets::parse_json(data).unwrap();
-        assert_eq!(curated.len(), 4, "expected the four reviewed seed events");
-        // Every id is a non-empty numeric string.
-        for id in curated.event_ids() {
-            assert!(
-                id.chars().all(|c| c.is_ascii_digit()),
-                "non-numeric id {id}"
-            );
-        }
-        assert_eq!(
-            curated.event_ids(),
-            ["333737", "79075", "85299", "96557"].map(str::to_string)
-        );
+        assert_eq!(curated.len(), 72, "expected exact reviewed mirror children");
+        assert_eq!(curated.condition_ids().len(), 72);
+        assert_eq!(curated.event_ids().len(), 10);
     }
 }
