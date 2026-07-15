@@ -55,6 +55,10 @@ pub struct SequencerConfig {
     /// Acknowledged proof-job heights retained in the sequencer after the
     /// standalone prover durably ingests them. Zero disables pruning.
     pub acknowledged_proof_job_retention_blocks: u64,
+    /// Block cadence for acknowledged proof-job maintenance.
+    pub acknowledged_proof_job_maintenance_interval_blocks: u64,
+    /// Maximum old proof-job rows examined in one maintenance pass.
+    pub acknowledged_proof_job_max_rows_per_pass: usize,
     /// Recent fill records retained for current diagnostics. Durable product
     /// history lives only in `sybil-history`.
     pub max_recent_fills_per_account: usize,
@@ -103,6 +107,8 @@ impl Default for SequencerConfig {
             canonical_archive_maintenance_interval_blocks: 1_000,
             canonical_archive_max_rows_per_pass: 10_000,
             acknowledged_proof_job_retention_blocks: 0,
+            acknowledged_proof_job_maintenance_interval_blocks: 1_000,
+            acknowledged_proof_job_max_rows_per_pass: 10_000,
             max_recent_fills_per_account:
                 crate::fill_recorder::DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT,
             max_recent_equity_points_per_account:

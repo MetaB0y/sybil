@@ -244,6 +244,22 @@ pub struct ApiConfig {
     )]
     pub acknowledged_proof_job_retention_blocks: u64,
 
+    /// Block cadence for acknowledged proof-job maintenance.
+    #[arg(
+        long,
+        default_value = "1000",
+        env = "SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS"
+    )]
+    pub acknowledged_proof_job_maintenance_interval_blocks: u64,
+
+    /// Maximum old proof-job rows examined in one maintenance pass.
+    #[arg(
+        long,
+        default_value = "10000",
+        env = "SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS"
+    )]
+    pub acknowledged_proof_job_max_rows_per_pass: usize,
+
     /// Recent fill records retained for current diagnostics.
     #[arg(
         long,
@@ -383,6 +399,8 @@ impl Default for ApiConfig {
             canonical_archive_maintenance_interval_blocks: 1_000,
             canonical_archive_max_rows_per_pass: 10_000,
             acknowledged_proof_job_retention_blocks: 0,
+            acknowledged_proof_job_maintenance_interval_blocks: 1_000,
+            acknowledged_proof_job_max_rows_per_pass: 10_000,
             max_recent_fills_per_account: 5_000,
             max_recent_equity_points_per_account: 0,
             max_recent_account_events_per_account: 0,

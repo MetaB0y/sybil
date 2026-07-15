@@ -2,7 +2,7 @@
 tags: [zk]
 layer: verification
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 ---
 
 # ZK Integration Path
@@ -115,6 +115,14 @@ publishes fsynced content-addressed envelope/payload directories. Startup
 reconciliation validates database references, quarantines interrupted output,
 and adopts an exact artifact left by a crash after rename but before the redb
 commit.
+
+That acknowledgement transfers durable source ownership. The sequencer keeps
+a configurable safety window, then atomically removes the matching job and ack
+in a separately bounded maintenance pass. Unacknowledged jobs and digest
+mismatches are never pruned. The rotating scan position is durable, so old
+unacknowledged work cannot force an unbounded scan or starve acknowledged rows
+behind it. Once the window expires, prover redb backup—not the canonical block
+archive or best-effort DA table—is the recovery source for those job bytes.
 
 Mock mode runs the same native epoch verification and envelope lifecycle. STARK
 mode invokes the pinned OpenVM encoder and `prove app`, then requires local

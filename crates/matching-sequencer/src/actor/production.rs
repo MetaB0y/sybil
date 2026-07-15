@@ -350,8 +350,11 @@ impl SequencerActorState {
                 maintenance_interval_blocks: self
                     .sequencer
                     .config
-                    .canonical_archive_maintenance_interval_blocks,
-                max_rows_per_pass: self.sequencer.config.canonical_archive_max_rows_per_pass,
+                    .acknowledged_proof_job_maintenance_interval_blocks,
+                max_rows_per_pass: self
+                    .sequencer
+                    .config
+                    .acknowledged_proof_job_max_rows_per_pass,
             };
             if canonical_policy.should_maintain_at(height)
                 || proof_job_policy.should_maintain_at(height)
@@ -403,6 +406,10 @@ impl SequencerActorState {
                             Ok(report) => {
                                 metrics::counter!("sybil_acknowledged_proof_jobs_pruned_total")
                                     .increment(report.jobs_pruned as u64);
+                                metrics::counter!(
+                                    "sybil_acknowledged_proof_job_rows_examined_total"
+                                )
+                                .increment(report.rows_examined as u64);
                                 if let Some(oldest) = report.oldest_retained_height {
                                     metrics::gauge!(
                                         "sybil_proof_job_outbox_oldest_retained_height"

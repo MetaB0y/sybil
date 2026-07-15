@@ -53,6 +53,12 @@ pub(super) const PROOF_JOB_OUTBOX: TableDefinition<u64, &[u8]> =
 /// Height -> acknowledged exact transport digest.
 pub(super) const PROOF_JOB_ACKS: TableDefinition<u64, &[u8]> =
     TableDefinition::new("proof_job_acks");
+/// Durable cursor for bounded proof-job retention scans. A rotating cursor is
+/// required because old unacknowledged jobs must survive without permanently
+/// starving acknowledged rows at greater heights.
+pub(super) const PROOF_JOB_RETENTION_META: TableDefinition<&str, u64> =
+    TableDefinition::new("proof_job_retention_meta");
+pub(super) const KEY_PROOF_JOB_RETENTION_NEXT_SCAN_HEIGHT: &str = "next_scan_height";
 
 /// Pubkey registry: compressed_point (33 bytes) → account_id (u64)
 pub(super) const PUBKEY_REGISTRY: TableDefinition<&[u8], u64> =

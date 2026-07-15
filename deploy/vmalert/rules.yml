@@ -581,6 +581,19 @@ groups:
           summary: "sybil-prover scrape target is down"
           description: "VictoriaMetrics has not been able to scrape sybil-prover for 2m."
 
+      - alert: ProofJobRetentionMaintenanceFailed
+        # Absolute so a first-scrape failure is not lost for lack of a prior
+        # zero sample. The counter resets only with a clean API process.
+        expr: sybil_acknowledged_proof_job_maintenance_failures_total > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: sequencer
+        annotations:
+          summary: "Acknowledged proof-job retention failed closed"
+          description: "The sequencer retained all source rows after proof-job maintenance failed. Inspect digest integrity and redb health before changing retention or deleting data."
+          runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/prover-daemon.md#source-retention-and-ownership"
+
       - alert: ProverInactive
         expr: |
           max(sybil_prover_artifact_directories_total) == 0

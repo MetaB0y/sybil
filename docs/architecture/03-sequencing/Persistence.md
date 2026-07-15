@@ -2,7 +2,7 @@
 tags: [infrastructure, storage]
 layer: sequencer
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-15
 ---
 
 # Persistence
@@ -211,6 +211,12 @@ Other sequencer-owned durable serving rows are:
   rows are written atomically after block commit and pruned together with the
   canonical-archive retention floor. They are availability artifacts, not part of
   the redb commit fence.
+- **Proof-job outbox**: portable transition jobs in `proof_job_outbox` remain
+  sequencer-owned until the standalone prover durably stores the exact bytes
+  and writes their digest acknowledgement. Old matching job/ack pairs are
+  deleted atomically after a safety window. A durable rotating maintenance
+  cursor bounds rows examined per pass while moving past unacknowledged jobs;
+  a digest mismatch aborts the whole transaction.
 
 Recent in-memory fill/price/event/equity caches may still support live
 analytics computations, but no public historical endpoint depends on them and
@@ -223,6 +229,12 @@ job. Product-history retention, backups, projections, and later archive/rollup
 policy belong entirely to `sybil-history`. The two policies must not be
 conflated: product history is not enough to reconstruct private state, and DA
 is not an account-query store.
+
+Proof-job retention is a third, independent policy. It transfers source
+ownership rather than availability ownership: after acknowledgement and the
+safety window, the prover redb is the only durable job source. Its database and
+artifacts therefore require a coordinated backup; canonical archive or DA
+retention cannot reconstruct pruned qMDB proof material.
 
 ## Recovery Order
 

@@ -721,6 +721,75 @@ async fn acknowledged_proof_job_pruning_is_bounded_and_preserves_unacknowledged_
 }
 
 #[tokio::test]
+async fn acknowledged_proof_job_pruning_rotates_past_an_unacknowledged_prefix() {
+    let path = temp_db_path("store-proof-job-retention-scan-cursor");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let markets = MarketSet::new();
+    let env = TestEnv::new();
+    let mut accounts = AccountStore::new();
+    accounts.create_account(100);
+
+    for height in 1..=8 {
+        let (header, witness) =
+            coherent_header_and_witness(height, &accounts, &markets, &lifecycle, &env.bridge_state);
+        store
+            .save_block_with_witness(
+                env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
+                &witness,
+            )
+            .await
+            .unwrap();
+    }
+
+    let job_six = store
+        .proof_job_outbox_page(None, 10)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.height == 6)
+        .unwrap();
+    store
+        .acknowledge_proof_job(6, job_six.digest)
+        .await
+        .unwrap();
+
+    let policy = AcknowledgedProofJobRetentionPolicy {
+        retention_blocks: 1,
+        maintenance_interval_blocks: 1,
+        max_rows_per_pass: 2,
+    };
+    for _ in 0..2 {
+        let report = store
+            .prune_acknowledged_proof_jobs(8, policy)
+            .await
+            .unwrap();
+        assert_eq!(report.rows_examined, 2);
+        assert_eq!(report.jobs_pruned, 0);
+    }
+
+    // The scan position is durable maintenance state. Restarting must not make
+    // the old unacknowledged prefix starve the acknowledged row behind it.
+    drop(store);
+    let store = Store::open(&path).unwrap();
+    let report = store
+        .prune_acknowledged_proof_jobs(8, policy)
+        .await
+        .unwrap();
+    assert_eq!(report.rows_examined, 2);
+    assert_eq!(report.jobs_pruned, 1);
+    assert_eq!(
+        store
+            .proof_job_outbox_page(None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.height)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5, 7, 8]
+    );
+}
+
+#[tokio::test]
 async fn acknowledged_proof_job_pruning_fails_closed_on_digest_mismatch() {
     let path = temp_db_path("store-proof-job-retention-mismatch");
     let store = Store::open(&path).unwrap();
