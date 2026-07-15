@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -74,7 +75,12 @@ class SyntheticStrategyConfig:
 
 def has_reference_price(market: Market) -> bool:
     ref = getattr(market, "reference_price_nanos", None)
-    return ref is not None and ref > 0
+    expires_at_ms = getattr(market, "reference_price_expires_at_ms", None)
+    return (
+        ref is not None
+        and ref > 0
+        and (expires_at_ms is None or int(time.time() * 1000) <= expires_at_ms)
+    )
 
 
 def is_mirror_market(market: Market) -> bool:

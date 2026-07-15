@@ -78,6 +78,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_HTTP_DA_CLIENT_RPS` / `BURST` | `10` / `20` | `10` / `20` | `10` / `20` | no |
 | `SYBIL_HTTP_DA_MAX_CONCURRENCY` | `4` | `4` | `4` | no |
 | `SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS` | `256` | `256` | `256` | no |
+| `SYBIL_REFERENCE_PRICE_TTL_MS` | `60000` | `60000` | `60000` | no |
 | `SYBIL_PUBLIC_ACCOUNT_CAPACITY` | `1000` | `1000` | `1000` (override deliberately) | no |
 | `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` | `1000000000000` ($1,000 play money) | same | `0` | **yes — blocks when nonzero** |
 | `SYBIL_HTTP_ONBOARDING_GLOBAL_RPS` / `BURST` | `5` / `20` | `5` / `20` | `5` / `20` | no |
@@ -88,6 +89,12 @@ caches only. They are neither durable history nor historical query policy.
 Product-history stock lives in `sybil-history`; the initial service retains raw
 batches and projections without an age/row cap. Canonical portfolio state is
 unaffected.
+
+The reference-price TTL is an API-owned per-market safety ceiling, independent
+of the mirror's 30-second per-token staleness detector. Public market reads omit
+expired values, and restart begins empty until the mirror republishes; changing
+this knob affects off-block display/agent inputs only, never matching or
+committed state.
 
 Public onboarding has both a flow and a stock boundary. The route-specific
 token buckets reject bursts before cryptographic/actor work; the durable next

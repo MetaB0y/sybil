@@ -10,6 +10,7 @@ from live.news_feed import (
     LiveArticle,
     NewsFeed,
     PairedNewsBatchBarrier,
+    ReferencePrices,
     build_search_query,
     llm_gate_batch,
 )
@@ -24,6 +25,23 @@ def _market(mid: int, name: str) -> Market:
         no_price_nanos=500_000_000,
         status="active",
     )
+
+
+def test_reference_price_cache_honors_exact_api_expiry_and_replacement():
+    now_ms = [1_000]
+    cache = ReferencePrices(clock_ms=lambda: now_ms[0])
+    market = _market(1, "Market")
+    market.reference_price_nanos = 400_000_000
+    market.reference_price_expires_at_ms = 1_100
+    cache.replace([market], {1})
+
+    now_ms[0] = 1_100
+    assert cache.get_price(1) == 0.4
+    now_ms[0] = 1_101
+    assert cache.get_price(1) is None
+
+    cache.replace([], {1})
+    assert cache.get_price(1) is None
 
 
 def test_relevance_gate_uses_live_deepseek_model():
@@ -176,9 +194,7 @@ async def test_two_subscribers_both_receive_same_article():
 async def test_paired_batch_barrier_holds_next_batch_until_both_arms_drain():
     feed = NewsFeed([_market(1, "Market")], api_key=None)
     upstream = feed.subscribe(name="paired")
-    barrier = PairedNewsBatchBarrier(
-        upstream, ("control", "stage1"), {1: 0.5}, lambda _market_id: None
-    )
+    barrier = PairedNewsBatchBarrier(upstream, ("control", "stage1"), lambda _market_id: 0.5)
     control = barrier.view("control")
     stage1 = barrier.view("stage1")
     first = _article("http://ex/first")
@@ -206,9 +222,7 @@ async def test_paired_batch_barrier_holds_next_batch_until_both_arms_drain():
 async def test_paired_batch_barrier_concurrent_drains_share_one_snapshot():
     feed = NewsFeed([_market(1, "Market")], api_key=None)
     upstream = feed.subscribe(name="paired")
-    barrier = PairedNewsBatchBarrier(
-        upstream, ("control", "stage1"), {1: 0.5}, lambda _market_id: None
-    )
+    barrier = PairedNewsBatchBarrier(upstream, ("control", "stage1"), lambda _market_id: 0.5)
     article = _article("http://ex/shared")
     async with feed._lock:
         upstream._deliver(1, article)
@@ -220,6 +234,25 @@ async def test_paired_batch_barrier_concurrent_drains_share_one_snapshot():
 
     assert control_batch is stage1_batch
     assert control_batch == [article]
+
+
+async def test_paired_batch_waits_without_consuming_articles_when_reference_expires():
+    feed = NewsFeed([_market(1, "Market")], api_key=None)
+    upstream = feed.subscribe(name="paired")
+    current_reference = None
+    barrier = PairedNewsBatchBarrier(
+        upstream,
+        ("control", "stage1"),
+        lambda _market_id: current_reference,
+    )
+    article = _article("http://ex/waiting")
+    async with feed._lock:
+        upstream._deliver(1, article)
+
+    control = barrier.view("control")
+    assert await control.drain(1) == []
+    current_reference = 0.6
+    assert await control.drain(1) == [article]
 
 
 async def test_unsubscribe_then_resubscribe_is_sane():

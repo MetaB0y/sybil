@@ -217,7 +217,7 @@ third-party stream.
 
 `sybil-oracle` implements immediate signed-feed resolution. It verifies feed identity, market binding, signature, payout range, and irreversible lifecycle state. Truthfulness of the feed remains a trust assumption; richer quorum/bond/challenge policy is not part of the core implementation.
 
-`sybil-polymarket` is an untrusted client integration: it mirrors curated events/groups, follows CLOB reference prices, submits one-shot MM liquidity, and signs clean closed-market resolutions. It imports no exchange state.
+`sybil-polymarket` is an untrusted client integration: it mirrors curated events/groups, follows CLOB reference prices, submits one-shot MM liquidity, and signs clean closed-market resolutions. It imports no exchange state. The API timestamps reference updates per market, publishes the exact expiry, and omits values older than its configured TTL, so a dead or partially updating publisher cannot leave a stale reference available to web/Arena consumers; this cache is volatile and empty after restart until republish. Arena consumes that one API-owned view, enforces the expiry between refreshes, and clears on refresh failure rather than maintaining a second CLOB/mapping cache.
 
 The Python arena and web frontend use the same public interfaces. The Rust client is shared by first-party Rust consumers; OpenAPI generates frontend types.
 

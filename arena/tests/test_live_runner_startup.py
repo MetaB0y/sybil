@@ -63,6 +63,8 @@ async def test_initial_baseline_is_awaited_before_any_worker_starts(monkeypatch)
         return 1
 
     class Feed:
+        reference_prices = MagicMock()
+
         async def run(self):
             assert baseline_complete
             worker_starts.append("feed")
@@ -101,8 +103,12 @@ async def test_initial_baseline_is_awaited_before_any_worker_starts(monkeypatch)
     monkeypatch.setattr(runner, "snapshot_portfolios_once", baseline)
 
     stop_event = asyncio.Event()
+    client = MagicMock()
+    client.list_markets = AsyncMock(return_value=[])
     tasks = await runner._start_live_tasks(
+        client,
         Feed(),
+        [{}],
         [Analyst()],
         [trader],
         [fast],
@@ -121,6 +127,59 @@ async def test_initial_baseline_is_awaited_before_any_worker_starts(monkeypatch)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_reference_refresh_replaces_shared_market_views_and_cache():
+    old = SimpleNamespace(
+        id=7,
+        reference_price_nanos=400_000_000,
+        reference_price_expires_at_ms=1_000,
+    )
+    fresh = SimpleNamespace(
+        id=7,
+        reference_price_nanos=450_000_000,
+        reference_price_expires_at_ms=2_000,
+    )
+    client = MagicMock()
+    client.list_markets = AsyncMock(return_value=[fresh])
+    feed = SimpleNamespace(reference_prices=MagicMock())
+    view = {7: old}
+    stop_event = asyncio.Event()
+
+    task = asyncio.create_task(
+        runner._reference_price_refresh_loop(client, feed, [view], stop_event)
+    )
+    while client.list_markets.await_count == 0:
+        await asyncio.sleep(0)
+    stop_event.set()
+    await task
+
+    feed.reference_prices.replace.assert_called_once_with([fresh], {7})
+    assert view[7] is fresh
+
+
+async def test_reference_refresh_failure_clears_every_live_view():
+    market = SimpleNamespace(
+        id=7,
+        reference_price_nanos=400_000_000,
+        reference_price_expires_at_ms=1_000,
+    )
+    client = MagicMock()
+    client.list_markets = AsyncMock(side_effect=RuntimeError("API unavailable"))
+    feed = SimpleNamespace(reference_prices=MagicMock())
+    stop_event = asyncio.Event()
+
+    task = asyncio.create_task(
+        runner._reference_price_refresh_loop(client, feed, [{7: market}], stop_event)
+    )
+    while client.list_markets.await_count == 0:
+        await asyncio.sleep(0)
+    stop_event.set()
+    await task
+
+    feed.reference_prices.clear.assert_called_once_with()
+    assert market.reference_price_nanos is None
+    assert market.reference_price_expires_at_ms is None
 
 
 async def test_only_experiment_arm_baseline_failures_abort_startup():

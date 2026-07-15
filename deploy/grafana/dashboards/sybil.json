@@ -399,7 +399,8 @@
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sybil_reference_prices_active_total", "legendFormat": "active references", "refId": "A" },
-        { "expr": "sybil_price_reference_pairs_total", "legendFormat": "priced pairs", "refId": "B" }
+        { "expr": "sybil_price_reference_pairs_total", "legendFormat": "priced pairs", "refId": "B" },
+        { "expr": "sybil_reference_prices_expired_total", "legendFormat": "expired references", "refId": "C" }
       ],
       "fieldConfig": {
         "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [

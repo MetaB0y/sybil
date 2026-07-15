@@ -490,7 +490,7 @@ class PersonaAnalyst:
         yes_price = (
             reference_price
             if reference_price is not None
-            else market_price(self.news_feed, self.markets_info, market_id, block)
+            else market_price(self.news_feed, market_id, block)
         )
         if yes_price <= 0:
             return ""
@@ -498,7 +498,7 @@ class PersonaAnalyst:
         poly_price = (
             reference_price
             if reference_price is not None
-            else self.news_feed.polymarket_prices.get_price(market_id)
+            else self.news_feed.reference_prices.get_price(market_id)
         )
         if poly_price and poly_price > 0:
             price_line = f"- Polymarket consensus: YES=${poly_price:.4f} | NO=${1 - poly_price:.4f}"
@@ -698,7 +698,7 @@ class PersonaAnalyst:
             ref_price = (
                 batch_reference_price
                 if batch_reference_price is not None
-                else market_price(self.news_feed, self.markets_info, market_id, block)
+                else market_price(self.news_feed, market_id, block)
             )
             if ref_price <= 0:
                 continue

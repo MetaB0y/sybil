@@ -26,6 +26,7 @@ class MarketLike(Protocol):
     tags: list[str]
     yes_price: float
     reference_price_nanos: int | None
+    reference_price_expires_at_ms: int | None
     volume_nanos: int
     volume_dollars: float
     expiry_timestamp_ms: int
@@ -309,7 +310,12 @@ def _ranking_volume(market: MarketLike) -> float:
 
 def _has_reference_price(market: MarketLike) -> bool:
     ref_price = getattr(market, "reference_price_nanos", None)
-    return ref_price is not None and ref_price > 0
+    expires_at_ms = getattr(market, "reference_price_expires_at_ms", None)
+    return (
+        ref_price is not None
+        and ref_price > 0
+        and (expires_at_ms is None or int(time.time() * 1000) <= expires_at_ms)
+    )
 
 
 def _market_probability(market: MarketLike) -> float:
@@ -318,7 +324,7 @@ def _market_probability(market: MarketLike) -> float:
     # sits at a degenerate 0.0/1.0 that would otherwise read as maximally
     # certain and distort uncertainty-based scoring/grouping.
     ref_price = getattr(market, "reference_price_nanos", None)
-    if ref_price is not None and ref_price > 0:
+    if _has_reference_price(market):
         return ref_price / NANOS_PER_DOLLAR
     price = getattr(market, "yes_price", 0.5)
     if price <= 0.0 or price >= 1.0:

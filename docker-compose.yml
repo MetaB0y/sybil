@@ -19,6 +19,9 @@ services:
       SYBIL_DEPLOYMENT_PROFILE: "${SYBIL_DEPLOYMENT_PROFILE:-devnet}"
       SYBIL_DEV_MODE: "true"
       SYBIL_BLOCK_INTERVAL_MS: "10000"
+      # The mirror rejects a token after 30s without a tick; the API adds an
+      # independent 60s per-market fail-closed ceiling if the publisher dies.
+      SYBIL_REFERENCE_PRICE_TTL_MS: "${SYBIL_REFERENCE_PRICE_TTL_MS:-60000}"
       SYBIL_ARENA_DB_PATH: "/arena-data/decisions.db"
       SYBIL_HISTORY_URL: "http://sybil-history:3003"
       SYBIL_HISTORY_TOKEN: "${SYBIL_HISTORY_TOKEN:-sybil-history-dev-only}"

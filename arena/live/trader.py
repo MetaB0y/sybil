@@ -305,11 +305,11 @@ class LiveLlmTrader(BaseAgent):
     # -- Price helpers --
 
     def _get_market_price(self, market_id: int, block: Block) -> float:
-        return market_price(self.news_feed, self.markets_info, market_id, block)
+        return market_price(self.news_feed, market_id, block)
 
     def _observed_market_prices(self, block: Block) -> dict[int, tuple[int, int]]:
         """Prices worth recording for live trading, without synthetic 50/50s."""
-        return observed_market_prices(self.news_feed, self.markets_info, self.market_ids, block)
+        return observed_market_prices(self.news_feed, self.market_ids, block)
 
     def _portfolio_value(self, block: Block) -> float:
         pv = self.current_balance

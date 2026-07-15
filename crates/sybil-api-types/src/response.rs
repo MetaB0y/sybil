@@ -182,6 +182,10 @@ pub struct MarketResponse {
     /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_price_nanos: Option<u64>,
+    /// Server-side expiry of `reference_price_nanos`, as Unix milliseconds.
+    /// The price is omitted once this boundary has passed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_price_expires_at_ms: Option<u64>,
     /// External URL (e.g., Polymarket link).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_url: Option<String>,
@@ -299,6 +303,9 @@ pub struct MarketSummaryResponse {
     /// Prices are per-share probabilities in [0, 1e9].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_price_nanos: Option<u64>,
+    /// Server-side expiry of `reference_price_nanos`, as Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_price_expires_at_ms: Option<u64>,
     /// All-time traded notional. Integer nanodollars; 1_000_000_000 = $1.
     pub volume_nanos: u64,
     pub status: String,

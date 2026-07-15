@@ -2492,6 +2492,12 @@ export interface components {
       polymarket_condition_id?: string | null;
       /**
        * Format: int64
+       * @description Server-side expiry of `reference_price_nanos`, as Unix milliseconds.
+       *     The price is omitted once this boundary has passed.
+       */
+      reference_price_expires_at_ms?: number | null;
+      /**
+       * Format: int64
        * @description Reference price from external system (e.g., Polymarket), display only.
        *     Integer nanodollars; 1_000_000_000 = $1.
        *     Prices are per-share probabilities in [0, 1e9].
@@ -2605,6 +2611,11 @@ export interface components {
       orders_placed_total?: number;
       /** Format: int64 */
       orders_unmatched_total?: number;
+      /**
+       * Format: int64
+       * @description Server-side expiry of `reference_price_nanos`, as Unix milliseconds.
+       */
+      reference_price_expires_at_ms?: number | null;
       /**
        * Format: int64
        * @description Reference price from external system (e.g., Polymarket), display only.
@@ -3538,6 +3549,7 @@ export interface components {
       /**
        * @description Map of market_id -> reference price. Integer nanodollars;
        *     1_000_000_000 = $1. Prices are per-share probabilities in [0, 1e9].
+       *     Zero explicitly evicts the current reference for that market.
        */
       prices: {
         [key: string]: number;

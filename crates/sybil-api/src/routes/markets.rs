@@ -32,6 +32,7 @@ struct BuildMarketResponseArgs<'a> {
     metadata: Option<&'a MarketMetadata>,
     volume_nanos: u64,
     reference_price_nanos: Option<u64>,
+    reference_price_expires_at_ms: Option<u64>,
     /// Off-block reference data (Polymarket mirror metadata). When `Some`,
     /// its `category` field wins over `metadata.category` and its other
     /// fields pass through directly (no on-block equivalent).
@@ -135,6 +136,7 @@ fn build_market_response(args: BuildMarketResponseArgs<'_>) -> MarketResponse {
         created_at_ms: args.metadata.map(|m| m.created_at_ms).filter(|&v| v != 0),
         volume_nanos: args.volume_nanos,
         reference_price_nanos: args.reference_price_nanos,
+        reference_price_expires_at_ms: args.reference_price_expires_at_ms,
         external_url: args.ref_data.and_then(|r| r.external_url.clone()),
         event_id: args.ref_data.and_then(|r| r.event_id.clone()),
         event_title: args.ref_data.and_then(|r| r.event_title.clone()),
@@ -210,7 +212,7 @@ pub async fn list_markets(
     .await?;
     let (liquidity_by_market, liquidity_band_nanos) = liquidity;
 
-    let ref_prices = state.reference_prices.read().await;
+    let ref_prices = state.fresh_reference_prices().await;
     let market_ref_data = state.market_ref_data.read().await;
 
     let _build_span =
@@ -239,7 +241,10 @@ pub async fn list_markets(
                 status: &status,
                 metadata: metadata.get(&m.id),
                 volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
-                reference_price_nanos: ref_prices.get(&m.id.0).copied(),
+                reference_price_nanos: ref_prices.get(&m.id.0).map(|price| price.price_nanos),
+                reference_price_expires_at_ms: ref_prices
+                    .get(&m.id.0)
+                    .map(|price| price.expires_at_ms),
                 ref_data: market_ref_data.get(&m.id.0),
                 trader_count: stats.trader_count,
                 volume_24h_nanos: stats.volume_24h_nanos,
@@ -304,7 +309,7 @@ pub async fn list_markets_summary(
     .await?;
     let (liquidity_by_market, liquidity_band_nanos) = liquidity;
 
-    let ref_prices = state.reference_prices.read().await;
+    let ref_prices = state.fresh_reference_prices().await;
 
     let _build_span = tracing::info_span!(
         "list_markets_summary.build_response",
@@ -332,7 +337,10 @@ pub async fn list_markets_summary(
                 name: m.name.clone(),
                 yes_price_nanos: market_prices.and_then(|p| p.first().map(|n| n.0)),
                 no_price_nanos: market_prices.and_then(|p| p.get(1).map(|n| n.0)),
-                reference_price_nanos: ref_prices.get(&m.id.0).copied(),
+                reference_price_nanos: ref_prices.get(&m.id.0).map(|price| price.price_nanos),
+                reference_price_expires_at_ms: ref_prices
+                    .get(&m.id.0)
+                    .map(|price| price.expires_at_ms),
                 volume_nanos: volumes.get(&m.id).copied().unwrap_or(0),
                 status: status.as_str().to_string(),
                 trader_count: stats.trader_count,
@@ -405,7 +413,7 @@ pub async fn get_market(
         &liquidity_by_market,
         &order_stats_by_market,
     );
-    let ref_price = state.reference_prices.read().await.get(&id).copied();
+    let ref_price = state.fresh_reference_price(id).await;
     let ref_data = state.market_ref_data.read().await.get(&id).cloned();
 
     Ok(Json(build_market_response(BuildMarketResponseArgs {
@@ -416,7 +424,8 @@ pub async fn get_market(
         status: &status,
         metadata: metadata.as_ref(),
         volume_nanos: volume,
-        reference_price_nanos: ref_price,
+        reference_price_nanos: ref_price.map(|price| price.price_nanos),
+        reference_price_expires_at_ms: ref_price.map(|price| price.expires_at_ms),
         ref_data: ref_data.as_ref(),
         trader_count: stats.trader_count,
         volume_24h_nanos: stats.volume_24h_nanos,
@@ -913,7 +922,7 @@ pub async fn search_markets(
         state.sequencer.get_order_stats_by_market(),
     )?;
     let (liquidity_by_market, liquidity_band_nanos) = liquidity;
-    let ref_prices = state.reference_prices.read().await;
+    let ref_prices = state.fresh_reference_prices().await;
     let market_ref_data = state.market_ref_data.read().await;
 
     let response: Vec<MarketResponse> = results
@@ -936,7 +945,10 @@ pub async fn search_markets(
                 status: &r.status,
                 metadata: r.metadata.as_ref(),
                 volume_nanos: r.volume_nanos,
-                reference_price_nanos: ref_prices.get(&mid).copied(),
+                reference_price_nanos: ref_prices.get(&mid).map(|price| price.price_nanos),
+                reference_price_expires_at_ms: ref_prices
+                    .get(&mid)
+                    .map(|price| price.expires_at_ms),
                 ref_data: market_ref_data.get(&mid),
                 trader_count: stats.trader_count,
                 volume_24h_nanos: stats.volume_24h_nanos,
@@ -967,11 +979,16 @@ pub async fn set_reference_prices(
     State(state): State<AppState>,
     Json(req): Json<SetReferencePricesRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut prices = state.reference_prices.write().await;
-    for (market_id, price) in req.prices {
-        prices.insert(market_id, price);
+    if let Some((market_id, price)) = req
+        .prices
+        .iter()
+        .find(|(_, price)| **price > NANOS_PER_DOLLAR)
+    {
+        return Err(AppError::bad_request(format!(
+            "reference price for market {market_id} exceeds {NANOS_PER_DOLLAR}: {price}"
+        )));
     }
-    *state.reference_prices_updated_at_ms.write().await = now_ms();
+    state.update_reference_prices(req.prices).await;
     Ok(Json(serde_json::json!({"updated": true})))
 }
 

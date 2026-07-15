@@ -564,6 +564,7 @@ impl SybilClient {
     }
 
     /// Push reference prices to sybil-api (display only, not matching logic).
+    /// A zero value explicitly evicts that market's current reference.
     pub async fn set_reference_prices(&self, prices: &HashMap<u32, u64>) -> Result<(), Error> {
         let body = serde_json::json!({ "prices": prices });
         let resp = self

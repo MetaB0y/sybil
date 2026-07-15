@@ -59,7 +59,8 @@ def _fixture_response(content, prompt_tokens, completion_tokens, cost=None):
 def _make_analyst(bus, market_ids, *, db=None, metrics=None, llm_budget_usd=None,
                   min_llm_interval_s=1000.0):
     news_feed = MagicMock()
-    news_feed.polymarket_prices.get_price.return_value = 0.55
+    news_feed.reference_prices.get_price.return_value = 0.55
+    news_feed.require_reference_prices = False
     news_feed.subscribe.return_value.drain = AsyncMock(return_value=[_article()])
 
     markets_info = {}

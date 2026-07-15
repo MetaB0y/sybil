@@ -2,7 +2,7 @@
 tags: [arena]
 layer: arena
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-15
 ---
 
 Sybil has two LLM trading paths with deliberately different boundaries.
@@ -18,6 +18,16 @@ market question and resolution criteria, the current external reference price, t
 value, and clustered articles. Its response must restate the YES condition before giving a fair
 value, countercase, confidence, motivation, and analysis. The analyst has no Sybil account and
 cannot submit orders.
+
+The API, rather than each Arena consumer, owns external-price expiry. It
+timestamps every market named by the mirror independently, publishes its exact
+expiry, and omits it after `SYBIL_REFERENCE_PRICE_TTL_MS`; partial publisher
+traffic cannot refresh an untouched token, and an API restart exposes no
+reference until republish. Arena has no second CLOB/mapping cache: one shared
+runtime view refreshes from the API every ten seconds, enforces the published
+expiry locally, and clears immediately on a failed refresh. Missing or
+non-positive values are unavailable, and `--require-reference-prices` does not
+fall back to the startup snapshot or local clearing.
 
 Each persona bus fans the same update out to two independent `LiveLlmTrader` subscribers. Despite
 its retained historical class name, `LiveLlmTrader` is now LLM-free: it applies mechanical Kelly
@@ -55,9 +65,10 @@ market set:
 Analyst, sizer, bus, and account identities include the experiment id, persona, and variant, so
 token spend, decisions, snapshots, and portfolios cannot be confused across arms. Each persona's
 two analysts share one feed subscription through a paired batch barrier. The first drain snapshots
-the current per-market article list and one reference price (a positive fresh Polymarket value when
-available, otherwise the frozen startup reference). Each arm receives that exact evidence-and-price
-batch once, and the next pending batch remains blocked until both views consume the active batch.
+the current per-market article list and one still-unexpired API reference price. Each arm receives
+that exact evidence-and-price batch once, and the next pending batch remains blocked until both
+views consume the active batch. When the reference is unavailable, articles remain queued rather
+than being paired with the frozen experiment-start value.
 A paused or lagging arm therefore cannot let the other advance onto differently grouped evidence or
 a later price context. Experiment startup rejects any selected market without a positive external
 reference before metadata or accounts are created. The per-analyst LLM pause threshold is unchanged.

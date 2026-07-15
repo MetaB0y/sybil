@@ -96,11 +96,7 @@ async def test_news_feed_run_drives_poll_metrics(monkeypatch):
     async def fake_poll(http):
         return (3, 7)  # (delivered, candidates)
 
-    async def fake_prices(http, ids):
-        return {}
-
     monkeypatch.setattr(feed, "_poll_once", fake_poll)
-    monkeypatch.setattr(feed.polymarket_prices, "fetch_prices", fake_prices)
 
     task = asyncio.create_task(feed.run())
     try:

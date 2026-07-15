@@ -18,7 +18,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from sybil_client import SybilClient
-from sybil_client.types import NANOS_PER_DOLLAR, TimeInForce
+from sybil_client.types import NANOS_PER_DOLLAR, Market, TimeInForce
 
 from .analyst import (
     PersonaAnalyst,
@@ -47,6 +47,7 @@ log = logging.getLogger(__name__)
 # mirror has published any reference prices. Rather than exit, poll for a
 # reference-backed market set on this cadence until one appears.
 MARKET_DISCOVERY_RETRY_SECONDS = 30
+REFERENCE_PRICE_REFRESH_SECONDS = 10
 STAGE1_AB_MODE = "syb-114-stage1-ab"
 STAGE1_AB_VARIANTS = (
     {
@@ -92,7 +93,6 @@ class LiveConfig:
     metrics_port: int = 0  # <=0 disables the exporter (default: off)
     personas: list[str] = field(default_factory=lambda: list(PERSONAS.keys()))
     market_ids: list[int] | None = None  # Manual market selection (overrides auto)
-    mapping_path: str | None = None  # Path to polymarket_mapping.json
     # Opt-in concurrent Stage 1 A/B. Supplying an id enables the experiment;
     # the ordinary one-analyst + Kelly/Flat topology remains the default.
     stage1_ab_experiment_id: str | None = None
@@ -684,7 +684,6 @@ def _wire_live_inputs(
     traders: list[LiveLlmTrader],
     feed: NewsFeed,
     paired_analyst_groups: list[tuple[PersonaAnalyst, PersonaAnalyst]] | None = None,
-    startup_reference_prices: dict[int, float] | None = None,
 ) -> None:
     """Attach default or paired analyst feed views and each sizer's price feed."""
     paired_analysts = set()
@@ -694,8 +693,7 @@ def _wire_live_inputs(
         barrier = PairedNewsBatchBarrier(
             subscription,
             (control.name, stage1.name),
-            startup_reference_prices or {},
-            feed.polymarket_prices.get_price,
+            feed.reference_prices.get_price,
         )
         control.attach_feed_and_bus(feed, control.bus, barrier.view(control.name))
         stage1.attach_feed_and_bus(feed, stage1.bus, barrier.view(stage1.name))
@@ -706,8 +704,53 @@ def _wire_live_inputs(
         trader.attach_news_feed(feed)
 
 
-async def _start_live_tasks(
+def _clear_reference_market_views(market_views: list[dict[int, Market]]) -> None:
+    for view in market_views:
+        for market in view.values():
+            market.reference_price_nanos = None
+            market.reference_price_expires_at_ms = None
+
+
+async def _reference_price_refresh_loop(
+    client: SybilClient,
     feed: NewsFeed,
+    market_views: list[dict[int, Market]],
+    stop_event: asyncio.Event,
+) -> None:
+    """Refresh one shared API-bounded price view for every live consumer."""
+    selected_market_ids = {market_id for view in market_views for market_id in view}
+    while not stop_event.is_set():
+        try:
+            latest = await client.list_markets()
+            feed.reference_prices.replace(latest, selected_market_ids)
+            latest_by_id = {market.id: market for market in latest}
+            for view in market_views:
+                for market_id in tuple(view):
+                    if market_id in latest_by_id:
+                        view[market_id] = latest_by_id[market_id]
+                    else:
+                        view[market_id].reference_price_nanos = None
+                        view[market_id].reference_price_expires_at_ms = None
+        except Exception as error:
+            # A failed refresh has no freshness evidence. Clear immediately;
+            # the next successful API read repopulates the exact cohort.
+            feed.reference_prices.clear()
+            _clear_reference_market_views(market_views)
+            log.warning("Reference-price refresh failed; live references cleared: %s", error)
+
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=REFERENCE_PRICE_REFRESH_SECONDS,
+            )
+        except TimeoutError:
+            pass
+
+
+async def _start_live_tasks(
+    client: SybilClient,
+    feed: NewsFeed,
+    market_views: list[dict[int, Market]],
     analysts: list[PersonaAnalyst],
     traders: list[LiveLlmTrader],
     fast_traders: list[FastReferenceTrader],
@@ -735,6 +778,10 @@ async def _start_live_tasks(
 
     tasks = [
         asyncio.create_task(feed.run(), name="news_feed"),
+        asyncio.create_task(
+            _reference_price_refresh_loop(client, feed, market_views, stop_event),
+            name="reference_prices",
+        ),
         asyncio.create_task(
             snapshot_portfolios(snapshot_traders, db, runtime_id=runtime_id),
             name="snapshots",
@@ -918,7 +965,7 @@ async def run_live(config: LiveConfig):
         # Rust mirror process; feeding every server market to Arena made a
         # focused profile cosmetic and revived stale pre-reset mirror rows.
         synthetic_markets = list(active)
-        synthetic_markets_info = {m.id: m for m in synthetic_markets}
+        synthetic_markets_info = markets_info
         synthetic_market_ids = [m.id for m in synthetic_markets]
 
         # 2. Create analyst/sizer accounts. The experiment is a fully opt-in
@@ -1058,7 +1105,7 @@ async def run_live(config: LiveConfig):
             active,
             api_key=config.api_key,
             poll_interval_s=config.news_poll_interval,
-            mapping_path=config.mapping_path,
+            require_reference_prices=config.require_reference_prices,
             metrics=metrics,
         )
 
@@ -1072,7 +1119,6 @@ async def run_live(config: LiveConfig):
             traders,
             feed,
             topology.paired_analyst_groups,
-            startup_reference_prices,
         )
 
         # 5. Run everything
@@ -1101,7 +1147,9 @@ async def run_live(config: LiveConfig):
         stop_event = asyncio.Event()
         try:
             tasks = await _start_live_tasks(
+                client,
                 feed,
+                [markets_info],
                 analysts,
                 traders,
                 fast_traders,
@@ -1357,9 +1405,6 @@ def main():
             "Rejected unless a Stage 1 experiment is active."
         ),
     )
-    parser.add_argument(
-        "--mapping-path", default=None, help="Path to polymarket_mapping.json for reference prices"
-    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
     try:
@@ -1498,7 +1543,6 @@ def main():
         metrics_port=args.metrics_port,
         personas=args.personas,
         market_ids=market_ids,
-        mapping_path=args.mapping_path,
         stage1_ab_experiment_id=stage1_ab_experiment_id,
         outcome_record_interval_s=outcome_record_interval_s,
     )

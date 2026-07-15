@@ -18,6 +18,90 @@ const MAX_HTTP_RATE_LIMIT_CLIENTS: usize = 10_000;
 const OVERFLOW_CLIENT_KEY: &str = "__overflow__";
 type ReadApiKeyOwners = HashMap<[u8; 32], AccountId>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ReferencePriceEntry {
+    price_nanos: u64,
+    updated_at_ms: u64,
+}
+
+/// API-owned freshness boundary for off-block external prices. The publisher
+/// can update any subset of markets; every retained value keeps its own clock.
+#[derive(Debug, Default)]
+struct ReferencePriceBook {
+    entries: HashMap<u32, ReferencePriceEntry>,
+    last_publisher_update_at_ms: u64,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ReferencePriceSnapshot {
+    pub fresh_prices: HashMap<u32, FreshReferencePrice>,
+    pub age_ms_by_market: HashMap<u32, u64>,
+    pub stored_count: u64,
+    pub expired_count: u64,
+    pub last_publisher_update_at_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FreshReferencePrice {
+    pub price_nanos: u64,
+    pub expires_at_ms: u64,
+}
+
+impl ReferencePriceBook {
+    fn update(&mut self, updates: HashMap<u32, u64>, now_ms: u64) {
+        for (market_id, price_nanos) in updates {
+            // Zero is the existing publisher eviction sentinel. Make it a
+            // real deletion at this boundary so consumers see `None`, not an
+            // ambiguous zero-probability reference.
+            if price_nanos == 0 {
+                self.entries.remove(&market_id);
+            } else {
+                self.entries.insert(
+                    market_id,
+                    ReferencePriceEntry {
+                        price_nanos,
+                        updated_at_ms: now_ms,
+                    },
+                );
+            }
+        }
+        self.last_publisher_update_at_ms = now_ms;
+    }
+
+    fn fresh_price(&self, market_id: u32, now_ms: u64, ttl_ms: u64) -> Option<FreshReferencePrice> {
+        self.entries.get(&market_id).and_then(|entry| {
+            (now_ms.saturating_sub(entry.updated_at_ms) <= ttl_ms).then_some(FreshReferencePrice {
+                price_nanos: entry.price_nanos,
+                expires_at_ms: entry.updated_at_ms.saturating_add(ttl_ms),
+            })
+        })
+    }
+
+    fn snapshot(&self, now_ms: u64, ttl_ms: u64) -> ReferencePriceSnapshot {
+        let mut snapshot = ReferencePriceSnapshot {
+            stored_count: u64::try_from(self.entries.len()).unwrap_or(u64::MAX),
+            last_publisher_update_at_ms: self.last_publisher_update_at_ms,
+            ..ReferencePriceSnapshot::default()
+        };
+        for (&market_id, entry) in &self.entries {
+            let age_ms = now_ms.saturating_sub(entry.updated_at_ms);
+            snapshot.age_ms_by_market.insert(market_id, age_ms);
+            if age_ms <= ttl_ms {
+                snapshot.fresh_prices.insert(
+                    market_id,
+                    FreshReferencePrice {
+                        price_nanos: entry.price_nanos,
+                        expires_at_ms: entry.updated_at_ms.saturating_add(ttl_ms),
+                    },
+                );
+            } else {
+                snapshot.expired_count = snapshot.expired_count.saturating_add(1);
+            }
+        }
+        snapshot
+    }
+}
+
 /// Reference market data mirrored from external systems (e.g., Polymarket).
 ///
 /// Off-block: this never enters `MarketMetadata` or any block-hashed state.
@@ -181,11 +265,10 @@ pub struct AppState {
     /// per-client rate limits. Empty is the safe direct-peer-only default.
     pub http_trusted_proxy_cidrs: Arc<Vec<ipnet::IpNet>>,
     pub prometheus: PrometheusHandle,
-    /// Reference prices from external systems (e.g., Polymarket).
-    /// Keyed by market_id (u32). Display-only — not part of matching logic.
-    pub reference_prices: Arc<RwLock<HashMap<u32, u64>>>,
-    /// Unix milliseconds when reference prices were last updated.
-    pub reference_prices_updated_at_ms: Arc<RwLock<u64>>,
+    /// Per-market external prices and publisher timestamps. Display-only —
+    /// never part of matching logic or committed state.
+    reference_prices: Arc<RwLock<ReferencePriceBook>>,
+    reference_price_ttl_ms: u64,
     /// Reference data per market (external URLs, images, categories, etc.).
     /// Off-block; populated by the Polymarket mirror via
     /// `POST /v1/markets/{id}/metadata`. Persists across restarts when
@@ -291,8 +374,8 @@ impl AppState {
             cors_origins,
             http_trusted_proxy_cidrs: Arc::new(config.http_trusted_proxy_cidrs.clone()),
             prometheus,
-            reference_prices: Arc::new(RwLock::new(HashMap::new())),
-            reference_prices_updated_at_ms: Arc::new(RwLock::new(0)),
+            reference_prices: Arc::new(RwLock::new(ReferencePriceBook::default())),
+            reference_price_ttl_ms: config.reference_price_ttl_ms,
             market_ref_data: Arc::new(RwLock::new(initial_ref_data)),
             market_ref_data_path,
             event_snapshot_dir,
@@ -333,6 +416,35 @@ impl AppState {
         let records = self.sequencer.list_auto_resolution_records().await?;
         self.auto_resolutions.rehydrate(records);
         Ok(())
+    }
+
+    pub(crate) async fn update_reference_prices(&self, updates: HashMap<u32, u64>) {
+        self.reference_prices
+            .write()
+            .await
+            .update(updates, crate::util::now_ms());
+    }
+
+    pub(crate) async fn fresh_reference_prices(&self) -> HashMap<u32, FreshReferencePrice> {
+        self.reference_price_snapshot().await.fresh_prices
+    }
+
+    pub(crate) async fn fresh_reference_price(
+        &self,
+        market_id: u32,
+    ) -> Option<FreshReferencePrice> {
+        self.reference_prices.read().await.fresh_price(
+            market_id,
+            crate::util::now_ms(),
+            self.reference_price_ttl_ms,
+        )
+    }
+
+    pub(crate) async fn reference_price_snapshot(&self) -> ReferencePriceSnapshot {
+        self.reference_prices
+            .read()
+            .await
+            .snapshot(crate::util::now_ms(), self.reference_price_ttl_ms)
     }
 
     /// Populate API-owned read models before accepting traffic. Tests that
@@ -443,5 +555,61 @@ impl AppState {
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod reference_price_tests {
+    use super::*;
+
+    fn updates(entries: &[(u32, u64)]) -> HashMap<u32, u64> {
+        entries.iter().copied().collect()
+    }
+
+    #[test]
+    fn publisher_death_expires_values_at_the_server_boundary() {
+        let mut book = ReferencePriceBook::default();
+        book.update(updates(&[(7, 400_000_000)]), 1_000);
+
+        assert_eq!(
+            book.fresh_price(7, 1_100, 100),
+            Some(FreshReferencePrice {
+                price_nanos: 400_000_000,
+                expires_at_ms: 1_100,
+            })
+        );
+        assert_eq!(book.fresh_price(7, 1_101, 100), None);
+        let expired = book.snapshot(1_101, 100);
+        assert_eq!(expired.expired_count, 1);
+        assert!(expired.fresh_prices.is_empty());
+    }
+
+    #[test]
+    fn partial_updates_refresh_only_the_tokens_the_publisher_sent() {
+        let mut book = ReferencePriceBook::default();
+        book.update(updates(&[(1, 400_000_000), (2, 600_000_000)]), 1_000);
+        book.update(updates(&[(1, 450_000_000)]), 1_080);
+
+        let snapshot = book.snapshot(1_110, 100);
+        assert_eq!(
+            snapshot.fresh_prices.get(&1),
+            Some(&FreshReferencePrice {
+                price_nanos: 450_000_000,
+                expires_at_ms: 1_180,
+            })
+        );
+        assert!(!snapshot.fresh_prices.contains_key(&2));
+        assert_eq!(snapshot.expired_count, 1);
+    }
+
+    #[test]
+    fn explicit_eviction_and_process_restart_cannot_resurrect_a_price() {
+        let mut book = ReferencePriceBook::default();
+        book.update(updates(&[(7, 400_000_000)]), 1_000);
+        book.update(updates(&[(7, 0)]), 1_010);
+        assert_eq!(book.snapshot(1_010, 100).stored_count, 0);
+
+        let restarted = ReferencePriceBook::default();
+        assert_eq!(restarted.fresh_price(7, 1_010, 100), None);
     }
 }

@@ -53,3 +53,21 @@ tests:
             exp_annotations:
               summary: "Polymarket reference-price feed is empty"
               description: "No active Polymarket reference price has been present for 3m. The curated feed, mirror process, or API update path is broken."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_reference_prices_expired_total{job="sybil-api",instance="sybil-api:3000"}'
+        values: "2+0x5"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ReferencePriceTokensExpired
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: ReferencePriceTokensExpired
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: polymarket
+            exp_annotations:
+              summary: "One or more reference-price tokens expired"
+              description: "At least one stored reference price exceeded the API per-market TTL for 2m (expired tokens: 2). Public market reads now omit those values, and Arena reference-required selection cannot use them."

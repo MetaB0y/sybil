@@ -202,9 +202,10 @@ async fn record_live_market_metrics(state: &AppState) {
         }
     };
 
-    let ref_prices = state.reference_prices.read().await;
+    let reference_snapshot = state.reference_price_snapshot().await;
+    let ref_prices = &reference_snapshot.fresh_prices;
     let market_ref_data = state.market_ref_data.read().await;
-    let updated_at_ms = *state.reference_prices_updated_at_ms.read().await;
+    let updated_at_ms = reference_snapshot.last_publisher_update_at_ms;
     let mut active_markets = 0u64;
     let mut active_reference_eligible_markets = 0u64;
     let mut active_reference_prices = 0u64;
@@ -223,8 +224,8 @@ async fn record_live_market_metrics(state: &AppState) {
         if is_active {
             active_markets += 1;
             // Coverage alerts must compare like with like: only active mirror
-            // markets are eligible for a Polymarket reference. The raw map is
-            // append/update-only and intentionally remains a separate gauge.
+            // markets are eligible for a Polymarket reference. Stored stock
+            // and fresh eligible coverage intentionally remain separate gauges.
             let is_reference_eligible = market_ref_data
                 .get(&market.id.0)
                 .and_then(|data| data.polymarket_condition_id.as_ref())
@@ -247,15 +248,28 @@ async fn record_live_market_metrics(state: &AppState) {
             volume_markets += 1;
         }
 
-        let Some(reference_price) = ref_prices.get(&market.id.0).copied() else {
+        let market_id = market.id.0;
+        let reference_price = ref_prices.get(&market_id).map(|price| price.price_nanos);
+        let reference_age_ms = reference_snapshot.age_ms_by_market.get(&market_id).copied();
+        let reference_expired = reference_age_ms.is_some() && reference_price.is_none();
+        metrics::gauge!("sybil_reference_price_available", "market_id" => market_id.to_string())
+            .set(if reference_price.is_some() { 1.0 } else { 0.0 });
+        metrics::gauge!("sybil_reference_price_expired", "market_id" => market_id.to_string())
+            .set(if reference_expired { 1.0 } else { 0.0 });
+        metrics::gauge!("sybil_reference_price_age_seconds", "market_id" => market_id.to_string())
+            .set(reference_age_ms.unwrap_or(0) as f64 / 1_000.0);
+        metrics::gauge!("sybil_reference_price_nanos", "market_id" => market_id.to_string())
+            .set(reference_price.unwrap_or(0) as f64);
+        metrics::gauge!("sybil_price_reference_diff_nanos", "market_id" => market_id.to_string())
+            .set(0.0);
+
+        let Some(reference_price) = reference_price else {
             continue;
         };
-        metrics::gauge!("sybil_reference_price_nanos", "market_id" => market.id.0.to_string())
-            .set(reference_price as f64);
 
         if let Some(yes_price) = yes_price {
             let diff = yes_price.0.abs_diff(reference_price);
-            metrics::gauge!("sybil_price_reference_diff_nanos", "market_id" => market.id.0.to_string())
+            metrics::gauge!("sybil_price_reference_diff_nanos", "market_id" => market_id.to_string())
                 .set(diff as f64);
             diff_count += 1;
             diff_sum = diff_sum.saturating_add(diff);
@@ -266,7 +280,9 @@ async fn record_live_market_metrics(state: &AppState) {
     metrics::gauge!("sybil_markets_active_total").set(active_markets as f64);
     metrics::gauge!("sybil_markets_priced_total").set(priced_markets as f64);
     metrics::gauge!("sybil_markets_with_volume_total").set(volume_markets as f64);
-    metrics::gauge!("sybil_reference_prices_total").set(ref_prices.len() as f64);
+    metrics::gauge!("sybil_reference_prices_total").set(reference_snapshot.stored_count as f64);
+    metrics::gauge!("sybil_reference_prices_expired_total")
+        .set(reference_snapshot.expired_count as f64);
     metrics::gauge!("sybil_reference_eligible_markets_active_total")
         .set(active_reference_eligible_markets as f64);
     metrics::gauge!("sybil_reference_prices_active_total").set(active_reference_prices as f64);

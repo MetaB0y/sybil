@@ -20,8 +20,8 @@ const SHARE_SCALE: f64 = 1_000.0;
 const SHARE_SCALE_I64: i64 = 1_000;
 
 /// Reference price pushed for a market whose token has gone stale (PM-6). A 0
-/// midpoint is not a legal in-band price (the MM only quotes `0.01 < p < 0.99`),
-/// so downstream `reference_price_nanos > 0` guards read it as "no reference"
+/// midpoint is not a legal in-band price (the MM only quotes `0.01 < p < 0.99`).
+/// The API treats zero as deletion, so downstream consumers see no reference
 /// and stop trading rather than trading on a frozen value.
 const REFERENCE_PRICE_EVICTION_SENTINEL: u64 = 0;
 
@@ -576,7 +576,7 @@ impl MmActor {
 
                     if snapshot.token_is_stale(yes_token_id, now, staleness_ms) {
                         // PM-6: a frozen token's reference price is evicted so downstream
-                        // `--require-reference-prices` consumers stop trading on it
+                        // the API deletes it and reference-required consumers stop trading
                         // rather than being picked off on the stale value.
                         ref_prices.insert(ms.sybil_market_id, REFERENCE_PRICE_EVICTION_SENTINEL);
                         continue;

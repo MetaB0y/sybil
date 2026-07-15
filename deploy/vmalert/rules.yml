@@ -167,10 +167,22 @@ groups:
           summary: "Polymarket reference-price feed is empty"
           description: "No active Polymarket reference price has been present for 3m. The curated feed, mirror process, or API update path is broken."
 
+      - alert: ReferencePriceTokensExpired
+        expr: max(sybil_reference_prices_expired_total) > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: polymarket
+        annotations:
+          summary: "One or more reference-price tokens expired"
+          description: "At least one stored reference price exceeded the API per-market TTL for 2m (expired tokens: {{ $value }}). Public market reads now omit those values, and Arena reference-required selection cannot use them."
+
       - alert: SybilPriceDivergenceHigh
         expr: |
           count(
             (sybil_price_reference_diff_nanos > 250 * 1000 * 1000)
+            and on(market_id)
+            (sybil_reference_price_available == 1)
             and on(market_id)
             (increase(sybil_market_fills_total[30m]) > 0)
           ) >= 3
@@ -187,11 +199,15 @@ groups:
           count(
             sybil_price_reference_diff_nanos
             and on(market_id)
+            (sybil_reference_price_available == 1)
+            and on(market_id)
             (increase(sybil_market_fills_total[30m]) > 0)
           ) >= 20
           and
           avg(
             sybil_price_reference_diff_nanos
+            and on(market_id)
+            (sybil_reference_price_available == 1)
             and on(market_id)
             (increase(sybil_market_fills_total[30m]) > 0)
           ) > 50 * 1000 * 1000

@@ -41,6 +41,8 @@ class MarketSummaryResponse:
             orders_matched_total (int | Unset):
             orders_placed_total (int | Unset): All-time placed/matched/unmatched (mirrors `MarketResponse`).
             orders_unmatched_total (int | Unset):
+            reference_price_expires_at_ms (int | None | Unset): Server-side expiry of `reference_price_nanos`, as Unix
+                milliseconds.
             reference_price_nanos (int | None | Unset): Reference price from external system (e.g., Polymarket), display
                 only.
                 Integer nanodollars; 1_000_000_000 = $1.
@@ -67,6 +69,7 @@ class MarketSummaryResponse:
     orders_matched_total: int | Unset = UNSET
     orders_placed_total: int | Unset = UNSET
     orders_unmatched_total: int | Unset = UNSET
+    reference_price_expires_at_ms: int | None | Unset = UNSET
     reference_price_nanos: int | None | Unset = UNSET
     trader_count: int | Unset = UNSET
     volume_24h_nanos: int | Unset = UNSET
@@ -108,6 +111,12 @@ class MarketSummaryResponse:
         orders_placed_total = self.orders_placed_total
 
         orders_unmatched_total = self.orders_unmatched_total
+
+        reference_price_expires_at_ms: int | None | Unset
+        if isinstance(self.reference_price_expires_at_ms, Unset):
+            reference_price_expires_at_ms = UNSET
+        else:
+            reference_price_expires_at_ms = self.reference_price_expires_at_ms
 
         reference_price_nanos: int | None | Unset
         if isinstance(self.reference_price_nanos, Unset):
@@ -154,6 +163,8 @@ class MarketSummaryResponse:
             field_dict["orders_placed_total"] = orders_placed_total
         if orders_unmatched_total is not UNSET:
             field_dict["orders_unmatched_total"] = orders_unmatched_total
+        if reference_price_expires_at_ms is not UNSET:
+            field_dict["reference_price_expires_at_ms"] = reference_price_expires_at_ms
         if reference_price_nanos is not UNSET:
             field_dict["reference_price_nanos"] = reference_price_nanos
         if trader_count is not UNSET:
@@ -210,6 +221,16 @@ class MarketSummaryResponse:
 
         orders_unmatched_total = d.pop("orders_unmatched_total", UNSET)
 
+        def _parse_reference_price_expires_at_ms(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        reference_price_expires_at_ms = _parse_reference_price_expires_at_ms(d.pop("reference_price_expires_at_ms", UNSET))
+
+
         def _parse_reference_price_nanos(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -256,6 +277,7 @@ class MarketSummaryResponse:
             orders_matched_total=orders_matched_total,
             orders_placed_total=orders_placed_total,
             orders_unmatched_total=orders_unmatched_total,
+            reference_price_expires_at_ms=reference_price_expires_at_ms,
             reference_price_nanos=reference_price_nanos,
             trader_count=trader_count,
             volume_24h_nanos=volume_24h_nanos,
