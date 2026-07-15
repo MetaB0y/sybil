@@ -9,6 +9,7 @@ import {
   parseNanos,
 } from "@/lib/format/nanos";
 import type { IndexMarket } from "@/lib/markets/use-markets";
+import { useEventQuestions } from "@/lib/markets/use-event-raw";
 import { selectLatestBlock, selectRecentBlocks, useStore } from "@/lib/store";
 
 type Props = {
@@ -26,6 +27,9 @@ type ClearEvent = {
   key: string;
   id: number;
   name: string;
+  /** Mirror identifiers used to resolve the full per-outcome question. */
+  condId: string | null;
+  eventId: string | null;
   /** Clearing YES price this batch (nanos). */
   yes: bigint;
   /** Matched volume this market contributed this batch (nanos, $). */
@@ -92,6 +96,8 @@ export function ClearingTicker({ marketsById }: Props) {
           key: `${b.height}-${id}`,
           id,
           name: m?.name ?? `#${id}`,
+          condId: m?.polymarket_condition_id ?? null,
+          eventId: m?.event_id ?? null,
           yes,
           volNanos,
           ppChange,
@@ -103,6 +109,18 @@ export function ClearingTicker({ marketsById }: Props) {
     all.reverse();
     return all.slice(0, MAX_TICKER_ITEMS);
   }, [recent, marketsById]);
+
+  const eventIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const event of events) {
+      if (event.condId && event.eventId) ids.add(event.eventId);
+    }
+    return [...ids];
+  }, [events]);
+  const questionByCondition = useEventQuestions(eventIds);
+  const labelFor = (event: ClearEvent): string =>
+    (event.condId ? questionByCondition.get(event.condId) : undefined) ??
+    event.name;
 
   const animate = events.length >= MARQUEE_MIN_ITEMS;
   // ~one cell-width per ~6s keeps the scroll slow and readable as the list grows.
@@ -200,7 +218,7 @@ export function ClearingTicker({ marketsById }: Props) {
             }}
           >
             {events.map((e) => (
-              <TickerCell key={e.key} event={e} now={now} />
+              <TickerCell key={e.key} event={e} label={labelFor(e)} now={now} />
             ))}
             {/* Second copy makes the -50% loop seamless. */}
             {animate &&
@@ -208,6 +226,7 @@ export function ClearingTicker({ marketsById }: Props) {
                 <TickerCell
                   key={`dup-${e.key}`}
                   event={e}
+                  label={labelFor(e)}
                   now={now}
                   ariaHidden
                 />
@@ -221,14 +240,16 @@ export function ClearingTicker({ marketsById }: Props) {
 
 function TickerCell({
   event,
+  label,
   now,
   ariaHidden,
 }: {
   event: ClearEvent;
+  label: string;
   now: number;
   ariaHidden?: boolean;
 }) {
-  const { id, name, volNanos, ppChange, ts } = event;
+  const { id, volNanos, ppChange, ts } = event;
   return (
     <Link
       className="clearing-ticker-link"
@@ -257,10 +278,11 @@ function TickerCell({
         e.currentTarget.style.background = "transparent";
       }}
     >
-      {/* Full market question, untruncated. For grouped (NegRisk) outcomes the
-          name is "{event}: {outcome}"; for binaries it's the bare question.
-          The marquee scrolls, so a wide cell is fine. */}
-      <span style={{ color: "var(--fg-2)", whiteSpace: "nowrap" }}>{name}</span>
+      {/* Full mirror question when raw metadata is available; native markets
+          fall back to their catalog name. The marquee can carry a wide cell. */}
+      <span style={{ color: "var(--fg-2)", whiteSpace: "nowrap" }}>
+        {label}
+      </span>
       <span className="tabular" style={{ color: "var(--fg-4)" }}>
         {formatCompactDollars(volNanos)} vol
       </span>

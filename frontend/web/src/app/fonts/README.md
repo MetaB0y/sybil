@@ -4,9 +4,11 @@ These `.woff2` files are checked in so `next build` is **hermetic** — it never
 contacts `fonts.googleapis.com` / `fonts.gstatic.com` at build time. This
 permanently fixes the recurring "font fetch failed during build" breakage.
 
-They are loaded via `next/font/local` in `src/app/layout.tsx` and exposed under
-the same CSS variables as before (`--font-display`, `--font-sans`,
-`--font-mono`), so no other code changed.
+They are loaded via `next/font/local` in `src/app/layout.tsx` under private
+`--font-*-vendor` variables. The public design tokens (`--font-display`,
+`--font-sans`, `--font-mono`) reference those variables first, followed by
+system fallbacks. Keeping the two layers distinct prevents the token sheet from
+overwriting the font-family value emitted by Next.js.
 
 Each file is the **latin-subset variable** font (all weights in one file),
 matching the previous `subsets: ["latin"]` config exactly.

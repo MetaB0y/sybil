@@ -1,9 +1,8 @@
 "use client";
 
 /**
- * Expanded panel for a batch row. Top: truthful committed-block metadata.
- * Body: 2-col grid with a market-row table on the left and a donut +
- * composition KV on the right.
+ * Expanded panel for a batch row. The author-vetted two-column layout keeps
+ * market rows on the left and batch identity/order composition on the right.
  *
  * Data comes from `useBatchDetail(height)`. The per-market rows are real —
  * volume, welfare and placed/matched come from `BlockResponse.by_market`.
@@ -65,38 +64,6 @@ export function BatchDetail({ row }: { row: BatchRow }) {
         padding: "18px 24px 24px 70px",
       }}
     >
-      {/* Meta strip */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 32,
-          paddingBottom: 16,
-          borderBottom: "1px solid var(--border-1)",
-          marginBottom: 18,
-        }}
-      >
-        <MetaPair label="Batch" value={`#${formatInt(row.height)}`} mono />
-        <MetaPair
-          label="State root"
-          value={block ? shortDigest(block.state_root) : "—"}
-          title={block?.state_root}
-          mono
-        />
-        <MetaPair
-          label="Events root"
-          value={block ? shortDigest(block.events_root) : "—"}
-          title={block?.events_root}
-          mono
-        />
-        <MetaPair
-          label="Markets priced"
-          value={formatInt(row.marketsTouched)}
-          mono
-        />
-        <MetaPair label="Clearing rule" value="uniform · pro-rata" />
-      </div>
-
       <div
         className="activity-batch-detail-grid"
         style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24 }}
@@ -177,8 +144,15 @@ export function BatchDetail({ row }: { row: BatchRow }) {
           </div>
         </div>
 
-        {/* Right: donut + composition KV */}
+        {/* Right: truthful batch identity, then the order stats it describes. */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <SidebarPanel>
+            <BatchIdentity
+              height={row.height}
+              stateRoot={block?.state_root ?? null}
+              eventsRoot={block?.events_root ?? null}
+            />
+          </SidebarPanel>
           <SidebarPanel title="Order outcome">
             <DonutOutcome
               matched={row.ordersMatched}
@@ -264,7 +238,6 @@ function SortTh({
     <button
       type="button"
       onClick={() => onSort(col)}
-      title={`Sort by ${label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -367,7 +340,6 @@ function MarketRow({ row }: { row: BatchMarketRow }) {
         <Link
           href={`/m/${row.marketId}`}
           className="market-link"
-          title={row.title}
           style={{
             fontFamily: "var(--font-sans)",
             fontSize: 12,
@@ -431,7 +403,7 @@ function SidebarPanel({
   title,
   children,
 }: {
-  title: string;
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -443,12 +415,14 @@ function SidebarPanel({
         padding: "12px 14px",
       }}
     >
-      <div
-        className="eyebrow"
-        style={{ color: "var(--fg-3)", paddingBottom: 10 }}
-      >
-        {title}
-      </div>
+      {title != null && (
+        <div
+          className="eyebrow"
+          style={{ color: "var(--fg-3)", paddingBottom: 10 }}
+        >
+          {title}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {children}
       </div>
@@ -496,38 +470,85 @@ function KvRow({
   );
 }
 
-// ── Meta strip helper ─────────────────────────────────────────────────────
+// ── Batch identity ─────────────────────────────────────────────────────────
 
-function MetaPair({
-  label,
-  value,
-  mono,
-  title,
+function BatchIdentity({
+  height,
+  stateRoot,
+  eventsRoot,
 }: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  title?: string | undefined;
+  height: number;
+  stateRoot: string | null;
+  eventsRoot: string | null;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <span className="eyebrow" style={{ color: "var(--fg-3)" }}>
-        {label}
-      </span>
+    <>
+      <IdentityRow label="Batch">
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 15,
+            color: "var(--fg-1)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          #{formatInt(height)}
+        </span>
+      </IdentityRow>
+      <IdentityRow label="State root">
+        <span title={stateRoot ?? undefined} style={digestStyle}>
+          {stateRoot ? shortDigest(stateRoot) : "—"}
+        </span>
+      </IdentityRow>
+      <IdentityRow label="Events root">
+        <span title={eventsRoot ?? undefined} style={digestStyle}>
+          {eventsRoot ? shortDigest(eventsRoot) : "—"}
+        </span>
+      </IdentityRow>
+    </>
+  );
+}
+
+function IdentityRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        gap: 10,
+      }}
+    >
       <span
-        title={title}
+        className="eyebrow"
         style={{
-          fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)",
-          fontSize: 12,
-          color: "var(--fg-1)",
-          fontVariantNumeric: "tabular-nums",
+          color: "var(--fg-3)",
+          whiteSpace: "nowrap",
+          flexShrink: 0,
         }}
       >
-        {value}
+        {label}
       </span>
+      {children}
     </div>
   );
 }
+
+const digestStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--fg-2)",
+  fontVariantNumeric: "tabular-nums",
+};
 
 function shortDigest(value: string): string {
   const hex = value.startsWith("0x") ? value.slice(2) : value;

@@ -61,9 +61,6 @@ function compareBySort(
   sort: SortKey,
   eventTraders: Map<string, number>,
 ): number {
-  if (sort === "new") {
-    return b.createdMs - a.createdMs;
-  }
   if (sort === "traders") {
     const ta = traderCountOf(a, eventTraders);
     const tb = traderCountOf(b, eventTraders);

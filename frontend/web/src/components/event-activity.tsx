@@ -260,14 +260,14 @@ export function EventActivity({ marketId }: { marketId: number }) {
               filter: swapping ? "blur(5px)" : undefined,
               opacity: swapping ? 0.5 : 1,
               transition:
-                "filter var(--dur-outcome-swap) var(--ease-standard), opacity var(--dur-outcome-swap) var(--ease-standard)",
+                "filter var(--dur-swap) var(--ease-standard), opacity var(--dur-swap) var(--ease-standard)",
             }}
           >
             <div
               key={swapKey}
               style={{
                 animation:
-                  "sybil-fade-swap var(--dur-outcome-swap) var(--ease-standard)",
+                  "sybil-fade-swap var(--dur-swap) var(--ease-standard)",
               }}
             >
               <VolumeBars
@@ -418,7 +418,8 @@ function formatSpanAgo(ms: number): string {
   if (minutes < 60) return `${Math.round(minutes)}m ago`;
   const hours = ms / 3_600_000;
   if (hours < 48) {
-    const rounded = hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours);
+    const rounded =
+      hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours);
     return `${rounded}h ago`;
   }
   return `${Math.round(ms / 86_400_000)}d ago`;
@@ -498,7 +499,14 @@ function VolumeBars({
           <span style={{ position: "absolute", bottom: -5, right: 8 }}>$0</span>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, position: "relative", height: CHART_H }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            position: "relative",
+            height: CHART_H,
+          }}
+        >
           {/* Gridlines at peak + midpoint, behind the bars. */}
           {max > 0n &&
             [0, 0.5].map((t) => (
@@ -510,7 +518,8 @@ function VolumeBars({
                   left: 0,
                   right: 0,
                   top: `${t * 100}%`,
-                  borderTop: "1px dashed color-mix(in srgb, var(--fg-4) 18%, transparent)",
+                  borderTop:
+                    "1px dashed color-mix(in srgb, var(--fg-4) 18%, transparent)",
                 }}
               />
             ))}
@@ -538,7 +547,8 @@ function VolumeBars({
               const isHover = hover?.key === bar.key;
               const dimmed = hover != null && !isHover;
               const barVol = volOf(bar);
-              const ratio = max === 0n ? 0 : Number((barVol * 1000n) / max) / 1000;
+              const ratio =
+                max === 0n ? 0 : Number((barVol * 1000n) / max) / 1000;
               const barH = Math.max(MIN_BAR_H, ratio * CHART_H);
 
               // Topmost-first stack: with one outcome selected a single segment
@@ -552,7 +562,10 @@ function VolumeBars({
                 });
               } else if (selectedId != null) {
                 const seg = bar.segments.find((s) => s.marketId === selectedId);
-                stack.push({ color: moveColor(seg?.ppChange ?? null), h: barH });
+                stack.push({
+                  color: moveColor(seg?.ppChange ?? null),
+                  h: barH,
+                });
               } else {
                 for (const seg of bar.segments) {
                   if (seg.volNanos <= 0n) continue;
@@ -662,7 +675,11 @@ function VolumeBars({
                     : { left: `${f * 100}%`, transform: "translateX(-50%)" }),
                 display: "flex",
                 flexDirection: "column",
-                alignItems: atStart ? "flex-start" : atEnd ? "flex-end" : "center",
+                alignItems: atStart
+                  ? "flex-start"
+                  : atEnd
+                    ? "flex-end"
+                    : "center",
                 gap: 3,
               }}
             >
@@ -671,7 +688,8 @@ function VolumeBars({
                 style={{
                   width: 1,
                   height: 3,
-                  background: "color-mix(in srgb, var(--fg-4) 35%, transparent)",
+                  background:
+                    "color-mix(in srgb, var(--fg-4) 35%, transparent)",
                 }}
               />
               <span style={{ whiteSpace: "nowrap" }}>{label}</span>
@@ -705,7 +723,11 @@ function ActivityBarTooltip({
   const labelOf = new Map(outcomes.map((o) => [o.marketId, o.shortLabel]));
   const agoMs = nowMs > 0 ? Math.max(0, nowMs - bar.endMs) : null;
   const endedLabel =
-    agoMs == null ? "—" : agoMs < 60_000 ? "just now" : `${formatAge(agoMs)} ago`;
+    agoMs == null
+      ? "—"
+      : agoMs < 60_000
+        ? "just now"
+        : `${formatAge(agoMs)} ago`;
 
   const selected =
     selectedId == null
@@ -738,7 +760,8 @@ function ActivityBarTooltip({
     </div>
   );
 
-  const estHeight = 58 + (selected ? 34 : shown.length * 16 + (overflow > 0 ? 14 : 0));
+  const estHeight =
+    58 + (selected ? 34 : shown.length * 16 + (overflow > 0 ? 14 : 0));
 
   return (
     <FloatingTooltip
@@ -775,7 +798,9 @@ function ActivityBarTooltip({
         {kv("ended", endedLabel)}
         {kv(
           "matched vol",
-          formatCompactDollars(selected ? selected.volNanos : bar.totalVolNanos),
+          formatCompactDollars(
+            selected ? selected.volNanos : bar.totalVolNanos,
+          ),
         )}
         {selected != null && (
           <>
@@ -1042,7 +1067,8 @@ function OutcomeFilter({
 
   useEffect(() => {
     function close(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
@@ -1109,7 +1135,9 @@ function OutcomeFilter({
             whiteSpace: "nowrap",
           }}
         >
-          {selectedOutcome != null ? selectedOutcome.shortLabel : "All outcomes"}
+          {selectedOutcome != null
+            ? selectedOutcome.shortLabel
+            : "All outcomes"}
         </span>
         <svg
           aria-hidden

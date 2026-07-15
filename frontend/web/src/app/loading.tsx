@@ -13,7 +13,7 @@ export default function Loading() {
         letterSpacing: "var(--track-wide)",
       }}
     >
-      {"// loading"}
+      loading
     </div>
   );
 }

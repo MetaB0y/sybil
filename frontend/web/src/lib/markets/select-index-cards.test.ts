@@ -3,7 +3,11 @@ import { selectIndexCards, type CardItem } from "./select-index-cards";
 import type { Market } from "./use-markets";
 
 function mk(partial: Partial<Market> & { market_id: number }): Market {
-  return { name: `m${partial.market_id}`, status: "active", ...partial } as Market;
+  return {
+    name: `m${partial.market_id}`,
+    status: "active",
+    ...partial,
+  } as Market;
 }
 
 function binary(
@@ -17,7 +21,10 @@ function binary(
 ): CardItem {
   return {
     kind: "binary",
-    market: mk({ market_id: id, ...(opts.traders !== undefined ? { trader_count: opts.traders } : {}) }),
+    market: mk({
+      market_id: id,
+      ...(opts.traders !== undefined ? { trader_count: opts.traders } : {}),
+    }),
     volumeNanos: opts.vol ?? 0n,
     sortKey: `m${id}`,
     createdMs: 0,
@@ -59,7 +66,9 @@ function ids(out: CardItem[]): number[] {
 describe("selectIndexCards", () => {
   it("hides closed cards by default (showClosed=false)", () => {
     const items = [binary(1, { closed: false }), binary(2, { closed: true })];
-    expect(ids(selectIndexCards(items, { ...base, showClosed: false }))).toEqual([1]);
+    expect(
+      ids(selectIndexCards(items, { ...base, showClosed: false })),
+    ).toEqual([1]);
   });
 
   it("shows closed cards (open first) when showClosed=true", () => {
@@ -75,20 +84,12 @@ describe("selectIndexCards", () => {
       binary(2, { vol: 999n, closed: true }),
       binary(3, { vol: 5n, closed: false }),
     ];
-    const out = selectIndexCards(items, { ...base, sort: "volume", showClosed: true });
-    expect(ids(out)).toEqual([1, 3, 2]);
-  });
-
-  it("sinks closed cards below open ones under 'new' sort, even when newer", () => {
-    const open1: CardItem = { ...binary(1, { closed: false }), createdMs: 100 };
-    const closedNewer: CardItem = { ...binary(2, { closed: true }), createdMs: 999 };
-    const open2: CardItem = { ...binary(3, { closed: false }), createdMs: 200 };
-    const out = selectIndexCards([open1, closedNewer, open2], {
+    const out = selectIndexCards(items, {
       ...base,
-      sort: "new",
+      sort: "volume",
       showClosed: true,
     });
-    expect(ids(out)).toEqual([3, 1, 2]);
+    expect(ids(out)).toEqual([1, 3, 2]);
   });
 
   it("filters by category and query", () => {
@@ -96,8 +97,24 @@ describe("selectIndexCards", () => {
       binary(1, { category: "Politics" }),
       binary(2, { category: "Sports" }),
     ];
-    expect(ids(selectIndexCards(items, { ...base, category: "Sports", showClosed: true }))).toEqual([2]);
-    expect(ids(selectIndexCards([...items], { ...base, query: "m1", showClosed: true }))).toEqual([1]);
+    expect(
+      ids(
+        selectIndexCards(items, {
+          ...base,
+          category: "Sports",
+          showClosed: true,
+        }),
+      ),
+    ).toEqual([2]);
+    expect(
+      ids(
+        selectIndexCards([...items], {
+          ...base,
+          query: "m1",
+          showClosed: true,
+        }),
+      ),
+    ).toEqual([1]);
   });
 
   it("sinks closed cards below open ones under 'traders' sort, even with more traders", () => {

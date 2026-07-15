@@ -46,7 +46,6 @@ export function AccountChip() {
         className="account-chip nav-chip"
         type="button"
         onClick={() => setOpen(true)}
-        title="Create or import an account"
       >
         connect
       </button>
@@ -97,7 +96,7 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
     availableNanos != null
       ? formatDollars(availableNanos, { decimals: 2 })
       : "—";
-  const reserved = formatDollars(reservedNanos, { decimals: 2 });
+  const inOrders = formatDollars(reservedNanos, { decimals: 2 });
   const positions =
     portfolio != null
       ? formatDollars(parseNanos(portfolio.total_position_value_nanos), {
@@ -131,7 +130,6 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={`Portfolio ${total} · Available ${cash} · Reserved ${reserved} · Positions ${positions} · Account #${accountId}`}
       >
         <span
           className="account-chip-balance"
@@ -170,8 +168,8 @@ function ConnectedMenu({ accountId }: { accountId: number }) {
         >
           <div style={{ padding: "6px 10px 8px" }}>
             <InfoRow label="Portfolio" value={total} strong />
-            <InfoRow label="Available" value={cash} />
-            <InfoRow label="Reserved" value={reserved} />
+            <InfoRow label="Cash" value={cash} />
+            <InfoRow label="In orders" value={inOrders} />
             <InfoRow label="Positions" value={positions} />
             <InfoRow label="Account" value={`#${accountId}`} />
           </div>

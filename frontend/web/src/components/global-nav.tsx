@@ -35,11 +35,6 @@ const TABS: readonly NavTab[] = [
     label: "Portfolio",
     match: (p) => p.startsWith("/portfolio"),
   },
-  {
-    href: "/settings",
-    label: "Settings",
-    match: (p) => p.startsWith("/settings"),
-  },
 ];
 
 export function GlobalNav() {

@@ -201,7 +201,6 @@ export function NavSearch() {
           <button
             type="button"
             aria-label="Clear search"
-            title="Clear search"
             onMouseDown={(event) => event.preventDefault()}
             onClick={clearSearch}
             onMouseEnter={(event) => {

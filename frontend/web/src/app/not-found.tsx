@@ -24,7 +24,7 @@ export default function NotFound() {
           letterSpacing: "var(--track-wide)",
         }}
       >
-        {"// 404"}
+        404
       </div>
       <h1
         style={{

@@ -77,7 +77,8 @@
   html.theme-transition *,
   html.theme-transition *::before,
   html.theme-transition *::after {
-    transition: background-color var(--dur-slow) var(--ease-standard),
+    transition:
+      background-color var(--dur-slow) var(--ease-standard),
       border-color var(--dur-slow) var(--ease-standard),
       color var(--dur-slow) var(--ease-standard),
       fill var(--dur-slow) var(--ease-standard),
@@ -183,7 +184,8 @@ textarea {
   flex-shrink: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  transition: color var(--dur-fast) var(--ease-standard),
+  transition:
+    color var(--dur-fast) var(--ease-standard),
     background var(--dur-fast) var(--ease-standard);
 }
 
@@ -198,7 +200,8 @@ textarea {
 .nav-devzone,
 .nav-icon-btn,
 .nav-chip {
-  transition: color var(--dur-fast) var(--ease-standard),
+  transition:
+    color var(--dur-fast) var(--ease-standard),
     background var(--dur-fast) var(--ease-standard),
     border-color var(--dur-fast) var(--ease-standard);
 }
@@ -708,7 +711,8 @@ textarea {
   white-space: nowrap;
   color: var(--fg-3);
   background: transparent;
-  transition: color var(--dur-fast) var(--ease-standard),
+  transition:
+    color var(--dur-fast) var(--ease-standard),
     background var(--dur-fast) var(--ease-standard);
 }
 .dev-sub-nav-tab[data-active="true"] {
@@ -824,7 +828,8 @@ textarea {
   color: var(--fg-1);
   cursor: pointer;
   box-shadow: var(--shadow-inset-top);
-  transition: border-color var(--dur-fast) var(--ease-standard),
+  transition:
+    border-color var(--dur-fast) var(--ease-standard),
     background var(--dur-fast) var(--ease-standard);
 }
 .arena-bot-card[data-active="true"] {
@@ -893,7 +898,8 @@ textarea {
 .settings-btn {
   white-space: nowrap;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-standard),
+  transition:
+    background var(--dur-fast) var(--ease-standard),
     border-color var(--dur-fast) var(--ease-standard),
     color var(--dur-fast) var(--ease-standard),
     filter var(--dur-fast) var(--ease-standard);
@@ -1088,8 +1094,9 @@ textarea {
     gap: var(--space-1);
   }
 
+  /* Keep the portfolio total visible; collapse only the "/ cash" half. */
   .global-nav-right .batch-pill,
-  .global-nav-right .account-chip-balance {
+  .account-chip-cash {
     display: none !important;
   }
 

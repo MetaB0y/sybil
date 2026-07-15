@@ -48,6 +48,9 @@ export type EventOutcome = {
   volume24hNanos: bigint;
   /** All-time matched volume in nanos ($), used for event-level totals. */
   volumeNanos?: bigint;
+  /** Last-ten-batch near-price depth sum. Display sites divide by the ring
+   * length to present average resting liquidity per batch. */
+  liquidityNanos: bigint;
   /** Real market creation time (epoch ms), or `null` if unknown. Bounds how
    *  far back the price chart holds the line flat — never before the market
    *  existed. See `build-chart-series`. */
@@ -120,6 +123,9 @@ export function useEventGroup(marketId: number): {
         delta24Cents,
         volume24hNanos: m.volume_24h_nanos ? BigInt(m.volume_24h_nanos) : 0n,
         volumeNanos: m.volume_nanos ? BigInt(m.volume_nanos) : 0n,
+        liquidityNanos: m.liquidity_avg10_nanos
+          ? BigInt(m.liquidity_avg10_nanos)
+          : 0n,
         createdAtMs: m.created_at_ms ?? null,
         endDateMs: m.market_end_date_ms ?? m.expiry_timestamp_ms ?? null,
       };

@@ -6,9 +6,10 @@ import { useEffect, useState } from "react";
 
 const PLATFORMS = [
   { name: "Perplexity", url: "https://www.perplexity.ai/" },
-  { name: "ChatGPT", url: "https://chatgpt.com/" },
-  { name: "Claude", url: "https://claude.ai/" },
-  { name: "Gemini", url: "https://gemini.google.com/" },
+  { name: "Futuresearch", url: "https://futuresearch.ai/" },
+  { name: "Mantic", url: "https://www.mantic.com/" },
+  { name: "Lightningrod", url: "http://lightningrod.ai/" },
+  { name: "Elicit", url: "https://elicit.com/" },
   { name: "Consensus", url: "https://consensus.app/" },
 ] as const;
 
@@ -68,8 +69,8 @@ export function ResearchNudge() {
         gap: 6,
         fontFamily: "var(--font-mono)",
         fontSize: 11,
-        color: "var(--fg-4)",
-        minHeight: 22,
+        color: "var(--fg-3)",
+        letterSpacing: "0.01em",
       }}
     >
       <span>not sure? ask</span>

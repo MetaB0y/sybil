@@ -15,6 +15,7 @@ import { PlaceOrderModal } from "@/components/market-rail/place-order-modal";
 import { MarketThumb } from "@/components/market-thumb";
 import { OutcomeLegend } from "@/components/outcome-legend";
 import { PriceChart, PriceHistoryNotice } from "@/components/price-chart";
+import { useSoonTooltip } from "@/components/soon-tooltip";
 import {
   formatAge,
   formatCompactDollars,
@@ -101,9 +102,7 @@ export default function MarketDetailPage({
               <Header
                 marketId={marketId}
                 market={market}
-                {...(market.closed === true
-                  ? {}
-                  : { onPlaceOrder: openOrder })}
+                {...(market.closed === true ? {} : { onPlaceOrder: openOrder })}
               />
             </div>
 
@@ -179,8 +178,19 @@ function Header({
   const title = rawQuestion || market.name;
 
   return (
-    <header className="market-detail-header">
+    <header
+      className="market-detail-header"
+      /* Outcome changes use the deliberately slower, human-vetted blur shared
+         with the Lite picker. The custom property is scoped to this header so
+         card thumbnails elsewhere retain the fast generic swap. */
+      style={
+        {
+          ["--dur-swap" as string]: "var(--dur-outcome-swap)",
+        } as React.CSSProperties
+      }
+    >
       <MarketThumb
+        key={marketId}
         marketId={market.market_id}
         name={market.name}
         imageUrl={market.market_image_url ?? market.event_image_url ?? null}
@@ -493,7 +503,8 @@ function ChartSection({ marketId }: { marketId: number }) {
     group?.isMultiOutcome ? (group.eventId ?? undefined) : undefined,
   ).data;
   const eventVolumeNanos = useMemo(
-    () => outcomes.reduce((sum, outcome) => sum + (outcome.volumeNanos ?? 0n), 0n),
+    () =>
+      outcomes.reduce((sum, outcome) => sum + (outcome.volumeNanos ?? 0n), 0n),
     [outcomes],
   );
   const eventVolume24hNanos = useMemo(
@@ -740,7 +751,47 @@ function DescriptionBlock({
           </span>
         )}
       </div>
+      <ProposeResolution />
     </section>
+  );
+}
+
+/** Visible placeholder for the future proposal flow. */
+function ProposeResolution() {
+  const { hovered, handlers, tooltip } = useSoonTooltip();
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-3)",
+        paddingTop: "var(--space-3)",
+        borderTop: "1px solid var(--border-1)",
+      }}
+    >
+      <button
+        type="button"
+        aria-disabled
+        tabIndex={-1}
+        {...handlers}
+        style={{
+          flexShrink: 0,
+          padding: "10px 16px",
+          borderRadius: "var(--radius-md)",
+          border: "1px solid var(--border-2)",
+          background: "var(--surface-2)",
+          color: hovered ? "var(--fg-2)" : "var(--fg-3)",
+          fontFamily: "var(--font-sans)",
+          fontSize: "var(--fs-13)",
+          fontWeight: 600,
+          cursor: "default",
+          transition: "color var(--dur-fast) var(--ease-standard)",
+        }}
+      >
+        Propose resolution
+      </button>
+      {tooltip}
+    </div>
   );
 }
 

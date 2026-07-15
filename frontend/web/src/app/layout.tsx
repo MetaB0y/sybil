@@ -9,18 +9,27 @@ import "./globals.css";
 // fonts.googleapis.com at build time. This makes `next build` hermetic and
 // network-free — the recurring "fonts fetch failed during build" breakage
 // can no longer happen. The .woff2 files are the latin-subset variable fonts
-// (same subset as the previous `subsets: ["latin"]`). CSS variable names are
-// unchanged so nothing downstream needs to change. See src/app/fonts/README.md.
+// (same subset as the previous `subsets: ["latin"]`). Private vendor variables
+// feed the public design tokens without colliding with them. See
+// src/app/fonts/README.md.
 const display = localFont({
-  variable: "--font-display",
+  variable: "--font-display-vendor",
   display: "swap",
-  src: [{ path: "./fonts/Syne-Variable.woff2", weight: "400 800", style: "normal" }],
+  src: [
+    { path: "./fonts/Syne-Variable.woff2", weight: "400 800", style: "normal" },
+  ],
 });
 
 const sans = localFont({
-  variable: "--font-sans",
+  variable: "--font-sans-vendor",
   display: "swap",
-  src: [{ path: "./fonts/Inter-Variable.woff2", weight: "100 900", style: "normal" }],
+  src: [
+    {
+      path: "./fonts/Inter-Variable.woff2",
+      weight: "100 900",
+      style: "normal",
+    },
+  ],
 });
 
 // Exposed as `--font-mono-vendor` (not `--font-mono`) so it doesn't collide
@@ -30,7 +39,13 @@ const sans = localFont({
 const mono = localFont({
   variable: "--font-mono-vendor",
   display: "swap",
-  src: [{ path: "./fonts/JetBrainsMono-Variable.woff2", weight: "100 800", style: "normal" }],
+  src: [
+    {
+      path: "./fonts/JetBrainsMono-Variable.woff2",
+      weight: "100 800",
+      style: "normal",
+    },
+  ],
 });
 
 export const metadata: Metadata = {

@@ -12,6 +12,7 @@ import {
   isNative,
   type IndexMarket,
 } from "@/lib/markets/use-markets";
+import { avgLiquidityNanos } from "@/lib/markets/liquidity";
 import { useCardHistory } from "@/lib/markets/use-card-history";
 import { formatTraders } from "@/lib/mock";
 import { getCategoryColor, pickDisplayCategory } from "@/lib/categorize";
@@ -421,7 +422,7 @@ function FooterRow({ market }: { market: IndexMarket }) {
   const volNanos = market.volume_nanos ? BigInt(market.volume_nanos) : 0n;
   const vol = volNanos > 0n ? formatCompactDollars(volNanos) : "—";
   const liqNanos = market.liquidity_avg10_nanos
-    ? BigInt(market.liquidity_avg10_nanos)
+    ? avgLiquidityNanos(BigInt(market.liquidity_avg10_nanos))
     : 0n;
   const liq = liqNanos > 0n ? formatCompactDollars(liqNanos) : "—";
   const traderCount = market.trader_count ?? 0;

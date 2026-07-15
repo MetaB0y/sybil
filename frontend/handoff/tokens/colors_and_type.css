@@ -62,9 +62,11 @@
   --chart-axis:    rgba(255,255,255,0.40);  /* price-chart axis / crosshair line */
 
   /* ── Type: families ──────────────────────────────────────────────────── */
-  --font-display:  'Syne', ui-sans-serif, system-ui, sans-serif;
-  --font-sans:     'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono:     'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-display:  var(--font-display-vendor), 'Syne', ui-sans-serif, system-ui, sans-serif;
+  --font-sans:     var(--font-sans-vendor), 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* The private vendor variables are emitted by next/font/local in layout.tsx.
+   * Listing them first makes each checked-in variable font the actual face. */
+  --font-mono:     var(--font-mono-vendor), 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* ── Type: scale (px) ────────────────────────────────────────────────── */
   --fs-12: 12px;   --lh-12: 16px;
@@ -128,6 +130,8 @@
   --dur-fast:       120ms;   /* @kind other */
   --dur-base:       200ms;   /* @kind other */
   --dur-slow:       320ms;   /* @kind other */
+  --dur-swap:       460ms;   /* market-detail focus/cross-fade @kind other */
+  --dur-outcome-swap: 1500ms; /* deliberate slow blur when switching outcomes: rail picker + market-detail header @kind other */
 
   /* ── Backdrop ────────────────────────────────────────────────────────── */
   --blur-nav: blur(12px) saturate(140%);   /* @kind other */
@@ -350,17 +354,13 @@ code, kbd, samp, pre {
   font-size: 0.94em;
 }
 
-/* Code-comment annotation — the `// methodology...` Sybil signature */
+/* Muted mono annotation under a title or beside a section heading */
 .text-annotation {
   font-family: var(--font-mono);
   font-size: var(--fs-13);
   line-height: var(--lh-18);
   color: var(--fg-3);
   font-variant-numeric: tabular-nums;
-}
-.text-annotation::before {
-  content: '// ';
-  color: var(--fg-4);
 }
 
 /* Links */
@@ -423,4 +423,54 @@ hr {
 @keyframes sybil-marquee {
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
+}
+
+/* Content swap — used when the market-detail header re-keys to a new outcome so
+   the title / stats / thumbnail focus in (blur → sharp, never fully transparent)
+   rather than hard-cutting or sliding. */
+@keyframes sybil-fade-swap {
+  from { opacity: 0.5; filter: blur(5px); }
+  to   { opacity: 1; filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sybil-fade-swap {
+    from { opacity: 1; filter: blur(0); }
+    to   { opacity: 1; filter: blur(0); }
+  }
+}
+
+/* Tooltip entrance — fade + slight rise from its cursor anchor. */
+@keyframes sybil-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 3px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%);
+  }
+}
+
+@keyframes sybil-rot-in {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sybil-rot-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-100%); }
+}
+
+/* Rail mode swap (Lite ↔ Pro) — a plain opacity fade so the panel body eases in
+   instead of hard-cutting. Deliberately NO blur: the blur focus-in is reserved
+   for the outcome swap, so switching modes stays calm. */
+@keyframes sybil-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sybil-fade-in {
+    from { opacity: 1; }
+    to   { opacity: 1; }
+  }
 }

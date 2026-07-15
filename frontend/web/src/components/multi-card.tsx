@@ -13,6 +13,7 @@ import {
   isNative,
   type IndexMarket,
 } from "@/lib/markets/use-markets";
+import { avgLiquidityNanos } from "@/lib/markets/liquidity";
 import { useCardHistory } from "@/lib/markets/use-card-history";
 import { formatTraders } from "@/lib/mock";
 import { useEventTraders } from "@/lib/markets/use-event-traders";
@@ -135,7 +136,7 @@ export function MultiCard({ groupName, markets, prices }: Props) {
       />
       <FooterRow
         totalVol={totalVol}
-        totalLiqNanos={sumLiquidityNanos(markets)}
+        totalLiqNanos={avgLiquidityNanos(sumLiquidityNanos(markets))}
         traderCount={eventTradersQ.data ?? 0}
       />
     </article>

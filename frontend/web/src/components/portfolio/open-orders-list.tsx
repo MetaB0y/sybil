@@ -334,7 +334,6 @@ export function OrderRow({
     >
       <Link
         href={`/m/${order.market_id}`}
-        title={label}
         style={{
           gridColumn: "1 / span 2",
           display: "grid",
@@ -408,7 +407,6 @@ export function OrderRow({
           type="button"
           onClick={onCancel}
           disabled={cancelling}
-          title="Cancel order"
           style={{
             padding: "3px 9px",
             background: "transparent",
@@ -480,10 +478,8 @@ function FilledCell({
   if (placed === 0) {
     return <>{formatShareUnits(remaining, 1)}</>;
   }
-  const placedLabel = formatShareUnits(placed);
-  const filledLabel = formatShareUnits(filled);
   return (
-    <span title={`${filledLabel} filled of ${placedLabel} placed`}>
+    <span>
       {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
     </span>
   );
@@ -528,7 +524,6 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(col.key)}
-      title={`Sort by ${col.label}`}
       style={{
         display: "inline-flex",
         alignItems: "center",

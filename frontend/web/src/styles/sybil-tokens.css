@@ -67,11 +67,10 @@
   --chart-axis:    rgba(255,255,255,0.40);  /* price-chart axis / crosshair line */
 
   /* ── Type: families ──────────────────────────────────────────────────── */
-  --font-display:  'Syne', ui-sans-serif, system-ui, sans-serif;
-  --font-sans:     'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  /* `--font-mono-vendor` is the bundled JetBrains Mono variable font (next/font,
-   * see layout.tsx). Listing it first means every weight (100–800) is a real
-   * face of one font, so e.g. a 500 chip and a 700 chip stay the same typeface. */
+  --font-display:  var(--font-display-vendor), 'Syne', ui-sans-serif, system-ui, sans-serif;
+  --font-sans:     var(--font-sans-vendor), 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* The private vendor variables are emitted by next/font/local in layout.tsx.
+   * Listing them first makes each checked-in variable font the actual face. */
   --font-mono:     var(--font-mono-vendor), 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* ── Type: scale (px) ────────────────────────────────────────────────── */
@@ -442,6 +441,18 @@ hr {
   @keyframes sybil-fade-swap {
     from { opacity: 1; filter: blur(0); }
     to   { opacity: 1; filter: blur(0); }
+  }
+}
+
+/* Tooltip entrance — fade + slight rise from its cursor anchor. */
+@keyframes sybil-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 3px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%);
   }
 }
 

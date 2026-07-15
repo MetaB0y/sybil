@@ -38,7 +38,7 @@ export default function GlobalError({
           letterSpacing: "var(--track-wide)",
         }}
       >
-        {"// error"}
+        error
       </div>
       <h1
         style={{

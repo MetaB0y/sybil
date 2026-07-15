@@ -6,21 +6,17 @@
  */
 
 import { useActivityOverview } from "@/lib/activity/use-activity-overview";
-import { useBatches } from "@/lib/activity/use-batches";
 import { HeroAllTime } from "@/components/activity/hero-all-time";
 import { PulseStrip } from "@/components/activity/pulse-strip";
 import { BatchesTable } from "@/components/activity/batches-table";
 import { BatchDetail } from "@/components/activity/batch-detail";
-import { ActivityBatchChip } from "@/components/activity/batch-chip";
 import { ActivityOverviewReadNotice } from "@/components/activity/overview-read-notice";
 import { PageHeader } from "@/components/page-header";
-import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 import { useArenaFeed } from "@/lib/arena/use-arena-feed";
 
 export default function ActivityPage() {
   const overview = useActivityOverview();
   const bots = useArenaFeed({ limit: 1 });
-  const batches = useBatches(60);
   const botCount =
     bots.data?.db_available === true
       ? (bots.data.stats?.traders ?? null)
@@ -46,11 +42,7 @@ export default function ActivityPage() {
           paddingBottom: "var(--space-6)",
         }}
       >
-        <PageHeader
-          title="Activity"
-          meta={`everything happening on Sybil · uniform clearing every ${BLOCK_INTERVAL_MS / 1000}s`}
-          action={<ActivityBatchChip />}
-        />
+        <PageHeader title="Activity" />
       </div>
 
       <ActivityOverviewReadNotice
@@ -60,14 +52,7 @@ export default function ActivityPage() {
       />
       <HeroAllTime allTime={overview.allTime} botCount={botCount} />
       <PulseStrip last24h={overview.last24h} />
-      <BatchesTable
-        rows={batches.rows}
-        isBackfilling={batches.isBackfilling}
-        backfillError={batches.error != null}
-        retrying={batches.isFetching}
-        onRetry={batches.retry}
-        renderDetail={(r) => <BatchDetail row={r} />}
-      />
+      <BatchesTable renderDetail={(r) => <BatchDetail row={r} />} />
     </main>
   );
 }

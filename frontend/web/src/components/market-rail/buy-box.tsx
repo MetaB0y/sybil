@@ -44,7 +44,12 @@ import {
 } from "@/lib/account/use-account";
 import { useAvailableBalance } from "@/lib/account/use-available-balance";
 import { usePortfolio } from "@/lib/account/use-portfolio";
-import { formatBatchSeconds, formatDollars } from "@/lib/format/nanos";
+import {
+  formatAge,
+  formatBatchSeconds,
+  formatDollars,
+} from "@/lib/format/nanos";
+import { BLOCK_INTERVAL_MS } from "@/lib/constants";
 import {
   useEventGroup,
   type EventOutcome,
@@ -69,6 +74,23 @@ function orderSideFor(dir: Direction, side: OutcomeSide): OrderSide {
   return side === "YES" ? "SellYes" : "SellNo";
 }
 
+/** Shares of this outcome reserved by the account's resting sell orders. */
+function sumSellShareReservations(
+  orders: AccountOrder[] | undefined,
+  marketId: number,
+  side: OutcomeSide,
+): bigint {
+  const wanted = side.toLowerCase();
+  let units = 0n;
+  for (const order of orders ?? []) {
+    if (order.market_id !== marketId) continue;
+    const orderSide = order.side.toLowerCase();
+    if (!orderSide.includes("sell") || !orderSide.includes(wanted)) continue;
+    units += BigInt(order.remaining_quantity);
+  }
+  return units;
+}
+
 export function BuyBox({
   outcome,
   requireConfirmation = false,
@@ -83,9 +105,11 @@ export function BuyBox({
   const { secondsLeftPrecise, latestHeight } = useBatchCountdown();
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const portfolio = usePortfolio(session?.accountId ?? null);
-  const { availableNanos, isPending: balancePending } = useAvailableBalance(
-    session?.accountId ?? null,
-  );
+  const {
+    availableNanos,
+    reservedNanos,
+    isPending: balancePending,
+  } = useAvailableBalance(session?.accountId ?? null);
   const { data: openOrders } = useAccountOrders(session?.accountId ?? null);
   const groupMarkets = useGroupMarkets(outcome.marketId);
   const { group: displayGroup } = useEventGroup(outcome.marketId);
@@ -103,8 +127,15 @@ export function BuyBox({
   const [amount, setAmount] = useState("25");
   const [shares, setShares] = useState("100");
   const [tif, setTif] = useState<Tif>("GTC");
-  // GTD block-height picker: how many batches ahead the order stays eligible.
-  const [gtdBatches, setGtdBatches] = useState(5);
+  // Numeric protocol value plus a free-edit text buffer for the GTD control.
+  const [gtdBatches, setGtdBatches] = useState(10);
+  const [gtdText, setGtdText] = useState("10");
+  const gtdMax = 60;
+  const setGtd = (value: number) => {
+    const clamped = Math.max(1, Math.min(gtdMax, Math.round(value)));
+    setGtdBatches(clamped);
+    setGtdText(String(clamped));
+  };
 
   const indicativeCents = outcomeSide === "YES" ? yesCents : noCents;
   const [limit, setLimit] = useState<number>(indicativeCents);
@@ -160,20 +191,17 @@ export function BuyBox({
     Number(notionalNanosCeil(limitPriceNanosPreview, qtyUnits)) / 1e9;
   const payoutIfWin = qtyShares; // qty × $1
 
-  // Live clearing ESTIMATE from the side's indicative price. A batch auction
-  // gives no firm quote, so this is only "what the next batch would fill near
-  // if it clears at today's indicative" — surfaced as an estimate, never a quote.
-  const estClearingCents = Math.max(
-    1,
-    Math.min(99, Math.round(indicativeCents)),
-  );
-  const estFillDollars = qtyShares * (estClearingCents / 100);
-
   // Cash available to BUY = balance − cash reserved by resting buy orders.
   // (Sells are gated by held shares below, not cash.) Matches the engine so a
   // buy MAX / headroom never proposes more than will be accepted.
   const availableDollars =
     availableNanos == null ? null : Number(availableNanos) / 1e9;
+  const cashLockedNanos = reservedNanos;
+  const sellLockedUnits = sumSellShareReservations(
+    openOrders,
+    outcome.marketId,
+    outcomeSide,
+  );
 
   // Shares of THIS outcome+side the user currently holds — what they can sell.
   // Positions carry the outcome as "YES"/"NO" (accounts route), matching
@@ -521,7 +549,6 @@ export function BuyBox({
               whiteSpace: "nowrap",
               minWidth: 0,
             }}
-            title={outcome.label}
           >
             {outcome.shortLabel}
           </span>
@@ -612,13 +639,29 @@ export function BuyBox({
               color: "var(--fg-4)",
             }}
           >
-            {dir === "sell"
-              ? `balance ${formatShareUnits(heldUnits)} sh`
-              : availableDollars == null
-                ? ""
-                : unit === "usd"
+            {dir === "sell" ? (
+              <>
+                {`balance ${formatShareUnits(heldUnits)} sh`}
+                {sellLockedUnits > 0n && (
+                  <span style={{ opacity: 0.7 }}>
+                    {` · ${formatShareUnits(sellLockedUnits)} sh in orders`}
+                  </span>
+                )}
+              </>
+            ) : availableDollars == null ? (
+              ""
+            ) : (
+              <>
+                {unit === "usd"
                   ? `available ${formatDollars(BigInt(Math.floor(availableDollars * 1e9)), { decimals: 2 })}`
                   : `max ${(availableDollars / limitDec).toFixed(0)} sh`}
+                {cashLockedNanos > 0n && (
+                  <span style={{ opacity: 0.7 }}>
+                    {` · ${formatDollars(cashLockedNanos, { decimals: 2 })} in orders`}
+                  </span>
+                )}
+              </>
+            )}
           </span>
         </div>
         <div
@@ -928,29 +971,63 @@ export function BuyBox({
               <StepButton
                 label="−"
                 disabled={disabledInputs || gtdBatches <= 1}
-                onClick={() => setGtdBatches((n) => Math.max(1, n - 1))}
+                onClick={() => setGtd(gtdBatches - 1)}
               />
               <span
                 className="tabular"
                 style={{
+                  display: "inline-flex",
+                  alignItems: "baseline",
+                  justifyContent: "center",
+                  gap: 3,
                   minWidth: 60,
-                  textAlign: "center",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                  color: "var(--fg-1)",
                 }}
               >
-                {gtdBatches} {gtdBatches === 1 ? "batch" : "batches"}
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label="batches until expiry"
+                  value={gtdText}
+                  disabled={disabledInputs}
+                  onChange={(event) => {
+                    const text = event.target.value
+                      .replace(/[^0-9]/g, "")
+                      .slice(0, 3);
+                    setGtdText(text);
+                    const parsed = Number.parseInt(text, 10);
+                    if (Number.isFinite(parsed) && parsed >= 1) {
+                      setGtdBatches(Math.min(gtdMax, parsed));
+                    }
+                  }}
+                  onBlur={() =>
+                    setGtd(Number.parseInt(gtdText, 10) || gtdBatches)
+                  }
+                  style={{
+                    width: 32,
+                    textAlign: "right",
+                    background: "transparent",
+                    border: 0,
+                    color: "var(--fg-1)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 12,
+                    padding: 0,
+                    outline: "none",
+                    boxShadow: "none",
+                  }}
+                />
+                <span style={{ fontSize: 10, color: "var(--fg-3)" }}>
+                  {gtdBatches === 1 ? "batch" : "batches"}
+                </span>
               </span>
               <StepButton
                 label="+"
-                disabled={disabledInputs || gtdBatches >= 60}
-                onClick={() => setGtdBatches((n) => Math.min(60, n + 1))}
+                disabled={disabledInputs || gtdBatches >= gtdMax}
+                onClick={() => setGtd(gtdBatches + 1)}
               />
             </div>
           </div>
         )}
-        {tif !== "GTC" && latestHeight != null && (
+        {tif === "GTD" && (
           <div
             style={{
               marginTop: 5,
@@ -960,10 +1037,14 @@ export function BuyBox({
               textAlign: "right",
             }}
           >
-            expires block #
-            {(
-              latestHeight + (tif === "IOC" ? 1 : Math.max(1, gtdBatches))
-            ).toLocaleString()}
+            {`cancels in ~${formatAge(Math.max(1, gtdBatches) * BLOCK_INTERVAL_MS)}`}
+            {latestHeight != null && (
+              <span style={{ opacity: 0.7 }}>
+                {` · block #${(
+                  latestHeight + Math.max(1, gtdBatches)
+                ).toLocaleString()}`}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -982,24 +1063,9 @@ export function BuyBox({
           fontSize: 11,
         }}
       >
-        {/* Live clearing estimate — labelled an estimate; a batch auction gives
-            no firm quote until the next batch clears. For a never-traded market
-            there is no price to estimate against, so instead of a fabricated
-            ~50% fill we say the order would seed the book at the chosen limit. */}
-        {hasPrice ? (
-          <ReceiptRow
-            label={
-              dir === "buy"
-                ? "est. fill · next batch"
-                : "est. proceeds · next batch"
-            }
-            value={
-              <span style={{ color: "var(--fg-2)" }}>
-                ~${estFillDollars.toFixed(2)} at ~{estClearingCents}%
-              </span>
-            }
-          />
-        ) : (
+        {/* No speculative quote: the max-cost/min-receive rows are the honest
+            bound. A never-traded market still explains that this seeds the book. */}
+        {!hasPrice && (
           <div style={{ color: "var(--fg-3)", lineHeight: 1.35 }}>
             no price yet — your order would seed the book at{" "}
             <span style={{ color: "var(--fg-1)" }}>{limitCentsPreview}¢</span>

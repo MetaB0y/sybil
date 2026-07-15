@@ -38,9 +38,7 @@ function withQueries(node: React.ReactNode): string {
 
 describe("markets page accessibility", () => {
   it("keeps live batch and empty-trades copy on AA contrast tokens", () => {
-    const ticker = renderToStaticMarkup(
-      <ClearingTicker marketsById={new Map()} />,
-    );
+    const ticker = withQueries(<ClearingTicker marketsById={new Map()} />);
 
     expect(batchPillLabelColor(true)).toBe("var(--accent)");
     expect(batchPillLabelColor(false)).toBe("var(--warn)");
@@ -85,9 +83,7 @@ describe("markets page accessibility", () => {
       />,
     );
 
-    const prefetchProps = `${binary}${multi}`.match(
-      /data-prefetch="[^"]+"/g,
-    );
+    const prefetchProps = `${binary}${multi}`.match(/data-prefetch="[^"]+"/g);
     expect(prefetchProps).toHaveLength(5);
     expect(prefetchProps).toEqual(
       Array.from({ length: 5 }, () => 'data-prefetch="false"'),

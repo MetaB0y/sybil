@@ -2,14 +2,16 @@
 
 /**
  * Pro-mode hero card — the showpiece of the rail. Big circular countdown
- * gauge + batch # + "N traders joined" + indicative trio + last-24-batches
- * mini bars. Matches the inline hero block in `V2BatchTheater` ProRail
+ * gauge + batch # + "N traders joined" + last-price / indicative-volume /
+ * liquidity stats + last-24-batches mini bars. Matches the inline hero block in `V2BatchTheater` ProRail
  * (`fed-variations.jsx:128`).
  *
  * All values are real:
  *  - circular countdown progress + batch number
  *  - traders in this batch — polled open-batch unique placers
- *  - indicative price / volume — polled open-batch shadow-solve (C2)
+ *  - last price — most recent batch where this market actually traded
+ *  - indicative volume — polled open-batch shadow-solve
+ *  - liquidity — average near-price resting depth per batch
  *  - past-batch bar heights (matched volume)
  */
 
@@ -25,6 +27,7 @@ import {
   parseNanos,
 } from "@/lib/format/nanos";
 import type { EventOutcome } from "@/lib/market-detail/use-event-group";
+import { avgLiquidityNanos } from "@/lib/markets/liquidity";
 import {
   useOpenBatchLive,
   type OpenBatchLive,
@@ -44,12 +47,9 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
 
   const batchNumber = latestHeight == null ? null : latestHeight + 1;
   const placers = live?.uniquePlacers ?? null;
-  const price = deriveOpenBatchPrice(
-    live,
-    openBatch.readState,
-    outcome.yesPriceNanos,
-    outcome.shortLabel,
-  );
+  const lastPriceNanos =
+    lastTradedYesNanos(outcome.marketId, recent) ?? outcome.yesPriceNanos;
+  const liquidityNanos = avgLiquidityNanos(outcome.liquidityNanos);
 
   // Honest connection pill: only claim a "live batch" when the block stream is
   // actually connected. If it's reconnecting/failed the countdown freezes at
@@ -89,7 +89,6 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
           textTransform: "uppercase",
           letterSpacing: "0.06em",
         }}
-        title={`block stream: ${wsState}`}
       >
         <span
           aria-hidden
@@ -163,10 +162,7 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
                 boxShadow: "0 0 6px var(--yes)",
               }}
             />
-            <span
-              style={{ color: "var(--fg-1)", fontWeight: 600 }}
-              title="Distinct traders with a resting order in the open batch — updates ~1s"
-            >
+            <span style={{ color: "var(--fg-1)", fontWeight: 600 }}>
               {placers ?? "—"}
             </span>
             <span>{placers === 1 ? "trader" : "traders"} in this batch</span>
@@ -188,31 +184,30 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
         onRetry={openBatch.retry}
       />
 
-      {/* Indicative trio */}
+      {/* Live batch stats */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <SubStat
-          label={
-            price.kind === "indicative" ? (
-              <Glossary term="Indicative price">indicative price</Glossary>
-            ) : (
-              "last clearing price"
-            )
-          }
-          secondary={price.secondary}
+          label={<Glossary term="Last price">last price</Glossary>}
+          secondary={`for ${outcome.shortLabel}`}
           value={
-            price.valueNanos == null
-              ? "—"
-              : formatCentsPrecise(price.valueNanos)
+            lastPriceNanos == null ? "—" : formatCentsPrecise(lastPriceNanos)
           }
           valueColor="var(--yes)"
         />
         <SubStat
           label={<Glossary term="IEV">indicative volume</Glossary>}
-          secondary="would clear at indicative"
+          secondary="would clear this batch"
           value={
             live == null
               ? "—"
               : formatCompactDollars(live.indicativeVolumeNanos)
+          }
+        />
+        <SubStat
+          label={<Glossary term="Liquidity">liquidity</Glossary>}
+          secondary="resting near the price"
+          value={
+            liquidityNanos > 0n ? formatCompactDollars(liquidityNanos) : "—"
           }
         />
       </div>
@@ -238,6 +233,22 @@ export function BatchHero({ outcome }: { outcome: EventOutcome }) {
       </div>
     </div>
   );
+}
+
+/** Most recent clearing YES price from a block where this market had matched
+ * volume. Recent blocks are newest-first, so the first hit is the last trade. */
+function lastTradedYesNanos(
+  marketId: number,
+  blocks: import("@/lib/api/schema").components["schemas"]["BlockResponse"][],
+): bigint | null {
+  const key = String(marketId);
+  for (const block of blocks) {
+    const volume = block.by_market?.[key]?.volume_nanos;
+    if (volume == null || parseNanos(volume) <= 0n) continue;
+    const price = block.clearing_prices_nanos?.[key]?.[0];
+    if (price != null) return parseNanos(price);
+  }
+  return null;
 }
 
 export function deriveOpenBatchPrice(

@@ -27,7 +27,12 @@ import {
 } from "@/lib/account/quantity";
 import type { AccountFill } from "@/lib/account/use-account-fills";
 import type { AccountOrder } from "@/lib/account/use-account-orders";
-import { formatAge, formatCentsPrecise, formatDollars, parseNanos } from "@/lib/format/nanos";
+import {
+  formatAge,
+  formatCentsPrecise,
+  formatDollarsRounded,
+  parseNanos,
+} from "@/lib/format/nanos";
 import { selectLatestBlock, useStore } from "@/lib/store";
 import { Pager, usePaged } from "@/components/event-list-pager";
 import { SidePill } from "@/components/portfolio/side-pill";
@@ -75,7 +80,7 @@ const COLUMNS: { key: SortKey; label: string; align: "left" | "right" }[] = [
   { key: "outcome", label: "Outcome", align: "left" },
   { key: "action", label: "Action", align: "left" },
   { key: "side", label: "Side", align: "left" },
-  { key: "placed", label: "Placed/Filled", align: "right" },
+  { key: "placed", label: "Filled/Placed", align: "right" },
   { key: "limit", label: "Limit", align: "right" },
   { key: "avgfill", label: "Avg fill", align: "right" },
   { key: "value", label: "Value", align: "right" },
@@ -112,7 +117,10 @@ function compareBy(a: OpenRow, b: OpenRow, key: SortKey): number {
     case "side":
       return a.outcome.localeCompare(b.outcome);
     case "placed":
-      return (a.placed || a.order.remaining_quantity) - (b.placed || b.order.remaining_quantity);
+      return (
+        (a.placed || a.order.remaining_quantity) -
+        (b.placed || b.order.remaining_quantity)
+      );
     case "limit":
       return cmpBig(a.limitNanos, b.limitNanos);
     case "avgfill":
@@ -164,7 +172,10 @@ export function EventOpenOrders({
     }
     const out = new Map<number, OrderFillAgg>();
     for (const [id, e] of acc) {
-      out.set(id, { count: e.count, avgPriceNanos: priceNanosFromNotional(e.cost, e.qty) });
+      out.set(id, {
+        count: e.count,
+        avgPriceNanos: priceNanosFromNotional(e.cost, e.qty),
+      });
     }
     return out;
   }, [fills]);
@@ -174,7 +185,11 @@ export function EventOpenOrders({
       const sideRaw = o.side.toLowerCase();
       const agg = fillsByOrder.get(o.order_id);
       const placed = o.original_quantity ?? 0;
-      const outcome = sideRaw.includes("yes") ? "YES" : sideRaw.includes("no") ? "NO" : "";
+      const outcome = sideRaw.includes("yes")
+        ? "YES"
+        : sideRaw.includes("no")
+          ? "NO"
+          : "";
       // agg.avgPriceNanos is already this side's own price (matches Limit).
       const avgPriceNanos = agg?.avgPriceNanos ?? null;
       const limitNanos = parseNanos(o.limit_price_nanos);
@@ -190,7 +205,8 @@ export function EventOpenOrders({
         avgPriceNanos,
         fillCount: agg?.count ?? 0,
         expiresAtBlock: o.expires_at_block,
-        placedAtMs: o.created_at_ms && o.created_at_ms > 0 ? o.created_at_ms : 0,
+        placedAtMs:
+          o.created_at_ms && o.created_at_ms > 0 ? o.created_at_ms : 0,
       } satisfies OpenRow;
     });
     if (!sort) return decorated;
@@ -310,7 +326,6 @@ function OrderRow({
   return (
     <Row>
       <span
-        title={label}
         style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -333,17 +348,14 @@ function OrderRow({
       >
         {action}
       </span>
-      <span>
-        <SidePill outcome={outcome} />
-      </span>
+      <SidePill outcome={outcome} />
       <Right mono>
         {placed === 0 ? (
-          <>{formatShareUnits(order.remaining_quantity)}</>
+          <>{formatShareUnits(order.remaining_quantity, 1)}</>
         ) : (
-          <span
-            title={`${formatShareUnits(filled)} filled of ${formatShareUnits(placed)} placed`}
-          >
-            {`${formatShareUnits(placed)} / ${formatShareUnits(filled)}`}
+          // Rounded to 1dp in view.
+          <span>
+            {`${formatShareUnits(filled, 1)} / ${formatShareUnits(placed, 1)}`}
           </span>
         )}
       </Right>
@@ -351,7 +363,7 @@ function OrderRow({
       <Right mono>
         <AvgFillCell priceNanos={avgPriceNanos} count={fillCount} />
       </Right>
-      <Right mono>{formatDollars(valueNanos, { decimals: 2 })}</Right>
+      <Right mono>{formatDollarsRounded(valueNanos, { decimals: 1 })}</Right>
       <Right mono>
         <CreatedCell placedAtMs={placedAtMs} nowMs={nowMs} />
       </Right>
@@ -363,7 +375,7 @@ function OrderRow({
           type="button"
           onClick={onCancel}
           disabled={cancelling}
-          title="Cancel order"
+          title={cancelError || undefined}
           style={{
             padding: "3px 8px",
             background: "transparent",
@@ -402,7 +414,13 @@ function OrderRow({
 /** When the order was created — shown as time-since ("5m ago", "2h ago") vs the
  *  latest block time. Unknown (pre-B8 orders without created_at_ms) or no block
  *  yet → "—". */
-function CreatedCell({ placedAtMs, nowMs }: { placedAtMs: number; nowMs: number | null }) {
+function CreatedCell({
+  placedAtMs,
+  nowMs,
+}: {
+  placedAtMs: number;
+  nowMs: number | null;
+}) {
   if (placedAtMs <= 0 || nowMs == null) {
     return <span style={{ color: "var(--fg-4)" }}>—</span>;
   }
@@ -413,30 +431,31 @@ function CreatedCell({ placedAtMs, nowMs }: { placedAtMs: number; nowMs: number 
   );
 }
 
-/** Avg fill price (WAC, side-adjusted) with fill count beneath. */
-function AvgFillCell({ priceNanos, count }: { priceNanos: bigint | null; count: number }) {
+/** Avg fill price (WAC, side-adjusted) with the fill count inline as a faded
+ *  "·N" suffix — one line, so the row stays a single row. */
+function AvgFillCell({
+  priceNanos,
+  count,
+}: {
+  priceNanos: bigint | null;
+  count: number;
+}) {
   return (
     <span
       style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "flex-end",
-        gap: 1,
         fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        whiteSpace: "nowrap",
       }}
     >
-      <span style={{ fontSize: 12, color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
+      <span style={{ color: count > 0 ? "var(--fg-1)" : "var(--fg-3)" }}>
         {priceNanos != null ? formatCentsPrecise(priceNanos) : "—"}
       </span>
-      <span
-        style={{
-          fontSize: 9.5,
-          color: "var(--fg-4)",
-          letterSpacing: "var(--track-wide)",
-        }}
-      >
-        {count === 1 ? "1 fill" : `${count} fills`}
-      </span>
+      {count > 0 && (
+        <span
+          style={{ color: "var(--fg-4)", fontSize: 10 }}
+        >{` ·${count}`}</span>
+      )}
     </span>
   );
 }
@@ -470,7 +489,6 @@ function HeaderCell({
         letterSpacing: "var(--track-wide)",
         color: active ? "var(--fg-2)" : "var(--fg-4)",
       }}
-      title={`Sort by ${col.label}`}
     >
       <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
       <span style={{ fontSize: 8, lineHeight: 1, opacity: active ? 1 : 0.3 }}>
