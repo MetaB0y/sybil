@@ -2,7 +2,10 @@
 
 mod common;
 
+use axum::extract::State;
 use axum::http::StatusCode;
+use axum::routing::post;
+use axum::{Json, Router};
 use common::{get, post_json, test_app, test_app_with_store};
 use matching_sequencer::{
     AccountAuthScheme, AccountId, AuthenticatedProfileUpdate, PublicKey, RegisteredPubkey,
@@ -11,6 +14,71 @@ use matching_sequencer::{
 use p256::ecdsa::SigningKey;
 use serde_json::Value;
 use serde_json::json;
+use sybil_api::app::create_router;
+use sybil_api::config::ApiConfig;
+use sybil_api::state::AppState;
+use sybil_history_types::{EquityBaselines, EquityBaselinesQuery, ProjectionStatus};
+
+#[derive(Clone, Copy)]
+enum HistoryFrontier {
+    BeforeBoundary,
+    AtBoundary,
+}
+
+async fn projected_baselines(
+    State(frontier): State<HistoryFrontier>,
+    Json(query): Json<EquityBaselinesQuery>,
+) -> Json<EquityBaselines> {
+    let indexed_through_timestamp_ms = match frontier {
+        HistoryFrontier::BeforeBoundary => query.at_or_before_ms.saturating_sub(1),
+        HistoryFrontier::AtBoundary => query.at_or_before_ms,
+    };
+    Json(EquityBaselines {
+        // These tests create their accounts after the seven-day cutoff, so a
+        // caught-up projector legitimately has no opening anchors for them.
+        baselines: vec![],
+        status: ProjectionStatus {
+            genesis_hash: Some([7; 32]),
+            first_height: Some(1),
+            first_timestamp_ms: Some(query.at_or_before_ms.saturating_sub(1)),
+            indexed_through_height: Some(10),
+            indexed_through_timestamp_ms: Some(indexed_through_timestamp_ms),
+        },
+    })
+}
+
+async fn app_with_history_frontier(handle: SequencerHandle, frontier: HistoryFrontier) -> Router {
+    let history_app = Router::new()
+        .route(
+            "/internal/history/v1/query/equity-baselines",
+            post(projected_baselines),
+        )
+        .with_state(frontier);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("history frontier listener");
+    let addr = listener.local_addr().expect("history frontier address");
+    tokio::spawn(async move {
+        axum::serve(listener, history_app)
+            .await
+            .expect("history frontier server");
+    });
+
+    let config = ApiConfig {
+        dev_mode: true,
+        history_url: format!("http://{addr}"),
+        ..ApiConfig::default()
+    };
+    let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+    let state = AppState::new(handle, &config, prometheus);
+    state
+        .initialize_read_models()
+        .await
+        .expect("leaderboard read model initializes");
+    create_router(state)
+}
 
 async fn leaderboard(app: &axum::Router, query: &str) -> Value {
     let uri = if query.is_empty() {
@@ -182,4 +250,33 @@ async fn empty_windowed_leaderboard_does_not_require_history() {
     let body = leaderboard(&app, "window=7d").await;
     assert_eq!(body["window"], "7d");
     assert_eq!(body["entries"], json!([]));
+}
+
+#[tokio::test]
+async fn windowed_leaderboard_requires_history_to_reach_the_opening_boundary() {
+    let (setup_app, handle) = test_app_with_store(true).await;
+    let expected_ids = create_ranked_pair(&setup_app, &handle).await;
+
+    let lagging_app =
+        app_with_history_frontier(handle.clone(), HistoryFrontier::BeforeBoundary).await;
+    let (status, body) = get(lagging_app, "/v1/leaderboard?window=7d").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let error: Value = serde_json::from_slice(&body).expect("structured history error");
+    assert_eq!(error["code"], "HISTORY_INCOMPLETE");
+    assert_eq!(
+        error["error"],
+        "Historical data has not caught up to the leaderboard window"
+    );
+
+    let exact_app = app_with_history_frontier(handle, HistoryFrontier::AtBoundary).await;
+    let all_time = leaderboard(&exact_app, "window=all").await;
+    let windowed = leaderboard(&exact_app, "window=7d").await;
+    assert_eq!(
+        account_ids(windowed["entries"].as_array().unwrap()),
+        vec![expected_ids.0, expected_ids.1]
+    );
+    assert_eq!(
+        windowed["entries"], all_time["entries"],
+        "accounts created after the boundary legitimately use all of their lifetime PnL"
+    );
 }

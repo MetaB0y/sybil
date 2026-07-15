@@ -162,6 +162,17 @@ service failures return `503 HISTORY_UNAVAILABLE`; they are never replaced by
 an empty in-memory response. Equity is bounded to 5,000 represented points and
 reports `source_points` plus `downsampled`.
 
+Windowed leaderboard reads use a stricter two-sided completeness proof from
+the private history status: the projector must begin at genesis or at/before
+the requested cutoff, and its contiguous checkpoint timestamp must be at/after
+that cutoff. A missing opening equity anchor is treated as post-cutoff account
+creation only after both conditions hold. An insufficient floor or lagging
+checkpoint returns `503 HISTORY_INCOMPLETE` with a specific reason; the API
+does not substitute all-time PnL. The all-time path and a genuinely empty
+publishable cohort remain independent of history, and no leaderboard request
+adds sequencer actor work because current bases stay in the API-owned read
+model.
+
 All account history remains owner-scoped at the public API. Internal history
 routes and raw account-attributed batches use a dedicated
 `SYBIL_HISTORY_TOKEN`, are private service surfaces, and are not browser
