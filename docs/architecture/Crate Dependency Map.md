@@ -139,7 +139,7 @@ graph TB
 - `matching-sim` is a dev tool that cross-cuts multiple crates for benchmarking
 - `sequencer-sim` is a dev-only crate: it depends on `matching-sequencer` so the sequencer library stays free of simulation/agent code (nothing `sybil-api` links pulls it in)
 - `sybil-loadtest` has no in-process exchange dependency; it tests deployed
-  boundaries through read-only public HTTP
+  boundaries through read-only public HTTP and the shared Rust WebSocket client
 
 ## Where This Lives
 > `Cargo.toml` — workspace member list and dependency declarations

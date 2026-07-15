@@ -78,6 +78,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_HTTP_DA_CLIENT_RPS` / `BURST` | `10` / `20` | `10` / `20` | `10` / `20` | no |
 | `SYBIL_HTTP_DA_MAX_CONCURRENCY` | `4` | `4` | `4` | no |
 | `SYBIL_HTTP_PUBLIC_STREAM_MAX_CONNECTIONS` | `256` | `256` | `256` | no |
+| `SYBIL_WS_CLIENT_IDLE_TIMEOUT_MS` | `90000` | `90000` | `90000` | no |
 | `SYBIL_REFERENCE_PRICE_TTL_MS` | `60000` | `60000` | `60000` | no |
 | `SYBIL_PUBLIC_ACCOUNT_CAPACITY` | `1000` | `1000` | `1000` (override deliberately) | no |
 | `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` | `1000000000000` ($1,000 play money) | same | `0` | **yes — blocks when nonzero** |
@@ -89,6 +90,12 @@ caches only. They are neither durable history nor historical query policy.
 Product-history stock lives in `sybil-history`; the initial service retains raw
 batches and projections without an age/row cap. Canonical portfolio state is
 unaffected.
+
+The 256 anonymous-stream ceiling is a hard admission budget shared by public
+SSE and WebSocket connections, not a capacity claim. Run `just ws-load` with at
+least 100 subscribers before changing it or claiming fanout headroom; the
+runbook requires concurrent RSS/high-water, mailbox, solve-p99, health-p95, and
+block-progress evidence plus a separate fast-cadence lag/replay profile.
 
 The reference-price TTL is an API-owned per-market safety ceiling, independent
 of the mirror's 30-second per-token staleness detector. Public market reads omit

@@ -459,7 +459,12 @@ impl SequencerActorState {
         metrics::gauge!("sybil_pending_orders").set(bp.flow_metrics.pending_orders_after as f64);
         metrics::gauge!("sybil_state_accounts_total").set(bp.witness.post_state.len() as f64);
         metrics::histogram!("sybil_solve_time_seconds").record(bp.pipeline.total_time_secs);
-        metrics::gauge!("sybil_recent_block_cache_len").set(self.recent_blocks.len() as f64);
+        let recent_block_cache_len = self
+            .recent_blocks
+            .read()
+            .expect("recent block cache lock poisoned")
+            .len();
+        metrics::gauge!("sybil_recent_block_cache_len").set(recent_block_cache_len as f64);
         let recent_history = self.sequencer.analytics().recent_history_cache_counts();
         metrics::gauge!("sybil_recent_price_point_entries").set(recent_history.price_points as f64);
         metrics::gauge!("sybil_recent_fill_entries").set(recent_history.fills as f64);
@@ -520,10 +525,14 @@ impl SequencerActorState {
     }
 
     fn push_to_history(&mut self, block: SealedBlock) {
-        if self.recent_blocks.len() >= self.sequencer.config.recent_block_cache_capacity {
-            self.recent_blocks.pop_front();
+        let mut recent_blocks = self
+            .recent_blocks
+            .write()
+            .expect("recent block cache lock poisoned");
+        if recent_blocks.len() >= self.sequencer.config.recent_block_cache_capacity {
+            recent_blocks.pop_front();
         }
-        self.recent_blocks.push_back(block);
+        recent_blocks.push_back(block);
     }
 }
 

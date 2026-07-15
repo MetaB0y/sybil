@@ -246,6 +246,16 @@ pub struct ApiConfig {
     )]
     pub http_public_stream_max_connections: usize,
 
+    /// Close a WebSocket block stream when the server has received no frame
+    /// from its client for this many milliseconds.
+    #[arg(
+        long,
+        default_value = "90000",
+        env = "SYBIL_WS_CLIENT_IDLE_TIMEOUT_MS",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub ws_client_idle_timeout_ms: u64,
+
     /// WebAuthn relying-party id. For local frontend dev this is `localhost`.
     #[arg(long, default_value = "localhost", env = "SYBIL_WEBAUTHN_RP_ID")]
     pub webauthn_rp_id: String,
@@ -460,6 +470,7 @@ impl Default for ApiConfig {
             http_da_client_burst: 20,
             http_da_max_concurrency: 4,
             http_public_stream_max_connections: 256,
+            ws_client_idle_timeout_ms: 90_000,
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:3000".to_string(),
             webauthn_require_uv: true,

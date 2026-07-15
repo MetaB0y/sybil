@@ -9,7 +9,14 @@ publish = false
 name = "sybil-history-load"
 path = "src/bin/history_load.rs"
 
+[[bin]]
+name = "sybil-ws-load"
+path = "src/bin/ws_load.rs"
+
 [dependencies]
+futures-util = "0.3"
 goose = { version = "0.18.1", default-features = false, features = ["rustls-tls"] }
 reqwest = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+serde_json = { workspace = true }
+sybil-client = { path = "../sybil-client" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }

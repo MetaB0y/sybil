@@ -426,6 +426,11 @@ bench:
 history-load *args:
     cargo run --release -p sybil-loadtest --bin sybil-history-load -- {{args}}
 
+# Hold 100+ public WebSocket subscribers while checking replay recovery,
+# process memory, actor pressure, block progress, and health/solve latency.
+ws-load:
+    cargo run --release -p sybil-loadtest --bin sybil-ws-load
+
 # Watch for changes and run tests
 watch:
     cargo watch -x "test --workspace"

@@ -137,10 +137,6 @@ impl SequencerActorState {
                 Some(SequencerMsg::GetStateProof(key, reply))
             }
             SequencerMsg::ProduceBlock(reply) => Some(SequencerMsg::ProduceBlock(reply)),
-            SequencerMsg::GetBlockPage(before, limit, reply) => {
-                Some(SequencerMsg::GetBlockPage(before, limit, reply))
-            }
-            SequencerMsg::GetBlock(height, reply) => Some(SequencerMsg::GetBlock(height, reply)),
             SequencerMsg::GetDaArtifact(height, reply) => {
                 Some(SequencerMsg::GetDaArtifact(height, reply))
             }

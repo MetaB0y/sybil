@@ -5,6 +5,8 @@ use ractor::SupervisionEvent;
 pub(super) struct SequencerHandleInner {
     pub(super) actor: Arc<RwLock<Option<ActorRef<SequencerMsg>>>>,
     pub(super) block_broadcast: broadcast::Sender<SealedBlock>,
+    pub(super) recent_blocks: Arc<RwLock<VecDeque<SealedBlock>>>,
+    pub(super) store: Option<Arc<crate::store::Store>>,
     pub(super) mailbox_monitor: MailboxMonitor,
     pub(super) shutdown_requested: Arc<AtomicBool>,
 }
@@ -54,6 +56,7 @@ impl SequencerSupervisorState {
             sequencer,
             store: self.store.clone(),
             block_broadcast: self.handle.block_broadcast.clone(),
+            recent_blocks: self.handle.recent_blocks.clone(),
             mailbox_monitor: self.handle.mailbox_monitor.clone(),
         };
         let (child, _) =

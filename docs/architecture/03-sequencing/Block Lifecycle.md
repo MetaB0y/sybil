@@ -32,6 +32,11 @@ Two artifacts leave the kernel:
 - `SealedBlock`: canonical block plus explicitly non-validity derived views for REST/WebSocket/SSE.
 - `BlockWitness` v10: transition-complete private material for native verification, proving, DA, and recovery, including ordinary order/cancel authorization and trading nonces.
 
+After the fence and live-state swap, `SealedBlock` publication updates the
+shared read-only recent-block ring before broadcasting the live event. Replay
+and REST block serving read that ring without entering the single-writer actor;
+the persistent canonical archive remains the fallback beyond the ring.
+
 ## Invariants
 
 1. The actor serializes exchange mutation; the synchronous kernel remains deterministic.

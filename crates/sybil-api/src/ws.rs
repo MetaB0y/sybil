@@ -16,9 +16,6 @@ use sybil_api_types::ws::{
 use crate::convert::{block_to_response, public_block_to_response};
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
-/// Close the connection if we don't hear anything from the client for this long.
-const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
-
 /// WebSocket close code for policy violations and stream-level errors.
 /// Chosen so browser `onclose` handlers can distinguish a server-initiated
 /// close from transport failures (code 1006 is reserved for abnormal close).
@@ -42,6 +39,7 @@ pub async fn handle_block_ws(
     handle: &SequencerHandle,
     query: WsQuery,
     visibility: BlockStreamVisibility,
+    client_idle_timeout: Duration,
 ) {
     // Subscribe BEFORE fetching head so that the live channel already
     // holds any block committed while we replay, and we can dedupe by
@@ -116,7 +114,7 @@ pub async fn handle_block_ws(
                 }
             },
             _ = ping_timer.tick() => {
-                if last_activity.elapsed() > CLIENT_IDLE_TIMEOUT {
+                if last_activity.elapsed() > client_idle_timeout {
                     close_with_reason(&mut socket, "client idle timeout".into()).await;
                     return;
                 }

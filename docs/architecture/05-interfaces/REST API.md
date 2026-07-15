@@ -191,9 +191,11 @@ All exchange mutation remains in the `SequencerActor`. Order-write endpoints
 first pass through cheap global/per-client HTTP token buckets before JSON or
 P256 work. Handlers convert public DTOs to domain instructions and send them to
 the actor, which directly admits ordinary supported orders or defers atomic
-bundles/MM submissions. Current block/account reads also come from actor
-snapshots. Historical range queries take the independent private service path
-and therefore cannot occupy the sequencer actor or scan its database.
+bundles/MM submissions. Current account reads come from actor snapshots;
+committed block reads use the post-commit shared ring and canonical archive
+without entering the actor mailbox. Historical product-range queries take the
+independent private service path and therefore cannot occupy the sequencer
+actor or scan its database.
 
 The same atomic operational snapshot includes the sequencer's integrity-halt
 state. After a hard block invariant fails, `/v1/health` returns `503` with

@@ -7035,8 +7035,11 @@ dependencies = [
 name = "sybil-loadtest"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "goose",
  "reqwest 0.13.4",
+ "serde_json",
+ "sybil-client",
  "tokio",
 ]
 

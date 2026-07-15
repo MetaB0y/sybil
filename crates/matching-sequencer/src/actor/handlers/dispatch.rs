@@ -18,7 +18,7 @@ impl Actor for SequencerActor {
         Ok(SequencerActorState {
             sequencer: args.sequencer,
             latest_block: None,
-            recent_blocks: VecDeque::new(),
+            recent_blocks: args.recent_blocks,
             block_broadcast: args.block_broadcast,
             pause_count: 0,
             halted_error: None,
@@ -336,63 +336,6 @@ impl Actor for SequencerActor {
             }
             SequencerMsg::InstallTemplate(template, reply) => {
                 let _ = reply.send(state.handle_install_template(template).await);
-            }
-            SequencerMsg::GetBlockPage(before_height, limit, reply) => {
-                let limit = limit.min(MAX_BLOCK_REPLAY_QUERY_BLOCKS);
-                let result = match &state.store {
-                    Some(store) => store
-                        .load_block_page(before_height, limit)
-                        .await
-                        .map_err(|error| SequencerError::Persistence(error.to_string())),
-                    None => Ok(state
-                        .recent_blocks
-                        .iter()
-                        .rev()
-                        .filter(|block| {
-                            before_height
-                                .is_none_or(|before| block.canonical.header.height < before)
-                        })
-                        .take(limit)
-                        .cloned()
-                        .collect()),
-                };
-                let _ = reply.send(result);
-            }
-            SequencerMsg::GetBlock(height, reply) => {
-                let block = state
-                    .recent_blocks
-                    .iter()
-                    .find(|b| b.canonical.header.height == height)
-                    .cloned();
-                let result = match block {
-                    Some(block) => Ok(block),
-                    None => match &state.store {
-                        Some(store) => match store.load_block(height).await {
-                            Ok(Some(block)) => Ok(block),
-                            Ok(None) => match store.canonical_archive_meta() {
-                                Ok(meta) => {
-                                    if let Some(retention_min_height) = meta.oldest_retained_height
-                                    {
-                                        if height < retention_min_height {
-                                            Err(SequencerError::BlockPruned {
-                                                requested_height: height,
-                                                retention_min_height,
-                                            })
-                                        } else {
-                                            Err(SequencerError::BlockNotFound)
-                                        }
-                                    } else {
-                                        Err(SequencerError::BlockNotFound)
-                                    }
-                                }
-                                Err(error) => Err(SequencerError::Persistence(error.to_string())),
-                            },
-                            Err(error) => Err(SequencerError::Persistence(error.to_string())),
-                        },
-                        None => Err(SequencerError::BlockNotFound),
-                    },
-                };
-                let _ = reply.send(result);
             }
             SequencerMsg::GetDaArtifact(height, reply) => {
                 let result = match &state.store {

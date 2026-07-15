@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::http::HeaderValue;
 use matching_sequencer::{AccountId, LeaderboardBase, SequencerHandle};
@@ -302,6 +303,9 @@ pub struct AppState {
     /// Hard lifetime cap for anonymous SSE and public WebSocket block streams.
     /// A permit is held until the response stream/upgrade task is dropped.
     pub http_public_stream_concurrency: Arc<Semaphore>,
+    /// WebSocket client-liveness window. Public and service streams share the
+    /// protocol behavior, while only public streams consume the anonymous cap.
+    pub ws_client_idle_timeout: Duration,
     /// WebAuthn verifier policy for passkey account actions.
     pub webauthn: WebAuthnVerifierConfig,
     /// Serializes account creation and the deprecated first-key bootstrap.
@@ -404,6 +408,7 @@ impl AppState {
             http_public_stream_concurrency: Arc::new(Semaphore::new(
                 config.http_public_stream_max_connections.max(1),
             )),
+            ws_client_idle_timeout: Duration::from_millis(config.ws_client_idle_timeout_ms),
             webauthn: WebAuthnVerifierConfig::from_api_config(config),
             account_bootstrap_lock: Arc::new(AsyncMutex::new(())),
             auto_resolutions: crate::auto_resolution::AutoResolutionStore::new(),

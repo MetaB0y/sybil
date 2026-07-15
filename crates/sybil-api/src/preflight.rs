@@ -202,6 +202,14 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
             dev_only: false,
         });
     }
+    if config.ws_client_idle_timeout_ms != 90_000 {
+        out.push(Deviation {
+            knob: "SYBIL_WS_CLIENT_IDLE_TIMEOUT_MS",
+            value: config.ws_client_idle_timeout_ms.to_string(),
+            prod_intended: "90000",
+            dev_only: false,
+        });
+    }
     if !is_set(&config.market_ref_data_path) {
         out.push(Deviation {
             knob: "SYBIL_MARKET_REF_DATA_PATH",

@@ -1,8 +1,8 @@
 # `sybil-loadtest`
 
-Black-box HTTP load tests for architectural isolation and capacity discovery.
-These binaries target an already-running stack and never mutate exchange
-state.
+Black-box API load tests for architectural isolation and capacity discovery.
+These binaries target an already-running stack over HTTP/WebSocket and never
+mutate exchange state.
 
 ## Read first
 

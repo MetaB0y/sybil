@@ -6,13 +6,14 @@ pub(super) struct SequencerActorArgs {
     pub(super) sequencer: BlockSequencer,
     pub(super) store: Option<Arc<crate::store::Store>>,
     pub(super) block_broadcast: broadcast::Sender<SealedBlock>,
+    pub(super) recent_blocks: Arc<RwLock<VecDeque<SealedBlock>>>,
     pub(super) mailbox_monitor: MailboxMonitor,
 }
 
 pub(super) struct SequencerActorState {
     pub(super) sequencer: BlockSequencer,
     pub(super) latest_block: Option<SealedBlock>,
-    pub(super) recent_blocks: VecDeque<SealedBlock>,
+    pub(super) recent_blocks: Arc<RwLock<VecDeque<SealedBlock>>>,
     pub(super) block_broadcast: broadcast::Sender<SealedBlock>,
     pub(super) pause_count: u32,
     pub(super) halted_error: Option<SequencerError>,
@@ -182,12 +183,6 @@ pub enum SequencerMsg {
         sybil_oracle::ResolutionTemplate,
         RpcReplyPort<Result<(), SequencerError>>,
     ),
-    GetBlockPage(
-        Option<u64>,
-        usize,
-        RpcReplyPort<Result<Vec<SealedBlock>, SequencerError>>,
-    ),
-    GetBlock(u64, RpcReplyPort<Result<SealedBlock, SequencerError>>),
     GetDaArtifact(u64, RpcReplyPort<Result<DaArtifactLookup, SequencerError>>),
     GetDaManifest(u64, RpcReplyPort<Result<DaManifestLookup, SequencerError>>),
     CreateMarketWithMetadata(
