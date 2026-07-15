@@ -2,7 +2,7 @@
 tags: [contracts, bridge, validium, spec]
 layer: verification
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-07-15
 ---
 
 # L1 settlement and vault
@@ -83,8 +83,9 @@ amount_nanos = amount_token_units * 1_000
 1. `deposit` transfers tokens and appends a domain-separated leaf to a
    depth-32 incremental Merkle tree.
 2. `DepositReceived` exposes the sequential id and cumulative root.
-3. The indexer waits for configured confirmations, reconciles the log root with
-   `depositRootByCount`, and submits ordered input through service routes.
+3. The indexer waits for configured confirmations, validates every log's
+   canonical block hash, reconciles the log root with `depositRootByCount`, and
+   submits ordered input through service routes.
 4. The sequencer credits a known account or quarantines an unresolved key.
 5. The transition guest reconstructs the same deposit prefix and requires the
    credited/quarantined events and committed cursor/root to agree.
@@ -95,6 +96,30 @@ types come from the unconditional Alloy bindings in `sybil-l1-abi`, with
 existing byte-level goldens guarding the Rust/Solidity boundary. RPC/finality
 policy remains an operational trust boundary; root mismatch or cursor/vault
 identity mismatch is fatal in the indexer.
+
+### Confirmed-prefix checkpoint and deep reorgs
+
+The indexer requires a deployment-bound cursor file. Cursor schema v2 stores
+`next_from` together with the canonical number/hash of `next_from - 1`. Before
+reading or submitting another range, the indexer re-reads that header and
+requires the hash to match; the descendant header commits the entire processed
+prefix. It also checks each deposit and withdrawal event's reported block hash
+against the canonical header and requires the range-tip hash to remain stable
+across ingestion.
+
+A mismatch stops before further L1 input and persists a fail-stop incident in
+the cursor. Restarts refuse the latch. This detects deep rewrites of deposits
+already credited and withdrawal events already applied; it does not invent an
+inverse transition. Operators must freeze the API and both contracts, preserve
+the store/cursor, and follow the
+[L1 reorg runbook](../../runbooks/l1-reorg-recovery.md). Complete validium-state
+rollback/reconstruction is not implemented, so this remains a blocker before
+real funds.
+
+Local Anvil may explicitly use zero confirmations. Public-chain dev/test policy
+is at least 64 confirmations with the same configured minimum. A block-count
+heuristic and one RPC provider still do not replace a reviewed finalized-tag,
+provider-quorum, or receipt-proof policy.
 
 ### Normal withdrawals
 
@@ -200,6 +225,9 @@ authority.
   replacement operator.
 - Decide whether escape mode is permanent for a deployment or has an explicit,
   safe resumption mechanism.
+- Implement and drill complete state recovery after a canonical L1 checkpoint
+  mismatch, plus production finality/provider monitoring; fail-stop detection
+  alone is not a real-funds recovery mechanism.
 
 ## See also
 

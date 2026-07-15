@@ -332,6 +332,15 @@ run_bridge_indexer() {
         --once
 }
 run_bridge_indexer 2>&1 | tee "$WORK/bridge-indexer-deposit.log"
+python3 - "$BRIDGE_CURSOR" <<'PY'
+import json, sys
+state = json.load(open(sys.argv[1], encoding="utf-8"))
+assert state["schema_version"] == 2, state
+assert state["checkpoint"]["block_number"] + 1 == state["next_from"], state
+assert len(state["checkpoint"]["block_hash_hex"]) == 64, state
+assert "reorg_incident" not in state, state
+PY
+pass "L1 indexer persisted a deployment-bound canonical block checkpoint"
 http_json GET "/v1/accounts/$BRIDGE_ACCOUNT" "$WORK/bridge-funded-account.json" 200
 http_json GET /v1/bridge/status "$WORK/bridge-status.json" 200
 python3 - "$WORK/bridge-funded-account.json" "$WORK/bridge-status.json" <<'PY'

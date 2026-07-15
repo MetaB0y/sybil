@@ -62,6 +62,13 @@ account balance exactly once, and retires the leaf in the same committed block.
 `refunded` is exposed as a withdrawal status while the terminal event is
 pending; replays after pruning are accepted as no-ops.
 
+The indexer now persists the canonical hash of the last processed L1 block
+beside that cursor and validates it before making any later API call. Deposit
+and withdrawal logs are also bound to canonical block hashes. A mismatch is
+durably fail-stop latched in the cursor; the API has no automatic inverse for
+events already applied, so operators must freeze trading/contracts and follow
+the [L1 reorg recovery runbook](../../runbooks/l1-reorg-recovery.md).
+
 `GET /v1/accounts/{id}/withdrawals` is the only account withdrawal-detail read
 and is owner-scoped. The formerly enumerable
 `GET /v1/bridge/withdrawals/{id}` route is removed.
