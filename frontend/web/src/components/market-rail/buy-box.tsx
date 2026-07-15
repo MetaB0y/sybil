@@ -305,6 +305,7 @@ export function BuyBox({
         restingOrders: openOrders ?? [],
         marketId: outcome.marketId,
         side: orderSide,
+        limitPriceNanos: limitPriceNanosPreview,
       })
     : null;
   const completeSetBlocked =

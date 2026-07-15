@@ -137,12 +137,13 @@ export function DegenRail({
 
   const connected = session !== null;
   const orderSide: OrderSideName = side === "YES" ? "BuyYes" : "BuyNo";
-  const completeSetBlockers = connected
+  const completeSetBlockers = connected && built?.ok
     ? findCompleteSetBlockers({
         groupMarkets,
         restingOrders: openOrders ?? [],
         marketId: selected.marketId,
         side: orderSide,
+        limitPriceNanos: built.order.limitPriceNanos,
       })
     : null;
   const completeSetBlocked =

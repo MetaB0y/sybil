@@ -132,10 +132,9 @@ fn price_in_band(price: f64, min: f64, max: f64) -> bool {
 
 /// Select a bounded, rotating slice of quotes for one block.
 ///
-/// The live API intentionally caps orders per submission. When the mirror
-/// tracks hundreds of markets, submitting every quote every block is both too
-/// expensive and rejected by that guardrail. This preserves coverage by
-/// rotating the starting market each block.
+/// The default cap fits the current full catalog. Rotation remains the
+/// deterministic overflow behavior when an operator lowers the cap or the
+/// catalog grows beyond it.
 pub fn select_rotating_quotes(
     quote_inputs: &[QuoteInput],
     quote_config: &QuoteConfig,
@@ -148,7 +147,7 @@ pub fn select_rotating_quotes(
 
     let start = start_index % quote_inputs.len();
     let mut orders = Vec::new();
-    let mut group_coverage = HashMap::<String, GroupQuoteCoverage>::new();
+    let mut group_quotes = HashMap::<String, GroupQuoteState>::new();
     let mut considered = 0;
 
     for offset in 0..quote_inputs.len() {
@@ -172,10 +171,10 @@ pub fn select_rotating_quotes(
             if orders.len() >= max_orders {
                 break;
             }
-            if would_complete_group_coverage(input, &order, &group_coverage) {
+            if would_self_cross_group(input, &order, &group_quotes) {
                 continue;
             }
-            record_group_coverage(input, &order, &mut group_coverage);
+            record_group_quote(input, &order, &mut group_quotes);
             orders.push(order);
         }
 
@@ -188,16 +187,16 @@ pub fn select_rotating_quotes(
     (orders, next_index)
 }
 
-#[derive(Default)]
-struct GroupQuoteCoverage {
-    buy_yes_markets: std::collections::HashSet<u32>,
-    buy_no_markets: std::collections::HashSet<u32>,
+#[derive(Clone, Default)]
+struct GroupQuoteState {
+    yes_limits: HashMap<u32, u64>,
+    no_limits: HashMap<u32, u64>,
 }
 
-fn would_complete_group_coverage(
+fn would_self_cross_group(
     input: &QuoteInput,
     order: &OrderSpec,
-    coverage: &HashMap<String, GroupQuoteCoverage>,
+    groups: &HashMap<String, GroupQuoteState>,
 ) -> bool {
     let Some(group_key) = &input.group_key else {
         return false;
@@ -206,49 +205,69 @@ fn would_complete_group_coverage(
     if group_size < 2 {
         return false;
     }
-    let Some(existing) = coverage.get(group_key) else {
-        return false;
-    };
+    let mut candidate = groups.get(group_key).cloned().unwrap_or_default();
+    record_limit(&mut candidate, order);
+
     match order {
         OrderSpec::BuyYes { market_id, .. } => {
-            existing.buy_no_markets.contains(market_id)
-                || existing.buy_yes_markets.len()
-                    + usize::from(!existing.buy_yes_markets.contains(market_id))
-                    >= group_size
+            complementary_limits_cross(&candidate, *market_id)
+                || (candidate.yes_limits.len() >= group_size
+                    && candidate
+                        .yes_limits
+                        .values()
+                        .copied()
+                        .map(u128::from)
+                        .sum::<u128>()
+                        >= u128::from(NANOS_PER_DOLLAR))
         }
-        OrderSpec::BuyNo { market_id, .. } => {
-            existing.buy_yes_markets.contains(market_id)
-                || existing
-                    .buy_no_markets
-                    .iter()
-                    .any(|existing_market_id| existing_market_id != market_id)
-        }
+        OrderSpec::BuyNo { market_id, .. } => complementary_limits_cross(&candidate, *market_id),
         _ => false,
     }
 }
 
-fn record_group_coverage(
+fn record_group_quote(
     input: &QuoteInput,
     order: &OrderSpec,
-    coverage: &mut HashMap<String, GroupQuoteCoverage>,
+    groups: &mut HashMap<String, GroupQuoteState>,
 ) {
     let Some(group_key) = &input.group_key else {
         return;
     };
-    let entry = coverage
-        .entry(group_key.clone())
-        .or_insert_with(|| GroupQuoteCoverage {
-            ..GroupQuoteCoverage::default()
-        });
+    record_limit(groups.entry(group_key.clone()).or_default(), order);
+}
+
+fn record_limit(state: &mut GroupQuoteState, order: &OrderSpec) {
     match order {
-        OrderSpec::BuyYes { market_id, .. } => {
-            entry.buy_yes_markets.insert(*market_id);
+        OrderSpec::BuyYes {
+            market_id,
+            limit_price_nanos,
+            ..
+        } => {
+            state
+                .yes_limits
+                .entry(*market_id)
+                .and_modify(|current| *current = (*current).max(*limit_price_nanos))
+                .or_insert(*limit_price_nanos);
         }
-        OrderSpec::BuyNo { market_id, .. } => {
-            entry.buy_no_markets.insert(*market_id);
+        OrderSpec::BuyNo {
+            market_id,
+            limit_price_nanos,
+            ..
+        } => {
+            state
+                .no_limits
+                .entry(*market_id)
+                .and_modify(|current| *current = (*current).max(*limit_price_nanos))
+                .or_insert(*limit_price_nanos);
         }
         _ => {}
     }
+}
+
+fn complementary_limits_cross(state: &GroupQuoteState, market_id: u32) -> bool {
+    let yes = state.yes_limits.get(&market_id).copied().unwrap_or(0);
+    let no = state.no_limits.get(&market_id).copied().unwrap_or(0);
+    u128::from(yes) + u128::from(no) >= u128::from(NANOS_PER_DOLLAR)
 }
 
 // --------------------------------------------------------------------------- //

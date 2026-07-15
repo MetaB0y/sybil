@@ -1,25 +1,41 @@
 use super::*;
+use matching_engine::NANOS_PER_DOLLAR;
 
-/// Per-order self-trade prevention (STP) for market groups.
+/// Per-order self-trade prevention (STP) for binary and grouped markets.
 ///
-/// Tracks buy-side outcome coverage per account across a batch. When an order
-/// would complete coverage of all N outcomes in a group (enabling minting
-/// self-trade), that specific order is rejected. Earlier orders are kept.
+/// Tracks buy-side outcome coverage and limits per account across a batch.
+/// Coverage alone is not a self-trade: non-crossing bids can span every
+/// outcome without filling against one another. An order is rejected only
+/// when the account's limits can fund a binary complete set, or when it
+/// completes group coverage with limits that can fund the group mint.
 ///
 /// Applied to ALL accounts, not just MMs — same principle as traditional
 /// exchange STP (CME, Nasdaq, etc.) but adapted for batch auctions.
 ///
-/// Coverage rules:
-/// - BuyYes on market_i → covers outcome i
-/// - BuyNo on market_i → covers all outcomes EXCEPT i (in the group)
-/// - SellYes/SellNo → does NOT contribute (reduces exposure)
+/// Crossing rules:
+/// - BuyYes + BuyNo on one binary market must sum to at least $1.
+/// - BuyYes on every outcome in a group must sum to at least $1.
+/// - SellYes/SellNo do not contribute; complete-set redemption is legitimate.
 pub(super) struct GroupCoverageTracker {
-    /// market_id → (group_index, group_size)
-    market_to_group: HashMap<MarketId, (usize, usize)>,
-    /// (account_id, group_index) → set of covered outcome market_ids
-    coverage: HashMap<(AccountId, usize), HashSet<MarketId>>,
+    /// market_id → group_index
+    market_to_group: HashMap<MarketId, usize>,
+    /// (account_id, group_index) → highest accepted YES limit per outcome.
+    group_yes_limits: HashMap<(AccountId, usize), GroupBidState>,
+    /// Complementary buy limits apply to every binary market, grouped or not.
+    binary_limits: HashMap<(AccountId, MarketId), BinaryBidState>,
     /// group_index → list of market_ids in the group
     group_markets: Vec<Vec<MarketId>>,
+}
+
+#[derive(Clone, Default)]
+struct GroupBidState {
+    yes_limits: HashMap<MarketId, u64>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct BinaryBidState {
+    yes_limit: u64,
+    no_limit: u64,
 }
 
 impl GroupCoverageTracker {
@@ -28,54 +44,58 @@ impl GroupCoverageTracker {
         let mut group_markets = Vec::with_capacity(market_groups.len());
         for (gi, group) in market_groups.iter().enumerate() {
             let markets: Vec<MarketId> = group.markets.clone();
-            let n = markets.len();
             for &mid in &markets {
-                market_to_group.insert(mid, (gi, n));
+                market_to_group.insert(mid, gi);
             }
             group_markets.push(markets);
         }
         Self {
             market_to_group,
-            coverage: HashMap::new(),
+            group_yes_limits: HashMap::new(),
+            binary_limits: HashMap::new(),
             group_markets,
         }
     }
 
-    /// Check if accepting this order would complete a group set for the account.
-    /// Returns true if the order should be REJECTED (would complete self-trade).
+    /// Check whether accepting this order would create a price-crossing
+    /// complete set for the account.
     pub(super) fn would_complete_set(&self, account_id: AccountId, order: &Order) -> bool {
         if order.num_markets != 1 || order.num_states != 2 {
             return false;
         }
         let market = order.markets[0];
-        let Some(&(gi, n)) = self.market_to_group.get(&market) else {
-            return false;
-        };
-
         let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
-
-        // Compute what this order would add to coverage
-        let mut new_coverage: HashSet<MarketId> = HashSet::new();
+        let mut binary = self
+            .binary_limits
+            .get(&(account_id, market))
+            .copied()
+            .unwrap_or_default();
         if yes_pay > 0 && no_pay == 0 {
-            new_coverage.insert(market);
+            binary.yes_limit = binary.yes_limit.max(order.limit_price.0);
         } else if yes_pay == 0 && no_pay > 0 {
-            for &gm in &self.group_markets[gi] {
-                if gm != market {
-                    new_coverage.insert(gm);
-                }
-            }
+            binary.no_limit = binary.no_limit.max(order.limit_price.0);
         } else {
             return false; // Sell or mixed — not a coverage concern
         }
+        if binary_limits_cross(binary) {
+            return true;
+        }
 
-        let key = (account_id, gi);
-        let existing = self.coverage.get(&key);
-        let total = match existing {
-            Some(set) => set.union(&new_coverage).count(),
-            None => new_coverage.len(),
+        let Some(&gi) = self.market_to_group.get(&market) else {
+            return false;
         };
+        if yes_pay <= 0 || no_pay != 0 {
+            return false;
+        }
 
-        total >= n
+        let mut candidate = self
+            .group_yes_limits
+            .get(&(account_id, gi))
+            .cloned()
+            .unwrap_or_default();
+        record_highest_limit(&mut candidate.yes_limits, market, order.limit_price.0);
+
+        complete_set_limits_cross(&candidate, &self.group_markets[gi])
     }
 
     /// Record that this order was accepted — update coverage for the account.
@@ -84,24 +104,53 @@ impl GroupCoverageTracker {
             return;
         }
         let market = order.markets[0];
-        let Some(&(gi, _)) = self.market_to_group.get(&market) else {
+        let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
+        let binary = self.binary_limits.entry((account_id, market)).or_default();
+        if yes_pay > 0 && no_pay == 0 {
+            binary.yes_limit = binary.yes_limit.max(order.limit_price.0);
+        } else if yes_pay == 0 && no_pay > 0 {
+            binary.no_limit = binary.no_limit.max(order.limit_price.0);
+        } else {
+            return;
+        }
+
+        let Some(&gi) = self.market_to_group.get(&market) else {
             return;
         };
-
-        let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
-        let key = (account_id, gi);
-        let set = self.coverage.entry(key).or_default();
-
         if yes_pay > 0 && no_pay == 0 {
-            set.insert(market);
-        } else if yes_pay == 0 && no_pay > 0 {
-            for &gm in &self.group_markets[gi] {
-                if gm != market {
-                    set.insert(gm);
-                }
-            }
+            let state = self.group_yes_limits.entry((account_id, gi)).or_default();
+            record_highest_limit(&mut state.yes_limits, market, order.limit_price.0);
         }
     }
+}
+
+fn binary_limits_cross(state: BinaryBidState) -> bool {
+    u128::from(state.yes_limit) + u128::from(state.no_limit) >= u128::from(NANOS_PER_DOLLAR)
+}
+
+fn record_highest_limit(limits: &mut HashMap<MarketId, u64>, market: MarketId, limit: u64) {
+    limits
+        .entry(market)
+        .and_modify(|current| *current = (*current).max(limit))
+        .or_insert(limit);
+}
+
+/// Return true when the accepted bids can fund a risk-free complete set.
+///
+/// Binary crossing is handled before group coverage. Group minting crosses
+/// when every group outcome has a YES bid and their limits sum to at least $1.
+/// Other coverage combinations remain exposed to at least one outcome and are
+/// not self-trades merely because their payoff union spans the group.
+fn complete_set_limits_cross(state: &GroupBidState, group_markets: &[MarketId]) -> bool {
+    let Some(total) = group_markets.iter().try_fold(0_u128, |total, market| {
+        state
+            .yes_limits
+            .get(market)
+            .map(|limit| total + u128::from(*limit))
+    }) else {
+        return false;
+    };
+    total >= u128::from(NANOS_PER_DOLLAR)
 }
 
 impl BlockSequencer {
@@ -257,8 +306,8 @@ impl BlockSequencer {
 
     /// Seed an STP tracker with every resting/pending-bundle order belonging
     /// to `account_id`. Used at admit time so a single order can't complete a
-    /// coverage set against the account's prior-block resting orders or against
-    /// bundles still staged in `pending_bundles`.
+    /// price-crossing complete set against the account's prior-block resting
+    /// orders or against bundles still staged in `pending_bundles`.
     pub(super) fn seed_group_coverage_for_account(
         &self,
         stp: &mut GroupCoverageTracker,
