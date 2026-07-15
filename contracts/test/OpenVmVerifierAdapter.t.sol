@@ -28,6 +28,21 @@ contract OpenVmVerifierAdapterTest {
         adapter = new OpenVmVerifierAdapter(halo2Verifier, APP_EXE_COMMIT, APP_VM_COMMIT);
     }
 
+    function testConstructorRejectsZeroVerifierAndCommits() public {
+        _assertConstructorReverts(
+            IOpenVmHalo2Verifier(address(0)),
+            APP_EXE_COMMIT,
+            APP_VM_COMMIT,
+            OpenVmVerifierAdapter.ZeroAddress.selector
+        );
+        _assertConstructorReverts(
+            halo2Verifier, bytes32(0), APP_VM_COMMIT, OpenVmVerifierAdapter.ZeroCommit.selector
+        );
+        _assertConstructorReverts(
+            halo2Verifier, APP_EXE_COMMIT, bytes32(0), OpenVmVerifierAdapter.ZeroCommit.selector
+        );
+    }
+
     function testVerifiesPinnedSybilOpenVmProof() public {
         bytes memory publicValues = _publicValues(PUBLIC_INPUT_HASH);
         bytes memory proofData = hex"01020304";
@@ -100,6 +115,27 @@ contract OpenVmVerifierAdapterTest {
     ) internal pure returns (bytes memory publicValues) {
         publicValues = new bytes(32);
         _writePublicValue(publicValues, 0, firstWord);
+    }
+
+    function _assertConstructorReverts(
+        IOpenVmHalo2Verifier verifier,
+        bytes32 appExeCommit,
+        bytes32 appVmCommit,
+        bytes4 expectedSelector
+    ) private {
+        try new OpenVmVerifierAdapter(verifier, appExeCommit, appVmCommit) returns (
+            OpenVmVerifierAdapter unexpected
+        ) {
+            unexpected;
+            revert("invalid adapter deployed");
+        } catch (bytes memory revertData) {
+            require(revertData.length >= 4, "revert data missing selector");
+            bytes4 actualSelector;
+            assembly {
+                actualSelector := mload(add(revertData, 32))
+            }
+            require(actualSelector == expectedSelector, "unexpected revert selector");
+        }
     }
 
     function _writePublicValue(

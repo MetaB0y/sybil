@@ -19,9 +19,14 @@ forge build
 forge test
 ```
 
+Money-path branch coverage is a separate filtered gate. It excludes tests,
+mocks, deployment scripts, and the unsafe development adapter, then enforces
+per-contract plus aggregate floors documented in [`COVERAGE.md`](COVERAGE.md).
+
 From the repository root:
 
 ```bash
 just contracts-test
+just contracts-coverage
 just contracts-anvil-unsafe-smoke
 ```

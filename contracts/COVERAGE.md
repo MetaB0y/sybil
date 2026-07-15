@@ -1,37 +1,68 @@
-# Contract coverage baseline
+# Contract money-path coverage gate
 
-Report-only baseline captured on 2026-07-10 with `forge coverage` using Forge
-1.6.0-v1.7.0 (`f83bad9`). Foundry disabled optimizer settings and `viaIR` for
-the coverage build. All 34 tests passed.
+`just contracts-coverage` runs Foundry coverage, filters out scripts, tests,
+mocks, and the explicitly unsafe development adapter, then enforces branch
+floors on the four production contracts that accept proofs, advance roots,
+move collateral, or control those operations. The same gate runs in the
+`Contracts` CI job and in `just check-all`.
 
-| File | Lines | Statements | Branches | Functions |
+## Current measured baseline
+
+Captured on 2026-07-15 with Forge 1.6.0-v1.7.0 (`f83bad9`). Foundry disables
+optimizer settings and `viaIR` for coverage. All 77 tests passed.
+
+| Production file | Lines | Statements | Branches | Functions |
 |---|---:|---:|---:|---:|
-| `script/UnsafeAnvilSmoke.s.sol` | 0.00% (0/26) | 0.00% (0/33) | 0.00% (0/8) | 0.00% (0/2) |
-| `src/OpenVmVerifierAdapter.sol` | 100.00% (26/26) | 92.86% (26/28) | 77.78% (7/9) | 100.00% (4/4) |
-| `src/SybilSettlement.sol` | 84.85% (56/66) | 77.03% (57/74) | 29.41% (5/17) | 81.82% (9/11) |
-| `src/SybilVault.sol` | 82.20% (97/118) | 76.34% (100/131) | 37.93% (11/29) | 78.95% (15/19) |
-| `src/access/SybilAccessControl.sol` | 79.17% (38/48) | 70.00% (35/50) | 22.22% (2/9) | 72.73% (8/11) |
-| `src/dev/UnsafeAcceptAllVerifierAdapter.sol` | 100.00% (4/4) | 100.00% (2/2) | 100.00% (0/0) | 100.00% (2/2) |
-| `test/SybilGoldenVectors.t.sol` | 100.00% (13/13) | 100.00% (13/13) | 100.00% (0/0) | 100.00% (2/2) |
-| `test/mocks/MockOpenVmHalo2Verifier.sol` | 100.00% (4/4) | 100.00% (2/2) | 100.00% (1/1) | 100.00% (2/2) |
-| `test/mocks/MockOpenVmVerifierAdapter.sol` | 100.00% (4/4) | 100.00% (2/2) | 100.00% (0/0) | 100.00% (2/2) |
-| `test/mocks/MockUSDC.sol` | 95.65% (22/23) | 94.44% (17/18) | 40.00% (2/5) | 100.00% (5/5) |
-| **Total** | **79.52% (264/332)** | **71.95% (254/353)** | **35.90% (28/78)** | **81.67% (49/60)** |
+| `src/OpenVmVerifierAdapter.sol` | 100.00% (26/26) | 100.00% (28/28) | 100.00% (9/9) | 100.00% (4/4) |
+| `src/SybilSettlement.sol` | 95.45% (63/66) | 97.30% (72/74) | 100.00% (17/17) | 90.91% (10/11) |
+| `src/SybilVault.sol` | 100.00% (157/157) | 100.00% (180/180) | 100.00% (43/43) | 100.00% (23/23) |
+| `src/access/SybilAccessControl.sol` | 95.83% (46/48) | 94.00% (47/50) | 88.89% (8/9) | 90.91% (10/11) |
+| **Filtered total** | **98.32% (292/297)** | **98.49% (327/332)** | **98.72% (77/78)** | **95.92% (47/49)** |
 
-## Largest settlement/vault money-path gaps
+The only currently uncredited production branch is the false arm of the
+inherited `onlyAdmin` modifier. Exact-selector tests invoke that arm on both
+settlement and vault, but this Foundry source-map build does not attribute the
+hit to `SybilAccessControl.sol`.
 
-- Settlement branch coverage is only 29.41%; root submission still lacks a
-  systematic rejection matrix for broken height/state-root chaining, zero or
-  duplicate new roots, an unset vault, and an unavailable zero deposit root.
-- Deposit tests cover successful custody and pausing, but do not exercise a
-  collateral token returning `false` from `transferFrom`; that `TransferFailed`
-  branch is the deposit path's primary external-call failure.
-- Withdrawal request coverage does not form a full input-validation matrix for
-  zero amount, unsupported token, and unknown accepted state root before proof
-  verification.
-- Withdrawal finalization/cancellation does not comprehensively cover unknown,
-  already-finalized, and already-canceled records, or a token returning `false`
-  from the final payout transfer.
-- Escape/timelocked administration has broad happy-path coverage, but repeated
-  escape activation and the verifier/escape-timeout mutation branches remain
-  thinner than the withdrawal-delay path they can affect operationally.
+## Enforced floors
+
+| Production file | Branch floor |
+|---|---:|
+| `src/OpenVmVerifierAdapter.sol` | 85% |
+| `src/SybilSettlement.sol` | 90% |
+| `src/SybilVault.sol` | 90% |
+| `src/access/SybilAccessControl.sol` | 75% |
+| **Aggregate** | **95%** |
+
+The per-file floors prevent a highly covered vault from hiding erosion in the
+smaller adapter or access-control boundary. The aggregate floor permits at
+most a very small amount of instrumentation drift from the current 77/78 while
+still failing broad regression. Floors deliberately retain headroom instead of
+turning compiler/source-map details into protocol requirements; branch coverage
+is a spotlight, not a substitute for the named behavior tests.
+
+## Named money-path behavior
+
+The focused failure suite now pins:
+
+- settlement rejection for an unset vault; broken previous height/root;
+  non-forward height; zero/duplicate roots; deposit count/root mismatch,
+  regression, or unavailable zero roots; pause; and invalid proofs;
+- deposit zero-amount, pause/escape shutdown, and ERC-20 `transferFrom`
+  returning `false` without moving custody or advancing the accumulator;
+- withdrawal claim-kind, amount, token, accepted-root, proof, and nullifier
+  validation before queueing;
+- early, unknown, canceled, finalized, and replayed withdrawal operations,
+  including payout `false` rollback followed by a successful retry;
+- frozen-root/height/nullifier escape validation, repeated activation,
+  invalid-proof and payout-failure rollback, double-claim prevention, and the
+  deliberate pause bypass;
+- zero deployment/rotation dependencies, non-admin calls, unknown/duplicate/
+  early/replayed timelock operations, verifier/vault/delay/timeout mutations,
+  admin transfer, and timestamp overflow.
+
+Scripts are deployment plumbing rather than contract state machines and remain
+outside the floor. `src/dev/UnsafeAcceptAllVerifierAdapter.sol` is deliberately
+excluded because it is Anvil-only and accepting every proof is its documented
+unsafe behavior. Golden-vector parity and Anvil deployment smoke remain
+separate gates.

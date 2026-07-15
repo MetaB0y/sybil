@@ -414,7 +414,7 @@ store-tools-check:
     bash -n scripts/store-backup.sh scripts/store-restore-drill.sh
 
 # Complete local/CI-equivalent gate, including every standalone Rust workspace.
-check-all: check-fast check-features test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check monitoring-check contracts-fmt-check contracts-build contracts-test
+check-all: check-fast check-features test standalone-check check-consensus docs-check store-tools-check arena-check frontend-check monitoring-check contracts-fmt-check contracts-build contracts-test contracts-coverage
     @echo "All checks passed!"
 
 # Run benchmarks if any
@@ -821,6 +821,11 @@ contracts-build:
 # Run Solidity tests
 contracts-test:
     cd contracts && forge test
+
+# Enforce filtered per-contract and aggregate branch floors on the production
+# verifier adapter, settlement, vault, and shared access-control boundary.
+contracts-coverage:
+    ./scripts/check-contract-coverage.sh
 
 # Run a local Anvil bridge smoke with the explicit unsafe accept-all verifier.
 # Start anvil separately, or point rpc_url at an existing Anvil-compatible RPC.

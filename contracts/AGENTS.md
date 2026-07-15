@@ -11,6 +11,7 @@ just contracts-fmt
 just contracts-fmt-check
 just contracts-build
 just contracts-test
+just contracts-coverage
 ```
 
 Or from this directory:
