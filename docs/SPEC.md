@@ -226,7 +226,7 @@ missing service/history tokens, missing history URL, or missing persistent
 sequencer data directory. The current public devnet is intentionally not the
 production trust posture.
 
-Before real value, operators must deploy the pinned real verifier, eliminate mock/unsafe acceptance, retain DA payloads, exercise backup/import/withdrawal/escape drills, configure L1 confirmation depth and monitoring, and protect admin/feed/verifier keys under the chosen governance policy. See [[Threat Model]] and [[Deployment Profiles]].
+Before real value, operators must deploy the pinned real verifier, eliminate mock/unsafe acceptance, retain DA payloads, exercise backup/import/withdrawal/escape drills, configure L1 finality/checkpoint monitoring and deep-reorg state recovery, and protect admin/feed/verifier keys under the chosen governance policy. See [[Threat Model]], [[L1 Settlement and Vault]], and [[Deployment Profiles]].
 
 The current permissionless API is also not economically resource-bounded:
 unlimited demo accounts, unbounded API-key records, zero-reservation orders,

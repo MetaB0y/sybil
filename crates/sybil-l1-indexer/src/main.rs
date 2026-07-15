@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use alloy::primitives::{Address, B256, Bytes};
 use alloy::providers::{DynProvider, Provider, ProviderBuilder};
-use alloy::rpc::types::{Filter, Log as EthLog, TransactionRequest};
+use alloy::rpc::types::{BlockNumberOrTag, Filter, Log as EthLog, TransactionRequest};
 use alloy::sol_types::SolCall;
 use clap::Parser;
 #[cfg(test)]
@@ -28,7 +28,7 @@ use tokio::time::sleep;
 mod cursor;
 mod events;
 
-use cursor::{load_cursor, save_cursor};
+use cursor::{BlockCheckpoint, CursorState, ReorgIncident, load_cursor, save_cursor};
 use events::{
     IndexedDeposit, indexed_deposit_from_log, indexed_withdrawal_event_from_log, sort_deposits,
     sort_withdrawal_events, withdrawal_event_request,
@@ -40,14 +40,17 @@ use events::{
 /// reorg shallower than this window is absorbed by re-scanning before anything
 /// reaches the sequencer. `2` is chosen for local Anvil, where blocks are
 /// effectively final on mine and a deep reorg cannot occur; it keeps the dev
-/// loop responsive without waiting. Production against a public chain MUST raise
-/// this to something like 12-32 (e.g. `SYBIL_L1_CONFIRMATIONS=32`) because
-/// crediting a deposit that a reorg later drops or replaces is unrecoverable
-/// (`ingest_l1_deposit` mutates the deposit cursor/root irreversibly).
+/// loop responsive without waiting. Public-chain operation MUST raise this to
+/// the repository policy of 64 (and set the matching minimum) because crediting
+/// an event that a deeper reorg later drops or replaces has no automatic inverse
+/// transition.
 const DEFAULT_CONFIRMATIONS: u64 = 2;
 /// Fail-closed minimum when operators omit `SYBIL_L1_MIN_CONFIRMATIONS`.
 /// Local development can still opt out explicitly with `0`.
 const DEFAULT_MIN_CONFIRMATIONS: u64 = 2;
+/// Repository operating policy for public PoS chains. This is deliberately
+/// conservative and still does not replace finalized-tag/receipt-proof trust.
+const RECOMMENDED_PUBLIC_CONFIRMATIONS: u64 = 64;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -74,14 +77,14 @@ struct Args {
     #[arg(long, env = "SYBIL_L1_START_BLOCK", default_value_t = 0)]
     start_block: u64,
     /// L1 confirmation depth: only credit deposits at or below
-    /// `latest - confirmations`. Defaults to a dev-Anvil value; use 12–32 for
-    /// public/mainnet-like chains. See `DEFAULT_CONFIRMATIONS`.
+    /// `latest - confirmations`. Defaults to a dev-Anvil value; use at least 64
+    /// for public/mainnet-like chains. See
+    /// `DEFAULT_CONFIRMATIONS`.
     #[arg(long, env = "SYBIL_L1_CONFIRMATIONS", default_value_t = DEFAULT_CONFIRMATIONS)]
     confirmations: u64,
     /// Minimum L1 confirmation depth enforced at startup. Defaults fail-closed
     /// at 2; explicit `0` disables the guard for local development. For
-    /// public/mainnet-like chains, configure a value in the recommended 12–32
-    /// range.
+    /// public/mainnet-like chains, configure at least 64.
     #[arg(
         long,
         env = "SYBIL_L1_MIN_CONFIRMATIONS",
@@ -99,10 +102,10 @@ struct Args {
     /// Poll interval in milliseconds.
     #[arg(long, env = "SYBIL_L1_POLL_MS", default_value_t = 1_000)]
     poll_ms: u64,
-    /// Optional path to persist the scan cursor (`next_from`) so restarts do not
-    /// rescan from `start_block`. Lightweight JSON state file; no DB.
+    /// Required path for the deployment-bound scan cursor, canonical block-hash
+    /// checkpoint, and durable deep-reorg fail-stop latch.
     #[arg(long, env = "SYBIL_L1_CURSOR_PATH")]
-    cursor_path: Option<PathBuf>,
+    cursor_path: PathBuf,
     /// Scan once and exit.
     #[arg(long, env = "SYBIL_L1_INDEX_ONCE", default_value_t = false)]
     once: bool,
@@ -162,6 +165,39 @@ enum IndexerError {
         arg_chain: u64,
     },
     #[error(
+        "cursor state at {path} uses schema {stored}, expected {expected}; refusing an \
+         uncheckpointed or unknown recovery state"
+    )]
+    CursorSchemaMismatch {
+        path: String,
+        stored: u32,
+        expected: u32,
+    },
+    #[error("cursor checkpoint at {path} is invalid: {message}")]
+    CursorCheckpointInvalid { path: String, message: String },
+    #[error(
+        "cursor state at {path} is fail-stop latched after {context} mismatch at L1 block \
+         {block_number}: expected {expected}, observed {observed}; preserve the cursor and \
+         sequencer store and follow the L1 reorg recovery runbook"
+    )]
+    ReorgIncidentLatched {
+        path: String,
+        context: String,
+        block_number: u64,
+        expected: String,
+        observed: String,
+    },
+    #[error(
+        "canonical L1 block hash mismatch during {context} at block {block_number}: expected \
+         {expected}, observed {observed}; refusing further bridge input"
+    )]
+    CanonicalBlockHashMismatch {
+        context: &'static str,
+        block_number: u64,
+        expected: String,
+        observed: String,
+    },
+    #[error(
         "unsafe L1 confirmation configuration: confirmations={confirmations} is below \
          min_confirmations={min_confirmations}; deep reorgs can mis-credit already-processed blocks"
     )]
@@ -171,8 +207,8 @@ enum IndexerError {
     },
     #[error(
         "configured start block {start_block} is ahead of persisted cursor {persisted_cursor}; \
-         refusing to skip unprocessed L1 blocks (to intentionally re-point at a new \
-         deployment, delete the cursor file at SYBIL_L1_CURSOR_PATH / --cursor-path)"
+         refusing to skip unprocessed L1 blocks (preserve the cursor; a new cursor path is \
+         allowed only under the documented deployment/reorg recovery procedure)"
     )]
     StartBlockAheadOfCursor {
         start_block: u64,
@@ -182,13 +218,16 @@ enum IndexerError {
 
 impl IndexerError {
     /// Fatal errors must stop the process rather than being retried on the next
-    /// poll: a detected reorg (`DepositRootMismatch`) or a misconfigured cursor
-    /// (`CursorConfigMismatch`) will not fix themselves, and continuing to poll
-    /// risks crediting deposits built on a divergent chain view.
+    /// poll. A canonical hash mismatch is also persisted as a fail-stop latch.
     fn is_fatal(&self) -> bool {
         matches!(
             self,
-            IndexerError::DepositRootMismatch { .. } | IndexerError::CursorConfigMismatch { .. }
+            IndexerError::DepositRootMismatch { .. }
+                | IndexerError::CursorConfigMismatch { .. }
+                | IndexerError::CursorSchemaMismatch { .. }
+                | IndexerError::CursorCheckpointInvalid { .. }
+                | IndexerError::ReorgIncidentLatched { .. }
+                | IndexerError::CanonicalBlockHashMismatch { .. }
         )
     }
 }
@@ -206,11 +245,12 @@ fn check_confirmation_safety(confirmations: u64, min_confirmations: u64) -> Resu
 }
 
 fn warn_if_low_confirmation_depth(confirmations: u64) {
-    if confirmations < 12 {
+    if confirmations < RECOMMENDED_PUBLIC_CONFIRMATIONS {
         tracing::warn!(
-            "L1 confirmation depth {} is below the recommended 12–32; deep reorgs can \
+            "L1 confirmation depth {} is below the public-chain policy of {}; deep reorgs can \
              mis-credit already-processed blocks",
-            confirmations
+            confirmations,
+            RECOMMENDED_PUBLIC_CONFIRMATIONS
         );
     }
 }
@@ -226,10 +266,41 @@ fn effective_scan_start(start_block: u64, persisted_cursor: Option<u64>) -> Resu
     }
 }
 
+fn persist_reorg_latch(
+    path: &std::path::Path,
+    next_from: u64,
+    vault_hex: &str,
+    chain_id: u64,
+    checkpoint: Option<BlockCheckpoint>,
+    error: &IndexerError,
+) -> Result<bool> {
+    let IndexerError::CanonicalBlockHashMismatch {
+        context,
+        block_number,
+        expected,
+        observed,
+    } = error
+    else {
+        return Ok(false);
+    };
+    let expected_hash = parse_hex_array::<32>(expected, "expected_block_hash")?;
+    let observed_hash = parse_hex_array::<32>(observed, "observed_block_hash")?;
+    let halted = CursorState::halted(
+        next_from,
+        vault_hex,
+        chain_id,
+        checkpoint,
+        ReorgIncident::new(context, *block_number, expected_hash, observed_hash),
+    );
+    save_cursor(path, &halted)?;
+    Ok(true)
+}
+
 /// L1 JSON-RPC surface the indexer depends on. Abstracted so tests can drive the
 /// reorg/confirmation logic without a network.
 trait L1Rpc {
     async fn block_number(&self) -> Result<u64>;
+    async fn block_hash(&self, block_number: u64) -> Result<Bytes32>;
     async fn deposit_logs(
         &self,
         vault: EthAddress,
@@ -277,6 +348,15 @@ struct HttpL1Rpc {
 impl L1Rpc for HttpL1Rpc {
     async fn block_number(&self) -> Result<u64> {
         Ok(self.provider.get_block_number().await?)
+    }
+
+    async fn block_hash(&self, block_number: u64) -> Result<Bytes32> {
+        let block = self
+            .provider
+            .get_block_by_number(BlockNumberOrTag::Number(block_number))
+            .await?
+            .ok_or(IndexerError::MissingRpcResult)?;
+        Ok(block.hash().into())
     }
 
     async fn deposit_logs(
@@ -390,17 +470,21 @@ async fn main() -> Result<()> {
         args.sybil_service_token.clone(),
     );
 
-    let persisted_cursor = match args.cursor_path.as_deref() {
-        Some(path) => load_cursor(path, &vault_hex, args.chain_id)?,
-        None => None,
-    };
-    let mut next_from = effective_scan_start(args.start_block, persisted_cursor)?;
-    match persisted_cursor {
-        Some(cursor) => tracing::info!(
+    let persisted_cursor = load_cursor(&args.cursor_path, &vault_hex, args.chain_id)?;
+    let mut next_from = effective_scan_start(
+        args.start_block,
+        persisted_cursor.as_ref().map(|state| state.next_from),
+    )?;
+    let mut checkpoint = persisted_cursor
+        .as_ref()
+        .and_then(|state| state.checkpoint.clone());
+    match persisted_cursor.as_ref() {
+        Some(state) => tracing::info!(
             effective_start = next_from,
-            persisted_cursor = cursor,
+            persisted_cursor = state.next_from,
+            checkpoint_block = state.checkpoint.as_ref().map(|value| value.block_number),
             configured_start = args.start_block,
-            reason = "persisted cursor; resume without rescanning processed blocks",
+            reason = "persisted cursor and canonical checkpoint",
             "l1.indexer.scan_start"
         ),
         None => tracing::info!(
@@ -412,15 +496,52 @@ async fn main() -> Result<()> {
     }
 
     loop {
-        match run_once(&l1, &sybil, &args, vault_address, next_from).await {
-            Ok(Some(next)) => {
-                next_from = next;
-                if let Some(path) = args.cursor_path.as_deref() {
-                    save_cursor(path, next_from, &vault_hex, args.chain_id)?;
-                }
+        match run_once(
+            &l1,
+            &sybil,
+            &args,
+            vault_address,
+            next_from,
+            checkpoint.as_ref(),
+        )
+        .await
+        {
+            Ok(Some(progress)) => {
+                let state = CursorState::active(
+                    progress.next_from,
+                    &vault_hex,
+                    args.chain_id,
+                    progress.checkpoint.clone(),
+                );
+                save_cursor(&args.cursor_path, &state)?;
+                next_from = progress.next_from;
+                checkpoint = Some(progress.checkpoint);
             }
             Ok(None) => {}
             Err(error) => {
+                match persist_reorg_latch(
+                    &args.cursor_path,
+                    next_from,
+                    &vault_hex,
+                    args.chain_id,
+                    checkpoint.clone(),
+                    &error,
+                ) {
+                    Ok(true) => tracing::error!(
+                        path = %args.cursor_path.display(),
+                        "l1.indexer.reorg_latched"
+                    ),
+                    Ok(false) => {}
+                    Err(save_error) => {
+                        tracing::error!(
+                            reorg_error = %error,
+                            %save_error,
+                            path = %args.cursor_path.display(),
+                            "l1.indexer.reorg_latch_persist_failed"
+                        );
+                        return Err(save_error);
+                    }
+                }
                 if error.is_fatal() {
                     tracing::error!(%error, "l1.indexer.fatal");
                     return Err(error);
@@ -439,13 +560,31 @@ async fn main() -> Result<()> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ScanProgress {
+    next_from: u64,
+    checkpoint: BlockCheckpoint,
+}
+
 async fn run_once<L: L1Rpc, S: DepositSink>(
     l1: &L,
     sink: &S,
     args: &Args,
     vault_address: EthAddress,
     next_from: u64,
-) -> Result<Option<u64>> {
+    checkpoint: Option<&BlockCheckpoint>,
+) -> Result<Option<ScanProgress>> {
+    if let Some(checkpoint) = checkpoint {
+        let expected = checkpoint.block_hash(&args.cursor_path)?;
+        require_canonical_block_hash(
+            l1,
+            checkpoint.block_number,
+            expected,
+            "persisted scan checkpoint",
+        )
+        .await?;
+    }
+
     let latest = l1.block_number().await?;
     // Confirmation depth: never look past `latest - confirmations`. A reorg
     // shallower than this window is absorbed by re-scanning before any deposit
@@ -456,6 +595,7 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
     }
 
     let to = confirmed_tip.min(next_from.saturating_add(args.max_block_span.saturating_sub(1)));
+    let range_tip_hash = l1.block_hash(to).await?;
     let mut deposits = l1
         .deposit_logs(vault_address, next_from, to)
         .await?
@@ -470,6 +610,7 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
         .collect::<Result<Vec<_>>>()?;
     sort_deposits(&mut deposits);
     sort_withdrawal_events(&mut withdrawal_events);
+    validate_log_block_hashes(l1, &deposits, &withdrawal_events).await?;
 
     let status = sink.bridge_status().await?;
     let mut cursor = status.deposit_cursor;
@@ -566,15 +707,65 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
         );
     }
 
-    // The existing confirmed scan cursor is the bridge clock. Advance it only
-    // after every log in the range was accepted, so a failed refund/observation
-    // causes the whole range to be retried.
+    // Re-read the range-tip hash after applying every event. A mid-poll reorg is
+    // fatal: the cursor is not advanced and the incident is latched for manual
+    // recovery instead of replaying ambiguous already-acknowledged inputs.
+    require_canonical_block_hash(l1, to, range_tip_hash, "scan range stability").await?;
+
+    // The confirmed scan cursor is the bridge clock. Advance it only after
+    // every event and both hash checks succeeded, so a failed observation or
+    // unstable range cannot acquire an authoritative cursor checkpoint.
     sink.observe_l1_height(&ObserveL1HeightRequest {
         l1_block_height: to,
     })
     .await?;
 
-    Ok(Some(to.saturating_add(1)))
+    Ok(Some(ScanProgress {
+        next_from: to.saturating_add(1),
+        checkpoint: BlockCheckpoint::new(to, range_tip_hash),
+    }))
+}
+
+async fn require_canonical_block_hash<L: L1Rpc>(
+    l1: &L,
+    block_number: u64,
+    expected: Bytes32,
+    context: &'static str,
+) -> Result<()> {
+    let observed = l1.block_hash(block_number).await?;
+    if observed != expected {
+        return Err(IndexerError::CanonicalBlockHashMismatch {
+            context,
+            block_number,
+            expected: hex::encode(expected),
+            observed: hex::encode(observed),
+        });
+    }
+    Ok(())
+}
+
+async fn validate_log_block_hashes<L: L1Rpc>(
+    l1: &L,
+    deposits: &[IndexedDeposit],
+    withdrawals: &[events::IndexedWithdrawalEvent],
+) -> Result<()> {
+    for deposit in deposits {
+        validate_log_block_hash(l1, &deposit.log, "confirmed deposit log").await?;
+    }
+    for withdrawal in withdrawals {
+        validate_log_block_hash(l1, &withdrawal.log, "confirmed withdrawal log").await?;
+    }
+    Ok(())
+}
+
+async fn validate_log_block_hash<L: L1Rpc>(
+    l1: &L,
+    log: &EthLog,
+    context: &'static str,
+) -> Result<()> {
+    let block_number = log.block_number.ok_or(IndexerError::MissingRpcResult)?;
+    let expected: Bytes32 = log.block_hash.ok_or(IndexerError::MissingRpcResult)?.into();
+    require_canonical_block_hash(l1, block_number, expected, context).await
 }
 
 async fn resolve_bridge_account<S: DepositSink>(
@@ -599,12 +790,13 @@ async fn submit_deposit<S: DepositSink>(
     account_id: Option<u64>,
 ) -> Result<BridgeDepositResponse> {
     // TODO(SYB-188/SYB-178): this dev indexer trusts eth_getLogs from its RPC
-    // and does not prove receipt inclusion/finality. The confirmation-depth +
-    // on-chain root reconciliation added in SYB-190 defends against reorgs, but
-    // the sequencer still credits the first deposit it sees for an id and cannot
-    // reject a same-id replacement (`ingest_l1_deposit` only rejects
-    // non-sequential ids). Keep the API route service-gated until deposit
-    // soundness is proof-backed and the sequencer rejects same-id replacement.
+    // and does not prove receipt inclusion/finality. Confirmation depth,
+    // per-log canonical hashes, the persisted processed-prefix checkpoint, and
+    // on-chain root reconciliation detect ordinary/deep reorgs and fail closed.
+    // The sequencer still credits the first deposit it sees for an id and cannot
+    // independently reject a same-id replacement (`ingest_l1_deposit` only
+    // rejects non-sequential ids). Keep the API route service-gated until
+    // deposit soundness is proof-backed and that trust gap is closed.
     let body = SubmitL1DepositRequest {
         deposit_id: deposit.event.deposit_id,
         account_id,
@@ -686,6 +878,12 @@ mod tests {
 
     /// Build a well-formed DepositReceived EthLog for `deposit_id` at `block`
     /// with the given cumulative `root`.
+    fn test_block_hash(block: u64) -> Bytes32 {
+        let mut hash = [0x42; 32];
+        hash[24..].copy_from_slice(&block.to_be_bytes());
+        hash
+    }
+
     fn deposit_log(deposit_id: u64, block: u64, root: Bytes32, amount: u64) -> EthLog {
         let event = SybilVault::DepositReceived {
             depositId: deposit_id,
@@ -701,6 +899,7 @@ mod tests {
                 data: event.encode_log_data(),
             },
             block_number: Some(block),
+            block_hash: Some(B256::from(test_block_hash(block))),
             transaction_hash: Some(B256::from([0xaa; 32])),
             log_index: Some(1),
             ..Default::default()
@@ -724,6 +923,7 @@ mod tests {
                 data: event.encode_log_data(),
             },
             block_number: Some(block),
+            block_hash: Some(B256::from(test_block_hash(block))),
             transaction_hash: Some(B256::from([0xbb; 32])),
             log_index: Some(log_index),
             ..Default::default()
@@ -743,11 +943,24 @@ mod tests {
         onchain_roots: std::collections::HashMap<u64, Bytes32>,
         /// Records (count, block) each reconciliation queried.
         reconciled: Mutex<Vec<(u64, u64)>>,
+        /// Explicit canonical block hashes; unspecified blocks use
+        /// `test_block_hash(number)`.
+        block_hashes: std::collections::HashMap<u64, Bytes32>,
+        block_hash_queries: Mutex<Vec<u64>>,
     }
 
     impl L1Rpc for FakeL1 {
         async fn block_number(&self) -> Result<u64> {
             Ok(self.latest)
+        }
+
+        async fn block_hash(&self, block_number: u64) -> Result<Bytes32> {
+            self.block_hash_queries.lock().unwrap().push(block_number);
+            Ok(self
+                .block_hashes
+                .get(&block_number)
+                .copied()
+                .unwrap_or_else(|| test_block_hash(block_number)))
         }
 
         async fn deposit_logs(
@@ -938,7 +1151,7 @@ mod tests {
             min_confirmations: 0,
             max_block_span: 1_000,
             poll_ms: 0,
-            cursor_path: None,
+            cursor_path: PathBuf::from("test-l1-cursor.json"),
             once: true,
         }
     }
@@ -1002,12 +1215,12 @@ mod tests {
             .with_writer(logs.clone())
             .finish();
 
-        tracing::subscriber::with_default(subscriber, || warn_if_low_confirmation_depth(11));
+        tracing::subscriber::with_default(subscriber, || warn_if_low_confirmation_depth(63));
 
         let logs = logs.contents();
         assert!(logs.contains("WARN"));
         assert!(logs.contains(
-            "L1 confirmation depth 11 is below the recommended 12–32; deep reorgs can \
+            "L1 confirmation depth 63 is below the public-chain policy of 64; deep reorgs can \
              mis-credit already-processed blocks"
         ));
     }
@@ -1037,12 +1250,12 @@ mod tests {
         let sink = FakeSink::default();
         let args = test_args(2);
 
-        let next = run_once(&l1, &sink, &args, vault, 0).await.unwrap();
+        let next = run_once(&l1, &sink, &args, vault, 0, None).await.unwrap();
 
         assert_eq!(sink.submitted.lock().unwrap().as_slice(), &[1]);
         // Reconciliation happened at the confirmed height (latest - confirmations = 8).
         assert_eq!(l1.reconciled.lock().unwrap().as_slice(), &[(1, 8)]);
-        assert_eq!(next, Some(9));
+        assert_eq!(next.map(|progress| progress.next_from), Some(9));
     }
 
     #[tokio::test]
@@ -1057,13 +1270,13 @@ mod tests {
         let sink = FakeSink::default();
         let args = test_args(2);
 
-        let next = run_once(&l1, &sink, &args, vault, 0).await.unwrap();
+        let next = run_once(&l1, &sink, &args, vault, 0, None).await.unwrap();
 
         assert_eq!(
             sink.withdrawal_statuses.lock().unwrap().as_slice(),
             &[(hex::encode(nullifier), BridgeWithdrawalL1Status::Queued)]
         );
-        assert_eq!(next, Some(9));
+        assert_eq!(next.map(|progress| progress.next_from), Some(9));
     }
 
     #[tokio::test]
@@ -1082,7 +1295,7 @@ mod tests {
         let args = test_args(2);
         let next_from = 0;
 
-        let result = run_once(&l1, &sink, &args, vault, next_from).await;
+        let result = run_once(&l1, &sink, &args, vault, next_from, None).await;
 
         assert!(matches!(result, Err(IndexerError::MissingRpcResult)));
         assert_eq!(
@@ -1117,7 +1330,7 @@ mod tests {
             .with_writer(logs.clone())
             .finish();
 
-        let result = run_once(&l1, &sink, &args, vault, next_from)
+        let result = run_once(&l1, &sink, &args, vault, next_from, None)
             .with_subscriber(subscriber)
             .await;
 
@@ -1145,12 +1358,12 @@ mod tests {
         };
         let args = test_args(2);
 
-        let next = run_once(&l1, &sink, &args, vault, 0).await.unwrap();
+        let next = run_once(&l1, &sink, &args, vault, 0, None).await.unwrap();
 
         assert_eq!(sink.submitted.lock().unwrap().as_slice(), &[1]);
         assert!(sink.quarantine_submitted.load(Ordering::SeqCst));
         assert_eq!(
-            next,
+            next.map(|progress| progress.next_from),
             Some(9),
             "successful quarantine disposes the deposit and advances the scan cursor"
         );
@@ -1171,14 +1384,155 @@ mod tests {
         let sink = FakeSink::default();
         let args = test_args(2);
 
-        let next = run_once(&l1, &sink, &args, vault, 0).await.unwrap();
+        let next = run_once(&l1, &sink, &args, vault, 0, None).await.unwrap();
 
         assert_eq!(sink.submitted.lock().unwrap().as_slice(), &[1]);
         assert_eq!(
             sink.withdrawal_statuses.lock().unwrap().as_slice(),
             &[(hex::encode(nullifier), BridgeWithdrawalL1Status::Queued)]
         );
-        assert_eq!(next, Some(9));
+        assert_eq!(next.map(|progress| progress.next_from), Some(9));
+    }
+
+    #[tokio::test]
+    async fn deep_reorg_after_credited_deposit_halts_before_future_credit() {
+        let vault = [0x10; 20];
+        let first_root = [0x55; 32];
+        let first_l1 = FakeL1 {
+            latest: 10,
+            logs: vec![deposit_log(1, 2, first_root, 1_000_000)],
+            onchain_roots: [(1u64, first_root)].into_iter().collect(),
+            ..Default::default()
+        };
+        let sink = FakeSink::default();
+        let args = test_args(2);
+
+        let progress = run_once(&first_l1, &sink, &args, vault, 0, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(sink.submitted.lock().unwrap().as_slice(), &[1]);
+        assert_eq!(progress.checkpoint.block_number, 8);
+
+        let replacement_hash = [0x99; 32];
+        let second_root = [0x66; 32];
+        let reorged_l1 = FakeL1 {
+            latest: 12,
+            logs: vec![deposit_log(2, 9, second_root, 2_000_000)],
+            onchain_roots: [(2u64, second_root)].into_iter().collect(),
+            block_hashes: [(8u64, replacement_hash)].into_iter().collect(),
+            ..Default::default()
+        };
+
+        let error = run_once(
+            &reorged_l1,
+            &sink,
+            &args,
+            vault,
+            progress.next_from,
+            Some(&progress.checkpoint),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            IndexerError::CanonicalBlockHashMismatch {
+                context: "persisted scan checkpoint",
+                block_number: 8,
+                ..
+            }
+        ));
+        assert!(error.is_fatal());
+        assert_eq!(sink.submitted.lock().unwrap().as_slice(), &[1]);
+        assert!(reorged_l1.deposit_log_ranges.lock().unwrap().is_empty());
+        assert!(reorged_l1.withdrawal_log_ranges.lock().unwrap().is_empty());
+        assert_eq!(sink.observed_heights.lock().unwrap().as_slice(), &[8]);
+    }
+
+    #[tokio::test]
+    async fn deep_reorg_after_withdrawal_event_halts_before_future_lifecycle_input() {
+        let vault = [0x10; 20];
+        let first_nullifier = [0xab; 32];
+        let first_l1 = FakeL1 {
+            latest: 10,
+            withdrawal_logs: vec![withdrawal_queued_log(first_nullifier, 2, 3)],
+            ..Default::default()
+        };
+        let sink = FakeSink::default();
+        let args = test_args(2);
+
+        let progress = run_once(&first_l1, &sink, &args, vault, 0, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            sink.withdrawal_statuses.lock().unwrap().as_slice(),
+            &[(
+                hex::encode(first_nullifier),
+                BridgeWithdrawalL1Status::Queued
+            )]
+        );
+
+        let second_nullifier = [0xcd; 32];
+        let reorged_l1 = FakeL1 {
+            latest: 12,
+            withdrawal_logs: vec![withdrawal_queued_log(second_nullifier, 9, 1)],
+            block_hashes: [(8u64, [0x99; 32])].into_iter().collect(),
+            ..Default::default()
+        };
+
+        let error = run_once(
+            &reorged_l1,
+            &sink,
+            &args,
+            vault,
+            progress.next_from,
+            Some(&progress.checkpoint),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            IndexerError::CanonicalBlockHashMismatch {
+                context: "persisted scan checkpoint",
+                block_number: 8,
+                ..
+            }
+        ));
+        assert_eq!(sink.withdrawal_statuses.lock().unwrap().len(), 1);
+        assert!(reorged_l1.deposit_log_ranges.lock().unwrap().is_empty());
+        assert!(reorged_l1.withdrawal_log_ranges.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn withdrawal_log_hash_mismatch_halts_before_sequencer_submission() {
+        let vault = [0x10; 20];
+        let nullifier = [0xab; 32];
+        let l1 = FakeL1 {
+            latest: 10,
+            withdrawal_logs: vec![withdrawal_queued_log(nullifier, 2, 3)],
+            block_hashes: [(2u64, [0x77; 32])].into_iter().collect(),
+            ..Default::default()
+        };
+        let sink = FakeSink::default();
+        let args = test_args(2);
+
+        let error = run_once(&l1, &sink, &args, vault, 0, None)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            IndexerError::CanonicalBlockHashMismatch {
+                context: "confirmed withdrawal log",
+                block_number: 2,
+                ..
+            }
+        ));
+        assert!(sink.withdrawal_statuses.lock().unwrap().is_empty());
+        assert!(sink.observed_heights.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1197,7 +1551,9 @@ mod tests {
         let sink = FakeSink::default();
         let args = test_args(2);
 
-        let err = run_once(&l1, &sink, &args, vault, 0).await.unwrap_err();
+        let err = run_once(&l1, &sink, &args, vault, 0, None)
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             err,
@@ -1222,7 +1578,9 @@ mod tests {
         let sink = FakeSink::default();
         let args = test_args(2);
 
-        let err = run_once(&l1, &sink, &args, vault, 0).await.unwrap_err();
+        let err = run_once(&l1, &sink, &args, vault, 0, None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, IndexerError::DepositRootMismatch { .. }));
         assert!(sink.submitted.lock().unwrap().is_empty());
     }
@@ -1242,12 +1600,12 @@ mod tests {
         let sink = FakeSink::default();
         let args = test_args(3); // confirmed_tip = 7
 
-        let next = run_once(&l1, &sink, &args, vault, 0).await.unwrap();
+        let next = run_once(&l1, &sink, &args, vault, 0, None).await.unwrap();
 
         assert!(sink.submitted.lock().unwrap().is_empty());
         // Scanned up to confirmed_tip = 7, so next_from advances to 8 but the
         // deposit at block 10 is left for a later poll once it is deep enough.
-        assert_eq!(next, Some(8));
+        assert_eq!(next.map(|progress| progress.next_from), Some(8));
     }
 
     #[tokio::test]
@@ -1260,7 +1618,7 @@ mod tests {
         let sink = FakeSink::default();
         let args = test_args(2); // confirmed_tip = 0, but next_from = 5
 
-        let next = run_once(&l1, &sink, &args, vault, 5).await.unwrap();
+        let next = run_once(&l1, &sink, &args, vault, 5, None).await.unwrap();
         assert_eq!(next, None);
         assert!(sink.submitted.lock().unwrap().is_empty());
     }
@@ -1277,32 +1635,41 @@ mod tests {
         let mut args = test_args(0);
         args.max_block_span = 3;
         let mut cursor = 0;
+        let mut checkpoint = None;
 
-        cursor = run_once(&l1, &sink, &args, vault, cursor)
+        let progress = run_once(&l1, &sink, &args, vault, cursor, checkpoint.as_ref())
             .await
             .unwrap()
             .unwrap();
+        cursor = progress.next_from;
+        checkpoint = Some(progress.checkpoint);
         assert_eq!(cursor, 3);
 
         let failed_cursor = cursor;
         assert!(matches!(
-            run_once(&l1, &sink, &args, vault, cursor).await,
+            run_once(&l1, &sink, &args, vault, cursor, checkpoint.as_ref()).await,
             Err(IndexerError::MissingRpcResult)
         ));
         assert_eq!(cursor, failed_cursor);
 
-        cursor = run_once(&l1, &sink, &args, vault, cursor)
+        let progress = run_once(&l1, &sink, &args, vault, cursor, checkpoint.as_ref())
             .await
             .unwrap()
             .unwrap();
+        cursor = progress.next_from;
+        checkpoint = Some(progress.checkpoint);
         assert_eq!(cursor, 6);
-        cursor = run_once(&l1, &sink, &args, vault, cursor)
+        let progress = run_once(&l1, &sink, &args, vault, cursor, checkpoint.as_ref())
             .await
             .unwrap()
             .unwrap();
+        cursor = progress.next_from;
+        checkpoint = Some(progress.checkpoint);
         assert_eq!(cursor, 9);
         assert_eq!(
-            run_once(&l1, &sink, &args, vault, cursor).await.unwrap(),
+            run_once(&l1, &sink, &args, vault, cursor, checkpoint.as_ref())
+                .await
+                .unwrap(),
             None
         );
 
@@ -1332,12 +1699,24 @@ mod tests {
 
         assert_eq!(load_cursor(&path, &vault_hex, 31_337).unwrap(), None);
 
-        save_cursor(&path, 123, &vault_hex, 31_337).unwrap();
-        assert_eq!(load_cursor(&path, &vault_hex, 31_337).unwrap(), Some(123));
+        let state = CursorState::active(
+            123,
+            &vault_hex,
+            31_337,
+            BlockCheckpoint::new(122, test_block_hash(122)),
+        );
+        save_cursor(&path, &state).unwrap();
+        assert_eq!(load_cursor(&path, &vault_hex, 31_337).unwrap(), Some(state));
 
         // Overwrite with a later cursor.
-        save_cursor(&path, 456, &vault_hex, 31_337).unwrap();
-        assert_eq!(load_cursor(&path, &vault_hex, 31_337).unwrap(), Some(456));
+        let later = CursorState::active(
+            456,
+            &vault_hex,
+            31_337,
+            BlockCheckpoint::new(455, test_block_hash(455)),
+        );
+        save_cursor(&path, &later).unwrap();
+        assert_eq!(load_cursor(&path, &vault_hex, 31_337).unwrap(), Some(later));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1349,7 +1728,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("cursor.json");
         let vault_hex = hex::encode([0x10; 20]);
-        save_cursor(&path, 7, &vault_hex, 31_337).unwrap();
+        let state = CursorState::active(
+            7,
+            &vault_hex,
+            31_337,
+            BlockCheckpoint::new(6, test_block_hash(6)),
+        );
+        save_cursor(&path, &state).unwrap();
 
         let other_vault = hex::encode([0x99; 20]);
         assert!(matches!(
@@ -1359,6 +1744,72 @@ mod tests {
         assert!(matches!(
             load_cursor(&path, &vault_hex, 1),
             Err(IndexerError::CursorConfigMismatch { .. })
+        ));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn legacy_cursor_without_checkpoint_is_rejected() {
+        let dir = std::env::temp_dir().join(format!("syb62-legacy-cursor-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cursor.json");
+        let vault_hex = hex::encode([0x10; 20]);
+        std::fs::write(
+            &path,
+            format!("{{\"next_from\":7,\"vault_address_hex\":\"{vault_hex}\",\"chain_id\":31337}}"),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            load_cursor(&path, &vault_hex, 31_337),
+            Err(IndexerError::CursorSchemaMismatch {
+                stored: 0,
+                expected: 2,
+                ..
+            })
+        ));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn persisted_reorg_incident_is_fail_stop_latched_across_restart() {
+        let dir = std::env::temp_dir().join(format!("syb62-reorg-latch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cursor.json");
+        let vault_hex = hex::encode([0x10; 20]);
+        let expected = test_block_hash(8);
+        let observed = [0x99; 32];
+        let error = IndexerError::CanonicalBlockHashMismatch {
+            context: "persisted scan checkpoint",
+            block_number: 8,
+            expected: hex::encode(expected),
+            observed: hex::encode(observed),
+        };
+        assert!(
+            persist_reorg_latch(
+                &path,
+                9,
+                &vault_hex,
+                31_337,
+                Some(BlockCheckpoint::new(8, expected)),
+                &error,
+            )
+            .unwrap()
+        );
+
+        assert!(matches!(
+            load_cursor(&path, &vault_hex, 31_337),
+            Err(IndexerError::ReorgIncidentLatched {
+                context,
+                block_number: 8,
+                expected: expected_hex,
+                observed: observed_hex,
+                ..
+            }) if context == "persisted scan checkpoint"
+                && expected_hex == hex::encode(expected)
+                && observed_hex == hex::encode(observed)
         ));
 
         std::fs::remove_dir_all(&dir).ok();

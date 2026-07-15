@@ -3,7 +3,7 @@ tags: [infrastructure, operations, deployment]
 layer: api
 crate: sybil-api
 status: current
-last_verified: 2026-07-14
+last_verified: 2026-07-15
 ---
 
 Sybil runs the same API/history images in three very different postures. The
@@ -119,6 +119,22 @@ At boot, before opening the store or binding the socket,
    deliberate one-off operations, never steady state.
 
 `local` and `devnet` never block; only `prod` fail-closes.
+
+## L1 indexer finality and cursor policy
+
+The separately managed `sybil-l1-indexer` always requires
+`SYBIL_L1_CURSOR_PATH`. Cursor schema v2 binds chain id, vault address,
+`next_from`, and the canonical hash of the last fully processed block in one
+durable update. An old cursor without a hash is rejected rather than blessed
+from the current RPC view. A detected mismatch adds a persistent incident latch
+that restarts refuse; see the
+[L1 reorg runbook](../../runbooks/l1-reorg-recovery.md).
+
+Local Anvil may explicitly set both confirmation values to zero. Public-chain
+dev/test runs set `SYBIL_L1_CONFIRMATIONS=64` and
+`SYBIL_L1_MIN_CONFIRMATIONS=64`. Real-value operation remains blocked on a
+reviewed finalized-tag/provider policy, critical indexer monitoring, and a
+complete state-recovery mechanism for already-applied bridge events.
 
 ## Witness and proof-job retention policy
 
