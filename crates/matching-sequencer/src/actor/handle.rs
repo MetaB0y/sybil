@@ -3425,6 +3425,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn acknowledged_proof_job_maintenance_runs_after_block_commit() {
+        let path = temp_store_path("acknowledged-proof-job-retention");
+        let store = Arc::new(crate::store::Store::open(&path).unwrap());
+        let config = SequencerConfig {
+            acknowledged_proof_job_retention_blocks: 1,
+            acknowledged_proof_job_maintenance_interval_blocks: 1,
+            acknowledged_proof_job_max_rows_per_pass: 10,
+            block_interval: Duration::from_secs(60 * 60),
+            ..SequencerConfig::default()
+        };
+        let (seq, _) = make_test_sequencer_with_config(config);
+        let handle = SequencerHandle::spawn_with_store_arc(seq, Some(store.clone()));
+
+        let block1 = handle.produce_block().await.unwrap();
+        let job1 = store
+            .proof_job_outbox_page(None, 10)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.height == block1.canonical.header.height)
+            .expect("first block proof job");
+        handle
+            .acknowledge_proof_job(job1.height, job1.digest)
+            .await
+            .unwrap();
+
+        let block2 = handle.produce_block().await.unwrap();
+        assert_eq!(block2.canonical.header.height, 2);
+        let remaining = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let jobs = store.proof_job_outbox_page(None, 10).unwrap();
+                if jobs.iter().all(|job| job.height != job1.height) {
+                    break jobs;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("post-commit proof-job pruning should finish");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].height, block2.canonical.header.height);
+        assert!(!remaining[0].acknowledged);
+    }
+
+    #[tokio::test]
     async fn committed_price_facts_are_written_to_the_durable_history_outbox() {
         let path = temp_store_path("price-history");
         let store = Arc::new(crate::store::Store::open(&path).unwrap());

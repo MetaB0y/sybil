@@ -71,7 +71,8 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT` | `0` | `0` | `0` | no (history served remotely) |
 | `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
-| `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
+| `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | `8640` in Compose; `0` for direct runs | `8640` (1 day at 10s/block) | `60480` (7 days at 10s/block) | no |
+| `SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS` / `MAX_ROWS_PER_PASS` | `60` / `1000` in Compose | `60` / `1000` | `60` / `10000` | no |
 | `SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS` / `MAX_ROWS_PER_PASS` | `1000` / `10000` | same as default | `60` / `10000` | no |
 | `SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS` | `1000000` | `1000000` | `1000000` | no |
 | `SYBIL_HTTP_DA_GLOBAL_RPS` / `BURST` | `20` / `40` | `20` / `40` | `20` / `40` | no |
@@ -159,7 +160,11 @@ complete state-recovery mechanism for already-applied bridge events.
   indefinitely because the sequencer is still their durable owner. After the
   standalone prover durably ingests and acknowledges the exact bytes, the
   sequencer retains a configurable source safety window and then deletes the
-  matching job/ack pair atomically in bounded maintenance passes.
+  matching job/ack pair atomically in bounded maintenance passes. A durable
+  rotating scan cursor limits rows examined as well as rows deleted, so a long
+  unacknowledged prefix neither makes a pass unbounded nor starves later
+  acknowledged rows. The proof-job cadence and row budget are separate from
+  canonical block/DA maintenance.
 - `GET /v1/blocks/{height}` replay remains backed by the bounded canonical
   block archive. The proof outbox is exposed only through
   service-authenticated oldest-unacknowledged pull and exact-digest ack routes.
@@ -188,8 +193,11 @@ artifacts an explicit seven-day target. At the inherited 10-second interval
 that is 60,480 heights. Product prices/candles are not part of this job; they
 live in `sybil-history`.
 
-Production schedules the bounded pass every 60 blocks (ten minutes) with a
-10,000-row delete ceiling.
+Base Compose keeps one day of acknowledged source jobs and examines at most
+1,000 old rows every 60 blocks. Production keeps seven days and raises the
+independent proof-job pass to 10,000 rows at the same ten-minute cadence.
+Direct/in-memory development retains the conservative disabled default unless
+the operator opts in.
 
 This is a row/age policy, not a disk-byte cap. Artifact sizes vary, bounded
 pruning may lag, and deleting redb rows does not promise immediate filesystem

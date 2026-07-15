@@ -29,6 +29,12 @@ services:
       SYBIL_WEBAUTHN_ORIGIN: "${SYBIL_WEBAUTHN_ORIGIN:-http://localhost:3005}"
       SYBIL_MAX_RECENT_PRICE_POINTS_PER_MARKET: "2000"
       SYBIL_MAX_RECENT_FILLS_PER_ACCOUNT: "5000"
+      # The shared mock-prover devnet transfers durable ownership quickly; keep
+      # one day of acknowledged source jobs as a bounded recovery cushion.
+      # Direct cargo runs retain the conservative no-prune default.
+      SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS: "${SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS:-8640}"
+      SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS: "60"
+      SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS: "1000"
       SYBIL_EVENT_SNAPSHOT_DIR: "/data/event_snapshots"
       RUST_LOG: "warn,sybil_api=info,matching_sequencer=info,sybil_prover=info,commonware_storage=error,tower_http=warn"
     volumes:

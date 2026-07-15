@@ -160,6 +160,22 @@ grep -Fq 'condition: service_healthy' <<<"$arena_dashboard_block" \
     || fail "sybil-arena-dashboard does not wait for healthy arena metrics"
 pass "arena runner and dashboard expose healthchecks with ordered startup"
 
+base_api_service_block=$(
+    awk '
+        /^  sybil-api:/ { in_service = 1; next }
+        in_service && /^  [[:alnum:]_-]+:/ { exit }
+        in_service { print }
+    ' docker-compose.yml
+)
+for expected in \
+    'SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS: "${SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS:-8640}"' \
+    'SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS: "60"' \
+    'SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS: "1000"'; do
+    grep -Fq "$expected" <<<"$base_api_service_block" \
+        || fail "devnet compose is missing bounded proof-job policy $expected"
+done
+pass "devnet compose bounds acknowledged proof-job source retention"
+
 retention_env=$(
     compose config | python3 -c '
 import re
@@ -168,6 +184,8 @@ import sys
 keys = (
     "SYBIL_BLOCK_INTERVAL_MS",
     "SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS",
+    "SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS",
+    "SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS",
     "SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS",
     "SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS",
     "SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS",
@@ -191,6 +209,8 @@ for key in keys:
 expected_retention_env=$(printf '%s\n' \
     'SYBIL_BLOCK_INTERVAL_MS=10000' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS=60480' \
+    'SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS=60' \
+    'SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS=10000' \
     'SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS=60480' \
     'SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS=60' \
     'SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS=10000')

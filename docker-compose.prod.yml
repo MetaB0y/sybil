@@ -55,6 +55,8 @@ services:
       # standalone prover. Keep a bounded sequencer-side safety window after
       # that handoff; unacknowledged jobs are never eligible for deletion.
       SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS: "${SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS:-60480}"
+      SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS: "60"
+      SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS: "10000"
       # Run canonical block/DA maintenance every ten minutes (60 blocks).
       SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS: "60"
       SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS: "10000"

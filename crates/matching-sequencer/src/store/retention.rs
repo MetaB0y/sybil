@@ -95,7 +95,8 @@ pub struct AcknowledgedProofJobRetentionPolicy {
     pub retention_blocks: u64,
     /// Run one maintenance pass every N committed heights.
     pub maintenance_interval_blocks: u64,
-    /// Maximum acknowledged job/ack pairs deleted in one pass.
+    /// Maximum old job rows examined in one pass. Deletions are therefore
+    /// bounded by the same value.
     pub max_rows_per_pass: usize,
 }
 
@@ -123,6 +124,7 @@ impl AcknowledgedProofJobRetentionPolicy {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AcknowledgedProofJobPruneReport {
     pub jobs_pruned: usize,
+    pub rows_examined: usize,
     pub oldest_retained_height: Option<u64>,
 }
 
@@ -211,16 +213,24 @@ fn prune_acknowledged_proof_jobs_redb(
     max_rows: usize,
 ) -> Result<AcknowledgedProofJobPruneReport, StoreError> {
     let txn = db.begin_write()?;
-    let candidates = {
+    let scan_from = {
+        let meta = txn.open_table(PROOF_JOB_RETENTION_META)?;
+        meta.get(KEY_PROOF_JOB_RETENTION_NEXT_SCAN_HEIGHT)?
+            .map(|height| height.value())
+            .filter(|height| *height < target_floor)
+            .unwrap_or(0)
+    };
+    let (candidates, rows_examined, next_scan_height) = {
         let jobs = txn.open_table(PROOF_JOB_OUTBOX)?;
         let acks = txn.open_table(PROOF_JOB_ACKS)?;
         let mut candidates = Vec::with_capacity(max_rows);
-        for row in jobs.range(0..target_floor)? {
-            if candidates.len() >= max_rows {
-                break;
-            }
+        let mut rows_examined = 0usize;
+        let mut next_scan_height = 0u64;
+        for row in jobs.range(scan_from..target_floor)?.take(max_rows) {
             let (height, job) = row?;
             let height = height.value();
+            rows_examined += 1;
+            next_scan_height = height.saturating_add(1);
             let Some(ack) = acks.get(height)? else {
                 continue;
             };
@@ -232,7 +242,12 @@ fn prune_acknowledged_proof_jobs_redb(
             }
             candidates.push(height);
         }
-        candidates
+        if rows_examined < max_rows {
+            // The eligible range was exhausted. Wrap so an acknowledgement
+            // added behind the cursor is reconsidered on the next pass.
+            next_scan_height = 0;
+        }
+        (candidates, rows_examined, next_scan_height)
     };
 
     if !candidates.is_empty() {
@@ -241,6 +256,15 @@ fn prune_acknowledged_proof_jobs_redb(
         for height in &candidates {
             jobs.remove(*height)?;
             acks.remove(*height)?;
+        }
+    }
+
+    {
+        let mut meta = txn.open_table(PROOF_JOB_RETENTION_META)?;
+        if next_scan_height == 0 {
+            meta.remove(KEY_PROOF_JOB_RETENTION_NEXT_SCAN_HEIGHT)?;
+        } else {
+            meta.insert(KEY_PROOF_JOB_RETENTION_NEXT_SCAN_HEIGHT, next_scan_height)?;
         }
     }
 
@@ -255,6 +279,7 @@ fn prune_acknowledged_proof_jobs_redb(
 
     Ok(AcknowledgedProofJobPruneReport {
         jobs_pruned: candidates.len(),
+        rows_examined,
         oldest_retained_height,
     })
 }

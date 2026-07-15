@@ -46,6 +46,9 @@ Important configuration:
 | `SYBIL_PROVER_SOURCE_URL` | Sybil API base URL |
 | `SYBIL_PROVER_SOURCE_TOKEN` | API service bearer for pull/ack |
 | `SYBIL_PROVER_AUTH_TOKEN` | separate bearer for daemon ingest/admin mutations |
+| `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | sequencer-side source safety window after exact-byte ack |
+| `SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS` | independent cadence for bounded source pruning |
+| `SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS` | maximum old source rows examined in one pass |
 | `--memory-limit-mib` | Linux `RLIMIT_AS` ceiling; zero disables it. This limits virtual address space, not RSS |
 | `--command-timeout-secs` | per encoder/prove/verify subprocess timeout |
 
@@ -122,6 +125,25 @@ conflicting height, gap, invalid witness, mismatched epoch output, or invalid
 source metadata fails closed. The first non-proven epoch is always the proving
 barrier, so a later range cannot skip a poisoned transition.
 
+### Source retention and ownership
+
+After acknowledgement, the sequencer retains the source job only for its
+configured safety window. It then removes the matching job/ack pair atomically;
+unacknowledged or digest-mismatched rows survive. Maintenance uses a durable
+rotating cursor and a hard rows-examined budget, so an old unacknowledged prefix
+does not monopolize redb. Treat the acknowledgement as an ownership transfer:
+after the window, deleting or losing prover redb cannot be repaired from the
+sequencer's canonical block or DA rows.
+
+The API exports `sybil_acknowledged_proof_jobs_pruned_total`,
+`sybil_acknowledged_proof_job_rows_examined_total`,
+`sybil_proof_job_outbox_oldest_retained_height`, and
+`sybil_acknowledged_proof_job_maintenance_failures_total`. The last counter
+drives `ProofJobRetentionMaintenanceFailed` as an absolute first-scrape-safe
+critical page. On alert, do not delete either table or relax digest checks:
+preserve the sequencer store, compare the prover's ingested digest/height, and
+repair the storage or ownership disagreement before allowing pruning to resume.
+
 Proof attempts carry an owner UUID, attempt number, and renewable deadline.
 Subprocess/resource failures retry with bounded exponential backoff and
 deterministic jitter. Validity failures halt permanently until explicit
@@ -136,6 +158,11 @@ Back up the redb file and artifact tree as one logical set while the daemon is
 stopped. The database contains state/ownership/digests; the files contain large
 immutable payloads. Restoring only one side intentionally triggers
 reconciliation and may require re-proving.
+
+Keep at least one verified backup generation older than the sequencer's source
+safety window. Before shortening that window, restore the prover backup in an
+isolated directory and confirm its durable ingested height covers the jobs that
+the sequencer will make eligible for pruning.
 
 After restore, start the daemon and require `/readyz`, then inspect:
 

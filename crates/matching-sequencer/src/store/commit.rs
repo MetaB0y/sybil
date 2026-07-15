@@ -634,6 +634,7 @@ impl Store {
         txn.open_table(PRODUCT_HISTORY_OUTBOX)?;
         txn.open_table(PROOF_JOB_OUTBOX)?;
         txn.open_table(PROOF_JOB_ACKS)?;
+        txn.open_table(PROOF_JOB_RETENTION_META)?;
         txn.open_table(DA_ARTIFACTS)?;
         txn.open_table(DA_MANIFESTS)?;
         txn.open_table(PUBKEY_REGISTRY)?;
