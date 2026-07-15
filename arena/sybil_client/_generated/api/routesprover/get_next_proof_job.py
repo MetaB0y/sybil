@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from typing import cast
 
 
 
@@ -21,8 +22,8 @@ def _get_kwargs(
     
 
     _kwargs: dict[str, Any] = {
-        "method": "post",
-        "url": "/v1/simulation/resume",
+        "method": "get",
+        "url": "/v1/prover/jobs/next",
     }
 
 
@@ -30,12 +31,19 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | list[int] | None:
     if response.status_code == 200:
-        return None
+        response_200 = cast(list[int], response.content)
 
-    if response.status_code == 403:
-        return None
+        return response_200
+
+    if response.status_code == 204:
+        response_204 = cast(Any, None)
+        return response_204
+
+    if response.status_code == 503:
+        response_503 = cast(Any, None)
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -43,7 +51,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | list[int]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -56,17 +64,15 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any]:
-    """ POST /v1/simulation/resume
-
-     Dev-mode only: resumes block production. Returns 403 outside dev mode.
+) -> Response[Any | list[int]]:
+    """ GET /v1/prover/jobs/next
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any]
+        Response[Any | list[int]]
      """
 
 
@@ -80,22 +86,40 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
-async def asyncio_detailed(
+def sync(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[Any]:
-    """ POST /v1/simulation/resume
-
-     Dev-mode only: resumes block production. Returns 403 outside dev mode.
+) -> Any | list[int] | None:
+    """ GET /v1/prover/jobs/next
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any]
+        Any | list[int]
+     """
+
+
+    return sync_detailed(
+        client=client,
+
+    ).parsed
+
+async def asyncio_detailed(
+    *,
+    client: AuthenticatedClient | Client,
+
+) -> Response[Any | list[int]]:
+    """ GET /v1/prover/jobs/next
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        Response[Any | list[int]]
      """
 
 
@@ -109,3 +133,23 @@ async def asyncio_detailed(
 
     return _build_response(client=client, response=response)
 
+async def asyncio(
+    *,
+    client: AuthenticatedClient | Client,
+
+) -> Any | list[int] | None:
+    """ GET /v1/prover/jobs/next
+
+    Raises:
+        errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
+        httpx.TimeoutException: If the request takes longer than Client.timeout.
+
+    Returns:
+        Any | list[int]
+     """
+
+
+    return (await asyncio_detailed(
+        client=client,
+
+    )).parsed

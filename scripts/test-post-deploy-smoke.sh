@@ -30,6 +30,35 @@ sleep() {
     SECONDS=$((SECONDS + $1))
 }
 
+# Public onboarding must accept the key-only route while stock remains and
+# treat durable-cap exhaustion as an expected, explicitly coded policy state.
+mint_p256_pub() { printf '%s\n' "04$(printf '11%.0s' {1..64})"; }
+for onboarding_enabled in true false; do
+    reset_gate
+    http() {
+        local method=$1 path=$2 body=${3:-}
+        if [[ "$method|$path" == "GET|/v1/onboarding" ]]; then
+            HTTP_CODE=200
+            if [[ "$onboarding_enabled" == true ]]; then
+                HTTP_BODY='{"enabled":true,"account_capacity":1000,"accounts_allocated":10,"accounts_remaining":990,"grant_nanos":1000000000000}'
+            else
+                HTTP_BODY='{"enabled":false,"account_capacity":1000,"accounts_allocated":1000,"accounts_remaining":0,"grant_nanos":1000000000000}'
+            fi
+        elif [[ "$path" == "/v1/onboarding/accounts" && "$body" == *initial_balance_nanos* ]]; then
+            HTTP_CODE=422; HTTP_BODY='{"error":"unknown field"}'
+        elif [[ "$path" == "/v1/onboarding/accounts" && "$onboarding_enabled" == true ]]; then
+            HTTP_CODE=200; HTTP_BODY='{"account_id":10,"balance_nanos":1000000000000}'
+        elif [[ "$path" == "/v1/onboarding/accounts" ]]; then
+            HTTP_CODE=409; HTTP_BODY='{"code":"PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED"}'
+        else
+            HTTP_CODE=401; HTTP_BODY='{"code":"UNAUTHORIZED"}'
+        fi
+    }
+    check_onboarding >/dev/null
+    [[ "$FAILN" -eq 0 ]] \
+        || { echo "FAIL: onboarding policy state enabled=$onboarding_enabled failed deploy-gate checks" >&2; exit 1; }
+done
+
 # One unready registry followed by a ready registry + fresh feed proves bounded
 # retries recover without weakening the final assertion.
 reset_gate

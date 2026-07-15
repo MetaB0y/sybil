@@ -26,8 +26,8 @@ without creating accounts, orders, or any other application state.
 - `/v1/blocks/latest` advances between samples separated by 1.5 configured
   block intervals;
 - `/v1/markets` is a nonempty JSON array;
-- an `OPTIONS /v1/accounts` preflight from the real app origin permits that
-  origin and `POST`;
+- an `OPTIONS /v1/onboarding/accounts` preflight from the real app origin
+  permits that origin and `POST`;
 - the proof-status head (`GET /proofs/latest` on the prover status API) is
   within `SYBIL_SMOKE_PROOF_LAG_MAX` blocks (default 30) of
   `/v1/blocks/latest` — see [Proof lag](#proof-lag) below;

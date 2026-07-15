@@ -36,24 +36,58 @@ the current committed `keys_digest` and `events_digest`. Clients fetch it just
 before signing key registration/revocation; it contains no key list, balance,
 position, or profile data. Admission rejects a stale state binding with 409.
 
-Public account onboarding uses `POST /v1/accounts` with both
-`initial_balance_nanos` and `initial_key`. The API sends both through one
-sequencer actor command and one control-plane WAL row, so restart cannot expose
-an acknowledged onboarding account without its initial key. Omitting
-`initial_key` retains the deprecated bare-account form for service/dev tooling
-only; the old unsigned `POST /accounts/{id}/keys` bootstrap is likewise
-service-only.
+Public self-service onboarding is a separate surface:
+`GET /v1/onboarding` reports the fixed grant and remaining lifetime account
+stock, while `POST /v1/onboarding/accounts` accepts only `initial_key`. The
+server chooses `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS`; unknown fields are rejected,
+so an anonymous caller cannot select its funding. A dedicated global/client
+token bucket limits request flow before key parsing and actor work.
 
-> [!warning] Public onboarding is not production-safe yet
-> The route currently permits unlimited free accounts and caller-selected demo
-> balances. Read-API-key recovery state and durable resting-order admission are
-> now bounded, but free account creation and the product-history outbox during a
-> prolonged projector outage still lack stock or byte budgets. Order token
-> buckets limit flow, not all
-> accumulated state. See the
+`SYBIL_PUBLIC_ACCOUNT_CAPACITY` bounds the total account-id stock visible to
+anonymous onboarding. Allocation reads the actor's durable next account id and
+holds the bootstrap lock through the one-command account/key write, so parallel
+callers cannot overshoot and restart cannot expose an acknowledged account
+without its initial key. Account ids, key history, and witness references are
+permanent protocol identities: v1 does not delete, tombstone, recycle, or
+reclaim them. The cap is therefore deliberately a lifetime stock limit, not a
+concurrent-user limit. Exhaustion returns stable error code
+`PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED` with HTTP 409.
+
+Explicitly funded `POST /v1/accounts` is service/dev-only. This trusted operator
+surface is intentionally outside the anonymous cap for bots, fixtures, and
+recovery operations; its use is observable in total sequencer account stock and
+also consumes ids, so it can reduce the remaining public allocation. The old
+unsigned `POST /accounts/{id}/keys` bootstrap is likewise service-only.
+
+An L1 deposit does not allocate an account. A deposit for an unknown Sybil key
+is capital-backed by the token transfer and L1 gas but remains in the bounded
+quarantine workflow until that key is registered on an account allocated by
+one of the normal routes; quarantine cannot bypass the account-stock ceiling.
+The protocol currently imposes no additional economic minimum above a valid
+positive token-unit deposit. The `prod` posture fixes the public play-money
+grant at zero and fail-closes a nonzero override. Any vault minimum/state-rent
+policy must be ratified together with its refund, quarantine, and rounding
+semantics rather than invented as an API-only minimum.
+
+> [!warning] Other stock budgets remain open
+> Public account stock, read-API-key recovery state, and durable resting-order
+> admission are bounded, but the product-history outbox during a prolonged
+> projector outage still lacks a byte/row budget. See the
 > [2026-07-11 resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md).
 
-Bridge deposit ingestion is scaffolding for [[L1 Settlement and Vault]] rather than a completed trust boundary. `POST /v1/bridge/deposits` is service-only and credits the sequencer through the `L1Deposit` variant of the globally ordered [[Acknowledged-Write WAL Replay|acknowledged-write log]], but today it trusts the operator/indexer-supplied L1 event fields. The sequencer reconstructs the deposit root from every leaf field and its committed frontier; the eventual transition checkpoint is also matched against the real vault by `SybilSettlement`. This makes a same-id leaf substitution unable to become an accepted L1 state root, but a dishonest single RPC can still create temporary unprovable off-chain state. The route remains service-gated until receipt/finality authentication closes that operational trust boundary. `POST /v1/bridge/withdrawals/signed` verifies a P256 signature over the canonical withdrawal payload against the account key registry before appending the corresponding `BridgeWithdrawal` write; `POST /v1/bridge/withdrawals` remains a service-only operator path.
+Bridge deposit ingestion is service-only. The indexer authenticates the lowest
+common finalized prefix of its configured provider set, requires unanimous
+block hashes, and binds both log and state reads to exact canonical block
+hashes before submitting `POST /v1/bridge/deposits`. The sequencer then commits
+the `L1Deposit` through the globally ordered [[Acknowledged-Write WAL
+Replay|acknowledged-write log]] and reconstructs the deposit root from every
+leaf field and its committed frontier; the eventual transition checkpoint is
+also matched against the real vault by `SybilSettlement`. See [[L1 Settlement
+and Vault]] for the provider-quorum and fail-stop recovery boundary.
+`POST /v1/bridge/withdrawals/signed` verifies a P256 signature over the
+canonical withdrawal payload against the account key registry before appending
+the corresponding `BridgeWithdrawal` write; `POST /v1/bridge/withdrawals`
+remains a service-only operator path.
 
 The service-gated indexer advances `POST /v1/bridge/l1-height` after each fully
 processed confirmed scan range. That existing scan cursor is the withdrawal

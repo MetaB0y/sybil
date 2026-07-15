@@ -15,6 +15,7 @@ const STATE_PROOF_FORMAT: &str = "commonware-qmdb-current-ordered-sha256-mmr-202
 
 /// GET /v1/proofs/state/{leaf_key_hex}
 #[utoipa::path(
+    tag = "routesproofs",
     get,
     path = "/v1/proofs/state/{leaf_key_hex}",
     params(("leaf_key_hex" = String, Path, description = "Hex-encoded canonical state leaf key")),

@@ -26,6 +26,7 @@ pub struct ProofJobAckResponse {
 
 /// GET /v1/prover/jobs/next
 #[utoipa::path(
+    tag = "routesprover",
     get,
     path = "/v1/prover/jobs/next",
     responses(
@@ -57,6 +58,7 @@ pub async fn get_next_proof_job(State(state): State<AppState>) -> Result<Respons
 
 /// POST /v1/prover/jobs/{height}/ack
 #[utoipa::path(
+    tag = "routesprover",
     post,
     path = "/v1/prover/jobs/{height}/ack",
     params(("height" = u64, Path, description = "Committed block height")),

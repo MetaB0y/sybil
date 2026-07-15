@@ -10,10 +10,24 @@ pub struct CreateAccountRequest {
     pub initial_balance_nanos: u64,
     /// First signing key to register in the same account-creation operation.
     ///
-    /// This is required for public self-service onboarding. Omitting it uses
-    /// the deprecated service-only bare-account creation path.
+    /// This service/dev DTO may omit the key for legacy operator tooling.
+    /// Public self-service uses [`OnboardAccountRequest`] and always requires
+    /// an initial key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_key: Option<RegisterKeyRequest>,
+}
+
+/// Public self-service account onboarding.
+///
+/// The server, not the caller, chooses the play-money grant. Keeping funding
+/// out of this DTO prevents anonymous callers from turning account allocation
+/// into an arbitrary minting interface.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OnboardAccountRequest {
+    /// First signing key installed atomically with account allocation.
+    pub initial_key: RegisterKeyRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

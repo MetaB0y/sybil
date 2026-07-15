@@ -102,6 +102,20 @@ impl AppError {
         }
     }
 
+    pub fn public_account_capacity_exhausted(capacity: u64) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            body: ErrorBody {
+                error: format!(
+                    "Public account capacity {capacity} is exhausted; use an existing account or contact the operator"
+                ),
+                code: "PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED".to_string(),
+                details: None,
+            },
+            retry_after_secs: None,
+        }
+    }
+
     pub fn replay_nonce_stale(error: impl Into<String>) -> Self {
         Self {
             status: StatusCode::CONFLICT,

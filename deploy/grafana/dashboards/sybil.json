@@ -644,6 +644,46 @@
       }
     },
     {
+      "title": "Public Account Stock",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 109 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_public_account_stock", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "thresholds": { "steps": [{ "color": "blue", "value": null }] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Public Account Slots Remaining",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 109 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "sybil_public_account_remaining", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null },
+          { "color": "orange", "value": 1 },
+          { "color": "green", "value": 101 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Public Onboarding Rejections (1h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 109 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [{ "expr": "increase(sybil_public_account_creation_total{result=\"capacity_exhausted\"}[1h]) + increase(sybil_http_onboarding_rate_limited_total[1h])", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "orange", "value": 1 }
+        ] } },
+        "overrides": []
+      }
+    },
+    {
       "title": "L1 Indexer",
       "type": "row",
       "collapsed": false,

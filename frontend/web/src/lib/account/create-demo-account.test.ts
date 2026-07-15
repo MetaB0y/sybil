@@ -130,13 +130,34 @@ function readKey(token: string) {
 }
 
 describe("createDemoAccount recovery checkpoints", () => {
+  it("uses the key-only public route and surfaces lifetime-cap exhaustion", async () => {
+    mocks.apiPost.mockResolvedValue({
+      error: { code: "PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED" },
+      response: { status: 409 },
+    });
+
+    await expect(createDemoAccount("local_key")).rejects.toMatchObject({
+      kind: "capacity_exhausted",
+      message: expect.stringContaining("allocated"),
+    } satisfies Partial<AccountError>);
+    expect(mocks.apiPost).toHaveBeenCalledWith("/v1/onboarding/accounts", {
+      body: {
+        initial_key: {
+          public_key_hex: "02bootstrap",
+          auth_scheme: "raw_p256",
+        },
+      },
+    });
+    expect(mocks.writeStoredAccount).not.toHaveBeenCalled();
+  });
+
   it("does not create an account when browser storage cannot be read", async () => {
     mocks.readStoredAccountRevision.mockImplementationOnce(() => {
       throw new DOMException("storage blocked", "SecurityError");
     });
 
     await expect(
-      createDemoAccount(500_000_000_000n, "local_key"),
+      createDemoAccount("local_key"),
     ).rejects.toMatchObject({
       kind: "unknown",
       message: expect.stringContaining("Browser storage is unavailable"),
@@ -153,7 +174,7 @@ describe("createDemoAccount recovery checkpoints", () => {
       }),
     );
 
-    const creation = createDemoAccount(500_000_000_000n, "local_key");
+    const creation = createDemoAccount("local_key");
     await vi.waitFor(() => expect(mocks.apiPost).toHaveBeenCalledOnce());
     storageRevision = "external-revision";
     storedAccount = {
@@ -185,7 +206,7 @@ describe("createDemoAccount recovery checkpoints", () => {
     );
 
     await expect(
-      createDemoAccount(500_000_000_000n, "passkey"),
+      createDemoAccount("passkey"),
     ).rejects.toMatchObject({
       kind: "account_created_recovery",
       message: expect.stringContaining("Account #73 was created and saved"),
@@ -212,7 +233,7 @@ describe("createDemoAccount recovery checkpoints", () => {
     mocks.createApiKey.mockRejectedValue(new Error("network unavailable"));
 
     await expect(
-      createDemoAccount(500_000_000_000n, "local_key"),
+      createDemoAccount("local_key"),
     ).rejects.toMatchObject({
       kind: "account_created_recovery",
     } satisfies Partial<AccountError>);
@@ -233,7 +254,7 @@ describe("createDemoAccount recovery checkpoints", () => {
     });
 
     await expect(
-      createDemoAccount(500_000_000_000n, "local_key"),
+      createDemoAccount("local_key"),
     ).rejects.toMatchObject({
       kind: "account_created_recovery",
       createdAccountId: 73,
@@ -270,7 +291,7 @@ describe("createDemoAccount recovery checkpoints", () => {
     });
 
     await expect(
-      createDemoAccount(500_000_000_000n, "local_key"),
+      createDemoAccount("local_key"),
     ).rejects.toMatchObject({
       kind: "account_created_recovery",
       createdAccountId: 73,
@@ -295,7 +316,7 @@ describe("createDemoAccount recovery checkpoints", () => {
     mocks.registerPasskey.mockRejectedValue(new Error("registration rejected"));
 
     await expect(
-      createDemoAccount(500_000_000_000n, "passkey"),
+      createDemoAccount("passkey"),
     ).rejects.toMatchObject({
       kind: "account_created_recovery",
     } satisfies Partial<AccountError>);
@@ -317,7 +338,7 @@ describe("createDemoAccount recovery checkpoints", () => {
     );
 
     await expect(
-      createDemoAccount(500_000_000_000n, "passkey"),
+      createDemoAccount("passkey"),
     ).rejects.toMatchObject({
       kind: "account_created_recovery",
     } satisfies Partial<AccountError>);
@@ -344,7 +365,7 @@ describe("createDemoAccount recovery checkpoints", () => {
       }),
     );
 
-    const creation = createDemoAccount(500_000_000_000n, "passkey");
+    const creation = createDemoAccount("passkey");
     await vi.waitFor(() =>
       expect(mocks.createPasskeyForAccount).toHaveBeenCalledOnce(),
     );
@@ -377,7 +398,7 @@ describe("createDemoAccount recovery checkpoints", () => {
       }),
     );
 
-    const creation = createDemoAccount(500_000_000_000n, "passkey");
+    const creation = createDemoAccount("passkey");
     await vi.waitFor(() =>
       expect(mocks.registerPasskey).toHaveBeenCalledOnce(),
     );
@@ -411,7 +432,7 @@ describe("createDemoAccount recovery checkpoints", () => {
       }),
     );
 
-    const creation = createDemoAccount(500_000_000_000n, "passkey");
+    const creation = createDemoAccount("passkey");
     await vi.waitFor(() =>
       expect(mocks.revokeSigningKey).toHaveBeenCalledOnce(),
     );
@@ -432,7 +453,7 @@ describe("createDemoAccount recovery checkpoints", () => {
       new Error("Passkey creation was cancelled"),
     );
     await expect(
-      createDemoAccount(500_000_000_000n, "passkey"),
+      createDemoAccount("passkey"),
     ).rejects.toMatchObject({
       kind: "account_created_recovery",
     } satisfies Partial<AccountError>);
@@ -466,7 +487,7 @@ describe("createDemoAccount recovery checkpoints", () => {
     );
 
     await expect(
-      createDemoAccount(500_000_000_000n, "passkey"),
+      createDemoAccount("passkey"),
     ).rejects.toMatchObject({
       kind: "account_created_recovery",
     } satisfies Partial<AccountError>);
@@ -487,7 +508,7 @@ describe("createDemoAccount recovery checkpoints", () => {
   it("migrates a successful account only after both credentials are durable", async () => {
     mocks.createApiKey.mockResolvedValueOnce(readKey("sybk_passkey"));
 
-    await createDemoAccount(500_000_000_000n, "passkey");
+    await createDemoAccount("passkey");
 
     expect(mocks.writeStoredAccount).toHaveBeenCalledTimes(3);
     expect(mocks.writeStoredAccount).toHaveBeenNthCalledWith(2, {
@@ -521,7 +542,7 @@ describe("createDemoAccount recovery checkpoints", () => {
       )
       .mockResolvedValueOnce(undefined);
 
-    await createDemoAccount(500_000_000_000n, "passkey");
+    await createDemoAccount("passkey");
 
     expect(mocks.revokeSigningKey).toHaveBeenCalledTimes(2);
     expect(mocks.revokeSigningKey).toHaveBeenNthCalledWith(1, {
@@ -552,7 +573,7 @@ describe("createDemoAccount recovery checkpoints", () => {
   it("activates a successful local account from the same raw checkpoint", async () => {
     mocks.createApiKey.mockResolvedValue(readKey("sybk_local"));
 
-    await createDemoAccount(500_000_000_000n, "local_key");
+    await createDemoAccount("local_key");
 
     expect(storedAccount).toEqual({
       accountId: 73,

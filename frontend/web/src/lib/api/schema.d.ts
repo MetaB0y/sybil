@@ -14,10 +14,9 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * POST /v1/accounts — create an account with its initial signing key.
-     * @description Public onboarding must provide `initial_key`; account allocation and
-     *     first-key registration are serialized as one API operation. The legacy
-     *     bare request shape (no `initial_key`) is deprecated and service-tier only.
+     * POST /v1/accounts — service/dev account creation with explicit funding.
+     * @description This operator surface may install an initial key atomically or create the
+     *     deprecated bare account used by local tooling. It is never public.
      */
     post: operations["create_account"];
     delete?: never;
@@ -1100,6 +1099,45 @@ export interface paths {
     put?: never;
     /** POST /v1/markets/{id}/resolve */
     post: operations["resolve_market"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/onboarding": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/onboarding — public account stock and fixed grant policy. */
+    get: operations["get_onboarding_policy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/onboarding/accounts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * POST /v1/onboarding/accounts — allocate one capped public account.
+     * @description The server supplies the fixed grant. The API lock covers the durable-stock
+     *     read and atomic account/key command, so concurrent callers cannot overshoot
+     *     the lifetime ceiling.
+     */
+    post: operations["onboard_account"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2618,6 +2656,44 @@ export interface components {
       refunded_withdrawal_ids: number[];
     };
     /**
+     * @description Public self-service account onboarding.
+     *
+     *     The server, not the caller, chooses the play-money grant. Keeping funding
+     *     out of this DTO prevents anonymous callers from turning account allocation
+     *     into an arbitrary minting interface.
+     */
+    OnboardAccountRequest: {
+      /** @description First signing key installed atomically with account allocation. */
+      initial_key: components["schemas"]["RegisterKeyRequest"];
+    };
+    /** @description Public self-service onboarding stock and server-assigned demo grant. */
+    OnboardingPolicyResponse: {
+      /**
+       * Format: int64
+       * @description Lifetime account-id ceiling for anonymous onboarding. Account ids are
+       *     never reclaimed or reused.
+       */
+      account_capacity: number;
+      /**
+       * Format: int64
+       * @description Durable non-system account ids already allocated on this chain.
+       */
+      accounts_allocated: number;
+      /**
+       * Format: int64
+       * @description Remaining anonymous allocations under the current deployment policy.
+       */
+      accounts_remaining: number;
+      /** @description Whether another anonymous account can currently be allocated. */
+      enabled: boolean;
+      /**
+       * Format: int64
+       * @description Fixed play-money balance assigned by the server to each new public
+       *     account. Integer nanodollars; 1_000_000_000 = $1.
+       */
+      grant_nanos: string;
+    };
+    /**
      * @description Response shape for `GET /v1/markets/{id}/open-batch`. B1 populates
      *     `unique_placers`; indicative fields stub `None`/`0` until C2.
      */
@@ -3949,7 +4025,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Account and initial signing key created */
+      /** @description Service account created */
       200: {
         headers: {
           [name: string]: unknown;
@@ -3965,7 +4041,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Bare creation requires the service token */
+      /** @description Service token required */
       401: {
         headers: {
           [name: string]: unknown;
@@ -6230,6 +6306,78 @@ export interface operations {
       };
       /** @description Market not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_onboarding_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Public onboarding stock policy */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OnboardingPolicyResponse"];
+        };
+      };
+      /** @description Sequencer unavailable */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  onboard_account: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OnboardAccountRequest"];
+      };
+    };
+    responses: {
+      /** @description Public account and initial key created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountResponse"];
+        };
+      };
+      /** @description Invalid initial key */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Key conflict or public account capacity exhausted */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Onboarding request rate exceeded */
+      429: {
         headers: {
           [name: string]: unknown;
         };

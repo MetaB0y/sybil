@@ -18,6 +18,11 @@ services:
       # See docs/architecture/Deployment Profiles.md.
       SYBIL_DEPLOYMENT_PROFILE: "prod"
       SYBIL_DEV_MODE: "false"
+      SYBIL_PUBLIC_ACCOUNT_CAPACITY: "${SYBIL_PUBLIC_ACCOUNT_CAPACITY:-1000}"
+      # Real-value posture: anonymous identities start empty and must receive
+      # capital through authenticated L1 deposits. A nonzero value is a
+      # preflight-blocking dev-only override.
+      SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS: "${SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS:-0}"
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
       SYBIL_CORS_ORIGINS: "${SYBIL_CORS_ORIGINS:-}"
       # A null Compose value omits the variable unless it is explicitly set in

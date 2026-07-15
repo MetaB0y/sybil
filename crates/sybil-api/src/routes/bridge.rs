@@ -121,6 +121,7 @@ fn withdrawal_request_from_api(
 
 /// GET /v1/bridge/status
 #[utoipa::path(
+    tag = "routesbridge",
     get,
     path = "/v1/bridge/status",
     responses((status = 200, description = "Bridge sidecar status", body = BridgeStatusResponse))
@@ -168,6 +169,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<BridgeStatusRe
 
 /// GET /v1/accounts/{id}/bridge-key
 #[utoipa::path(
+    tag = "routesbridge",
     get,
     path = "/v1/accounts/{id}/bridge-key",
     params(("id" = u64, Path, description = "Account ID")),
@@ -203,6 +205,7 @@ pub async fn account_key(
 /// retires them, then disappear from this collection. Historical creation
 /// blocks remain immutable and must not be used as a current-status view.
 #[utoipa::path(
+    tag = "routesbridge",
     get,
     path = "/v1/accounts/{id}/withdrawals",
     params(("id" = u64, Path, description = "Account ID")),
@@ -233,6 +236,7 @@ pub async fn list_account_withdrawals(
 
 /// GET /v1/bridge/accounts/by-key/{key_hex}
 #[utoipa::path(
+    tag = "routesbridge",
     get,
     path = "/v1/bridge/accounts/by-key/{key_hex}",
     params(("key_hex" = String, Path, description = "Hex-encoded Sybil bridge account key")),
@@ -259,6 +263,7 @@ pub async fn account_by_key(
 
 /// POST /v1/bridge/deposits
 #[utoipa::path(
+    tag = "routesbridge",
     post,
     path = "/v1/bridge/deposits",
     request_body = SubmitL1DepositRequest,
@@ -271,13 +276,12 @@ pub async fn submit_l1_deposit(
     State(state): State<AppState>,
     Json(req): Json<SubmitL1DepositRequest>,
 ) -> Result<Json<BridgeDepositResponse>, AppError> {
-    // This service-gated route trusts the indexer for L1 delivery. The
-    // sequencer reconstructs the submitted leaf/root and the eventual L1
-    // settlement independently matches the proven checkpoint to the vault, so
-    // a same-id leaf substitution cannot become an accepted L1 state root.
-    // Production ingress still needs authenticated receipt/finality policy to
-    // prevent a dishonest RPC from creating temporary unprovable off-chain
-    // state; bearer authorization alone is not an L1 inclusion proof.
+    // This service-gated route accepts only the authenticated indexer delivery
+    // path in production. The indexer establishes finalized-provider unanimity
+    // and exact block-hash log/state reads; the sequencer independently
+    // reconstructs the submitted leaf/root, and L1 settlement matches the
+    // proven checkpoint to the vault. Bearer authorization identifies the
+    // ingress service but is not itself the L1 inclusion proof.
     if req.quarantine == req.account_id.is_some() {
         return Err(AppError::bad_request(
             "exactly one deposit disposition is required: account_id or quarantine=true",
@@ -331,6 +335,7 @@ pub async fn submit_l1_deposit(
 
 /// POST /v1/bridge/withdrawals
 #[utoipa::path(
+    tag = "routesbridge",
     post,
     path = "/v1/bridge/withdrawals",
     request_body = CreateBridgeWithdrawalRequest,
@@ -362,6 +367,7 @@ pub async fn create_withdrawal(
 
 /// POST /v1/bridge/withdrawals/signed
 #[utoipa::path(
+    tag = "routesbridge",
     post,
     path = "/v1/bridge/withdrawals/signed",
     request_body = CreateSignedBridgeWithdrawalRequest,
@@ -433,6 +439,7 @@ pub async fn create_signed_withdrawal(
 
 /// POST /v1/bridge/withdrawals/l1-events
 #[utoipa::path(
+    tag = "routesbridge",
     post,
     path = "/v1/bridge/withdrawals/l1-events",
     request_body = SubmitL1WithdrawalEventRequest,
@@ -475,6 +482,7 @@ pub async fn submit_l1_withdrawal_event(
 
 /// POST /v1/bridge/l1-height
 #[utoipa::path(
+    tag = "routesbridge",
     post,
     path = "/v1/bridge/l1-height",
     request_body = ObserveL1HeightRequest,

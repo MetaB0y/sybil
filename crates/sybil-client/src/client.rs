@@ -148,6 +148,28 @@ impl SybilClient {
 
     // === Accounts ===
 
+    /// Allocate a capped public account with the server-selected grant and an
+    /// initial signing key. No service credential is required.
+    pub async fn onboard_account(
+        &self,
+        initial_key: RegisterKeyRequest,
+    ) -> Result<AccountResponse, Error> {
+        let req = OnboardAccountRequest { initial_key };
+        let resp = self
+            .http
+            .post(self.url("/v1/onboarding/accounts"))
+            .json(&req)
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
+    pub async fn onboarding_policy(&self) -> Result<OnboardingPolicyResponse, Error> {
+        let resp = self.http.get(self.url("/v1/onboarding")).send().await?;
+        self.decode(resp).await
+    }
+
+    /// Service/dev creation with an explicitly chosen initial balance.
     pub async fn create_account(
         &self,
         initial_balance_nanos: u64,
@@ -166,8 +188,8 @@ impl SybilClient {
     }
 
     /// Deprecated operator-only bare account creation. This requires the
-    /// service token outside dev mode; self-service callers must use
-    /// [`Self::create_account`] with an initial signing key.
+    /// service token outside dev mode; self-service callers use
+    /// [`Self::onboard_account`] instead.
     pub async fn create_bare_account(
         &self,
         initial_balance_nanos: u64,

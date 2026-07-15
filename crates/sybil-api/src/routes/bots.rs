@@ -31,6 +31,7 @@ type SnapshotRow = (
 ///
 /// Native arena / bot analytics feed. Public (unauthenticated) read route.
 #[utoipa::path(
+    tag = "routesbots",
     get,
     path = "/v1/bots/decisions",
     params(
@@ -68,6 +69,7 @@ pub async fn get_bot_decisions(
 /// Public (unauthenticated) read route. Dense result sets are downsampled with a
 /// naive stride after a bounded count query; the latest point is retained.
 #[utoipa::path(
+    tag = "routesbots",
     get,
     path = "/v1/bots/equity-series",
     params(

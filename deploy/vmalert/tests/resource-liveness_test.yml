@@ -78,6 +78,50 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'sybil_public_account_capacity{job="sybil-api",instance="sybil-api:3000"}'
+        values: "1000+0x15"
+      - series: 'sybil_public_account_remaining{job="sybil-api",instance="sybil-api:3000"}'
+        values: "1000+0x4 50+0x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: PublicAccountCapacityLow
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: PublicAccountCapacityLow
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-api"
+              instance: "sybil-api:3000"
+              severity: warning
+              component: api
+            exp_annotations:
+              summary: "Public onboarding account stock is nearly exhausted"
+              description: "At most 10% of the configured lifetime public account stock remains. Account ids are permanent and are not reclaimed; plan an explicit policy change or direct users to reconnect existing accounts. See docs/runbooks/resource-liveness.md."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_public_account_capacity{job="sybil-api",instance="sybil-api:3000"}'
+        values: "1000+0x8"
+      - series: 'sybil_public_account_remaining{job="sybil-api",instance="sybil-api:3000"}'
+        values: "0+0x8"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PublicAccountCapacityExhausted
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: PublicAccountCapacityExhausted
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-api"
+              instance: "sybil-api:3000"
+              severity: critical
+              component: api
+            exp_annotations:
+              summary: "Public onboarding account stock is exhausted"
+              description: "No lifetime public account allocations remain. Anonymous onboarding now returns PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED; account ids are not reclaimed automatically. See docs/runbooks/resource-liveness.md."
+
+  - interval: 1m
+    input_series:
       - series: 'sybil_witness_payload_bytes{quantile="0.99",job="sybil-api",instance="sybil-api:3000"}'
         values: "9437184+0x10"
     alert_rule_test:

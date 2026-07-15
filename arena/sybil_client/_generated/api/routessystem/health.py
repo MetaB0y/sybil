@@ -69,9 +69,10 @@ def sync_detailed(
 ) -> Response[HealthResponse]:
     """ GET /v1/health
 
-     Returns 200 when one atomic sequencer snapshot is available, 503 when it is
-    unavailable. Height and genesis hash are never assembled from separate
-    mailbox reads.
+     Returns 200 when one atomic sequencer snapshot is available and canonical
+    writes are enabled. Returns 503 when the actor is unavailable or integrity-
+    halted. Height, genesis hash, and halt state are never assembled from
+    separate mailbox reads.
     Downstream services and Docker healthchecks should treat any non-200 as
     unhealthy and stop routing traffic.
 
@@ -101,9 +102,10 @@ def sync(
 ) -> HealthResponse | None:
     """ GET /v1/health
 
-     Returns 200 when one atomic sequencer snapshot is available, 503 when it is
-    unavailable. Height and genesis hash are never assembled from separate
-    mailbox reads.
+     Returns 200 when one atomic sequencer snapshot is available and canonical
+    writes are enabled. Returns 503 when the actor is unavailable or integrity-
+    halted. Height, genesis hash, and halt state are never assembled from
+    separate mailbox reads.
     Downstream services and Docker healthchecks should treat any non-200 as
     unhealthy and stop routing traffic.
 
@@ -128,9 +130,10 @@ async def asyncio_detailed(
 ) -> Response[HealthResponse]:
     """ GET /v1/health
 
-     Returns 200 when one atomic sequencer snapshot is available, 503 when it is
-    unavailable. Height and genesis hash are never assembled from separate
-    mailbox reads.
+     Returns 200 when one atomic sequencer snapshot is available and canonical
+    writes are enabled. Returns 503 when the actor is unavailable or integrity-
+    halted. Height, genesis hash, and halt state are never assembled from
+    separate mailbox reads.
     Downstream services and Docker healthchecks should treat any non-200 as
     unhealthy and stop routing traffic.
 
@@ -160,9 +163,10 @@ async def asyncio(
 ) -> HealthResponse | None:
     """ GET /v1/health
 
-     Returns 200 when one atomic sequencer snapshot is available, 503 when it is
-    unavailable. Height and genesis hash are never assembled from separate
-    mailbox reads.
+     Returns 200 when one atomic sequencer snapshot is available and canonical
+    writes are enabled. Returns 503 when the actor is unavailable or integrity-
+    halted. Height, genesis hash, and halt state are never assembled from
+    separate mailbox reads.
     Downstream services and Docker healthchecks should treat any non-200 as
     unhealthy and stop routing traffic.
 

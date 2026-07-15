@@ -185,14 +185,20 @@ fn table_contains(table: &[RouteMount], method: &str, path: &str) -> bool {
 
 // ── 1. Route tier matrix ────────────────────────────────────────────────────
 
-/// The exact regression, asserted against the authoritative tables: onboarding
-/// lives on the PUBLIC tier (never service-gated), funding stays service-gated.
+/// Public onboarding is a fixed-grant route; arbitrary account funding and
+/// legacy account creation remain service-gated.
 /// A future tier move breaks this before it can reach a deploy.
 #[test]
 fn onboarding_is_public_and_fund_is_service_gated() {
-    assert!(table_contains(PUBLIC_ROUTE_TABLE, "POST", "/v1/accounts"));
+    assert!(table_contains(
+        PUBLIC_ROUTE_TABLE,
+        "POST",
+        "/v1/onboarding/accounts"
+    ));
+    assert!(table_contains(PUBLIC_ROUTE_TABLE, "GET", "/v1/onboarding"));
 
     for (method, path) in [
+        ("POST", "/v1/accounts"),
         ("POST", "/v1/accounts/{id}/keys"),
         ("POST", "/v1/accounts/{id}/fund"),
         ("GET", "/v1/da/{height}/payload"),
@@ -238,18 +244,13 @@ fn route_tiers_are_disjoint() {
 
 /// Every PUBLIC route must be reachable with NO service token — it must never
 /// return the service-gate 401. This is the direct, table-driven guard for the
-/// onboarding regression: had `create_account` been service-gated, this sweep
+/// onboarding regression: had the public command been service-gated, this sweep
 /// would flag it as 401-without-a-token. (Domain 400/404/422 are fine; only the
 /// service-gate 401 is forbidden. Bearer-gated reads are excluded — see below.)
 #[tokio::test]
 async fn every_public_route_is_reachable_without_service_token() {
     let app = prod_app().await;
     for mount in PUBLIC_ROUTE_TABLE {
-        // `/v1/accounts` is a hybrid contract: atomic create-with-key is
-        // public, while the deprecated bare `{}` payload is service-only.
-        if mount.method == "POST" && mount.path == "/v1/accounts" {
-            continue;
-        }
         let uri = concretize(mount.path);
         let status = status_only(app.clone(), method_of(mount.method), &uri, None).await;
         assert_ne!(

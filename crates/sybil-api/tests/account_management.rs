@@ -162,14 +162,13 @@ async fn keyop_binding(app: &axum::Router, account_id: u64) -> ([u8; 32], [u8; 3
     (keys, events)
 }
 
-/// Create a dev-mode account and register `key` as its primary signing key.
+/// Create a public fixed-grant account and register `key` as its primary key.
 async fn account_with_key(app: &axum::Router, seed: u8) -> (u64, SigningKey) {
     let key = signing_key(seed);
     let (_, body) = post_json(
         app.clone(),
-        "/v1/accounts",
+        "/v1/onboarding/accounts",
         json!({
-            "initial_balance_nanos": 100_000_000_000u64,
             "initial_key": {"public_key_hex": pubkey_hex(&key)}
         }),
     )
@@ -516,9 +515,8 @@ async fn webauthn_keyop_register_and_revoke_fixture_seals_valid_block() {
     let primary = signing_key(71);
     let (_, body) = post_json(
         app.clone(),
-        "/v1/accounts",
+        "/v1/onboarding/accounts",
         json!({
-            "initial_balance_nanos": 1_000_000_000u64,
             "initial_key": {
                 "public_key_hex": pubkey_hex(&primary),
                 "auth_scheme": "webauthn",
@@ -635,9 +633,8 @@ async fn atomic_onboarding_rejects_oversized_signing_key_labels_without_allocati
     for label in ["x".repeat(cap + 1), "é".repeat(cap / 2 + 1)] {
         let (status, body) = post_json(
             app.clone(),
-            "/v1/accounts",
+            "/v1/onboarding/accounts",
             json!({
-                "initial_balance_nanos": 100u64,
                 "initial_key": {
                     "public_key_hex": pubkey_hex(&primary),
                     "label": label,
@@ -661,9 +658,8 @@ async fn atomic_onboarding_rejects_oversized_signing_key_labels_without_allocati
     assert_eq!(exact.len(), cap);
     let (status, body) = post_json(
         app,
-        "/v1/accounts",
+        "/v1/onboarding/accounts",
         json!({
-            "initial_balance_nanos": 100u64,
             "initial_key": {
                 "public_key_hex": pubkey_hex(&primary),
                 "label": exact,
@@ -1061,7 +1057,10 @@ async fn api_key_create_show_once_then_gate_private_summary() {
     );
     let summary = parse(&body);
     assert_eq!(summary["account_id"].as_u64().unwrap(), account_id);
-    assert_eq!(summary["balance_nanos"].as_i64().unwrap(), 100_000_000_000);
+    assert_eq!(
+        summary["balance_nanos"].as_i64().unwrap(),
+        ApiConfig::default().public_account_grant_nanos as i64
+    );
 
     // A token scoped to this account cannot read another account.
     let (other_id, _other_key) = account_with_key(&app, 16).await;

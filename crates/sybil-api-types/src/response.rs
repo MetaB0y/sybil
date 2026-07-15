@@ -34,6 +34,24 @@ pub struct AccountResponse {
     pub avatar_seed: Option<String>,
 }
 
+/// Public self-service onboarding stock and server-assigned demo grant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OnboardingPolicyResponse {
+    /// Whether another anonymous account can currently be allocated.
+    pub enabled: bool,
+    /// Lifetime account-id ceiling for anonymous onboarding. Account ids are
+    /// never reclaimed or reused.
+    pub account_capacity: u64,
+    /// Durable non-system account ids already allocated on this chain.
+    pub accounts_allocated: u64,
+    /// Remaining anonymous allocations under the current deployment policy.
+    pub accounts_remaining: u64,
+    /// Fixed play-money balance assigned by the server to each new public
+    /// account. Integer nanodollars; 1_000_000_000 = $1.
+    pub grant_nanos: u64,
+}
+
 /// A registered signing key with SYB-60 management metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -86,6 +86,7 @@ fn now_ms() -> u64 {
 /// POST /v1/admin/auto-resolutions — record (or refresh) an auto-resolution
 /// proposal. Never settles a market.
 #[utoipa::path(
+    tag = "routesauto_resolution",
     post,
     path = "/v1/admin/auto-resolutions",
     request_body = SubmitAutoResolutionRequest,
@@ -124,6 +125,7 @@ pub async fn submit_auto_resolution(
 
 /// GET /v1/admin/auto-resolutions — list every recorded proposal.
 #[utoipa::path(
+    tag = "routesauto_resolution",
     get,
     path = "/v1/admin/auto-resolutions",
     responses(
@@ -146,6 +148,7 @@ pub async fn list_auto_resolutions(
 /// POST /v1/admin/auto-resolutions/{id}/approve — approve a proposal so the
 /// resolver finalizes it on its next poll (does not settle here).
 #[utoipa::path(
+    tag = "routesauto_resolution",
     post,
     path = "/v1/admin/auto-resolutions/{id}/approve",
     params(("id" = u32, Path, description = "Market ID")),
@@ -171,6 +174,7 @@ pub async fn approve_auto_resolution(
 /// POST /v1/admin/auto-resolutions/{id}/reject — veto a proposal. Terminal: the
 /// resolver will never finalize it.
 #[utoipa::path(
+    tag = "routesauto_resolution",
     post,
     path = "/v1/admin/auto-resolutions/{id}/reject",
     params(("id" = u32, Path, description = "Market ID")),

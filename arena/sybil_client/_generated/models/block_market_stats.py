@@ -41,7 +41,7 @@ class BlockMarketStats:
             welfare_nanos (int | Unset): Per-market welfare contribution from this block's fills (B7). Integer nanodollars;
                 1_000_000_000 = $1. Multi-market fills credit each active market with their
                 full welfare; the platform `total_welfare_nanos` counts each fill once.
-                Signed — solver rounding can yield small negatives.
+                Encoded as signed nanos to match canonical welfare arithmetic.
      """
 
     matched: int | Unset = UNSET

@@ -46,6 +46,7 @@ export class AccountError extends Error {
     message: string,
     public readonly kind:
       | "dev_mode_off"
+      | "capacity_exhausted"
       | "network"
       | "invalid_jwk"
       | "account_not_found"
@@ -113,11 +114,10 @@ async function revokeOnboardingBootstrapKey(args: {
  * network failure cannot strand the newly-created account. The passkey only
  * replaces it after registration succeeds, then mints its own read token.
  *
- * Throws AccountError("dev_mode_off") if the server rejects step 1, so the
- * modal can show a "bridge deposits coming soon" message.
+ * Public onboarding has no caller-selected funding field: the server assigns
+ * its configured fixed grant and enforces the durable account-stock ceiling.
  */
 export async function createDemoAccount(
-  initialBalanceNanos: bigint,
   mode: CreateAccountKeyMode = isWebAuthnAvailable() ? "passkey" : "local_key",
 ): Promise<void> {
   if (mode === "passkey" && !isWebAuthnAvailable()) {
@@ -141,9 +141,8 @@ export async function createDemoAccount(
       "unknown",
     );
   }
-  const created = await api.POST("/v1/accounts", {
+  const created = await api.POST("/v1/onboarding/accounts", {
     body: {
-      initial_balance_nanos: Number(initialBalanceNanos) as unknown as string,
       initial_key: {
         public_key_hex: bootstrapPublicKeyHex,
         auth_scheme: "raw_p256",
@@ -152,6 +151,13 @@ export async function createDemoAccount(
   });
   if (created.error || !created.data) {
     const status = created.response?.status;
+    const errorCode = (created.error as { code?: string } | undefined)?.code;
+    if (status === 409 && errorCode === "PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED") {
+      throw new AccountError(
+        "All public demo account spots have been allocated",
+        "capacity_exhausted",
+      );
+    }
     if (status === 403) {
       throw new AccountError(
         "Demo account creation is disabled on this server",

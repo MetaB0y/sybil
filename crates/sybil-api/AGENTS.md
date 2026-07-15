@@ -24,6 +24,10 @@ Do not maintain an endpoint list here:
 
 - Public, service, and dev route groups are explicit. Production service routes
   require `SYBIL_SERVICE_TOKEN`; dev-only routes are not mounted in prod.
+- Public onboarding accepts only an initial key and receives a server-selected
+  grant. Its durable lifetime account-id stock and dedicated route/client rate
+  budgets must remain separate from service/dev explicit funding. Account ids
+  are never reclaimed or reused.
 - Production preflight fails closed on dev mode, missing service auth,
   persistence, or invalid WebAuthn configuration.
 - Browser CORS is same-origin unless an explicit allowlist is configured.

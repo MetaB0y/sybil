@@ -172,13 +172,18 @@ base_api_service_block=$(
     ' docker-compose.yml
 )
 for expected in \
+    'SYBIL_DEPLOYMENT_PROFILE: "${SYBIL_DEPLOYMENT_PROFILE:-devnet}"' \
+    'SYBIL_PUBLIC_ACCOUNT_CAPACITY: "${SYBIL_PUBLIC_ACCOUNT_CAPACITY:-1000}"' \
+    'SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS: "${SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS:-1000000000000}"' \
+    'SYBIL_HTTP_ONBOARDING_GLOBAL_RPS: "5"' \
+    'SYBIL_HTTP_ONBOARDING_CLIENT_RPS: "1"' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS: "${SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS:-8640}"' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS: "60"' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_MAX_ROWS_PER_PASS: "1000"'; do
     grep -Fq "$expected" <<<"$base_api_service_block" \
         || fail "devnet compose is missing bounded proof-job policy $expected"
 done
-pass "devnet compose bounds acknowledged proof-job source retention"
+pass "devnet compose identifies its profile and bounds onboarding plus proof-job stock"
 
 retention_env=$(
     compose config | python3 -c '
@@ -186,6 +191,7 @@ import re
 import sys
 
 keys = (
+    "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS",
     "SYBIL_BLOCK_INTERVAL_MS",
     "SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS",
     "SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS",
@@ -211,6 +217,7 @@ for key in keys:
 '
 )
 expected_retention_env=$(printf '%s\n' \
+    'SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS=0' \
     'SYBIL_BLOCK_INTERVAL_MS=10000' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS=60480' \
     'SYBIL_ACKNOWLEDGED_PROOF_JOB_MAINTENANCE_INTERVAL_BLOCKS=60' \

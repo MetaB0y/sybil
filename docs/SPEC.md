@@ -228,10 +228,11 @@ production trust posture.
 
 Before real value, operators must deploy the pinned real verifier, eliminate mock/unsafe acceptance, retain DA payloads, exercise backup/import/withdrawal/escape drills, operate and independently review the unanimous finalized-provider set, drill checkpoint/source-integrity recovery, and protect admin/feed/verifier keys under the chosen governance policy. See [[Threat Model]], [[L1 Settlement and Vault]], and [[Deployment Profiles]].
 
-The current permissionless API is also not economically resource-bounded:
-unlimited demo accounts, unbounded API-key records, zero-reservation orders,
-and an unbounded product-history outbox during a prolonged projector outage can grow
-state without deposited capital. These critical availability gaps must be
+The current permissionless API is not yet fully economically resource-bounded.
+Anonymous onboarding has a durable lifetime account-stock cap, a server-chosen
+fixed play-money grant, and dedicated flow limits; account ids are never reused.
+Unbounded product-history outbox growth during a prolonged projector outage can
+still grow storage without deposited capital. This availability gap must be
 closed, monitored, or service-gated
 before real-value deployment; the [dated audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md)
 owns the detailed evidence and remediation order.

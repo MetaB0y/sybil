@@ -21,19 +21,26 @@ T = TypeVar("T", bound="SystemEventResponseType12")
 
 @_attrs_define
 class SystemEventResponseType12:
-    """ 
+    """ An order or cancellation whose client authorization was committed to
+    the block witness. The signature bytes stay in proof data; this view
+    exposes the audit-relevant identity and nonce only.
+
         Attributes:
-            amount_nanos (int): Amount parked in the system ledger. Integer nanodollars; 1_000_000_000 = $1.
-            deposit_id (int):
-            deposit_root_hex (str):
-            sybil_account_key_hex (str):
+            account_id (int):
+            action (str):
+            auth_scheme (int):
+            nonce (int):
+            order_id (int):
+            public_key_hex (str):
             type_ (SystemEventResponseType12Type):
      """
 
-    amount_nanos: int
-    deposit_id: int
-    deposit_root_hex: str
-    sybil_account_key_hex: str
+    account_id: int
+    action: str
+    auth_scheme: int
+    nonce: int
+    order_id: int
+    public_key_hex: str
     type_: SystemEventResponseType12Type
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -42,13 +49,17 @@ class SystemEventResponseType12:
 
 
     def to_dict(self) -> dict[str, Any]:
-        amount_nanos = self.amount_nanos
+        account_id = self.account_id
 
-        deposit_id = self.deposit_id
+        action = self.action
 
-        deposit_root_hex = self.deposit_root_hex
+        auth_scheme = self.auth_scheme
 
-        sybil_account_key_hex = self.sybil_account_key_hex
+        nonce = self.nonce
+
+        order_id = self.order_id
+
+        public_key_hex = self.public_key_hex
 
         type_ = self.type_.value
 
@@ -56,10 +67,12 @@ class SystemEventResponseType12:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "amount_nanos": amount_nanos,
-            "deposit_id": deposit_id,
-            "deposit_root_hex": deposit_root_hex,
-            "sybil_account_key_hex": sybil_account_key_hex,
+            "account_id": account_id,
+            "action": action,
+            "auth_scheme": auth_scheme,
+            "nonce": nonce,
+            "order_id": order_id,
+            "public_key_hex": public_key_hex,
             "type": type_,
         })
 
@@ -70,13 +83,17 @@ class SystemEventResponseType12:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        amount_nanos = d.pop("amount_nanos")
+        account_id = d.pop("account_id")
 
-        deposit_id = d.pop("deposit_id")
+        action = d.pop("action")
 
-        deposit_root_hex = d.pop("deposit_root_hex")
+        auth_scheme = d.pop("auth_scheme")
 
-        sybil_account_key_hex = d.pop("sybil_account_key_hex")
+        nonce = d.pop("nonce")
+
+        order_id = d.pop("order_id")
+
+        public_key_hex = d.pop("public_key_hex")
 
         type_ = SystemEventResponseType12Type(d.pop("type"))
 
@@ -84,10 +101,12 @@ class SystemEventResponseType12:
 
 
         system_event_response_type_12 = cls(
-            amount_nanos=amount_nanos,
-            deposit_id=deposit_id,
-            deposit_root_hex=deposit_root_hex,
-            sybil_account_key_hex=sybil_account_key_hex,
+            account_id=account_id,
+            action=action,
+            auth_scheme=auth_scheme,
+            nonce=nonce,
+            order_id=order_id,
+            public_key_hex=public_key_hex,
             type_=type_,
         )
 

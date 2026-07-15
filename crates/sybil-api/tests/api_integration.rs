@@ -395,16 +395,14 @@ fn signed_cancel_payload(
 
 #[tokio::test]
 async fn create_account_is_public_onboarding_without_dev_mode() {
-    // Self-service onboarding is PUBLIC (SYB-245): a fresh browser/passkey user
-    // creates a demo-capped account with no service token, even in non-dev mode.
-    // (It used to 401 here, which was the production onboarding regression.)
+    // Self-service onboarding has a dedicated PUBLIC fixed-grant command. The
+    // caller cannot choose funding or reach the service account-creation path.
     let (app, _) = test_app(false).await;
     let key = new_signing_key();
     let (status, _) = post_json(
         app,
-        "/v1/accounts",
+        "/v1/onboarding/accounts",
         json!({
-            "initial_balance_nanos": 100,
             "initial_key": {
                 "public_key_hex": to_hex(key.verifying_key().to_sec1_point(true).as_bytes())
             }

@@ -11,6 +11,8 @@ services:
       args: *rust-build-args
     ports:
       - "127.0.0.1:3000:3000"
+    environment:
+      SYBIL_DEPLOYMENT_PROFILE: "local"
 
   sybil-history:
     build:

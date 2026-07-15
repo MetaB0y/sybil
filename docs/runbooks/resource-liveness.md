@@ -13,8 +13,9 @@ last_verified: 2026-07-14
 > process/host exhaustion from validity failures.
 
 **Alerts:** `SybilApiMemoryGrowingFast`, `HostMemoryPressureStalled`,
-`HostOomKill`, `SequencerAccountStockGrowingFast`, `WitnessPayloadLarge`, and
-`DaArtifactWriteBacklog`.
+`HostOomKill`, `SequencerAccountStockGrowingFast`,
+`PublicAccountCapacityLow`, `PublicAccountCapacityExhausted`,
+`WitnessPayloadLarge`, and `DaArtifactWriteBacklog`.
 
 ## Signals and thresholds
 
@@ -24,6 +25,8 @@ last_verified: 2026-07-14
 | `HostMemoryPressureStalled` | Full Linux PSI memory stalls above 5% for 5 minutes | By this point scrapes, DNS, and actor scheduling can already lag, so later queue values may be consequences rather than causes. |
 | `HostOomKill` | Any kernel OOM kill in 10 minutes | Container state can remain stale when the host OOM killer terminates the payload process directly. |
 | `SequencerAccountStockGrowingFast` | More than 100 committed accounts added in 15 minutes, sustained for 5 minutes | Accounts are permanent today and each account recurs in every later full-state witness. This is a traffic-anomaly warning, not a hard capacity limit. |
+| `PublicAccountCapacityLow` | At most 10% of configured lifetime public account stock remains for 5 minutes | Gives the operator time to communicate exhaustion or ratify a new ceiling; ids cannot be reclaimed. |
+| `PublicAccountCapacityExhausted` | No public slots remain for 2 minutes | Anonymous onboarding is deterministically returning 409 and will not self-recover. |
 | `WitnessPayloadLarge` | Rolling p99 canonical witness payload above 8 MiB for 5 minutes | At the 10-second deployment cadence, retaining an 8 MiB payload every block is about 68 GiB/day before database overhead. The threshold is an early operating-cost warning, well below host-memory exhaustion. |
 | `DaArtifactWriteBacklog` | More than two DA writes in flight for 2 minutes | One write per block is expected. Sustained overlap means the post-commit writer is not keeping pace and can consume memory through cloned witnesses and queued write tasks. |
 
@@ -53,9 +56,12 @@ failure and inspect logs before restarting.
    A flat queue with growing cache entries is retention; a growing queue with
    flat caches is backpressure. Once PSI is high, treat queue growth as possibly
    downstream of host starvation.
-3. For account growth, inspect request volume and callers for
-   `POST /v1/accounts`. Confirm whether an onboarding event explains the rate;
-   otherwise gate or rate-limit account creation before the stock grows further.
+3. For account growth, compare `sybil_state_accounts_total` with
+   `sybil_public_account_stock`, `sybil_public_account_remaining`, and
+   `sybil_public_account_creation_total{result=...}`. Anonymous creation uses
+   `POST /v1/onboarding/accounts`; `POST /v1/accounts` is a trusted service/dev
+   bypass. Inspect route/client rate-limit rejections before changing the
+   lifetime ceiling. Do not assume restart or deletion will recover ids.
 4. For a large witness, compare `sybil_state_accounts_total`,
    `sybil_pending_orders`, and `sybil_quarantine_ledger_size`. These are the
    principal recurring full-state populations currently exposed as metrics.

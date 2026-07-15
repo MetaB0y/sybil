@@ -112,6 +112,8 @@ fn is_set(value: &str) -> bool {
 /// - `SYBIL_HISTORY_TOKEN` unset — the private history boundary is unauthenticated.
 /// - `SYBIL_ADMIN_FEED_KEY_PATH` unset — the admin resolution feed identity is
 ///   regenerated on every restart, so the configured signer is not durable.
+/// - `SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS` nonzero — anonymous play-money minting
+///   must not enter a real-value production balance domain.
 ///
 /// Informational-only deviations (logged, never block):
 /// - `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` — recent canonical-block cache size.
@@ -125,6 +127,14 @@ pub fn collect_deviations(config: &ApiConfig) -> Vec<Deviation> {
             knob: "SYBIL_DEV_MODE",
             value: "true".to_string(),
             prod_intended: "false",
+            dev_only: true,
+        });
+    }
+    if config.public_account_grant_nanos != 0 {
+        out.push(Deviation {
+            knob: "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS",
+            value: config.public_account_grant_nanos.to_string(),
+            prod_intended: "0",
             dev_only: true,
         });
     }
@@ -258,6 +268,12 @@ pub fn log_report(report: &PreflightReport) {
 /// refused. On the `SYBIL_ALLOW_DEV_KNOBS=1` override, logs a loud error and
 /// returns `Ok`.
 pub fn run_preflight(config: &ApiConfig) -> Result<(), String> {
+    if config.public_account_grant_nanos > i64::MAX as u64 {
+        return Err(format!(
+            "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS={} exceeds the signed account-balance range",
+            config.public_account_grant_nanos
+        ));
+    }
     let report = build_report(config)?;
     log_report(&report);
 
@@ -309,6 +325,7 @@ mod tests {
             webauthn_rp_id: sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_RP_ID.to_string(),
             webauthn_origin: sybil_verifier::key_op_auth::EXPECTED_WEBAUTHN_ORIGIN.to_string(),
             webauthn_require_uv: true,
+            public_account_grant_nanos: 0,
             max_recent_fills_per_account: 5_000,
             max_recent_price_points_per_market: 2_000,
             max_recent_equity_points_per_account: 0,
@@ -477,5 +494,32 @@ mod tests {
     fn local_default_config_starts_clean() {
         // The zero-config developer path must never be blocked.
         assert!(run_preflight(&ApiConfig::default()).is_ok());
+    }
+
+    #[test]
+    fn public_grant_must_fit_the_signed_account_balance() {
+        let config = ApiConfig {
+            public_account_grant_nanos: i64::MAX as u64 + 1,
+            ..ApiConfig::default()
+        };
+        let error = run_preflight(&config).unwrap_err();
+        assert!(error.contains("SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS"));
+        assert!(error.contains("signed account-balance range"));
+    }
+
+    #[test]
+    fn public_play_money_grant_blocks_prod_start() {
+        let config = ApiConfig {
+            public_account_grant_nanos: 1,
+            ..prod_ready_config()
+        };
+        let report = build_report(&config).unwrap();
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|deviation| deviation.knob == "SYBIL_PUBLIC_ACCOUNT_GRANT_NANOS")
+        );
+        assert!(run_preflight(&config).is_err());
     }
 }

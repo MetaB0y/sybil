@@ -24,7 +24,7 @@ const OPENAPI_EXEMPT_PATHS: &[&str] = &[
     "/metrics",
 ];
 
-const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 137;
+const EXPECTED_UNIT_FIELD_DESCRIPTIONS: usize = 138;
 
 /// Unique path templates across all three mount tables, minus the non-API
 /// exemptions. `MatchedPath`/utoipa both key on the path template (not the
@@ -212,6 +212,46 @@ fn openapi_info_mentions_units_convention() {
             && description.contains("integer nanodollars")
             && description.contains("docs/architecture/REST%20API.md#units"),
         "OpenAPI info.description must mention global unit conventions and link REST API units; got {description:?}"
+    );
+}
+
+#[test]
+fn openapi_operations_keep_stable_sdk_tags() {
+    let spec = openapi_json();
+    let paths = spec
+        .pointer("/paths")
+        .and_then(serde_json::Value::as_object)
+        .expect("OpenAPI paths object");
+    let mut missing = Vec::new();
+
+    for (path, item) in paths {
+        let Some(operations) = item.as_object() else {
+            continue;
+        };
+        for (method, operation) in operations {
+            if !matches!(
+                method.as_str(),
+                "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "trace"
+            ) {
+                continue;
+            }
+            let tags = operation.get("tags").and_then(serde_json::Value::as_array);
+            let stable = tags.is_some_and(|tags| {
+                tags.len() == 1
+                    && tags[0]
+                        .as_str()
+                        .is_some_and(|tag| tag.starts_with("routes"))
+            });
+            if !stable {
+                missing.push(format!("{method} {path}: {:?}", operation.get("tags")));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "OpenAPI operations need one stable routes* tag so generated SDK module paths do not collapse into api/default:\n{}",
+        missing.join("\n")
     );
 }
 
