@@ -26,6 +26,7 @@ const META_GENESIS_HASH: &str = "genesis_hash";
 const META_FIRST_HEIGHT: &str = "first_height";
 const META_FIRST_TIMESTAMP_MS: &str = "first_timestamp_ms";
 const META_INDEXED_THROUGH_HEIGHT: &str = "indexed_through_height";
+const META_INDEXED_THROUGH_TIMESTAMP_MS: &str = "indexed_through_timestamp_ms";
 const META_LAST_BLOCK_HASH: &str = "last_block_hash";
 const META_CANDLE_RESOLUTIONS: &str = "candle_resolutions_secs_v1";
 const MAX_QUERY_POINTS: usize = 5_000;
@@ -110,6 +111,38 @@ impl HistoryStore {
                 let encoded = rmp_serde::to_vec(&resolutions)?;
                 meta.insert(META_CANDLE_RESOLUTIONS, encoded.as_slice())?;
             }
+        }
+        // Additive metadata introduced after the initial projector release is
+        // recoverable from the immutable raw checkpoint batch. Backfill it on
+        // open so an upgraded, otherwise caught-up projector does not report a
+        // false completeness gap until the next block arrives.
+        let timestamp_backfill_height = {
+            let meta = txn.open_table(META_U64)?;
+            let indexed_through_height = meta
+                .get(META_INDEXED_THROUGH_HEIGHT)?
+                .map(|value| value.value());
+            let has_timestamp = meta.get(META_INDEXED_THROUGH_TIMESTAMP_MS)?.is_some();
+            indexed_through_height.filter(|_| !has_timestamp)
+        };
+        if let Some(height) = timestamp_backfill_height {
+            let committed_at_ms = {
+                let batches = txn.open_table(RAW_BATCHES)?;
+                let raw = batches.get(height)?.ok_or_else(|| {
+                    HistoryError::InvalidBatch(format!(
+                        "checkpoint height {height} has no immutable raw batch"
+                    ))
+                })?;
+                let batch: CommittedHistoryBatchV1 = rmp_serde::from_slice(raw.value())?;
+                if batch.height != height {
+                    return Err(HistoryError::InvalidBatch(format!(
+                        "checkpoint key {height} contains batch height {}",
+                        batch.height
+                    )));
+                }
+                batch.committed_at_ms
+            };
+            txn.open_table(META_U64)?
+                .insert(META_INDEXED_THROUGH_TIMESTAMP_MS, committed_at_ms)?;
         }
         txn.commit()?;
         Ok(Self {
@@ -269,6 +302,7 @@ impl HistoryStore {
                 meta.insert(META_FIRST_TIMESTAMP_MS, batch.committed_at_ms)?;
             }
             meta.insert(META_INDEXED_THROUGH_HEIGHT, batch.height)?;
+            meta.insert(META_INDEXED_THROUGH_TIMESTAMP_MS, batch.committed_at_ms)?;
         }
         txn.commit()?;
         Ok(ApplyBatchResponse {
@@ -599,6 +633,9 @@ fn projection_status(txn: &ReadTransaction) -> Result<ProjectionStatus, HistoryE
         indexed_through_height: meta
             .get(META_INDEXED_THROUGH_HEIGHT)?
             .map(|value| value.value()),
+        indexed_through_timestamp_ms: meta
+            .get(META_INDEXED_THROUGH_TIMESTAMP_MS)?
+            .map(|value| value.value()),
     })
 }
 
@@ -817,7 +854,9 @@ mod tests {
 
         let status = store.status().expect("status");
         assert_eq!(status.first_height, Some(10));
+        assert_eq!(status.first_timestamp_ms, Some(100_000));
         assert_eq!(status.indexed_through_height, Some(11));
+        assert_eq!(status.indexed_through_timestamp_ms, Some(110_000));
         assert_eq!(store.raw_batch(10).expect("raw batch"), Some(first));
 
         let fills = store
@@ -971,6 +1010,36 @@ mod tests {
             Err(error) => error,
         };
         assert!(matches!(error, HistoryError::Configuration(_)));
+    }
+
+    #[test]
+    fn reopen_backfills_checkpoint_timestamp_from_the_raw_batch() {
+        let (dir, store) = store();
+        let path = dir.path().join("history.redb");
+        store
+            .apply_batch(batch(10, [1; 32], [10; 32], 100_000))
+            .expect("first apply");
+        store
+            .apply_batch(batch(11, [10; 32], [11; 32], 110_000))
+            .expect("second apply");
+        {
+            let txn = store.db.begin_write().expect("legacy metadata write");
+            txn.open_table(META_U64)
+                .expect("metadata table")
+                .remove(META_INDEXED_THROUGH_TIMESTAMP_MS)
+                .expect("remove new metadata");
+            txn.commit().expect("legacy metadata commit");
+        }
+        drop(store);
+
+        let reopened = HistoryStore::open(path, vec![60]).expect("upgraded store reopens");
+        assert_eq!(
+            reopened
+                .status()
+                .expect("reopened status")
+                .indexed_through_timestamp_ms,
+            Some(110_000)
+        );
     }
 
     #[test]

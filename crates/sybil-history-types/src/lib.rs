@@ -394,6 +394,11 @@ pub struct ProjectionStatus {
     pub first_height: Option<u64>,
     pub first_timestamp_ms: Option<u64>,
     pub indexed_through_height: Option<u64>,
+    /// Commit timestamp of `indexed_through_height`. Together with the
+    /// contiguous height checkpoint, this proves whether time-window queries
+    /// have reached their requested boundary.
+    #[serde(default)]
+    pub indexed_through_timestamp_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

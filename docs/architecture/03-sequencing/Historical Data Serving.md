@@ -96,10 +96,16 @@ this authorization check is O(1) and does not enqueue a sequencer RPC.
   also immediately and legitimately empty; it does not require history.
 - Price points and sparse OHLCV candles page by stable height/time cursors.
 - Responses expose `indexed_through_height` and
-  `history_complete_from_height`. An unavailable/unconfigured backend is a
-  typed `HISTORY_UNAVAILABLE` response, while a projector whose indexed floor
-  cannot cover a requested leaderboard window returns `HISTORY_INCOMPLETE`.
-  Neither condition is represented as an empty successful history.
+  `history_complete_from_height`. The private `ProjectionStatus` also pairs
+  the contiguous checkpoint height with its commit timestamp. A windowed
+  leaderboard is complete only when the projector began at genesis or no
+  later than the opening cutoff **and** that checkpoint timestamp has reached
+  the cutoff. Only after both global facts hold may a missing per-account
+  baseline mean that the account was created after the cutoff. An
+  unavailable/unconfigured backend is a typed `HISTORY_UNAVAILABLE` response;
+  either an insufficient floor or a lagging checkpoint returns
+  `HISTORY_INCOMPLETE`. Neither condition is represented as an empty successful
+  history or silently substituted with all-time PnL.
 
 The first indexed batch may be above height one when a new projector is
 bootstrapped from an existing sequencer. That floor is disclosed as incomplete

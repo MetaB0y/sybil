@@ -39,12 +39,22 @@ fn window_since_ms(window: &str, now_ms: u64) -> u64 {
     }
 }
 
-fn history_window_is_incomplete(status: &ProjectionStatus, since_ms: u64) -> bool {
-    match (status.first_height, status.first_timestamp_ms) {
-        (Some(first_height), Some(_)) if first_height <= 1 => false,
-        (Some(_), Some(first_timestamp_ms)) => first_timestamp_ms > since_ms,
-        _ => true,
+fn history_window_gap(status: &ProjectionStatus, since_ms: u64) -> Option<&'static str> {
+    let covers_opening_boundary = match (status.first_height, status.first_timestamp_ms) {
+        (Some(first_height), Some(_)) if first_height <= 1 => true,
+        (Some(_), Some(first_timestamp_ms)) => first_timestamp_ms <= since_ms,
+        _ => false,
+    };
+    if !covers_opening_boundary {
+        return Some("Leaderboard window predates available historical data");
     }
+    if !status
+        .indexed_through_timestamp_ms
+        .is_some_and(|indexed_through_ms| indexed_through_ms >= since_ms)
+    {
+        return Some("Historical data has not caught up to the leaderboard window");
+    }
+    None
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -88,10 +98,8 @@ pub async fn get_leaderboard(
                 at_or_before_ms: since_ms,
             })
             .await?;
-        if history_window_is_incomplete(&response.status, since_ms) {
-            return Err(AppError::history_incomplete(
-                "Leaderboard window predates available historical data",
-            ));
+        if let Some(reason) = history_window_gap(&response.status, since_ms) {
+            return Err(AppError::history_incomplete(reason));
         }
         response
             .baselines
@@ -191,33 +199,36 @@ mod tests {
     #[test]
     fn window_history_completeness_fails_closed() {
         let since_ms = 1_000;
-        let status = |first_height, first_timestamp_ms| ProjectionStatus {
-            genesis_hash: Some([7; 32]),
-            first_height,
-            first_timestamp_ms,
-            indexed_through_height: Some(10),
-        };
+        let status =
+            |first_height, first_timestamp_ms, indexed_through_timestamp_ms| ProjectionStatus {
+                genesis_hash: Some([7; 32]),
+                first_height,
+                first_timestamp_ms,
+                indexed_through_height: Some(10),
+                indexed_through_timestamp_ms,
+            };
 
-        assert!(!history_window_is_incomplete(
-            &status(Some(1), Some(2_000)),
-            since_ms
-        ));
-        assert!(!history_window_is_incomplete(
-            &status(Some(5), Some(since_ms)),
-            since_ms
-        ));
-        assert!(history_window_is_incomplete(
-            &status(Some(5), Some(2_000)),
-            since_ms
-        ));
-        assert!(history_window_is_incomplete(&status(None, None), since_ms));
-        assert!(history_window_is_incomplete(
-            &status(Some(5), None),
-            since_ms
-        ));
-        assert!(history_window_is_incomplete(
-            &status(Some(1), None),
-            since_ms
-        ));
+        assert_eq!(
+            history_window_gap(&status(Some(1), Some(since_ms), Some(since_ms)), since_ms),
+            None,
+            "a genesis-complete projector exactly at the boundary is complete"
+        );
+        assert_eq!(
+            history_window_gap(&status(Some(5), Some(since_ms), Some(2_000)), since_ms),
+            None,
+            "a later bootstrap with an exact opening floor and caught-up tip is complete"
+        );
+        assert_eq!(
+            history_window_gap(&status(Some(1), Some(100), Some(since_ms - 1)), since_ms),
+            Some("Historical data has not caught up to the leaderboard window")
+        );
+        assert_eq!(
+            history_window_gap(&status(Some(5), Some(2_000), Some(3_000)), since_ms),
+            Some("Leaderboard window predates available historical data")
+        );
+        assert!(history_window_gap(&status(None, None, None), since_ms).is_some());
+        assert!(history_window_gap(&status(Some(5), None, Some(2_000)), since_ms).is_some());
+        assert!(history_window_gap(&status(Some(1), None, Some(2_000)), since_ms).is_some());
+        assert!(history_window_gap(&status(Some(1), Some(100), None), since_ms).is_some());
     }
 }
