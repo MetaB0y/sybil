@@ -72,8 +72,11 @@ semantics rather than invented as an API-only minimum.
 > [!warning] Other stock budgets remain open
 > Public account stock, read-API-key recovery state, and durable resting-order
 > admission are bounded, but the product-history outbox during a prolonged
-> projector outage still lacks a byte/row budget. See the
-> [2026-07-11 resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md).
+> projector outage still lacks a ratified byte/row overflow policy. Exact
+> logical bytes, rows, oldest/newest height, oldest age, and host disk capacity
+> are monitored for devnet; no row is silently dropped. See the
+> [2026-07-11 resource audit](https://github.com/MetaB0y/sybil/blob/main/design/dos-audit-2026-07-11.md)
+> and [GitHub #90](https://github.com/MetaB0y/sybil/issues/90).
 
 Bridge deposit ingestion is service-only. The indexer authenticates the lowest
 common finalized prefix of its configured provider set, requires unanimous

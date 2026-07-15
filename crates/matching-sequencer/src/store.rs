@@ -135,7 +135,7 @@ pub use self::da::{
 };
 #[cfg(test)]
 pub(crate) use self::fault::StoreFaultPoint;
-pub use self::history_outbox::ProductHistoryOutboxAck;
+pub use self::history_outbox::{ProductHistoryOutboxAck, ProductHistoryOutboxStats};
 pub use self::import::WitnessImportSummary;
 pub use self::restore::{AnalyticsRestoredState, RestoredState};
 pub use self::retention::{

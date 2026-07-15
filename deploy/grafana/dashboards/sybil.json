@@ -494,7 +494,7 @@
     {
       "title": "Acknowledged-write Restore Failures",
       "type": "timeseries",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 109 },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 121 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sum by (kind) (sybil_restore_acknowledged_write_failures_total)", "legendFormat": "{{kind}}", "refId": "A" }
@@ -644,9 +644,45 @@
       }
     },
     {
+      "title": "Product History Source Backlog",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 109 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "sybil_product_history_outbox_backlog_rows", "legendFormat": "rows", "refId": "A" },
+        { "expr": "sybil_product_history_outbox_payload_bytes", "legendFormat": "payload bytes", "refId": "B" },
+        { "expr": "sybil_product_history_outbox_oldest_age_seconds", "legendFormat": "oldest age", "refId": "C" },
+        { "expr": "sybil_product_history_outbox_oldest_height", "legendFormat": "oldest height", "refId": "D" },
+        { "expr": "sybil_product_history_outbox_newest_height", "legendFormat": "newest height", "refId": "E" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "payload bytes" }, "properties": [{ "id": "unit", "value": "bytes" }] },
+          { "matcher": { "id": "byName", "options": "oldest age" }, "properties": [{ "id": "unit", "value": "s" }] }
+        ]
+      }
+    },
+    {
+      "title": "Host Root Filesystem",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 109 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "node_filesystem_avail_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|overlay|squashfs\"}", "legendFormat": "available bytes", "refId": "A" },
+        { "expr": "node_filesystem_avail_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|overlay|squashfs\"}", "legendFormat": "available ratio", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "min": 0, "custom": { "drawStyle": "line", "fillOpacity": 15 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "available ratio" }, "properties": [{ "id": "unit", "value": "percentunit" }, { "id": "max", "value": 1 }] }
+        ]
+      }
+    },
+    {
       "title": "Public Account Stock",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 109 },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 117 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_public_account_stock", "refId": "A" }],
       "fieldConfig": {
@@ -657,7 +693,7 @@
     {
       "title": "Public Account Slots Remaining",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 109 },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 117 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_public_account_remaining", "refId": "A" }],
       "fieldConfig": {
@@ -672,7 +708,7 @@
     {
       "title": "Public Onboarding Rejections (1h)",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 109 },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 117 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "increase(sybil_public_account_creation_total{result=\"capacity_exhausted\"}[1h]) + increase(sybil_http_onboarding_rate_limited_total[1h])", "refId": "A" }],
       "fieldConfig": {
@@ -688,12 +724,12 @@
       "type": "row",
       "collapsed": false,
       "panels": [],
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 113 }
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 125 }
     },
     {
       "title": "L1 Indexer Ready",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 114 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 126 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_l1_indexer_ready", "refId": "A" }],
       "fieldConfig": {
@@ -707,7 +743,7 @@
     {
       "title": "L1 Integrity Latched",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 114 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 126 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_l1_indexer_integrity_latched", "refId": "A" }],
       "fieldConfig": {
@@ -721,7 +757,7 @@
     {
       "title": "L1 Checkpoint Block",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 114 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 126 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_l1_indexer_checkpoint_block", "refId": "A" }],
       "fieldConfig": {
@@ -732,7 +768,7 @@
     {
       "title": "L1 Authenticated-Prefix Lag",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 114 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 126 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [{ "expr": "sybil_l1_indexer_confirmed_lag_blocks", "refId": "A" }],
       "fieldConfig": {
@@ -747,7 +783,7 @@
     {
       "title": "L1 Indexer Progress",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 118 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 130 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sybil_l1_indexer_latest_block", "legendFormat": "source tip", "refId": "A" },
@@ -763,7 +799,7 @@
     {
       "title": "L1 Indexer Failures",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 118 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 130 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [
         { "expr": "sum by (kind) (sybil_l1_indexer_fatal_failures_total)", "legendFormat": "fatal: {{kind}}", "refId": "A" },

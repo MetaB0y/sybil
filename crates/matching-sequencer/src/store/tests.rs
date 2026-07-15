@@ -95,6 +95,142 @@ async fn witnessed_qmdb_state_root_matches_header_after_slot_reuse() {
 }
 
 #[tokio::test]
+async fn product_history_outbox_stats_are_atomic_and_backfill_on_reopen() {
+    let path = temp_db_path("store-product-history-outbox-stats");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let markets = MarketSet::new();
+    let accounts = AccountStore::new();
+    let env = TestEnv::new();
+
+    for height in 1..=2 {
+        let (header, _) =
+            coherent_header_and_witness(height, &accounts, &markets, &lifecycle, &env.bridge_state);
+        store
+            .save_block(env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]))
+            .await
+            .unwrap();
+    }
+
+    let batches = store.product_history_outbox_batches(10).unwrap();
+    let payload_bytes = batches.iter().fold(0u64, |total, batch| {
+        total + u64::try_from(rmp_serde::to_vec(batch).unwrap().len()).unwrap()
+    });
+    let initial = store.product_history_outbox_stats().unwrap();
+    assert_eq!(initial.rows, 2);
+    assert_eq!(initial.payload_bytes, payload_bytes);
+    assert_eq!(initial.oldest_height, Some(1));
+    assert_eq!(initial.newest_height, Some(2));
+    assert_eq!(
+        initial.oldest_committed_at_ms,
+        Some(batches[0].committed_at_ms)
+    );
+
+    let (duplicate_header, _) =
+        coherent_header_and_witness(2, &accounts, &markets, &lifecycle, &env.bridge_state);
+    store
+        .save_block(env.snapshot(
+            &accounts,
+            &markets,
+            &lifecycle,
+            &duplicate_header,
+            1,
+            None,
+            vec![],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.product_history_outbox_stats().unwrap(),
+        initial,
+        "an exact duplicate fenced row must not double-count payload bytes"
+    );
+
+    let mut wrong_hash = batches[0].payload_hash;
+    wrong_hash[0] ^= 1;
+    assert!(
+        store
+            .acknowledge_product_history_batch(ProductHistoryOutboxAck {
+                height: batches[0].height,
+                payload_hash: wrong_hash,
+            })
+            .is_err()
+    );
+    assert_eq!(store.product_history_outbox_stats().unwrap(), initial);
+
+    assert!(
+        store
+            .acknowledge_product_history_batch(ProductHistoryOutboxAck {
+                height: batches[0].height,
+                payload_hash: batches[0].payload_hash,
+            })
+            .unwrap()
+    );
+    let remaining_payload_bytes =
+        u64::try_from(rmp_serde::to_vec(&batches[1]).unwrap().len()).unwrap();
+    assert_eq!(
+        store.product_history_outbox_stats().unwrap(),
+        ProductHistoryOutboxStats {
+            rows: 1,
+            payload_bytes: remaining_payload_bytes,
+            oldest_height: Some(2),
+            newest_height: Some(2),
+            oldest_committed_at_ms: Some(batches[1].committed_at_ms),
+        }
+    );
+
+    // Simulate a store written before the additive payload-byte counter. Open
+    // performs one bounded migration scan, then normal reads stay O(log n).
+    let txn = store.db.begin_write().unwrap();
+    {
+        let mut meta = txn.open_table(PRODUCT_HISTORY_OUTBOX_META).unwrap();
+        meta.remove(KEY_PRODUCT_HISTORY_OUTBOX_PAYLOAD_BYTES)
+            .unwrap();
+        meta.remove(KEY_PRODUCT_HISTORY_OUTBOX_OLDEST_COMMITTED_AT_MS)
+            .unwrap();
+    }
+    txn.commit().unwrap();
+    drop(store);
+
+    let store = Store::open(&path).unwrap();
+    assert_eq!(
+        store.product_history_outbox_stats().unwrap().payload_bytes,
+        remaining_payload_bytes
+    );
+    assert!(
+        store
+            .acknowledge_product_history_batch(ProductHistoryOutboxAck {
+                height: batches[1].height,
+                payload_hash: batches[1].payload_hash,
+            })
+            .unwrap()
+    );
+    assert_eq!(
+        store.product_history_outbox_stats().unwrap(),
+        ProductHistoryOutboxStats::default()
+    );
+
+    let (header, _) =
+        coherent_header_and_witness(3, &accounts, &markets, &lifecycle, &env.bridge_state);
+    store
+        .save_block(env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]))
+        .await
+        .unwrap();
+    let txn = store.db.begin_write().unwrap();
+    txn.open_table(PRODUCT_HISTORY_OUTBOX_META)
+        .unwrap()
+        .remove(KEY_PRODUCT_HISTORY_OUTBOX_OLDEST_COMMITTED_AT_MS)
+        .unwrap();
+    txn.commit().unwrap();
+    drop(store);
+    assert!(
+        matches!(Store::open(&path), Err(StoreError::CorruptLayout(message)) if message.contains("partially initialized")),
+        "a populated outbox with partial stock metadata must fail closed"
+    );
+}
+
+#[tokio::test]
 async fn canonical_archive_pruning_deletes_replay_blocks_and_da_with_metadata() {
     let path = temp_db_path("store-canonical-archive-retention");
     let store = Store::open(&path).unwrap();

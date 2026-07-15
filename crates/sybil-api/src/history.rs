@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use matching_sequencer::store::{ProductHistoryOutboxAck, Store};
+use matching_sequencer::store::{ProductHistoryOutboxAck, ProductHistoryOutboxStats, Store};
 use reqwest::StatusCode;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -158,15 +158,15 @@ pub async fn run_outbox_publisher(
     loop {
         let read_store = Arc::clone(&store);
         let read = tokio::task::spawn_blocking(move || {
-            let backlog = read_store.product_history_outbox_len()?;
+            let stats = read_store.product_history_outbox_stats()?;
             let batches = read_store.product_history_outbox_batches(OUTBOX_READ_BATCH_SIZE)?;
-            Ok::<_, matching_sequencer::store::StoreError>((backlog, batches))
+            Ok::<_, matching_sequencer::store::StoreError>((stats, batches))
         });
         let read = tokio::select! {
             _ = cancel.cancelled() => return,
             result = read => result,
         };
-        let (backlog, batches) = match read {
+        let (stats, batches) = match read {
             Ok(Ok(result)) => result,
             Ok(Err(error)) => {
                 metrics::counter!("sybil_product_history_outbox_read_failures_total").increment(1);
@@ -185,7 +185,7 @@ pub async fn run_outbox_publisher(
                 continue;
             }
         };
-        metrics::gauge!("sybil_product_history_outbox_backlog_rows").set(backlog as f64);
+        record_outbox_stats(stats);
         if batches.is_empty() {
             if wait_or_cancel(&cancel, poll_interval).await {
                 return;
@@ -264,6 +264,58 @@ pub async fn run_outbox_publisher(
             return;
         }
     }
+}
+
+/// Keep the durable source stock visible even when no history endpoint is
+/// configured. This is intentionally observation-only: overflow behavior is
+/// an explicit architecture decision, never an implicit row drop.
+pub async fn run_outbox_monitor(
+    store: Arc<Store>,
+    poll_interval: Duration,
+    cancel: CancellationToken,
+) {
+    let poll_interval = poll_interval.max(Duration::from_millis(10));
+    loop {
+        let read_store = Arc::clone(&store);
+        let read = tokio::task::spawn_blocking(move || read_store.product_history_outbox_stats());
+        let read = tokio::select! {
+            _ = cancel.cancelled() => return,
+            result = read => result,
+        };
+        match read {
+            Ok(Ok(stats)) => record_outbox_stats(stats),
+            Ok(Err(error)) => {
+                metrics::counter!("sybil_product_history_outbox_read_failures_total").increment(1);
+                tracing::warn!(%error, "failed to inspect product-history outbox");
+            }
+            Err(error) => {
+                metrics::counter!("sybil_product_history_outbox_read_failures_total").increment(1);
+                tracing::warn!(%error, "product-history outbox monitor task failed");
+            }
+        }
+        if wait_or_cancel(&cancel, poll_interval).await {
+            return;
+        }
+    }
+}
+
+fn record_outbox_stats(stats: ProductHistoryOutboxStats) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let now_ms = u64::try_from(now_ms).unwrap_or(u64::MAX);
+    let oldest_age_seconds = stats
+        .oldest_committed_at_ms
+        .map(|timestamp_ms| now_ms.saturating_sub(timestamp_ms) as f64 / 1_000.0)
+        .unwrap_or(0.0);
+    metrics::gauge!("sybil_product_history_outbox_backlog_rows").set(stats.rows as f64);
+    metrics::gauge!("sybil_product_history_outbox_payload_bytes").set(stats.payload_bytes as f64);
+    metrics::gauge!("sybil_product_history_outbox_oldest_height")
+        .set(stats.oldest_height.unwrap_or(0) as f64);
+    metrics::gauge!("sybil_product_history_outbox_newest_height")
+        .set(stats.newest_height.unwrap_or(0) as f64);
+    metrics::gauge!("sybil_product_history_outbox_oldest_age_seconds").set(oldest_age_seconds);
 }
 
 async fn wait_or_cancel(cancel: &CancellationToken, duration: Duration) -> bool {

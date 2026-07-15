@@ -49,6 +49,54 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'node_filesystem_avail_bytes{job="node",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "14000000000+0x12"
+      - series: 'node_filesystem_size_bytes{job="node",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "100000000000+0x12"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: HostDiskSpaceLow
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: HostDiskSpaceLow
+        exp_alerts:
+          - exp_labels:
+              job: "node"
+              instance: "node-exporter:9100"
+              mountpoint: "/"
+              fstype: "ext4"
+              severity: warning
+              component: host
+            exp_annotations:
+              summary: "Host root filesystem space is low"
+              description: "Available space on the root filesystem has been below 15% for 10m (current ratio: 14%). Sequencer and history Docker volumes share this filesystem; inspect outbox/history/archive growth before redb writes fail."
+
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{job="node",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "4000000000+0x5"
+      - series: 'node_filesystem_size_bytes{job="node",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "100000000000+0x5"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HostDiskSpaceCritical
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HostDiskSpaceCritical
+        exp_alerts:
+          - exp_labels:
+              job: "node"
+              instance: "node-exporter:9100"
+              mountpoint: "/"
+              fstype: "ext4"
+              severity: critical
+              component: host
+            exp_annotations:
+              summary: "Host root filesystem is nearly full"
+              description: "Available space on the root filesystem is below 5% (current ratio: 4%). Preserve the stores and stop discretionary writers; do not delete product-history outbox rows without a verified durable sink."
+
+  - interval: 1m
+    input_series:
       - series: 'sybil_state_accounts_total{job="sybil-api",instance="sybil-api:3000"}'
         values: "0+0x10 0+10x20"
     alert_rule_test:
@@ -119,6 +167,48 @@ tests:
             exp_annotations:
               summary: "Public onboarding account stock is exhausted"
               description: "No lifetime public account allocations remain. Anonymous onboarding now returns PUBLIC_ACCOUNT_CAPACITY_EXHAUSTED; account ids are not reclaimed automatically. See docs/runbooks/resource-liveness.md."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_product_history_outbox_backlog_rows{job="sybil-api",instance="sybil-api:3000"}'
+        values: "100+0x8"
+      - series: 'sybil_product_history_outbox_oldest_age_seconds{job="sybil-api",instance="sybil-api:3000"}'
+        values: "1200+0x8"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ProductHistoryOutboxStale
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: ProductHistoryOutboxStale
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-api"
+              instance: "sybil-api:3000"
+              severity: warning
+              component: history
+            exp_annotations:
+              summary: "Product-history source outbox is stale"
+              description: "The oldest unacknowledged product-history batch has been at least 15m old for 5m (current age: 20m 0s). Check projector health, credentials, network, redb writes, and disk capacity; trading continues while this backlog consumes sequencer disk. See docs/runbooks/resource-liveness.md."
+
+  - interval: 1m
+    input_series:
+      - series: 'sybil_product_history_outbox_payload_bytes{job="sybil-api",instance="sybil-api:3000"}'
+        values: "314572800+0x8"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ProductHistoryOutboxLarge
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: ProductHistoryOutboxLarge
+        exp_alerts:
+          - exp_labels:
+              job: "sybil-api"
+              instance: "sybil-api:3000"
+              severity: warning
+              component: history
+            exp_annotations:
+              summary: "Product-history source outbox is large"
+              description: "Encoded product-history payloads retained in the sequencer outbox exceed 256 MiB (current: 300MiB), excluding redb page overhead. Restore projector throughput before shared-host disk pressure threatens canonical persistence. See docs/runbooks/resource-liveness.md."
 
   - interval: 1m
     input_series:

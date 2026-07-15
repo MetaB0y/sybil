@@ -125,12 +125,16 @@ reconstructable or supply an escape witness.
 
 ## Operations and failure behavior
 
-- Monitor outbox rows/oldest height, delivery failures/duration, history
-  checkpoint, and lag to the sequencer head.
+- Monitor exact outbox rows/logical payload bytes, oldest/newest height, oldest
+  age, delivery failures/duration, root-filesystem capacity, history checkpoint,
+  and lag to the sequencer head. Payload bytes are transactionally maintained
+  and deliberately exclude redb page/fragmentation overhead.
 - Back up the history volume independently from canonical sequencer state.
 - A prolonged service outage can exhaust sequencer disk through the unbounded
   outbox. Devnet alerts and discloses; a production halt/drop policy requires a
-  separate explicit decision. Silent dropping is forbidden.
+  separate explicit decision in
+  [GitHub #90](https://github.com/MetaB0y/sybil/issues/90). Silent dropping is
+  forbidden.
 - The current Compose topology puts both processes on one host. It isolates
   CPU/mailbox/database work, not host failure or disk contention.
 - Outbox catch-up delivers and acknowledges bounded prefixes; one local redb
