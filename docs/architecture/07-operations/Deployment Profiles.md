@@ -122,12 +122,17 @@ At boot, before opening the store or binding the socket,
 
 ## L1 indexer finality and cursor policy
 
-The separately managed `sybil-l1-indexer` always requires
-`SYBIL_L1_CURSOR_PATH`. Cursor schema v2 binds chain id, vault address,
+The `sybil-l1-indexer` is an opt-in Compose profile until a vault/RPC deployment
+is configured. The server image packages the binary; the profile mounts a
+dedicated cursor volume and exposes independent `/metrics` and `/healthz` on
+port 9102. It always requires `SYBIL_L1_CURSOR_PATH`. Cursor schema v2 binds
+chain id, vault address,
 `next_from`, and the canonical hash of the last fully processed block in one
 durable update. An old cursor without a hash is rejected rather than blessed
 from the current RPC view. A detected mismatch adds a persistent incident latch
-that restarts refuse; see the
+that restarts refuse. Fatal startup or runtime failures retain only the metrics
+and unhealthy health endpoints so the first scrape cannot lose the incident;
+see the
 [L1 reorg runbook](../../runbooks/l1-reorg-recovery.md).
 
 Local Anvil may explicitly set both confirmation values to zero. Public-chain

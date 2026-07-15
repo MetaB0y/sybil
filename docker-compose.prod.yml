@@ -67,6 +67,14 @@ services:
       SYBIL_HISTORY_DATA_DIR: "/history-data"
       SYBIL_HISTORY_CANDLE_RESOLUTIONS_SECS: "60,300,3600"
     logging: *default-logging
+  sybil-l1-indexer:
+    environment:
+      SYBIL_L1_RPC_URL: "${SYBIL_L1_RPC_URL:-}"
+      SYBIL_L1_VAULT: "${SYBIL_L1_VAULT:-}"
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
+      SYBIL_L1_CONFIRMATIONS: "${SYBIL_L1_CONFIRMATIONS:-64}"
+      SYBIL_L1_MIN_CONFIRMATIONS: "${SYBIL_L1_MIN_CONFIRMATIONS:-64}"
+    logging: *default-logging
   sybil-polymarket:
     environment:
       SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"

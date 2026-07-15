@@ -1,0 +1,122 @@
+# Prometheus-compatible tests for L1 indexer fail-stop and liveness paging.
+# Run: promtool test rules deploy/vmalert/tests/l1-indexer-health_test.yml
+
+rule_files:
+  - ../rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: first scrape of fatal cursor failure pages by kind
+    interval: 1m
+    input_series:
+      - series: 'sybil_l1_indexer_fatal_failures_total{kind="cursor_invalid",job="sybil-l1-indexer",instance="sybil-l1-indexer:9102"}'
+        values: "1+0x4"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: L1IndexerFatalFailure
+        exp_alerts:
+          - exp_labels:
+              kind: cursor_invalid
+              severity: critical
+              component: l1-indexer
+            exp_annotations:
+              summary: "L1 indexer entered fail-stop mode"
+              description: "The L1 indexer is serving metrics only after a fatal integrity failure (kind=cursor_invalid). Preserve the cursor/store evidence, stop bridge-dependent writes, and do not clear or edit the cursor."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+
+  - name: clean restart clears fatal page
+    interval: 1m
+    input_series:
+      - series: 'sybil_l1_indexer_fatal_failures_total{kind="canonical_hash_mismatch",job="sybil-l1-indexer",instance="sybil-l1-indexer:9102"}'
+        values: "1 0+0x3"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: L1IndexerFatalFailure
+        exp_alerts:
+          - exp_labels:
+              kind: canonical_hash_mismatch
+              severity: critical
+              component: l1-indexer
+            exp_annotations:
+              summary: "L1 indexer entered fail-stop mode"
+              description: "The L1 indexer is serving metrics only after a fatal integrity failure (kind=canonical_hash_mismatch). Preserve the cursor/store evidence, stop bridge-dependent writes, and do not clear or edit the cursor."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+      - eval_time: 1m
+        alertname: L1IndexerFatalFailure
+        exp_alerts: []
+
+  - name: sustained unready state pages and recovery clears
+    interval: 1m
+    input_series:
+      - series: 'sybil_l1_indexer_ready{job="sybil-l1-indexer",instance="sybil-l1-indexer:9102"}'
+        values: "0 0 1"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: L1IndexerNotReady
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: L1IndexerNotReady
+        exp_alerts:
+          - exp_labels:
+              job: sybil-l1-indexer
+              instance: sybil-l1-indexer:9102
+              severity: critical
+              component: l1-indexer
+            exp_annotations:
+              summary: "L1 indexer is not ready"
+              description: "The indexer metrics listener is reachable but ingestion has remained unready for 1m. Check the fatal counter and /healthz before restarting anything."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+      - eval_time: 2m
+        alertname: L1IndexerNotReady
+        exp_alerts: []
+
+  - name: three consecutive RPC failures page and success recovers
+    interval: 1m
+    input_series:
+      - series: 'sybil_l1_indexer_consecutive_rpc_failures{job="sybil-l1-indexer",instance="sybil-l1-indexer:9102"}'
+        values: "0 1 2 3 0"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: L1IndexerRpcFailureBurst
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: L1IndexerRpcFailureBurst
+        exp_alerts:
+          - exp_labels:
+              job: sybil-l1-indexer
+              instance: sybil-l1-indexer:9102
+              severity: critical
+              component: l1-indexer
+            exp_annotations:
+              summary: "L1 indexer RPC failures are consecutive"
+              description: "At least three consecutive L1 RPC polls failed (current streak: 3). Treat provider unavailability or equivocation as a bridge-integrity incident; do not bypass the configured endpoint policy."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+      - eval_time: 4m
+        alertname: L1IndexerRpcFailureBurst
+        exp_alerts: []
+
+  - name: confirmed lag warns only after sustained threshold
+    interval: 5m
+    input_series:
+      - series: 'sybil_l1_indexer_confirmed_lag_blocks{job="sybil-l1-indexer",instance="sybil-l1-indexer:9102"}'
+        values: "10 65 70 72 20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: L1IndexerConfirmedLagHigh
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: L1IndexerConfirmedLagHigh
+        exp_alerts:
+          - exp_labels:
+              job: sybil-l1-indexer
+              instance: sybil-l1-indexer:9102
+              severity: warning
+              component: l1-indexer
+            exp_annotations:
+              summary: "L1 indexer is behind the confirmed tip"
+              description: "The durable L1 checkpoint has remained more than 64 confirmed blocks behind for 10m (current lag: 72 blocks). Check RPC latency, API failures, and cursor persistence before the backlog grows."
+              runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+      - eval_time: 20m
+        alertname: L1IndexerConfirmedLagHigh
+        exp_alerts: []

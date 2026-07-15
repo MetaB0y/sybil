@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -23,16 +24,19 @@ use sybil_l1_protocol::{
     Bytes32, EthAddress, L1ProtocolError, deposit_received_topic0, withdrawal_cancelled_topic0,
     withdrawal_finalized_topic0, withdrawal_queued_topic0,
 };
+use tokio::net::TcpListener;
 use tokio::time::sleep;
 
 mod cursor;
 mod events;
+mod monitoring;
 
 use cursor::{BlockCheckpoint, CursorState, ReorgIncident, load_cursor, save_cursor};
 use events::{
     IndexedDeposit, indexed_deposit_from_log, indexed_withdrawal_event_from_log, sort_deposits,
     sort_withdrawal_events, withdrawal_event_request,
 };
+use monitoring::IndexerMetrics;
 
 /// Default L1 confirmation depth.
 ///
@@ -106,6 +110,9 @@ struct Args {
     /// checkpoint, and durable deep-reorg fail-stop latch.
     #[arg(long, env = "SYBIL_L1_CURSOR_PATH")]
     cursor_path: PathBuf,
+    /// Bind address for the independent Prometheus and health listener.
+    #[arg(long, env = "SYBIL_L1_METRICS_BIND", default_value = "0.0.0.0:9102")]
+    metrics_bind: SocketAddr,
     /// Scan once and exit.
     #[arg(long, env = "SYBIL_L1_INDEX_ONCE", default_value_t = false)]
     once: bool,
@@ -130,6 +137,8 @@ enum IndexerError {
     Json(#[from] serde_json::Error),
     #[error("cursor state I/O failed: {0}")]
     Io(#[from] std::io::Error),
+    #[error("metrics server I/O failed: {0}")]
+    MetricsIo(std::io::Error),
     #[error("Sybil API failed: {0}")]
     SybilApi(#[from] sybil_client::Error),
     #[error("L1 protocol error: {0}")]
@@ -229,6 +238,36 @@ impl IndexerError {
                 | IndexerError::ReorgIncidentLatched { .. }
                 | IndexerError::CanonicalBlockHashMismatch { .. }
         )
+    }
+
+    fn metric_kind(&self) -> &'static str {
+        match self {
+            Self::InvalidHex { .. }
+            | Self::InvalidRpcUrl(_)
+            | Self::UnsafeConfirmations { .. }
+            | Self::StartBlockAheadOfCursor { .. } => "configuration",
+            Self::Rpc(_) | Self::MissingRpcResult => "rpc",
+            Self::Abi(_) | Self::L1Protocol(_) => "l1_decode",
+            Self::Json(_)
+            | Self::CursorConfigMismatch { .. }
+            | Self::CursorSchemaMismatch { .. }
+            | Self::CursorCheckpointInvalid { .. } => "cursor_invalid",
+            Self::Io(_) => "cursor_io",
+            Self::MetricsIo(_) => "metrics_io",
+            Self::SybilApi(_) => "sybil_api",
+            Self::DepositGap { .. } => "deposit_gap",
+            Self::DepositRootMismatch { .. } => "deposit_root_mismatch",
+            Self::ReorgIncidentLatched { .. } => "reorg_latched",
+            Self::CanonicalBlockHashMismatch { .. } => "canonical_hash_mismatch",
+        }
+    }
+
+    fn is_rpc_failure(&self) -> bool {
+        matches!(self, Self::Rpc(_) | Self::MissingRpcResult)
+    }
+
+    fn is_latched_reorg(&self) -> bool {
+        matches!(self, Self::ReorgIncidentLatched { .. })
     }
 }
 
@@ -441,6 +480,24 @@ impl DepositSink for SybilClient {
     }
 }
 
+struct RunFailure {
+    error: IndexerError,
+    fatal: bool,
+}
+
+impl RunFailure {
+    fn fatal(error: IndexerError) -> Self {
+        Self { error, fatal: true }
+    }
+
+    fn transient(error: IndexerError) -> Self {
+        Self {
+            error,
+            fatal: false,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -448,17 +505,51 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     let args = Args::parse();
+    let metrics = IndexerMetrics::new();
+    let listener = TcpListener::bind(args.metrics_bind)
+        .await
+        .map_err(IndexerError::MetricsIo)?;
+    tracing::info!(address = %args.metrics_bind, "l1.indexer.monitoring_listening");
+
+    let server = monitoring::serve(listener, metrics.clone());
+    let indexer = run_indexer(&args, &metrics);
+    tokio::pin!(server);
+    tokio::pin!(indexer);
+
+    tokio::select! {
+        outcome = &mut indexer => match outcome {
+            Ok(()) => Ok(()),
+            Err(failure) if !failure.fatal => Err(failure.error),
+            Err(failure) => {
+                metrics.record_fatal(
+                    failure.error.metric_kind(),
+                    failure.error.is_latched_reorg(),
+                );
+                tracing::error!(error = %failure.error, "l1.indexer.fatal_metrics_only_mode");
+                // Keep only /metrics and /healthz alive so the first scrape sees
+                // the nonzero fatal counter instead of losing it on process exit.
+                server.await.map_err(IndexerError::MetricsIo)?;
+                Err(failure.error)
+            }
+        },
+        server_result = &mut server => server_result.map_err(IndexerError::MetricsIo),
+    }
+}
+
+async fn run_indexer(args: &Args, metrics: &IndexerMetrics) -> std::result::Result<(), RunFailure> {
     warn_if_low_confirmation_depth(args.confirmations);
     if let Err(error) = check_confirmation_safety(args.confirmations, args.min_confirmations) {
         tracing::error!(%error, "l1.indexer.unsafe_confirmation_config");
-        return Err(error);
+        return Err(RunFailure::fatal(error));
     }
 
-    let vault_address = parse_hex_array::<20>(&args.vault_address, "vault_address")?;
+    let vault_address =
+        parse_hex_array::<20>(&args.vault_address, "vault_address").map_err(RunFailure::fatal)?;
     let vault_hex = hex::encode(vault_address);
     let http = reqwest::Client::new();
     let rpc_url = reqwest::Url::parse(&args.rpc_url)
-        .map_err(|error| IndexerError::InvalidRpcUrl(error.to_string()))?;
+        .map_err(|error| IndexerError::InvalidRpcUrl(error.to_string()))
+        .map_err(RunFailure::fatal)?;
     let l1 = HttpL1Rpc {
         provider: ProviderBuilder::new()
             .connect_reqwest(http.clone(), rpc_url)
@@ -470,11 +561,13 @@ async fn main() -> Result<()> {
         args.sybil_service_token.clone(),
     );
 
-    let persisted_cursor = load_cursor(&args.cursor_path, &vault_hex, args.chain_id)?;
+    let persisted_cursor =
+        load_cursor(&args.cursor_path, &vault_hex, args.chain_id).map_err(RunFailure::fatal)?;
     let mut next_from = effective_scan_start(
         args.start_block,
         persisted_cursor.as_ref().map(|state| state.next_from),
-    )?;
+    )
+    .map_err(RunFailure::fatal)?;
     let mut checkpoint = persisted_cursor
         .as_ref()
         .and_then(|state| state.checkpoint.clone());
@@ -494,30 +587,44 @@ async fn main() -> Result<()> {
             "l1.indexer.scan_start"
         ),
     }
+    metrics.mark_ready(
+        next_from,
+        checkpoint.as_ref().map(|value| value.block_number),
+    );
 
     loop {
-        match run_once(
+        match poll_once(
             &l1,
             &sybil,
-            &args,
+            args,
             vault_address,
             next_from,
             checkpoint.as_ref(),
         )
         .await
         {
-            Ok(Some(progress)) => {
-                let state = CursorState::active(
-                    progress.next_from,
-                    &vault_hex,
-                    args.chain_id,
-                    progress.checkpoint.clone(),
+            Ok(poll) => {
+                if let Some(progress) = poll.progress {
+                    let state = CursorState::active(
+                        progress.next_from,
+                        &vault_hex,
+                        args.chain_id,
+                        progress.checkpoint.clone(),
+                    );
+                    if let Err(error) = save_cursor(&args.cursor_path, &state) {
+                        metrics.record_cursor_persistence_failure();
+                        return Err(RunFailure::fatal(error));
+                    }
+                    next_from = progress.next_from;
+                    checkpoint = Some(progress.checkpoint);
+                }
+                metrics.record_successful_poll(
+                    poll.latest_block,
+                    poll.confirmed_tip_block,
+                    next_from,
+                    checkpoint.as_ref().map(|value| value.block_number),
                 );
-                save_cursor(&args.cursor_path, &state)?;
-                next_from = progress.next_from;
-                checkpoint = Some(progress.checkpoint);
             }
-            Ok(None) => {}
             Err(error) => {
                 match persist_reorg_latch(
                     &args.cursor_path,
@@ -527,27 +634,32 @@ async fn main() -> Result<()> {
                     checkpoint.clone(),
                     &error,
                 ) {
-                    Ok(true) => tracing::error!(
-                        path = %args.cursor_path.display(),
-                        "l1.indexer.reorg_latched"
-                    ),
+                    Ok(true) => {
+                        metrics.mark_reorg_latched();
+                        tracing::error!(
+                            path = %args.cursor_path.display(),
+                            "l1.indexer.reorg_latched"
+                        );
+                    }
                     Ok(false) => {}
                     Err(save_error) => {
+                        metrics.record_cursor_persistence_failure();
                         tracing::error!(
                             reorg_error = %error,
                             %save_error,
                             path = %args.cursor_path.display(),
                             "l1.indexer.reorg_latch_persist_failed"
                         );
-                        return Err(save_error);
+                        return Err(RunFailure::fatal(save_error));
                     }
                 }
                 if error.is_fatal() {
                     tracing::error!(%error, "l1.indexer.fatal");
-                    return Err(error);
+                    return Err(RunFailure::fatal(error));
                 }
+                metrics.record_poll_failure(error.metric_kind(), error.is_rpc_failure());
                 if args.once {
-                    return Err(error);
+                    return Err(RunFailure::transient(error));
                 }
                 tracing::warn!(%error, "l1.indexer.poll_failed");
             }
@@ -566,14 +678,21 @@ struct ScanProgress {
     checkpoint: BlockCheckpoint,
 }
 
-async fn run_once<L: L1Rpc, S: DepositSink>(
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PollResult {
+    progress: Option<ScanProgress>,
+    latest_block: u64,
+    confirmed_tip_block: u64,
+}
+
+async fn poll_once<L: L1Rpc, S: DepositSink>(
     l1: &L,
     sink: &S,
     args: &Args,
     vault_address: EthAddress,
     next_from: u64,
     checkpoint: Option<&BlockCheckpoint>,
-) -> Result<Option<ScanProgress>> {
+) -> Result<PollResult> {
     if let Some(checkpoint) = checkpoint {
         let expected = checkpoint.block_hash(&args.cursor_path)?;
         require_canonical_block_hash(
@@ -591,7 +710,11 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
     // is credited.
     let confirmed_tip = latest.saturating_sub(args.confirmations);
     if confirmed_tip < next_from {
-        return Ok(None);
+        return Ok(PollResult {
+            progress: None,
+            latest_block: latest,
+            confirmed_tip_block: confirmed_tip,
+        });
     }
 
     let to = confirmed_tip.min(next_from.saturating_add(args.max_block_span.saturating_sub(1)));
@@ -720,10 +843,30 @@ async fn run_once<L: L1Rpc, S: DepositSink>(
     })
     .await?;
 
-    Ok(Some(ScanProgress {
-        next_from: to.saturating_add(1),
-        checkpoint: BlockCheckpoint::new(to, range_tip_hash),
-    }))
+    Ok(PollResult {
+        progress: Some(ScanProgress {
+            next_from: to.saturating_add(1),
+            checkpoint: BlockCheckpoint::new(to, range_tip_hash),
+        }),
+        latest_block: latest,
+        confirmed_tip_block: confirmed_tip,
+    })
+}
+
+#[cfg(test)]
+async fn run_once<L: L1Rpc, S: DepositSink>(
+    l1: &L,
+    sink: &S,
+    args: &Args,
+    vault_address: EthAddress,
+    next_from: u64,
+    checkpoint: Option<&BlockCheckpoint>,
+) -> Result<Option<ScanProgress>> {
+    Ok(
+        poll_once(l1, sink, args, vault_address, next_from, checkpoint)
+            .await?
+            .progress,
+    )
 }
 
 async fn require_canonical_block_hash<L: L1Rpc>(
@@ -1152,6 +1295,7 @@ mod tests {
             max_block_span: 1_000,
             poll_ms: 0,
             cursor_path: PathBuf::from("test-l1-cursor.json"),
+            metrics_bind: "127.0.0.1:0".parse().unwrap(),
             once: true,
         }
     }
@@ -1787,8 +1931,50 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    #[test]
-    fn persisted_reorg_incident_is_fail_stop_latched_across_restart() {
+    #[tokio::test]
+    async fn invalid_cursor_startup_exports_first_scrape_fatal_signal() {
+        let dir = std::env::temp_dir().join(format!(
+            "syb85-invalid-cursor-metrics-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cursor.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "next_from": 9,
+                "vault_address_hex": "1010101010101010101010101010101010101010",
+                "chain_id": 31337
+            }"#,
+        )
+        .unwrap();
+
+        let mut args = test_args(2);
+        args.rpc_url = "http://127.0.0.1:8545".to_string();
+        args.cursor_path = path;
+        let metrics = IndexerMetrics::new();
+        let failure = run_indexer(&args, &metrics).await.unwrap_err();
+        assert!(failure.fatal);
+        assert_eq!(failure.error.metric_kind(), "cursor_invalid");
+
+        // This is the same transition main applies before awaiting the metrics
+        // server forever in recovery-only mode.
+        metrics.record_fatal(
+            failure.error.metric_kind(),
+            failure.error.is_latched_reorg(),
+        );
+        let rendered = metrics.render();
+        assert!(rendered.contains("sybil_l1_indexer_ready 0"));
+        assert!(
+            rendered.contains("sybil_l1_indexer_fatal_failures_total{kind=\"cursor_invalid\"} 1")
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn persisted_reorg_incident_is_fail_stop_latched_across_restart() {
         let dir = std::env::temp_dir().join(format!("syb62-reorg-latch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("cursor.json");
@@ -1825,6 +2011,25 @@ mod tests {
                 && expected_hex == hex::encode(expected)
                 && observed_hex == hex::encode(observed)
         ));
+
+        let mut args = test_args(2);
+        args.rpc_url = "http://127.0.0.1:8545".to_string();
+        args.cursor_path = path;
+        let metrics = IndexerMetrics::new();
+        let failure = run_indexer(&args, &metrics).await.unwrap_err();
+        assert!(failure.fatal);
+        assert_eq!(failure.error.metric_kind(), "reorg_latched");
+        assert!(failure.error.is_latched_reorg());
+
+        metrics.record_fatal(
+            failure.error.metric_kind(),
+            failure.error.is_latched_reorg(),
+        );
+        let rendered = metrics.render();
+        assert!(rendered.contains("sybil_l1_indexer_reorg_latched 1"));
+        assert!(
+            rendered.contains("sybil_l1_indexer_fatal_failures_total{kind=\"reorg_latched\"} 1")
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

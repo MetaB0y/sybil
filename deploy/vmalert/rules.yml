@@ -265,6 +265,57 @@ groups:
           summary: "L1 deposit pipeline is stalled"
           description: "The service-tier deposit submit path returned a server error. Unlike an unresolved-key 404, this is not a quarantine disposition and the gapless indexer will retry the head deposit."
 
+      - alert: L1IndexerFatalFailure
+        # Fatal counters are absolute rather than increase(): cold-start cursor
+        # failures first appear at 1 and have no previously scraped zero.
+        expr: |
+          sum by (kind) (
+            sybil_l1_indexer_fatal_failures_total
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: l1-indexer
+        annotations:
+          summary: "L1 indexer entered fail-stop mode"
+          description: "The L1 indexer is serving metrics only after a fatal integrity failure (kind={{ $labels.kind }}). Preserve the cursor/store evidence, stop bridge-dependent writes, and do not clear or edit the cursor."
+          runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+
+      - alert: L1IndexerNotReady
+        expr: sybil_l1_indexer_ready == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: l1-indexer
+        annotations:
+          summary: "L1 indexer is not ready"
+          description: "The indexer metrics listener is reachable but ingestion has remained unready for 1m. Check the fatal counter and /healthz before restarting anything."
+          runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+
+      - alert: L1IndexerRpcFailureBurst
+        # This process-local gauge is scrape-safe on its first observation and
+        # resets on the next successful poll.
+        expr: sybil_l1_indexer_consecutive_rpc_failures >= 3
+        for: 0m
+        labels:
+          severity: critical
+          component: l1-indexer
+        annotations:
+          summary: "L1 indexer RPC failures are consecutive"
+          description: "At least three consecutive L1 RPC polls failed (current streak: {{ $value }}). Treat provider unavailability or equivocation as a bridge-integrity incident; do not bypass the configured endpoint policy."
+          runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+
+      - alert: L1IndexerConfirmedLagHigh
+        expr: sybil_l1_indexer_confirmed_lag_blocks > 64
+        for: 10m
+        labels:
+          severity: warning
+          component: l1-indexer
+        annotations:
+          summary: "L1 indexer is behind the confirmed tip"
+          description: "The durable L1 checkpoint has remained more than 64 confirmed blocks behind for 10m (current lag: {{ $value }} blocks). Check RPC latency, API failures, and cursor persistence before the backlog grows."
+          runbook_url: "https://github.com/MetaB0y/sybil/blob/main/docs/runbooks/l1-reorg-recovery.md#indexer-alerts-and-diagnosis"
+
       - alert: SyntheticProbeFailed
         expr: last_over_time(sybil_synthetic_probe_failure{job="sybil-synthetic"}[10m]) == 1
         for: 0m

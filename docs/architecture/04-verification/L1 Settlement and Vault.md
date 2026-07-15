@@ -132,10 +132,12 @@ against the canonical header and requires the range-tip hash to remain stable
 across ingestion.
 
 A mismatch stops before further L1 input and persists a fail-stop incident in
-the cursor. Restarts refuse the latch. This detects deep rewrites of deposits
-already credited and withdrawal events already applied; it does not invent an
-inverse transition. Operators must freeze the API and both contracts, preserve
-the store/cursor, and follow the
+the cursor. The process retains only scrapeable metrics and unhealthy health
+endpoints; restarts refuse the latch. Critical alerts cover fatal kind, unready
+state, consecutive RPC failures, and confirmed lag. This detects deep rewrites
+of deposits already credited and withdrawal events already applied; it does not
+invent an inverse transition. Operators must freeze the API and both contracts,
+preserve the store/cursor, and follow the
 [L1 reorg runbook](../../runbooks/l1-reorg-recovery.md). Complete validium-state
 rollback/reconstruction is not implemented, so this remains a blocker before
 real funds.

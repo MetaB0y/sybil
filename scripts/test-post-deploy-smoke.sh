@@ -21,10 +21,12 @@ proof_root="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 reset_gate() {
     PASSN=0; FAILN=0; SKIPN=0; RESULTS=(); ORDER_MARKET=""
+    VIRTUAL_SLEEP_CALLS=0
     SECONDS=0
 }
 
 sleep() {
+    VIRTUAL_SLEEP_CALLS=$((VIRTUAL_SLEEP_CALLS + 1))
     SECONDS=$((SECONDS + $1))
 }
 
@@ -98,14 +100,14 @@ http() {
     else HTTP_BODY="{\"state_root\":\"$proof_root\"}"; fi
 }
 smoke_compose_service_curl() {
-    if [[ "$SECONDS" -eq 0 ]]; then
+    if [[ "$VIRTUAL_SLEEP_CALLS" -eq 0 ]]; then
         printf '%s' "{\"block_height\":90,\"state_root\":\"0x$proof_root\",\"status\":\"prepared\",\"proof_status\":\"mock_verified\"}"
     else
         printf '%s' "{\"block_height\":98,\"state_root\":\"0x$proof_root\",\"status\":\"prepared\",\"proof_status\":\"mock_verified\"}"
     fi
 }
 check_proof_freshness >/dev/null
-[[ "$FAILN" -eq 0 && "$PASSN" -eq 1 && "$SECONDS" -eq 2 ]] \
+[[ "$FAILN" -eq 0 && "$PASSN" -eq 1 && "$VIRTUAL_SLEEP_CALLS" -eq 1 ]] \
     || { echo "FAIL: transient proof lag did not recover" >&2; exit 1; }
 
 # A permanently stale proof head stops exactly at the deadline and blocks a

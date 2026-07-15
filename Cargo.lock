@@ -7004,6 +7004,7 @@ name = "sybil-l1-indexer"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "axum",
  "clap",
  "hex",
  "reqwest 0.13.4",

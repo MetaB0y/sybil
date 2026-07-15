@@ -68,6 +68,43 @@ services:
       start_period: 5s
     logging: *default-logging
 
+  # Opt-in until an L1 deployment is configured. Enable with
+  # `docker compose --profile l1-indexer up -d sybil-l1-indexer`; its cursor
+  # volume is deployment identity and must never be shared across vaults.
+  sybil-l1-indexer:
+    profiles: ["l1-indexer"]
+    image: sybil-api:latest
+    mem_limit: "256m"
+    memswap_limit: "384m"
+    entrypoint: ["sybil-l1-indexer"]
+    environment:
+      SYBIL_L1_RPC_URL: "${SYBIL_L1_RPC_URL:-http://host.docker.internal:8545}"
+      SYBIL_API_URL: "http://sybil-api:3000"
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:-sybil-local-service}"
+      SYBIL_L1_VAULT: "${SYBIL_L1_VAULT:-}"
+      SYBIL_L1_CHAIN_ID: "${SYBIL_L1_CHAIN_ID:-31337}"
+      SYBIL_L1_START_BLOCK: "${SYBIL_L1_START_BLOCK:-0}"
+      SYBIL_L1_CONFIRMATIONS: "${SYBIL_L1_CONFIRMATIONS:-2}"
+      SYBIL_L1_MIN_CONFIRMATIONS: "${SYBIL_L1_MIN_CONFIRMATIONS:-2}"
+      SYBIL_L1_CURSOR_PATH: "/l1-indexer-data/cursor.json"
+      SYBIL_L1_METRICS_BIND: "0.0.0.0:9102"
+      RUST_LOG: "warn,sybil_l1_indexer=info"
+    volumes:
+      - l1-indexer-data:/l1-indexer-data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      sybil-api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9102/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging: *default-logging
+
   sybil-web:
     # Next.js frontend (standalone server, non-root). NEXT_PUBLIC_* are baked at
     # BUILD time, so the API/WS base URLs are build args, not runtime env.
@@ -300,3 +337,5 @@ volumes:
     name: prover-artifacts
   history-data:
     name: history-data
+  l1-indexer-data:
+    name: l1-indexer-data
