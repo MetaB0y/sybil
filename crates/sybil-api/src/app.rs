@@ -68,6 +68,7 @@ use crate::util::now_ms;
         OnboardingPolicyResponse,
         PositionResponse,
         BridgeStatusResponse,
+        BridgeDomainResponse,
         BridgeAccountKeyResponse,
         BridgeDepositResponse,
         BridgeDepositEventResponse,
@@ -765,6 +766,10 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/bridge/deposits",
     },
     RouteMount {
+        method: "GET",
+        path: "/v1/bridge/withdrawals/pending",
+    },
+    RouteMount {
         method: "POST",
         path: "/v1/bridge/withdrawals",
     },
@@ -928,6 +933,7 @@ fn service_routes() -> OpenApiRouter<AppState> {
         .routes(openapi_routes!(routes::accounts::register_key))
         .routes(openapi_routes!(routes::bridge::account_by_key))
         .routes(openapi_routes!(routes::bridge::submit_l1_deposit))
+        .routes(openapi_routes!(routes::bridge::list_pending_withdrawals))
         .routes(openapi_routes!(routes::bridge::create_withdrawal))
         .routes(openapi_routes!(routes::bridge::create_signed_withdrawal))
         .routes(openapi_routes!(routes::bridge::submit_l1_withdrawal_event))

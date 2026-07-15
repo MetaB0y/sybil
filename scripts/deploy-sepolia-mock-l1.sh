@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/lib/unsafe-sepolia-mock.sh"
 
 for command in forge cast jq; do
     if ! command -v "$command" >/dev/null 2>&1; then
@@ -85,46 +86,7 @@ jq -e --argjson deployment_start_block "$deployment_start_block" '
       end
 ' "$broadcast" >"$manifest_tmp"
 
-token="$(jq -r '.contracts.token.address' "$manifest_tmp")"
-verifier="$(jq -r '.contracts.verifier.address' "$manifest_tmp")"
-escape_verifier="$(jq -r '.contracts.escape_verifier.address' "$manifest_tmp")"
-settlement="$(jq -r '.contracts.settlement.address' "$manifest_tmp")"
-vault="$(jq -r '.contracts.vault.address' "$manifest_tmp")"
-
-for address in "$token" "$verifier" "$escape_verifier" "$settlement" "$vault"; do
-    if [[ "$(cast code "$address" --rpc-url "$SEPOLIA_RPC_URL")" == "0x" ]]; then
-        echo "deployment address has no code: $address" >&2
-        exit 1
-    fi
-done
-
-assert_address_call() {
-    local contract="$1"
-    local signature="$2"
-    local expected="$3"
-    local actual
-    actual="$(cast call "$contract" "$signature" --rpc-url "$SEPOLIA_RPC_URL")"
-    if [[ "${actual,,}" != "${expected,,}" ]]; then
-        echo "$contract $signature returned $actual; expected $expected" >&2
-        exit 1
-    fi
-}
-
-assert_address_call "$settlement" 'vault()(address)' "$vault"
-assert_address_call "$settlement" 'verifier()(address)' "$verifier"
-assert_address_call "$vault" 'token()(address)' "$token"
-assert_address_call "$vault" 'settlement()(address)' "$settlement"
-assert_address_call "$vault" 'verifier()(address)' "$verifier"
-assert_address_call "$vault" 'escapeVerifier()(address)' "$escape_verifier"
-
-if [[ "$(cast call "$verifier" 'unsafeAcceptsAllProofs()(bool)' --rpc-url "$SEPOLIA_RPC_URL")" != "true" ]]; then
-    echo "normal verifier is missing the unsafe accept-all marker" >&2
-    exit 1
-fi
-if [[ "$(cast call "$escape_verifier" 'unsafeAcceptsAllProofs()(bool)' --rpc-url "$SEPOLIA_RPC_URL")" != "true" ]]; then
-    echo "escape verifier is missing the unsafe accept-all marker" >&2
-    exit 1
-fi
+unsafe_sepolia_validate_deployment "$manifest_tmp" "$SEPOLIA_RPC_URL"
 
 mv "$manifest_tmp" "$manifest_path"
 trap - EXIT

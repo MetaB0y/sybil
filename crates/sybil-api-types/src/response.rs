@@ -754,6 +754,10 @@ pub struct BridgeDepositEventResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BridgeStatusResponse {
+    /// Single chain/vault/token domain accepted by monetary bridge routes.
+    /// `None` means deposits and withdrawal creation fail closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configured_domain: Option<BridgeDomainResponse>,
     pub deposit_cursor: u64,
     pub deposit_root_hex: String,
     pub observed_l1_height: u64,
@@ -772,6 +776,14 @@ pub struct BridgeStatusResponse {
     #[serde(default)]
     /// Sum of parked value. Integer nanodollars; 1_000_000_000 = $1.
     pub total_quarantined_nanos: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct BridgeDomainResponse {
+    pub chain_id: u64,
+    pub vault_address_hex: String,
+    pub token_address_hex: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

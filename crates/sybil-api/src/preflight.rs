@@ -282,6 +282,7 @@ pub fn run_preflight(config: &ApiConfig) -> Result<(), String> {
             config.public_account_grant_nanos
         ));
     }
+    config.bridge_domain()?;
     let report = build_report(config)?;
     log_report(&report);
 

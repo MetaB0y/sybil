@@ -19,6 +19,9 @@ services:
       SYBIL_BLOCK_INTERVAL_MS: "${SYBIL_ITEST_BLOCK_INTERVAL_MS:-1000}"
       SYBIL_DATA_DIR: "/itest-data"
       SYBIL_ARENA_DB_PATH: ""
+      SYBIL_BRIDGE_CHAIN_ID: "${SYBIL_BRIDGE_CHAIN_ID:?itest bridge chain is required}"
+      SYBIL_BRIDGE_VAULT_ADDRESS: "${SYBIL_BRIDGE_VAULT_ADDRESS:?itest bridge vault is required}"
+      SYBIL_BRIDGE_TOKEN_ADDRESS: "${SYBIL_BRIDGE_TOKEN_ADDRESS:?itest bridge token is required}"
       RUST_LOG: "warn,sybil_api=info,matching_sequencer=info"
     volumes:
       - itest-data:/itest-data

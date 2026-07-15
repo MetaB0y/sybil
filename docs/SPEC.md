@@ -195,7 +195,7 @@ assembles and schedules epochs continuously; sustained STARK capacity/restart
 soak and real EVM verifier deployment remain operational requirements;
 unsafe/mock adapters are development-only.
 
-`SybilVault` custodies collateral and builds the deposit tree. `SybilSettlement` accepts consecutive proven roots bound to the vault checkpoint and pinned guest commitments. Normal withdrawals use typed leaves, proofs, nullifiers, and a queue.
+`SybilVault` custodies collateral and builds the deposit tree. `SybilSettlement` accepts consecutive proven roots bound to the vault checkpoint and pinned guest commitments. Normal withdrawals use typed leaves, proofs, nullifiers, and a queue. The API fail-closes monetary bridge admission unless one chain/vault/token domain is configured; the unsafe Sepolia-only relay validates that domain and the live mock deployment before submitting a root or queue request. This runtime guard is not yet the validity-level domain proof tracked in GitHub #92.
 
 The escape path proves a conservative cash floor; it does not unwind positions.
 DA manifests and canonical witness payloads are served per height, witness

@@ -282,6 +282,16 @@ impl SybilClient {
         self.decode(resp).await
     }
 
+    pub async fn list_pending_bridge_withdrawals(
+        &self,
+    ) -> Result<Vec<BridgeWithdrawalResponse>, Error> {
+        let resp = self
+            .with_service_auth(self.http.get(self.url("/v1/bridge/withdrawals/pending")))
+            .send()
+            .await?;
+        self.decode(resp).await
+    }
+
     pub async fn observe_l1_height(
         &self,
         req: &ObserveL1HeightRequest,

@@ -4,19 +4,20 @@ set -euo pipefail
 # SYB-243 Docker Compose money-path harness.
 #
 # Usage:
-#   scripts/itest-compose.sh             # operator/CI: runs Docker E2E
-#   scripts/itest-compose.sh --skip-escape # omit custody proof drill
+#   scripts/itest-compose.sh             # operator/CI: no-proving Docker E2E
+#   scripts/itest-compose.sh --with-escape # opt into the custody proof drill
 #   scripts/itest-compose.sh --dry-run   # sandbox-safe static + assertion tests
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 DRY_RUN=0
-SKIP_ESCAPE=0
+SKIP_ESCAPE=1
 case "${1:-}" in
     "") ;;
+    --with-escape) SKIP_ESCAPE=0 ;;
     --dry-run) DRY_RUN=1 ;;
-    --skip-escape) SKIP_ESCAPE=1 ;;
+    --skip-escape) SKIP_ESCAPE=1 ;; # explicit no-proving alias
     -h|--help)
         sed -n '3,8p' "$0" | sed 's/^# \{0,1\}//'
         exit 0
@@ -27,7 +28,8 @@ esac
 
 for file in docker-compose.yml docker-compose.itest.yml \
     crates/sybil-client/examples/seed_book.rs crates/sybil-client/examples/smoke_sign.rs \
-    contracts/script/UnsafeAnvilBridgeSetup.s.sol scripts/assert-seed-book.py; do
+    contracts/script/UnsafeSepoliaMockSetup.s.sol scripts/assert-seed-book.py \
+    scripts/deploy-sepolia-mock-l1.sh scripts/relay-sepolia-mock-withdrawals.sh; do
     [[ -f "$file" ]] || { echo "missing required harness file: $file" >&2; exit 1; }
 done
 if [[ "$SKIP_ESCAPE" -eq 0 ]]; then
@@ -40,11 +42,11 @@ fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
     python3 scripts/assert-seed-book.py --self-test
     printf 'dry-run: docker compose -p <isolated-project> -f docker-compose.yml -f docker-compose.itest.yml up -d --build sybil-history sybil-api\n'
-    printf 'dry-run: wait health -> seed -> snapshot/reconstruct -> unsafe Anvil escape payout -> unsafe Anvil normal deposit/index/withdraw/finalize -> down -v\n'
+    printf 'dry-run: Sepolia-chain Anvil mock deploy -> API domain boot -> seed -> optional escape -> deposit/index/relay/queue/finalize -> down -v\n'
     exit 0
 fi
 
-for tool in docker curl python3 cargo anvil forge cast; do
+for tool in docker curl jq python3 cargo anvil forge cast; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required" >&2; exit 2; }
 done
 # Compose v2 plugin (docker compose) on CI, standalone v1 (docker-compose) on
@@ -120,6 +122,34 @@ print("true" if value is True else "false" if value is False else value)
 ' "$1" "$2"
 }
 
+step "Deploy the chain-bound UNSAFE mock bridge before API startup"
+ANVIL_PORT="${SYBIL_ITEST_ANVIL_PORT:-18545}"
+ANVIL_RPC="http://127.0.0.1:$ANVIL_PORT"
+ANVIL_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+ANVIL_ADMIN="0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+anvil --silent --chain-id 11155111 --port "$ANVIL_PORT" >"$WORK/anvil.log" 2>&1 &
+ANVIL_PID=$!
+for _ in $(seq 1 30); do
+    cast chain-id --rpc-url "$ANVIL_RPC" >/dev/null 2>&1 && break
+    sleep 1
+done
+[[ "$(cast chain-id --rpc-url "$ANVIL_RPC")" == "11155111" ]]
+
+export PRIVATE_KEY="$ANVIL_KEY"
+export SEPOLIA_RPC_URL="$ANVIL_RPC"
+export CONFIRM_UNSAFE_SEPOLIA_MOCK=I_UNDERSTAND_PROOFS_ARE_NOT_VERIFIED
+export CONFIRM_UNSAFE_SEPOLIA_MOCK_RELAY=I_UNDERSTAND_WITHDRAWALS_ARE_NOT_PROOF_VERIFIED
+export SYBIL_L1_DEPLOYMENT_MANIFEST="$WORK/sepolia-mock-l1.json"
+./scripts/deploy-sepolia-mock-l1.sh >"$WORK/bridge-setup.log"
+
+BRIDGE_TOKEN="$(jq -er '.contracts.token.address' "$SYBIL_L1_DEPLOYMENT_MANIFEST")"
+BRIDGE_SETTLEMENT="$(jq -er '.contracts.settlement.address' "$SYBIL_L1_DEPLOYMENT_MANIFEST")"
+BRIDGE_VAULT="$(jq -er '.contracts.vault.address' "$SYBIL_L1_DEPLOYMENT_MANIFEST")"
+export SYBIL_BRIDGE_CHAIN_ID=11155111
+export SYBIL_BRIDGE_VAULT_ADDRESS="$BRIDGE_VAULT"
+export SYBIL_BRIDGE_TOKEN_ADDRESS="$BRIDGE_TOKEN"
+pass "Sepolia-only adapters, mintable token, settlement, vault, and manifest validated"
+
 step "Build and start isolated sybil-api + history projector"
 compose up -d --build sybil-history sybil-api
 
@@ -194,19 +224,6 @@ python3 scripts/assert-seed-book.py \
     --no-fills "$WORK/no-fills.json"
 pass "matched_volume=1000, YES/NO prices=500000000, marked balance conserved exactly"
 
-ANVIL_PORT="${SYBIL_ITEST_ANVIL_PORT:-18545}"
-ANVIL_RPC="http://127.0.0.1:$ANVIL_PORT"
-ANVIL_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-ANVIL_ADMIN="0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-anvil --silent --port "$ANVIL_PORT" >"$WORK/anvil.log" 2>&1 &
-ANVIL_PID=$!
-for _ in $(seq 1 30); do
-    cast chain-id --rpc-url "$ANVIL_RPC" >/dev/null 2>&1 && break
-    sleep 1
-done
-cast chain-id --rpc-url "$ANVIL_RPC" >/dev/null
-export PRIVATE_KEY="$ANVIL_KEY"
-
 if [[ "$SKIP_ESCAPE" -eq 0 ]]; then
 step "Run the anyone-can-prove custody escape fixture drill"
 http_json POST /v1/simulation/pause "$WORK/escape-pause.json" 200
@@ -224,7 +241,7 @@ export DA_COMMITMENT="0x$(jget "$WORK/escape-manifest-api.json" da_commitment)"
 (cd contracts && forge script script/UnsafeAnvilEscapeSetup.s.sol:UnsafeAnvilEscapeSetup \
     --rpc-url "$ANVIL_RPC" --broadcast) >"$WORK/escape-setup.log"
 
-BROADCAST="contracts/broadcast/UnsafeAnvilEscapeSetup.s.sol/31337/run-latest.json"
+BROADCAST="contracts/broadcast/UnsafeAnvilEscapeSetup.s.sol/11155111/run-latest.json"
 [[ -f "$BROADCAST" ]] || { echo "escape setup broadcast artifact missing" >&2; exit 1; }
 read -r TOKEN SETTLEMENT VAULT < <(python3 - "$BROADCAST" <<'PY'
 import json, sys
@@ -291,25 +308,13 @@ assert user_after - user_before == vault_before - vault_after
 PY
 pass "escape activation -> fixture adapter proof -> custody calldata submission paid exact claim"
 else
-step "Skip custody escape proof drill by explicit request"
+step "Skip custody escape proof drill in the default no-proving profile"
 http_json POST /v1/simulation/pause "$WORK/bridge-initial-pause.json" 200
 [[ "$(jget "$WORK/bridge-initial-pause.json" status)" == "paused" ]]
 fi
 
-step "Run the UNSAFE local-Anvil normal bridge round trip"
-echo "  local-only: accept-all adapters validate plumbing, not withdrawal proof soundness"
-(cd contracts && forge script script/UnsafeAnvilBridgeSetup.s.sol:UnsafeAnvilBridgeSetup \
-    --rpc-url "$ANVIL_RPC" --broadcast) >"$WORK/bridge-setup.log"
-
-BRIDGE_BROADCAST="contracts/broadcast/UnsafeAnvilBridgeSetup.s.sol/31337/run-latest.json"
-[[ -f "$BRIDGE_BROADCAST" ]] || { echo "bridge setup broadcast artifact missing" >&2; exit 1; }
-read -r BRIDGE_TOKEN BRIDGE_SETTLEMENT BRIDGE_VAULT < <(python3 - "$BRIDGE_BROADCAST" <<'PY'
-import json, sys
-txs = json.load(open(sys.argv[1], encoding="utf-8"))["transactions"]
-created = {tx.get("contractName"): tx.get("contractAddress") for tx in txs if tx.get("contractAddress")}
-print(created["MockUSDC"], created["SybilSettlement"], created["SybilVault"])
-PY
-)
+step "Run the UNSAFE Sepolia-mock normal bridge round trip"
+echo "  accept-all adapters validate public-testnet plumbing, not withdrawal proof soundness"
 
 cargo build -p sybil-client --example smoke_sign
 cargo build -p sybil-l1-indexer
@@ -330,6 +335,9 @@ http_json GET "/v1/accounts/$BRIDGE_ACCOUNT/bridge-key" "$WORK/bridge-account-ke
 BRIDGE_ACCOUNT_KEY="$(jget "$WORK/bridge-account-key.json" sybil_account_key_hex)"
 
 BRIDGE_DEPOSIT_UNITS=5000000
+cast send "$BRIDGE_TOKEN" "approve(address,uint256)" \
+    "$BRIDGE_VAULT" "$BRIDGE_DEPOSIT_UNITS" \
+    --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
 cast send "$BRIDGE_VAULT" "deposit(uint256,bytes32)" \
     "$BRIDGE_DEPOSIT_UNITS" "0x$BRIDGE_ACCOUNT_KEY" \
     --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
@@ -342,7 +350,7 @@ run_bridge_indexer() {
         --trust-mode unsafe-single-dev \
         --sybil-api-url "$BASE" \
         --vault-address "$BRIDGE_VAULT" \
-        --chain-id 31337 \
+        --chain-id 11155111 \
         --start-block 0 \
         --confirmations 0 \
         --min-confirmations 0 \
@@ -385,7 +393,7 @@ BRIDGE_GENESIS_HASH="$(jget "$WORK/bridge-health.json" genesis_hash)"
 target/debug/examples/smoke_sign withdrawal \
     --priv "$BRIDGE_PRIVATE_KEY" \
     --account "$BRIDGE_ACCOUNT" \
-    --chain-id 31337 \
+    --chain-id 11155111 \
     --vault "$BRIDGE_VAULT" \
     --recipient "$ANVIL_ADMIN" \
     --token "$BRIDGE_TOKEN" \
@@ -401,7 +409,7 @@ signature = json.load(open(sys.argv[1], encoding="utf-8"))
 print(json.dumps({
     "withdrawal": {
         "account_id": int(sys.argv[2]),
-        "chain_id": 31337,
+        "chain_id": 11155111,
         "vault_address_hex": sys.argv[3],
         "recipient_hex": sys.argv[4],
         "token_address_hex": sys.argv[5],
@@ -438,29 +446,36 @@ http_json GET "/v1/blocks/$BRIDGE_WITHDRAW_HEIGHT" "$WORK/bridge-block.json" 200
 http_json GET "/v1/accounts/$BRIDGE_ACCOUNT" "$WORK/bridge-debited-account.json" 200
 [[ "$(jget "$WORK/bridge-debited-account.json" balance_nanos)" == "3000000000" ]]
 
-ZERO_HASH="0x$(printf '%064d' 0)"
-BRIDGE_STATE_ROOT="0x$(jget "$WORK/bridge-manifest.json" state_root)"
-BRIDGE_BLOCK_HASH="0x$(jget "$WORK/bridge-manifest.json" block_hash)"
-BRIDGE_EVENTS_ROOT="0x$(jget "$WORK/bridge-block.json" events_root)"
-BRIDGE_WITNESS_ROOT="0x$(jget "$WORK/bridge-manifest.json" witness_root)"
-BRIDGE_DA_COMMITMENT="0x$(jget "$WORK/bridge-manifest.json" da_commitment)"
-BRIDGE_DEPOSIT_ROOT="0x$(jget "$WORK/bridge-block.json" bridge.deposit_root_hex)"
-BRIDGE_DEPOSIT_COUNT="$(jget "$WORK/bridge-block.json" bridge.deposit_count)"
-# This fixture settlement is fresh, so the committed API withdrawal root is
-# installed as its first accepted root. The accept-all adapter deliberately
-# does not prove the API chain's parent transition; this is plumbing-only.
-cast send "$BRIDGE_SETTLEMENT" \
-    "submitStateRoot((uint64,uint64,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,uint64),bytes)" \
-    "(0,$BRIDGE_WITHDRAW_HEIGHT,$ZERO_HASH,$BRIDGE_STATE_ROOT,$BRIDGE_BLOCK_HASH,$BRIDGE_EVENTS_ROOT,$BRIDGE_WITNESS_ROOT,$BRIDGE_DA_COMMITMENT,$BRIDGE_DEPOSIT_ROOT,$BRIDGE_DEPOSIT_COUNT)" \
-    0x01 --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
-
-BRIDGE_NORMAL_KIND="$(cast call "$BRIDGE_VAULT" "CLAIM_KIND_NORMAL()(bytes32)" --rpc-url "$ANVIL_RPC")"
 BRIDGE_USER_BEFORE="$(cast call "$BRIDGE_TOKEN" "balanceOf(address)(uint256)" "$ANVIL_ADMIN" --rpc-url "$ANVIL_RPC")"
 BRIDGE_VAULT_BEFORE="$(cast call "$BRIDGE_TOKEN" "balanceOf(address)(uint256)" "$BRIDGE_VAULT" --rpc-url "$ANVIL_RPC")"
-cast send "$BRIDGE_VAULT" \
-    "requestWithdrawal((bytes32,uint64,bytes32,address,address,uint256,bytes32),bytes)" \
-    "($BRIDGE_STATE_ROOT,$BRIDGE_WITHDRAW_HEIGHT,0x$BRIDGE_NULLIFIER,$ANVIL_ADMIN,$BRIDGE_TOKEN,$BRIDGE_WITHDRAW_UNITS,$BRIDGE_NORMAL_KIND)" \
-    0x02 --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
+
+export SYBIL_API_URL="$BASE"
+export SYBIL_SERVICE_TOKEN=sybil-itest-relay
+./scripts/relay-sepolia-mock-withdrawals.sh >"$WORK/bridge-relay.log"
+
+# A crash after the vault transaction but before the indexer advances API
+# status must not submit another root or request the same nullifier again.
+BRIDGE_SETTLEMENT_HEIGHT_BEFORE="$(cast call "$BRIDGE_SETTLEMENT" 'latestHeight()(uint64)' --rpc-url "$ANVIL_RPC")"
+./scripts/relay-sepolia-mock-withdrawals.sh >"$WORK/bridge-relay-rerun.log"
+BRIDGE_SETTLEMENT_HEIGHT_AFTER="$(cast call "$BRIDGE_SETTLEMENT" 'latestHeight()(uint64)' --rpc-url "$ANVIL_RPC")"
+[[ "$BRIDGE_SETTLEMENT_HEIGHT_BEFORE" == "$BRIDGE_SETTLEMENT_HEIGHT_AFTER" ]]
+grep -q 'already_queued=1' "$WORK/bridge-relay-rerun.log"
+
+run_bridge_indexer 2>&1 | tee "$WORK/bridge-indexer-queued.log"
+http_json GET "/v1/accounts/$BRIDGE_ACCOUNT/withdrawals" \
+    "$WORK/bridge-withdrawals-queued.json" 200
+python3 - "$WORK/bridge-withdrawals-queued.json" "$BRIDGE_NULLIFIER" <<'PY'
+import json, sys
+rows = json.load(open(sys.argv[1], encoding="utf-8"))
+assert len(rows) == 1, rows
+assert rows[0]["nullifier_hex"] == sys.argv[2], rows[0]
+assert rows[0]["l1_status"] == "queued", rows[0]
+assert rows[0]["l1_requested_at_unix"] is not None, rows[0]
+assert rows[0]["l1_executable_at_unix"] is not None, rows[0]
+PY
+
+cast rpc --rpc-url "$ANVIL_RPC" evm_increaseTime 3601 >/dev/null
+cast rpc --rpc-url "$ANVIL_RPC" evm_mine >/dev/null
 cast send "$BRIDGE_VAULT" "finalizeWithdrawal(bytes32)" "0x$BRIDGE_NULLIFIER" \
     --rpc-url "$ANVIL_RPC" --private-key "$ANVIL_KEY" >/dev/null
 BRIDGE_USER_AFTER="$(cast call "$BRIDGE_TOKEN" "balanceOf(address)(uint256)" "$ANVIL_ADMIN" --rpc-url "$ANVIL_RPC")"
@@ -489,6 +504,6 @@ assert rows[0]["l1_status"] == "finalized", rows[0]
 assert rows[0]["l1_requested_at_unix"] is not None, rows[0]
 assert rows[0]["l1_finalized_at_unix"] is not None, rows[0]
 PY
-pass "signed Sybil debit -> unsafe accepted root -> vault queue/finalize -> indexed finalized status"
+pass "signed debit -> validated mock relay -> idempotent rerun -> delayed queue/finalize -> indexed status"
 
 step "Compose integration passed"

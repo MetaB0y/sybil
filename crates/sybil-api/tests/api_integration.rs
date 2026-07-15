@@ -805,6 +805,10 @@ async fn bridge_commitment_is_public_but_individual_rows_stay_private() {
     assert_eq!(active.as_array().unwrap().len(), 1);
     assert_eq!(active[0]["l1_status"], json!("finalized"));
 
+    let (status, body) = get(app.clone(), "/v1/bridge/withdrawals/pending").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).as_array().unwrap().is_empty());
+
     handle.produce_block().await.unwrap();
 
     let (status, body) = get(
@@ -832,6 +836,74 @@ async fn bridge_commitment_is_public_but_individual_rows_stay_private() {
             "public block leaked {forbidden}"
         );
     }
+}
+
+#[tokio::test]
+async fn bridge_money_routes_fail_closed_outside_configured_domain() {
+    let (disabled, _) = test_app_with_config(ApiConfig {
+        dev_mode: true,
+        ..ApiConfig::default()
+    })
+    .await;
+    let (status, body) = post_json(
+        disabled.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000u64 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+
+    let request = json!({
+        "account_id": account_id,
+        "chain_id": 1,
+        "vault_address_hex": hex_bytes(0x10, 20),
+        "recipient_hex": hex_bytes(0x40, 20),
+        "token_address_hex": hex_bytes(0x20, 20),
+        "amount_token_units": 1_000u64,
+        "expiry_height": 10u64,
+    });
+    let (status, body) =
+        post_json(disabled.clone(), "/v1/bridge/withdrawals", request.clone()).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(parse_json(&body)["code"], json!("BRIDGE_UNAVAILABLE"));
+    let (status, body) = get(disabled.clone(), &format!("/v1/accounts/{account_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body)["balance_nanos"], json!(10_000_000i64));
+    let (status, body) = get(disabled, "/v1/bridge/status").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(parse_json(&body).get("configured_domain").is_none());
+
+    let (configured, _) = test_app(true).await;
+    let (status, body) = post_json(
+        configured.clone(),
+        "/v1/accounts",
+        json!({ "initial_balance_nanos": 10_000_000u64 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let account_id = parse_json(&body)["account_id"].as_u64().unwrap();
+    let mut wrong = request;
+    wrong["account_id"] = json!(account_id);
+    wrong["chain_id"] = json!(2);
+    let (status, body) = post_json(configured.clone(), "/v1/bridge/withdrawals", wrong).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(parse_json(&body)["code"], json!("BRIDGE_DOMAIN_MISMATCH"));
+    let (status, body) = get(configured.clone(), &format!("/v1/accounts/{account_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(parse_json(&body)["balance_nanos"], json!(10_000_000i64));
+    let (status, body) = get(configured, "/v1/bridge/status").await;
+    assert_eq!(status, StatusCode::OK);
+    let status = parse_json(&body);
+    assert_eq!(status["configured_domain"]["chain_id"], json!(1));
+    assert_eq!(
+        status["configured_domain"]["vault_address_hex"],
+        json!(hex_bytes(0x10, 20))
+    );
+    assert_eq!(
+        status["configured_domain"]["token_address_hex"],
+        json!(hex_bytes(0x20, 20))
+    );
 }
 
 #[tokio::test]

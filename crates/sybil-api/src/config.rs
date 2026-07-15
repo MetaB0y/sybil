@@ -2,6 +2,29 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BridgeDomain {
+    pub chain_id: u64,
+    pub vault_address: [u8; 20],
+    pub token_address: [u8; 20],
+}
+
+fn parse_bridge_address(value: &str, name: &str) -> Result<[u8; 20], String> {
+    let value = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    let bytes = hex::decode(value).map_err(|_| format!("{name} must be hex encoded"))?;
+    let len = bytes.len();
+    let address = bytes
+        .try_into()
+        .map_err(|_| format!("{name} must decode to 20 bytes, got {len}"))?;
+    if address == [0; 20] {
+        return Err(format!("{name} must be nonzero"));
+    }
+    Ok(address)
+}
+
 #[derive(Parser, Debug, Clone)]
 #[command(name = "sybil-api", about = "HTTP API for Sybil prediction markets")]
 pub struct ApiConfig {
@@ -31,6 +54,20 @@ pub struct ApiConfig {
     /// Empty/unset means service routes fail closed in production.
     #[arg(long, default_value = "", env = "SYBIL_SERVICE_TOKEN")]
     pub service_token: String,
+
+    /// L1 chain accepted by bridge deposit and withdrawal routes. This and
+    /// both bridge addresses are all-or-none; an unset domain keeps monetary
+    /// bridge admission unavailable while leaving status reads operational.
+    #[arg(long, default_value = "", env = "SYBIL_BRIDGE_CHAIN_ID")]
+    pub bridge_chain_id: String,
+
+    /// Hex-encoded 20-byte vault accepted by bridge routes.
+    #[arg(long, default_value = "", env = "SYBIL_BRIDGE_VAULT_ADDRESS")]
+    pub bridge_vault_address: String,
+
+    /// Hex-encoded 20-byte collateral token accepted by bridge routes.
+    #[arg(long, default_value = "", env = "SYBIL_BRIDGE_TOKEN_ADDRESS")]
+    pub bridge_token_address: String,
 
     /// Private history projector base URL. Empty keeps ingestion disabled and
     /// makes historical product endpoints explicitly unavailable; trading and
@@ -435,6 +472,9 @@ impl Default for ApiConfig {
             deployment_profile: "local".to_string(),
             allow_dev_knobs: false,
             service_token: String::new(),
+            bridge_chain_id: String::new(),
+            bridge_vault_address: String::new(),
+            bridge_token_address: String::new(),
             history_url: String::new(),
             history_token: String::new(),
             history_poll_ms: 250,
@@ -498,6 +538,89 @@ impl Default for ApiConfig {
             event_snapshot_dir: String::new(),
             admin_feed_key_path: String::new(),
             polymarket_feed_pubkey_hex: String::new(),
+        }
+    }
+}
+
+impl ApiConfig {
+    pub fn bridge_domain(&self) -> Result<Option<BridgeDomain>, String> {
+        let chain = self.bridge_chain_id.trim();
+        let vault = self.bridge_vault_address.trim();
+        let token = self.bridge_token_address.trim();
+        let configured = [!chain.is_empty(), !vault.is_empty(), !token.is_empty()];
+
+        if configured == [false, false, false] {
+            return Ok(None);
+        }
+        if configured != [true, true, true] {
+            return Err("SYBIL_BRIDGE_CHAIN_ID, SYBIL_BRIDGE_VAULT_ADDRESS, and \
+                 SYBIL_BRIDGE_TOKEN_ADDRESS must be configured together"
+                .to_string());
+        }
+
+        let chain_id = chain
+            .parse::<u64>()
+            .map_err(|_| "SYBIL_BRIDGE_CHAIN_ID must be an unsigned integer".to_string())?;
+        if chain_id == 0 {
+            return Err("SYBIL_BRIDGE_CHAIN_ID must be nonzero".to_string());
+        }
+
+        Ok(Some(BridgeDomain {
+            chain_id,
+            vault_address: parse_bridge_address(vault, "SYBIL_BRIDGE_VAULT_ADDRESS")?,
+            token_address: parse_bridge_address(token, "SYBIL_BRIDGE_TOKEN_ADDRESS")?,
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bridge_domain_is_all_or_none_and_strictly_typed() {
+        assert_eq!(ApiConfig::default().bridge_domain().unwrap(), None);
+
+        let valid = ApiConfig {
+            bridge_chain_id: "11155111".to_string(),
+            bridge_vault_address: format!("0x{}", "11".repeat(20)),
+            bridge_token_address: "22".repeat(20),
+            ..ApiConfig::default()
+        };
+        assert_eq!(
+            valid.bridge_domain().unwrap(),
+            Some(BridgeDomain {
+                chain_id: 11_155_111,
+                vault_address: [0x11; 20],
+                token_address: [0x22; 20],
+            })
+        );
+
+        for invalid in [
+            ApiConfig {
+                bridge_chain_id: "11155111".to_string(),
+                ..ApiConfig::default()
+            },
+            ApiConfig {
+                bridge_chain_id: "0".to_string(),
+                bridge_vault_address: "11".repeat(20),
+                bridge_token_address: "22".repeat(20),
+                ..ApiConfig::default()
+            },
+            ApiConfig {
+                bridge_chain_id: "11155111".to_string(),
+                bridge_vault_address: "11".repeat(19),
+                bridge_token_address: "22".repeat(20),
+                ..ApiConfig::default()
+            },
+            ApiConfig {
+                bridge_chain_id: "11155111".to_string(),
+                bridge_vault_address: "00".repeat(20),
+                bridge_token_address: "22".repeat(20),
+                ..ApiConfig::default()
+            },
+        ] {
+            assert!(invalid.bridge_domain().is_err());
         }
     }
 }

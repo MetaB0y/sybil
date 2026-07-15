@@ -26,6 +26,11 @@ services:
       SYBIL_HISTORY_URL: "http://sybil-history:3003"
       SYBIL_HISTORY_TOKEN: "${SYBIL_HISTORY_TOKEN:-sybil-history-dev-only}"
       SYBIL_DATA_DIR: "/data"
+      # All three are optional as a group. When absent, monetary bridge routes
+      # fail closed while trading and bridge status remain available.
+      SYBIL_BRIDGE_CHAIN_ID: "${SYBIL_BRIDGE_CHAIN_ID:-}"
+      SYBIL_BRIDGE_VAULT_ADDRESS: "${SYBIL_BRIDGE_VAULT_ADDRESS:-}"
+      SYBIL_BRIDGE_TOKEN_ADDRESS: "${SYBIL_BRIDGE_TOKEN_ADDRESS:-}"
       # The local Compose frontend is published on localhost:3005. Keep the
       # browser ceremony and server verification on the same RP/origin by
       # default, while allowing production/alternate local hosts to override.

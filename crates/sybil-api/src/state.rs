@@ -260,6 +260,9 @@ pub struct AppState {
     /// Bearer token for service/operator routes. `None` fails closed when
     /// `dev_mode` is false.
     pub service_token: Option<String>,
+    /// Single operational L1 domain accepted by monetary bridge routes.
+    /// This is an admission guard, not a validity-guest input.
+    pub bridge_domain: Option<crate::config::BridgeDomain>,
     /// CORS origins allowed in production. Empty means no cross-origin CORS.
     pub cors_origins: Vec<HeaderValue>,
     /// Networks whose direct connections may supply forwarding headers for
@@ -344,6 +347,9 @@ impl AppState {
         };
         let service_token =
             (!config.service_token.trim().is_empty()).then(|| config.service_token.clone());
+        let bridge_domain = config
+            .bridge_domain()
+            .expect("bridge domain must pass startup preflight");
         let cors_origins = config
             .cors_origins
             .iter()
@@ -375,6 +381,7 @@ impl AppState {
             read_model_init_lock: Arc::new(AsyncMutex::new(())),
             dev_mode: config.dev_mode,
             service_token,
+            bridge_domain,
             cors_origins,
             http_trusted_proxy_cidrs: Arc::new(config.http_trusted_proxy_cidrs.clone()),
             prometheus,

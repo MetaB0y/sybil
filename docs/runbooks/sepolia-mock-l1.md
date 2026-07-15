@@ -9,7 +9,8 @@ last_verified: 2026-07-15
 This profile gives the private devnet a real Sepolia custody/state-machine
 footprint without running a prover. It deliberately does **not** verify proofs.
 Use it only for wallet, deposit-indexing, root-submission, withdrawal queue,
-finalization, restart, and UI/API integration.
+finalization, restart, and UI/API integration. The one-shot relay is
+restart-safe across the queue/indexer gap, but it is not a proof system.
 
 ## Safety boundary
 
@@ -86,8 +87,71 @@ SYBIL_L1_RPC_URLS=<provider-a>,<provider-b>
 SYBIL_L1_RPC_IDS=<stable-id-a>,<stable-id-b>
 ```
 
-The mock deployment alone does not complete the product flow. Keep signed L2
-withdrawal creation out of the public UI until a relay/proof substitute queues
-the corresponding L1 claim and the UI exposes its queued/finalized lifecycle.
-Real verifier deployment remains a separate fresh deployment, never an upgrade
-claim for this unsafe fixture.
+The API has a separate all-or-none admission domain. Set it from the same
+validated manifest before accepting either deposits or withdrawals:
+
+```text
+SYBIL_BRIDGE_CHAIN_ID=11155111
+SYBIL_BRIDGE_VAULT_ADDRESS=<manifest contracts.vault.address>
+SYBIL_BRIDGE_TOKEN_ADDRESS=<manifest contracts.token.address>
+```
+
+`GET /v1/bridge/status` exposes that configured domain. With any field missing,
+deposit and withdrawal creation return `503 BRIDGE_UNAVAILABLE`; a request for
+another chain, vault, or token returns `400 BRIDGE_DOMAIN_MISMATCH` before the
+sequencer mutates balance or its acknowledged-write log. This is an honest
+operator guard, not a guest-proven invariant; [GitHub #92](https://github.com/MetaB0y/sybil/issues/92)
+tracks the validity-level domain binding required before real funds.
+
+## Unsafe withdrawal relay
+
+The relay reads only the service-authenticated
+`GET /v1/bridge/withdrawals/pending` feed. On every run it:
+
+1. revalidates chain `11155111`, manifest shape, deployed code, contract
+   cross-wiring, mintable-collateral marker, and both accept-all markers;
+2. requires the API's configured chain/vault/token to equal that manifest;
+3. rejects malformed, duplicate, wrong-token, or already-expired leaves;
+4. submits at most one newer committed API root after matching the exact vault
+   deposit checkpoint; and
+5. queues each unused nullifier while skipping rows already consumed on L1.
+
+The final property makes a retry safe when the first process queued a claim but
+crashed before `sybil-l1-indexer` advanced API status. A retry does not submit
+another root or request that nullifier again.
+
+Load the same non-secret manifest and a funded testnet transaction key:
+
+```bash
+export SYBIL_API_URL=https://your-devnet.example
+export SYBIL_SERVICE_TOKEN=...
+export SEPOLIA_RPC_URL=https://your-sepolia-rpc.example
+read -rs PRIVATE_KEY
+export PRIVATE_KEY
+export SYBIL_L1_DEPLOYMENT_MANIFEST=target/sepolia-mock-l1.json
+export CONFIRM_UNSAFE_SEPOLIA_MOCK_RELAY=I_UNDERSTAND_WITHDRAWALS_ARE_NOT_PROOF_VERIFIED
+
+just contracts-sepolia-mock-relay
+unset PRIVATE_KEY
+```
+
+Run the indexer after the relay so `WithdrawalQueued` becomes visible through
+the account-scoped status API. The relay deliberately does not finalize:
+Sepolia's mock vault has a one-hour withdrawal delay, and anyone may call
+`finalizeWithdrawal(nullifier)` after `l1_executable_at_unix`. Run the indexer
+again after finalization to ingest the terminal event.
+
+Keep signed L2 withdrawal creation out of the public UI until the wallet flow
+can submit an authorized request, show relay/indexer health, and expose the
+queued/finalizable/finalized lifecycle without implying validity. Real verifier
+deployment remains a separate fresh deployment, never an upgrade claim for
+this unsafe fixture.
+
+## Local end-to-end drill
+
+`scripts/itest-compose.sh` now starts Anvil as chain `11155111`,
+deploys this exact mock profile before API boot, injects the validated admission
+domain, indexes a deposit, creates a signed withdrawal, runs the relay twice to
+prove retry idempotence, advances the one-hour delay, finalizes, and indexes the
+terminal status. The default performs no proving; `--with-escape` is a separate
+explicit opt-in for the older custody drill.

@@ -684,6 +684,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/bridge/withdrawals/pending": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * GET /v1/bridge/withdrawals/pending
+     * @description Operator relay feed for active leaves that have not yet produced a
+     *     confirmed `WithdrawalQueued` event. This is service-authenticated because
+     *     rows contain account-attributed recipients and amounts.
+     */
+    get: operations["list_pending_withdrawals"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/bridge/withdrawals/signed": {
     parameters: {
       query?: never;
@@ -1840,8 +1862,15 @@ export interface components {
       /** @description `credited` or `quarantined`. */
       disposition: string;
     };
+    BridgeDomainResponse: {
+      /** Format: int64 */
+      chain_id: number;
+      token_address_hex: string;
+      vault_address_hex: string;
+    };
     BridgeStatusResponse: {
       cancelled_withdrawal_count?: number;
+      configured_domain?: null | components["schemas"]["BridgeDomainResponse"];
       /** Format: int64 */
       deposit_cursor: number;
       deposit_root_hex: string;
@@ -5470,6 +5499,33 @@ export interface operations {
       };
       /** @description Withdrawal not found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  list_pending_withdrawals: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Active withdrawals awaiting an L1 queue event */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BridgeWithdrawalResponse"][];
+        };
+      };
+      /** @description Missing or invalid service token */
+      401: {
         headers: {
           [name: string]: unknown;
         };

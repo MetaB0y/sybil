@@ -173,7 +173,8 @@ ignored in that mode.
 
 Normal withdrawal is sequencer-cooperative:
 
-1. An authenticated API request debits available cash and creates a typed
+1. An authenticated API request must match the one configured operational
+   chain/vault/token domain, then debits available cash and creates a typed
    `withdrawal/{id}` leaf with recipient, token, amounts, expiry, and nullifier.
 2. A proof against an accepted root authorizes `requestWithdrawal`.
 3. The vault consumes the root-independent nullifier and queues the transfer.
@@ -183,10 +184,19 @@ Normal withdrawal is sequencer-cooperative:
    leaf without refund.
 
 The contract queue, sequencer leaf lifecycle, refund/finalization replay rules,
-and verifier sidecar transition are implemented. A dedicated production-grade
-user proof generator/guest for the normal withdrawal public inputs is not yet
-the same complete path that exists for escape claims. API signatures alone do
-not authorize vault release.
+and verifier sidecar transition are implemented. The unsafe Sepolia profile
+also has a one-shot operator relay: it validates the live deployment manifest
+and API domain, submits the newest committed root to the accept-all adapter,
+and queues unused, unexpired pending leaves. It never finalizes automatically;
+the confirmed-log indexer remains the sole L1-to-sequencer lifecycle input.
+
+A dedicated production-grade user proof generator/guest for the normal
+withdrawal public inputs is not yet the same complete path that exists for
+escape claims. The runtime domain admission is also not yet a validity-guest
+rule: the committed withdrawal opening carries the resulting nullifier but not
+an independently checked chain/vault relation. GitHub #92 tracks that
+fresh-genesis schema/public-input decision. API signatures and the mock relay
+do not authorize a real-funds vault release.
 
 ### Emergency escape
 
