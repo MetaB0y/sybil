@@ -789,14 +789,14 @@ async fn submit_deposit<S: DepositSink>(
     deposit: &IndexedDeposit,
     account_id: Option<u64>,
 ) -> Result<BridgeDepositResponse> {
-    // TODO(SYB-188/SYB-178): this dev indexer trusts eth_getLogs from its RPC
-    // and does not prove receipt inclusion/finality. Confirmation depth,
-    // per-log canonical hashes, the persisted processed-prefix checkpoint, and
-    // on-chain root reconciliation detect ordinary/deep reorgs and fail closed.
-    // The sequencer still credits the first deposit it sees for an id and cannot
-    // independently reject a same-id replacement (`ingest_l1_deposit` only
-    // rejects non-sequential ids). Keep the API route service-gated until
-    // deposit soundness is proof-backed and that trust gap is closed.
+    // The sequencer reconstructs this leaf's prefix root from its persisted
+    // frontier. A same-id substitution that retains the canonical vault root
+    // fails there; one that recomputes its root fails depositRootByCount above
+    // and SybilSettlement's independent vault check. This indexer still trusts
+    // one RPC for headers, logs, and eth_call rather than authenticating receipt
+    // inclusion/finality, so keep the API route service-gated: a fully dishonest
+    // RPC can create temporary unprovable off-chain state even though L1 cannot
+    // accept its checkpoint.
     let body = SubmitL1DepositRequest {
         deposit_id: deposit.event.deposit_id,
         account_id,
@@ -1536,15 +1536,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reorg_replaced_tip_deposit_is_not_credited() {
-        // Log carries the pre-reorg root, but the canonical chain now records a
-        // different root at this deposit id (a replacement deposit). Fail closed.
+    async fn malicious_rpc_same_id_substitution_with_forged_root_is_not_credited() {
+        // The substituted amount needs its own self-consistent frontier root to
+        // pass the sequencer. An honest canonical depositRootByCount view still
+        // exposes the original leaf's different root, so the indexer fails
+        // before service submission.
         let vault = [0x10; 20];
-        let log_root = [0x55; 32];
-        let canonical_root = [0x66; 32];
+        let canonical_leaf = sybil_l1_protocol::DepositLeaf {
+            chain_id: 31_337,
+            vault_address: vault,
+            deposit_id: 1,
+            token_address: [0x20; 20],
+            sender: [0x30; 20],
+            sybil_account_key: [0x44; 32],
+            amount_token_units: 1_000_000,
+        };
+        let mut substituted_leaf = canonical_leaf.clone();
+        substituted_leaf.amount_token_units += 1;
+        let canonical_root = sybil_l1_protocol::deposit_root_from_prefix(&[canonical_leaf]);
+        let forged_root = sybil_l1_protocol::deposit_root_from_prefix(&[substituted_leaf]);
+        assert_ne!(forged_root, canonical_root);
         let l1 = FakeL1 {
             latest: 10,
-            logs: vec![deposit_log(1, 2, log_root, 1_000_000)],
+            logs: vec![deposit_log(1, 2, forged_root, 1_000_001)],
             onchain_roots: [(1u64, canonical_root)].into_iter().collect(),
             ..Default::default()
         };
