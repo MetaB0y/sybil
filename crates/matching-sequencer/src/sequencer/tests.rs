@@ -3342,7 +3342,7 @@ fn test_mm_partial_group_accepted() {
 #[test]
 fn test_mm_same_market_both_sides_accepted() {
     // A non-crossing BuyYes + BuyNo pair is legitimate MM behavior.
-    let (markets, m0) = setup();
+    let (markets, m0, _m1, _m2, group) = setup_group();
     let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
     let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
@@ -3358,7 +3358,7 @@ fn test_mm_same_market_both_sides_accepted() {
         mm_constraint: Some(constraint),
     };
 
-    let result = run_batch(&mut seq, vec![sub], &markets, &[]);
+    let result = run_batch(&mut seq, vec![sub], &markets, &[group]);
     assert_eq!(
         result.rejections.len(),
         0,
@@ -3368,7 +3368,7 @@ fn test_mm_same_market_both_sides_accepted() {
 
 #[test]
 fn test_mm_same_market_crossing_bids_are_rejected() {
-    let (markets, m0) = setup();
+    let (markets, m0, _m1, _m2, group) = setup_group();
     let (mut seq, aid) = make_sequencer(100 * NANOS_PER_DOLLAR as i64);
 
     let mut constraint = MmConstraint::new(MmId::new(1), Nanos(50 * NANOS_PER_DOLLAR));
@@ -3383,7 +3383,7 @@ fn test_mm_same_market_crossing_bids_are_rejected() {
         mm_constraint: Some(constraint),
     };
 
-    let result = run_batch(&mut seq, vec![sub], &markets, &[]);
+    let result = run_batch(&mut seq, vec![sub], &markets, &[group]);
     assert_eq!(result.rejections.len(), 1);
     assert!(result.fills.is_empty());
 }

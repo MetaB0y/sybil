@@ -29,7 +29,7 @@ describe("findCompleteSetBlockers", () => {
     ).toBeNull();
   });
 
-  it("finds a crossing complementary bid on an independent binary market", () => {
+  it("does not apply group STP to an independent binary market", () => {
     expect(
       findCompleteSetBlockers({
         groupMarkets: [],
@@ -38,7 +38,7 @@ describe("findCompleteSetBlockers", () => {
         side: "BuyNo",
         limitPriceNanos: 600_000_000n,
       }),
-    ).toEqual([order(1, 11, "BuyYes")]);
+    ).toBeNull();
   });
 
   it("finds the same-market opposite resting buy", () => {

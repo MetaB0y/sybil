@@ -1,19 +1,19 @@
 use super::*;
 use matching_engine::NANOS_PER_DOLLAR;
 
-/// Per-order self-trade prevention (STP) for binary and grouped markets.
+/// Per-order self-trade prevention (STP) within protocol market groups.
 ///
 /// Tracks buy-side outcome coverage and limits per account across a batch.
 /// Coverage alone is not a self-trade: non-crossing bids can span every
 /// outcome without filling against one another. An order is rejected only
-/// when the account's limits can fund a binary complete set, or when it
-/// completes group coverage with limits that can fund the group mint.
+/// when the account's limits can fund a same-market binary complete set within
+/// a group, or when it completes coverage that can fund the group mint.
 ///
 /// Applied to ALL accounts, not just MMs — same principle as traditional
 /// exchange STP (CME, Nasdaq, etc.) but adapted for batch auctions.
 ///
 /// Crossing rules:
-/// - BuyYes + BuyNo on one binary market must sum to at least $1.
+/// - BuyYes + BuyNo on one grouped binary market must sum to at least $1.
 /// - BuyYes on every outcome in a group must sum to at least $1.
 /// - SellYes/SellNo do not contribute; complete-set redemption is legitimate.
 pub(super) struct GroupCoverageTracker {
@@ -21,7 +21,7 @@ pub(super) struct GroupCoverageTracker {
     market_to_group: HashMap<MarketId, usize>,
     /// (account_id, group_index) → highest accepted YES limit per outcome.
     group_yes_limits: HashMap<(AccountId, usize), GroupBidState>,
-    /// Complementary buy limits apply to every binary market, grouped or not.
+    /// Complementary buy limits for binary markets that belong to a group.
     binary_limits: HashMap<(AccountId, MarketId), BinaryBidState>,
     /// group_index → list of market_ids in the group
     group_markets: Vec<Vec<MarketId>>,
@@ -64,6 +64,9 @@ impl GroupCoverageTracker {
             return false;
         }
         let market = order.markets[0];
+        let Some(&gi) = self.market_to_group.get(&market) else {
+            return false;
+        };
         let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
         let mut binary = self
             .binary_limits
@@ -81,9 +84,6 @@ impl GroupCoverageTracker {
             return true;
         }
 
-        let Some(&gi) = self.market_to_group.get(&market) else {
-            return false;
-        };
         if yes_pay <= 0 || no_pay != 0 {
             return false;
         }
@@ -104,6 +104,9 @@ impl GroupCoverageTracker {
             return;
         }
         let market = order.markets[0];
+        let Some(&gi) = self.market_to_group.get(&market) else {
+            return;
+        };
         let (yes_pay, no_pay) = (order.payoffs[0], order.payoffs[1]);
         let binary = self.binary_limits.entry((account_id, market)).or_default();
         if yes_pay > 0 && no_pay == 0 {
@@ -114,9 +117,6 @@ impl GroupCoverageTracker {
             return;
         }
 
-        let Some(&gi) = self.market_to_group.get(&market) else {
-            return;
-        };
         if yes_pay > 0 && no_pay == 0 {
             let state = self.group_yes_limits.entry((account_id, gi)).or_default();
             record_highest_limit(&mut state.yes_limits, market, order.limit_price.0);
@@ -144,10 +144,11 @@ fn record_highest_limit(limits: &mut HashMap<MarketId, u64>, market: MarketId, l
 
 /// Return true when the accepted bids can fund a risk-free complete set.
 ///
-/// Binary crossing is handled before group coverage. Group minting crosses
-/// when every group outcome has a YES bid and their limits sum to at least $1.
-/// Other coverage combinations remain exposed to at least one outcome and are
-/// not self-trades merely because their payoff union spans the group.
+/// Same-market binary crossing inside the group is handled before group
+/// coverage. Group minting crosses when every group outcome has a YES bid and
+/// their limits sum to at least $1. Other coverage combinations remain exposed
+/// to at least one outcome and are not self-trades merely because their payoff
+/// union spans the group.
 fn complete_set_limits_cross(state: &GroupBidState, group_markets: &[MarketId]) -> bool {
     let Some(total) = group_markets.iter().try_fold(0_u128, |total, market| {
         state

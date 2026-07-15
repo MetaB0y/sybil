@@ -36,10 +36,9 @@ export function findCompleteSetBlockers({
   if (side !== "BuyYes" && side !== "BuyNo") return null;
 
   const hasProtocolGroup = groupMarkets.includes(marketId);
-  const relevantOrders = restingOrders.filter(
-    (order) =>
-      order.market_id === marketId ||
-      (hasProtocolGroup && groupMarkets.includes(order.market_id)),
+  if (!hasProtocolGroup) return null;
+  const relevantOrders = restingOrders.filter((order) =>
+    groupMarkets.includes(order.market_id),
   );
   const opposite = side === "BuyYes" ? "BuyNo" : "BuyYes";
   const crossingSameMarket = relevantOrders.filter(
@@ -51,7 +50,7 @@ export function findCompleteSetBlockers({
   );
   if (crossingSameMarket.length > 0) return crossingSameMarket;
 
-  if (!hasProtocolGroup || side !== "BuyYes") return null;
+  if (side !== "BuyYes") return null;
 
   const highestYesByMarket = new Map<number, CoverageOrder>();
   for (const order of relevantOrders) {
