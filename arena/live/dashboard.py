@@ -62,6 +62,7 @@ else:
     cutoff = None
 
 # Trader filter
+active_runtime = queries.get_active_scored_runtime(conn)
 snaps_all = queries.get_latest_snapshots(conn)
 all_traders = snaps_all["trader_name"].tolist() if not snaps_all.empty else []
 
@@ -104,15 +105,22 @@ else:
 # --------------------------------------------------------------------------- #
 st.header("PnL Over Time — Kelly vs Flat")
 
-tlist = ",".join(f"'{t}'" for t in selected_traders)
-pnl_query = (
-    f"SELECT trader_name, timestamp, portfolio_value, pnl "
-    f"FROM portfolio_snapshots WHERE trader_name IN ({tlist})"
-    + (f" AND timestamp > '{cutoff}'" if cutoff else "")
-    + " ORDER BY timestamp"
-) if selected_traders else None
-
-pnl_df = pd.read_sql_query(pnl_query, conn) if pnl_query else pd.DataFrame()
+if selected_traders and active_runtime is not None:
+    placeholders = ",".join("?" for _trader in selected_traders)
+    pnl_query = (
+        "SELECT trader_name, timestamp, portfolio_value, pnl "
+        f"FROM portfolio_snapshots WHERE run_id = ? AND trader_name IN ({placeholders})"
+        + (" AND timestamp > ?" if cutoff else "")
+        + " ORDER BY timestamp"
+    )
+    pnl_params = (
+        active_runtime.run_id,
+        *selected_traders,
+        *([cutoff] if cutoff else []),
+    )
+    pnl_df = pd.read_sql_query(pnl_query, conn, params=pnl_params)
+else:
+    pnl_df = pd.DataFrame()
 
 if pnl_df.empty:
     st.info("No PnL data yet.")

@@ -22,6 +22,7 @@ describe("arena derivations", () => {
       bot("C (Flat)", 2, 104, 4, 1, 1, null),
       bot("Old experiment (Flat)", 1, 500, -50, 8, 2, null, false, true),
       bot("Fast-0", 0, 1_000_000, 200, 9, 4, null, true, false),
+      bot("Corrupt load", 0, 1_000_000, 300, 9, 4, null, true, true, "load"),
     ];
 
     expect(summarizeBots(bots)).toEqual({
@@ -72,11 +73,12 @@ function bot(
   avg_edge: number | null,
   active = true,
   scored = true,
+  role = scored ? "competitor" : "load",
 ): ArenaBotSummary {
   return {
     trader_name,
     active,
-    role: scored ? "competitor" : "load",
+    role,
     scored,
     decision_count,
     portfolio_value,

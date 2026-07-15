@@ -7,6 +7,7 @@ Rendering is the caller's job.
 import json
 import os
 import sqlite3
+from dataclasses import dataclass
 from hashlib import sha256
 
 import pandas as pd
@@ -21,9 +22,16 @@ SYBIL_URL = os.environ.get("SYBIL_URL", "http://172.17.0.1:3000")
 RUNTIME_HEARTBEAT_MAX_AGE = "-15 minutes"
 
 
+@dataclass(frozen=True)
+class ActiveScoredRuntime:
+    run_id: str
+    started_at_utc: str
+    trader_names: tuple[str, ...]
+
+
 def get_active_scored_runtime(
     conn: sqlite3.Connection,
-) -> tuple[str, list[str]] | None:
+) -> ActiveScoredRuntime | None:
     """Return the live scored cohort start and names, or no live cohort.
 
     Historical snapshots remain durable diagnostics. Competition aggregates
@@ -48,15 +56,15 @@ def get_active_scored_runtime(
     if run is None:
         return None
 
-    names = [
+    names = tuple(
         str(row[0])
         for row in conn.execute(
             "SELECT trader_name FROM arena_run_participants "
-            "WHERE run_id = ? AND scored = 1 ORDER BY trader_name",
+            "WHERE run_id = ? AND role = 'competitor' AND scored = 1 ORDER BY trader_name",
             (run[0],),
         ).fetchall()
-    ]
-    return str(run[1]), names
+    )
+    return ActiveScoredRuntime(str(run[0]), str(run[1]), names)
 
 
 def extract_strategy(name: str) -> str:
@@ -78,30 +86,39 @@ def check_divergence(fv: float, mkt: float) -> str:
 
 def get_latest_snapshots(conn: sqlite3.Connection, *, scored_only: bool = True) -> pd.DataFrame:
     """Latest portfolio snapshot per trader, scoped to the live score cohort."""
+    runtime = get_active_scored_runtime(conn) if scored_only else None
+    if scored_only and runtime is None:
+        scope = "WHERE 0"
+        params: tuple[str, ...] = ()
+    elif runtime is not None:
+        scope = "WHERE run_id = ?"
+        params = (runtime.run_id,)
+    else:
+        scope = ""
+        params = ()
+
     try:
         df = pd.read_sql_query(
             "SELECT trader_name, balance, portfolio_value, pnl, positions, total_fills, total_orders, timestamp "
             "FROM portfolio_snapshots WHERE id IN ("
-            "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
+            f"  SELECT MAX(id) FROM portfolio_snapshots {scope} GROUP BY trader_name"
             ") ORDER BY trader_name",
             conn,
+            params=params,
         )
     except Exception:
         df = pd.read_sql_query(
             "SELECT trader_name, balance, portfolio_value, pnl, positions, timestamp "
             "FROM portfolio_snapshots WHERE id IN ("
-            "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
+            f"  SELECT MAX(id) FROM portfolio_snapshots {scope} GROUP BY trader_name"
             ") ORDER BY trader_name",
             conn,
+            params=params,
         )
         df["total_fills"] = 0
         df["total_orders"] = 0
-    if scored_only:
-        runtime = get_active_scored_runtime(conn)
-        if runtime is None:
-            return df.iloc[0:0].copy()
-        _started_at, names = runtime
-        df = df[df["trader_name"].isin(names)].copy()
+    if runtime is not None:
+        df = df[df["trader_name"].isin(runtime.trader_names)].copy()
     if not df.empty:
         df["strategy"] = df["trader_name"].apply(extract_strategy)
     return df
@@ -138,16 +155,20 @@ def get_strategy_comparison(conn: sqlite3.Connection) -> pd.DataFrame | None:
 
     # Average edge from decisions
     runtime = get_active_scored_runtime(conn)
-    started_at = runtime[0] if runtime is not None else ""
+    if runtime is None:
+        return None
     dec = pd.read_sql_query(
         "SELECT trader_name, AVG(ABS(fair_value - market_price)) as avg_edge "
-        "FROM decisions WHERE timestamp >= ? GROUP BY trader_name",
+        "FROM decisions WHERE run_id = ? GROUP BY trader_name",
         conn,
-        params=(started_at,),
+        params=(runtime.run_id,),
     )
+    if not dec.empty:
+        dec = dec[dec["trader_name"].isin(runtime.trader_names)].copy()
     if not dec.empty:
         dec["strategy"] = dec["trader_name"].apply(extract_strategy)
         dec = dec[dec["strategy"].isin(["Kelly", "Flat"])]
+    if not dec.empty:
         edge = dec.groupby("strategy")["avg_edge"].mean().reset_index()
         agg = agg.merge(edge, on="strategy", how="left")
     else:

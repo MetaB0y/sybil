@@ -103,7 +103,10 @@ export function strategyRows(summaries: ArenaBotSummary[]): StrategyRow[] {
 }
 
 function scoredBots(summaries: ArenaBotSummary[]): ArenaBotSummary[] {
-  return summaries.filter((summary) => summary.active && summary.scored);
+  return summaries.filter(
+    (summary) =>
+      summary.active && summary.role === "competitor" && summary.scored,
+  );
 }
 
 export function estimateTokenCost(
