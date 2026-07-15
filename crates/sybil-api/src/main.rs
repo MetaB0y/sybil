@@ -85,6 +85,7 @@ fn sequencer_config_from_api(config: &ApiConfig) -> SequencerConfig {
         canonical_archive_maintenance_interval_blocks: config
             .canonical_archive_maintenance_interval_blocks,
         canonical_archive_max_rows_per_pass: config.canonical_archive_max_rows_per_pass,
+        acknowledged_proof_job_retention_blocks: config.acknowledged_proof_job_retention_blocks,
         max_recent_fills_per_account: config.max_recent_fills_per_account,
         max_recent_equity_points_per_account: config.max_recent_equity_points_per_account,
         max_recent_account_events_per_account: config.max_recent_account_events_per_account,

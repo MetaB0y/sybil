@@ -72,10 +72,11 @@ pub use sequencer::{
     SequencerConfig,
 };
 pub use store::{
-    AutoResolutionAction, AutoResolutionRecord, DA_FILE_PROVIDER_REF_ENCODING,
-    DA_FILE_PROVIDER_REF_KIND, DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND,
-    DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact, DaArtifactIntegrityError, DaArtifactLookup,
-    DaArtifactManifest, DaManifestLookup, DaProviderRef, ProofJobOutboxEntry,
+    AcknowledgedProofJobPruneReport, AcknowledgedProofJobRetentionPolicy, AutoResolutionAction,
+    AutoResolutionRecord, DA_FILE_PROVIDER_REF_ENCODING, DA_FILE_PROVIDER_REF_KIND,
+    DA_PAYLOAD_ENCODING, DA_PAYLOAD_KIND, DA_PROVIDER_REFS_ENCODING_BYTES, DaArtifact,
+    DaArtifactIntegrityError, DaArtifactLookup, DaArtifactManifest, DaManifestLookup,
+    DaProviderRef, ProofJobOutboxEntry,
 };
 pub use sybil_verifier::{ClientActionAuth, ClientActionWitness, KeyOpAuth, KeyRecord};
 pub use system_event::SystemEvent;

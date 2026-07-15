@@ -89,7 +89,7 @@ def run(db_path: str | None = None, hours: int = 24):
         print("No strategy data yet.")
 
     # Also show Legacy/Noise totals
-    snaps = queries.get_latest_snapshots(conn)
+    snaps = queries.get_latest_snapshots(conn, scored_only=False)
     if not snaps.empty and "strategy" in snaps.columns:
         for label in ["Legacy", "Noise"]:
             group = snaps[snaps["strategy"] == label]

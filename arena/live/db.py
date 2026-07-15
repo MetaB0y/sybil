@@ -5,6 +5,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from .sqlite_utils import connect_writer
 
@@ -135,6 +136,22 @@ class DecisionDB:
                     configuration_json TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS arena_runs (
+                    run_id TEXT PRIMARY KEY,
+                    started_at_utc TEXT NOT NULL,
+                    heartbeat_at_utc TEXT NOT NULL,
+                    stopped_at_utc TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS arena_run_participants (
+                    run_id TEXT NOT NULL,
+                    trader_name TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    scored INTEGER NOT NULL CHECK (scored IN (0, 1)),
+                    PRIMARY KEY (run_id, trader_name),
+                    FOREIGN KEY (run_id) REFERENCES arena_runs(run_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_decisions_trader
                     ON decisions(trader_name);
                 CREATE INDEX IF NOT EXISTS idx_decisions_time
@@ -143,7 +160,59 @@ class DecisionDB:
                     ON portfolio_snapshots(trader_name);
                 CREATE INDEX IF NOT EXISTS idx_snapshots_time
                     ON portfolio_snapshots(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_arena_runs_active
+                    ON arena_runs(stopped_at_utc, heartbeat_at_utc);
             """)
+
+    def activate_runtime(self, participants: list[tuple[str, str, bool]]) -> str:
+        """Atomically replace live Arena membership while preserving prior runs."""
+        if not participants:
+            raise ValueError("arena runtime requires at least one participant")
+        names = [name for name, _role, _scored in participants]
+        if len(names) != len(set(names)):
+            raise ValueError("arena runtime participant names must be unique")
+        if any(not name.strip() or not role.strip() for name, role, _ in participants):
+            raise ValueError("arena runtime participant name and role must be nonempty")
+
+        now = datetime.now(timezone.utc).isoformat()
+        run_id = uuid4().hex
+        with self._lock, self.conn:
+            self.conn.execute(
+                "UPDATE arena_runs SET stopped_at_utc = ? WHERE stopped_at_utc IS NULL",
+                (now,),
+            )
+            self.conn.execute(
+                """INSERT INTO arena_runs
+                   (run_id, started_at_utc, heartbeat_at_utc, stopped_at_utc)
+                   VALUES (?, ?, ?, NULL)""",
+                (run_id, now, now),
+            )
+            self.conn.executemany(
+                """INSERT INTO arena_run_participants
+                   (run_id, trader_name, role, scored) VALUES (?, ?, ?, ?)""",
+                [(run_id, name, role, 1 if scored else 0) for name, role, scored in participants],
+            )
+        return run_id
+
+    def heartbeat_runtime(self, run_id: str) -> None:
+        """Refresh liveness only for the still-active matching runtime."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self.conn:
+            self.conn.execute(
+                """UPDATE arena_runs SET heartbeat_at_utc = ?
+                   WHERE run_id = ? AND stopped_at_utc IS NULL""",
+                (now, run_id),
+            )
+
+    def stop_runtime(self, run_id: str) -> None:
+        """Mark a graceful shutdown without deleting historical membership."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self.conn:
+            self.conn.execute(
+                """UPDATE arena_runs SET heartbeat_at_utc = ?, stopped_at_utc = ?
+                   WHERE run_id = ? AND stopped_at_utc IS NULL""",
+                (now, now, run_id),
+            )
 
     def ensure_experiment(
         self,

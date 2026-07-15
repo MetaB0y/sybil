@@ -71,6 +71,7 @@ reflects base `docker-compose.yml`; "prod" reflects base + `docker-compose.prod.
 | `SYBIL_MAX_RECENT_ACCOUNT_EVENTS_PER_ACCOUNT` | `0` | `0` | `0` | no (history served remotely) |
 | `SYBIL_RECENT_BLOCK_CACHE_CAPACITY` | `100` | `100` | `100` | no |
 | `SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
+| `SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS` | `0` (no prune) | `0` | `60480` (7 days at 10s/block) | no |
 | `SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS` / `MAX_ROWS_PER_PASS` | `1000` / `10000` | same as default | `60` / `10000` | no |
 | `SYBIL_MIN_RESTING_ORDER_NOTIONAL_NANOS` | `1000000` | `1000000` | `1000000` | no |
 | `SYBIL_HTTP_DA_GLOBAL_RPS` / `BURST` | `20` / `40` | `20` / `40` | `20` / `40` | no |
@@ -133,12 +134,17 @@ At boot, before opening the store or binding the socket,
   can rotate, a witnessed block captures its ordered pre/post leaf proofs into
   a portable job. The job is inserted into `proof_job_outbox` in the same redb
   transaction that commits the block fence. Exact-byte acknowledgements live
-  in `proof_job_acks`; a wrong digest fails closed. Jobs are not pruned yet, so
-  independent proving survives witness pruning and prolonged prover downtime.
+  in `proof_job_acks`; a wrong digest fails closed. Unacknowledged jobs remain
+  indefinitely because the sequencer is still their durable owner. After the
+  standalone prover durably ingests and acknowledges the exact bytes, the
+  sequencer retains a configurable source safety window and then deletes the
+  matching job/ack pair atomically in bounded maintenance passes.
 - `GET /v1/blocks/{height}` replay remains backed by the bounded canonical
   block archive. The proof outbox is exposed only through
   service-authenticated oldest-unacknowledged pull and exact-digest ack routes.
-  Retention-after-ack remains a separate bounded-storage policy task.
+  Prover database backup and artifact publication remain necessary: once an
+  acknowledged source job ages past the safety window, losing the prover store
+  cannot be repaired by replaying that job from the sequencer.
 - A witness imported into an empty store is an explicit recovery checkpoint,
   not a claim that the fresh node can prove the incoming historical transition.
   It has no outbox row; its first locally produced child resumes mandatory job

@@ -695,6 +695,14 @@ pub const SERVICE_ROUTE_TABLE: &[RouteMount] = &[
         path: "/v1/da/{height}/payload",
     },
     RouteMount {
+        method: "GET",
+        path: "/v1/prover/jobs/next",
+    },
+    RouteMount {
+        method: "POST",
+        path: "/v1/prover/jobs/{height}/ack",
+    },
+    RouteMount {
         method: "POST",
         path: "/v1/accounts/{id}/fund",
     },

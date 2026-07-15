@@ -69,6 +69,7 @@ export function LeaderboardTable({
   isLoading,
   isRetrying,
   readState,
+  errorMessage,
   onRetry,
   myAccountId,
 }: {
@@ -76,6 +77,7 @@ export function LeaderboardTable({
   isLoading: boolean;
   isRetrying: boolean;
   readState: "ready" | "unavailable" | "stale";
+  errorMessage?: string | null;
   onRetry: () => void;
   myAccountId: number | null;
 }) {
@@ -99,6 +101,7 @@ export function LeaderboardTable({
       {readState !== "ready" && (
         <LeaderboardReadNotice
           stale={readState === "stale"}
+          message={errorMessage}
           retrying={isRetrying}
           onRetry={onRetry}
         />
@@ -148,10 +151,12 @@ export function LeaderboardTable({
 
 export function LeaderboardReadNotice({
   stale,
+  message,
   retrying,
   onRetry,
 }: {
   stale: boolean;
+  message?: string | null | undefined;
   retrying: boolean;
   onRetry: () => void;
 }) {
@@ -177,7 +182,7 @@ export function LeaderboardReadNotice({
       <span>
         {stale
           ? "leaderboard refresh failed · showing saved rankings"
-          : "leaderboard unavailable · rankings could not be loaded"}
+          : `leaderboard unavailable · ${message ?? "rankings could not be loaded"}`}
       </span>
       <button
         type="button"

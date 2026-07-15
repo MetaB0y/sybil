@@ -104,9 +104,7 @@ class LiveConfig:
 class LiveTopology:
     analysts: list[PersonaAnalyst]
     traders: list[LiveLlmTrader]
-    paired_analyst_groups: list[tuple[PersonaAnalyst, PersonaAnalyst]] = field(
-        default_factory=list
-    )
+    paired_analyst_groups: list[tuple[PersonaAnalyst, PersonaAnalyst]] = field(default_factory=list)
 
 
 def _validate_stage1_ab_config(config: LiveConfig) -> str | None:
@@ -355,9 +353,7 @@ def _resolve_stage1_ab_activation(
             "ARENA_MARKET_IDS requires ARENA_STAGE1_AB_EXPERIMENT_ID; set both to opt in"
         )
     if experiment_id is not None and market_ids is None:
-        raise ValueError(
-            "Stage 1 A/B activation requires --market-ids or ARENA_MARKET_IDS"
-        )
+        raise ValueError("Stage 1 A/B activation requires --market-ids or ARENA_MARKET_IDS")
     return experiment_id, market_ids
 
 
@@ -410,6 +406,7 @@ async def snapshot_portfolios_once(
     db: DecisionDB,
     *,
     required_trader_names: set[str] | None = None,
+    runtime_id: str | None = None,
 ) -> int:
     """Record one portfolio snapshot per trader, optionally failing closed."""
     recorded = 0
@@ -443,14 +440,21 @@ async def snapshot_portfolios_once(
             f"experiment portfolio baseline failed for {len(required_failures)} arm(s): {names}; "
             "window invalidated; use a new experiment id"
         ) from required_failures[0][1]
+    if runtime_id is not None:
+        db.heartbeat_runtime(runtime_id)
     return recorded
 
 
-async def snapshot_portfolios(traders, db: DecisionDB, interval_s: float = 300):
+async def snapshot_portfolios(
+    traders,
+    db: DecisionDB,
+    interval_s: float = 300,
+    runtime_id: str | None = None,
+):
     """Periodically log portfolio snapshots for all traders after each interval."""
     while True:
         await asyncio.sleep(interval_s)
-        await snapshot_portfolios_once(traders, db)
+        await snapshot_portfolios_once(traders, db, runtime_id=runtime_id)
 
 
 async def log_articles_loop(feed: NewsFeed, db: DecisionDB, interval_s: float = 30):
@@ -686,9 +690,7 @@ def _wire_live_inputs(
     paired_analysts = set()
     for control, stage1 in paired_analyst_groups or []:
         paired_analysts.update((control, stage1))
-        subscription = feed.subscribe(
-            name=f"paired:{control.persona_key.rsplit(':', 1)[0]}"
-        )
+        subscription = feed.subscribe(name=f"paired:{control.persona_key.rsplit(':', 1)[0]}")
         barrier = PairedNewsBatchBarrier(
             subscription,
             (control.name, stage1.name),
@@ -712,38 +714,43 @@ async def _start_live_tasks(
     noise_traders: list,
     db: DecisionDB,
     stop_event: asyncio.Event,
+    runtime_id: str | None = None,
     required_baseline_trader_names: set[str] | None = None,
 ) -> list[asyncio.Task]:
     """Persist every account baseline before starting any live worker."""
     snapshot_traders = [*traders, *fast_traders, *noise_traders]
-    await snapshot_portfolios_once(
-        snapshot_traders,
-        db,
-        required_trader_names=required_baseline_trader_names,
-    )
+    if runtime_id is not None:
+        await snapshot_portfolios_once(
+            snapshot_traders,
+            db,
+            required_trader_names=required_baseline_trader_names,
+            runtime_id=runtime_id,
+        )
+    else:
+        await snapshot_portfolios_once(
+            snapshot_traders,
+            db,
+            required_trader_names=required_baseline_trader_names,
+        )
 
     tasks = [
         asyncio.create_task(feed.run(), name="news_feed"),
         asyncio.create_task(
-            snapshot_portfolios(snapshot_traders, db),
+            snapshot_portfolios(snapshot_traders, db, runtime_id=runtime_id),
             name="snapshots",
         ),
         asyncio.create_task(log_articles_loop(feed, db), name="article_logger"),
     ]
     for analyst in analysts:
         tasks.append(
-            asyncio.create_task(
-                supervise_bot(analyst, stop_event), name=f"analyst:{analyst.name}"
-            )
+            asyncio.create_task(supervise_bot(analyst, stop_event), name=f"analyst:{analyst.name}")
         )
     for trader in traders:
         tasks.append(
             asyncio.create_task(supervise_bot(trader, stop_event), name=f"trader:{trader.name}")
         )
     for fast in fast_traders:
-        tasks.append(
-            asyncio.create_task(supervise_bot(fast, stop_event), name=f"fast:{fast.name}")
-        )
+        tasks.append(asyncio.create_task(supervise_bot(fast, stop_event), name=f"fast:{fast.name}"))
     for noise in noise_traders:
         tasks.append(
             asyncio.create_task(supervise_bot(noise, stop_event), name=f"noise:{noise.name}")
@@ -823,9 +830,7 @@ async def _discover_markets_until_ready(
                 pending_reference_ids = [
                     int(m.id)
                     for m in active
-                    if _pending_startup_reference(
-                        getattr(m, "reference_price_nanos", None)
-                    )
+                    if _pending_startup_reference(getattr(m, "reference_price_nanos", None))
                 ]
                 if pending_reference_ids:
                     # The cohort is frozen, but it is not selected *for live
@@ -846,9 +851,7 @@ async def _discover_markets_until_ready(
             reference_count = sum(
                 1
                 for m in active
-                if _valid_startup_reference_nanos(
-                    getattr(m, "reference_price_nanos", None)
-                )
+                if _valid_startup_reference_nanos(getattr(m, "reference_price_nanos", None))
             )
             metrics.set_market_selection(len(active), reference_count)
             return all_markets, active
@@ -1082,19 +1085,37 @@ async def run_live(config: LiveConfig):
             len(active),
         )
 
-        stop_event = asyncio.Event()
-        tasks = await _start_live_tasks(
-            feed,
-            analysts,
-            traders,
-            fast_traders,
-            noise_traders,
-            db,
-            stop_event,
-            required_baseline_trader_names=(
-                {trader.name for trader in traders} if experiment_id is not None else None
-            ),
+        runtime_id = db.activate_runtime(
+            [
+                *((trader.name, "competitor", True) for trader in traders),
+                *((trader.name, "load", False) for trader in fast_traders),
+                *((trader.name, "noise", False) for trader in noise_traders),
+            ]
         )
+        log.info(
+            "Activated Arena runtime %s with %d participants",
+            runtime_id,
+            len(traders) + len(fast_traders) + len(noise_traders),
+        )
+
+        stop_event = asyncio.Event()
+        try:
+            tasks = await _start_live_tasks(
+                feed,
+                analysts,
+                traders,
+                fast_traders,
+                noise_traders,
+                db,
+                stop_event,
+                runtime_id,
+                required_baseline_trader_names=(
+                    {trader.name for trader in traders} if experiment_id is not None else None
+                ),
+            )
+        except BaseException:
+            db.stop_runtime(runtime_id)
+            raise
         outcome_recorder_task = _start_outcome_recorder_task(
             config,
             db_path,
@@ -1160,6 +1181,7 @@ async def run_live(config: LiveConfig):
             task.cancel()
         await asyncio.gather(*watched_tasks, return_exceptions=True)
 
+        db.stop_runtime(runtime_id)
         db.close()
         if metrics_server is not None:
             try:

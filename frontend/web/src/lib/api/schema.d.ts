@@ -1190,6 +1190,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/prover/jobs/next": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** GET /v1/prover/jobs/next */
+    get: operations["get_next_proof_job"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/prover/jobs/{height}/ack": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** POST /v1/prover/jobs/{height}/ack */
+    post: operations["acknowledge_proof_job"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/simulation/pause": {
     parameters: {
       query?: never;
@@ -1696,6 +1730,8 @@ export interface components {
       traders: number;
     };
     BotSummaryResponse: {
+      /** @description Member of the most recent non-stale Arena runtime cohort. */
+      active: boolean;
       /** Format: double */
       avg_edge?: number | null;
       /** Format: int64 */
@@ -1716,6 +1752,10 @@ export interface components {
       pnl?: number | null;
       /** Format: double */
       portfolio_value?: number | null;
+      /** @description Runtime role such as competitor, load, or noise. */
+      role?: string | null;
+      /** @description Eligible for public competition totals within the active runtime. */
+      scored: boolean;
       snapshot_timestamp?: string | null;
       /** Format: int64 */
       total_fills?: number | null;
@@ -3047,6 +3087,16 @@ export interface components {
        */
       total_deposited_nanos: string;
     };
+    ProofJobAckRequest: {
+      /** @description Exact transport digest returned by the pull response. */
+      transport_digest: string;
+    };
+    ProofJobAckResponse: {
+      acknowledged: boolean;
+      /** Format: int64 */
+      height: number;
+      transport_digest: string;
+    };
     /**
      * @description Privacy-preserving projection of a committed block for public REST and
      *     streaming clients. Account-attributed fills, rejections, system events,
@@ -3804,6 +3854,20 @@ export interface components {
           public_key_hex: string;
           /** @enum {string} */
           type: "key_revoked";
+        }
+      | {
+          /** Format: int64 */
+          account_id: number;
+          action: string;
+          /** Format: int32 */
+          auth_scheme: number;
+          /** Format: int64 */
+          nonce: number;
+          /** Format: int64 */
+          order_id: number;
+          public_key_hex: string;
+          /** @enum {string} */
+          type: "client_action_authorized";
         }
       | {
           /**
@@ -6363,6 +6427,81 @@ export interface operations {
         content?: never;
       };
       /** @description Proof store unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  get_next_proof_job: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Oldest unacknowledged MessagePack proof job */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": number[];
+        };
+      };
+      /** @description No unacknowledged proof job */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Persistent proof-job outbox unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  acknowledge_proof_job: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Committed block height */
+        height: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProofJobAckRequest"];
+      };
+    };
+    responses: {
+      /** @description Exact proof-job bytes acknowledged */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProofJobAckResponse"];
+        };
+      };
+      /** @description Malformed digest */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Persistent proof-job outbox unavailable */
       503: {
         headers: {
           [name: string]: unknown;

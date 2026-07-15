@@ -49,7 +49,7 @@ export function extractStrategy(name: string): StrategyName {
 }
 
 export function summarizeBots(summaries: ArenaBotSummary[]): ArenaTotals {
-  return summaries.reduce<ArenaTotals>(
+  return scoredBots(summaries).reduce<ArenaTotals>(
     (acc, row) => {
       acc.portfolioValue += num(row.portfolio_value);
       acc.pnl += num(row.pnl);
@@ -63,7 +63,7 @@ export function summarizeBots(summaries: ArenaBotSummary[]): ArenaTotals {
 
 export function strategyRows(summaries: ArenaBotSummary[]): StrategyRow[] {
   const rows = new Map<StrategyName, ArenaBotSummary[]>();
-  for (const summary of summaries) {
+  for (const summary of scoredBots(summaries)) {
     const strategy = extractStrategy(summary.trader_name);
     rows.set(strategy, [...(rows.get(strategy) ?? []), summary]);
   }
@@ -73,7 +73,9 @@ export function strategyRows(summaries: ArenaBotSummary[]): StrategyRow[] {
       const totalPnl = bots.reduce((sum, bot) => sum + num(bot.pnl), 0);
       const edges = bots
         .map((bot) => bot.avg_edge)
-        .filter((edge): edge is number => edge != null && Number.isFinite(edge));
+        .filter(
+          (edge): edge is number => edge != null && Number.isFinite(edge),
+        );
       return {
         strategy,
         traders: bots.length,
@@ -82,7 +84,10 @@ export function strategyRows(summaries: ArenaBotSummary[]): StrategyRow[] {
         avgEdge: edges.length
           ? edges.reduce((sum, edge) => sum + edge, 0) / edges.length
           : null,
-        totalOrders: bots.reduce((sum, bot) => sum + (bot.total_orders ?? 0), 0),
+        totalOrders: bots.reduce(
+          (sum, bot) => sum + (bot.total_orders ?? 0),
+          0,
+        ),
         totalFills: bots.reduce((sum, bot) => sum + (bot.total_fills ?? 0), 0),
       };
     })
@@ -95,6 +100,10 @@ export function strategyRows(summaries: ArenaBotSummary[]): StrategyRow[] {
       };
       return order[a.strategy] - order[b.strategy];
     });
+}
+
+function scoredBots(summaries: ArenaBotSummary[]): ArenaBotSummary[] {
+  return summaries.filter((summary) => summary.active && summary.scored);
 }
 
 export function estimateTokenCost(
@@ -172,9 +181,7 @@ export function driftPointsFromDecisions(
       const parsedTime = decision.timestamp
         ? new Date(decision.timestamp).getTime()
         : NaN;
-      const t = Number.isFinite(parsedTime)
-        ? parsedTime
-        : Number(decision.id);
+      const t = Number.isFinite(parsedTime) ? parsedTime : Number(decision.id);
       return {
         id: Number(decision.id),
         t,
@@ -221,7 +228,8 @@ export function formatDecisionOrder(order: unknown): string {
   if (!isRecord(order)) return "order";
   const side = text(order.side ?? order.action ?? order.type, "order");
   const qty = order.quantity ?? order.qty ?? order.size ?? order.shares;
-  const price = order.price ?? order.limit_price ?? order.limit ?? order.limit_price_nanos;
+  const price =
+    order.price ?? order.limit_price ?? order.limit ?? order.limit_price_nanos;
   const qtyPart = qty == null || qty === "" ? "" : " " + String(qty);
   const pricePart =
     price == null || price === ""

@@ -20,6 +20,8 @@ describe("arena derivations", () => {
       bot("A (Kelly)", 5, 110, 10, 4, 3, 0.12),
       bot("B (Kelly)", 4, 90, -10, 2, 1, 0.08),
       bot("C (Flat)", 2, 104, 4, 1, 1, null),
+      bot("Old experiment (Flat)", 1, 500, -50, 8, 2, null, false, true),
+      bot("Fast-0", 0, 1_000_000, 200, 9, 4, null, true, false),
     ];
 
     expect(summarizeBots(bots)).toEqual({
@@ -68,9 +70,14 @@ function bot(
   total_orders: number,
   total_fills: number,
   avg_edge: number | null,
+  active = true,
+  scored = true,
 ): ArenaBotSummary {
   return {
     trader_name,
+    active,
+    role: scored ? "competitor" : "load",
+    scored,
     decision_count,
     portfolio_value,
     pnl,

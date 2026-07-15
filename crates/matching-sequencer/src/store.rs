@@ -139,7 +139,8 @@ pub use self::history_outbox::ProductHistoryOutboxAck;
 pub use self::import::WitnessImportSummary;
 pub use self::restore::{AnalyticsRestoredState, RestoredState};
 pub use self::retention::{
-    CanonicalArchiveMeta, CanonicalArchivePruneReport, CanonicalArchiveRetentionPolicy,
+    AcknowledgedProofJobPruneReport, AcknowledgedProofJobRetentionPolicy, CanonicalArchiveMeta,
+    CanonicalArchivePruneReport, CanonicalArchiveRetentionPolicy,
 };
 pub use self::wal::{
     ACKNOWLEDGED_WRITE_ENVELOPE_VERSION, AcknowledgedWrite, ControlPlaneCommand,

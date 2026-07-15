@@ -10,6 +10,7 @@ import sqlite3
 from hashlib import sha256
 
 import pandas as pd
+from sybil_client.types import SHARE_SCALE
 
 try:
     from .personas import PERSONAS
@@ -17,6 +18,46 @@ except ImportError:
     from personas import PERSONAS  # type: ignore[no-redef]
 
 SYBIL_URL = os.environ.get("SYBIL_URL", "http://172.17.0.1:3000")
+RUNTIME_HEARTBEAT_MAX_AGE = "-15 minutes"
+
+
+def get_active_scored_runtime(
+    conn: sqlite3.Connection,
+) -> tuple[str, list[str]] | None:
+    """Return the live scored cohort start and names, or no live cohort.
+
+    Historical snapshots remain durable diagnostics. Competition aggregates
+    must be explicitly scoped to a recently heartbeating runtime so old bot
+    identities and synthetic load do not silently change the reported total.
+    """
+    required = {"arena_runs", "arena_run_participants"}
+    tables = {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
+    if not required.issubset(tables):
+        return None
+
+    run = conn.execute(
+        "SELECT run_id, started_at_utc FROM arena_runs "
+        "WHERE stopped_at_utc IS NULL "
+        "  AND julianday(heartbeat_at_utc) >= julianday('now', ?) "
+        "ORDER BY started_at_utc DESC LIMIT 1",
+        (RUNTIME_HEARTBEAT_MAX_AGE,),
+    ).fetchone()
+    if run is None:
+        return None
+
+    names = [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT trader_name FROM arena_run_participants "
+            "WHERE run_id = ? AND scored = 1 ORDER BY trader_name",
+            (run[0],),
+        ).fetchall()
+    ]
+    return str(run[1]), names
+
 
 def extract_strategy(name: str) -> str:
     if "(Kelly)" in name:
@@ -35,24 +76,32 @@ def check_divergence(fv: float, mkt: float) -> str:
     return "DIVERGENT" if fv_extreme and not mkt_agrees else ""
 
 
-def get_latest_snapshots(conn: sqlite3.Connection) -> pd.DataFrame:
-    """Latest portfolio snapshot per trader."""
+def get_latest_snapshots(conn: sqlite3.Connection, *, scored_only: bool = True) -> pd.DataFrame:
+    """Latest portfolio snapshot per trader, scoped to the live score cohort."""
     try:
         df = pd.read_sql_query(
             "SELECT trader_name, balance, portfolio_value, pnl, positions, total_fills, total_orders, timestamp "
             "FROM portfolio_snapshots WHERE id IN ("
             "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
-            ") ORDER BY trader_name", conn
+            ") ORDER BY trader_name",
+            conn,
         )
     except Exception:
         df = pd.read_sql_query(
             "SELECT trader_name, balance, portfolio_value, pnl, positions, timestamp "
             "FROM portfolio_snapshots WHERE id IN ("
             "  SELECT MAX(id) FROM portfolio_snapshots GROUP BY trader_name"
-            ") ORDER BY trader_name", conn
+            ") ORDER BY trader_name",
+            conn,
         )
         df["total_fills"] = 0
         df["total_orders"] = 0
+    if scored_only:
+        runtime = get_active_scored_runtime(conn)
+        if runtime is None:
+            return df.iloc[0:0].copy()
+        _started_at, names = runtime
+        df = df[df["trader_name"].isin(names)].copy()
     if not df.empty:
         df["strategy"] = df["trader_name"].apply(extract_strategy)
     return df
@@ -68,11 +117,15 @@ def get_strategy_comparison(conn: sqlite3.Connection) -> pd.DataFrame | None:
     if competing.empty:
         return None
 
-    agg = competing.groupby("strategy").agg(
-        traders=("trader_name", "count"),
-        total_pnl=("pnl", "sum"),
-        avg_pnl=("pnl", "mean"),
-    ).reset_index()
+    agg = (
+        competing.groupby("strategy")
+        .agg(
+            traders=("trader_name", "count"),
+            total_pnl=("pnl", "sum"),
+            avg_pnl=("pnl", "mean"),
+        )
+        .reset_index()
+    )
 
     # Count positions
     for idx, row in agg.iterrows():
@@ -84,9 +137,13 @@ def get_strategy_comparison(conn: sqlite3.Connection) -> pd.DataFrame | None:
         agg.at[idx, "positions"] = int(n)
 
     # Average edge from decisions
+    runtime = get_active_scored_runtime(conn)
+    started_at = runtime[0] if runtime is not None else ""
     dec = pd.read_sql_query(
         "SELECT trader_name, AVG(ABS(fair_value - market_price)) as avg_edge "
-        "FROM decisions GROUP BY trader_name", conn
+        "FROM decisions WHERE timestamp >= ? GROUP BY trader_name",
+        conn,
+        params=(started_at,),
     )
     if not dec.empty:
         dec["strategy"] = dec["trader_name"].apply(extract_strategy)
@@ -100,7 +157,9 @@ def get_strategy_comparison(conn: sqlite3.Connection) -> pd.DataFrame | None:
 
 
 def get_fv_drift(
-    conn: sqlite3.Connection, traders: list[str] | None = None, cutoff: str | None = None,
+    conn: sqlite3.Connection,
+    traders: list[str] | None = None,
+    cutoff: str | None = None,
 ) -> pd.DataFrame:
     """Fair value drift per (trader, market) with divergence warnings."""
     where = []
@@ -113,25 +172,32 @@ def get_fv_drift(
 
     df = pd.read_sql_query(
         f"SELECT trader_name, market_name, market_id, fair_value, market_price, timestamp "
-        f"FROM decisions {clause} ORDER BY timestamp", conn
+        f"FROM decisions {clause} ORDER BY timestamp",
+        conn,
     )
     if df.empty:
         return pd.DataFrame()
 
     # Latest per (trader, market)
-    latest = df.groupby(["trader_name", "market_name", "market_id"]).agg(
-        current_fv=("fair_value", "last"),
-        current_mkt=("market_price", "last"),
-        n_decisions=("fair_value", "count"),
-    ).reset_index()
+    latest = (
+        df.groupby(["trader_name", "market_name", "market_id"])
+        .agg(
+            current_fv=("fair_value", "last"),
+            current_mkt=("market_price", "last"),
+            n_decisions=("fair_value", "count"),
+        )
+        .reset_index()
+    )
 
     # Trend (last 5 FVs)
     def _trend(group):
         return " -> ".join(f"{v:.2f}" for v in group["fair_value"].tail(5))
 
-    trends = df.groupby(["trader_name", "market_name"]).apply(
-        _trend, include_groups=False
-    ).reset_index(name="fv_trend")
+    trends = (
+        df.groupby(["trader_name", "market_name"])
+        .apply(_trend, include_groups=False)
+        .reset_index(name="fv_trend")
+    )
     latest = latest.merge(trends, on=["trader_name", "market_name"], how="left")
 
     latest["edge"] = (latest["current_fv"] - latest["current_mkt"]).abs()
@@ -143,8 +209,10 @@ def get_fv_drift(
 
 
 def get_recent_decisions(
-    conn: sqlite3.Connection, traders: list[str] | None = None,
-    cutoff: str | None = None, limit: int = 50,
+    conn: sqlite3.Connection,
+    traders: list[str] | None = None,
+    cutoff: str | None = None,
+    limit: int = 50,
 ) -> pd.DataFrame:
     where = []
     if traders:
@@ -157,7 +225,8 @@ def get_recent_decisions(
     return pd.read_sql_query(
         f"SELECT trader_name, market_name, fair_value, market_price, orders, "
         f"       motivation, analysis, llm_duration_s, timestamp, balance, article_urls "
-        f"FROM decisions {clause} ORDER BY id DESC LIMIT {limit}", conn
+        f"FROM decisions {clause} ORDER BY id DESC LIMIT {limit}",
+        conn,
     )
 
 
@@ -174,7 +243,8 @@ def get_llm_cost(conn: sqlite3.Connection, cutoff: str | None = None) -> pd.Data
         f"  SUM(prompt_tokens) as prompt_tokens, "
         f"  SUM(completion_tokens) as completion_tokens, "
         f"  AVG(duration_s) as avg_latency_s "
-        f"FROM token_usage {clause} GROUP BY trader_name", conn
+        f"FROM token_usage {clause} GROUP BY trader_name",
+        conn,
     )
 
 
@@ -233,13 +303,9 @@ def get_live_experiment_status(conn: sqlite3.Connection) -> list[dict]:
             )
             record["count"] += int(row[1])
             if row[2] is not None:
-                record["first_at"] = min(
-                    filter(None, (record["first_at"], str(row[2])))
-                )
+                record["first_at"] = min(filter(None, (record["first_at"], str(row[2]))))
             if row[3] is not None:
-                record["last_at"] = max(
-                    filter(None, (record["last_at"], str(row[3])))
-                )
+                record["last_at"] = max(filter(None, (record["last_at"], str(row[3]))))
 
     collect("decisions", "decision_count")
     collect("portfolio_snapshots", "snapshot_count")
@@ -316,9 +382,7 @@ def get_live_experiment_status(conn: sqlite3.Connection) -> list[dict]:
                 "first_snapshot_at": first_snapshot,
                 "last_snapshot_at": last_snapshot,
                 "ready": (
-                    bool(expected)
-                    and decision_names == expected
-                    and snapshot_names == expected
+                    bool(expected) and decision_names == expected and snapshot_names == expected
                 ),
             }
         result.append(
@@ -335,16 +399,26 @@ def get_live_experiment_status(conn: sqlite3.Connection) -> list[dict]:
     return result
 
 
-def get_mm_mtm(sybil_url: str = SYBIL_URL, account_id: int = 0, initial_balance: float = 1_000_000.0) -> dict | None:
+def get_mm_mtm(
+    sybil_url: str = SYBIL_URL, account_id: int = 0, initial_balance: float = 1_000_000.0
+) -> dict | None:
     """Fetch MM account from Sybil API and compute mark-to-market P&L.
 
     Returns dict with cash, position_value, total, pnl, return_pct, positions count,
     or None if the API is unreachable.
     """
     import urllib.request
+
+    token = os.environ.get("SYBIL_SERVICE_TOKEN", "")
+
+    def private_request(path: str):
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        request = urllib.request.Request(f"{sybil_url}{path}", headers=headers)
+        return json.loads(urllib.request.urlopen(request, timeout=5).read())
+
     try:
-        acct = json.loads(urllib.request.urlopen(f"{sybil_url}/v1/accounts/{account_id}", timeout=3).read())
-        mkts = json.loads(urllib.request.urlopen(f"{sybil_url}/v1/markets?limit=2000", timeout=5).read())
+        acct = private_request(f"/v1/accounts/{account_id}")
+        mkts = private_request("/v1/markets?limit=2000")
     except Exception:
         return None
 
@@ -359,7 +433,7 @@ def get_mm_mtm(sybil_url: str = SYBIL_URL, account_id: int = 0, initial_balance:
     n_positions = 0
     for p in acct.get("positions", []):
         mid = ref_prices.get(p["market_id"], 0.5)
-        qty = p["quantity"]
+        qty = p["quantity"] / SHARE_SCALE
         if p["outcome"] == "YES":
             position_value += qty * mid
         else:

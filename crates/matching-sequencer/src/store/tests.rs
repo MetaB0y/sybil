@@ -644,6 +644,138 @@ async fn save_block_with_witness_prunes_historical_witnesses() {
 }
 
 #[tokio::test]
+async fn acknowledged_proof_job_pruning_is_bounded_and_preserves_unacknowledged_jobs() {
+    let path = temp_db_path("store-proof-job-retention");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let markets = MarketSet::new();
+    let env = TestEnv::new();
+    let mut accounts = AccountStore::new();
+    accounts.create_account(100);
+
+    for height in 1..=4 {
+        let (header, witness) =
+            coherent_header_and_witness(height, &accounts, &markets, &lifecycle, &env.bridge_state);
+        store
+            .save_block_with_witness(
+                env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
+                &witness,
+            )
+            .await
+            .unwrap();
+    }
+
+    let outbox = store.proof_job_outbox_page(None, 10).unwrap();
+    for height in [1, 2, 4] {
+        let entry = outbox.iter().find(|entry| entry.height == height).unwrap();
+        store
+            .acknowledge_proof_job(height, entry.digest)
+            .await
+            .unwrap();
+    }
+
+    let policy = AcknowledgedProofJobRetentionPolicy {
+        retention_blocks: 2,
+        maintenance_interval_blocks: 1,
+        max_rows_per_pass: 1,
+    };
+    let first = store
+        .prune_acknowledged_proof_jobs(4, policy)
+        .await
+        .unwrap();
+    assert_eq!(first.jobs_pruned, 1);
+    assert_eq!(first.oldest_retained_height, Some(2));
+    assert_eq!(
+        store
+            .proof_job_outbox_page(None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.height)
+            .collect::<Vec<_>>(),
+        vec![2, 3, 4]
+    );
+
+    let second = store
+        .prune_acknowledged_proof_jobs(4, policy)
+        .await
+        .unwrap();
+    assert_eq!(second.jobs_pruned, 1);
+    assert_eq!(second.oldest_retained_height, Some(3));
+    let remaining = store.proof_job_outbox_page(None, 10).unwrap();
+    assert_eq!(
+        remaining
+            .iter()
+            .map(|entry| entry.height)
+            .collect::<Vec<_>>(),
+        vec![3, 4]
+    );
+    assert!(
+        !remaining[0].acknowledged,
+        "old unacknowledged job must survive"
+    );
+    assert!(
+        remaining[1].acknowledged,
+        "retained safety-window job stays acked"
+    );
+}
+
+#[tokio::test]
+async fn acknowledged_proof_job_pruning_fails_closed_on_digest_mismatch() {
+    let path = temp_db_path("store-proof-job-retention-mismatch");
+    let store = Store::open(&path).unwrap();
+    let oracle = Arc::new(AdminOracle::new());
+    let lifecycle = MarketLifecycle::new(oracle);
+    let markets = MarketSet::new();
+    let env = TestEnv::new();
+    let mut accounts = AccountStore::new();
+    accounts.create_account(100);
+
+    for height in 1..=2 {
+        let (header, witness) =
+            coherent_header_and_witness(height, &accounts, &markets, &lifecycle, &env.bridge_state);
+        store
+            .save_block_with_witness(
+                env.snapshot(&accounts, &markets, &lifecycle, &header, 1, None, vec![]),
+                &witness,
+            )
+            .await
+            .unwrap();
+    }
+
+    let txn = store.db.begin_write().unwrap();
+    {
+        let wrong_digest = [9_u8; 32];
+        let mut acks = txn.open_table(PROOF_JOB_ACKS).unwrap();
+        acks.insert(1, wrong_digest.as_slice()).unwrap();
+    }
+    txn.commit().unwrap();
+
+    let error = store
+        .prune_acknowledged_proof_jobs(
+            2,
+            AcknowledgedProofJobRetentionPolicy {
+                retention_blocks: 1,
+                maintenance_interval_blocks: 1,
+                max_rows_per_pass: 10,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, StoreError::ProofJob(_)));
+    assert_eq!(
+        store
+            .proof_job_outbox_page(None, 10)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.height)
+            .collect::<Vec<_>>(),
+        vec![1, 2],
+        "failed maintenance must leave the source outbox intact"
+    );
+}
+
+#[tokio::test]
 async fn save_block_with_witness_rejects_mismatched_header() {
     let path = temp_db_path("store-witness-mismatch");
     let store = Store::open(&path).unwrap();

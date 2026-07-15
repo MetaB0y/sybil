@@ -10,6 +10,7 @@ describe("LeaderboardTable read states", () => {
         isLoading={false}
         isRetrying={false}
         readState="unavailable"
+        errorMessage="Leaderboard window predates available historical data"
         onRetry={() => {}}
         myAccountId={null}
       />,
@@ -17,6 +18,7 @@ describe("LeaderboardTable read states", () => {
 
     expect(html).toContain('role="alert"');
     expect(html).toContain("leaderboard unavailable");
+    expect(html).toContain("window predates available historical data");
     expect(html).toContain(">retry<");
     expect(html).not.toContain("no ranked traders yet");
   });

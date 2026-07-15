@@ -137,6 +137,7 @@ import sys
 
 keys = (
     "SYBIL_BLOCK_INTERVAL_MS",
+    "SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS",
     "SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS",
     "SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS",
     "SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS",
@@ -159,12 +160,13 @@ for key in keys:
 )
 expected_retention_env=$(printf '%s\n' \
     'SYBIL_BLOCK_INTERVAL_MS=10000' \
+    'SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS=60480' \
     'SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS=60480' \
     'SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS=60' \
     'SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS=10000')
 [[ "$retention_env" == "$expected_retention_env" ]] \
-    || fail "production compose does not pin canonical archive retention"
-pass "production compose pins market and canonical archive retention"
+    || fail "production compose does not pin archive and acknowledged proof-job retention"
+pass "production compose pins market, archive, and acknowledged proof-job retention"
 
 durability_contract=$(
     compose config | python3 -c '

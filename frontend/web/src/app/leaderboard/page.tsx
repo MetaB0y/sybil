@@ -17,9 +17,9 @@ import {
 } from "@/lib/leaderboard/use-leaderboard";
 
 export default function LeaderboardPage() {
-  const [window, setWindow] = useState<LeaderboardWindow>("7D");
+  const [window, setWindow] = useState<LeaderboardWindow>("ALL");
   const session = useAccountSession();
-  const { rows, isLoading, isRetrying, readState, retry } =
+  const { rows, isLoading, isRetrying, readState, errorMessage, retry } =
     useLeaderboard(window);
 
   return (
@@ -51,6 +51,7 @@ export default function LeaderboardPage() {
         isLoading={isLoading}
         isRetrying={isRetrying}
         readState={readState}
+        errorMessage={errorMessage}
         onRetry={retry}
         myAccountId={session?.accountId ?? null}
       />

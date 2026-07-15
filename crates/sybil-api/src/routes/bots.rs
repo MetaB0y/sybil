@@ -135,6 +135,12 @@ pub struct BotStatsResponse {
 #[derive(Debug, Clone, Default, Serialize, utoipa::ToSchema)]
 pub struct BotSummaryResponse {
     pub trader_name: String,
+    /// Member of the most recent non-stale Arena runtime cohort.
+    pub active: bool,
+    /// Runtime role such as competitor, load, or noise.
+    pub role: Option<String>,
+    /// Eligible for public competition totals within the active runtime.
+    pub scored: bool,
     pub decision_count: i64,
     pub avg_edge: Option<f64>,
     pub latest_timestamp: Option<String>,
@@ -262,7 +268,7 @@ fn load_bot_decisions(
         articles: count_rows(&conn, "articles"),
         snapshots: count_rows(&conn, "portfolio_snapshots"),
         token_usage: count_rows(&conn, "token_usage"),
-        traders: summaries.len(),
+        traders: summaries.iter().filter(|summary| summary.active).count(),
         latest_decision_timestamp: latest_decision_timestamp(&conn),
     };
 
@@ -467,15 +473,59 @@ fn load_summaries(conn: &Connection) -> rusqlite::Result<Vec<BotSummaryResponse>
     }
 
     load_latest_snapshots(conn, &mut summaries);
+    apply_active_runtime_membership(conn, &mut summaries)?;
 
     let mut rows: Vec<_> = summaries.into_values().collect();
     rows.sort_by(|a, b| {
-        b.latest_timestamp
-            .cmp(&a.latest_timestamp)
+        b.active
+            .cmp(&a.active)
+            .then_with(|| b.scored.cmp(&a.scored))
+            .then_with(|| b.latest_timestamp.cmp(&a.latest_timestamp))
             .then_with(|| b.decision_count.cmp(&a.decision_count))
             .then_with(|| a.trader_name.cmp(&b.trader_name))
     });
     Ok(rows)
+}
+
+fn apply_active_runtime_membership(
+    conn: &Connection,
+    summaries: &mut HashMap<String, BotSummaryResponse>,
+) -> rusqlite::Result<()> {
+    if !table_exists(conn, "arena_runs") || !table_exists(conn, "arena_run_participants") {
+        return Ok(());
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT p.trader_name, p.role, p.scored \
+         FROM arena_run_participants p \
+         JOIN arena_runs r ON r.run_id = p.run_id \
+         WHERE r.run_id = ( \
+             SELECT run_id FROM arena_runs \
+             WHERE stopped_at_utc IS NULL \
+               AND julianday(heartbeat_at_utc) >= julianday('now', '-15 minutes') \
+             ORDER BY started_at_utc DESC LIMIT 1 \
+         )",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, bool>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (trader_name, role, scored) = row?;
+        let summary = summaries
+            .entry(trader_name.clone())
+            .or_insert_with(|| BotSummaryResponse {
+                trader_name,
+                ..BotSummaryResponse::default()
+            });
+        summary.active = true;
+        summary.role = Some(role);
+        summary.scored = scored;
+    }
+    Ok(())
 }
 
 fn load_latest_snapshots(conn: &Connection, summaries: &mut HashMap<String, BotSummaryResponse>) {
@@ -830,6 +880,25 @@ mod tests {
         .expect("create snapshots table");
     }
 
+    fn arena_runtime_tables(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE arena_runs (
+                run_id TEXT PRIMARY KEY,
+                started_at_utc TEXT NOT NULL,
+                heartbeat_at_utc TEXT NOT NULL,
+                stopped_at_utc TEXT
+            );
+            CREATE TABLE arena_run_participants (
+                run_id TEXT NOT NULL,
+                trader_name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                scored INTEGER NOT NULL,
+                PRIMARY KEY (run_id, trader_name)
+            );",
+        )
+        .expect("create Arena runtime tables");
+    }
+
     #[test]
     fn bot_decision_query_limit_defaults_and_clamps() {
         assert_eq!(bot_decision_query_limit(None), DEFAULT_BOT_DECISION_LIMIT);
@@ -877,6 +946,62 @@ mod tests {
         assert_eq!(rows[0].fair_value, Some(0.42));
         assert_eq!(rows[0].yes_pos, Some(5.0));
         assert_eq!(rows[0].no_pos, Some(3.0));
+    }
+
+    #[test]
+    fn summaries_mark_only_the_live_runtime_and_preserve_diagnostic_roles() {
+        let conn = Connection::open_in_memory().expect("sqlite");
+        decisions_table(&conn);
+        snapshots_table(&conn);
+        arena_runtime_tables(&conn);
+        for trader in ["alice", "old-experiment"] {
+            conn.execute(
+                "INSERT INTO decisions (trader_name, timestamp) VALUES (?1, '2026-07-15T00:00:00+00:00')",
+                [trader],
+            )
+            .expect("insert decision");
+        }
+        for (trader, pnl) in [("alice", 4.0), ("old-experiment", -8.0), ("Fast-0", 2.0)] {
+            conn.execute(
+                "INSERT INTO portfolio_snapshots (
+                    trader_name, timestamp, balance, portfolio_value, pnl,
+                    positions, total_fills, total_orders
+                ) VALUES (?1, '2026-07-15T00:00:00+00:00', 100.0, 100.0, ?2, '{}', 1, 2)",
+                rusqlite::params![trader, pnl],
+            )
+            .expect("insert snapshot");
+        }
+        conn.execute(
+            "INSERT INTO arena_runs (run_id, started_at_utc, heartbeat_at_utc)
+             VALUES ('live', datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("insert live runtime");
+        for (trader, role, scored) in [("alice", "competitor", 1), ("Fast-0", "load", 0)] {
+            conn.execute(
+                "INSERT INTO arena_run_participants (run_id, trader_name, role, scored)
+                 VALUES ('live', ?1, ?2, ?3)",
+                rusqlite::params![trader, role, scored],
+            )
+            .expect("insert runtime participant");
+        }
+
+        let rows = load_summaries(&conn).expect("load summaries");
+        let alice = rows.iter().find(|row| row.trader_name == "alice").unwrap();
+        assert!(alice.active);
+        assert!(alice.scored);
+        assert_eq!(alice.role.as_deref(), Some("competitor"));
+        let fast = rows.iter().find(|row| row.trader_name == "Fast-0").unwrap();
+        assert!(fast.active);
+        assert!(!fast.scored);
+        assert_eq!(fast.role.as_deref(), Some("load"));
+        let old = rows
+            .iter()
+            .find(|row| row.trader_name == "old-experiment")
+            .unwrap();
+        assert!(!old.active);
+        assert!(!old.scored);
+        assert_eq!(old.role, None);
     }
 
     #[test]

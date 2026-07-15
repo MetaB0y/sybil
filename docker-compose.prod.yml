@@ -50,7 +50,11 @@ services:
       # Seven days at the inherited 10-second block cadence: 6 blocks/minute
       # * 60 * 24 * 7 = 60,480 blocks. This applies only to full canonical
       # blocks and paired local DA artifacts, not product history.
-      SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS: "60480"
+      SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS: "${SYBIL_CANONICAL_ARCHIVE_RETENTION_BLOCKS:-60480}"
+      # Exact-byte acknowledgement transfers durable job ownership to the
+      # standalone prover. Keep a bounded sequencer-side safety window after
+      # that handoff; unacknowledged jobs are never eligible for deletion.
+      SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS: "${SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS:-60480}"
       # Run canonical block/DA maintenance every ten minutes (60 blocks).
       SYBIL_CANONICAL_ARCHIVE_MAINTENANCE_INTERVAL_BLOCKS: "60"
       SYBIL_CANONICAL_ARCHIVE_MAX_ROWS_PER_PASS: "10000"
@@ -102,6 +106,9 @@ services:
       - "--require-reference-prices"
 
     logging: *default-logging
+  sybil-arena-dashboard:
+    environment:
+      SYBIL_SERVICE_TOKEN: "${SYBIL_SERVICE_TOKEN:?Set SYBIL_SERVICE_TOKEN in /opt/sybil/.env}"
   grafana:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:?Set GF_SECURITY_ADMIN_PASSWORD in /opt/sybil/.env}"

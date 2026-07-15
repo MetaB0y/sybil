@@ -235,6 +235,15 @@ pub struct ApiConfig {
     )]
     pub canonical_archive_max_rows_per_pass: usize,
 
+    /// Acknowledged proof-job heights retained by the sequencer after durable
+    /// prover ingest. Uses the canonical maintenance cadence and row budget.
+    #[arg(
+        long,
+        default_value = "0",
+        env = "SYBIL_ACKNOWLEDGED_PROOF_JOB_RETENTION_BLOCKS"
+    )]
+    pub acknowledged_proof_job_retention_blocks: u64,
+
     /// Recent fill records retained for current diagnostics.
     #[arg(
         long,
@@ -373,6 +382,7 @@ impl Default for ApiConfig {
             canonical_archive_retention_blocks: 0,
             canonical_archive_maintenance_interval_blocks: 1_000,
             canonical_archive_max_rows_per_pass: 10_000,
+            acknowledged_proof_job_retention_blocks: 0,
             max_recent_fills_per_account: 5_000,
             max_recent_equity_points_per_account: 0,
             max_recent_account_events_per_account: 0,

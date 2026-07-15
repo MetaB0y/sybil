@@ -58,6 +58,7 @@ export interface UseLeaderboardResult {
   isLoading: boolean;
   isRetrying: boolean;
   readState: "ready" | "unavailable" | "stale";
+  errorMessage: string | null;
   retry: () => void;
 }
 
@@ -72,7 +73,7 @@ export function useLeaderboard(
         // and paginate across everyone, not just the default top 50.
         params: { query: { window: WINDOW_QUERY[window], limit: 100 } },
       });
-      if (error || !data) throw new Error("/v1/leaderboard failed");
+      if (error || !data) throw new Error(leaderboardErrorMessage(error));
       return data;
     },
     refetchInterval: 15_000,
@@ -84,8 +85,17 @@ export function useLeaderboard(
     isLoading: q.isPending,
     isRetrying: q.isFetching,
     readState: q.error == null ? "ready" : hasData ? "stale" : "unavailable",
+    errorMessage: q.error instanceof Error ? q.error.message : null,
     retry: () => {
       void q.refetch();
     },
   };
+}
+
+function leaderboardErrorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && "error" in error) {
+    const detail = (error as { error?: unknown }).error;
+    if (typeof detail === "string" && detail.trim() !== "") return detail;
+  }
+  return "Rankings could not be loaded";
 }

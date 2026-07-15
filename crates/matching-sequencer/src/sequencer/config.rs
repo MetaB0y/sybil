@@ -52,6 +52,9 @@ pub struct SequencerConfig {
     pub canonical_archive_maintenance_interval_blocks: u64,
     /// Maximum replay-block or DA-artifact rows deleted in one pass.
     pub canonical_archive_max_rows_per_pass: usize,
+    /// Acknowledged proof-job heights retained in the sequencer after the
+    /// standalone prover durably ingests them. Zero disables pruning.
+    pub acknowledged_proof_job_retention_blocks: u64,
     /// Recent fill records retained for current diagnostics. Durable product
     /// history lives only in `sybil-history`.
     pub max_recent_fills_per_account: usize,
@@ -99,6 +102,7 @@ impl Default for SequencerConfig {
             canonical_archive_retention_blocks: 0,
             canonical_archive_maintenance_interval_blocks: 1_000,
             canonical_archive_max_rows_per_pass: 10_000,
+            acknowledged_proof_job_retention_blocks: 0,
             max_recent_fills_per_account:
                 crate::fill_recorder::DEFAULT_MAX_RECENT_FILLS_PER_ACCOUNT,
             max_recent_equity_points_per_account:

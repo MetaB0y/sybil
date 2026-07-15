@@ -334,7 +334,7 @@ impl SequencerActorState {
                 da_writes_in_flight.decrement(1.0);
             });
 
-            let policy = CanonicalArchiveRetentionPolicy {
+            let canonical_policy = CanonicalArchiveRetentionPolicy {
                 retention_blocks: self.sequencer.config.canonical_archive_retention_blocks,
                 maintenance_interval_blocks: self
                     .sequencer
@@ -342,36 +342,85 @@ impl SequencerActorState {
                     .canonical_archive_maintenance_interval_blocks,
                 max_rows_per_pass: self.sequencer.config.canonical_archive_max_rows_per_pass,
             };
-            if policy.should_maintain_at(height) {
-                // Canonical replay/DA retention is maintenance, not part of the
-                // commit fence. Never hold the single-writer actor while it
-                // scans or deletes archive rows.
+            let proof_job_policy = AcknowledgedProofJobRetentionPolicy {
+                retention_blocks: self
+                    .sequencer
+                    .config
+                    .acknowledged_proof_job_retention_blocks,
+                maintenance_interval_blocks: self
+                    .sequencer
+                    .config
+                    .canonical_archive_maintenance_interval_blocks,
+                max_rows_per_pass: self.sequencer.config.canonical_archive_max_rows_per_pass,
+            };
+            if canonical_policy.should_maintain_at(height)
+                || proof_job_policy.should_maintain_at(height)
+            {
+                // Persistent artifact retention is maintenance, not part of
+                // the commit fence. Never hold the single-writer actor while
+                // it scans or deletes archive rows.
                 let retention_store = Arc::clone(store);
                 self.background_tasks.spawn(async move {
-                    match retention_store
-                        .prune_canonical_archive(height, policy)
-                        .await
-                    {
-                        Ok(report) => {
-                            metrics::counter!(
-                                "sybil_canonical_archive_pruned_rows_total",
-                                "stream" => "replay_blocks"
-                            )
-                            .increment(report.replay_blocks_pruned as u64);
-                            metrics::counter!(
-                                "sybil_canonical_archive_pruned_rows_total",
-                                "stream" => "da_artifacts"
-                            )
-                            .increment(report.da_artifacts_pruned as u64);
-                            if let Some(min_height) = report.meta.oldest_retained_height {
-                                metrics::gauge!("sybil_canonical_archive_oldest_height")
-                                    .set(min_height as f64);
+                    if canonical_policy.should_maintain_at(height) {
+                        match retention_store
+                            .prune_canonical_archive(height, canonical_policy)
+                            .await
+                        {
+                            Ok(report) => {
+                                metrics::counter!(
+                                    "sybil_canonical_archive_pruned_rows_total",
+                                    "stream" => "replay_blocks"
+                                )
+                                .increment(report.replay_blocks_pruned as u64);
+                                metrics::counter!(
+                                    "sybil_canonical_archive_pruned_rows_total",
+                                    "stream" => "da_artifacts"
+                                )
+                                .increment(report.da_artifacts_pruned as u64);
+                                if let Some(min_height) = report.meta.oldest_retained_height {
+                                    metrics::gauge!("sybil_canonical_archive_oldest_height")
+                                        .set(min_height as f64);
+                                }
+                            }
+                            Err(error) => {
+                                metrics::counter!(
+                                    "sybil_canonical_archive_maintenance_failures_total"
+                                )
+                                .increment(1);
+                                tracing::warn!(
+                                    height,
+                                    %error,
+                                    "canonical archive maintenance failed"
+                                );
                             }
                         }
-                        Err(error) => {
-                            metrics::counter!("sybil_canonical_archive_maintenance_failures_total")
+                    }
+                    if proof_job_policy.should_maintain_at(height) {
+                        match retention_store
+                            .prune_acknowledged_proof_jobs(height, proof_job_policy)
+                            .await
+                        {
+                            Ok(report) => {
+                                metrics::counter!("sybil_acknowledged_proof_jobs_pruned_total")
+                                    .increment(report.jobs_pruned as u64);
+                                if let Some(oldest) = report.oldest_retained_height {
+                                    metrics::gauge!(
+                                        "sybil_proof_job_outbox_oldest_retained_height"
+                                    )
+                                    .set(oldest as f64);
+                                }
+                            }
+                            Err(error) => {
+                                metrics::counter!(
+                                    "sybil_acknowledged_proof_job_maintenance_failures_total"
+                                )
                                 .increment(1);
-                            tracing::warn!(height, %error, "canonical archive maintenance failed");
+                                tracing::warn!(
+                                    height,
+                                    %error,
+                                    "acknowledged proof-job maintenance failed"
+                                );
+                            }
                         }
                     }
                 });

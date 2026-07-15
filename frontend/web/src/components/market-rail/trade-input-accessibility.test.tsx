@@ -16,6 +16,7 @@ const OUTCOME: EventOutcome = {
   yesCents: 60,
   delta24Cents: 2,
   volume24hNanos: 1_000_000_000n,
+  liquidityNanos: 0n,
   createdAtMs: null,
   endDateMs: null,
 };
